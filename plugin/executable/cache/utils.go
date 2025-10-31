@@ -39,9 +39,20 @@ func (k key) Sum() uint64 {
 	return maphash.String(seed, string(k))
 }
 
+func getECSClient(qCtx *query_context.Context) string {
+	queryOpt := qCtx.QOpt()
+	// Check if query already has an ecs.
+	for _, o := range queryOpt.Option {
+		if o.Option() == dns.EDNS0SUBNET {
+			return o.String()
+		}
+	}
+	return ""
+}
+
 // getMsgKey returns a string key for the query msg, or an empty
 // string if query should not be cached.
-func getMsgKey(q *dns.Msg) string {
+func getMsgKey(q *dns.Msg, qCtx *query_context.Context, useECS bool) string {
 	if q.Response || q.Opcode != dns.OpcodeQuery || len(q.Question) != 1 {
 		return ""
 	}
@@ -53,7 +64,15 @@ func getMsgKey(q *dns.Msg) string {
 	)
 
 	question := q.Question[0]
-	buf := make([]byte, 1+2+1+len(question.Name)) // bits + qtype + qname length + qname
+	// bits + qtype + qname length + qname
+	totalLen := 1 + 2 + 1 + len(question.Name)
+	ecs := ""
+	if useECS {
+		ecs = getECSClient(qCtx)
+		// if useECS: bits + qtype + qname length + qname + ecs length + ecs
+		totalLen += 1 + len(ecs)
+	}
+	buf := make([]byte, totalLen)
 	b := byte(0)
 	// RFC 6840 5.7: The AD bit in a query as a signal
 	// indicating that the requester understands and is interested in the
@@ -72,6 +91,10 @@ func getMsgKey(q *dns.Msg) string {
 	buf[2] = byte(question.Qtype)
 	buf[3] = byte(len(question.Name))
 	copy(buf[4:], question.Name)
+	if len(ecs) > 0 {
+		buf[4+len(question.Name)] = byte(len(ecs))
+		copy(buf[4+len(question.Name)+1:], ecs)
+	}
 	return utils.BytesToStringUnsafe(buf)
 }
 

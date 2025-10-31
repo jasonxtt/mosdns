@@ -55,6 +55,7 @@ var _ sequence.RecursiveExecutable = (*Cache)(nil)
 type Args struct {
 	Size         int      `yaml:"size"`
 	LazyCacheTTL int      `yaml:"lazy_cache_ttl"`
+	EnableECS    bool     `yaml:"enable_ecs"`
 	ExcludeIPs   []string `yaml:"exclude_ip"`
 	DumpFile     string   `yaml:"dump_file"`
 	DumpInterval int      `yaml:"dump_interval"`
@@ -63,6 +64,7 @@ type Args struct {
 type argsRaw struct {
 	Size         int         `yaml:"size"`
 	LazyCacheTTL int         `yaml:"lazy_cache_ttl"`
+	EnableECS    bool        `yaml:"enable_ecs"`
 	ExcludeIP    interface{} `yaml:"exclude_ip"`
 	DumpFile     string      `yaml:"dump_file"`
 	DumpInterval int         `yaml:"dump_interval"`
@@ -78,6 +80,7 @@ func (a *Args) UnmarshalYAML(node *yaml.Node) error {
 	a.LazyCacheTTL = raw.LazyCacheTTL
 	a.DumpFile = raw.DumpFile
 	a.DumpInterval = raw.DumpInterval
+	a.EnableECS = raw.EnableECS
 
 	switch v := raw.ExcludeIP.(type) {
 	case string:
@@ -104,13 +107,13 @@ func (a *Args) init() {
 }
 
 type Cache struct {
-	args        *Args
-	logger      *zap.Logger
-	backend     *cache.Cache[key, *item]
+	args         *Args
+	logger       *zap.Logger
+	backend      *cache.Cache[key, *item]
 	lazyUpdateSF singleflight.Group
-	closeOnce   sync.Once
-	closeNotify chan struct{}
-	updatedKey  atomic.Uint64
+	closeOnce    sync.Once
+	closeNotify  chan struct{}
+	updatedKey   atomic.Uint64
 
 	queryTotal   prometheus.Counter
 	hitTotal     prometheus.Counter
@@ -249,7 +252,7 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	c.queryTotal.Inc()
 	q := qCtx.Q()
 
-	msgKey := getMsgKey(q)
+	msgKey := getMsgKey(q, qCtx, c.args.EnableECS)
 	if len(msgKey) == 0 {
 		return next.ExecNext(ctx, qCtx)
 	}
