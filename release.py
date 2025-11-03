@@ -44,7 +44,7 @@ def go_build():
     logger.info(f'building {PROJECT_NAME}')
 
     global envs
-    if args.i:
+    if args.i is not None:
         envs = [envs[args.i]]
 
     VERSION = 'dev/unknown'
