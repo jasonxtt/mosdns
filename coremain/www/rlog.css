@@ -526,6 +526,7 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 .secondary-switches-grid .control-item:hover {
     box-shadow: var(--shadow-sm);
 }
+.info-icon { display: inline-flex; align-items: center; }
 .info-icon svg {
     display: inline-block;
     vertical-align: middle;
