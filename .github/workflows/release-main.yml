@@ -1,0 +1,102 @@
+name: Release (main)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build target ${{ matrix.index }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        index: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          check-latest: true
+
+      - name: Read version from code
+        id: ver
+        run: |
+          VER=$(sed -n 's/^\s*version\s*=\s*"\(.*\)"/\1/p' main.go | head -n1)
+          echo "VERSION=$VER" >> $GITHUB_ENV
+
+      - name: Build one target
+        run: python ./release.py -i ${{ matrix.index }}
+        env:
+          CGO_ENABLED: '0'
+          VERSION: ${{ env.VERSION }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosdns-${{ matrix.index }}
+          path: ./release/mosdns*.zip
+          if-no-files-found: error
+
+  release:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from code
+        run: |
+          VER=$(sed -n 's/^\s*version\s*=\s*"\(.*\)"/\1/p' main.go | head -n1)
+          echo "TAG_NAME=${VER}" >> $GITHUB_ENV
+
+      - name: Read Go version from go.mod
+        run: |
+          GOV=$(awk '/^go / {print $2}' go.mod)
+          echo "GO_VERSION=$GOV" >> $GITHUB_ENV
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "Release ${{ env.TAG_NAME }}"
+          files: './artifacts/mosdns*.zip'
+          prerelease: false
+          generate_release_notes: true
+          append_body: true
+          body: "Built with Go ${{ env.GO_VERSION }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update tag `last` to this commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git fetch --tags --force
+          git tag -f last $GITHUB_SHA
+          git push origin -f last
