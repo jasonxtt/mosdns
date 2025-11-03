@@ -527,6 +527,7 @@ dialog.card:hover { border-color: var(--color-border) !important; }
     box-shadow: var(--shadow-sm);
 }
 .info-icon { display: inline-flex; align-items: center; }
+.info-icon:hover { color: var(--color-accent-primary); }
 .info-icon svg {
     display: inline-block;
     vertical-align: middle;
