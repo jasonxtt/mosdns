@@ -208,7 +208,13 @@ func saveRespToCache(msgKey string, qCtx *query_context.Context, backend *cache.
 		if len(r.Answer) == 0 { // Empty answer. Set ttl between 0~300.
 			const maxEmtpyAnswerTtl = 300
 			msgTtl = time.Duration(min(minTTL, maxEmtpyAnswerTtl)) * time.Second
-			cacheTtl = msgTtl
+			// --- START MODIFICATION 1 of 2: Apply lazy_cache_ttl to empty answers ---
+			if lazyCacheTtl > 0 {
+				cacheTtl = time.Duration(lazyCacheTtl) * time.Second
+			} else {
+				cacheTtl = msgTtl
+			}
+			// --- END MODIFICATION 1 of 2 ---
 		} else {
 			msgTtl = time.Duration(minTTL) * time.Second
 			if lazyCacheTtl > 0 {
@@ -218,9 +224,19 @@ func saveRespToCache(msgKey string, qCtx *query_context.Context, backend *cache.
 			}
 		}
 	}
-	if msgTtl <= 0 || cacheTtl <= 0 {
-		return false
+
+	// --- START MODIFICATION 2 of 2: Safety net for TTL=0 ---
+	// Safety net: Prevents TTL=0 for any reason, ensuring the entry has a minimal lifespan.
+	// This replaces the original `if msgTtl <= 0 ... return false` check.
+	const minCacheableTTL = 5 * time.Second
+	if msgTtl <= 0 {
+		msgTtl = minCacheableTTL
 	}
+	// Also check cacheTtl in case lazy_cache_ttl is not configured.
+	if cacheTtl <= 0 {
+		cacheTtl = minCacheableTTL
+	}
+	// --- END MODIFICATION 2 of 2 ---
 
 	now := time.Now()
 	v := &item{
