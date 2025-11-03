@@ -479,18 +479,27 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 }
 .secondary-switches-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1.25rem 2rem;
+    /* 增大每格最小宽度，减少拥挤与误读 */
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem 1.25rem;
     padding-top: 1.25rem;
     margin-top: 1.25rem;
     border-top: 1px solid var(--color-border);
 }
 .secondary-switches-grid .control-item {
+    /* 让标题在左、开关在右且顶端对齐 */
     justify-content: space-between;
+    align-items: flex-start;
+    padding: 0.75rem 1rem;
+    background-color: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-sm);
 }
 .secondary-switches-grid .control-item strong {
     /* 使标题与说明垂直排列，避免与右侧开关混淆 */
     display: block;
+    flex: 1 1 auto;
+    margin-right: 0.75rem;
 }
 .secondary-switches-grid .control-item strong .title-line {
     display: inline-flex;
@@ -504,7 +513,18 @@ dialog.card:hover { border-color: var(--color-border) !important; }
     font-size: 0.85rem;
     margin-top: 0.25rem;
     line-height: 1.35;
-    max-width: 36ch;
+    max-width: 38ch;
+}
+
+/* 开关保持靠右并顶端对齐 */
+.secondary-switches-grid .control-item > label.switch {
+    margin-left: auto;
+    align-self: flex-start;
+}
+
+/* 轻微悬浮强调，帮助识别每个独立项 */
+.secondary-switches-grid .control-item:hover {
+    box-shadow: var(--shadow-sm);
 }
 .info-icon svg {
     display: inline-block;
