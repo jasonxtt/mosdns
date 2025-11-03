@@ -614,11 +614,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isDisabled = status === 'error';
                 html += `
                     <div class="control-item">
-                        <strong>
-                            <span>${profile.name}</span>
-                            <span class="info-icon" title="${profile.tip}">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z"></path></svg>
+                        <strong class="switch-label">
+                            <span class="title-line">
+                                <span>${profile.name}</span>
+                                <span class="info-icon" title="${profile.tip}">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z"></path></svg>
+                                </span>
                             </span>
+                            ${profile.desc ? `<span class="switch-desc">${profile.desc}</span>` : ''}
                         </strong>
                         <label class="switch">
                             <input type="checkbox" data-switch-tag="${profile.tag}" ${isChecked ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}>
@@ -627,6 +630,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>`;
             });
             elements.secondarySwitchesContainer.innerHTML = html;
+            bindInfoIconTooltips();
         },
     
         async handleCoreSwitch(button) {
@@ -1211,6 +1215,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const tooltipManager = (() => {
         const tooltip = elements.tooltip;
         let showTimeout, hideTimeout;
+        const _positionAndShow = (targetElement, html) => {
+            tooltip.innerHTML = html;
+            tooltip.style.visibility = 'hidden';
+            tooltip.classList.add('visible');
+            requestAnimationFrame(() => {
+                const targetRect = targetElement.getBoundingClientRect();
+                const tooltipRect = tooltip.getBoundingClientRect();
+                let top = targetRect.bottom + 10,
+                    left = targetRect.left + (targetRect.width / 2) - (tooltipRect.width / 2);
+                if (top + tooltipRect.height > window.innerHeight - 10) top = targetRect.top - tooltipRect.height - 10;
+                if (left < 10) left = 10; else if (left + tooltipRect.width > window.innerWidth - 10) left = window.innerWidth - tooltipRect.width - 10;
+                tooltip.style.top = `${top}px`;
+                tooltip.style.left = `${left}px`;
+                tooltip.style.visibility = 'visible';
+            });
+        };
         const _display = (targetElement) => {
             const logIndex = targetElement.dataset.logIndex ? parseInt(targetElement.dataset.logIndex, 10) : null;
             const rankIndex = targetElement.dataset.rankIndex ? parseInt(targetElement.dataset.rankIndex, 10) : null;
@@ -1222,21 +1242,67 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (source === 'domain_set' && rankIndex !== null) data = state.domainSetRank[rankIndex];
             else if (logIndex !== null) data = state.displayedLogs[logIndex];
             if (!data) return;
-            tooltip.innerHTML = getTooltipHTML(data, source);
-            tooltip.style.visibility = 'hidden'; tooltip.classList.add('visible');   
-            requestAnimationFrame(() => { 
-                const targetRect = targetElement.getBoundingClientRect();
-                const tooltipRect = tooltip.getBoundingClientRect();
-                let top = targetRect.bottom + 10, left = targetRect.left + (targetRect.width / 2) - (tooltipRect.width / 2);
-                if (top + tooltipRect.height > window.innerHeight - 10) top = targetRect.top - tooltipRect.height - 10;
-                if (left < 10) left = 10;
-                else if (left + tooltipRect.width > window.innerWidth - 10) left = window.innerWidth - tooltipRect.width - 10;
-                tooltip.style.top = `${top}px`; tooltip.style.left = `${left}px`; tooltip.style.visibility = 'visible';
-            });
+            _positionAndShow(targetElement, getTooltipHTML(data, source));
         };
         const _hide = () => { tooltip.classList.remove('visible'); tooltip.addEventListener('transitionend', () => { if (!tooltip.classList.contains('visible')) tooltip.style.visibility = 'hidden'; }, { once: true }); };
-        return { handleTriggerEnter(targetElement) { clearTimeout(hideTimeout); showTimeout = setTimeout(() => _display(targetElement), CONSTANTS.TOOLTIP_SHOW_DELAY); }, handleTriggerLeave() { clearTimeout(showTimeout); hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); }, handleTooltipEnter() { clearTimeout(hideTimeout); }, handleTooltipLeave() { hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); }, show(targetElement) { _display(targetElement); }, hide() { _hide(); } };
+        return { 
+            handleTriggerEnter(targetElement) { clearTimeout(hideTimeout); showTimeout = setTimeout(() => _display(targetElement), CONSTANTS.TOOLTIP_SHOW_DELAY); }, 
+            handleTriggerLeave() { clearTimeout(showTimeout); hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); }, 
+            handleTooltipEnter() { clearTimeout(hideTimeout); }, 
+            handleTooltipLeave() { hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); }, 
+            show(targetElement) { _display(targetElement); }, 
+            hide() { _hide(); },
+            showText(targetElement, text) {
+                if (!text) return;
+                clearTimeout(hideTimeout);
+                showTimeout = setTimeout(() => {
+                    const safe = String(text).replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+                    _positionAndShow(targetElement, `<div style=\"max-width: 40ch; line-height: 1.5;\">${safe}</div>`);
+                }, CONSTANTS.TOOLTIP_SHOW_DELAY);
+            }
+        };
     })();
+
+    // 绑定 info-icon 的提示（功能开关说明）
+    function bindInfoIconTooltips() {
+        const scope = elements.featureSwitchesModule || document;
+        const icons = scope.querySelectorAll('.info-icon');
+        icons.forEach(icon => {
+            if (icon.dataset.tooltipBound) return;
+            icon.dataset.tooltipBound = '1';
+            const text = icon.getAttribute('title') || icon.dataset.tip || '';
+            icon.setAttribute('aria-label', text);
+            icon.addEventListener('mouseenter', () => tooltipManager.showText(icon, text));
+            icon.addEventListener('mouseleave', () => tooltipManager.hide());
+            icon.addEventListener('focus', () => tooltipManager.showText(icon, text));
+            icon.addEventListener('blur', () => tooltipManager.hide());
+        });
+    }
+
+    // 全局委托绑定，避免动态渲染遗漏（如切换 Tab/刷新模块后失效）
+    function mountGlobalInfoIconDelegation() {
+        if (document.documentElement.dataset.infoIconDelegationMounted === '1') return;
+        document.documentElement.dataset.infoIconDelegationMounted = '1';
+        const getIcon = (e) => e.target.closest && e.target.closest('.info-icon');
+        document.addEventListener('mouseover', (e) => {
+            const icon = getIcon(e);
+            if (!icon) return;
+            const text = icon.getAttribute('title') || icon.dataset.tip || icon.getAttribute('aria-label') || '';
+            tooltipManager.showText(icon, text);
+        }, true);
+        document.addEventListener('mouseout', (e) => {
+            if (getIcon(e)) tooltipManager.hide();
+        }, true);
+        document.addEventListener('focusin', (e) => {
+            const icon = getIcon(e);
+            if (!icon) return;
+            const text = icon.getAttribute('title') || icon.dataset.tip || icon.getAttribute('aria-label') || '';
+            tooltipManager.showText(icon, text);
+        });
+        document.addEventListener('focusout', (e) => {
+            if (getIcon(e)) tooltipManager.hide();
+        });
+    }
 
     function getDetailContentHTML(data) {
         if (!data) return '';
@@ -2180,6 +2246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         autoRefreshManager.loadSettings();
         tableSorter.init();
         switchManager.init();
+        mountGlobalInfoIconDelegation();
         setupEventListeners();
         setupGlowEffect();
         setupLazyLoading();
