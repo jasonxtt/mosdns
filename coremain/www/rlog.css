@@ -489,9 +489,22 @@ dialog.card:hover { border-color: var(--color-border) !important; }
     justify-content: space-between;
 }
 .secondary-switches-grid .control-item strong {
-    display: flex;
+    /* 使标题与说明垂直排列，避免与右侧开关混淆 */
+    display: block;
+}
+.secondary-switches-grid .control-item strong .title-line {
+    display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+}
+.secondary-switches-grid .control-item .switch-desc {
+    display: block;
+    color: var(--color-text-secondary);
+    font-weight: 400;
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+    line-height: 1.35;
+    max-width: 36ch;
 }
 .info-icon svg {
     display: inline-block;
