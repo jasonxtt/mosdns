@@ -1279,6 +1279,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // 全局委托绑定，避免动态渲染遗漏（如切换 Tab/刷新模块后失效）
+    function mountGlobalInfoIconDelegation() {
+        if (document.documentElement.dataset.infoIconDelegationMounted === '1') return;
+        document.documentElement.dataset.infoIconDelegationMounted = '1';
+        const getIcon = (e) => e.target.closest && e.target.closest('.info-icon');
+        document.addEventListener('mouseover', (e) => {
+            const icon = getIcon(e);
+            if (!icon) return;
+            const text = icon.getAttribute('title') || icon.dataset.tip || icon.getAttribute('aria-label') || '';
+            tooltipManager.showText(icon, text);
+        }, true);
+        document.addEventListener('mouseout', (e) => {
+            if (getIcon(e)) tooltipManager.hide();
+        }, true);
+        document.addEventListener('focusin', (e) => {
+            const icon = getIcon(e);
+            if (!icon) return;
+            const text = icon.getAttribute('title') || icon.dataset.tip || icon.getAttribute('aria-label') || '';
+            tooltipManager.showText(icon, text);
+        });
+        document.addEventListener('focusout', (e) => {
+            if (getIcon(e)) tooltipManager.hide();
+        });
+    }
+
     function getDetailContentHTML(data) {
         if (!data) return '';
         const queryInfo = {}, responseInfo = {}; let answers = [];
@@ -2221,6 +2246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         autoRefreshManager.loadSettings();
         tableSorter.init();
         switchManager.init();
+        mountGlobalInfoIconDelegation();
         setupEventListeners();
         setupGlowEffect();
         setupLazyLoading();
