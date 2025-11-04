@@ -28,6 +28,7 @@ type Config struct {
 	Include []string       `yaml:"include"`
 	Plugins []PluginConfig `yaml:"plugins"`
 	API     APIConfig      `yaml:"api"`
+	baseDir string         `yaml:"-"`
 }
 
 // PluginConfig represents a plugin config

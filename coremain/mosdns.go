@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"path" // <<< NEW: Import path package
+	"path/filepath"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/IrineSistiana/mosdns/v5/pkg/safe_close"
@@ -39,6 +40,7 @@ import (
 )
 
 // <<< MODIFIED: Adjusted the embed list for rlog assets
+//
 //go:embed www/mosdns.html www/mosdnsp.html www/log.html www/log_plain.html www/rlog.html www/adguard.html www/rlog.css www/rlog.js
 var content embed.FS
 
@@ -63,12 +65,12 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 
 	// Create our TeeCore to also write to the in-memory collector for detailed process logs.
 	teeCore := NewTeeCore(baseLogger.Core(), GlobalLogCollector)
-	
+
 	// Create the final logger with our TeeCore.
 	lg := zap.New(teeCore, zap.AddCaller(), zap.AddStacktrace(zap.ErrorLevel))
-	
-    // Start the audit log collector's background worker.
-    GlobalAuditCollector.StartWorker()
+
+	// Start the audit log collector's background worker.
+	GlobalAuditCollector.StartWorker()
 
 	m := &Mosdns{
 		logger:     lg,
@@ -116,8 +118,8 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 			defer done()
 			<-closeSignal
 
-            // Stop the audit worker gracefully.
-            GlobalAuditCollector.StopWorker()
+			// Stop the audit worker gracefully.
+			GlobalAuditCollector.StopWorker()
 
 			m.logger.Info("starting shutdown sequences")
 			for tag, p := range m.plugins {
@@ -199,91 +201,91 @@ func newMetricsReg() *prometheus.Registry {
 
 // initHttpMux initializes api entries. It MUST be called after m.metricsReg being initialized.
 func (m *Mosdns) initHttpMux() {
-    // 全局 CORS 中间件
-    corsMiddleware := func(next http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            w.Header().Set("Access-Control-Allow-Origin", "*")
+	// 全局 CORS 中间件
+	corsMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 			// <<< MODIFIED: Allow PUT and DELETE methods for plugin APIs
-            w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-            w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
-            
-            if r.Method == http.MethodOptions {
-                w.WriteHeader(http.StatusOK)
-                return
-            }
-            next.ServeHTTP(w, r)
-        })
-    }
-    
-    m.httpMux.Use(corsMiddleware)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
 
-    // metrics 处理 (只注册一次)
-    metricsHandler := promhttp.HandlerFor(m.metricsReg, promhttp.HandlerOpts{})
-    wrappedMetricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        m.logger.Debug("Metrics endpoint accessed", 
-            zap.String("remote_addr", r.RemoteAddr),
-            zap.String("method", r.Method))
-        metricsHandler.ServeHTTP(w, r)
-    })
-    m.httpMux.Method(http.MethodGet, "/metrics", wrappedMetricsHandler)
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	m.httpMux.Use(corsMiddleware)
+
+	// metrics 处理 (只注册一次)
+	metricsHandler := promhttp.HandlerFor(m.metricsReg, promhttp.HandlerOpts{})
+	wrappedMetricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.logger.Debug("Metrics endpoint accessed",
+			zap.String("remote_addr", r.RemoteAddr),
+			zap.String("method", r.Method))
+		metricsHandler.ServeHTTP(w, r)
+	})
+	m.httpMux.Method(http.MethodGet, "/metrics", wrappedMetricsHandler)
 
 	// [修改] 将原来的公共handler拆分为两个独立的handler
-	
-    // [新增] 根路由 ("/") 的 handler，指向 mosdnsp.html
-    rootHandler := func(w http.ResponseWriter, r *http.Request) {
-        data, err := content.ReadFile("www/mosdnsp.html") // 读取新文件
-        if err != nil {
-            m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdnsp.html"), zap.Error(err))
-            http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-            return
-        }
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        if _, err := w.Write(data); err != nil {
-            m.logger.Error("Error writing response", zap.Error(err))
-        }
-    }
-	
-    // [新增] graphic 路由 ("/graphic") 的 handler，保持指向 mosdns.html
-    graphicHandler := func(w http.ResponseWriter, r *http.Request) {
-        data, err := content.ReadFile("www/mosdns.html") // 读取原文件
-        if err != nil {
-            m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdns.html"), zap.Error(err))
-            http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-            return
-        }
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        if _, err := w.Write(data); err != nil {
-            m.logger.Error("Error writing response", zap.Error(err))
-        }
-    }
 
-    // [新增] log 路由 ("/log") 的 handler, 指向 /www/log.html
-    logHandler := func(w http.ResponseWriter, r *http.Request) {
-        data, err := content.ReadFile("www/log.html") // 读取 /www/log.html
-        if err != nil {
-            m.logger.Error("Error reading embedded file", zap.String("file", "www/log.html"), zap.Error(err))
-            http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-            return
-        }
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        if _, err := w.Write(data); err != nil {
-            m.logger.Error("Error writing response", zap.Error(err))
-        }
-    }
+	// [新增] 根路由 ("/") 的 handler，指向 mosdnsp.html
+	rootHandler := func(w http.ResponseWriter, r *http.Request) {
+		data, err := content.ReadFile("www/mosdnsp.html") // 读取新文件
+		if err != nil {
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdnsp.html"), zap.Error(err))
+			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := w.Write(data); err != nil {
+			m.logger.Error("Error writing response", zap.Error(err))
+		}
+	}
 
-    // [新添加] plog 路由 ("/plog") 的 handler, 指向 /www/log_plain.html
-    plainLogHandler := func(w http.ResponseWriter, r *http.Request) {
-        data, err := content.ReadFile("www/log_plain.html") // 读取 /www/log_plain.html
-        if err != nil {
-            m.logger.Error("Error reading embedded file", zap.String("file", "www/log_plain.html"), zap.Error(err))
-            http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-            return
-        }
-        w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        if _, err := w.Write(data); err != nil {
-            m.logger.Error("Error writing response", zap.Error(err))
-        }
-    }
+	// [新增] graphic 路由 ("/graphic") 的 handler，保持指向 mosdns.html
+	graphicHandler := func(w http.ResponseWriter, r *http.Request) {
+		data, err := content.ReadFile("www/mosdns.html") // 读取原文件
+		if err != nil {
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdns.html"), zap.Error(err))
+			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := w.Write(data); err != nil {
+			m.logger.Error("Error writing response", zap.Error(err))
+		}
+	}
+
+	// [新增] log 路由 ("/log") 的 handler, 指向 /www/log.html
+	logHandler := func(w http.ResponseWriter, r *http.Request) {
+		data, err := content.ReadFile("www/log.html") // 读取 /www/log.html
+		if err != nil {
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/log.html"), zap.Error(err))
+			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := w.Write(data); err != nil {
+			m.logger.Error("Error writing response", zap.Error(err))
+		}
+	}
+
+	// [新添加] plog 路由 ("/plog") 的 handler, 指向 /www/log_plain.html
+	plainLogHandler := func(w http.ResponseWriter, r *http.Request) {
+		data, err := content.ReadFile("www/log_plain.html") // 读取 /www/log_plain.html
+		if err != nil {
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/log_plain.html"), zap.Error(err))
+			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := w.Write(data); err != nil {
+			m.logger.Error("Error writing response", zap.Error(err))
+		}
+	}
 
 	// --- ADDED: Handler for the new /rlog route (for v2 API frontend) ---
 	rlogHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -336,12 +338,12 @@ func (m *Mosdns) initHttpMux() {
 			m.logger.Error("Error writing static asset response", zap.Error(err))
 		}
 	}
-    
-    // [修改] 为每个路由注册对应的 handler
-    m.httpMux.Get("/", rootHandler)
-    m.httpMux.Get("/graphic", graphicHandler)
-    m.httpMux.Get("/log", logHandler)
-    m.httpMux.Get("/plog", plainLogHandler)
+
+	// [修改] 为每个路由注册对应的 handler
+	m.httpMux.Get("/", rootHandler)
+	m.httpMux.Get("/graphic", graphicHandler)
+	m.httpMux.Get("/log", logHandler)
+	m.httpMux.Get("/plog", plainLogHandler)
 	m.httpMux.Get("/rlog", rlogHandler) // This remains the same, still serves rlog.html
 	m.httpMux.Get("/adguard", adguardHandler)
 
@@ -349,32 +351,31 @@ func (m *Mosdns) initHttpMux() {
 	m.httpMux.Get("/rlog.css", staticAssetHandler)
 	m.httpMux.Get("/rlog.js", staticAssetHandler)
 
+	// Register pprof.
+	m.httpMux.Route("/debug/pprof", func(r chi.Router) {
+		r.Get("/*", pprof.Index)
+		r.Get("/cmdline", pprof.Cmdline)
+		r.Get("/profile", pprof.Profile)
+		r.Get("/symbol", pprof.Symbol)
+		r.Get("/trace", pprof.Trace)
+	})
 
-    // Register pprof.
-    m.httpMux.Route("/debug/pprof", func(r chi.Router) {
-        r.Get("/*", pprof.Index)
-        r.Get("/cmdline", pprof.Cmdline)
-        r.Get("/profile", pprof.Profile)
-        r.Get("/symbol", pprof.Symbol)
-        r.Get("/trace", pprof.Trace)
-    })
-
-    // A helper page for invalid request.
-    invalidApiReqHelper := func(w http.ResponseWriter, req *http.Request) {
-        b := new(bytes.Buffer)
-        _, _ = fmt.Fprintf(b, "Invalid request %s %s\n\n", req.Method, req.RequestURI)
-        b.WriteString("Available api urls:\n")
-        _ = chi.Walk(m.httpMux, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
-            b.WriteString(method)
-            b.WriteByte(' ')
-            b.WriteString(route)
-            b.WriteByte('\n')
-            return nil
-        })
-        _, _ = w.Write(b.Bytes())
-    }
-    m.httpMux.NotFound(invalidApiReqHelper)
-    m.httpMux.MethodNotAllowed(invalidApiReqHelper)
+	// A helper page for invalid request.
+	invalidApiReqHelper := func(w http.ResponseWriter, req *http.Request) {
+		b := new(bytes.Buffer)
+		_, _ = fmt.Fprintf(b, "Invalid request %s %s\n\n", req.Method, req.RequestURI)
+		b.WriteString("Available api urls:\n")
+		_ = chi.Walk(m.httpMux, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+			b.WriteString(method)
+			b.WriteByte(' ')
+			b.WriteString(route)
+			b.WriteByte('\n')
+			return nil
+		})
+		_, _ = w.Write(b.Bytes())
+	}
+	m.httpMux.NotFound(invalidApiReqHelper)
+	m.httpMux.MethodNotAllowed(invalidApiReqHelper)
 }
 
 func (m *Mosdns) loadPresetPlugins() error {
@@ -397,14 +398,18 @@ func (m *Mosdns) loadPluginsFromCfg(cfg *Config, includeDepth int) error {
 	includeDepth++
 
 	// Follow include first.
-	for _, s := range cfg.Include {
-		subCfg, path, err := loadConfig(s)
+	for _, includePath := range cfg.Include {
+		resolvedPath := includePath
+		if len(cfg.baseDir) > 0 && !filepath.IsAbs(includePath) {
+			resolvedPath = filepath.Join(cfg.baseDir, includePath)
+		}
+		subCfg, path, err := loadConfig(resolvedPath)
 		if err != nil {
-			return fmt.Errorf("failed to read config from %s, %w", s, err)
+			return fmt.Errorf("failed to read config from %s, %w", includePath, err)
 		}
 		m.logger.Info("load config", zap.String("file", path))
 		if err := m.loadPluginsFromCfg(subCfg, includeDepth); err != nil {
-			return fmt.Errorf("failed to load config from %s, %w", s, err)
+			return fmt.Errorf("failed to load config from %s, %w", includePath, err)
 		}
 	}
 
