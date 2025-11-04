@@ -15,7 +15,11 @@ function unlockScroll() {
     document.body.style.top = '';
     document.body.style.width = '';
     document.body.style.overflowY = '';
+    const htmlEl = document.documentElement;
+    const prevScrollBehavior = htmlEl.style.scrollBehavior;
+    htmlEl.style.scrollBehavior = 'auto';
     window.scrollTo(0, savedScrollY);
+    htmlEl.style.scrollBehavior = prevScrollBehavior;
 }
 
 // -- [修改] -- 创建一个统一的关闭函数来消除闪烁
