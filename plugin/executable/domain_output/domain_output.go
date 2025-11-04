@@ -331,7 +331,7 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]int) {
 	}()
 }
 
-func (d *domainOutput) Shutdown() error {
+func (d *domainOutput) Close() error {
 	fmt.Println("[domain_output] initiating shutdown...")
 	close(d.stopChan)
 	<-d.workerDoneChan
