@@ -34,6 +34,9 @@ import (
 	"syscall"
 )
 
+// <<< ADDED: Global variable to store the base directory for other packages to use.
+var MainConfigBaseDir string
+
 type serverFlags struct {
 	c         string
 	dir       string
@@ -125,6 +128,32 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fail to load config, %w", err)
 	}
+
+	// <<< ADDED: Determine and set the main config base directory.
+	// This ensures the path is absolute and available for other packages.
+	if fileUsed != "" {
+		if absPath, err := filepath.Abs(fileUsed); err == nil {
+			MainConfigBaseDir = filepath.Dir(absPath)
+		} else {
+			MainConfigBaseDir = filepath.Dir(fileUsed)
+		}
+	} else if len(sf.dir) > 0 {
+		if absPath, err := filepath.Abs(sf.dir); err == nil {
+			MainConfigBaseDir = absPath
+		} else {
+			MainConfigBaseDir = sf.dir
+		}
+	} else {
+		if wd, err := os.Getwd(); err == nil {
+			MainConfigBaseDir = wd
+		}
+	}
+	mlog.L().Info("main config base directory set", zap.String("path", MainConfigBaseDir))
+
+	// <<< ADDED: Explicitly initialize the audit collector with the correct base path.
+	InitializeAuditCollector(MainConfigBaseDir)
+	// <<< END ADDED SECTION
+
 	mlog.L().Info("main config loaded", zap.String("file", fileUsed))
 
 	return NewMosdns(cfg)
