@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,6 +34,7 @@ const (
 	httpTimeout          = 120 * time.Second
 	userAgent            = "mosdns-update-client"
 	stateFileName        = ".mosdns-update-state.json"
+	postUpgradeEndpoint  = "http://127.0.0.1:9099/plugins/my_fakeiplist/restartall"
 )
 
 var (
@@ -66,7 +68,6 @@ type UpdateActionResponse struct {
 	Status          UpdateStatus `json:"status"`
 	Installed       bool         `json:"installed"`
 	RestartRequired bool         `json:"restart_required"`
-	BackupPath      string       `json:"backup_path,omitempty"`
 	Notes           string       `json:"notes,omitempty"`
 }
 
@@ -301,22 +302,26 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 		return action, nil
 	}
 
-	backupPath, err := replaceBinary(exePath, extractedBinary, mode)
-	if err != nil {
+	if err := installBinary(exePath, extractedBinary, mode); err != nil {
 		action.Notes = err.Error()
 		return action, err
 	}
 
-	action.BackupPath = backupPath
 	action.Installed = true
 	action.RestartRequired = true
-	action.Notes = fmt.Sprintf("新版本已写入 %s，重启 Mosdns 后生效。备份: %s", exePath, backupPath)
+	action.Notes = fmt.Sprintf("新版本已写入 %s，重启 Mosdns 后生效。", exePath)
 
 	status.PendingRestart = true
 	status.Message = action.Notes
 	action.Status = status
 
 	m.recordInstalled(status.AssetSignature)
+	if err := m.triggerPostUpgradeHook(ctx); err != nil {
+		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", postUpgradeEndpoint))
+	} else {
+		action.Notes += " 已请求刷新 my_fakeiplist。"
+		status.Message = action.Notes
+	}
 
 	return action, nil
 }
@@ -330,6 +335,35 @@ func (m *UpdateManager) recordInstalled(signature string) {
 	m.pendingSignature = ""
 	m.mu.Unlock()
 	m.saveState(signature)
+}
+
+func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
+	endpoint := postUpgradeEndpoint
+	if endpoint == "" {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
+		req.Host = req.URL.Host
+	}
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("hook returned %s", resp.Status)
+	}
+	return nil
 }
 
 func (m *UpdateManager) isUpdateNeeded(latest, signature string) bool {
@@ -633,39 +667,26 @@ func extractBinaryFromZip(zipPath string) (string, os.FileMode, error) {
 	return tmpFile.Name(), mode, nil
 }
 
-func replaceBinary(exePath, newBinary string, mode os.FileMode) (string, error) {
+func installBinary(exePath, newBinary string, mode os.FileMode) error {
 	dir := filepath.Dir(exePath)
-	backupPath := fmt.Sprintf("%s.bak.%s", exePath, time.Now().Format("20060102-150405"))
-
 	tempDest, err := os.CreateTemp(dir, "mosdns-new-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	tempDestPath := tempDest.Name()
 	tempDest.Close()
 
 	if err := copyFile(newBinary, tempDestPath, mode); err != nil {
 		os.Remove(tempDestPath)
-		return "", err
-	}
-
-	if err := os.Rename(exePath, backupPath); err != nil {
-		os.Remove(tempDestPath)
-		return "", err
+		return err
 	}
 
 	if err := os.Rename(tempDestPath, exePath); err != nil {
-		os.Rename(backupPath, exePath)
 		os.Remove(tempDestPath)
-		return "", err
+		return err
 	}
 
-	if err := os.Chmod(exePath, mode); err != nil {
-		m := fmt.Errorf("failed to set executable bit: %w", err)
-		return backupPath, m
-	}
-
-	return backupPath, nil
+	return os.Chmod(exePath, mode)
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
