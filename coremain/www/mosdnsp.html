@@ -889,6 +889,36 @@
         const MAX_LINES_TO_DISPLAY = 500;
         const D = document; 
         const baseFontStack = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
+        const loadScript = (src) => new Promise((resolve, reject) => {
+            const script = D.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = resolve;
+            script.onerror = () => reject(new Error(`failed to load ${src}`));
+            D.head.appendChild(script);
+        });
+
+        let chartsReady = false;
+        async function ensureChartsLoaded() {
+            if (chartsReady) return;
+            await loadScript('assets/js/chart.umd.min.js');
+            await loadScript('assets/js/chartjs-plugin-datalabels.min.js');
+            if (typeof Chart === 'undefined' || typeof ChartDataLabels === 'undefined') {
+                throw new Error('Chart libraries failed to load');
+            }
+            Chart.register(ChartDataLabels);
+            Chart.defaults.plugins.legend.display = false;
+            Chart.defaults.plugins.datalabels.font = { weight: 'bold', size: 11 };
+            Chart.defaults.cutout = '70%';
+            Chart.defaults.responsive = true;
+            Chart.defaults.maintainAspectRatio = false;
+            Chart.defaults.plugins.datalabels.formatter = (value, context) => {
+                const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                return total > 0 && value / total > 0.05 ? `${(value / total * 100).toFixed(0)}%` : '';
+            };
+            chartsReady = true;
+        }
+
         const getById = (id) => D.getElementById(id);
 
         let chartInstances = {}; 
@@ -931,9 +961,6 @@
         const hostsProfiles = [];
         const ruleListPaths = ['top_domains/flush', 'my_fakeiplist/flush', 'my_nodenov4list/flush', 'my_nodenov6list/flush', 'my_notinlist/flush', 'my_nov4list/flush', 'my_nov6list/flush', 'my_realiplist/flush'];
 
-        Chart.register(ChartDataLabels); Chart.defaults.plugins.legend.display = false; Chart.defaults.plugins.datalabels.font = { weight: 'bold', size: 11 }; Chart.defaults.cutout = '70%'; Chart.defaults.responsive = true; Chart.defaults.maintainAspectRatio = false;
-        Chart.defaults.plugins.datalabels.formatter = (v, c) => { const s = c.chart.data.datasets[0].data.reduce((a, b) => a + b, 0); return s > 0 && v / s > 0.05 ? `${(v / s * 100).toFixed(0)}%` : ''; };
-        
         function createElement(tag, className, innerText = '', id = '') { const el = D.createElement(tag); if (className) el.className = className; if (innerText) el.innerText = innerText; if (id) el.id = id; return el; }
         function formatNumber(num) { if (typeof num !== 'number' && isNaN(num = parseFloat(num))) { return num; } return num.toLocaleString('en-US'); }
 
@@ -1076,6 +1103,7 @@
             const data = await fetchData();
             if (data && data.error) { getById('main-content').innerHTML = `<div class="error-message"><i class="fas fa-exclamation-triangle"></i><p>无法连接到 MosDNS API。</p><small>${data.error}</small></div>`; if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; getById('auto-refresh-toggle').checked = false; localStorage.setItem('autoRefresh', 'false'); } return; }
             if (!data) return;
+            await ensureChartsLoaded();
             if (forceRebuild) { getById('main-content').innerHTML = ''; Object.values(chartInstances).forEach(c => c.destroy()); chartInstances = {}; }
             
             cacheOrder.forEach(key => {
