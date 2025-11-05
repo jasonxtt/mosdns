@@ -272,6 +272,19 @@ func (m *Mosdns) initHttpMux() {
 		}
 	}
 
+	plainLogHandler := func(w http.ResponseWriter, r *http.Request) {
+		data, err := content.ReadFile("www/log_plain.html")
+		if err != nil {
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/log_plain.html"), zap.Error(err))
+			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := w.Write(data); err != nil {
+			m.logger.Error("Error writing response", zap.Error(err))
+		}
+	}
+
 	redirectToLog := func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/log", http.StatusFound)
 	}
@@ -312,7 +325,7 @@ func (m *Mosdns) initHttpMux() {
 	m.httpMux.Get("/", rootHandler)
 	m.httpMux.Get("/graphic", graphicHandler)
 	m.httpMux.Get("/log", logHandler)
-	m.httpMux.Get("/plog", redirectToLog)
+	m.httpMux.Get("/plog", plainLogHandler)
 	m.httpMux.Get("/rlog", redirectToLog)
 	m.httpMux.Get("/assets/*", staticAssetHandler)
 
