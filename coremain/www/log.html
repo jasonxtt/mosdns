@@ -415,42 +415,6 @@
                         <button type="submit" class="button primary" data-default-text="设置"><span>设置</span></button>
                     </form>
                 </div>
-                <div class="control-module" id="update-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 4v6h-2V6.41l-4.29 4.3-1.42-1.42 4.3-4.29H14V4h7zM5 17.59l4.29-4.3 1.42 1.42-4.3 4.29H10V20H3v-6h2v3.59z"></path></svg>版本与更新</h3>
-                    <div class="control-item">
-                        <strong>当前版本:</strong> <span id="update-current-version">检测中...</span>
-                    </div>
-                    <div class="control-item">
-                        <strong>最新版本:</strong> <span id="update-latest-version">--</span>
-                    </div>
-                    <div class="control-item control-item-text">
-                        <strong>状态:</strong>
-                        <p id="update-status-text">等待检查</p>
-                    </div>
-                    <div class="control-item">
-                        <strong>上次检查:</strong> <span id="update-last-checked">--</span>
-                    </div>
-                    <div class="control-item">
-                        <strong>匹配构建:</strong> <span id="update-target-info">--</span>
-                    </div>
-                    <div class="button-group" style="grid-template-columns: repeat(3, 1fr);">
-                        <button id="update-check-btn" class="button secondary" data-default-text="强制检查"><span>强制检查</span></button>
-                        <button id="update-apply-btn" class="button primary" data-default-text="立即更新" disabled><span>立即更新</span></button>
-                        <button id="update-force-btn" class="button danger" data-default-text="强制更新"><span>强制更新</span></button>
-                    </div>
-                    <div class="control-item">
-                        <strong>自动检查</strong>
-                        <label class="switch" style="margin-left: auto;">
-                            <input type="checkbox" id="update-auto-toggle">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    <div class="control-item">
-                        <label for="update-interval-input"><strong>间隔 (分钟)</strong></label>
-                        <input type="number" id="update-interval-input" min="5" max="720" value="60" style="max-width: 140px;">
-                    </div>
-                    <p class="control-hint" id="update-hint-text"></p>
-                </div>
                 
                 <!-- Row 2 -->
                  <div class="control-module" style="grid-column: 1 / -1;">
@@ -517,6 +481,42 @@
                     <div id="system-info-container" class="info-grid">
                         <!-- System info will be injected by JS -->
                     </div>
+                </div>
+                <div class="control-module" id="update-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 4v6h-2V6.41l-4.29 4.3-1.42-1.42 4.3-4.29H14V4h7zM5 17.59l4.29-4.3 1.42 1.42-4.3 4.29H10V20H3v-6h2v3.59z"></path></svg>版本与更新</h3>
+                    <div class="control-item">
+                        <strong>当前版本:</strong> <span id="update-current-version">检测中...</span>
+                    </div>
+                    <div class="control-item">
+                        <strong>最新版本:</strong> <span id="update-latest-version">--</span>
+                    </div>
+                    <div class="control-item control-item-text">
+                        <strong>状态:</strong>
+                        <p id="update-status-text">等待检查</p>
+                    </div>
+                    <div class="control-item">
+                        <strong>上次检查:</strong> <span id="update-last-checked">--</span>
+                    </div>
+                    <div class="control-item">
+                        <strong>匹配构建:</strong> <span id="update-target-info">--</span>
+                    </div>
+                    <div class="button-group" style="grid-template-columns: repeat(3, 1fr);">
+                        <button id="update-check-btn" class="button secondary" data-default-text="强制检查"><span>强制检查</span></button>
+                        <button id="update-apply-btn" class="button primary" data-default-text="立即更新" disabled><span>立即更新</span></button>
+                        <button id="update-force-btn" class="button danger" data-default-text="强制更新"><span>强制更新</span></button>
+                    </div>
+                    <div class="control-item">
+                        <strong>自动检查</strong>
+                        <label class="switch" style="margin-left: auto;">
+                            <input type="checkbox" id="update-auto-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="control-item">
+                        <label for="update-interval-input"><strong>间隔 (分钟)</strong></label>
+                        <input type="number" id="update-interval-input" min="5" max="720" value="60" style="max-width: 140px;">
+                    </div>
+                    <p class="control-hint" id="update-hint-text"></p>
                 </div>
 
                 <!-- Row 4 -->
