@@ -32,8 +32,8 @@ function closeAndUnlock(dialogElement) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-    const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 30, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250 };
-    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {} };
+	const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 30, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 60 };
+	let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: 60, timerId: null } } };
     const elements = { 
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'), 
         colorSwatches: document.querySelectorAll('.color-swatch'), 
@@ -92,9 +92,20 @@ document.addEventListener('DOMContentLoaded', () => {
         requerySchedulerToggle: document.getElementById('requery-scheduler-toggle'),
         requeryIntervalInput: document.getElementById('requery-interval-input'),
         requeryStartDatetimeInput: document.getElementById('requery-start-datetime-input'),
-        requeryClearBackupBtn: document.getElementById('requery-clear-backup-btn'),
-        requeryDomainStatsTbody: document.getElementById('requery-domain-stats-tbody'),
-        requeryRefreshStatsBtn: document.getElementById('requery-refresh-stats-btn'),
+	requeryClearBackupBtn: document.getElementById('requery-clear-backup-btn'),
+	requeryDomainStatsTbody: document.getElementById('requery-domain-stats-tbody'),
+	requeryRefreshStatsBtn: document.getElementById('requery-refresh-stats-btn'),
+	updateModule: document.getElementById('update-module'),
+	updateCurrentVersion: document.getElementById('update-current-version'),
+	updateLatestVersion: document.getElementById('update-latest-version'),
+	updateStatusText: document.getElementById('update-status-text'),
+	updateLastChecked: document.getElementById('update-last-checked'),
+	updateTargetInfo: document.getElementById('update-target-info'),
+	updateCheckBtn: document.getElementById('update-check-btn'),
+	updateApplyBtn: document.getElementById('update-apply-btn'),
+	updateAutoToggle: document.getElementById('update-auto-toggle'),
+	updateIntervalInput: document.getElementById('update-interval-input'),
+	updateHintText: document.getElementById('update-hint-text'),
 
         fakeipDomainCount: document.getElementById('fakeip-domain-count'),
         realipDomainCount: document.getElementById('realip-domain-count'),
@@ -135,15 +146,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) {} } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => api.fetch('/metrics', { signal }), getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for(let [key, value] of queryParams.entries()){ if(!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
     
-    const requeryApi = {
-        getConfig: (signal) => api.fetch(`/plugins/requery`, { signal }), 
-        getStatus: (signal) => api.fetch(`/plugins/requery/status`, { signal }),
-        trigger: () => api.fetch(`/plugins/requery/trigger`, { method: 'POST' }),
-        cancel: () => api.fetch(`/plugins/requery/cancel`, { method: 'POST' }),
-        updateSchedulerConfig: (config) => api.fetch(`/plugins/requery/scheduler/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) }),
-        clearBackup: () => api.fetch(`/plugins/requery/clear_backup`, { method: 'POST' }),
-        getBackupCount: (signal) => api.fetch(`/plugins/requery/stats/backup_file_count`, { signal }),
-    };
+	const requeryApi = {
+		getConfig: (signal) => api.fetch(`/plugins/requery`, { signal }), 
+		getStatus: (signal) => api.fetch(`/plugins/requery/status`, { signal }),
+		trigger: () => api.fetch(`/plugins/requery/trigger`, { method: 'POST' }),
+		cancel: () => api.fetch(`/plugins/requery/cancel`, { method: 'POST' }),
+		updateSchedulerConfig: (config) => api.fetch(`/plugins/requery/scheduler/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) }),
+		clearBackup: () => api.fetch(`/plugins/requery/clear_backup`, { method: 'POST' }),
+		getBackupCount: (signal) => api.fetch(`/plugins/requery/stats/backup_file_count`, { signal }),
+	};
+
+	const updateApi = {
+		getStatus: (signal) => api.fetch(`/api/v1/update/status`, { signal }),
+		forceCheck: () => api.fetch(`/api/v1/update/check`, { method: 'POST' }),
+		apply: () => api.fetch(`/api/v1/update/apply`, { method: 'POST' })
+	};
 
     const normalizeIP = (ip) => {
         if (typeof ip === 'string' && ip.startsWith('::ffff:')) {
@@ -681,7 +698,183 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    const systemInfoManager = {
+	const updateManager = {
+		init() {
+			if (!elements.updateModule) return;
+			const autoCfg = this.loadAutoConfig();
+			state.update.auto.enabled = autoCfg.enabled;
+			state.update.auto.intervalMinutes = autoCfg.interval;
+			elements.updateAutoToggle.checked = autoCfg.enabled;
+			elements.updateIntervalInput.value = autoCfg.interval;
+			elements.updateAutoToggle.addEventListener('change', () => {
+				state.update.auto.enabled = elements.updateAutoToggle.checked;
+				this.persistAutoConfig();
+				this.applyAutoSchedule(true);
+			});
+			elements.updateIntervalInput.addEventListener('change', () => {
+				const val = parseInt(elements.updateIntervalInput.value, 10);
+				if (!Number.isFinite(val) || val < 5) {
+					elements.updateIntervalInput.value = state.update.auto.intervalMinutes;
+					ui.showToast('自动检查间隔至少为 5 分钟', 'error');
+					return;
+				}
+				state.update.auto.intervalMinutes = Math.min(val, 720);
+				this.persistAutoConfig();
+				this.applyAutoSchedule(true);
+			});
+			elements.updateCheckBtn?.addEventListener('click', () => this.forceCheck());
+			elements.updateApplyBtn?.addEventListener('click', () => this.applyUpdate());
+			this.applyAutoSchedule(false);
+			this.refreshStatus();
+		},
+
+		loadAutoConfig() {
+			try {
+				const raw = localStorage.getItem('mosdns-update-auto');
+				if (!raw) throw new Error('empty');
+				const parsed = JSON.parse(raw);
+				return {
+					enabled: Boolean(parsed.enabled),
+					interval: Number.isFinite(parsed.interval) ? parsed.interval : CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT,
+				};
+			} catch (e) {
+				return { enabled: true, interval: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT };
+			}
+		},
+
+		persistAutoConfig() {
+			const payload = {
+				enabled: state.update.auto.enabled,
+				interval: state.update.auto.intervalMinutes,
+			};
+			try {
+				localStorage.setItem('mosdns-update-auto', JSON.stringify(payload));
+			} catch (e) {
+				console.warn('无法保存自动更新配置:', e);
+			}
+		},
+
+		applyAutoSchedule(resetTimer) {
+			if (resetTimer && state.update.auto.timerId) {
+				clearInterval(state.update.auto.timerId);
+				state.update.auto.timerId = null;
+			}
+			if (elements.updateIntervalInput) {
+				elements.updateIntervalInput.disabled = !state.update.auto.enabled;
+			}
+			if (!state.update.auto.enabled) {
+				this.setHint('自动检查已关闭。您可以随时手动检查更新。');
+				return;
+			}
+			const intervalMs = Math.max(state.update.auto.intervalMinutes, 5) * 60 * 1000;
+			this.setHint(`自动检查已启用，每 ${state.update.auto.intervalMinutes} 分钟检查一次。`);
+			if (!state.update.auto.timerId) {
+				state.update.auto.timerId = setInterval(() => {
+					this.refreshStatus();
+				}, intervalMs);
+			}
+		},
+
+		setHint(text) {
+			if (elements.updateHintText) {
+				elements.updateHintText.textContent = text;
+			}
+		},
+
+		setUpdateLoading(isLoading, targetBtn) {
+			state.update.loading = isLoading;
+			if (targetBtn) ui.setLoading(targetBtn, isLoading);
+			this.refreshButtons();
+		},
+
+		canApply() {
+			const status = state.update.status;
+			if (!status) return false;
+			if (status.pending_restart) return false;
+			return Boolean(status.update_available && status.download_url);
+		},
+
+		refreshButtons() {
+			if (!elements.updateApplyBtn) return;
+			elements.updateApplyBtn.disabled = state.update.loading || !this.canApply();
+		},
+
+		updateStatusUI(status) {
+			state.update.status = status;
+			if (!elements.updateModule || !status) return;
+			elements.updateCurrentVersion.textContent = status.current_version || '未知';
+			elements.updateLatestVersion.textContent = status.latest_version || '--';
+			elements.updateTargetInfo.textContent = status.asset_name ? `${status.asset_name} (${status.architecture || '未知'})` : (status.architecture || '未知');
+			elements.updateStatusText.textContent = status.message || (status.update_available ? '发现新版本，可立即更新。' : '已是最新版本');
+			const lastChecked = status.checked_at ? new Date(status.checked_at) : null;
+			elements.updateLastChecked.textContent = lastChecked ? lastChecked.toLocaleString() : '--';
+			if (elements.updateApplyBtn) {
+				const span = elements.updateApplyBtn.querySelector('span');
+				let label = '立即更新';
+				if (status.pending_restart) label = '等待重启';
+				else if (!this.canApply()) label = '已是最新';
+				if (span) span.textContent = label;
+				elements.updateApplyBtn.dataset.defaultText = label;
+			}
+			if (elements.updateCheckBtn) {
+				const span = elements.updateCheckBtn.querySelector('span');
+				if (span) { span.textContent = '强制检查'; elements.updateCheckBtn.dataset.defaultText = '强制检查'; }
+			}
+			if (status.pending_restart) {
+				this.setHint(status.message || '已安装更新，等待服务重启生效。');
+			}
+			this.refreshButtons();
+		},
+
+		async refreshStatus(force = false) {
+			if (!elements.updateModule) return;
+			try {
+				const status = force ? await updateApi.forceCheck() : await updateApi.getStatus();
+				this.updateStatusUI(status);
+			} catch (error) {
+				console.error('检查更新失败:', error);
+				ui.showToast('检查更新失败，请稍后重试', 'error');
+			}
+		},
+
+		async forceCheck() {
+			if (state.update.loading) return;
+			this.setUpdateLoading(true, elements.updateCheckBtn);
+			try {
+				const status = await updateApi.forceCheck();
+				ui.showToast('已刷新最新版本信息', 'success');
+				this.updateStatusUI(status);
+			} catch (error) {
+				console.error('强制检查更新失败:', error);
+				ui.showToast('强制检查失败', 'error');
+			} finally {
+				this.setUpdateLoading(false, elements.updateCheckBtn);
+				this.applyAutoSchedule(true);
+			}
+		},
+
+		async applyUpdate() {
+			if (state.update.loading || !this.canApply()) return;
+			this.setUpdateLoading(true, elements.updateApplyBtn);
+			try {
+				const result = await updateApi.apply();
+				if (result.installed) {
+					ui.showToast('更新包已写入，重启后生效', 'success');
+				} else {
+					ui.showToast(result.status?.message || '更新已处理', 'info');
+				}
+				if (result.status) this.updateStatusUI(result.status);
+			} catch (error) {
+				console.error('执行更新失败:', error);
+				ui.showToast('更新失败，请检查日志', 'error');
+			} finally {
+				this.setUpdateLoading(false, elements.updateApplyBtn);
+				this.applyAutoSchedule(true);
+			}
+		}
+	};
+
+	const systemInfoManager = {
         parseMetrics(metricsText) {
             const lines = metricsText.split('\n');
             const metrics = { startTime: 0, cpuTime: 0, residentMemory: 0, heapIdleMemory: 0, threads: 0, openFds: 0, goVersion: "N/A" };
@@ -1064,13 +1257,13 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.shuntResultsBody.innerHTML = `<div class="donut-chart-wrapper"><div class="donut-chart"><svg viewBox="0 0 160 160">${paths}</svg><div class="donut-chart-center-text"><div class="total">${total.toLocaleString()}</div><div class="label">总计</div></div></div><ul class="donut-legend">${legend}</ul></div>`;
     };
 
-    let updateController;
-    async function updatePageData(forceAll = false) {
-        if (state.isUpdating) return;
-        state.isUpdating = true;
-        if (updateController) updateController.abort();
-        updateController = new AbortController();
-        const { signal } = updateController;
+	let updateController;
+	async function updatePageData(forceAll = false) {
+		if (state.isUpdating) return;
+		state.isUpdating = true;
+		if (updateController) updateController.abort();
+		updateController = new AbortController();
+		const { signal } = updateController;
         ui.setLoading(elements.globalRefreshBtn, true);
         const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
         try {
@@ -1094,15 +1287,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderDonutChart(state.domainSetRank); 
             }
             
-            if (activeTab === 'system-control' || forceAll) {
-                await Promise.allSettled([
-                    state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
-                    updateDomainListStats(signal),
-                    cacheManager.updateStats(signal),
-                    switchManager.loadStatus(signal),
-                    systemInfoManager.load(signal),
-                ]);
-            }
+		if (activeTab === 'system-control' || forceAll) {
+			await Promise.allSettled([
+				state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
+				updateDomainListStats(signal),
+				cacheManager.updateStats(signal),
+				switchManager.loadStatus(signal),
+				systemInfoManager.load(signal),
+				updateManager.refreshStatus(forceAll)
+			]);
+		}
             
             if (forceAll) {
                 const [topDomainsRes, topClientsRes, slowestRes] = await Promise.allSettled([api.v2.getTopDomains(signal, 100), api.v2.getTopClients(signal, 100), api.v2.getSlowest(signal, 100)]);
@@ -2249,8 +2443,9 @@ document.addEventListener('DOMContentLoaded', () => {
         historyManager.load();
         autoRefreshManager.loadSettings();
         tableSorter.init();
-        switchManager.init();
-        mountGlobalInfoIconDelegation();
+		switchManager.init();
+		updateManager.init();
+		mountGlobalInfoIconDelegation();
         setupEventListeners();
         setupGlowEffect();
         setupLazyLoading();

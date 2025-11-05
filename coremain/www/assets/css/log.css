@@ -343,6 +343,7 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 .control-module { background-color: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: var(--border-radius-xl); padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
 .control-module h3 { font-size: 1rem; font-weight: 600; color: var(--color-text-primary); text-transform: none; letter-spacing: 0; padding-bottom: 0.75rem; border-bottom: 1px solid var(--color-border); margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.6rem; }
 .control-module h3 svg { width: 1.1em; height: 1.1em; color: var(--color-accent-primary); opacity: 0.8; }
+.control-hint { color: var(--color-text-secondary); font-size: 0.85rem; line-height: 1.5; margin: 0; }
 .form-field { margin-bottom: 1.25rem; }
 .form-field label { display: block; font-weight: 500; margin-bottom: 0.5rem; }
 
