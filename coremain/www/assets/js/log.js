@@ -34,7 +34,7 @@ function closeAndUnlock(dialogElement) {
 document.addEventListener('DOMContentLoaded', () => {
 	const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 30, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 60 };
 	let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: 60, timerId: null } } };
-    const elements = { 
+	const elements = { 
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'), 
         colorSwatches: document.querySelectorAll('.color-swatch'), 
         themeSwitcher: document.getElementById('theme-switcher-select'),
@@ -101,8 +101,9 @@ document.addEventListener('DOMContentLoaded', () => {
 	updateStatusText: document.getElementById('update-status-text'),
 	updateLastChecked: document.getElementById('update-last-checked'),
 	updateTargetInfo: document.getElementById('update-target-info'),
-	updateCheckBtn: document.getElementById('update-check-btn'),
-	updateApplyBtn: document.getElementById('update-apply-btn'),
+		updateCheckBtn: document.getElementById('update-check-btn'),
+		updateApplyBtn: document.getElementById('update-apply-btn'),
+		updateForceBtn: document.getElementById('update-force-btn'),
 	updateAutoToggle: document.getElementById('update-auto-toggle'),
 	updateIntervalInput: document.getElementById('update-interval-input'),
 	updateHintText: document.getElementById('update-hint-text'),
@@ -159,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	const updateApi = {
 		getStatus: (signal) => api.fetch(`/api/v1/update/status`, { signal }),
 		forceCheck: () => api.fetch(`/api/v1/update/check`, { method: 'POST' }),
-		apply: () => api.fetch(`/api/v1/update/apply`, { method: 'POST' })
+		apply: (force = false) => api.fetch(`/api/v1/update/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force }) })
 	};
 
     const normalizeIP = (ip) => {
@@ -726,6 +727,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			elements.updateApplyBtn?.addEventListener('click', () => this.applyUpdate());
 			this.applyAutoSchedule(false);
 			this.refreshStatus();
+			elements.updateForceBtn?.addEventListener('click', () => this.applyUpdate(true, elements.updateForceBtn));
 		},
 
 		loadAutoConfig() {
@@ -795,8 +797,13 @@ document.addEventListener('DOMContentLoaded', () => {
 		},
 
 		refreshButtons() {
-			if (!elements.updateApplyBtn) return;
-			elements.updateApplyBtn.disabled = state.update.loading || !this.canApply();
+			if (elements.updateApplyBtn) {
+				elements.updateApplyBtn.disabled = state.update.loading || !this.canApply();
+			}
+			if (elements.updateForceBtn) {
+				const hasDownload = Boolean(state.update.status?.download_url);
+				elements.updateForceBtn.disabled = state.update.loading || !hasDownload;
+			}
 		},
 
 		updateStatusUI(status) {
@@ -815,6 +822,11 @@ document.addEventListener('DOMContentLoaded', () => {
 				else if (!this.canApply()) label = '已是最新';
 				if (span) span.textContent = label;
 				elements.updateApplyBtn.dataset.defaultText = label;
+			}
+			if (elements.updateForceBtn) {
+				const span = elements.updateForceBtn.querySelector('span');
+				if (span) span.textContent = '强制更新';
+				elements.updateForceBtn.dataset.defaultText = '强制更新';
 			}
 			if (elements.updateCheckBtn) {
 				const span = elements.updateCheckBtn.querySelector('span');
@@ -853,11 +865,12 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 		},
 
-		async applyUpdate() {
-			if (state.update.loading || !this.canApply()) return;
-			this.setUpdateLoading(true, elements.updateApplyBtn);
+		async applyUpdate(force = false, button = elements.updateApplyBtn) {
+			if (state.update.loading) return;
+			if (!force && !this.canApply()) return;
+			this.setUpdateLoading(true, button || elements.updateApplyBtn);
 			try {
-				const result = await updateApi.apply();
+				const result = await updateApi.apply(force);
 				if (result.installed) {
 					ui.showToast('更新包已写入，重启后生效', 'success');
 				} else {
@@ -868,7 +881,7 @@ document.addEventListener('DOMContentLoaded', () => {
 				console.error('执行更新失败:', error);
 				ui.showToast('更新失败，请检查日志', 'error');
 			} finally {
-				this.setUpdateLoading(false, elements.updateApplyBtn);
+				this.setUpdateLoading(false, button || elements.updateApplyBtn);
 				this.applyAutoSchedule(true);
 			}
 		}

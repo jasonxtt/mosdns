@@ -3,6 +3,7 @@ package coremain
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -36,7 +37,20 @@ func handleForceUpdateStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
-	result, err := GlobalUpdateManager.PerformUpdate(r.Context(), false)
+	force := false
+	if r.Body != nil && r.Body != http.NoBody {
+		var req struct {
+			Force bool `json:"force"`
+		}
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		force = req.Force
+	}
+
+	result, err := GlobalUpdateManager.PerformUpdate(r.Context(), force)
 	if err != nil {
 		if errors.Is(err, ErrNoUpdateAvailable) {
 			writeJSON(w, http.StatusOK, result)
