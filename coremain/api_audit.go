@@ -72,7 +72,7 @@ func handleGetAuditCapacity(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(capacity)
 }
 
-// ADDED: Handler to set new audit log capacity.
+// MODIFIED: Handler to set new audit log capacity.
 func handleSetAuditCapacity(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Capacity int `json:"capacity"`
@@ -83,8 +83,8 @@ func handleSetAuditCapacity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// The validation is inside the SetCapacity method.
-	GlobalAuditCollector.SetCapacity(req.Capacity)
+	// <<< MODIFIED: Pass the MainConfigBaseDir to the SetCapacity function >>>
+	GlobalAuditCollector.SetCapacity(req.Capacity, MainConfigBaseDir)
 	
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Audit log capacity set to %d. Existing logs have been cleared.", req.Capacity)
