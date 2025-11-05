@@ -660,6 +660,11 @@ func replaceBinary(exePath, newBinary string, mode os.FileMode) (string, error) 
 		return "", err
 	}
 
+	if err := os.Chmod(exePath, mode); err != nil {
+		m := fmt.Errorf("failed to set executable bit: %w", err)
+		return backupPath, m
+	}
+
 	return backupPath, nil
 }
 
