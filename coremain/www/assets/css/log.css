@@ -860,3 +860,29 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 [data-theme="terra"] .stat-card { background: var(--color-bg-card); color: var(--color-text-primary); border: 1px solid rgba(255, 140, 66, 0.4); }
 [data-theme="terra"] .stat-card h3 { color: var(--color-text-primary); }
 [data-theme="terra"] .main-nav a.active { color: var(--color-accent-text) !important; }
+.control-module--mini {
+    padding: 1rem 1.25rem;
+    gap: 0.6rem;
+}
+.control-module--mini .control-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.control-module--mini .button-group {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.6rem;
+}
+.control-module--mini .button-group .button {
+    min-height: 2.2rem;
+}
+.control-module--mini form {
+    display: flex;
+    gap: 0.6rem;
+    width: 100%;
+}
+.control-module--mini form input {
+    flex: 1;
+    min-width: 0;
+}
