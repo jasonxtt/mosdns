@@ -3,6 +3,8 @@ package coremain
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,44 +12,54 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/IrineSistiana/mosdns/v5/mlog"
+	"go.uber.org/zap"
 )
 
 const (
-	githubOwner             = "yyysuo"
-	githubRepo              = "mosdns"
-	githubLatestReleasePath = "https://api.github.com/repos/%s/%s/releases/latest"
-	githubReleasePage       = "https://github.com/%s/%s/releases/tag/%s"
-	defaultCacheTTL         = 15 * time.Minute
-	httpTimeout             = 120 * time.Second
-	userAgent               = "mosdns-update-client"
+	githubOwner          = "yyysuo"
+	githubRepo           = "mosdns"
+	releaseTag           = "v5-ph-srs"
+	githubReleaseAPI     = "https://api.github.com/repos/%s/%s/releases/tags/%s"
+	githubReleasePage    = "https://github.com/%s/%s/releases/tag/%s"
+	githubExpandedAssets = "https://github.com/%s/%s/releases/expanded_assets/%s"
+	defaultCacheTTL      = 15 * time.Minute
+	httpTimeout          = 120 * time.Second
+	userAgent            = "mosdns-update-client"
+	stateFileName        = ".mosdns-update-state.json"
 )
 
 var (
-	// ErrNoUpdateAvailable 表示当前已是最新版本。
 	ErrNoUpdateAvailable = errors.New("当前已是最新版本")
+	GlobalUpdateManager  = NewUpdateManager()
 
-	// GlobalUpdateManager 为整个程序共享的更新管理器实例。
-	GlobalUpdateManager = NewUpdateManager()
+	assetLinkRegex    = regexp.MustCompile(fmt.Sprintf(`href="(/%s/%s/releases/download/[^" ]+/([^"?]+))"`, githubOwner, githubRepo))
+	assetHashRegex    = regexp.MustCompile(`sha256:([a-fA-F0-9]{64})`)
+	relativeTimeRegex = regexp.MustCompile(`<relative-time[^>]+datetime="([^\"]+)"`)
 )
 
 type UpdateStatus struct {
-	CurrentVersion  string     `json:"current_version"`
-	LatestVersion   string     `json:"latest_version"`
-	ReleaseURL      string     `json:"release_url"`
-	Architecture    string     `json:"architecture"`
-	AssetName       string     `json:"asset_name,omitempty"`
-	DownloadURL     string     `json:"download_url,omitempty"`
-	PublishedAt     *time.Time `json:"published_at,omitempty"`
-	CheckedAt       time.Time  `json:"checked_at"`
-	CacheExpiresAt  time.Time  `json:"cache_expires_at"`
-	UpdateAvailable bool       `json:"update_available"`
-	Cached          bool       `json:"cached"`
-	Message         string     `json:"message,omitempty"`
-	PendingRestart  bool       `json:"pending_restart,omitempty"`
+	CurrentVersion   string     `json:"current_version"`
+	LatestVersion    string     `json:"latest_version"`
+	ReleaseURL       string     `json:"release_url"`
+	Architecture     string     `json:"architecture"`
+	AssetName        string     `json:"asset_name,omitempty"`
+	DownloadURL      string     `json:"download_url,omitempty"`
+	AssetSignature   string     `json:"asset_signature,omitempty"`
+	CurrentSignature string     `json:"current_signature,omitempty"`
+	PublishedAt      *time.Time `json:"published_at,omitempty"`
+	CheckedAt        time.Time  `json:"checked_at"`
+	CacheExpiresAt   time.Time  `json:"cache_expires_at"`
+	UpdateAvailable  bool       `json:"update_available"`
+	Cached           bool       `json:"cached"`
+	Message          string     `json:"message,omitempty"`
+	PendingRestart   bool       `json:"pending_restart,omitempty"`
 }
 
 type UpdateActionResponse struct {
@@ -58,34 +70,96 @@ type UpdateActionResponse struct {
 	Notes           string       `json:"notes,omitempty"`
 }
 
-type UpdateManager struct {
-	mu             sync.Mutex
-	httpClient     *http.Client
-	cacheTTL       time.Duration
-	lastStatus     *UpdateStatus
-	lastChecked    time.Time
-	currentVersion string
-	pendingVersion string
+type updateState struct {
+	AssetSignature string    `json:"asset_signature"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-type githubRelease struct {
-	TagName     string        `json:"tag_name"`
-	Name        string        `json:"name"`
-	PublishedAt *time.Time    `json:"published_at"`
-	Assets      []githubAsset `json:"assets"`
+type UpdateManager struct {
+	mu                    sync.Mutex
+	httpClient            *http.Client
+	cacheTTL              time.Duration
+	lastStatus            *UpdateStatus
+	lastChecked           time.Time
+	currentVersion        string
+	currentAssetSignature string
+	pendingSignature      string
+	statePath             string
 }
 
 type githubAsset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
+	Name               string     `json:"name"`
+	BrowserDownloadURL string     `json:"browser_download_url"`
+	UpdatedAt          *time.Time `json:"updated_at"`
+	Sha256             string
+}
+
+type releaseInfo struct {
+	publishedAt *time.Time
+	assets      []githubAsset
 }
 
 func NewUpdateManager() *UpdateManager {
 	client := &http.Client{Timeout: httpTimeout}
-	return &UpdateManager{
+	mgr := &UpdateManager{
 		httpClient:     client,
 		cacheTTL:       defaultCacheTTL,
 		currentVersion: GetBuildVersion(),
+	}
+	mgr.initState()
+	return mgr
+}
+
+func (m *UpdateManager) initState() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(exe)
+	m.statePath = filepath.Join(dir, stateFileName)
+	m.loadState()
+}
+
+func (m *UpdateManager) loadState() {
+	m.mu.Lock()
+	path := m.statePath
+	m.mu.Unlock()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var st updateState
+	if err := json.Unmarshal(data, &st); err != nil {
+		return
+	}
+	if st.AssetSignature != "" {
+		m.mu.Lock()
+		m.currentAssetSignature = st.AssetSignature
+		m.mu.Unlock()
+	}
+}
+
+func (m *UpdateManager) saveState(signature string) {
+	if signature == "" {
+		return
+	}
+	m.mu.Lock()
+	path := m.statePath
+	m.mu.Unlock()
+	if path == "" {
+		return
+	}
+	payload := updateState{AssetSignature: signature, UpdatedAt: time.Now()}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		m.logWarn("save update state marshal failed", err)
+		return
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		m.logWarn("save update state failed", err)
 	}
 }
 
@@ -95,12 +169,25 @@ func (m *UpdateManager) SetCurrentVersion(version string) {
 	}
 	m.mu.Lock()
 	m.currentVersion = version
-	m.pendingVersion = ""
+	m.pendingSignature = ""
 	if m.lastStatus != nil {
 		m.lastStatus.CurrentVersion = version
-		m.lastStatus.UpdateAvailable = m.updateAvailableLocked(m.lastStatus.LatestVersion)
+		m.lastStatus.UpdateAvailable = m.updateAvailableLocked(m.lastStatus.LatestVersion, m.lastStatus.AssetSignature)
 	}
 	m.mu.Unlock()
+}
+
+func (m *UpdateManager) logger() *zap.Logger {
+	if lg := mlog.L(); lg != nil {
+		return lg
+	}
+	return nil
+}
+
+func (m *UpdateManager) logWarn(msg string, err error, fields ...zap.Field) {
+	if lg := m.logger(); lg != nil {
+		lg.Warn(msg, append(fields, zap.Error(err))...)
+	}
 }
 
 func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateStatus, error) {
@@ -117,18 +204,34 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	}
 	m.mu.Unlock()
 
-	status, err := m.fetchLatest(ctx)
+	rel, err := m.fetchReleaseInfo(ctx)
 	if err != nil {
 		return UpdateStatus{}, err
 	}
 
-	status.CheckedAt = now
-	status.CacheExpiresAt = now.Add(m.cacheTTL)
-	status.Cached = false
+	status := UpdateStatus{
+		CurrentVersion:   m.currentVersion,
+		LatestVersion:    releaseTag,
+		ReleaseURL:       fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, releaseTag),
+		Architecture:     fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		PublishedAt:      rel.publishedAt,
+		CheckedAt:        now,
+		CacheExpiresAt:   now.Add(m.cacheTTL),
+		Cached:           false,
+		CurrentSignature: m.currentAssetSignature,
+	}
+
+	if asset := selectAsset(rel.assets); asset != nil {
+		status.AssetName = asset.Name
+		status.DownloadURL = asset.BrowserDownloadURL
+		status.AssetSignature = buildAssetSignature(*asset)
+	} else {
+		status.Message = fmt.Sprintf("未找到适用于 %s/%s 的安装包", runtime.GOOS, runtime.GOARCH)
+	}
+
+	status.UpdateAvailable = m.isUpdateNeeded(status.LatestVersion, status.AssetSignature)
 
 	m.mu.Lock()
-	status.CurrentVersion = m.currentVersion
-	status.UpdateAvailable = m.updateAvailableLocked(status.LatestVersion)
 	m.lastStatus = &status
 	m.lastChecked = now
 	m.mu.Unlock()
@@ -149,7 +252,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 	if status.DownloadURL == "" {
 		note := status.Message
 		if note == "" {
-			note = fmt.Sprintf("未找到 %s/%s 对应的安装包", runtime.GOOS, runtime.GOARCH)
+			note = "无法定位下载地址"
 		}
 		status.Message = note
 		return UpdateActionResponse{Status: status}, errors.New(note)
@@ -161,6 +264,12 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 		return UpdateActionResponse{Status: status}, err
 	}
 	defer os.Remove(assetFile)
+
+	if status.AssetSignature == "" {
+		if sig, hashErr := fileSHA256(assetFile); hashErr == nil {
+			status.AssetSignature = fmt.Sprintf("%s:%s", status.AssetName, sig)
+		}
+	}
 
 	extractedBinary, mode, err := extractBinaryFromZip(assetFile)
 	if err != nil {
@@ -182,15 +291,13 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 			action.Notes = fmt.Sprintf("写入新文件失败: %v", err)
 			return action, err
 		}
-		action.Notes = fmt.Sprintf("已将新版写入 %s，请停止服务后手动替换 mosdns.exe", target)
+		action.Notes = fmt.Sprintf("已将新版写入 %s，请手动替换 mosdns.exe", target)
 		action.RestartRequired = true
 		status.PendingRestart = true
-		status.UpdateAvailable = false
-		status.Message = action.Notes
-		action.Status = status
 		m.mu.Lock()
-		m.pendingVersion = status.LatestVersion
+		m.pendingSignature = status.AssetSignature
 		m.mu.Unlock()
+		action.Status = status
 		return action, nil
 	}
 
@@ -203,30 +310,70 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 	action.BackupPath = backupPath
 	action.Installed = true
 	action.RestartRequired = true
-	action.Notes = fmt.Sprintf("新版本已写入 %s，重启 Mosdns 后生效。备份位于 %s", exePath, backupPath)
+	action.Notes = fmt.Sprintf("新版本已写入 %s，重启 Mosdns 后生效。备份: %s", exePath, backupPath)
 
-	// 成功安装后，更新缓存状态，提示需要重启。
-	status.Message = action.Notes
 	status.PendingRestart = true
-	status.UpdateAvailable = false
-	m.mu.Lock()
-	m.pendingVersion = status.LatestVersion
-	status.Cached = false
-	status.CheckedAt = time.Now()
-	status.CacheExpiresAt = status.CheckedAt.Add(m.cacheTTL)
-	m.lastStatus = &status
-	m.lastChecked = status.CheckedAt
-	m.mu.Unlock()
-
+	status.Message = action.Notes
 	action.Status = status
+
+	m.recordInstalled(status.AssetSignature)
+
 	return action, nil
 }
 
-func (m *UpdateManager) fetchLatest(ctx context.Context) (UpdateStatus, error) {
-	url := fmt.Sprintf(githubLatestReleasePath, githubOwner, githubRepo)
+func (m *UpdateManager) recordInstalled(signature string) {
+	if signature == "" {
+		signature = fmt.Sprintf("manual-%d", time.Now().Unix())
+	}
+	m.mu.Lock()
+	m.currentAssetSignature = signature
+	m.pendingSignature = ""
+	m.mu.Unlock()
+	m.saveState(signature)
+}
+
+func (m *UpdateManager) isUpdateNeeded(latest, signature string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.updateAvailableLocked(latest, signature)
+}
+
+func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
+	if signature != "" {
+		if signature == m.currentAssetSignature {
+			return false
+		}
+		if signature == m.pendingSignature {
+			return false
+		}
+		return true
+	}
+
+	latest = strings.TrimSpace(latest)
+	if latest == "" {
+		return false
+	}
+	current := strings.TrimSpace(m.currentVersion)
+	if current == "" {
+		return true
+	}
+	return latest != current
+}
+
+func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, error) {
+	if info, err := m.fetchReleaseInfoAPI(ctx); err == nil {
+		return info, nil
+	} else {
+		m.logWarn("release API failed, fallback to HTML", err)
+		return m.fetchReleaseInfoHTML(ctx)
+	}
+}
+
+func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, error) {
+	url := fmt.Sprintf(githubReleaseAPI, githubOwner, githubRepo, releaseTag)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return UpdateStatus{}, err
+		return releaseInfo{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", userAgent)
@@ -238,42 +385,161 @@ func (m *UpdateManager) fetchLatest(ctx context.Context) (UpdateStatus, error) {
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
-		return UpdateStatus{}, err
+		return releaseInfo{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusForbidden {
-		return UpdateStatus{}, fmt.Errorf("GitHub API 访问受限: %s", resp.Status)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return releaseInfo{}, fmt.Errorf("GitHub API 访问受限: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return UpdateStatus{}, fmt.Errorf("GitHub API 请求失败: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
+		return releaseInfo{}, fmt.Errorf("GitHub API 请求失败: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
 	}
 
-	var rel githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return UpdateStatus{}, err
+	var payload struct {
+		PublishedAt *time.Time    `json:"published_at"`
+		Assets      []githubAsset `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return releaseInfo{}, err
 	}
 
-	status := UpdateStatus{
-		LatestVersion: rel.TagName,
-		ReleaseURL:    fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, rel.TagName),
-		Architecture:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
-	}
-	if rel.PublishedAt != nil {
-		status.PublishedAt = rel.PublishedAt
+	return releaseInfo{publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
+}
+
+func (m *UpdateManager) fetchReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
+	assetsURL := fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, releaseTag)
+	body, err := m.fetchHTML(ctx, assetsURL)
+	if err != nil {
+		return releaseInfo{}, err
 	}
 
-	asset, message := selectAsset(rel.Assets)
-	if asset != nil {
-		status.AssetName = asset.Name
-		status.DownloadURL = asset.BrowserDownloadURL
-	}
-	if message != "" {
-		status.Message = message
+	assets := parseAssetsFromHTML(body)
+	if len(assets) == 0 {
+		return releaseInfo{}, errors.New("未在发布页面解析到资产")
 	}
 
-	return status, nil
+	var publishedAt *time.Time
+	if match := relativeTimeRegex.FindStringSubmatch(body); len(match) == 2 {
+		if t, err := time.Parse(time.RFC3339, match[1]); err == nil {
+			publishedAt = &t
+		}
+	}
+
+	return releaseInfo{publishedAt: publishedAt, assets: assets}, nil
+}
+
+func (m *UpdateManager) fetchHTML(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return "", fmt.Errorf("请求 %s 失败: %s (%s)", url, resp.Status, strings.TrimSpace(string(body)))
+	}
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(bodyBytes), nil
+}
+
+func selectAsset(assets []githubAsset) *githubAsset {
+	var candidates []string
+	switch runtime.GOOS {
+	case "linux":
+		switch runtime.GOARCH {
+		case "amd64":
+			candidates = []string{"mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip"}
+		case "arm64":
+			candidates = []string{"mosdns-linux-arm64.zip"}
+		case "arm":
+			candidates = []string{"mosdns-linux-arm-7.zip", "mosdns-linux-arm-6.zip", "mosdns-linux-arm-5.zip"}
+		case "mips", "mips64", "mips64le", "mipsle":
+			candidates = append(candidates, fmt.Sprintf("mosdns-linux-%s.zip", runtime.GOARCH))
+		}
+	case "darwin":
+		candidates = append(candidates, fmt.Sprintf("mosdns-darwin-%s.zip", runtime.GOARCH))
+	case "windows":
+		if runtime.GOARCH == "amd64" {
+			candidates = []string{"mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip"}
+		} else if runtime.GOARCH == "arm64" {
+			candidates = []string{"mosdns-windows-arm64.zip"}
+		}
+	}
+
+	for _, name := range candidates {
+		for idx := range assets {
+			if assets[idx].Name == name {
+				return &assets[idx]
+			}
+		}
+	}
+	if len(assets) > 0 {
+		return &assets[0]
+	}
+	return nil
+}
+
+func buildAssetSignature(asset githubAsset) string {
+	if asset.Sha256 != "" {
+		return fmt.Sprintf("%s:%s", asset.Name, strings.ToLower(asset.Sha256))
+	}
+	if asset.UpdatedAt != nil {
+		return fmt.Sprintf("%s:%d", asset.Name, asset.UpdatedAt.Unix())
+	}
+	if asset.BrowserDownloadURL != "" {
+		return asset.BrowserDownloadURL
+	}
+	return ""
+}
+
+func parseAssetsFromHTML(html string) []githubAsset {
+	items := strings.Split(html, "<li")
+	seen := make(map[string]struct{})
+	result := make([]githubAsset, 0, len(items))
+	for _, raw := range items {
+		chunk := "<li" + raw
+		if !strings.Contains(chunk, "/releases/download/") {
+			continue
+		}
+		linkMatch := assetLinkRegex.FindStringSubmatch(chunk)
+		if len(linkMatch) != 3 {
+			continue
+		}
+		urlPart := linkMatch[1]
+		name := linkMatch[2]
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		sha := ""
+		if hashMatch := assetHashRegex.FindStringSubmatch(chunk); len(hashMatch) == 2 {
+			sha = strings.ToLower(hashMatch[1])
+		}
+		var updatedAt *time.Time
+		if tm := relativeTimeRegex.FindStringSubmatch(chunk); len(tm) == 2 {
+			if t, err := time.Parse(time.RFC3339, tm[1]); err == nil {
+				updatedAt = &t
+			}
+		}
+		result = append(result, githubAsset{
+			Name:               name,
+			BrowserDownloadURL: "https://github.com" + urlPart,
+			Sha256:             sha,
+			UpdatedAt:          updatedAt,
+		})
+	}
+	return result
 }
 
 func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, error) {
@@ -282,12 +548,6 @@ func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, 
 		return "", err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	if token := os.Getenv("MOSDNS_GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	} else if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return "", err
@@ -395,7 +655,6 @@ func replaceBinary(exePath, newBinary string, mode os.FileMode) (string, error) 
 	}
 
 	if err := os.Rename(tempDestPath, exePath); err != nil {
-		// 尝试还原旧文件
 		os.Rename(backupPath, exePath)
 		os.Remove(tempDestPath)
 		return "", err
@@ -424,86 +683,15 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return out.Close()
 }
 
-func selectAsset(assets []githubAsset) (*githubAsset, string) {
-	candidates := buildAssetCandidates()
-	for _, preferred := range candidates {
-		for i := range assets {
-			if assets[i].Name == preferred {
-				return &assets[i], ""
-			}
-		}
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
 	}
-	if len(assets) == 0 {
-		return nil, "发布页未提供任何资产文件"
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
-	return nil, fmt.Sprintf("未找到适用于 %s/%s 的安装包", runtime.GOOS, runtime.GOARCH)
-}
-
-func buildAssetCandidates() []string {
-	var list []string
-	goos := runtime.GOOS
-	arch := runtime.GOARCH
-
-	switch goos {
-	case "linux":
-		switch arch {
-		case "amd64":
-			list = append(list, "mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip")
-		case "arm64":
-			list = append(list, "mosdns-linux-arm64.zip")
-		case "arm":
-			list = append(list, "mosdns-linux-arm-7.zip", "mosdns-linux-arm-6.zip", "mosdns-linux-arm-5.zip")
-		case "mips":
-			list = append(list, "mosdns-linux-mips.zip", "mosdns-linux-mips-softfloat.zip")
-		case "mipsle":
-			list = append(list, "mosdns-linux-mipsle.zip", "mosdns-linux-mipsle-softfloat.zip")
-		case "mips64":
-			list = append(list, "mosdns-linux-mips64.zip", "mosdns-linux-mips64-softfloat.zip")
-		case "mips64le":
-			list = append(list, "mosdns-linux-mips64le.zip", "mosdns-linux-mips64le-softfloat.zip")
-		default:
-			list = append(list, fmt.Sprintf("mosdns-linux-%s.zip", arch))
-		}
-	case "darwin":
-		switch arch {
-		case "amd64":
-			list = append(list, "mosdns-darwin-amd64.zip")
-		case "arm64":
-			list = append(list, "mosdns-darwin-arm64.zip")
-		}
-	case "windows":
-		switch arch {
-		case "amd64":
-			list = append(list, "mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip")
-		case "arm64":
-			list = append(list, "mosdns-windows-arm64.zip")
-		}
-	case "android":
-		if arch == "arm64" {
-			list = append(list, "mosdns-android-arm64.zip")
-		}
-	}
-
-	return list
-}
-
-func (m *UpdateManager) isUpdateNeeded(latest string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.updateAvailableLocked(latest)
-}
-
-func (m *UpdateManager) updateAvailableLocked(latest string) bool {
-	latest = strings.TrimSpace(latest)
-	current := strings.TrimSpace(m.currentVersion)
-	if latest == "" {
-		return false
-	}
-	if m.pendingVersion != "" && latest == m.pendingVersion {
-		return false
-	}
-	if current == "" {
-		return true
-	}
-	return latest != current
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
