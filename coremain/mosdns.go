@@ -27,8 +27,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
-	"path" // <<< NEW: Import path package
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/IrineSistiana/mosdns/v5/pkg/safe_close"
@@ -39,9 +40,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// <<< MODIFIED: Adjusted the embed list for rlog assets
-//
-//go:embed www/mosdns.html www/mosdnsp.html www/log.html www/log_plain.html www/rlog.html www/adguard.html www/rlog.css www/rlog.js
+//go:embed www/*
 var content embed.FS
 
 type Mosdns struct {
@@ -273,65 +272,35 @@ func (m *Mosdns) initHttpMux() {
 		}
 	}
 
-	// [新添加] plog 路由 ("/plog") 的 handler, 指向 /www/log_plain.html
-	plainLogHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/log_plain.html") // 读取 /www/log_plain.html
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/log_plain.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
+	redirectToLog := func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/log", http.StatusFound)
 	}
 
-	// --- ADDED: Handler for the new /rlog route (for v2 API frontend) ---
-	rlogHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/rlog.html") // 读取 /www/rlog.html
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/rlog.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
-	// --- STEP 2: ADD A NEW HANDLER FOR /adguard ---
-	adguardHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/adguard.html") // 读取 /www/adguard.html
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/adguard.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
-	// <<< NEW: Generic handler for static assets like CSS and JS
 	staticAssetHandler := func(w http.ResponseWriter, r *http.Request) {
-		// Use the URL path to determine which file to read from the embedded FS.
-		// e.g., a request to /rlog.css will read "www/rlog.css"
-		filePath := path.Join("www", r.URL.Path)
+		relativePath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if !strings.HasPrefix(relativePath, "assets/") {
+			http.NotFound(w, r)
+			return
+		}
+		filePath := path.Join("www", relativePath)
 		data, err := content.ReadFile(filePath)
 		if err != nil {
 			m.logger.Error("Error reading embedded static file", zap.String("path", filePath), zap.Error(err))
-			http.NotFound(w, r) // Return 404 if file not found
+			http.NotFound(w, r)
 			return
 		}
 
-		// Set content type based on file extension
-		if ext := path.Ext(filePath); ext == ".css" {
+		switch ext := path.Ext(filePath); ext {
+		case ".css":
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		} else if ext == ".js" {
+		case ".js":
 			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		case ".woff2":
+			w.Header().Set("Content-Type", "font/woff2")
+		case ".woff":
+			w.Header().Set("Content-Type", "font/woff")
+		case ".ttf":
+			w.Header().Set("Content-Type", "font/ttf")
 		}
 
 		if _, err := w.Write(data); err != nil {
@@ -343,13 +312,9 @@ func (m *Mosdns) initHttpMux() {
 	m.httpMux.Get("/", rootHandler)
 	m.httpMux.Get("/graphic", graphicHandler)
 	m.httpMux.Get("/log", logHandler)
-	m.httpMux.Get("/plog", plainLogHandler)
-	m.httpMux.Get("/rlog", rlogHandler) // This remains the same, still serves rlog.html
-	m.httpMux.Get("/adguard", adguardHandler)
-
-	// <<< NEW: Register routes for the separated CSS and JS files
-	m.httpMux.Get("/rlog.css", staticAssetHandler)
-	m.httpMux.Get("/rlog.js", staticAssetHandler)
+	m.httpMux.Get("/plog", redirectToLog)
+	m.httpMux.Get("/rlog", redirectToLog)
+	m.httpMux.Get("/assets/*", staticAssetHandler)
 
 	// Register pprof.
 	m.httpMux.Route("/debug/pprof", func(r chi.Router) {
