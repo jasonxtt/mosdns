@@ -1,23 +1,24 @@
 package coremain
 
 import (
-	"archive/zip"
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
-	"runtime"
-	"strings"
-	"sync"
-	"time"
+    "archive/zip"
+    "context"
+    "crypto/sha256"
+    "encoding/hex"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io"
+    "net"
+    "net/http"
+    "os"
+    "path/filepath"
+    "regexp"
+    "runtime"
+    "syscall"
+    "strings"
+    "sync"
+    "time"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"go.uber.org/zap"
@@ -36,7 +37,8 @@ const (
 	httpTimeout          = 120 * time.Second
 	userAgent            = "mosdns-update-client"
 	stateFileName        = ".mosdns-update-state.json"
-	postUpgradeEndpoint  = "http://127.0.0.1:9099/api/v1/system/restart"
+    // 默认的重启端点；可由环境变量 MOSDNS_RESTART_ENDPOINT 覆盖。
+    postUpgradeEndpoint  = "http://127.0.0.1:9099/api/v1/system/restart"
 )
 
 var (
@@ -385,34 +387,60 @@ func (m *UpdateManager) recordInstalled(signature string) {
 }
 
 func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
-	endpoint := postUpgradeEndpoint
-	if endpoint == "" {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	payload := strings.NewReader(`{"delay_ms":500}`)
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, payload)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
-		req.Host = req.URL.Host
-	}
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("self-restart hook returned %s", resp.Status)
-	}
-	return nil
+    // 优先使用环境变量覆盖（便于自定义 API 端口/路径）
+    endpoint := strings.TrimSpace(os.Getenv("MOSDNS_RESTART_ENDPOINT"))
+    if endpoint == "" {
+        endpoint = postUpgradeEndpoint
+    }
+
+    // 先尝试通过 HTTP 端点触发重启
+    if endpoint != "" {
+        if ctx == nil {
+            ctx = context.Background()
+        }
+        requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+        defer cancel()
+        payload := strings.NewReader(`{"delay_ms":500}`)
+        req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, payload)
+        if err == nil {
+            req.Header.Set("Content-Type", "application/json")
+            if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
+                req.Host = req.URL.Host
+            }
+            if resp, err := m.httpClient.Do(req); err == nil {
+                defer resp.Body.Close()
+                io.Copy(io.Discard, resp.Body)
+                if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+                    return nil
+                }
+                // 记录非 2xx 的响应，继续走本地回退
+                m.logWarn("self-restart hook returned non-2xx", fmt.Errorf(resp.Status), zap.String("endpoint", endpoint))
+            } else {
+                // 记录 HTTP 失败，继续走本地回退
+                m.logWarn("self-restart hook request failed", err, zap.String("endpoint", endpoint))
+            }
+        } else {
+            // 构造请求失败，继续走本地回退
+            m.logWarn("self-restart hook request build failed", err, zap.String("endpoint", endpoint))
+        }
+    }
+
+    // 本地回退：直接在当前进程内发起自重启（仅非 Windows）
+    if runtime.GOOS != "windows" {
+        exe, err := os.Executable()
+        if err != nil {
+            return err
+        }
+        args := append([]string{exe}, os.Args[1:]...)
+        env := os.Environ()
+        go func() {
+            // 给上层 UI 一点时间处理 pending 状态
+            time.Sleep(500 * time.Millisecond)
+            _ = syscall.Exec(exe, args, env)
+        }()
+        return nil
+    }
+    return errors.New("self-restart is not supported on Windows")
 }
 
 func (m *UpdateManager) isUpdateNeeded(latest, signature string) bool {
