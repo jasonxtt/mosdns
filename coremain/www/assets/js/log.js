@@ -51,6 +51,12 @@ document.addEventListener('DOMContentLoaded', () => {
         cacheStatsTbody: document.getElementById('cache-stats-tbody'),
         topDomainsBody: document.getElementById('top-domains-body'), topClientsBody: document.getElementById('top-clients-body'), slowestQueriesBody: document.getElementById('slowest-queries-body'), 
         shuntResultsBody: document.getElementById('shunt-results-body'),
+        // 覆盖配置元素
+        overridesModule: document.getElementById('overrides-module'),
+        overrideSocks5Input: document.getElementById('override-socks5-log'),
+        overrideEcsInput: document.getElementById('override-ecs-log'),
+        overridesLoadBtn: document.getElementById('overrides-load-btn-log'),
+        overridesSaveBtn: document.getElementById('overrides-save-btn-log'),
         logTable: document.getElementById('log-table'), logTableHead: document.getElementById('log-table-head'), logTableBody: document.getElementById('log-table-body'),
         logQueryTab: document.getElementById('log-query-tab'), 
         logSearch: document.getElementById('log-search'), logQueryTableContainer: document.getElementById('log-query-table-container'), logLoader: document.getElementById('log-loader'), 
@@ -1773,6 +1779,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateManager.refreshStatus(false);
             }, 1000);
         }
+        // 同时刷新覆盖配置表单
+        if (activeTabId === 'system-control' && elements.overridesModule) {
+            overridesManager.load();
+        }
         if (activeTabId === 'log-query' && state.displayedLogs.length === 0) {
             applyLogFilterAndRender();
         } else if (activeTabId === 'rules') {
@@ -2242,6 +2252,36 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // 覆盖配置管理器（/api/v1/overrides）
+    const overridesManager = {
+        async load() {
+            if (!elements.overrideSocks5Input || !elements.overrideEcsInput) return;
+            try {
+                const data = await api.fetch('/api/v1/overrides');
+                elements.overrideSocks5Input.value = (data && data.socks5) || '';
+                elements.overrideEcsInput.value = (data && data.ecs) || '';
+                ui.showToast('已读取当前覆盖配置');
+            } catch (e) {
+                ui.showToast('读取覆盖配置失败', 'error');
+            }
+        },
+        async save() {
+            if (!elements.overrideSocks5Input || !elements.overrideEcsInput) return;
+            const socks5 = elements.overrideSocks5Input.value.trim();
+            const ecs = elements.overrideEcsInput.value.trim();
+            const payload = {};
+            if (socks5) payload.socks5 = socks5;
+            if (ecs) payload.ecs = ecs;
+            if (Object.keys(payload).length === 0) { ui.showToast('没有可保存的覆盖项'); return; }
+            try {
+                await api.fetch('/api/v1/overrides', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                ui.showToast('覆盖配置已保存');
+            } catch (e) {
+                ui.showToast('保存覆盖配置失败', 'error');
+            }
+        }
+    };
+
 
     function setupEventListeners() {
         // -- [修改] -- 统一处理所有弹窗的关闭行为（遮罩层点击和ESC键）
@@ -2260,6 +2300,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         elements.tabLinks.forEach(link => link.addEventListener('click', (e) => { e.preventDefault(); handleNavigation(link); }));
+        // 覆盖配置：按钮事件
+        if (elements.overridesLoadBtn) elements.overridesLoadBtn.addEventListener('click', () => overridesManager.load());
+        if (elements.overridesSaveBtn) elements.overridesSaveBtn.addEventListener('click', () => overridesManager.save());
         window.addEventListener('popstate', () => { const hash = window.location.hash || '#overview'; const targetLink = document.querySelector(`.tab-link[href="${hash}"]`); handleNavigation(targetLink || elements.tabLinks[0]); });
         window.addEventListener('resize', debounce(handleResize, 150));
         elements.globalRefreshBtn?.addEventListener('click', () => updatePageData(true));
