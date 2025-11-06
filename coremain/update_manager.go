@@ -48,7 +48,8 @@ var (
 	GlobalUpdateManager  = NewUpdateManager()
 
 	assetLinkRegex    = regexp.MustCompile(fmt.Sprintf(`href="(/%s/%s/releases/download/[^" ]+/([^"?]+))"`, githubOwner, githubRepo))
-	tagFromURLRegex   = regexp.MustCompile(`/releases/tag/([^"'<>\s]+)`)
+    tagFromURLRegex   = regexp.MustCompile(`/releases/tag/([^"'<>\s]+)`)
+    expandedTagRegex  = regexp.MustCompile(`/releases/expanded_assets/([^"'<>\s]+)`)
 	assetHashRegex    = regexp.MustCompile(`sha256:([a-fA-F0-9]{64})`)
 	relativeTimeRegex = regexp.MustCompile(`<relative-time[^>]+datetime="([^\"]+)"`)
 )
@@ -248,10 +249,11 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	}
 	m.mu.Unlock()
 
-	rel, err := m.fetchReleaseInfo(ctx)
-	if err != nil {
-		return UpdateStatus{}, err
-	}
+    rel, err := m.fetchReleaseInfo(ctx)
+    if err != nil {
+        m.logWarn("fetch latest release failed", err)
+        return UpdateStatus{}, err
+    }
 
 	tag := rel.tagName
 	if tag == "" {
@@ -543,14 +545,13 @@ func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
 	return latest != current
 }
 
-// fetchReleaseInfo tries to get the latest release info first (releases/latest),
-// then falls back to the legacy fixed-tag mode (v5-ph-srs) for backward compatibility.
 func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, error) {
-	// 固定 tag 回退路径已移除：仅使用 releases/latest
-	if info, err := m.fetchLatestReleaseInfo(ctx); err == nil {
-		return info, nil
-	}
-	return releaseInfo{}, errors.New("无法获取最新版本信息（releases/latest）")
+    // 固定 tag 回退路径已移除：仅使用 releases/latest
+    info, err := m.fetchLatestReleaseInfo(ctx)
+    if err != nil {
+        return releaseInfo{}, fmt.Errorf("获取最新版本失败: %v", err)
+    }
+    return info, nil
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfo(ctx context.Context) (releaseInfo, error) {
@@ -649,18 +650,24 @@ func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseI
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
-	latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", githubOwner, githubRepo)
-	body, err := m.fetchHTML(ctx, latestURL)
-	if err != nil {
-		return releaseInfo{}, err
-	}
-	tag := ""
-	if match := tagFromURLRegex.FindStringSubmatch(body); len(match) == 2 {
-		tag = match[1]
-	}
-	if tag == "" {
-		return releaseInfo{}, errors.New("无法从 latest 页面解析 tag")
-	}
+    latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", githubOwner, githubRepo)
+    body, err := m.fetchHTML(ctx, latestURL)
+    if err != nil {
+        return releaseInfo{}, err
+    }
+    tag := ""
+    if match := tagFromURLRegex.FindStringSubmatch(body); len(match) == 2 {
+        tag = match[1]
+    }
+    // 防止解析到 GitHub 占位符（如 *name）导致 404
+    if tag == "" || strings.Contains(tag, "*") {
+        if match := expandedTagRegex.FindStringSubmatch(body); len(match) == 2 {
+            tag = match[1]
+        }
+    }
+    if tag == "" || strings.Contains(tag, "*") {
+        return releaseInfo{}, errors.New("无法从 latest 页面解析 tag（命中占位符或为空）")
+    }
 
 	// 发布时间（可选）
 	var publishedAt *time.Time
@@ -670,10 +677,10 @@ func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (release
 		}
 	}
 
-	assetsHTML, err := m.fetchHTML(ctx, fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, tag))
-	if err != nil {
-		return releaseInfo{}, err
-	}
+    assetsHTML, err := m.fetchHTML(ctx, fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, tag))
+    if err != nil {
+        return releaseInfo{}, err
+    }
 	assets := parseAssetsFromHTML(assetsHTML)
 	if len(assets) == 0 {
 		return releaseInfo{}, errors.New("未在最新发布页面解析到资产")
