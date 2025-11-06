@@ -276,12 +276,21 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 
     // 记录一次探测信息，便于排查未显示 v3 提示的情况
     if lg := m.logger(); lg != nil {
+        goamd64 := readGOAMD64()
+        cpuModel := cpuModelName()
         lg.Info("update status",
             zap.String("arch", status.Architecture),
+            zap.String("current", status.CurrentVersion),
             zap.String("latest", status.LatestVersion),
             zap.Bool("update_available", status.UpdateAvailable),
             zap.Bool("amd64_v3_capable", status.AMD64V3Capable),
             zap.Bool("current_is_v3", status.CurrentIsV3),
+            zap.String("goamd64", goamd64),
+            zap.String("cpu_model", cpuModel),
+            zap.Bool("cpu_avx2", runtime.GOARCH == "amd64" && xcpu.X86.HasAVX2),
+            zap.Bool("cpu_bmi1", runtime.GOARCH == "amd64" && xcpu.X86.HasBMI1),
+            zap.Bool("cpu_bmi2", runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2),
+            zap.Bool("cpu_fma", runtime.GOARCH == "amd64" && xcpu.X86.HasFMA),
         )
     }
 
@@ -765,6 +774,38 @@ func cpuSupportsAMD64V3() bool {
     }
     // 依据 Go 官方 GOAMD64 v3 的近似集合进行判断（保守取交集）。
     return xcpu.X86.HasAVX2 && xcpu.X86.HasBMI1 && xcpu.X86.HasBMI2 && xcpu.X86.HasFMA
+}
+
+// readGOAMD64 返回当前二进制的 GOAMD64 构建档位（v1/v2/v3/v4），未知则返回空串。
+func readGOAMD64() string {
+    if bi, ok := debug.ReadBuildInfo(); ok {
+        for _, s := range bi.Settings {
+            if s.Key == "GOAMD64" {
+                return strings.ToLower(strings.TrimSpace(s.Value))
+            }
+        }
+    }
+    return ""
+}
+
+// cpuModelName 在 Linux 上尝试读取 /proc/cpuinfo 的 model name；其他平台返回空串。
+func cpuModelName() string {
+    if runtime.GOOS != "linux" {
+        return ""
+    }
+    data, err := os.ReadFile("/proc/cpuinfo")
+    if err != nil {
+        return ""
+    }
+    lines := strings.Split(string(data), "\n")
+    for _, ln := range lines {
+        if strings.HasPrefix(strings.ToLower(ln), "model name") {
+            if idx := strings.Index(ln, ":"); idx != -1 {
+                return strings.TrimSpace(ln[idx+1:])
+            }
+        }
+    }
+    return ""
 }
 
 func buildAssetSignature(asset githubAsset) string {
