@@ -86,7 +86,8 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	RegisterCaptureAPI(m.httpMux) // For process logs
 	RegisterAuditAPI(m.httpMux)   // For audit logs v1
 	RegisterAuditAPIV2(m.httpMux) // For audit logs v2
-	RegisterUpdateAPI(m.httpMux)  // For binary updates
+    RegisterUpdateAPI(m.httpMux)  // For binary updates
+    RegisterSystemAPI(m.httpMux)  // For self-restart
 
 	// Start http api server
 	if httpAddr := cfg.API.HTTP; len(httpAddr) > 0 {
