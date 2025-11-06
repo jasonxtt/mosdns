@@ -379,6 +379,13 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 .update-auto-grid { display: grid; grid-template-columns: 200px 1fr; gap: 0.75rem 1rem; align-items: center; }
 .field-label { display: inline-flex; align-items: center; gap: 0.35rem; }
 
+/* --- Update module micro-badges --- */
+.badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; font-size: 0.8rem; line-height: 1; border: 1px solid var(--color-border); background: var(--color-bg-alt); color: var(--color-text-secondary); vertical-align: middle; }
+.badge.success { background: color-mix(in srgb, var(--color-success) 18%, transparent); border-color: color-mix(in srgb, var(--color-success) 40%, var(--color-border)); color: var(--color-success); }
+.badge.info { background: color-mix(in srgb, var(--color-accent-primary) 18%, transparent); border-color: color-mix(in srgb, var(--color-accent-primary) 40%, var(--color-border)); color: var(--color-accent-primary); }
+.badge.warning { background: color-mix(in srgb, var(--color-warning) 18%, transparent); border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border)); color: var(--color-warning); }
+.badge.danger { background: color-mix(in srgb, var(--color-danger) 18%, transparent); border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border)); color: var(--color-danger); }
+
 @media (max-width: 768px) {
   .update-header { grid-template-columns: 1fr; }
   .update-meta-grid { grid-template-columns: 1fr; }

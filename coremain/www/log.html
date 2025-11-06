@@ -544,7 +544,7 @@
                     <div class="update-header">
                         <div class="update-versions">
                             <div class="control-item"><strong>当前版本</strong> <span id="update-current-version" class="chip">检测中...</span></div>
-                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version" class="chip">--</span></div>
+                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version" class="chip">--</span> <span id="update-inline-badge" class="badge" style="display:none">已是最新</span></div>
                         </div>
                         <div class="button-group update-actions">
                             <button id="update-check-btn" class="button secondary" data-default-text="强制检查"><span>强制检查</span></button>
@@ -554,7 +554,7 @@
                     </div>
 
                     <!-- 状态横幅 -->
-                    <div class="update-status-banner" role="status" aria-live="polite">
+                    <div id="update-status-banner" class="update-status-banner" role="status" aria-live="polite">
                         <span id="update-status-text">等待检查</span>
                     </div>
 
