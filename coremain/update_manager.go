@@ -88,6 +88,28 @@ type UpdateManager struct {
 	currentAssetSignature string
 	pendingSignature      string
 	statePath             string
+	// 控制“固定 tag”回退行为：默认启用；也可切到 warn-only 或完全禁用
+	fixedTagMode fixedTagFallbackMode
+}
+
+// 固定 tag 回退模式
+type fixedTagFallbackMode int
+
+const (
+	fixedTagFallbackEnabled fixedTagFallbackMode = iota
+	fixedTagFallbackWarnOnly
+	fixedTagFallbackDisabled
+)
+
+func (m *UpdateManager) fixedTagModeString() string {
+	switch m.fixedTagMode {
+	case fixedTagFallbackWarnOnly:
+		return "warn-only"
+	case fixedTagFallbackDisabled:
+		return "disabled"
+	default:
+		return "enabled"
+	}
 }
 
 type githubAsset struct {
@@ -109,6 +131,16 @@ func NewUpdateManager() *UpdateManager {
 		httpClient:     client,
 		cacheTTL:       defaultCacheTTL,
 		currentVersion: GetBuildVersion(),
+	}
+	// 读取环境变量以控制固定 tag 回退逻辑（默认启用）
+	// MOSDNS_UPDATE_FIXED_TAG_MODE=enabled|warn-only|disabled
+	switch strings.ToLower(os.Getenv("MOSDNS_UPDATE_FIXED_TAG_MODE")) {
+	case "warn-only", "warnonly", "warn":
+		mgr.fixedTagMode = fixedTagFallbackWarnOnly
+	case "disabled", "disable", "off", "none":
+		mgr.fixedTagMode = fixedTagFallbackDisabled
+	default:
+		mgr.fixedTagMode = fixedTagFallbackEnabled
 	}
 	mgr.initState()
 	return mgr
@@ -407,12 +439,27 @@ func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, erro
 	if info, err := m.fetchLatestReleaseInfo(ctx); err == nil {
 		return info, nil
 	} else {
-		m.logWarn("latest release fetch failed, fallback to fixed tag", err)
-		// Fallback to fixed tag API/HTML
-		if info2, err2 := m.fetchReleaseInfoAPI(ctx); err2 == nil {
-			return info2, nil
+		// 记录 latest 获取失败
+		m.logWarn("latest release fetch failed", err, zap.String("fallback_mode", m.fixedTagModeString()))
+
+		// 根据回退模式处理
+		switch m.fixedTagMode {
+		case fixedTagFallbackEnabled:
+			m.logWarn("fallback to fixed tag", errors.New("using fixed tag fallback"), zap.String("fallback_mode", m.fixedTagModeString()))
+			if info2, err2 := m.fetchReleaseInfoAPI(ctx); err2 == nil {
+				return info2, nil
+			}
+			return m.fetchReleaseInfoHTML(ctx)
+		case fixedTagFallbackWarnOnly:
+			// 仅记录日志，不再实际回退，便于观测是否仍有老客户端依赖固定 tag
+			m.logWarn("fixed tag fallback suppressed (warn-only)", errors.New("suppressed fixed tag fallback"), zap.String("fallback_mode", m.fixedTagModeString()))
+			return releaseInfo{}, fmt.Errorf("获取最新版本失败（fixed-tag 回退 warn-only 已生效）: %v", err)
+		case fixedTagFallbackDisabled:
+			m.logWarn("fixed tag fallback disabled", errors.New("disabled fixed tag fallback"), zap.String("fallback_mode", m.fixedTagModeString()))
+			return releaseInfo{}, fmt.Errorf("获取最新版本失败（fixed-tag 回退已禁用）: %v", err)
+		default:
+			return releaseInfo{}, err
 		}
-		return m.fetchReleaseInfoHTML(ctx)
 	}
 }
 
