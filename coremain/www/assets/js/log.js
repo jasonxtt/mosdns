@@ -783,6 +783,43 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 		},
 
+		// 监听自重启完成：服务可用且版本变化 / 不再 pending_restart 即视为成功
+		restartProbeTimerId: null,
+		restartProbeActive: false,
+		startRestartWatch(prevVersion) {
+			if (this.restartProbeActive) return;
+			this.restartProbeActive = true;
+			const deadline = Date.now() + 90_000; // 最长 90 秒
+			const ping = async () => {
+				if (Date.now() > deadline) {
+					clearInterval(this.restartProbeTimerId);
+					this.restartProbeActive = false;
+					ui.showToast('重启超时，请手动刷新页面', 'error');
+					return;
+				}
+				try {
+					const controller = new AbortController();
+					const t = setTimeout(() => controller.abort(), 1500);
+					const res = await fetch('/api/v1/update/status', { cache: 'no-store', signal: controller.signal });
+					clearTimeout(t);
+					if (!res.ok) throw new Error(String(res.status));
+					const st = await res.json();
+					// 成功条件：不再 pending，且版本已变化（若版本相同也可视为已就绪）
+					if (st && !st.pending_restart && st.current_version) {
+						clearInterval(this.restartProbeTimerId);
+						this.restartProbeActive = false;
+						ui.showToast('重启完成', 'success');
+						setTimeout(() => location.reload(), 800);
+					}
+				} catch (e) {
+					// 忽略错误，继续轮询
+				}
+			};
+			// 立即触发一次，随后每 1 秒一次
+			ping();
+			this.restartProbeTimerId = setInterval(ping, 1000);
+		},
+
 		setUpdateLoading(isLoading, targetBtn) {
 			state.update.loading = isLoading;
 			if (targetBtn) ui.setLoading(targetBtn, isLoading);
@@ -880,13 +917,19 @@ document.addEventListener('DOMContentLoaded', () => {
 			if (!force && !this.canApply()) return;
 			this.setUpdateLoading(true, button || elements.updateApplyBtn);
 			try {
+				const prevVersion = state.update.status?.current_version || '';
 				const result = await updateApi.apply(force);
 				if (result.installed) {
-					ui.showToast('更新包已写入，重启后生效', 'success');
+					ui.showToast(result.status?.message || '更新已安装，正在自重启…', 'success');
 				} else {
 					ui.showToast(result.status?.message || '更新已处理', 'info');
 				}
 				if (result.status) this.updateStatusUI(result.status);
+				// 非 Windows 且已进入 pending_restart，开始监听重启完成
+				const isWindows = (result.status?.architecture || '').startsWith('windows/');
+				if (!isWindows && result.status?.pending_restart) {
+					this.startRestartWatch(prevVersion);
+				}
 			} catch (error) {
 				console.error('执行更新失败:', error);
 				ui.showToast('更新失败，请检查日志', 'error');
