@@ -1,27 +1,29 @@
 package coremain
 
 import (
-	"archive/zip"
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
-	"runtime"
-	"strings"
-	"sync"
-	"time"
+    "archive/zip"
+    "context"
+    "crypto/sha256"
+    "encoding/hex"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io"
+    "net"
+    "net/http"
+    "os"
+    "path/filepath"
+    "regexp"
+    "runtime"
+    "syscall"
+    "strings"
+    "sync"
+    "time"
 
-	"github.com/IrineSistiana/mosdns/v5/mlog"
-	"go.uber.org/zap"
-	"runtime/debug"
+    "github.com/IrineSistiana/mosdns/v5/mlog"
+    "go.uber.org/zap"
+    "runtime/debug"
+    xcpu "golang.org/x/sys/cpu"
 )
 
 const (
@@ -36,7 +38,8 @@ const (
 	httpTimeout          = 120 * time.Second
 	userAgent            = "mosdns-update-client"
 	stateFileName        = ".mosdns-update-state.json"
-	postUpgradeEndpoint  = "http://127.0.0.1:9099/api/v1/system/restart"
+    // 默认的重启端点；可由环境变量 MOSDNS_RESTART_ENDPOINT 覆盖。
+    postUpgradeEndpoint  = "http://127.0.0.1:9099/api/v1/system/restart"
 )
 
 var (
@@ -64,7 +67,10 @@ type UpdateStatus struct {
 	UpdateAvailable  bool       `json:"update_available"`
 	Cached           bool       `json:"cached"`
 	Message          string     `json:"message,omitempty"`
-	PendingRestart   bool       `json:"pending_restart,omitempty"`
+    PendingRestart   bool       `json:"pending_restart,omitempty"`
+    // 新增：在 amd64 上提示可手动切到 v3 优化构建
+    AMD64V3Capable   bool       `json:"amd64_v3_capable,omitempty"`
+    CurrentIsV3      bool       `json:"current_is_v3,omitempty"`
 }
 
 type UpdateActionResponse struct {
@@ -250,17 +256,34 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	if tag == "" {
 		tag = releaseTag
 	}
-	status := UpdateStatus{
-		CurrentVersion:   m.currentVersion,
-		LatestVersion:    tag,
-		ReleaseURL:       fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, tag),
-		Architecture:     fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
-		PublishedAt:      rel.publishedAt,
-		CheckedAt:        now,
-		CacheExpiresAt:   now.Add(m.cacheTTL),
-		Cached:           false,
-		CurrentSignature: m.currentAssetSignature,
-	}
+    status := UpdateStatus{
+        CurrentVersion:   m.currentVersion,
+        LatestVersion:    tag,
+        ReleaseURL:       fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, tag),
+        Architecture:     fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+        PublishedAt:      rel.publishedAt,
+        CheckedAt:        now,
+        CacheExpiresAt:   now.Add(m.cacheTTL),
+        Cached:           false,
+        CurrentSignature: m.currentAssetSignature,
+    }
+
+    // 提供 v3 能力提示用的标记（仅在 amd64 + linux/windows 下有意义）
+    if runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") {
+        status.AMD64V3Capable = cpuSupportsAMD64V3()
+        status.CurrentIsV3 = binaryIsAMD64V3Plus()
+    }
+
+    // 记录一次探测信息，便于排查未显示 v3 提示的情况
+    if lg := m.logger(); lg != nil {
+        lg.Info("update status",
+            zap.String("arch", status.Architecture),
+            zap.String("latest", status.LatestVersion),
+            zap.Bool("update_available", status.UpdateAvailable),
+            zap.Bool("amd64_v3_capable", status.AMD64V3Capable),
+            zap.Bool("current_is_v3", status.CurrentIsV3),
+        )
+    }
 
 	if asset := selectAsset(rel.assets); asset != nil {
 		status.AssetName = asset.Name
@@ -280,24 +303,44 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	return status, nil
 }
 
-func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateActionResponse, error) {
-	status, err := m.CheckForUpdate(ctx, force)
-	if err != nil {
-		return UpdateActionResponse{}, err
-	}
+func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 bool) (UpdateActionResponse, error) {
+    status, err := m.CheckForUpdate(ctx, force)
+    if err != nil {
+        return UpdateActionResponse{}, err
+    }
 
-	if !status.UpdateAvailable && !force {
-		return UpdateActionResponse{Status: status}, ErrNoUpdateAvailable
-	}
+    if !status.UpdateAvailable && !force && !preferV3 {
+        return UpdateActionResponse{Status: status}, ErrNoUpdateAvailable
+    }
 
-	if status.DownloadURL == "" {
-		note := status.Message
-		if note == "" {
-			note = "无法定位下载地址"
-		}
-		status.Message = note
-		return UpdateActionResponse{Status: status}, errors.New(note)
-	}
+    // 若用户显式请求 v3，并且平台/CPU 支持，尝试切换到 v3 资产
+    if preferV3 && runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") && cpuSupportsAMD64V3() {
+        if lg := m.logger(); lg != nil { lg.Info("prefer v3 requested; trying to switch asset") }
+        if rel, err := m.fetchReleaseInfo(ctx); err == nil {
+            if v3 := findV3Asset(rel.assets); v3 != nil {
+                status.AssetName = v3.Name
+                status.DownloadURL = v3.BrowserDownloadURL
+                status.AssetSignature = buildAssetSignature(*v3)
+                status.UpdateAvailable = m.isUpdateNeeded(status.LatestVersion, status.AssetSignature)
+                if !status.UpdateAvailable {
+                    // 即使版本相同，只要资产不同也视为需要更新（切换构建）
+                    status.UpdateAvailable = status.AssetSignature != m.currentAssetSignature
+                }
+            } else {
+                status.Message = "未找到 v3 优化构建包"
+                return UpdateActionResponse{Status: status}, errors.New(status.Message)
+            }
+        }
+    }
+
+    if status.DownloadURL == "" {
+        note := status.Message
+        if note == "" {
+            note = "无法定位下载地址"
+        }
+        status.Message = note
+        return UpdateActionResponse{Status: status}, errors.New(note)
+    }
 
 	assetFile, err := m.downloadAsset(ctx, status.DownloadURL)
 	if err != nil {
@@ -385,34 +428,60 @@ func (m *UpdateManager) recordInstalled(signature string) {
 }
 
 func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
-	endpoint := postUpgradeEndpoint
-	if endpoint == "" {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	payload := strings.NewReader(`{"delay_ms":500}`)
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, payload)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
-		req.Host = req.URL.Host
-	}
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("self-restart hook returned %s", resp.Status)
-	}
-	return nil
+    // 优先使用环境变量覆盖（便于自定义 API 端口/路径）
+    endpoint := strings.TrimSpace(os.Getenv("MOSDNS_RESTART_ENDPOINT"))
+    if endpoint == "" {
+        endpoint = postUpgradeEndpoint
+    }
+
+    // 先尝试通过 HTTP 端点触发重启
+    if endpoint != "" {
+        if ctx == nil {
+            ctx = context.Background()
+        }
+        requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+        defer cancel()
+        payload := strings.NewReader(`{"delay_ms":500}`)
+        req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, payload)
+        if err == nil {
+            req.Header.Set("Content-Type", "application/json")
+            if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
+                req.Host = req.URL.Host
+            }
+            if resp, err := m.httpClient.Do(req); err == nil {
+                defer resp.Body.Close()
+                io.Copy(io.Discard, resp.Body)
+                if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+                    return nil
+                }
+                // 记录非 2xx 的响应，继续走本地回退
+                m.logWarn("self-restart hook returned non-2xx", fmt.Errorf("HTTP %s", resp.Status), zap.String("endpoint", endpoint))
+            } else {
+                // 记录 HTTP 失败，继续走本地回退
+                m.logWarn("self-restart hook request failed", err, zap.String("endpoint", endpoint))
+            }
+        } else {
+            // 构造请求失败，继续走本地回退
+            m.logWarn("self-restart hook request build failed", err, zap.String("endpoint", endpoint))
+        }
+    }
+
+    // 本地回退：直接在当前进程内发起自重启（仅非 Windows）
+    if runtime.GOOS != "windows" {
+        exe, err := os.Executable()
+        if err != nil {
+            return err
+        }
+        args := append([]string{exe}, os.Args[1:]...)
+        env := os.Environ()
+        go func() {
+            // 给上层 UI 一点时间处理 pending 状态
+            time.Sleep(500 * time.Millisecond)
+            _ = syscall.Exec(exe, args, env)
+        }()
+        return nil
+    }
+    return errors.New("self-restart is not supported on Windows")
 }
 
 func (m *UpdateManager) isUpdateNeeded(latest, signature string) bool {
@@ -506,10 +575,10 @@ func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, e
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseInfo, error) {
-	url := fmt.Sprintf(githubLatestAPI, githubOwner, githubRepo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return releaseInfo{}, err
+    url := fmt.Sprintf(githubLatestAPI, githubOwner, githubRepo)
+    req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+    if err != nil {
+        return releaseInfo{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", userAgent)
@@ -533,18 +602,19 @@ func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseI
 		return releaseInfo{}, fmt.Errorf("GitHub API 请求失败: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
 	}
 
-	var payload struct {
-		TagName     string        `json:"tag_name"`
-		PublishedAt *time.Time    `json:"published_at"`
-		Assets      []githubAsset `json:"assets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return releaseInfo{}, err
-	}
-	if payload.TagName == "" {
-		return releaseInfo{}, errors.New("API 未返回 tag 名称")
-	}
-	return releaseInfo{publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
+    var payload struct {
+        TagName     string        `json:"tag_name"`
+        PublishedAt *time.Time    `json:"published_at"`
+        Assets      []githubAsset `json:"assets"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+        return releaseInfo{}, err
+    }
+    if payload.TagName == "" {
+        return releaseInfo{}, errors.New("API 未返回 tag 名称")
+    }
+    // 关键修复：确保通过 API 路径返回真实 tag，用于 UI 展示与 ReleaseURL 构造
+    return releaseInfo{tagName: payload.TagName, publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
@@ -687,6 +757,16 @@ func binaryIsAMD64V3Plus() bool {
     return false
 }
 
+// cpuSupportsAMD64V3 检测 CPU 是否支持 v3 关键指令（AVX2、BMI1、BMI2、FMA）。
+// 注意：这不是当前二进制的构建档位，而是硬件能力探测。
+func cpuSupportsAMD64V3() bool {
+    if runtime.GOARCH != "amd64" {
+        return false
+    }
+    // 依据 Go 官方 GOAMD64 v3 的近似集合进行判断（保守取交集）。
+    return xcpu.X86.HasAVX2 && xcpu.X86.HasBMI1 && xcpu.X86.HasBMI2 && xcpu.X86.HasFMA
+}
+
 func buildAssetSignature(asset githubAsset) string {
 	if asset.Sha256 != "" {
 		return fmt.Sprintf("%s:%s", asset.Name, strings.ToLower(asset.Sha256))
@@ -737,6 +817,28 @@ func parseAssetsFromHTML(html string) []githubAsset {
 		})
 	}
 	return result
+}
+
+// findV3Asset 在支持 v3 的 amd64 平台上，返回 v3 优化包。
+func findV3Asset(assets []githubAsset) *githubAsset {
+    if runtime.GOARCH != "amd64" {
+        return nil
+    }
+    want := ""
+    switch runtime.GOOS {
+    case "linux":
+        want = "mosdns-linux-amd64-v3.zip"
+    case "windows":
+        want = "mosdns-windows-amd64-v3.zip"
+    default:
+        return nil
+    }
+    for i := range assets {
+        if assets[i].Name == want {
+            return &assets[i]
+        }
+    }
+    return nil
 }
 
 func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, error) {

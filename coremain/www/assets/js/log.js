@@ -97,13 +97,17 @@ document.addEventListener('DOMContentLoaded', () => {
 	requeryRefreshStatsBtn: document.getElementById('requery-refresh-stats-btn'),
 	updateModule: document.getElementById('update-module'),
 	updateCurrentVersion: document.getElementById('update-current-version'),
-	updateLatestVersion: document.getElementById('update-latest-version'),
-	updateStatusText: document.getElementById('update-status-text'),
-	updateLastChecked: document.getElementById('update-last-checked'),
-	updateTargetInfo: document.getElementById('update-target-info'),
-		updateCheckBtn: document.getElementById('update-check-btn'),
-		updateApplyBtn: document.getElementById('update-apply-btn'),
-		updateForceBtn: document.getElementById('update-force-btn'),
+        updateLatestVersion: document.getElementById('update-latest-version'),
+        updateInlineBadge: document.getElementById('update-inline-badge'),
+        updateStatusBanner: document.getElementById('update-status-banner'),
+        updateStatusText: document.getElementById('update-status-text'),
+        updateLastChecked: document.getElementById('update-last-checked'),
+        updateTargetInfo: document.getElementById('update-target-info'),
+            updateCheckBtn: document.getElementById('update-check-btn'),
+            updateApplyBtn: document.getElementById('update-apply-btn'),
+            updateForceBtn: document.getElementById('update-force-btn'),
+        updateV3Callout: document.getElementById('update-v3-callout'),
+        updateV3Btn: document.getElementById('update-v3-btn'),
 	updateAutoToggle: document.getElementById('update-auto-toggle'),
 	updateIntervalInput: document.getElementById('update-interval-input'),
 	updateHintText: document.getElementById('update-hint-text'),
@@ -157,11 +161,11 @@ document.addEventListener('DOMContentLoaded', () => {
 		getBackupCount: (signal) => api.fetch(`/plugins/requery/stats/backup_file_count`, { signal }),
 	};
 
-	const updateApi = {
-		getStatus: (signal) => api.fetch(`/api/v1/update/status`, { signal }),
-		forceCheck: () => api.fetch(`/api/v1/update/check`, { method: 'POST' }),
-		apply: (force = false) => api.fetch(`/api/v1/update/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force }) })
-	};
+    const updateApi = {
+        getStatus: (signal) => api.fetch(`/api/v1/update/status`, { signal }),
+        forceCheck: () => api.fetch(`/api/v1/update/check`, { method: 'POST' }),
+        apply: (force = false, preferV3 = false) => api.fetch(`/api/v1/update/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force, prefer_v3: preferV3 }) })
+    };
 
     const normalizeIP = (ip) => {
         if (typeof ip === 'string' && ip.startsWith('::ffff:')) {
@@ -728,6 +732,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			this.applyAutoSchedule(false);
 			this.refreshStatus();
 			elements.updateForceBtn?.addEventListener('click', () => this.applyUpdate(true, elements.updateForceBtn));
+			elements.updateV3Btn?.addEventListener('click', () => this.applyUpdate(true, elements.updateV3Btn, true));
 		},
 
 		loadAutoConfig() {
@@ -843,13 +848,16 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 		},
 
-		updateStatusUI(status) {
-			state.update.status = status;
-			if (!elements.updateModule || !status) return;
-			elements.updateCurrentVersion.textContent = status.current_version || '未知';
-			elements.updateLatestVersion.textContent = status.latest_version || '--';
-			elements.updateTargetInfo.textContent = status.asset_name ? `${status.asset_name} (${status.architecture || '未知'})` : (status.architecture || '未知');
-			elements.updateStatusText.textContent = status.message || (status.update_available ? '发现新版本，可立即更新。' : '已是最新版本');
+        updateStatusUI(status) {
+            state.update.status = status;
+            if (!elements.updateModule || !status) return;
+            elements.updateCurrentVersion.textContent = status.current_version || '未知';
+            elements.updateLatestVersion.textContent = status.latest_version || '--';
+            elements.updateTargetInfo.textContent = status.asset_name ? `${status.asset_name} (${status.architecture || '未知'})` : (status.architecture || '未知');
+            // 重置内联徽标与横幅
+            if (elements.updateInlineBadge) { elements.updateInlineBadge.style.display = 'none'; elements.updateInlineBadge.className = 'badge'; }
+            if (elements.updateStatusBanner) elements.updateStatusBanner.style.display = '';
+            elements.updateStatusText.textContent = status.message || (status.update_available ? '发现新版本，可立即更新。' : '当前已是最新版本');
 			const lastChecked = status.checked_at ? new Date(status.checked_at) : null;
 			elements.updateLastChecked.textContent = lastChecked ? lastChecked.toLocaleString() : '--';
             if (elements.updateApplyBtn) {
@@ -877,13 +885,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 const msg = isWindows ? '更新已安装，等待手动重启生效。' : '更新已安装，正在自重启…';
                 elements.updateStatusText.textContent = msg;
                 this.setHint(msg);
+            } else if (!status.update_available) {
+                // 已是最新：在“最新版本”行右侧显示小徽标，隐藏“立即更新”按钮与冗余横幅
+                if (elements.updateInlineBadge) {
+                    elements.updateInlineBadge.textContent = '已是最新';
+                    elements.updateInlineBadge.classList.add('success');
+                    elements.updateInlineBadge.style.display = 'inline-flex';
+                }
+                if (elements.updateApplyBtn) {
+                    elements.updateApplyBtn.style.display = 'none';
+                }
+                if (elements.updateStatusBanner) {
+                    elements.updateStatusBanner.style.display = 'none';
+                }
             } else if (status.message) {
                 // 截断过长信息，避免溢出
                 const trimmed = (status.message || '').toString();
                 elements.updateStatusText.textContent = trimmed.length > 120 ? trimmed.slice(0,117) + '…' : trimmed;
+                // 有更新：确保“立即更新”按钮可见
+                if (elements.updateApplyBtn) {
+                    elements.updateApplyBtn.style.display = '';
+                }
             }
-			this.refreshButtons();
-		},
+            this.refreshButtons();
+
+            // v3 提示：仅在 amd64、CPU 支持 v3 且当前不是 v3 构建时显示
+            const arch = (status.architecture || '');
+            const showV3 = (arch === 'linux/amd64' || arch === 'windows/amd64') && status.amd64_v3_capable && !status.current_is_v3;
+            if (elements.updateV3Callout) {
+                elements.updateV3Callout.style.display = showV3 ? 'grid' : 'none';
+            }
+        },
 
 		async refreshStatus(force = false) {
 			if (!elements.updateModule) return;
@@ -896,29 +928,29 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 		},
 
-		async forceCheck() {
-			if (state.update.loading) return;
-			this.setUpdateLoading(true, elements.updateCheckBtn);
-			try {
-				const status = await updateApi.forceCheck();
-				ui.showToast('已刷新最新版本信息', 'success');
-				this.updateStatusUI(status);
-			} catch (error) {
-				console.error('强制检查更新失败:', error);
-				ui.showToast('强制检查失败', 'error');
-			} finally {
-				this.setUpdateLoading(false, elements.updateCheckBtn);
-				this.applyAutoSchedule(true);
-			}
-		},
+        async forceCheck() {
+            if (state.update.loading) return;
+            this.setUpdateLoading(true, elements.updateCheckBtn);
+            try {
+                const status = await updateApi.forceCheck();
+                ui.showToast('已刷新最新版本信息', 'success');
+                this.updateStatusUI(status);
+            } catch (error) {
+                console.error('强制检查更新失败:', error);
+                ui.showToast('强制检查失败', 'error');
+            } finally {
+                this.setUpdateLoading(false, elements.updateCheckBtn);
+                this.applyAutoSchedule(true);
+            }
+        },
 
-		async applyUpdate(force = false, button = elements.updateApplyBtn) {
+		async applyUpdate(force = false, button = elements.updateApplyBtn, preferV3 = false) {
 			if (state.update.loading) return;
 			if (!force && !this.canApply()) return;
 			this.setUpdateLoading(true, button || elements.updateApplyBtn);
 			try {
 				const prevVersion = state.update.status?.current_version || '';
-				const result = await updateApi.apply(force);
+				const result = await updateApi.apply(force, preferV3);
 				if (result.installed) {
 					ui.showToast(result.status?.message || '更新已安装，正在自重启…', 'success');
 				} else {
@@ -933,11 +965,16 @@ document.addEventListener('DOMContentLoaded', () => {
 			} catch (error) {
 				console.error('执行更新失败:', error);
 				ui.showToast('更新失败，请检查日志', 'error');
-			} finally {
-				this.setUpdateLoading(false, button || elements.updateApplyBtn);
-				this.applyAutoSchedule(true);
-			}
-		}
+            } finally {
+                this.setUpdateLoading(false, button || elements.updateApplyBtn);
+                this.applyAutoSchedule(true);
+                // 若不存在可更新，确保隐藏“立即更新”按钮的显示残留
+                const st = state.update.status;
+                if (elements.updateApplyBtn && st && !st.update_available) {
+                    elements.updateApplyBtn.style.display = 'none';
+                }
+            }
+        }
 	};
 
 	const systemInfoManager = {

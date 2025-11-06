@@ -544,7 +544,7 @@
                     <div class="update-header">
                         <div class="update-versions">
                             <div class="control-item"><strong>当前版本</strong> <span id="update-current-version" class="chip">检测中...</span></div>
-                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version" class="chip">--</span></div>
+                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version" class="chip">--</span> <span id="update-inline-badge" class="badge" style="display:none">已是最新</span></div>
                         </div>
                         <div class="button-group update-actions">
                             <button id="update-check-btn" class="button secondary" data-default-text="强制检查"><span>强制检查</span></button>
@@ -554,8 +554,19 @@
                     </div>
 
                     <!-- 状态横幅 -->
-                    <div class="update-status-banner" role="status" aria-live="polite">
+                    <div id="update-status-banner" class="update-status-banner" role="status" aria-live="polite">
                         <span id="update-status-text">等待检查</span>
+                    </div>
+
+                    <!-- v3 手动切换提示（仅 amd64 且 CPU 支持 v3、当前非 v3 构建时显示） -->
+                    <div id="update-v3-callout" class="callout info" style="display:none">
+                        <div class="callout-content">
+                            <strong>可用的 v3 优化构建</strong>
+                            <p>检测到此设备支持 amd64 v3 指令集，当前运行的是通用版。您可以手动切换到 v3 优化构建以获得更佳性能（不会自动切换）。</p>
+                        </div>
+                        <div class="callout-actions">
+                            <button id="update-v3-btn" class="button primary"><span>切换为 v3（手动）</span></button>
+                        </div>
                     </div>
 
                     <!-- 元信息：上次检查、匹配构建 -->
