@@ -899,6 +899,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 截断过长信息，避免溢出
                 const trimmed = (status.message || '').toString();
                 elements.updateStatusText.textContent = trimmed.length > 120 ? trimmed.slice(0,117) + '…' : trimmed;
+                // 有更新：确保“立即更新”按钮可见
+                if (elements.updateApplyBtn) {
+                    elements.updateApplyBtn.style.display = '';
+                }
             }
             this.refreshButtons();
         },
