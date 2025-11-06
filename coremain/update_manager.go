@@ -20,9 +20,10 @@ import (
     "sync"
     "time"
 
-	"github.com/IrineSistiana/mosdns/v5/mlog"
-	"go.uber.org/zap"
-	"runtime/debug"
+    "github.com/IrineSistiana/mosdns/v5/mlog"
+    "go.uber.org/zap"
+    "runtime/debug"
+    xcpu "golang.org/x/sys/cpu"
 )
 
 const (
@@ -66,7 +67,10 @@ type UpdateStatus struct {
 	UpdateAvailable  bool       `json:"update_available"`
 	Cached           bool       `json:"cached"`
 	Message          string     `json:"message,omitempty"`
-	PendingRestart   bool       `json:"pending_restart,omitempty"`
+    PendingRestart   bool       `json:"pending_restart,omitempty"`
+    // 新增：在 amd64 上提示可手动切到 v3 优化构建
+    AMD64V3Capable   bool       `json:"amd64_v3_capable,omitempty"`
+    CurrentIsV3      bool       `json:"current_is_v3,omitempty"`
 }
 
 type UpdateActionResponse struct {
@@ -252,17 +256,23 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	if tag == "" {
 		tag = releaseTag
 	}
-	status := UpdateStatus{
-		CurrentVersion:   m.currentVersion,
-		LatestVersion:    tag,
-		ReleaseURL:       fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, tag),
-		Architecture:     fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
-		PublishedAt:      rel.publishedAt,
-		CheckedAt:        now,
-		CacheExpiresAt:   now.Add(m.cacheTTL),
-		Cached:           false,
-		CurrentSignature: m.currentAssetSignature,
-	}
+    status := UpdateStatus{
+        CurrentVersion:   m.currentVersion,
+        LatestVersion:    tag,
+        ReleaseURL:       fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, tag),
+        Architecture:     fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+        PublishedAt:      rel.publishedAt,
+        CheckedAt:        now,
+        CacheExpiresAt:   now.Add(m.cacheTTL),
+        Cached:           false,
+        CurrentSignature: m.currentAssetSignature,
+    }
+
+    // 提供 v3 能力提示用的标记（仅在 amd64 + linux/windows 下有意义）
+    if runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") {
+        status.AMD64V3Capable = cpuSupportsAMD64V3()
+        status.CurrentIsV3 = binaryIsAMD64V3Plus()
+    }
 
 	if asset := selectAsset(rel.assets); asset != nil {
 		status.AssetName = asset.Name
@@ -282,24 +292,43 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	return status, nil
 }
 
-func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateActionResponse, error) {
-	status, err := m.CheckForUpdate(ctx, force)
-	if err != nil {
-		return UpdateActionResponse{}, err
-	}
+func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 bool) (UpdateActionResponse, error) {
+    status, err := m.CheckForUpdate(ctx, force)
+    if err != nil {
+        return UpdateActionResponse{}, err
+    }
 
-	if !status.UpdateAvailable && !force {
-		return UpdateActionResponse{Status: status}, ErrNoUpdateAvailable
-	}
+    if !status.UpdateAvailable && !force && !preferV3 {
+        return UpdateActionResponse{Status: status}, ErrNoUpdateAvailable
+    }
 
-	if status.DownloadURL == "" {
-		note := status.Message
-		if note == "" {
-			note = "无法定位下载地址"
-		}
-		status.Message = note
-		return UpdateActionResponse{Status: status}, errors.New(note)
-	}
+    // 若用户显式请求 v3，并且平台/CPU 支持，尝试切换到 v3 资产
+    if preferV3 && runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") && cpuSupportsAMD64V3() {
+        if rel, err := m.fetchReleaseInfo(ctx); err == nil {
+            if v3 := findV3Asset(rel.assets); v3 != nil {
+                status.AssetName = v3.Name
+                status.DownloadURL = v3.BrowserDownloadURL
+                status.AssetSignature = buildAssetSignature(*v3)
+                status.UpdateAvailable = m.isUpdateNeeded(status.LatestVersion, status.AssetSignature)
+                if !status.UpdateAvailable {
+                    // 即使版本相同，只要资产不同也视为需要更新（切换构建）
+                    status.UpdateAvailable = status.AssetSignature != m.currentAssetSignature
+                }
+            } else {
+                status.Message = "未找到 v3 优化构建包"
+                return UpdateActionResponse{Status: status}, errors.New(status.Message)
+            }
+        }
+    }
+
+    if status.DownloadURL == "" {
+        note := status.Message
+        if note == "" {
+            note = "无法定位下载地址"
+        }
+        status.Message = note
+        return UpdateActionResponse{Status: status}, errors.New(note)
+    }
 
 	assetFile, err := m.downloadAsset(ctx, status.DownloadURL)
 	if err != nil {
@@ -716,6 +745,16 @@ func binaryIsAMD64V3Plus() bool {
     return false
 }
 
+// cpuSupportsAMD64V3 检测 CPU 是否支持 v3 关键指令（AVX2、BMI1、BMI2、FMA）。
+// 注意：这不是当前二进制的构建档位，而是硬件能力探测。
+func cpuSupportsAMD64V3() bool {
+    if runtime.GOARCH != "amd64" {
+        return false
+    }
+    // 依据 Go 官方 GOAMD64 v3 的近似集合进行判断（保守取交集）。
+    return xcpu.X86.HasAVX2 && xcpu.X86.HasBMI1 && xcpu.X86.HasBMI2 && xcpu.X86.HasFMA
+}
+
 func buildAssetSignature(asset githubAsset) string {
 	if asset.Sha256 != "" {
 		return fmt.Sprintf("%s:%s", asset.Name, strings.ToLower(asset.Sha256))
@@ -766,6 +805,28 @@ func parseAssetsFromHTML(html string) []githubAsset {
 		})
 	}
 	return result
+}
+
+// findV3Asset 在支持 v3 的 amd64 平台上，返回 v3 优化包。
+func findV3Asset(assets []githubAsset) *githubAsset {
+    if runtime.GOARCH != "amd64" {
+        return nil
+    }
+    want := ""
+    switch runtime.GOOS {
+    case "linux":
+        want = "mosdns-linux-amd64-v3.zip"
+    case "windows":
+        want = "mosdns-windows-amd64-v3.zip"
+    default:
+        return nil
+    }
+    for i := range assets {
+        if assets[i].Name == want {
+            return &assets[i]
+        }
+    }
+    return nil
 }
 
 func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, error) {

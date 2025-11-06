@@ -159,11 +159,11 @@ document.addEventListener('DOMContentLoaded', () => {
 		getBackupCount: (signal) => api.fetch(`/plugins/requery/stats/backup_file_count`, { signal }),
 	};
 
-	const updateApi = {
-		getStatus: (signal) => api.fetch(`/api/v1/update/status`, { signal }),
-		forceCheck: () => api.fetch(`/api/v1/update/check`, { method: 'POST' }),
-		apply: (force = false) => api.fetch(`/api/v1/update/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force }) })
-	};
+    const updateApi = {
+        getStatus: (signal) => api.fetch(`/api/v1/update/status`, { signal }),
+        forceCheck: () => api.fetch(`/api/v1/update/check`, { method: 'POST' }),
+        apply: (force = false, preferV3 = false) => api.fetch(`/api/v1/update/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force, prefer_v3: preferV3 }) })
+    };
 
     const normalizeIP = (ip) => {
         if (typeof ip === 'string' && ip.startsWith('::ffff:')) {
@@ -730,6 +730,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			this.applyAutoSchedule(false);
 			this.refreshStatus();
 			elements.updateForceBtn?.addEventListener('click', () => this.applyUpdate(true, elements.updateForceBtn));
+			elements.updateV3Btn?.addEventListener('click', () => this.applyUpdate(true, elements.updateV3Btn, true));
 		},
 
 		loadAutoConfig() {
@@ -905,6 +906,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             this.refreshButtons();
+
+            // v3 提示：仅在 amd64、CPU 支持 v3 且当前不是 v3 构建时显示
+            const arch = (status.architecture || '');
+            const showV3 = (arch === 'linux/amd64' || arch === 'windows/amd64') && status.amd64_v3_capable && !status.current_is_v3;
+            if (elements.updateV3Callout) {
+                elements.updateV3Callout.style.display = showV3 ? 'grid' : 'none';
+            }
         },
 
 		async refreshStatus(force = false) {
@@ -934,13 +942,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
 
-		async applyUpdate(force = false, button = elements.updateApplyBtn) {
+		async applyUpdate(force = false, button = elements.updateApplyBtn, preferV3 = false) {
 			if (state.update.loading) return;
 			if (!force && !this.canApply()) return;
 			this.setUpdateLoading(true, button || elements.updateApplyBtn);
 			try {
 				const prevVersion = state.update.status?.current_version || '';
-				const result = await updateApi.apply(force);
+				const result = await updateApi.apply(force, preferV3);
 				if (result.installed) {
 					ui.showToast(result.status?.message || '更新已安装，正在自重启…', 'success');
 				} else {

@@ -386,6 +386,12 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 .badge.warning { background: color-mix(in srgb, var(--color-warning) 18%, transparent); border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border)); color: var(--color-warning); }
 .badge.danger { background: color-mix(in srgb, var(--color-danger) 18%, transparent); border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border)); color: var(--color-danger); }
 
+/* --- Callout for v3 hint --- */
+.callout { display: grid; grid-template-columns: 1fr auto; gap: 0.75rem 1rem; align-items: center; padding: 0.9rem 1rem; border-radius: var(--border-radius-md); border: 1px solid var(--color-border); background: var(--color-bg-alt); }
+.callout.info { border-color: color-mix(in srgb, var(--color-accent-primary) 40%, var(--color-border)); background: color-mix(in srgb, var(--color-accent-primary) 12%, var(--color-bg-alt)); }
+.callout .callout-content p { margin: 0.25rem 0 0; color: var(--color-text-secondary); }
+.callout .callout-actions .button { min-height: 2.2rem; }
+
 @media (max-width: 768px) {
   .update-header { grid-template-columns: 1fr; }
   .update-meta-grid { grid-template-columns: 1fr; }

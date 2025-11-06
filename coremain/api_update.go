@@ -37,20 +37,23 @@ func handleForceUpdateStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
-	force := false
-	if r.Body != nil && r.Body != http.NoBody {
-		var req struct {
-			Force bool `json:"force"`
-		}
-		dec := json.NewDecoder(r.Body)
-		if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		force = req.Force
-	}
+    force := false
+    preferV3 := false
+    if r.Body != nil && r.Body != http.NoBody {
+        var req struct {
+            Force bool `json:"force"`
+            PreferV3 bool `json:"prefer_v3"`
+        }
+        dec := json.NewDecoder(r.Body)
+        if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+            writeError(w, http.StatusBadRequest, err)
+            return
+        }
+        force = req.Force
+        preferV3 = req.PreferV3
+    }
 
-	result, err := GlobalUpdateManager.PerformUpdate(r.Context(), force)
+    result, err := GlobalUpdateManager.PerformUpdate(r.Context(), force, preferV3)
 	if err != nil {
 		if errors.Is(err, ErrNoUpdateAvailable) {
 			writeJSON(w, http.StatusOK, result)
