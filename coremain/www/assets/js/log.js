@@ -833,12 +833,15 @@ document.addEventListener('DOMContentLoaded', () => {
 			this.refreshButtons();
 		},
 
-		canApply() {
-			const status = state.update.status;
-			if (!status) return false;
-			if (status.pending_restart) return false;
-			return Boolean(status.update_available && status.download_url);
-		},
+        canApply() {
+            const status = state.update.status;
+            if (!status) return false;
+            if (status.pending_restart) return false;
+            const cur = status.current_version || '';
+            const lat = status.latest_version || '';
+            const sameVersion = this.normalizeVer(cur) !== '' && this.normalizeVer(cur) === this.normalizeVer(lat);
+            return Boolean(status.update_available && !sameVersion && status.download_url);
+        },
 
 		refreshButtons() {
 			if (elements.updateApplyBtn) {
@@ -850,16 +853,26 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 		},
 
+        // 前端冗余保护：即使后端误报，也以版本号等价判断为准
+        normalizeVer(v) {
+            if (!v) return '';
+            return String(v).trim().toLowerCase().replace(/^v/, '');
+        },
+
         updateStatusUI(status) {
             state.update.status = status;
             if (!elements.updateModule || !status) return;
-            elements.updateCurrentVersion.textContent = status.current_version || '未知';
-            elements.updateLatestVersion.textContent = status.latest_version || '--';
+            const cur = status.current_version || '';
+            const lat = status.latest_version || '';
+            const sameVersion = this.normalizeVer(cur) !== '' && this.normalizeVer(cur) === this.normalizeVer(lat);
+            elements.updateCurrentVersion.textContent = cur || '未知';
+            elements.updateLatestVersion.textContent = lat || '--';
             elements.updateTargetInfo.textContent = status.asset_name ? `${status.asset_name} (${status.architecture || '未知'})` : (status.architecture || '未知');
             // 重置内联徽标与横幅
             if (elements.updateInlineBadge) { elements.updateInlineBadge.style.display = 'none'; elements.updateInlineBadge.className = 'badge'; }
             if (elements.updateStatusBanner) elements.updateStatusBanner.style.display = '';
-            elements.updateStatusText.textContent = status.message || (status.update_available ? '发现新版本，可立即更新。' : '当前已是最新版本');
+            const effectiveUpdate = status.update_available && !sameVersion;
+            elements.updateStatusText.textContent = status.message || (effectiveUpdate ? '发现新版本，可立即更新。' : '当前已是最新版本');
 			const lastChecked = status.checked_at ? new Date(status.checked_at) : null;
 			elements.updateLastChecked.textContent = lastChecked ? lastChecked.toLocaleString() : '--';
             if (elements.updateApplyBtn) {
@@ -869,7 +882,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 非 Windows：自重启中；Windows：等待手动重启
                     const isWindows = (status.architecture || '').startsWith('windows/');
                     label = isWindows ? '等待重启' : '重启中…';
-                } else if (!this.canApply()) label = '已是最新';
+                } else if (!this.canApply() || sameVersion) label = '已是最新';
                 if (span) span.textContent = label;
                 elements.updateApplyBtn.dataset.defaultText = label;
             }
@@ -887,7 +900,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const msg = isWindows ? '更新已安装，等待手动重启生效。' : '更新已安装，正在自重启…';
                 elements.updateStatusText.textContent = msg;
                 this.setHint(msg);
-            } else if (!status.update_available) {
+            } else if (!effectiveUpdate) {
                 // 已是最新：在“最新版本”行右侧显示小徽标，隐藏“立即更新”按钮与冗余横幅
                 if (elements.updateInlineBadge) {
                     elements.updateInlineBadge.textContent = '已是最新';
