@@ -34,7 +34,7 @@
   - `POST /api/v1/update/apply` 执行更新（JSON: `{ "force": true|false }`）
 - 行为：
   - 下载匹配当前平台的压缩包，解压并原地覆盖二进制（Unix 保留可执行位；Windows 写入 `.new` 并提示手动替换）。
-  - 安装成功后会自动调用 `GET http://127.0.0.1:9099/plugins/my_fakeiplist/restartall` 完成重启。
+  - 安装成功后自动调用 `POST http://127.0.0.1:9099/api/v1/system/restart` 自重启（Unix）；Windows 因文件锁定不执行自重启。
 
 ## 重要变更：移除固定 tag 回退
 
