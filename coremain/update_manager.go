@@ -21,7 +21,7 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"go.uber.org/zap"
-	"golang.org/x/sys/cpu"
+	"runtime/debug"
 )
 
 const (
@@ -630,7 +630,7 @@ func selectAsset(assets []githubAsset) *githubAsset {
     case "linux":
         switch runtime.GOARCH {
         case "amd64":
-            if amd64v3Supported() {
+            if binaryIsAMD64V3Plus() {
                 candidates = []string{"mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip"}
             } else {
                 candidates = []string{"mosdns-linux-amd64.zip"}
@@ -646,7 +646,7 @@ func selectAsset(assets []githubAsset) *githubAsset {
         candidates = append(candidates, fmt.Sprintf("mosdns-darwin-%s.zip", runtime.GOARCH))
     case "windows":
         if runtime.GOARCH == "amd64" {
-            if amd64v3Supported() {
+            if binaryIsAMD64V3Plus() {
                 candidates = []string{"mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip"}
             } else {
                 candidates = []string{"mosdns-windows-amd64.zip"}
@@ -669,33 +669,22 @@ func selectAsset(assets []githubAsset) *githubAsset {
     return nil
 }
 
-// amd64v3Supported returns whether the current CPU very likely
-// supports running amd64-v3 binaries. We keep the check conservative:
-// only return true when key features are present.
-//
-// Rationale: x86-64-v3 roughly maps to AVX2 + BMI1/2 + FMA + POPCNT
-// (and others). x/sys/cpu exposes reliable runtime flags for these.
-// If any are missing, prefer the generic amd64 build to avoid crashes
-// on older CPUs mis-detected as v3.
-func amd64v3Supported() bool {
+// binaryIsAMD64V3Plus 通过读取当前二进制的构建信息，判断是否为
+// amd64 v3（或更高，如 v4）构建。读取失败则返回 false（保守选择传统包）。
+func binaryIsAMD64V3Plus() bool {
     if runtime.GOARCH != "amd64" {
         return false
     }
-    // Be conservative: require the common v3 set to all be present.
-    // If OS doesn't enable AVX state, HasAVX2 will be false as well.
-    if !cpu.X86.HasAVX2 {
-        return false
+    if bi, ok := debug.ReadBuildInfo(); ok {
+        for _, s := range bi.Settings {
+            if s.Key == "GOAMD64" {
+                v := strings.ToLower(strings.TrimSpace(s.Value))
+                return v == "v3" || v == "v4"
+            }
+        }
     }
-    if !cpu.X86.HasBMI1 || !cpu.X86.HasBMI2 {
-        return false
-    }
-    if !cpu.X86.HasFMA {
-        return false
-    }
-    if !cpu.X86.HasPOPCNT {
-        return false
-    }
-    return true
+    // 未能读到 GOAMD64，保守处理：按非 v3 处理
+    return false
 }
 
 func buildAssetSignature(asset githubAsset) string {
