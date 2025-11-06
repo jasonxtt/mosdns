@@ -248,10 +248,11 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	}
 	m.mu.Unlock()
 
-	rel, err := m.fetchReleaseInfo(ctx)
-	if err != nil {
-		return UpdateStatus{}, err
-	}
+    rel, err := m.fetchReleaseInfo(ctx)
+    if err != nil {
+        m.logWarn("fetch latest release failed", err)
+        return UpdateStatus{}, err
+    }
 
 	tag := rel.tagName
 	if tag == "" {
@@ -543,14 +544,13 @@ func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
 	return latest != current
 }
 
-// fetchReleaseInfo tries to get the latest release info first (releases/latest),
-// then falls back to the legacy fixed-tag mode (v5-ph-srs) for backward compatibility.
 func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, error) {
-	// 固定 tag 回退路径已移除：仅使用 releases/latest
-	if info, err := m.fetchLatestReleaseInfo(ctx); err == nil {
-		return info, nil
-	}
-	return releaseInfo{}, errors.New("无法获取最新版本信息（releases/latest）")
+    // 固定 tag 回退路径已移除：仅使用 releases/latest
+    info, err := m.fetchLatestReleaseInfo(ctx)
+    if err != nil {
+        return releaseInfo{}, fmt.Errorf("获取最新版本失败: %v", err)
+    }
+    return info, nil
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfo(ctx context.Context) (releaseInfo, error) {
