@@ -436,31 +436,11 @@ func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
 // fetchReleaseInfo tries to get the latest release info first (releases/latest),
 // then falls back to the legacy fixed-tag mode (v5-ph-srs) for backward compatibility.
 func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, error) {
+	// 固定 tag 回退路径已移除：仅使用 releases/latest
 	if info, err := m.fetchLatestReleaseInfo(ctx); err == nil {
 		return info, nil
-	} else {
-		// 记录 latest 获取失败
-		m.logWarn("latest release fetch failed", err, zap.String("fallback_mode", m.fixedTagModeString()))
-
-		// 根据回退模式处理
-		switch m.fixedTagMode {
-		case fixedTagFallbackEnabled:
-			m.logWarn("fallback to fixed tag", errors.New("using fixed tag fallback"), zap.String("fallback_mode", m.fixedTagModeString()))
-			if info2, err2 := m.fetchReleaseInfoAPI(ctx); err2 == nil {
-				return info2, nil
-			}
-			return m.fetchReleaseInfoHTML(ctx)
-		case fixedTagFallbackWarnOnly:
-			// 仅记录日志，不再实际回退，便于观测是否仍有老客户端依赖固定 tag
-			m.logWarn("fixed tag fallback suppressed (warn-only)", errors.New("suppressed fixed tag fallback"), zap.String("fallback_mode", m.fixedTagModeString()))
-			return releaseInfo{}, fmt.Errorf("获取最新版本失败（fixed-tag 回退 warn-only 已生效）: %v", err)
-		case fixedTagFallbackDisabled:
-			m.logWarn("fixed tag fallback disabled", errors.New("disabled fixed tag fallback"), zap.String("fallback_mode", m.fixedTagModeString()))
-			return releaseInfo{}, fmt.Errorf("获取最新版本失败（fixed-tag 回退已禁用）: %v", err)
-		default:
-			return releaseInfo{}, err
-		}
 	}
+	return releaseInfo{}, errors.New("无法获取最新版本信息（releases/latest）")
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfo(ctx context.Context) (releaseInfo, error) {
