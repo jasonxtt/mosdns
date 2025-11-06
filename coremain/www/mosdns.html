@@ -556,6 +556,28 @@
                         <div class="button-group-inline"><button id="save-rules-btn" class="btn"><i class="fas fa-save"></i> 保存分流规则</button><button id="flush-cache-btn" class="btn"><i class="fas fa-broom"></i> 清空全部缓存</button></div>
                         <div class="button-group-inline" style="margin-top:0.8rem"><button id="flush-rules-btn" class="btn danger"><i class="fas fa-trash-alt"></i> 清空分流规则</button><button id="restart-mosdns-btn" class="btn danger"><i class="fas fa-redo"></i> 重启 MosDNS</button></div>
                     </div>
+
+                    <!-- 覆盖配置：socks5 与 ECS -->
+                    <div class="overrides-section" style="margin-top: 1.2rem; border-top: 1px solid var(--border-color); padding-top: 1.2rem;">
+                        <h4 class="section-title"><i class="fas fa-sliders-h"></i> 覆盖配置</h4>
+                        <div class="control-group" style="align-items: center; gap: .6rem; flex-wrap: wrap;">
+                            <label class="control-base-label" for="override-socks5" style="min-width: 90px;">socks5 代理</label>
+                            <input type="text" id="override-socks5" placeholder="host:port" style="width: 240px;" />
+                            <span class="hint" style="color: var(--label-color);">留空表示不覆盖</span>
+                        </div>
+                        <div class="control-group" style="align-items: center; gap: .6rem; margin-top: .6rem; flex-wrap: wrap;">
+                            <label class="control-base-label" for="override-ecs" style="min-width: 90px;">ECS IP</label>
+                            <input type="text" id="override-ecs" placeholder="IPv4 / IPv6" style="width: 240px;" />
+                            <span class="hint" style="color: var(--label-color);">留空表示不覆盖</span>
+                        </div>
+                        <div class="button-group-inline" style="margin-top: .8rem; gap: .6rem;">
+                            <button id="overrides-load-btn" class="btn"><i class="fas fa-download"></i> 读取当前</button>
+                            <button id="overrides-save-btn" class="btn"><i class="fas fa-upload"></i> 保存</button>
+                        </div>
+                        <p class="subtle-tip" style="margin-top: .4rem; color: var(--label-color);">
+                            保存后需重启 MosDNS 生效。
+                        </p>
+                    </div>
                 </div>
             </section>
             <section class="control-section">
@@ -1023,6 +1045,42 @@
             const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) { const errorText = await response.text(); throw new Error(errorText || `请求失败，状态码: ${response.status}`); }
             return response;
+        }
+
+        // 覆盖配置：加载与保存
+        async function loadOverridesToForm() {
+            try {
+                const res = await fetch('/api/v1/overrides');
+                if (!res.ok) throw new Error(`加载覆盖配置失败: ${res.status}`);
+                const data = await res.json();
+                const socks5 = (data && data.socks5) || '';
+                const ecs = (data && data.ecs) || '';
+                getById('override-socks5').value = socks5;
+                getById('override-ecs').value = ecs;
+            } catch (e) {
+                showToast('读取覆盖配置失败', 'error');
+                console.error(e);
+            }
+        }
+
+        async function saveOverridesFromForm() {
+            const socks5 = getById('override-socks5').value.trim();
+            const ecs = getById('override-ecs').value.trim();
+            const payload = {};
+            if (socks5) payload.socks5 = socks5;
+            if (ecs) payload.ecs = ecs;
+            if (Object.keys(payload).length === 0) {
+                showToast('没有可保存的覆盖项');
+                return;
+            }
+            try {
+                const res = await postApi('/api/v1/overrides', payload);
+                await res.text();
+                showToast('覆盖配置已保存');
+            } catch (e) {
+                showToast('保存覆盖配置失败', 'error');
+                showErrorModal(e.message || '保存失败');
+            }
         }
 
         async function initializeSwitchManagementTab() {
@@ -1559,6 +1617,12 @@
             getById('data-modal-close').onclick = hideDataModal;
             dataModal.onclick = (e) => { if(e.target === dataModal) hideDataModal(); };
 
+            // 覆盖配置按钮事件
+            const loadBtn = getById('overrides-load-btn');
+            const saveBtn = getById('overrides-save-btn');
+            if (loadBtn) loadBtn.onclick = () => loadOverridesToForm().then(() => showToast('已读取当前覆盖配置'));
+            if (saveBtn) saveBtn.onclick = () => saveOverridesFromForm();
+
             getById('error-modal-close').onclick = hideErrorModal;
             getById('error-modal').onclick = (e) => { if(e.target === getById('error-modal')) hideErrorModal(); };
 
@@ -1777,6 +1841,9 @@
             if (autoRefresh) getById('auto-refresh-toggle').dispatchEvent(new Event('change'));
             
             initializeTooltips();
+
+            // 初始化时预取覆盖配置
+            loadOverridesToForm();
         });
     </script>
 </body>
