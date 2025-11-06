@@ -506,10 +506,10 @@ func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, e
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseInfo, error) {
-	url := fmt.Sprintf(githubLatestAPI, githubOwner, githubRepo)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return releaseInfo{}, err
+    url := fmt.Sprintf(githubLatestAPI, githubOwner, githubRepo)
+    req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+    if err != nil {
+        return releaseInfo{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", userAgent)
@@ -533,18 +533,19 @@ func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseI
 		return releaseInfo{}, fmt.Errorf("GitHub API 请求失败: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
 	}
 
-	var payload struct {
-		TagName     string        `json:"tag_name"`
-		PublishedAt *time.Time    `json:"published_at"`
-		Assets      []githubAsset `json:"assets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return releaseInfo{}, err
-	}
-	if payload.TagName == "" {
-		return releaseInfo{}, errors.New("API 未返回 tag 名称")
-	}
-	return releaseInfo{publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
+    var payload struct {
+        TagName     string        `json:"tag_name"`
+        PublishedAt *time.Time    `json:"published_at"`
+        Assets      []githubAsset `json:"assets"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+        return releaseInfo{}, err
+    }
+    if payload.TagName == "" {
+        return releaseInfo{}, errors.New("API 未返回 tag 名称")
+    }
+    // 关键修复：确保通过 API 路径返回真实 tag，用于 UI 展示与 ReleaseURL 构造
+    return releaseInfo{tagName: payload.TagName, publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
