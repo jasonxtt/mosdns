@@ -19,6 +19,7 @@ import (
     "strings"
     "sync"
     "time"
+    stdlog "log"
 
     "github.com/IrineSistiana/mosdns/v5/mlog"
     "go.uber.org/zap"
@@ -276,12 +277,41 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 
     // 记录一次探测信息，便于排查未显示 v3 提示的情况
     if lg := m.logger(); lg != nil {
+        goamd64 := readGOAMD64()
+        cpuModel := cpuModelName()
         lg.Info("update status",
             zap.String("arch", status.Architecture),
+            zap.String("current", status.CurrentVersion),
             zap.String("latest", status.LatestVersion),
             zap.Bool("update_available", status.UpdateAvailable),
             zap.Bool("amd64_v3_capable", status.AMD64V3Capable),
             zap.Bool("current_is_v3", status.CurrentIsV3),
+            zap.String("goamd64", goamd64),
+            zap.String("cpu_model", cpuModel),
+            zap.Bool("cpu_avx2", runtime.GOARCH == "amd64" && xcpu.X86.HasAVX2),
+            zap.Bool("cpu_bmi1", runtime.GOARCH == "amd64" && xcpu.X86.HasBMI1),
+            zap.Bool("cpu_bmi2", runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2),
+            zap.Bool("cpu_fma", runtime.GOARCH == "amd64" && xcpu.X86.HasFMA),
+        )
+        // 兼容 stdout/stderr 场景的简洁日志，便于快速排查（与 requery 插件日志一致风格）
+        stdlog.Printf("[update] arch=%s current=%s latest=%s update=%t goamd64=%s v3_capable=%t current_is_v3=%t cpu='%s' avx2=%t bmi1=%t bmi2=%t fma=%t",
+            status.Architecture, status.CurrentVersion, status.LatestVersion, status.UpdateAvailable, goamd64,
+            status.AMD64V3Capable, status.CurrentIsV3, cpuModel,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasAVX2,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasBMI1,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasFMA,
+        )
+        // 中文直观概览
+        stdlog.Printf("[update] 概览：当前版本=%s 最新版本=%s 架构=%s CPU=%s CPU支持v3=%s 当前为v3构建=%s GOAMD64=%s 需要更新=%s",
+            status.CurrentVersion,
+            status.LatestVersion,
+            status.Architecture,
+            cpuModel,
+            yesNoCN(status.AMD64V3Capable),
+            yesNoCN(status.CurrentIsV3),
+            nonEmpty(goamd64, "未知"),
+            yesNoCN(status.UpdateAvailable),
         )
     }
 
@@ -316,6 +346,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
     // 若用户显式请求 v3，并且平台/CPU 支持，尝试切换到 v3 资产
     if preferV3 && runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") && cpuSupportsAMD64V3() {
         if lg := m.logger(); lg != nil { lg.Info("prefer v3 requested; trying to switch asset") }
+        stdlog.Printf("[update] 已收到手动切换为 v3 的请求：如果存在 v3 资产将优先选择该包进行更新（不改变版本号，仅切换构建）。")
         if rel, err := m.fetchReleaseInfo(ctx); err == nil {
             if v3 := findV3Asset(rel.assets); v3 != nil {
                 status.AssetName = v3.Name
@@ -765,6 +796,54 @@ func cpuSupportsAMD64V3() bool {
     }
     // 依据 Go 官方 GOAMD64 v3 的近似集合进行判断（保守取交集）。
     return xcpu.X86.HasAVX2 && xcpu.X86.HasBMI1 && xcpu.X86.HasBMI2 && xcpu.X86.HasFMA
+}
+
+// readGOAMD64 返回当前二进制的 GOAMD64 构建档位（v1/v2/v3/v4），未知则返回空串。
+func readGOAMD64() string {
+    if bi, ok := debug.ReadBuildInfo(); ok {
+        for _, s := range bi.Settings {
+            if s.Key == "GOAMD64" {
+                return strings.ToLower(strings.TrimSpace(s.Value))
+            }
+        }
+    }
+    return ""
+}
+
+// cpuModelName 在 Linux 上尝试读取 /proc/cpuinfo 的 model name；其他平台返回空串。
+func cpuModelName() string {
+    if runtime.GOOS != "linux" {
+        return ""
+    }
+    data, err := os.ReadFile("/proc/cpuinfo")
+    if err != nil {
+        return ""
+    }
+    lines := strings.Split(string(data), "\n")
+    for _, ln := range lines {
+        if strings.HasPrefix(strings.ToLower(ln), "model name") {
+            if idx := strings.Index(ln, ":"); idx != -1 {
+                return strings.TrimSpace(ln[idx+1:])
+            }
+        }
+    }
+    return ""
+}
+
+// yesNoCN 将布尔值转换为“是/否”。
+func yesNoCN(b bool) string {
+    if b {
+        return "是"
+    }
+    return "否"
+}
+
+// nonEmpty 返回 s，否则返回 fallback。
+func nonEmpty(s, fallback string) string {
+    if strings.TrimSpace(s) == "" {
+        return fallback
+    }
+    return s
 }
 
 func buildAssetSignature(asset githubAsset) string {
