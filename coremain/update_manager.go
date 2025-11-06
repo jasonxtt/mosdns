@@ -48,7 +48,8 @@ var (
 	GlobalUpdateManager  = NewUpdateManager()
 
 	assetLinkRegex    = regexp.MustCompile(fmt.Sprintf(`href="(/%s/%s/releases/download/[^" ]+/([^"?]+))"`, githubOwner, githubRepo))
-	tagFromURLRegex   = regexp.MustCompile(`/releases/tag/([^"'<>\s]+)`)
+    tagFromURLRegex   = regexp.MustCompile(`/releases/tag/([^"'<>\s]+)`)
+    expandedTagRegex  = regexp.MustCompile(`/releases/expanded_assets/([^"'<>\s]+)`)
 	assetHashRegex    = regexp.MustCompile(`sha256:([a-fA-F0-9]{64})`)
 	relativeTimeRegex = regexp.MustCompile(`<relative-time[^>]+datetime="([^\"]+)"`)
 )
@@ -649,18 +650,24 @@ func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseI
 }
 
 func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
-	latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", githubOwner, githubRepo)
-	body, err := m.fetchHTML(ctx, latestURL)
-	if err != nil {
-		return releaseInfo{}, err
-	}
-	tag := ""
-	if match := tagFromURLRegex.FindStringSubmatch(body); len(match) == 2 {
-		tag = match[1]
-	}
-	if tag == "" {
-		return releaseInfo{}, errors.New("无法从 latest 页面解析 tag")
-	}
+    latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", githubOwner, githubRepo)
+    body, err := m.fetchHTML(ctx, latestURL)
+    if err != nil {
+        return releaseInfo{}, err
+    }
+    tag := ""
+    if match := tagFromURLRegex.FindStringSubmatch(body); len(match) == 2 {
+        tag = match[1]
+    }
+    // 防止解析到 GitHub 占位符（如 *name）导致 404
+    if tag == "" || strings.Contains(tag, "*") {
+        if match := expandedTagRegex.FindStringSubmatch(body); len(match) == 2 {
+            tag = match[1]
+        }
+    }
+    if tag == "" || strings.Contains(tag, "*") {
+        return releaseInfo{}, errors.New("无法从 latest 页面解析 tag（命中占位符或为空）")
+    }
 
 	// 发布时间（可选）
 	var publishedAt *time.Time
@@ -670,10 +677,10 @@ func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (release
 		}
 	}
 
-	assetsHTML, err := m.fetchHTML(ctx, fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, tag))
-	if err != nil {
-		return releaseInfo{}, err
-	}
+    assetsHTML, err := m.fetchHTML(ctx, fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, tag))
+    if err != nil {
+        return releaseInfo{}, err
+    }
 	assets := parseAssetsFromHTML(assetsHTML)
 	if len(assets) == 0 {
 		return releaseInfo{}, errors.New("未在最新发布页面解析到资产")
