@@ -2458,8 +2458,10 @@ document.addEventListener('DOMContentLoaded', () => {
         historyManager.load();
         autoRefreshManager.loadSettings();
         tableSorter.init();
-		switchManager.init();
-		updateManager.init();
+        switchManager.init();
+        // 绑定 info-icon 提示（例如日志容量的说明图标）
+        bindInfoIconTooltips();
+        updateManager.init();
 		mountGlobalInfoIconDelegation();
         setupEventListeners();
         setupGlowEffect();
