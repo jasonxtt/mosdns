@@ -21,6 +21,7 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"go.uber.org/zap"
+	"golang.org/x/sys/cpu"
 )
 
 const (
@@ -624,28 +625,36 @@ func (m *UpdateManager) fetchHTML(ctx context.Context, url string) (string, erro
 }
 
 func selectAsset(assets []githubAsset) *githubAsset {
-	var candidates []string
-	switch runtime.GOOS {
-	case "linux":
-		switch runtime.GOARCH {
-		case "amd64":
-			candidates = []string{"mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip"}
-		case "arm64":
-			candidates = []string{"mosdns-linux-arm64.zip"}
-		case "arm":
-			candidates = []string{"mosdns-linux-arm-7.zip", "mosdns-linux-arm-6.zip", "mosdns-linux-arm-5.zip"}
-		case "mips", "mips64", "mips64le", "mipsle":
-			candidates = append(candidates, fmt.Sprintf("mosdns-linux-%s.zip", runtime.GOARCH))
-		}
-	case "darwin":
-		candidates = append(candidates, fmt.Sprintf("mosdns-darwin-%s.zip", runtime.GOARCH))
-	case "windows":
-		if runtime.GOARCH == "amd64" {
-			candidates = []string{"mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip"}
-		} else if runtime.GOARCH == "arm64" {
-			candidates = []string{"mosdns-windows-arm64.zip"}
-		}
-	}
+    var candidates []string
+    switch runtime.GOOS {
+    case "linux":
+        switch runtime.GOARCH {
+        case "amd64":
+            if amd64v3Supported() {
+                candidates = []string{"mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip"}
+            } else {
+                candidates = []string{"mosdns-linux-amd64.zip"}
+            }
+        case "arm64":
+            candidates = []string{"mosdns-linux-arm64.zip"}
+        case "arm":
+            candidates = []string{"mosdns-linux-arm-7.zip", "mosdns-linux-arm-6.zip", "mosdns-linux-arm-5.zip"}
+        case "mips", "mips64", "mips64le", "mipsle":
+            candidates = append(candidates, fmt.Sprintf("mosdns-linux-%s.zip", runtime.GOARCH))
+        }
+    case "darwin":
+        candidates = append(candidates, fmt.Sprintf("mosdns-darwin-%s.zip", runtime.GOARCH))
+    case "windows":
+        if runtime.GOARCH == "amd64" {
+            if amd64v3Supported() {
+                candidates = []string{"mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip"}
+            } else {
+                candidates = []string{"mosdns-windows-amd64.zip"}
+            }
+        } else if runtime.GOARCH == "arm64" {
+            candidates = []string{"mosdns-windows-arm64.zip"}
+        }
+    }
 
 	for _, name := range candidates {
 		for idx := range assets {
@@ -657,7 +666,36 @@ func selectAsset(assets []githubAsset) *githubAsset {
 	if len(assets) > 0 {
 		return &assets[0]
 	}
-	return nil
+    return nil
+}
+
+// amd64v3Supported returns whether the current CPU very likely
+// supports running amd64-v3 binaries. We keep the check conservative:
+// only return true when key features are present.
+//
+// Rationale: x86-64-v3 roughly maps to AVX2 + BMI1/2 + FMA + POPCNT
+// (and others). x/sys/cpu exposes reliable runtime flags for these.
+// If any are missing, prefer the generic amd64 build to avoid crashes
+// on older CPUs mis-detected as v3.
+func amd64v3Supported() bool {
+    if runtime.GOARCH != "amd64" {
+        return false
+    }
+    // Be conservative: require the common v3 set to all be present.
+    // If OS doesn't enable AVX state, HasAVX2 will be false as well.
+    if !cpu.X86.HasAVX2 {
+        return false
+    }
+    if !cpu.X86.HasBMI1 || !cpu.X86.HasBMI2 {
+        return false
+    }
+    if !cpu.X86.HasFMA {
+        return false
+    }
+    if !cpu.X86.HasPOPCNT {
+        return false
+    }
+    return true
 }
 
 func buildAssetSignature(asset githubAsset) string {
