@@ -1066,8 +1066,15 @@
         async function saveOverridesFromForm() {
             const socks5 = getById('override-socks5').value.trim();
             const ecs = getById('override-ecs').value.trim();
+            const payload = {};
+            if (socks5) payload.socks5 = socks5;
+            if (ecs) payload.ecs = ecs;
+            if (Object.keys(payload).length === 0) {
+                showToast('没有可保存的覆盖项');
+                return;
+            }
             try {
-                const res = await postApi('/api/v1/overrides', { socks5, ecs });
+                const res = await postApi('/api/v1/overrides', payload);
                 await res.text();
                 showToast('覆盖配置已保存');
             } catch (e) {
