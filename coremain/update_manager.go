@@ -19,6 +19,7 @@ import (
     "strings"
     "sync"
     "time"
+    stdlog "log"
 
     "github.com/IrineSistiana/mosdns/v5/mlog"
     "go.uber.org/zap"
@@ -292,6 +293,15 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
             zap.Bool("cpu_bmi2", runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2),
             zap.Bool("cpu_fma", runtime.GOARCH == "amd64" && xcpu.X86.HasFMA),
         )
+        // 兼容 stdout/stderr 场景的简洁日志，便于快速排查（与 requery 插件日志一致风格）
+        stdlog.Printf("[update] arch=%s current=%s latest=%s update=%t goamd64=%s v3_capable=%t current_is_v3=%t cpu='%s' avx2=%t bmi1=%t bmi2=%t fma=%t",
+            status.Architecture, status.CurrentVersion, status.LatestVersion, status.UpdateAvailable, goamd64,
+            status.AMD64V3Capable, status.CurrentIsV3, cpuModel,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasAVX2,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasBMI1,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2,
+            runtime.GOARCH == "amd64" && xcpu.X86.HasFMA,
+        )
     }
 
 	if asset := selectAsset(rel.assets); asset != nil {
@@ -325,6 +335,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
     // 若用户显式请求 v3，并且平台/CPU 支持，尝试切换到 v3 资产
     if preferV3 && runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") && cpuSupportsAMD64V3() {
         if lg := m.logger(); lg != nil { lg.Info("prefer v3 requested; trying to switch asset") }
+        stdlog.Printf("[update] prefer_v3=true request received; switching asset if available")
         if rel, err := m.fetchReleaseInfo(ctx); err == nil {
             if v3 := findV3Asset(rel.assets); v3 != nil {
                 status.AssetName = v3.Name
