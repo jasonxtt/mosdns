@@ -331,12 +331,14 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 			action.Notes = fmt.Sprintf("写入新文件失败: %v", err)
 			return action, err
 		}
-		action.Notes = fmt.Sprintf("已将新版写入 %s，请手动替换 mosdns.exe", target)
+		// 短文案：避免在 UI 中出现过长路径
+		action.Notes = "更新已下载，已生成 mosdns.exe.new，请手动替换并重启。"
 		action.RestartRequired = true
 		status.PendingRestart = true
 		m.mu.Lock()
 		m.pendingSignature = status.AssetSignature
 		m.mu.Unlock()
+		status.Message = action.Notes
 		action.Status = status
 		return action, nil
 	}
@@ -348,7 +350,8 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 
 	action.Installed = true
 	action.RestartRequired = true
-	action.Notes = fmt.Sprintf("新版本已写入 %s，重启 Mosdns 后生效。", exePath)
+	// 短文案：由前端呈现“自重启中”状态
+	action.Notes = "更新已安装，正在自重启…"
 
 	status.PendingRestart = true
 	status.Message = action.Notes
@@ -357,8 +360,12 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 	m.recordInstalled(status.AssetSignature)
 	if err := m.triggerPostUpgradeHook(ctx); err != nil {
 		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", postUpgradeEndpoint))
+		// 简短降级提示
+		action.Notes = "更新已安装，请手动重启。"
+		status.Message = action.Notes
 	} else {
-		action.Notes += " 已请求自重启。"
+		// 保持简短
+		action.Notes = "更新已安装，正在自重启…"
 		status.Message = action.Notes
 	}
 

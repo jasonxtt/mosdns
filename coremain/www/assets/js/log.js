@@ -815,14 +815,17 @@ document.addEventListener('DOMContentLoaded', () => {
 			elements.updateStatusText.textContent = status.message || (status.update_available ? '发现新版本，可立即更新。' : '已是最新版本');
 			const lastChecked = status.checked_at ? new Date(status.checked_at) : null;
 			elements.updateLastChecked.textContent = lastChecked ? lastChecked.toLocaleString() : '--';
-			if (elements.updateApplyBtn) {
-				const span = elements.updateApplyBtn.querySelector('span');
-				let label = '立即更新';
-				if (status.pending_restart) label = '等待重启';
-				else if (!this.canApply()) label = '已是最新';
-				if (span) span.textContent = label;
-				elements.updateApplyBtn.dataset.defaultText = label;
-			}
+            if (elements.updateApplyBtn) {
+                const span = elements.updateApplyBtn.querySelector('span');
+                let label = '立即更新';
+                if (status.pending_restart) {
+                    // 非 Windows：自重启中；Windows：等待手动重启
+                    const isWindows = (status.architecture || '').startsWith('windows/');
+                    label = isWindows ? '等待重启' : '重启中…';
+                } else if (!this.canApply()) label = '已是最新';
+                if (span) span.textContent = label;
+                elements.updateApplyBtn.dataset.defaultText = label;
+            }
 			if (elements.updateForceBtn) {
 				const span = elements.updateForceBtn.querySelector('span');
 				if (span) span.textContent = '强制更新';
@@ -832,9 +835,16 @@ document.addEventListener('DOMContentLoaded', () => {
 				const span = elements.updateCheckBtn.querySelector('span');
 				if (span) { span.textContent = '强制检查'; elements.updateCheckBtn.dataset.defaultText = '强制检查'; }
 			}
-			if (status.pending_restart) {
-				this.setHint(status.message || '已安装更新，等待服务重启生效。');
-			}
+            if (status.pending_restart) {
+                const isWindows = (status.architecture || '').startsWith('windows/');
+                const msg = isWindows ? '更新已安装，等待手动重启生效。' : '更新已安装，正在自重启…';
+                elements.updateStatusText.textContent = msg;
+                this.setHint(msg);
+            } else if (status.message) {
+                // 截断过长信息，避免溢出
+                const trimmed = (status.message || '').toString();
+                elements.updateStatusText.textContent = trimmed.length > 120 ? trimmed.slice(0,117) + '…' : trimmed;
+            }
 			this.refreshButtons();
 		},
 
