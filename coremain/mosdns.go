@@ -22,11 +22,13 @@ package coremain
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -49,9 +51,10 @@ type Mosdns struct {
 	// Plugins
 	plugins map[string]any
 
-	httpMux    *chi.Mux
-	metricsReg *prometheus.Registry
-	sc         *safe_close.SafeClose
+	httpMux         *chi.Mux
+	metricsReg      *prometheus.Registry
+	sc              *safe_close.SafeClose
+	globalOverrides *GlobalOverrides // <<< ADDED
 }
 
 // NewMosdns initializes a mosdns instance and its plugins.
@@ -79,15 +82,39 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 		sc:         safe_close.NewSafeClose(),
 	}
 
+	// <<< START OF MODIFICATIONS >>>
+	// Step 1: Discover original settings from the raw config. This must be done
+	// before any overrides are applied. This is for the GET API fallback.
+	DiscoverAndCacheSettings(cfg)
+
+	// Step 2: Load overrides from file. The application of these overrides
+	// will happen inside `loadPluginsFromCfg` for each plugin config.
+	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	data, err := os.ReadFile(overridesPath)
+	if err == nil {
+		var overrides GlobalOverrides
+		if json.Unmarshal(data, &overrides) == nil {
+			m.globalOverrides = &overrides
+			mlog.L().Info("loaded global overrides from file",
+				zap.String("path", overridesPath),
+				zap.String("socks5", overrides.Socks5),
+				zap.String("ecs", overrides.ECS))
+		} else {
+			mlog.L().Error("failed to parse config_overrides.json, it will be ignored", zap.Error(err))
+		}
+	}
+	// <<< END OF MODIFICATIONS >>>
+
 	// This must be called after m.httpMux and m.metricsReg been set.
 	m.initHttpMux()
 
 	// Register our new APIs.
-	RegisterCaptureAPI(m.httpMux) // For process logs
-	RegisterAuditAPI(m.httpMux)   // For audit logs v1
-	RegisterAuditAPIV2(m.httpMux) // For audit logs v2
-    RegisterUpdateAPI(m.httpMux)  // For binary updates
-    RegisterSystemAPI(m.httpMux)  // For self-restart
+	RegisterCaptureAPI(m.httpMux)  // For process logs
+	RegisterAuditAPI(m.httpMux)    // For audit logs v1
+	RegisterAuditAPIV2(m.httpMux)  // For audit logs v2
+	RegisterOverridesAPI(m.httpMux) // <<< ADDED
+	RegisterUpdateAPI(m.httpMux)  // For binary updates
+	RegisterSystemAPI(m.httpMux)  // For self-restart
 
 	// Start http api server
 	if httpAddr := cfg.API.HTTP; len(httpAddr) > 0 {
@@ -394,6 +421,11 @@ func (m *Mosdns) loadPluginsFromCfg(cfg *Config, includeDepth int) error {
 	}
 
 	for i, pc := range cfg.Plugins {
+		// <<< MODIFIED: This is the correct "interception point".
+		if m.globalOverrides != nil {
+			ApplyOverrides(&pc, m.globalOverrides)
+		}
+		// <<< END MODIFICATION
 		if err := m.newPlugin(pc); err != nil {
 			return fmt.Errorf("failed to init plugin #%d %s, %w", i, pc.Tag, err)
 		}
