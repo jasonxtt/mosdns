@@ -358,7 +358,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool) (UpdateAc
 	if err := m.triggerPostUpgradeHook(ctx); err != nil {
 		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", postUpgradeEndpoint))
 	} else {
-		action.Notes += " 已请求刷新 my_fakeiplist。"
+		action.Notes += " 已请求自重启。"
 		status.Message = action.Notes
 	}
 
