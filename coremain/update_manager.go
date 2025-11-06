@@ -443,7 +443,7 @@ func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
                     return nil
                 }
                 // 记录非 2xx 的响应，继续走本地回退
-                m.logWarn("self-restart hook returned non-2xx", fmt.Errorf(resp.Status), zap.String("endpoint", endpoint))
+                m.logWarn("self-restart hook returned non-2xx", fmt.Errorf("HTTP %s", resp.Status), zap.String("endpoint", endpoint))
             } else {
                 // 记录 HTTP 失败，继续走本地回退
                 m.logWarn("self-restart hook request failed", err, zap.String("endpoint", endpoint))
