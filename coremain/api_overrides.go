@@ -1,11 +1,11 @@
 package coremain
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "os"
+    "path/filepath"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/go-chi/chi/v5"
@@ -14,15 +14,21 @@ import (
 
 // RegisterOverridesAPI registers the global overrides APIs.
 func RegisterOverridesAPI(router *chi.Mux) {
-	router.Route("/api/v1/overrides", func(r chi.Router) {
-		r.Get("/", handleGetOverrides)
-		r.Post("/", handleSetOverrides)
-	})
+    router.Route("/api/v1/overrides", func(r chi.Router) {
+        r.Get("/", handleGetOverrides)
+        r.Post("/", handleSetOverrides)
+    })
+}
+
+// PartialOverrides 用于区分字段是否在 JSON 中出现（指针为 nil 表示未提供）。
+type PartialOverrides struct {
+    Socks5 *string `json:"socks5"`
+    ECS    *string `json:"ecs"`
 }
 
 func handleGetOverrides(w http.ResponseWriter, r *http.Request) {
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
-	data, err := os.ReadFile(overridesPath)
+    overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+    data, err := os.ReadFile(overridesPath)
 
 	var response GlobalOverrides
 	if err == nil {
@@ -45,14 +51,14 @@ func handleGetOverrides(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSetOverrides(w http.ResponseWriter, r *http.Request) {
-	var newOverrides GlobalOverrides
-	if err := json.NewDecoder(r.Body).Decode(&newOverrides); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
+    var patch PartialOverrides
+    if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+        http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+        return
+    }
 
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
-	currentOverrides := GlobalOverrides{}
+    overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+    currentOverrides := GlobalOverrides{}
 
 	// Read existing file to preserve other potential settings in the future.
 	data, err := os.ReadFile(overridesPath)
@@ -61,9 +67,13 @@ func handleSetOverrides(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(data, &currentOverrides)
 	}
 
-	// Update with new values from the request.
-	currentOverrides.Socks5 = newOverrides.Socks5
-	currentOverrides.ECS = newOverrides.ECS
+    // 仅在请求中提供了对应字段时才更新，避免空值覆盖。
+    if patch.Socks5 != nil {
+        currentOverrides.Socks5 = *patch.Socks5
+    }
+    if patch.ECS != nil {
+        currentOverrides.ECS = *patch.ECS
+    }
 
 	// Write back to the file.
 	updatedData, err := json.MarshalIndent(currentOverrides, "", "  ")
