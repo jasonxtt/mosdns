@@ -274,6 +274,17 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
         status.CurrentIsV3 = binaryIsAMD64V3Plus()
     }
 
+    // 记录一次探测信息，便于排查未显示 v3 提示的情况
+    if lg := m.logger(); lg != nil {
+        lg.Info("update status",
+            zap.String("arch", status.Architecture),
+            zap.String("latest", status.LatestVersion),
+            zap.Bool("update_available", status.UpdateAvailable),
+            zap.Bool("amd64_v3_capable", status.AMD64V3Capable),
+            zap.Bool("current_is_v3", status.CurrentIsV3),
+        )
+    }
+
 	if asset := selectAsset(rel.assets); asset != nil {
 		status.AssetName = asset.Name
 		status.DownloadURL = asset.BrowserDownloadURL
@@ -304,6 +315,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 
     // 若用户显式请求 v3，并且平台/CPU 支持，尝试切换到 v3 资产
     if preferV3 && runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") && cpuSupportsAMD64V3() {
+        if lg := m.logger(); lg != nil { lg.Info("prefer v3 requested; trying to switch asset") }
         if rel, err := m.fetchReleaseInfo(ctx); err == nil {
             if v3 := findV3Asset(rel.assets); v3 != nil {
                 status.AssetName = v3.Name
