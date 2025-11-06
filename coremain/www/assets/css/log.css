@@ -594,8 +594,12 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 @media (min-width: 1600px) {
   [data-layout="comfortable"] .container { max-width: 1500px; }
   [data-layout="comfortable"] .overview-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
-  /* 固定四列，避免 mini 卡片在宽屏下换行 */
-  [data-layout="comfortable"] .control-panel-grid { grid-template-columns: repeat(4, 1fr); }
+  /* 大屏采用12栅格：
+     - 顶部4个mini模块：每个占3列 (4x3=12)
+     - 下面3个核心模块：每个占4列 (3x4=12)  */
+  .control-panel-grid { grid-template-columns: repeat(12, 1fr); }
+  .control-panel-grid > .control-module--mini { grid-column: span 3; }
+  #domain-stats-module, #system-info-module, #update-module { grid-column: span 4; }
 }
 @media (min-width: 2000px) { [data-layout="comfortable"] .container { max-width: 1900px; } }
 @media (max-width: 992px) { .page-header { justify-content: center; gap: 0.75rem; } h1 { flex-basis: 100%; text-align: center; margin-bottom: 0.5rem; } .header-main-actions { order: 1; flex-grow: 1; justify-content: center; } .overview-grid { grid-template-columns: 1fr; } }
