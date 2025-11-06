@@ -302,6 +302,17 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
             runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2,
             runtime.GOARCH == "amd64" && xcpu.X86.HasFMA,
         )
+        // 中文直观概览
+        stdlog.Printf("[update] 概览：当前版本=%s 最新版本=%s 架构=%s CPU=%s CPU支持v3=%s 当前为v3构建=%s GOAMD64=%s 需要更新=%s",
+            status.CurrentVersion,
+            status.LatestVersion,
+            status.Architecture,
+            cpuModel,
+            yesNoCN(status.AMD64V3Capable),
+            yesNoCN(status.CurrentIsV3),
+            nonEmpty(goamd64, "未知"),
+            yesNoCN(status.UpdateAvailable),
+        )
     }
 
 	if asset := selectAsset(rel.assets); asset != nil {
@@ -335,7 +346,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
     // 若用户显式请求 v3，并且平台/CPU 支持，尝试切换到 v3 资产
     if preferV3 && runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") && cpuSupportsAMD64V3() {
         if lg := m.logger(); lg != nil { lg.Info("prefer v3 requested; trying to switch asset") }
-        stdlog.Printf("[update] prefer_v3=true request received; switching asset if available")
+        stdlog.Printf("[update] 已收到手动切换为 v3 的请求：如果存在 v3 资产将优先选择该包进行更新（不改变版本号，仅切换构建）。")
         if rel, err := m.fetchReleaseInfo(ctx); err == nil {
             if v3 := findV3Asset(rel.assets); v3 != nil {
                 status.AssetName = v3.Name
@@ -817,6 +828,22 @@ func cpuModelName() string {
         }
     }
     return ""
+}
+
+// yesNoCN 将布尔值转换为“是/否”。
+func yesNoCN(b bool) string {
+    if b {
+        return "是"
+    }
+    return "否"
+}
+
+// nonEmpty 返回 s，否则返回 fallback。
+func nonEmpty(s, fallback string) string {
+    if strings.TrimSpace(s) == "" {
+        return fallback
+    }
+    return s
 }
 
 func buildAssetSignature(asset githubAsset) string {
