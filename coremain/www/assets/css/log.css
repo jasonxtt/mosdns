@@ -719,7 +719,7 @@ dialog.card:hover { border-color: var(--color-border) !important; }
     .mobile-log-row .meta .client { max-width: 15ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } 
     .mobile-log-row .meta .duration { font-weight: 500; } 
 
-    /* --- NEW: Mobile styles for Cache Management Table --- */
+/* --- NEW: Mobile styles for Cache Management Table --- */
     .cache-card-mobile {
         display: flex;
         flex-direction: column;
@@ -880,3 +880,21 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 .control-module--mini .button-group .button { min-height: 2.2rem; }
 .control-module--mini form { display: flex; gap: 0.6rem; width: 100%; }
 .control-module--mini form input { flex: 1; min-width: 0; }
+#requery-module { display: flex; flex-direction: column; gap: 1rem; }
+.requery-header { display: grid; grid-template-columns: 1fr auto; gap: 1rem 2rem; align-items: center; }
+.requery-status-group { display: grid; grid-template-columns: 1fr; gap: 0.5rem; }
+.requery-actions { display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end; }
+.requery-primary-btn { min-width: 180px; }
+.requery-progress-row { padding: 0.25rem 0; }
+.chip { display: inline-flex; align-items: center; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-bg-alt); font-weight: 600; font-size: 0.85rem; }
+.requery-scheduler { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem; border-top: 1px solid var(--color-border); padding-top: 1rem; }
+.requery-scheduler-grid { display: grid; grid-template-columns: 200px 1fr; gap: 0.75rem 1rem; align-items: center; }
+.requery-scheduler-grid .field-label { display: inline-flex; align-items: center; gap: 0.35rem; }
+.requery-important { border-top: 1px solid var(--color-border); padding-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.requery-important-actions { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+@media (max-width: 768px) {
+  .requery-header { grid-template-columns: 1fr; }
+  .requery-actions { justify-content: stretch; }
+  .requery-primary-btn { flex: 1; }
+  .requery-scheduler-grid { grid-template-columns: 1fr; }
+}

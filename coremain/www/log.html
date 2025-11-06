@@ -580,53 +580,58 @@
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4C16.97 4 21 8.03 21 13C21 17.97 16.97 22 12 22C7.03 22 3 17.97 3 13C3 8.03 7.03 4 12 4ZM12 2C5.925 2 1 6.925 1 13C1 19.075 5.925 24 12 24C18.075 24 23 19.075 23 13C23 6.925 18.075 2 12 2ZM12 14.5L8 10.5L9.41 9.09L11 10.67V6H13V10.67L14.59 9.09L16 10.5L12 14.5Z"/></svg>
                         刷新分流缓存
                     </h3>
-                    <div class="control-item">
-                        <strong>当前状态:</strong> <span id="requery-status-text">查询中...</span>
+
+                    <!-- 顶部状态 + 主操作按钮 -->
+                    <div class="requery-header">
+                        <div class="requery-status-group">
+                            <div class="control-item"><strong>当前状态</strong> <span id="requery-status-text" class="chip">查询中...</span></div>
+                            <div class="control-item"><strong>上次运行</strong> <span id="requery-last-run">查询中...</span></div>
+                        </div>
+                        <div class="requery-actions">
+                            <button id="requery-trigger-btn" class="button primary requery-primary-btn" data-default-text="开始全新任务"><span>开始全新任务</span></button>
+                            <button id="requery-cancel-btn" class="button danger requery-primary-btn" data-default-text="取消任务" hidden><span>取消任务</span></button>
+                        </div>
                     </div>
-                    <div id="requery-progress-container" class="control-item" hidden>
-                        <strong>执行进度:</strong>
+
+                    <!-- 进度条 -->
+                    <div id="requery-progress-container" class="requery-progress-row" hidden>
                         <div class="requery-progress-bar">
                             <div id="requery-progress-bar-fill" class="requery-progress-bar-fill"></div>
                             <span id="requery-progress-bar-text" class="requery-progress-bar-text"></span>
                         </div>
                     </div>
-                    <div class="control-item">
-                        <strong>上次运行:</strong> <span id="requery-last-run">查询中...</span>
-                    </div>
-                    <div class="button-group" style="grid-template-columns: 1fr 1fr;">
-                        <button id="requery-trigger-btn" class="button primary" data-default-text="开始全新任务"><span>开始全新任务</span></button>
-                        <button id="requery-cancel-btn" class="button danger" data-default-text="取消任务" hidden><span>取消任务</span></button>
-                    </div>
-                    
-                    <form id="requery-scheduler-form" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1rem; border-top: 1px solid var(--color-border); padding-top: 1.5rem;">
+
+                    <!-- 定时任务设置 -->
+                    <form id="requery-scheduler-form" class="requery-scheduler">
                         <div class="control-item">
                             <strong>启用定时任务</strong>
-                             <label class="switch" style="margin-left: auto;">
+                            <label class="switch" style="margin-left:auto;">
                                 <input type="checkbox" id="requery-scheduler-toggle">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="requery-scheduler-grid">
-                            <label for="requery-start-datetime-input">
-                                <strong>首次执行时间</strong>
+                            <label for="requery-start-datetime-input" class="field-label">
+                                首次执行时间
                                 <span class="info-icon" title="输入您的本地时间。留空则表示插件启动后，到达下个间隔时间点时执行。">
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z"></path></svg>
                                 </span>
                             </label>
                             <input type="datetime-local" id="requery-start-datetime-input">
-                            
-                            <label for="requery-interval-input"><strong>间隔 (分钟)</strong></label>
+
+                            <label for="requery-interval-input" class="field-label">间隔 (分钟)</label>
                             <input type="number" id="requery-interval-input" min="1">
                         </div>
                     </form>
-                    
-                    <div class="control-item" style="margin-top: 1.5rem; border-top: 1px solid var(--color-border); padding-top: 1.5rem; flex-direction: column; align-items: stretch; gap: 1rem;">
-                        <strong>重要操作:</strong>
-                        <div class="button-group" style="grid-template-columns: 1fr 1fr; margin-top: 0;">
-                             <button id="save-shunt-rules-btn" class="button primary" data-default-text="保存分流规则"><span>保存分流规则</span></button>
-                             <button id="clear-shunt-rules-btn" class="button danger" data-default-text="清空分流规则"><span>清空分流规则</span></button>
+
+                    <!-- 重要操作按钮区 -->
+                    <div class="requery-important">
+                        <strong>重要操作</strong>
+                        <div class="button-group requery-important-actions">
+                            <button id="save-shunt-rules-btn" class="button primary" data-default-text="保存分流规则"><span>保存分流规则</span></button>
+                            <button id="clear-shunt-rules-btn" class="button danger" data-default-text="清空分流规则"><span>清空分流规则</span></button>
+                            <button id="requery-clear-backup-btn" class="button danger" data-default-text="清空全量备份"><span>清空全量备份</span></button>
                         </div>
-                         <button id="requery-clear-backup-btn" class="button danger" data-default-text="清空全量备份"><span>清空全量备份</span></button>
                     </div>
                 </div>
 
