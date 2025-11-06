@@ -28,6 +28,7 @@ const (
 	githubRepo           = "mosdns"
 	releaseTag           = "v5-ph-srs"
 	githubReleaseAPI     = "https://api.github.com/repos/%s/%s/releases/tags/%s"
+	githubLatestAPI      = "https://api.github.com/repos/%s/%s/releases/latest"
 	githubReleasePage    = "https://github.com/%s/%s/releases/tag/%s"
 	githubExpandedAssets = "https://github.com/%s/%s/releases/expanded_assets/%s"
 	defaultCacheTTL      = 15 * time.Minute
@@ -42,6 +43,7 @@ var (
 	GlobalUpdateManager  = NewUpdateManager()
 
 	assetLinkRegex    = regexp.MustCompile(fmt.Sprintf(`href="(/%s/%s/releases/download/[^" ]+/([^"?]+))"`, githubOwner, githubRepo))
+	tagFromURLRegex   = regexp.MustCompile(`/releases/tag/([^"'<>\s]+)`)
 	assetHashRegex    = regexp.MustCompile(`sha256:([a-fA-F0-9]{64})`)
 	relativeTimeRegex = regexp.MustCompile(`<relative-time[^>]+datetime="([^\"]+)"`)
 )
@@ -96,6 +98,7 @@ type githubAsset struct {
 }
 
 type releaseInfo struct {
+	tagName     string
 	publishedAt *time.Time
 	assets      []githubAsset
 }
@@ -210,10 +213,14 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 		return UpdateStatus{}, err
 	}
 
+	tag := rel.tagName
+	if tag == "" {
+		tag = releaseTag
+	}
 	status := UpdateStatus{
 		CurrentVersion:   m.currentVersion,
-		LatestVersion:    releaseTag,
-		ReleaseURL:       fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, releaseTag),
+		LatestVersion:    tag,
+		ReleaseURL:       fmt.Sprintf(githubReleasePage, githubOwner, githubRepo, tag),
 		Architecture:     fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 		PublishedAt:      rel.publishedAt,
 		CheckedAt:        now,
@@ -394,13 +401,26 @@ func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
 	return latest != current
 }
 
+// fetchReleaseInfo tries to get the latest release info first (releases/latest),
+// then falls back to the legacy fixed-tag mode (v5-ph-srs) for backward compatibility.
 func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, error) {
-	if info, err := m.fetchReleaseInfoAPI(ctx); err == nil {
+	if info, err := m.fetchLatestReleaseInfo(ctx); err == nil {
 		return info, nil
 	} else {
-		m.logWarn("release API failed, fallback to HTML", err)
+		m.logWarn("latest release fetch failed, fallback to fixed tag", err)
+		// Fallback to fixed tag API/HTML
+		if info2, err2 := m.fetchReleaseInfoAPI(ctx); err2 == nil {
+			return info2, nil
+		}
 		return m.fetchReleaseInfoHTML(ctx)
 	}
+}
+
+func (m *UpdateManager) fetchLatestReleaseInfo(ctx context.Context) (releaseInfo, error) {
+	if info, err := m.fetchLatestReleaseInfoAPI(ctx); err == nil {
+		return info, nil
+	}
+	return m.fetchLatestReleaseInfoHTML(ctx)
 }
 
 func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, error) {
@@ -433,6 +453,7 @@ func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, e
 	}
 
 	var payload struct {
+		TagName     string        `json:"tag_name"`
 		PublishedAt *time.Time    `json:"published_at"`
 		Assets      []githubAsset `json:"assets"`
 	}
@@ -440,7 +461,86 @@ func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, e
 		return releaseInfo{}, err
 	}
 
+	tag := payload.TagName
+	if tag == "" {
+		tag = releaseTag
+	}
+	return releaseInfo{tagName: tag, publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
+}
+
+func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseInfo, error) {
+	url := fmt.Sprintf(githubLatestAPI, githubOwner, githubRepo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return releaseInfo{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", userAgent)
+	if token := os.Getenv("MOSDNS_GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return releaseInfo{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return releaseInfo{}, fmt.Errorf("GitHub API 访问受限: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return releaseInfo{}, fmt.Errorf("GitHub API 请求失败: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var payload struct {
+		TagName     string        `json:"tag_name"`
+		PublishedAt *time.Time    `json:"published_at"`
+		Assets      []githubAsset `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return releaseInfo{}, err
+	}
+	if payload.TagName == "" {
+		return releaseInfo{}, errors.New("API 未返回 tag 名称")
+	}
 	return releaseInfo{publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
+}
+
+func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
+	latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", githubOwner, githubRepo)
+	body, err := m.fetchHTML(ctx, latestURL)
+	if err != nil {
+		return releaseInfo{}, err
+	}
+	tag := ""
+	if match := tagFromURLRegex.FindStringSubmatch(body); len(match) == 2 {
+		tag = match[1]
+	}
+	if tag == "" {
+		return releaseInfo{}, errors.New("无法从 latest 页面解析 tag")
+	}
+
+	// 发布时间（可选）
+	var publishedAt *time.Time
+	if match := relativeTimeRegex.FindStringSubmatch(body); len(match) == 2 {
+		if t, err := time.Parse(time.RFC3339, match[1]); err == nil {
+			publishedAt = &t
+		}
+	}
+
+	assetsHTML, err := m.fetchHTML(ctx, fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, tag))
+	if err != nil {
+		return releaseInfo{}, err
+	}
+	assets := parseAssetsFromHTML(assetsHTML)
+	if len(assets) == 0 {
+		return releaseInfo{}, errors.New("未在最新发布页面解析到资产")
+	}
+	return releaseInfo{tagName: tag, publishedAt: publishedAt, assets: assets}, nil
 }
 
 func (m *UpdateManager) fetchReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
