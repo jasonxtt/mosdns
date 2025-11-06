@@ -127,13 +127,13 @@ func Test_fastUpstream(t *testing.T) {
 							bigMsg:  bigMsg,
 						})
 						defer shutdownServer()
-						u, err := NewUpstream(
-							scheme+"://"+addr,
-							Opt{
-								IdleTimeout: time.Second,
-								TLSConfig:   &tls.Config{InsecureSkipVerify: true},
-							},
-						)
+                    u, err := NewUpstream(
+                        scheme+"://"+addr,
+                        Opt{
+                            IdleTimeout: idleTimeout,
+                            TLSConfig:   &tls.Config{InsecureSkipVerify: true},
+                        },
+                    )
 						if err != nil {
 							t.Fatal(err)
 						}
