@@ -395,7 +395,7 @@
         <section id="system-control-tab" class="tab-content">
              <div class="control-panel-grid">
                 <!-- Row 1 -->
-                <div class="control-module">
+                <div class="control-module control-module--mini">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM11 11H7V13H11V17H13V13H17V11H13V7H11V11Z"></path></svg>审计控制</h3>
                     <div class="control-item">
                         <strong>运行状态:</strong> <span id="audit-status">查询中...</span>
@@ -405,17 +405,72 @@
                         <button id="clear-audit-btn" class="button danger" data-default-text="清空日志"><span>清空日志</span></button>
                     </div>
                 </div>
-                <div class="control-module">
+                <div class="control-module control-module--mini">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C7.02944 3 3 7.02944 3 12C3 16.9706 7.02944 21 12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3ZM12 19C8.13401 19 5 15.866 5 12C5 8.13401 8.13401 5 12 5C15.866 5 19 8.13401 19 12C19 15.866 15.866 19 12 19ZM12 10.5C12.8284 10.5 13.5 11.1716 13.5 12C13.5 12.8284 12.8284 13.5 12 13.5C11.1716 13.5 10.5 12.8284 10.5 12C10.5 11.1716 11.1716 10.5 12 10.5Z"></path></svg>日志容量</h3>
                     <div class="control-item">
                         <strong>当前容量:</strong> <span id="audit-capacity">查询中...</span>
                     </div>
                     <form id="capacity-form">
-                        <input type="number" id="new-capacity" placeholder="新容量 (将清空日志)" required min="1" max="400000">
+                        <input type="number" id="new-capacity" required min="1" max="400000">
                         <button type="submit" class="button primary" data-default-text="设置"><span>设置</span></button>
                     </form>
+                    <div class="control-item tip-inline" style="margin-top: -0.25rem;">
+                        <span class="info-inline" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z"></path></svg>
+                        </span>
+                        <small class="tip-text">设置新容量将清空日志。</small>
+                    </div>
                 </div>
-                
+                <div class="control-module control-module--mini" id="appearance-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V12L16.5 15.5L15.0858 16.9142L11 12.8284V7Z"></path></svg>主题与外观</h3>
+                    <div class="control-item">
+                        <strong>颜色主题</strong>
+                        <div class="color-palette">
+                            <button class="color-swatch" data-color="indigo" style="background-color: #4f46e5;" title="靛蓝" aria-label="靛蓝"></button>
+                            <button class="color-swatch" data-color="pink" style="background-color: #ec4899;" title="粉色" aria-label="粉色"></button>
+                            <button class="color-swatch" data-color="teal" style="background-color: #14b8a6;" title="青色" aria-label="青色"></button>
+                            <button class="color-swatch" data-color="orange" style="background-color: #f97316;" title="橙色" aria-label="橙色"></button>
+                            <button class="color-swatch" data-color="green" style="background-color: #22c55e;" title="绿色" aria-label="绿色"></button>
+                            <button class="color-swatch" data-color="violet" style="background-color: #8b5cf6;" title="紫色" aria-label="紫色"></button>
+                        </div>
+                    </div>
+                    <div class="control-item">
+                        <strong>界面风格</strong>
+                        <select id="theme-switcher-select">
+                           <option value="light">明亮</option>
+                           <option value="dark">黑暗</option>
+                           <option value="sakura">夜樱</option>
+                           <option value="evergreen">常青</option>
+                           <option value="starlight">星光</option>
+                           <option value="dusk">黄昏</option>
+                           <option value="terra">赤土</option>
+                        </select>
+                    </div>
+                    <div class="control-item">
+                        <strong>界面密度</strong>
+                        <select id="layout-density-select">
+                           <option value="comfortable">舒适</option>
+                           <option value="compact">紧凑</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="control-module control-module--mini" id="auto-refresh-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5C12.4142 2.5 12.75 2.83579 12.75 3.25V5.03131C15.2635 5.50376 17.25 7.49021 17.7224 9.99993H19.5C19.9142 9.99993 20.25 10.3357 20.25 10.75V13.25C20.25 13.6642 19.9142 14 19.5 14H17.7224C17.25 16.5097 15.2635 18.4962 12.75 18.9686V20.75C12.75 21.1642 12.4142 21.5 12 21.5C11.5858 21.5 11.25 21.1642 11.25 20.75V18.9686C8.73652 18.4962 6.75 16.5097 6.27758 14H4.5C4.08579 14 3.75 13.6642 3.75 13.25V10.75C3.75 10.3357 4.08579 9.99993 4.5 9.99993H6.27758C6.75 7.49021 8.73652 5.50376 11.25 5.03131V3.25C11.25 2.83579 11.5858 2.5 12 2.5ZM12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7Z"></path></svg>自动刷新</h3>
+                    <form id="auto-refresh-form" class="auto-refresh-form">
+                        <label class="switch" for="auto-refresh-toggle" style="display: contents; cursor: pointer;">
+                            <strong>启用</strong>
+                            <label class="switch">
+                                <input type="checkbox" id="auto-refresh-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </label>
+                        <div>
+                            <input type="number" id="auto-refresh-interval" min="5">
+                            <span>秒/次</span>
+                        </div>
+                    </form>
+                </div>
+
                 <!-- Row 2 -->
                  <div class="control-module" style="grid-column: 1 / -1;">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12.98,2.05C12.67,2.02 12.33,2.02 12.02,2.05C8.44,2.37 5.5,5.29 5.06,8.87C5.02,9.2 5,9.55 5,9.91L5.02,9.99C4.38,10.12 3.8,10.66 3.8,11.35V12.5C3.8,13.25 4.41,13.88 5.16,13.98L5.18,14C5.5,17.56 8.44,20.5 12.02,20.94C12.33,20.98 12.67,20.98 12.98,20.94C16.56,20.5 19.5,17.56 19.82,14L19.84,13.98C20.59,13.88 21.2,13.25 21.2,12.5V11.35C21.2,10.66 20.62,10.12 19.98,9.99L20,9.91C20,9.55 19.98,9.2 19.94,8.87C19.5,5.29 16.56,2.37 12.98,2.05ZM10,7L14,10L10,13V7Z"></path></svg>缓存管理</h3>
@@ -441,7 +496,7 @@
                 </div>
                 
                 <!-- Row 3 -->
-                <div class="control-module">
+                <div class="control-module" id="domain-stats-module">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M4 19h16v-7h2v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8h2v7zM20 3H4v7h2V5h12v5h2V4a1 1 0 0 0-1-1zm-8 4h-2v2H8v2h2v2h2v-2h2v-2h-2V7z"></path></svg>域名列表统计</h3>
                     <div class="scrollable-table-container" style="max-height: none; overflow-y: visible;">
                         <table id="domain-stats-table">
@@ -482,6 +537,49 @@
                         <!-- System info will be injected by JS -->
                     </div>
                 </div>
+                <div class="control-module" id="update-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 4v6h-2V6.41l-4.29 4.3-1.42-1.42 4.3-4.29H14V4h7zM5 17.59l4.29-4.3 1.42 1.42-4.3 4.29H10V20H3v-6h2v3.59z"></path></svg>版本与更新</h3>
+
+                    <!-- 顶部：版本信息 + 操作按钮 -->
+                    <div class="update-header">
+                        <div class="update-versions">
+                            <div class="control-item"><strong>当前版本</strong> <span id="update-current-version" class="chip">检测中...</span></div>
+                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version" class="chip">--</span></div>
+                        </div>
+                        <div class="button-group update-actions">
+                            <button id="update-check-btn" class="button secondary" data-default-text="强制检查"><span>强制检查</span></button>
+                            <button id="update-apply-btn" class="button primary" data-default-text="立即更新" disabled><span>立即更新</span></button>
+                            <button id="update-force-btn" class="button danger" data-default-text="强制更新"><span>强制更新</span></button>
+                        </div>
+                    </div>
+
+                    <!-- 状态横幅 -->
+                    <div class="update-status-banner" role="status" aria-live="polite">
+                        <span id="update-status-text">等待检查</span>
+                    </div>
+
+                    <!-- 元信息：上次检查、匹配构建 -->
+                    <div class="update-meta-grid">
+                        <div class="control-item"><strong>上次检查</strong> <span id="update-last-checked">--</span></div>
+                        <div class="control-item"><strong>匹配构建</strong> <code id="update-target-info">--</code></div>
+                    </div>
+
+                    <!-- 自动检查设置 -->
+                    <div class="update-auto">
+                        <div class="control-item">
+                            <strong>自动检查</strong>
+                            <label class="switch" style="margin-left:auto;">
+                                <input type="checkbox" id="update-auto-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="update-auto-grid">
+                            <label for="update-interval-input" class="field-label">间隔 (分钟)</label>
+                            <input type="number" id="update-interval-input" min="5" max="720" value="60" style="max-width: 140px;">
+                        </div>
+                        <p class="control-hint" id="update-hint-text"></p>
+                    </div>
+                </div>
 
                 <!-- Row 4 -->
                 <div class="control-module" id="requery-module" style="grid-column: 1 / -1;">
@@ -489,53 +587,58 @@
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4C16.97 4 21 8.03 21 13C21 17.97 16.97 22 12 22C7.03 22 3 17.97 3 13C3 8.03 7.03 4 12 4ZM12 2C5.925 2 1 6.925 1 13C1 19.075 5.925 24 12 24C18.075 24 23 19.075 23 13C23 6.925 18.075 2 12 2ZM12 14.5L8 10.5L9.41 9.09L11 10.67V6H13V10.67L14.59 9.09L16 10.5L12 14.5Z"/></svg>
                         刷新分流缓存
                     </h3>
-                    <div class="control-item">
-                        <strong>当前状态:</strong> <span id="requery-status-text">查询中...</span>
+
+                    <!-- 顶部状态 + 主操作按钮 -->
+                    <div class="requery-header">
+                        <div class="requery-status-group">
+                            <div class="control-item"><strong>当前状态</strong> <span id="requery-status-text" class="chip">查询中...</span></div>
+                            <div class="control-item"><strong>上次运行</strong> <span id="requery-last-run">查询中...</span></div>
+                        </div>
+                        <div class="requery-actions">
+                            <button id="requery-trigger-btn" class="button primary requery-primary-btn" data-default-text="开始全新任务"><span>开始全新任务</span></button>
+                            <button id="requery-cancel-btn" class="button danger requery-primary-btn" data-default-text="取消任务" hidden><span>取消任务</span></button>
+                        </div>
                     </div>
-                    <div id="requery-progress-container" class="control-item" hidden>
-                        <strong>执行进度:</strong>
+
+                    <!-- 进度条 -->
+                    <div id="requery-progress-container" class="requery-progress-row" hidden>
                         <div class="requery-progress-bar">
                             <div id="requery-progress-bar-fill" class="requery-progress-bar-fill"></div>
                             <span id="requery-progress-bar-text" class="requery-progress-bar-text"></span>
                         </div>
                     </div>
-                    <div class="control-item">
-                        <strong>上次运行:</strong> <span id="requery-last-run">查询中...</span>
-                    </div>
-                    <div class="button-group" style="grid-template-columns: 1fr 1fr;">
-                        <button id="requery-trigger-btn" class="button primary" data-default-text="开始全新任务"><span>开始全新任务</span></button>
-                        <button id="requery-cancel-btn" class="button danger" data-default-text="取消任务" hidden><span>取消任务</span></button>
-                    </div>
-                    
-                    <form id="requery-scheduler-form" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1rem; border-top: 1px solid var(--color-border); padding-top: 1.5rem;">
+
+                    <!-- 定时任务设置 -->
+                    <form id="requery-scheduler-form" class="requery-scheduler">
                         <div class="control-item">
                             <strong>启用定时任务</strong>
-                             <label class="switch" style="margin-left: auto;">
+                            <label class="switch" style="margin-left:auto;">
                                 <input type="checkbox" id="requery-scheduler-toggle">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="requery-scheduler-grid">
-                            <label for="requery-start-datetime-input">
-                                <strong>首次执行时间</strong>
+                            <label for="requery-start-datetime-input" class="field-label">
+                                首次执行时间
                                 <span class="info-icon" title="输入您的本地时间。留空则表示插件启动后，到达下个间隔时间点时执行。">
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z"></path></svg>
                                 </span>
                             </label>
                             <input type="datetime-local" id="requery-start-datetime-input">
-                            
-                            <label for="requery-interval-input"><strong>间隔 (分钟)</strong></label>
+
+                            <label for="requery-interval-input" class="field-label">间隔 (分钟)</label>
                             <input type="number" id="requery-interval-input" min="1">
                         </div>
                     </form>
-                    
-                    <div class="control-item" style="margin-top: 1.5rem; border-top: 1px solid var(--color-border); padding-top: 1.5rem; flex-direction: column; align-items: stretch; gap: 1rem;">
-                        <strong>重要操作:</strong>
-                        <div class="button-group" style="grid-template-columns: 1fr 1fr; margin-top: 0;">
-                             <button id="save-shunt-rules-btn" class="button primary" data-default-text="保存分流规则"><span>保存分流规则</span></button>
-                             <button id="clear-shunt-rules-btn" class="button danger" data-default-text="清空分流规则"><span>清空分流规则</span></button>
+
+                    <!-- 重要操作按钮区 -->
+                    <div class="requery-important">
+                        <strong>重要操作</strong>
+                        <div class="button-group requery-important-actions">
+                            <button id="save-shunt-rules-btn" class="button primary" data-default-text="保存分流规则"><span>保存分流规则</span></button>
+                            <button id="clear-shunt-rules-btn" class="button danger" data-default-text="清空分流规则"><span>清空分流规则</span></button>
+                            <button id="requery-clear-backup-btn" class="button danger" data-default-text="清空全量备份"><span>清空全量备份</span></button>
                         </div>
-                         <button id="requery-clear-backup-btn" class="button danger" data-default-text="清空全量备份"><span>清空全量备份</span></button>
                     </div>
                 </div>
 
@@ -563,56 +666,6 @@
                     </div>
                 </div>
                 
-                <!-- Row 6 -->
-                <div class="control-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5C12.4142 2.5 12.75 2.83579 12.75 3.25V5.03131C15.2635 5.50376 17.25 7.49021 17.7224 9.99993H19.5C19.9142 9.99993 20.25 10.3357 20.25 10.75V13.25C20.25 13.6642 19.9142 14 19.5 14H17.7224C17.25 16.5097 15.2635 18.4962 12.75 18.9686V20.75C12.75 21.1642 12.4142 21.5 12 21.5C11.5858 21.5 11.25 21.1642 11.25 20.75V18.9686C8.73652 18.4962 6.75 16.5097 6.27758 14H4.5C4.08579 14 3.75 13.6642 3.75 13.25V10.75C3.75 10.3357 4.08579 9.99993 4.5 9.99993H6.27758C6.75 7.49021 8.73652 5.50376 11.25 5.03131V3.25C11.25 2.83579 11.5858 2.5 12 2.5ZM12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7Z"></path></svg>主题与外观</h3>
-                    <div class="control-item">
-                        <strong>颜色主题</strong>
-                        <div class="color-palette">
-                            <button class="color-swatch" data-color="indigo" style="background-color: #4f46e5;" title="靛蓝" aria-label="靛蓝"></button>
-                            <button class="color-swatch" data-color="pink" style="background-color: #ec4899;" title="粉色" aria-label="粉色"></button>
-                            <button class="color-swatch" data-color="teal" style="background-color: #14b8a6;" title="青色" aria-label="青色"></button>
-                            <button class="color-swatch" data-color="orange" style="background-color: #f97316;" title="橙色" aria-label="橙色"></button>
-                            <button class="color-swatch" data-color="green" style="background-color: #22c55e;" title="绿色" aria-label="绿色"></button>
-                            <button class="color-swatch" data-color="violet" style="background-color: #8b5cf6;" title="紫色" aria-label="紫色"></button>
-                        </div>
-                    </div>
-                    <div class="control-item">
-                        <strong>界面风格</strong>
-                        <select id="theme-switcher-select">
-                            <option value="light">明亮</option>
-                            <option value="dark">黑暗</option>
-                            <option value="sakura">夜樱</option>
-                            <option value="evergreen">常青</option>
-                            <option value="starlight">星光</option>
-                            <option value="dusk">黄昏</option>
-                            <option value="terra">赤土</option>
-                        </select>
-                    </div>
-                    <div class="control-item">
-                        <strong>界面密度</strong>
-                        <select id="layout-density-select">
-                           <option value="comfortable">舒适</option>
-                           <option value="compact">紧凑</option>
-                        </select>
-                    </div>
-                </div>
-                 <div class="control-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V12L16.5 15.5L15.0858 16.9142L11 12.8284V7Z"></path></svg>自动刷新</h3>
-                     <form id="auto-refresh-form" class="auto-refresh-form">
-                        <label class="switch" for="auto-refresh-toggle" style="display: contents; cursor: pointer;">
-                            <strong>启用</strong>
-                            <label class="switch">
-                                <input type="checkbox" id="auto-refresh-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </label>
-                        <div>
-                            <input type="number" id="auto-refresh-interval" min="5">
-                            <span>秒/次</span>
-                        </div>
-                    </form>
-                </div>
             </div>
         </section>
     </main>

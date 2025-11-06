@@ -47,11 +47,27 @@ def go_build():
     if args.i is not None:
         envs = [envs[args.i]]
 
-    VERSION = 'dev/unknown'
+    # --- Compose version in the form: <base>-<yyyymmdd>-<shortsha>
+    # Priority order for base: $VERSION (env) -> latest tag -> 'dev'
+    base = os.getenv('VERSION')
+    if not base:
+        try:
+            base = subprocess.check_output('git describe --tags --abbrev=0', shell=True).decode().strip()
+        except subprocess.CalledProcessError:
+            base = 'dev'
+
+    # yyyymmdd in local time (can override via BUILD_DATE)
+    build_date = os.getenv('BUILD_DATE')
+    if not build_date:
+        from time import strftime, localtime
+        build_date = strftime('%Y%m%d', localtime())
+
     try:
-        VERSION = subprocess.check_output('git describe --tags --long --always', shell=True).decode().rstrip()
-    except subprocess.CalledProcessError as e:
-        logger.error(f'get git tag failed: {e.args}')
+        short_sha = subprocess.check_output('git rev-parse --short=7 HEAD', shell=True).decode().strip()
+    except subprocess.CalledProcessError:
+        short_sha = 'nogithash'
+
+    VERSION = f"{base}-{build_date}-{short_sha}"
 
     try:
         subprocess.check_call('go run ../ config gen config.yaml', shell=True, env=os.environ)
