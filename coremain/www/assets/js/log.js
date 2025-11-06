@@ -32,8 +32,8 @@ function closeAndUnlock(dialogElement) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-	const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 30, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 60 };
-	let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: 60, timerId: null } } };
+		const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 30, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
+		let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
 	const elements = { 
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'), 
         colorSwatches: document.querySelectorAll('.color-swatch'), 
@@ -143,6 +143,8 @@ document.addEventListener('DOMContentLoaded', () => {
         systemInfoContainer: document.getElementById('system-info-container'),
     };
     let toastTimeout;
+    // 进入 system-control 页后延迟触发更新检查的定时器
+    let deferredUpdateCheckTimerId = null;
     
     const SHUNT_RULE_SAVE_PATHS = ['top_domains/save','my_fakeiplist/save', 'my_nodenov4list/save', 'my_nodenov6list/save', 'my_notinlist/save', 'my_nov4list/save', 'my_nov6list/save', 'my_realiplist/save'];
     const SHUNT_RULE_FLUSH_PATHS = ['top_domains/flush', 'my_fakeiplist/flush', 'my_nodenov4list/flush', 'my_nodenov6list/flush', 'my_notinlist/flush', 'my_nov4list/flush', 'my_nov6list/flush', 'my_realiplist/flush'];
@@ -730,7 +732,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			elements.updateCheckBtn?.addEventListener('click', () => this.forceCheck());
 			elements.updateApplyBtn?.addEventListener('click', () => this.applyUpdate());
 			this.applyAutoSchedule(false);
-			this.refreshStatus();
+			// 延迟到用户进入“系统控制”页或后台定时器触发时再检查更新，避免首屏加载转圈变慢
 			elements.updateForceBtn?.addEventListener('click', () => this.applyUpdate(true, elements.updateForceBtn));
 			elements.updateV3Btn?.addEventListener('click', () => this.applyUpdate(true, elements.updateV3Btn, true));
 		},
@@ -1392,16 +1394,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderDonutChart(state.domainSetRank); 
             }
             
-		if (activeTab === 'system-control' || forceAll) {
-			await Promise.allSettled([
-				state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
-				updateDomainListStats(signal),
-				cacheManager.updateStats(signal),
-				switchManager.loadStatus(signal),
-				systemInfoManager.load(signal),
-				updateManager.refreshStatus(forceAll)
-			]);
-		}
+        if (activeTab === 'system-control' || forceAll) {
+            const shouldCheckUpdate = activeTab === 'system-control';
+            await Promise.allSettled([
+                state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
+                updateDomainListStats(signal),
+                cacheManager.updateStats(signal),
+                switchManager.loadStatus(signal),
+                systemInfoManager.load(signal),
+                shouldCheckUpdate ? updateManager.refreshStatus(false) : Promise.resolve()
+            ]);
+        }
             
             if (forceAll) {
                 const [topDomainsRes, topClientsRes, slowestRes] = await Promise.allSettled([api.v2.getTopDomains(signal, 100), api.v2.getTopClients(signal, 100), api.v2.getSlowest(signal, 100)]);
@@ -1750,6 +1753,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.location.hash !== newHash) history.pushState(null, '', newHash);
         const activeTabId = targetLink.dataset.tab;
         elements.tabContents.forEach(el => el.classList.toggle('active', el.id === `${activeTabId}-tab`));
+        // 进入“系统控制”页时，延迟 1s 再检查更新，避免影响首屏渲染
+        if (activeTabId === 'system-control' && elements.updateModule) {
+            if (deferredUpdateCheckTimerId) clearTimeout(deferredUpdateCheckTimerId);
+            deferredUpdateCheckTimerId = setTimeout(() => {
+                updateManager.refreshStatus(false);
+            }, 1000);
+        }
         if (activeTabId === 'log-query' && state.displayedLogs.length === 0) {
             applyLogFilterAndRender();
         } else if (activeTabId === 'rules') {
