@@ -589,7 +589,12 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 [data-layout="compact"] #log-query-table-container { max-height: calc(100vh - 280px); }
 
 @media (max-width: 1440px) { [data-layout="comfortable"] #log-query-tab table { font-size: 0.9rem; } [data-layout="comfortable"] #log-query-tab th, [data-layout="comfortable"] #log-query-tab td { padding-top: 0.55rem; padding-bottom: 0.55rem; } [data-layout="comfortable"] #log-query-table-container { max-height: calc(100vh - 320px); } [data-layout="comfortable"] #log-query-tab .card-header #log-header-actions { display: flex; flex-grow: 1; } [data-layout="comfortable"] #log-query-tab .card-header #log-search { flex-grow: 1; max-width: 450px; margin-left: 1rem; } #log-query-tab.search-moved-to-header #log-search-container-original { display: none; } }
-@media (min-width: 1600px) { [data-layout="comfortable"] .container { max-width: 1500px; } [data-layout="comfortable"] .overview-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); } [data-layout="comfortable"] .control-panel-grid { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); } }
+@media (min-width: 1600px) {
+  [data-layout="comfortable"] .container { max-width: 1500px; }
+  [data-layout="comfortable"] .overview-grid { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
+  /* 固定四列，避免 mini 卡片在宽屏下换行 */
+  [data-layout="comfortable"] .control-panel-grid { grid-template-columns: repeat(4, 1fr); }
+}
 @media (min-width: 2000px) { [data-layout="comfortable"] .container { max-width: 1900px; } }
 @media (max-width: 992px) { .page-header { justify-content: center; gap: 0.75rem; } h1 { flex-basis: 100%; text-align: center; margin-bottom: 0.5rem; } .header-main-actions { order: 1; flex-grow: 1; justify-content: center; } .overview-grid { grid-template-columns: 1fr; } }
 
