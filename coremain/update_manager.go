@@ -35,7 +35,7 @@ const (
 	httpTimeout          = 120 * time.Second
 	userAgent            = "mosdns-update-client"
 	stateFileName        = ".mosdns-update-state.json"
-	postUpgradeEndpoint  = "http://127.0.0.1:9099/plugins/my_fakeiplist/restartall"
+	postUpgradeEndpoint  = "http://127.0.0.1:9099/api/v1/system/restart"
 )
 
 var (
@@ -386,10 +386,12 @@ func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+	payload := strings.NewReader(`{"delay_ms":500}`)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, payload)
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Content-Type", "application/json")
 	if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
 		req.Host = req.URL.Host
 	}
@@ -400,7 +402,7 @@ func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("hook returned %s", resp.Status)
+		return fmt.Errorf("self-restart hook returned %s", resp.Status)
 	}
 	return nil
 }
