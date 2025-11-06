@@ -890,7 +890,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	const systemInfoManager = {
         parseMetrics(metricsText) {
             const lines = metricsText.split('\n');
-            const metrics = { startTime: 0, cpuTime: 0, residentMemory: 0, heapIdleMemory: 0, threads: 0, openFds: 0, goVersion: "N/A" };
+            const metrics = { startTime: 0, cpuTime: 0, residentMemory: 0, heapIdleMemory: 0, threads: 0, openFds: 0, grs: 0,goVersion: "N/A" };
             lines.forEach(line => {
                 if (line.startsWith('process_start_time_seconds')) { metrics.startTime = parseFloat(line.split(' ')[1]) || 0; } 
                 else if (line.startsWith('process_cpu_seconds_total')) { metrics.cpuTime = parseFloat(line.split(' ')[1]) || 0; } 
@@ -898,6 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (line.startsWith('go_memstats_heap_idle_bytes')) { metrics.heapIdleMemory = parseFloat(line.split(' ')[1]) || 0; } 
                 else if (line.startsWith('go_threads')) { metrics.threads = parseInt(line.split(' ')[1]) || 0; } 
                 else if (line.startsWith('process_open_fds')) { metrics.openFds = parseInt(line.split(' ')[1]) || 0; } 
+                else if (line.startsWith('go_goroutines')) { metrics.grs = parseInt(line.split(' ')[1]) || 0; }
                 else if (line.startsWith('go_info{version="')) { const match = line.match(/go_info{version="([^"]+)"}/); if (match && match[1]) { metrics.goVersion = match[1]; } }
             });
             return metrics;
@@ -919,6 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { label: 'Go 版本', value: data.goVersion, accent: true },
                 { label: '线程数', value: data.threads.toLocaleString() },
                 { label: '打开文件描述符', value: data.openFds.toLocaleString() },
+                { label: 'go_goroutines', value: data.grs.toLocaleString() },
             ];
     
             container.innerHTML = items.map(item => `
