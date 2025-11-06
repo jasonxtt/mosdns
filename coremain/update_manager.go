@@ -21,6 +21,7 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"go.uber.org/zap"
+	"runtime/debug"
 )
 
 const (
@@ -624,28 +625,36 @@ func (m *UpdateManager) fetchHTML(ctx context.Context, url string) (string, erro
 }
 
 func selectAsset(assets []githubAsset) *githubAsset {
-	var candidates []string
-	switch runtime.GOOS {
-	case "linux":
-		switch runtime.GOARCH {
-		case "amd64":
-			candidates = []string{"mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip"}
-		case "arm64":
-			candidates = []string{"mosdns-linux-arm64.zip"}
-		case "arm":
-			candidates = []string{"mosdns-linux-arm-7.zip", "mosdns-linux-arm-6.zip", "mosdns-linux-arm-5.zip"}
-		case "mips", "mips64", "mips64le", "mipsle":
-			candidates = append(candidates, fmt.Sprintf("mosdns-linux-%s.zip", runtime.GOARCH))
-		}
-	case "darwin":
-		candidates = append(candidates, fmt.Sprintf("mosdns-darwin-%s.zip", runtime.GOARCH))
-	case "windows":
-		if runtime.GOARCH == "amd64" {
-			candidates = []string{"mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip"}
-		} else if runtime.GOARCH == "arm64" {
-			candidates = []string{"mosdns-windows-arm64.zip"}
-		}
-	}
+    var candidates []string
+    switch runtime.GOOS {
+    case "linux":
+        switch runtime.GOARCH {
+        case "amd64":
+            if binaryIsAMD64V3Plus() {
+                candidates = []string{"mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip"}
+            } else {
+                candidates = []string{"mosdns-linux-amd64.zip"}
+            }
+        case "arm64":
+            candidates = []string{"mosdns-linux-arm64.zip"}
+        case "arm":
+            candidates = []string{"mosdns-linux-arm-7.zip", "mosdns-linux-arm-6.zip", "mosdns-linux-arm-5.zip"}
+        case "mips", "mips64", "mips64le", "mipsle":
+            candidates = append(candidates, fmt.Sprintf("mosdns-linux-%s.zip", runtime.GOARCH))
+        }
+    case "darwin":
+        candidates = append(candidates, fmt.Sprintf("mosdns-darwin-%s.zip", runtime.GOARCH))
+    case "windows":
+        if runtime.GOARCH == "amd64" {
+            if binaryIsAMD64V3Plus() {
+                candidates = []string{"mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip"}
+            } else {
+                candidates = []string{"mosdns-windows-amd64.zip"}
+            }
+        } else if runtime.GOARCH == "arm64" {
+            candidates = []string{"mosdns-windows-arm64.zip"}
+        }
+    }
 
 	for _, name := range candidates {
 		for idx := range assets {
@@ -657,7 +666,25 @@ func selectAsset(assets []githubAsset) *githubAsset {
 	if len(assets) > 0 {
 		return &assets[0]
 	}
-	return nil
+    return nil
+}
+
+// binaryIsAMD64V3Plus 通过读取当前二进制的构建信息，判断是否为
+// amd64 v3（或更高，如 v4）构建。读取失败则返回 false（保守选择传统包）。
+func binaryIsAMD64V3Plus() bool {
+    if runtime.GOARCH != "amd64" {
+        return false
+    }
+    if bi, ok := debug.ReadBuildInfo(); ok {
+        for _, s := range bi.Settings {
+            if s.Key == "GOAMD64" {
+                v := strings.ToLower(strings.TrimSpace(s.Value))
+                return v == "v3" || v == "v4"
+            }
+        }
+    }
+    // 未能读到 GOAMD64，保守处理：按非 v3 处理
+    return false
 }
 
 func buildAssetSignature(asset githubAsset) string {
