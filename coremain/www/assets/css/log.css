@@ -145,6 +145,16 @@ a.control-item-link:hover {
     width: 25%;
 }
 
+/* 避免“Fake IP 域名”等在桌面视口被逐字换行，保持一行显示并超出省略 */
+@media (min-width: 992px) {
+  #domain-stats-table td:first-child,
+  #domain-stats-table th:first-child {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 
 .control-item-static {
     border-top: 1px solid var(--color-border);
@@ -340,6 +350,12 @@ dialog.card:hover { border-color: var(--color-border) !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .control-panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; align-items: stretch; }
+/* 在中等偏大的屏幕上（1288px~1600px）强制 3 栏栅格，使每张卡片有更合理的宽度 */
+@media (min-width: 1288px) and (max-width: 1599.98px) {
+  .control-panel-grid { grid-template-columns: repeat(3, 1fr); }
+  /* 让“版本与更新”模块占两列，避免按钮/徽标拥挤换行 */
+  #update-module { grid-column: span 2; }
+}
 @media (min-width: 1400px) {
   .control-panel-grid { grid-template-columns: repeat(4, 1fr); }
 }
