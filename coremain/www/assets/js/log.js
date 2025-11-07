@@ -155,7 +155,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const debounce = (func, wait) => { let timeout; return function executedFunction(...args) { const later = () => { clearTimeout(timeout); func(...args); }; clearTimeout(timeout); timeout = setTimeout(later, wait); }; };
 
-    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) {} } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => api.fetch('/metrics', { signal }), getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for(let [key, value] of queryParams.entries()){ if(!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
+    // 轻量级请求器 + /metrics 简易缓存，减少同一时段的重复请求
+    let __metricsInflight = null; let __metricsStamp = 0;
+    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) {} } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => { const now = Date.now(); if (__metricsInflight && (now - __metricsStamp) < 3000) return __metricsInflight; __metricsInflight = api.fetch('/metrics', { signal }); __metricsStamp = now; return __metricsInflight; }, getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for(let [key, value] of queryParams.entries()){ if(!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
     
 	const requeryApi = {
 		getConfig: (signal) => api.fetch(`/plugins/requery`, { signal }), 
@@ -1864,31 +1866,27 @@ document.addEventListener('DOMContentLoaded', () => {
             nov6: { element: elements.nov6DomainCount, endpoint: '/plugins/my_nov6list/show' },
         };
 
-        const promises = Object.values(listMap).map(item => api.fetch(item.endpoint, { signal }));
-        const backupPromise = requeryApi.getBackupCount(signal);
-        
-        const results = await Promise.allSettled(promises);
-
-        results.forEach((result, index) => {
-            const key = Object.keys(listMap)[index];
-            const { element } = listMap[key];
-            if (result.status === 'fulfilled' && typeof result.value === 'string') {
-                const count = result.value.trim() === '' ? 0 : result.value.trim().split('\n').length;
+        // 顺序请求，降低并发峰值，避免阻塞渲染
+        for (const key of Object.keys(listMap)) {
+            const { element, endpoint } = listMap[key];
+            try {
+                const resText = await api.fetch(endpoint, { signal });
+                const count = (resText?.trim?.() || '').length === 0 ? 0 : resText.trim().split('\n').length;
                 element.textContent = count.toLocaleString();
-            } else {
-                element.textContent = '获取失败';
+            } catch (e) {
+                if (e.name !== 'AbortError') element.textContent = '获取失败';
             }
-        });
+        }
 
         try {
-            const backupRes = await backupPromise;
+            const backupRes = await requeryApi.getBackupCount(signal);
             if (backupRes && backupRes.status === 'success') {
                 elements.backupDomainCount.textContent = `${backupRes.count.toLocaleString()} 条`;
             } else {
                 elements.backupDomainCount.textContent = '获取失败';
             }
         } catch(e) {
-            elements.backupDomainCount.textContent = '获取失败';
+            if (e.name !== 'AbortError') elements.backupDomainCount.textContent = '获取失败';
         }
     }
 
@@ -2619,18 +2617,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!root) return;
         const seen = new Set();
         const map = new Map();
+
+        // 简易并发队列，避免系统控制页一次性触发过多请求
+        const SYS_MAX = 2; // 同时最多执行2个模块任务
+        const queue = [];
+        let running = 0;
+        const pump = () => {
+            while (running < SYS_MAX && queue.length > 0) {
+                const job = queue.shift();
+                running++;
+                Promise.resolve()
+                    .then(job)
+                    .catch(() => {})
+                    .finally(() => { running--; pump(); });
+            }
+        };
+        const enqueue = (fn) => { queue.push(fn); pump(); };
         const io = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting && !seen.has(entry.target)) {
                     seen.add(entry.target);
                     const fn = map.get(entry.target);
-                    if (typeof fn === 'function') {
+                    if (typeof fn === 'function') enqueue(() => {
                         if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-                            window.requestIdleCallback(() => fn(), { timeout: 1500 });
-                        } else {
-                            setTimeout(() => fn(), 300);
+                            return new Promise((resolve) => window.requestIdleCallback(() => { fn(); resolve(); }, { timeout: 1500 }));
                         }
-                    }
+                        return new Promise((resolve) => setTimeout(() => { fn(); resolve(); }, 300));
+                    });
                 }
             });
         }, { root, rootMargin: '50px' });
