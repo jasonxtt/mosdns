@@ -256,6 +256,71 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--c
 #adguard-table-container, #diversion-table-container { max-height: calc(100vh - 350px); min-height: 300px; }
 #data-view-table-container { max-height: 50vh; }
 
+/* Data View: Cache Accordion */
+#data-view-modal .accordion-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  background: var(--color-bg);
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+#data-view-modal .accordion-header {
+  margin: 0;
+}
+#data-view-modal .accordion-button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: var(--color-bg-alt);
+  padding: 0.75rem 1rem;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+#data-view-modal .accordion-button::after {
+  content: '▾';
+  float: right;
+  transition: transform 0.2s ease;
+}
+#data-view-modal .accordion-button.collapsed::after {
+  transform: rotate(-90deg);
+}
+#data-view-modal .accordion-collapse {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+#data-view-modal .accordion-collapse.show {
+  border-top: 1px solid var(--color-border);
+}
+#data-view-modal .accordion-body {
+  padding: 0.75rem 1rem;
+}
+#data-view-modal .data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 0.75rem 0;
+}
+#data-view-modal .data-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+  word-break: break-all;
+}
+#data-view-modal .data-table td:first-child {
+  color: var(--color-text-secondary);
+  width: 9rem;
+}
+#data-view-modal pre {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--border-radius-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
 
 table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.95rem; table-layout: fixed; }
 th, td { padding: 0.8rem 1.25rem; text-align: left; border-bottom: 1px solid var(--color-border); transition: background-color var(--transition-fast); word-break: break-word; vertical-align: middle;}
