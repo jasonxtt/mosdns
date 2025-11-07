@@ -1922,6 +1922,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 itemEl.append(headerEl, collapseEl);
                 accordionContainer.appendChild(itemEl);
 
+                // 标题整行可点击，触发按钮逻辑
+                headerEl.addEventListener('click', (ev) => { ev.preventDefault(); buttonEl.click(); });
+
                 buttonEl.addEventListener('click', () => {
                     const isCollapsed = buttonEl.classList.contains('collapsed');
                     if (isCollapsed && bodyEl.innerHTML === '') {
@@ -1949,14 +1952,12 @@ document.addEventListener('DOMContentLoaded', () => {
                          bodyEl.appendChild(pre);
                     }
 
+                    // 切换可见性
                     buttonEl.classList.toggle('collapsed');
                     collapseEl.classList.toggle('show');
                     
-                    if (collapseEl.classList.contains('show')) {
-                        collapseEl.style.maxHeight = bodyEl.scrollHeight + 'px';
-                    } else {
-                        collapseEl.style.maxHeight = null;
-                    }
+                    // 使用 max-height 实现动画，同时保证可收起
+                    collapseEl.style.maxHeight = collapseEl.classList.contains('show') ? (bodyEl.scrollHeight + 'px') : '0px';
                 });
             });
             elements.dataViewTableContainer.appendChild(accordionContainer);
