@@ -149,8 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
         systemInfoContainer: document.getElementById('system-info-container'),
     };
     let toastTimeout;
-    // 进入 system-control 页后延迟触发更新检查的定时器
-    let deferredUpdateCheckTimerId = null;
     
     const SHUNT_RULE_SAVE_PATHS = ['top_domains/save','my_fakeiplist/save', 'my_nodenov4list/save', 'my_nodenov6list/save', 'my_notinlist/save', 'my_nov4list/save', 'my_nov6list/save', 'my_realiplist/save'];
     const SHUNT_RULE_FLUSH_PATHS = ['top_domains/flush', 'my_fakeiplist/flush', 'my_nodenov4list/flush', 'my_nodenov6list/flush', 'my_notinlist/flush', 'my_nov4list/flush', 'my_nov6list/flush', 'my_realiplist/flush'];
