@@ -1922,8 +1922,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 itemEl.append(headerEl, collapseEl);
                 accordionContainer.appendChild(itemEl);
 
-                // 标题整行可点击，触发按钮逻辑
-                headerEl.addEventListener('click', (ev) => { ev.preventDefault(); buttonEl.click(); });
+                // 标题整行可点击：但避免点击到按钮自身时触发两次
+                headerEl.addEventListener('click', (ev) => {
+                    if (ev.target === buttonEl || buttonEl.contains(ev.target)) return; // 直接点击按钮时，不在此重复触发
+                    ev.preventDefault();
+                    buttonEl.click();
+                });
 
                 buttonEl.addEventListener('click', () => {
                     const isCollapsed = buttonEl.classList.contains('collapsed');
