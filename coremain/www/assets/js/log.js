@@ -2708,12 +2708,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // 根据进入页签决定是否首屏加载别名（仅日志/概览需要）。避免 system-control 首屏的额外请求。
         const firstHash = window.location.hash || '#overview';
         const firstTab = (document.querySelector(`.tab-link[href="${firstHash}"]`)?.dataset.tab) || firstHash.replace('#','');
+        const loadAliasesAsync = () => aliasManager.load().then(() => {
+            // 别名加载后，如当前在 log-query，轻量重渲染以显示别名
+            const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
+            if (activeTab === 'log-query' && state.displayedLogs.length) {
+                ui.renderLogTable(state.displayedLogs, false);
+            }
+        });
         if (firstTab === 'overview' || firstTab === 'log-query') {
-            await aliasManager.load();
+            // 不阻塞首屏：并行加载别名
+            loadAliasesAsync();
         } else {
             // 延后到空闲时加载，供后续切换使用
-            if ('requestIdleCallback' in window) requestIdleCallback(() => aliasManager.load());
-            else setTimeout(() => aliasManager.load(), 1500);
+            if ('requestIdleCallback' in window) requestIdleCallback(loadAliasesAsync);
+            else setTimeout(loadAliasesAsync, 1500);
         }
         historyManager.load();
         autoRefreshManager.loadSettings();
