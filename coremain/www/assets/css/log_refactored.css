@@ -52,6 +52,8 @@ h3 { font-size: 0.9rem; font-weight: 600; color: var(--color-text-secondary); te
 a { color: var(--color-accent-primary); text-decoration: none; font-weight: 600; transition: var(--transition-fast); }
 a:hover { color: var(--color-accent-primary-hover); }
 .text-right { text-align: right; }
+/* 居中辅助类，供“耗时”列使用 */
+.text-center { text-align: center; }
 /* 等宽数字，解决“耗时”等数字列视觉错位问题 */
 .numeric { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
 .duration-cell { white-space: nowrap; }
