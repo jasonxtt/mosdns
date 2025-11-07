@@ -227,16 +227,30 @@ document.addEventListener('DOMContentLoaded', () => {
             if (logs.length === 0 && !append) { renderTable(tbody, [], () => {}, 'log-query'); return; }
             const startIndex = state.displayedLogs.length;
             state.displayedLogs.push(...logs);
-            const fragment = document.createDocumentFragment();
-            logs.forEach((log, i) => { 
-                const row = renderLogItemHTML(log, startIndex + i);
-                requestAnimationFrame(() => {
-                    row.classList.add('animate-in');
-                    row.style.animationDelay = `${i * 20}ms`; 
-                });
-                fragment.appendChild(row); 
-            });
-            tbody.appendChild(fragment);
+
+            // 分批渲染，避免一次性插入大量行造成掉帧
+            const BATCH = 10;
+            let idx = 0;
+            const renderChunk = () => {
+                if (idx >= logs.length) return;
+                const frag = document.createDocumentFragment();
+                for (let c = 0; c < BATCH && idx < logs.length; c++, idx++) {
+                    const log = logs[idx];
+                    const row = renderLogItemHTML(log, startIndex + idx);
+                    // 仅对前20行做入场动画，减少布局/绘制开销
+                    if (startIndex + idx < 20) {
+                        row.classList.add('animate-in');
+                    }
+                    frag.appendChild(row);
+                }
+                tbody.appendChild(frag);
+                if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                    requestIdleCallback(renderChunk, { timeout: 300 });
+                } else {
+                    setTimeout(renderChunk, 0);
+                }
+            };
+            renderChunk();
         },
         updateSearchResultsInfo(pagination) { if (!elements.searchResultsInfo) return; if (state.currentLogSearchTerm?.query && pagination) { elements.searchResultsInfo.innerHTML = `为您找到 <strong>${pagination.total_items.toLocaleString()}</strong> 条相关结果`; } else { elements.searchResultsInfo.innerHTML = ''; } },
         openLogDetailModal(triggerElement) {
@@ -1468,7 +1482,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.isLogLoading && !append) return;
         state.isLogLoading = true;
         if (elements.logLoader) elements.logLoader.style.display = 'block';
-        if (!append) renderSkeletonRows(elements.logTableBody, CONSTANTS.LOGS_PER_PAGE, state.isMobile ? 1 : 5);
+        if (!append) renderSkeletonRows(elements.logTableBody, Math.min(20, CONSTANTS.LOGS_PER_PAGE), state.isMobile ? 1 : 5);
         if (!append && logRequestController) logRequestController.abort();
         logRequestController = new AbortController();
         const params = { page, limit: CONSTANTS.LOGS_PER_PAGE, q: state.currentLogSearchTerm.query, exact: state.currentLogSearchTerm.exact };
