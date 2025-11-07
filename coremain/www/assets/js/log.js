@@ -1858,6 +1858,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const adguardManager = { async load() { try { state.adguardRules = await api.fetch('/plugins/adguard/rules') || []; } catch (error) { state.adguardRules = []; } this.render(); }, render() { renderRuleTable(elements.adguardRulesTbody, state.adguardRules, 'adguard'); }, };
     const diversionManager = { sdSetInstanceMap: { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn' }, async load() { try { const promises = Object.values(this.sdSetInstanceMap).map(tag => api.fetch(`/plugins/${tag}/config`)); const results = await Promise.allSettled(promises); state.diversionRules = results.filter(r => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap(r => r.value); } catch(e) { state.diversionRules = []; } this.render(); }, render() { renderRuleTable(elements.diversionRulesTbody, state.diversionRules, 'diversion'); }, };
     
+    // 流式计数工具：避免一次性创建超大字符串数组导致主线程卡顿
+    async function countLinesStreaming(url, signal) {
+        const res = await fetch(url, { signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const reader = res.body?.getReader();
+        if (!reader) { // 兼容性回退
+            const text = await res.text();
+            if (!text) return 0;
+            let n = 0; for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
+            if (text.length > 0 && text.charCodeAt(text.length - 1) !== 10) n++;
+            return n;
+        }
+        const decoder = new TextDecoder();
+        let { value, done } = await reader.read();
+        let leftover = '';
+        let count = 0;
+        while (!done) {
+            const chunkText = leftover + decoder.decode(value, { stream: true });
+            // 统计当前块中的换行符
+            for (let i = 0; i < chunkText.length; i++) if (chunkText.charCodeAt(i) === 10) count++;
+            // 处理最后一行未以 \n 结尾的情况：保留到下一块
+            const lastNl = chunkText.lastIndexOf('\n');
+            leftover = lastNl === -1 ? chunkText : chunkText.slice(lastNl + 1);
+            ({ value, done } = await reader.read());
+        }
+        // 最后一块
+        const finalText = leftover + decoder.decode();
+        if (finalText.length > 0) count++;
+        return count;
+    }
+
     async function updateDomainListStats(signal) {
         const listMap = {
             fakeip: { element: elements.fakeipDomainCount, endpoint: '/plugins/my_fakeiplist/show' },
@@ -1866,12 +1897,11 @@ document.addEventListener('DOMContentLoaded', () => {
             nov6: { element: elements.nov6DomainCount, endpoint: '/plugins/my_nov6list/show' },
         };
 
-        // 顺序请求，降低并发峰值，避免阻塞渲染
+        // 顺序 + 流式计数，进一步降低内存占用与主线程卡顿
         for (const key of Object.keys(listMap)) {
             const { element, endpoint } = listMap[key];
             try {
-                const resText = await api.fetch(endpoint, { signal });
-                const count = (resText?.trim?.() || '').length === 0 ? 0 : resText.trim().split('\n').length;
+                const count = await countLinesStreaming(endpoint, signal);
                 element.textContent = count.toLocaleString();
             } catch (e) {
                 if (e.name !== 'AbortError') element.textContent = '获取失败';
