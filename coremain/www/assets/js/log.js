@@ -149,8 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
         systemInfoContainer: document.getElementById('system-info-container'),
     };
     let toastTimeout;
-    // 进入 system-control 页后延迟触发更新检查的定时器
-    let deferredUpdateCheckTimerId = null;
     
     const SHUNT_RULE_SAVE_PATHS = ['top_domains/save','my_fakeiplist/save', 'my_nodenov4list/save', 'my_nodenov6list/save', 'my_notinlist/save', 'my_nov4list/save', 'my_nov6list/save', 'my_realiplist/save'];
     const SHUNT_RULE_FLUSH_PATHS = ['top_domains/flush', 'my_fakeiplist/flush', 'my_nodenov4list/flush', 'my_nodenov6list/flush', 'my_notinlist/flush', 'my_nov4list/flush', 'my_nov6list/flush', 'my_realiplist/flush'];
@@ -1393,7 +1391,20 @@ document.addEventListener('DOMContentLoaded', () => {
         ui.setLoading(elements.globalRefreshBtn, true);
         const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
         try {
-            const [statusRes, capacityRes, statsRes, domainSetRankRes] = await Promise.allSettled([api.getStatus(signal), api.getCapacity(signal), api.v2.getStats(signal), api.v2.getDomainSetRank(signal, 100)]);
+            // 概览页首屏：尽量少拉数据，避免阻塞渲染
+            const shallowOnOverview = (activeTab === 'overview' && !forceAll);
+            const basePromises = [
+                api.getStatus(signal),
+                api.getCapacity(signal),
+                api.v2.getStats(signal)
+            ];
+            if (!shallowOnOverview) basePromises.push(api.v2.getDomainSetRank(signal, 100));
+
+            const results = await Promise.allSettled(basePromises);
+            const statusRes = results[0];
+            const capacityRes = results[1];
+            const statsRes = results[2];
+            const domainSetRankRes = results[3]; // 只有在非浅加载时才存在
 
             ui.updateStatus(statusRes.status === 'fulfilled' ? statusRes.value?.capturing : null);
             ui.updateCapacity(capacityRes.status === 'fulfilled' ? capacityRes.value?.capacity : null);
@@ -1408,20 +1419,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 historyManager.add(stats.total_queries, stats.average_duration_ms);
             }
 
-            if (domainSetRankRes.status === 'fulfilled') { 
+            if (domainSetRankRes && domainSetRankRes.status === 'fulfilled') { 
                 state.domainSetRank = domainSetRankRes.value || []; 
                 renderDonutChart(state.domainSetRank); 
             }
             
-        if (activeTab === 'system-control' || forceAll) {
-            const shouldCheckUpdate = activeTab === 'system-control';
+        // 系统控制：默认不在首屏/自动刷新时抓取重数据，改为“刷新按钮”触发或模块懒加载触发
+        if (activeTab === 'system-control' && forceAll) {
             await Promise.allSettled([
                 state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
                 updateDomainListStats(signal),
                 cacheManager.updateStats(signal),
                 switchManager.loadStatus(signal),
                 systemInfoManager.load(signal),
-                shouldCheckUpdate ? updateManager.refreshStatus(false) : Promise.resolve()
+                updateManager.refreshStatus(false)
             ]);
         }
             
@@ -1689,7 +1700,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${formatRelativeTime(log.query_time)}</td>
                 <td>${renderDomainResponseCellHTML(log)}</td>
                 <td>${log.query_type}</td>
-                <td class="text-right">${log.duration_ms.toFixed(2)}</td>
+                <td class="text-center numeric duration-cell">${log.duration_ms.toFixed(2)}</td>
                 <td>${aliasManager.getAliasedClientHTML(log.client_ip)}</td>`;
         }
         return tr; 
@@ -1715,7 +1726,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td>${renderDomainResponseCellHTML(log, 'slowest')}</td>
                 <td>${aliasManager.getAliasedClientHTML(log.client_ip)}</td>
-                <td class="text-right">${log.duration_ms.toFixed(2)}</td>`;
+                <td class="text-right numeric duration-cell">${log.duration_ms.toFixed(2)}</td>`;
         }
         return tr; 
     }
@@ -1772,18 +1783,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.location.hash !== newHash) history.pushState(null, '', newHash);
         const activeTabId = targetLink.dataset.tab;
         elements.tabContents.forEach(el => el.classList.toggle('active', el.id === `${activeTabId}-tab`));
-        // 进入“系统控制”页时，延迟 1s 再检查更新，避免影响首屏渲染
-        if (activeTabId === 'system-control' && elements.updateModule) {
-            if (deferredUpdateCheckTimerId) clearTimeout(deferredUpdateCheckTimerId);
-            deferredUpdateCheckTimerId = setTimeout(() => {
-                updateManager.refreshStatus(false);
-            }, 1000);
-        }
-        // 同时刷新覆盖配置表单
-        if (activeTabId === 'system-control' && elements.overridesModule) {
-            // 自动进入时静默加载，避免每次进入都弹出提示
-            overridesManager.load(true);
-        }
+        // 系统控制页采用懒加载；不在切换时主动拉取重数据，由模块可见时触发
         if (activeTabId === 'log-query' && state.displayedLogs.length === 0) {
             applyLogFilterAndRender();
         } else if (activeTabId === 'rules') {
@@ -2613,6 +2613,38 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.lazy-load-card').forEach(card => lazyLoadObserver.observe(card));
     }
 
+    // 系统控制页模块懒加载：模块进入可视区时才请求
+    function setupSystemControlLazyLoading() {
+        const root = document.getElementById('system-control-tab');
+        if (!root) return;
+        const seen = new Set();
+        const map = new Map();
+        const io = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && !seen.has(entry.target)) {
+                    seen.add(entry.target);
+                    const fn = map.get(entry.target);
+                    if (typeof fn === 'function') {
+                        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                            window.requestIdleCallback(() => fn(), { timeout: 1500 });
+                        } else {
+                            setTimeout(() => fn(), 300);
+                        }
+                    }
+                }
+            });
+        }, { root, rootMargin: '50px' });
+
+        const watch = (selector, fn) => { const el = document.querySelector(selector); if (!el) return; map.set(el, fn); io.observe(el); };
+        watch('#system-info-module', () => systemInfoManager.load());
+        watch('#update-module', () => updateManager.refreshStatus(false));
+        watch('#feature-switches-module', () => switchManager.loadStatus());
+        watch('#domain-stats-module', () => updateDomainListStats());
+        watch('#requery-module', () => requeryManager.updateStatus());
+        watch('#overrides-module', () => overridesManager.load(true));
+        watch('#cache-stats-table', () => cacheManager.updateStats());
+    }
+
     async function init() {
         state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         themeManager.init();
@@ -2628,11 +2660,13 @@ document.addEventListener('DOMContentLoaded', () => {
         setupEventListeners();
         setupGlowEffect();
         setupLazyLoading();
+        setupSystemControlLazyLoading();
         handleResize();
         const initialHash = window.location.hash || '#overview';
         const initialLink = document.querySelector(`.tab-link[href="${initialHash}"]`);
         if (initialLink) handleNavigation(initialLink);
-        await updatePageData(true);
+        // 首屏统一轻量刷新，所有重数据由懒加载或“刷新”按钮触发
+        await updatePageData(false);
         if (document.fonts?.ready) await document.fonts.ready;
         requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if(activeLink) updateNavSlider(activeLink); });
         elements.initialLoader.style.opacity = '0';
