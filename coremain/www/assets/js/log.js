@@ -1781,7 +1781,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // 同时刷新覆盖配置表单
         if (activeTabId === 'system-control' && elements.overridesModule) {
-            overridesManager.load();
+            // 自动进入时静默加载，避免每次进入都弹出提示
+            overridesManager.load(true);
         }
         if (activeTabId === 'log-query' && state.displayedLogs.length === 0) {
             applyLogFilterAndRender();
@@ -1921,6 +1922,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 itemEl.append(headerEl, collapseEl);
                 accordionContainer.appendChild(itemEl);
 
+                // 标题整行可点击：但避免点击到按钮自身时触发两次
+                headerEl.addEventListener('click', (ev) => {
+                    if (ev.target === buttonEl || buttonEl.contains(ev.target)) return; // 直接点击按钮时，不在此重复触发
+                    ev.preventDefault();
+                    buttonEl.click();
+                });
+
                 buttonEl.addEventListener('click', () => {
                     const isCollapsed = buttonEl.classList.contains('collapsed');
                     if (isCollapsed && bodyEl.innerHTML === '') {
@@ -1948,14 +1956,12 @@ document.addEventListener('DOMContentLoaded', () => {
                          bodyEl.appendChild(pre);
                     }
 
+                    // 切换可见性
                     buttonEl.classList.toggle('collapsed');
                     collapseEl.classList.toggle('show');
                     
-                    if (collapseEl.classList.contains('show')) {
-                        collapseEl.style.maxHeight = bodyEl.scrollHeight + 'px';
-                    } else {
-                        collapseEl.style.maxHeight = null;
-                    }
+                    // 使用 max-height 实现动画，同时保证可收起
+                    collapseEl.style.maxHeight = collapseEl.classList.contains('show') ? (bodyEl.scrollHeight + 'px') : '0px';
                 });
             });
             elements.dataViewTableContainer.appendChild(accordionContainer);
@@ -2254,13 +2260,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 覆盖配置管理器（/api/v1/overrides）
     const overridesManager = {
-        async load() {
+        async load(silent = false) {
             if (!elements.overrideSocks5Input || !elements.overrideEcsInput) return;
             try {
                 const data = await api.fetch('/api/v1/overrides');
                 elements.overrideSocks5Input.value = (data && data.socks5) || '';
                 elements.overrideEcsInput.value = (data && data.ecs) || '';
-                ui.showToast('已读取当前覆盖配置');
+                if (!silent) ui.showToast('已读取当前覆盖配置');
             } catch (e) {
                 ui.showToast('读取覆盖配置失败', 'error');
             }
@@ -2301,7 +2307,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         elements.tabLinks.forEach(link => link.addEventListener('click', (e) => { e.preventDefault(); handleNavigation(link); }));
         // 覆盖配置：按钮事件
-        if (elements.overridesLoadBtn) elements.overridesLoadBtn.addEventListener('click', () => overridesManager.load());
+        if (elements.overridesLoadBtn) elements.overridesLoadBtn.addEventListener('click', () => overridesManager.load(false));
         if (elements.overridesSaveBtn) elements.overridesSaveBtn.addEventListener('click', () => overridesManager.save());
         window.addEventListener('popstate', () => { const hash = window.location.hash || '#overview'; const targetLink = document.querySelector(`.tab-link[href="${hash}"]`); handleNavigation(targetLink || elements.tabLinks[0]); });
         window.addEventListener('resize', debounce(handleResize, 150));
