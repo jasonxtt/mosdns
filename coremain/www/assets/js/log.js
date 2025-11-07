@@ -1393,7 +1393,20 @@ document.addEventListener('DOMContentLoaded', () => {
         ui.setLoading(elements.globalRefreshBtn, true);
         const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
         try {
-            const [statusRes, capacityRes, statsRes, domainSetRankRes] = await Promise.allSettled([api.getStatus(signal), api.getCapacity(signal), api.v2.getStats(signal), api.v2.getDomainSetRank(signal, 100)]);
+            // 概览页首屏：尽量少拉数据，避免阻塞渲染
+            const shallowOnOverview = (activeTab === 'overview' && !forceAll);
+            const basePromises = [
+                api.getStatus(signal),
+                api.getCapacity(signal),
+                api.v2.getStats(signal)
+            ];
+            if (!shallowOnOverview) basePromises.push(api.v2.getDomainSetRank(signal, 100));
+
+            const results = await Promise.allSettled(basePromises);
+            const statusRes = results[0];
+            const capacityRes = results[1];
+            const statsRes = results[2];
+            const domainSetRankRes = results[3]; // 只有在非浅加载时才存在
 
             ui.updateStatus(statusRes.status === 'fulfilled' ? statusRes.value?.capturing : null);
             ui.updateCapacity(capacityRes.status === 'fulfilled' ? capacityRes.value?.capacity : null);
@@ -1408,7 +1421,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 historyManager.add(stats.total_queries, stats.average_duration_ms);
             }
 
-            if (domainSetRankRes.status === 'fulfilled') { 
+            if (domainSetRankRes && domainSetRankRes.status === 'fulfilled') { 
                 state.domainSetRank = domainSetRankRes.value || []; 
                 renderDonutChart(state.domainSetRank); 
             }
