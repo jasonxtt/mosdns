@@ -1700,7 +1700,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${formatRelativeTime(log.query_time)}</td>
                 <td>${renderDomainResponseCellHTML(log)}</td>
                 <td>${log.query_type}</td>
-                <td class="text-right">${log.duration_ms.toFixed(2)}</td>
+                <td class="text-right numeric duration-cell">${log.duration_ms.toFixed(2)}</td>
                 <td>${aliasManager.getAliasedClientHTML(log.client_ip)}</td>`;
         }
         return tr; 
@@ -1726,7 +1726,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td>${renderDomainResponseCellHTML(log, 'slowest')}</td>
                 <td>${aliasManager.getAliasedClientHTML(log.client_ip)}</td>
-                <td class="text-right">${log.duration_ms.toFixed(2)}</td>`;
+                <td class="text-right numeric duration-cell">${log.duration_ms.toFixed(2)}</td>`;
         }
         return tr; 
     }
