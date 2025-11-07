@@ -2368,7 +2368,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (Object.keys(payload).length === 0) { ui.showToast('没有可保存的覆盖项'); return; }
             try {
                 await api.fetch('/api/v1/overrides', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                ui.showToast('覆盖配置已保存');
+                ui.showToast('已保存，正在重启应用配置…', 'success');
+                // 调用系统重启接口，短延迟后自动刷新
+                try {
+                    await api.fetch('/api/v1/system/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delay_ms: 300 }) });
+                    // 给进程切换留出时间
+                    setTimeout(() => { location.reload(); }, 4000);
+                } catch (err) {
+                    ui.showToast('自动重启失败，请手动重启', 'error');
+                }
             } catch (e) {
                 ui.showToast('保存覆盖配置失败', 'error');
             }
