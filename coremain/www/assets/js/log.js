@@ -2624,7 +2624,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (entry.isIntersecting && !seen.has(entry.target)) {
                     seen.add(entry.target);
                     const fn = map.get(entry.target);
-                    if (typeof fn === 'function') fn();
+                    if (typeof fn === 'function') {
+                        if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                            window.requestIdleCallback(() => fn(), { timeout: 1500 });
+                        } else {
+                            setTimeout(() => fn(), 300);
+                        }
+                    }
                 }
             });
         }, { root, rootMargin: '50px' });
