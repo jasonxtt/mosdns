@@ -2661,7 +2661,16 @@ document.addEventListener('DOMContentLoaded', () => {
     async function init() {
         state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         themeManager.init();
-        await aliasManager.load(); 
+        // 根据进入页签决定是否首屏加载别名（仅日志/概览需要）。避免 system-control 首屏的额外请求。
+        const firstHash = window.location.hash || '#overview';
+        const firstTab = (document.querySelector(`.tab-link[href="${firstHash}"]`)?.dataset.tab) || firstHash.replace('#','');
+        if (firstTab === 'overview' || firstTab === 'log-query') {
+            await aliasManager.load();
+        } else {
+            // 延后到空闲时加载，供后续切换使用
+            if ('requestIdleCallback' in window) requestIdleCallback(() => aliasManager.load());
+            else setTimeout(() => aliasManager.load(), 1500);
+        }
         historyManager.load();
         autoRefreshManager.loadSettings();
         tableSorter.init();
@@ -2675,7 +2684,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setupLazyLoading();
         setupSystemControlLazyLoading();
         handleResize();
-        const initialHash = window.location.hash || '#overview';
+        const initialHash = firstHash;
         const initialLink = document.querySelector(`.tab-link[href="${initialHash}"]`);
         if (initialLink) handleNavigation(initialLink);
         // 首屏统一轻量刷新，所有重数据由懒加载或“刷新”按钮触发
