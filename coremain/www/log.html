@@ -421,6 +421,22 @@
                         <small class="tip-text">设置新容量将清空日志。</small>
                     </div>
                 </div>
+                <div class="control-module control-module--mini" id="auto-refresh-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5C12.4142 2.5 12.75 2.83579 12.75 3.25V5.03131C15.2635 5.50376 17.25 7.49021 17.7224 9.99993H19.5C19.9142 9.99993 20.25 10.3357 20.25 10.75V13.25C20.25 13.6642 19.9142 14 19.5 14H17.7224C17.25 16.5097 15.2635 18.4962 12.75 18.9686V20.75C12.75 21.1642 12.4142 21.5 12 21.5C11.5858 21.5 11.25 21.1642 11.25 20.75V18.9686C8.73652 18.4962 6.75 16.5097 6.27758 14H4.5C4.08579 14 3.75 13.6642 3.75 13.25V10.75C3.75 10.3357 4.08579 9.99993 4.5 9.99993H6.27758C6.75 7.49021 8.73652 5.50376 11.25 5.03131V3.25C11.25 2.83579 11.5858 2.5 12 2.5ZM12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7Z"></path></svg>自动刷新</h3>
+                    <form id="auto-refresh-form" class="auto-refresh-form">
+                        <label class="switch" for="auto-refresh-toggle" style="display: contents; cursor: pointer;">
+                            <strong>启用</strong>
+                            <label class="switch">
+                                <input type="checkbox" id="auto-refresh-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </label>
+                        <div>
+                            <input type="number" id="auto-refresh-interval" min="5">
+                            <span>秒/次</span>
+                        </div>
+                    </form>
+                </div>
                 <div class="control-module control-module--mini" id="appearance-module">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V12L16.5 15.5L15.0858 16.9142L11 12.8284V7Z"></path></svg>主题与外观</h3>
                     <div class="control-item">
@@ -453,22 +469,6 @@
                            <option value="compact">紧凑</option>
                         </select>
                     </div>
-                </div>
-                <div class="control-module control-module--mini" id="auto-refresh-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5C12.4142 2.5 12.75 2.83579 12.75 3.25V5.03131C15.2635 5.50376 17.25 7.49021 17.7224 9.99993H19.5C19.9142 9.99993 20.25 10.3357 20.25 10.75V13.25C20.25 13.6642 19.9142 14 19.5 14H17.7224C17.25 16.5097 15.2635 18.4962 12.75 18.9686V20.75C12.75 21.1642 12.4142 21.5 12 21.5C11.5858 21.5 11.25 21.1642 11.25 20.75V18.9686C8.73652 18.4962 6.75 16.5097 6.27758 14H4.5C4.08579 14 3.75 13.6642 3.75 13.25V10.75C3.75 10.3357 4.08579 9.99993 4.5 9.99993H6.27758C6.75 7.49021 8.73652 5.50376 11.25 5.03131V3.25C11.25 2.83579 11.5858 2.5 12 2.5ZM12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7Z"></path></svg>自动刷新</h3>
-                    <form id="auto-refresh-form" class="auto-refresh-form">
-                        <label class="switch" for="auto-refresh-toggle" style="display: contents; cursor: pointer;">
-                            <strong>启用</strong>
-                            <label class="switch">
-                                <input type="checkbox" id="auto-refresh-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </label>
-                        <div>
-                            <input type="number" id="auto-refresh-interval" min="5">
-                            <span>秒/次</span>
-                        </div>
-                    </form>
                 </div>
 
                 <!-- Row 2 -->
