@@ -244,7 +244,11 @@ func (dc *TraditionalDnsConn) queueLen() int {
 // It returns a nil c if queue has too many queries.
 // Caller must call deleteQueueC to release the qid in queue.
 func (dc *TraditionalDnsConn) addQueueC() (qid uint16, c chan *[]byte) {
-	c = make(chan *[]byte)
+    // Use a buffered channel to avoid dropping early responses when the
+    // reader goroutine delivers a packet before the exchanger starts
+    // waiting on the channel. A size-1 buffer preserves ordering and
+    // keeps readLoop non-blocking as intended.
+    c = make(chan *[]byte, 1)
 	dc.queueMu.Lock()
 	for i := 0; i < 100; i++ {
 		qid = dc.nextQid
