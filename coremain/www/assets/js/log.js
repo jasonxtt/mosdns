@@ -227,16 +227,30 @@ document.addEventListener('DOMContentLoaded', () => {
             if (logs.length === 0 && !append) { renderTable(tbody, [], () => {}, 'log-query'); return; }
             const startIndex = state.displayedLogs.length;
             state.displayedLogs.push(...logs);
-            const fragment = document.createDocumentFragment();
-            logs.forEach((log, i) => { 
-                const row = renderLogItemHTML(log, startIndex + i);
-                requestAnimationFrame(() => {
-                    row.classList.add('animate-in');
-                    row.style.animationDelay = `${i * 20}ms`; 
-                });
-                fragment.appendChild(row); 
-            });
-            tbody.appendChild(fragment);
+
+            // 分批渲染，避免一次性插入大量行造成掉帧
+            const BATCH = 10;
+            let idx = 0;
+            const renderChunk = () => {
+                if (idx >= logs.length) return;
+                const frag = document.createDocumentFragment();
+                for (let c = 0; c < BATCH && idx < logs.length; c++, idx++) {
+                    const log = logs[idx];
+                    const row = renderLogItemHTML(log, startIndex + idx);
+                    // 仅对前20行做入场动画，减少布局/绘制开销
+                    if (startIndex + idx < 20) {
+                        row.classList.add('animate-in');
+                    }
+                    frag.appendChild(row);
+                }
+                tbody.appendChild(frag);
+                if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+                    requestIdleCallback(renderChunk, { timeout: 300 });
+                } else {
+                    setTimeout(renderChunk, 0);
+                }
+            };
+            renderChunk();
         },
         updateSearchResultsInfo(pagination) { if (!elements.searchResultsInfo) return; if (state.currentLogSearchTerm?.query && pagination) { elements.searchResultsInfo.innerHTML = `为您找到 <strong>${pagination.total_items.toLocaleString()}</strong> 条相关结果`; } else { elements.searchResultsInfo.innerHTML = ''; } },
         openLogDetailModal(triggerElement) {
@@ -1450,10 +1464,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (activeTab === 'log-query') await fetchAndRenderLogs(1, false);
             else if (activeTab === 'rules') {
                 const activeSubTab = document.querySelector('#rules-tab .sub-nav-link.active').dataset.subTab;
-                if(activeSubTab === 'list-mgmt' && !state.listManagerInitialized) {
+                if (activeSubTab === 'list-mgmt' && !state.listManagerInitialized) {
                     listManager.init();
-                } else {
-                    await Promise.all([adguardManager.load(), diversionManager.load()]);
+                } else if (activeSubTab === 'adguard' && state.adguardRules.length === 0) {
+                    await adguardManager.load();
+                } else if (activeSubTab === 'diversion' && state.diversionRules.length === 0) {
+                    await diversionManager.load();
                 }
             }
         } catch (error) { if (error.name !== 'AbortError') console.error("Page update failed:", error); } 
@@ -1468,7 +1484,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.isLogLoading && !append) return;
         state.isLogLoading = true;
         if (elements.logLoader) elements.logLoader.style.display = 'block';
-        if (!append) renderSkeletonRows(elements.logTableBody, CONSTANTS.LOGS_PER_PAGE, state.isMobile ? 1 : 5);
+        if (!append) renderSkeletonRows(elements.logTableBody, Math.min(20, CONSTANTS.LOGS_PER_PAGE), state.isMobile ? 1 : 5);
         if (!append && logRequestController) logRequestController.abort();
         logRequestController = new AbortController();
         const params = { page, limit: CONSTANTS.LOGS_PER_PAGE, q: state.currentLogSearchTerm.query, exact: state.currentLogSearchTerm.exact };
@@ -1792,10 +1808,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const activeSubTab = document.querySelector('#rules-tab .sub-nav-link.active').dataset.subTab;
             if (activeSubTab === 'list-mgmt' && !state.listManagerInitialized) {
                 listManager.init();
-            } else if ((activeSubTab === 'adguard' && state.adguardRules.length === 0) || (activeSubTab === 'diversion' && state.diversionRules.length === 0)) {
+            } else if (activeSubTab === 'adguard' && state.adguardRules.length === 0) {
                 renderSkeletonRows(elements.adguardRulesTbody, 5, state.isMobile ? 1 : 6);
+                adguardManager.load();
+            } else if (activeSubTab === 'diversion' && state.diversionRules.length === 0) {
                 renderSkeletonRows(elements.diversionRulesTbody, 5, state.isMobile ? 1 : 7);
-                Promise.all([adguardManager.load(), diversionManager.load()]);
+                diversionManager.load();
             }
         }
     }
@@ -2225,7 +2243,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             elements.listSaveBtn.addEventListener('click', () => this.saveList());
-            this.loadList('whitelist'); // Load first list by default
+            // 首屏不立即加载巨大列表，交给空闲时机/用户点击触发，避免刷新时卡顿
+            if ('requestIdleCallback' in window) requestIdleCallback(() => this.loadList('whitelist'), { timeout: 2000 });
+            else setTimeout(() => this.loadList('whitelist'), 1200);
             state.listManagerInitialized = true;
         },
         
@@ -2244,17 +2264,56 @@ document.addEventListener('DOMContentLoaded', () => {
             ui.setLoading(elements.listSaveBtn, true);
 
             try {
-                const text = await api.fetch(`/plugins/${tag}/show`);
-                const lines = text.trim() === '' ? [] : text.trim().split('\n');
-                
-                if (lines.length > this.MAX_LINES) {
-                    elements.listContentTextArea.value = lines.slice(0, this.MAX_LINES).join('\n');
-                    elements.listContentInfo.textContent = `内容过长，仅显示前 ${this.MAX_LINES} 行（共 ${lines.length} 行）。`;
+                // 流式读取，最多加载 MAX_LINES 行，避免一次性 split 大字符串拖慢主线程
+                const res = await fetch(`/plugins/${tag}/show`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const reader = res.body?.getReader();
+                let totalLines = 0, shownLines = 0;
+                let buffer = '';
+                const CHUNK_LIMIT = this.MAX_LINES; // 达到就停止
+                let cancelled = false;
+                if (reader) {
+                    const decoder = new TextDecoder();
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        let nl;
+                        while ((nl = buffer.indexOf('\n')) !== -1) {
+                            totalLines++;
+                            const line = buffer.slice(0, nl);
+                            buffer = buffer.slice(nl + 1);
+                            if (shownLines < CHUNK_LIMIT) {
+                                elements.listContentTextArea.value += (shownLines ? '\n' : '') + line;
+                                shownLines++;
+                            }
+                            if (shownLines >= CHUNK_LIMIT) {
+                                // 够了，取消后续读取
+                                cancelled = true;
+                                try { reader.cancel(); } catch (_) {}
+                                break;
+                            }
+                        }
+                        if (cancelled) break;
+                    }
+                    // 剩余缓冲
+                    if (!cancelled && buffer.length > 0) {
+                        totalLines++;
+                        if (shownLines < CHUNK_LIMIT) {
+                            elements.listContentTextArea.value += (shownLines ? '\n' : '') + buffer;
+                            shownLines++;
+                        }
+                    }
                 } else {
-                    elements.listContentTextArea.value = text.trim();
-                    elements.listContentInfo.textContent = `共 ${lines.length} 行。`;
+                    // 兼容不支持流式的环境
+                    const text = await res.text();
+                    const parts = text.split('\n');
+                    totalLines = parts.length;
+                    elements.listContentTextArea.value = parts.slice(0, CHUNK_LIMIT).join('\n');
+                    shownLines = Math.min(totalLines, CHUNK_LIMIT);
                 }
-
+                if (shownLines >= CHUNK_LIMIT) elements.listContentInfo.textContent = `内容较长，已仅加载前 ${CHUNK_LIMIT} 行。`;
+                else elements.listContentInfo.textContent = `共 ${shownLines} 行。`;
             } catch (error) {
                 elements.listContentTextArea.value = `加载列表“${tag}”失败。`;
                 elements.listContentInfo.textContent = '加载失败';
@@ -2694,12 +2753,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // 根据进入页签决定是否首屏加载别名（仅日志/概览需要）。避免 system-control 首屏的额外请求。
         const firstHash = window.location.hash || '#overview';
         const firstTab = (document.querySelector(`.tab-link[href="${firstHash}"]`)?.dataset.tab) || firstHash.replace('#','');
+        const loadAliasesAsync = () => aliasManager.load().then(() => {
+            // 别名加载后，如当前在 log-query，轻量重渲染以显示别名
+            const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
+            if (activeTab === 'log-query' && state.displayedLogs.length) {
+                ui.renderLogTable(state.displayedLogs, false);
+            }
+        });
         if (firstTab === 'overview' || firstTab === 'log-query') {
-            await aliasManager.load();
+            // 不阻塞首屏：并行加载别名
+            loadAliasesAsync();
         } else {
             // 延后到空闲时加载，供后续切换使用
-            if ('requestIdleCallback' in window) requestIdleCallback(() => aliasManager.load());
-            else setTimeout(() => aliasManager.load(), 1500);
+            if ('requestIdleCallback' in window) requestIdleCallback(loadAliasesAsync);
+            else setTimeout(loadAliasesAsync, 1500);
         }
         historyManager.load();
         autoRefreshManager.loadSettings();
