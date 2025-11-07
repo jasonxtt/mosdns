@@ -579,7 +579,7 @@ dialog.card:hover {
 /* Overrides (覆盖配置)：横排布局，随屏幕自适应列数 */
 #overrides-module .overrides-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(260px, 1fr));
+    grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr) auto;
     gap: 1rem 1.5rem;
     align-items: end;
 }
@@ -588,6 +588,32 @@ dialog.card:hover {
 }
 #overrides-module .overrides-actions { align-self: end; }
 #overrides-module .button-group { margin-top: 0; }
+
+/* 覆盖配置：行内表单对齐（标签-输入-提示） */
+#overrides-module .control-item {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 0.5rem 1rem;
+    align-items: center;
+}
+#overrides-module .control-item .control-hint {
+    grid-column: 2 / 3;
+    margin-top: 0.1rem;
+}
+#overrides-module input[type="text"] {
+    width: 100%;
+    max-width: none;
+}
+#overrides-module .overrides-actions { 
+    display: flex; 
+    justify-content: flex-end; 
+    align-items: center;
+}
+#overrides-module .overrides-actions .button-group {
+    display: inline-grid;
+    grid-auto-flow: column;
+    gap: 1rem;
+}
 
 .rule-card { background-color: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: var(--border-radius-md); padding: 1rem; margin-bottom: 0.75rem; box-shadow: var(--shadow-sm); display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto; grid-template-areas: "toggle name" "meta meta" "actions actions"; gap: 0.5rem 1rem; align-items: center; }
 .rule-card-toggle { grid-area: toggle; }
