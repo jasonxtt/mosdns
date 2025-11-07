@@ -2251,6 +2251,12 @@ document.addEventListener('DOMContentLoaded', () => {
         
         async loadList(tag) {
             this.currentTag = tag;
+            // Abort any previous in-flight request and reset textarea to avoid old content persisting
+            try { this._abortController?.abort(); } catch (_) {}
+            this._abortController = new AbortController();
+            // Clear previous content so switching lists reflects immediately
+            elements.listContentTextArea.value = '';
+            elements.listContentTextArea.scrollTop = 0;
             elements.listMgmtNav.querySelectorAll('.list-mgmt-link').forEach(l => l.classList.toggle('active', l.dataset.listTag === tag));
             
             elements.listMgmtClientIpHint.style.display = (tag === 'client_ip') ? 'block' : 'none';
@@ -2265,7 +2271,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 // 流式读取，最多加载 MAX_LINES 行，避免一次性 split 大字符串拖慢主线程
-                const res = await fetch(`/plugins/${tag}/show`);
+                const res = await fetch(`/plugins/${tag}/show`, { signal: this._abortController.signal });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const reader = res.body?.getReader();
                 let totalLines = 0, shownLines = 0;
@@ -2315,13 +2321,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (shownLines >= CHUNK_LIMIT) elements.listContentInfo.textContent = `内容较长，已仅加载前 ${CHUNK_LIMIT} 行。`;
                 else elements.listContentInfo.textContent = `共 ${shownLines} 行。`;
             } catch (error) {
-                elements.listContentTextArea.value = `加载列表“${tag}”失败。`;
-                elements.listContentInfo.textContent = '加载失败';
-                ui.showToast(`加载列表“${tag}”失败`, 'error');
+                if (error?.name === 'AbortError') {
+                    // 用户快速切换导致的中断，不提示错误
+                    elements.listContentInfo.textContent = '已取消';
+                } else {
+                    elements.listContentTextArea.value = `加载列表“${tag}”失败。`;
+                    elements.listContentInfo.textContent = '加载失败';
+                    ui.showToast(`加载列表“${tag}”失败`, 'error');
+                }
             } finally {
                 elements.listContentLoader.style.display = 'none';
                 elements.listContentTextArea.style.display = 'block';
                 ui.setLoading(elements.listSaveBtn, false);
+                this._abortController = null;
             }
         },
 
