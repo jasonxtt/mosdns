@@ -155,7 +155,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const debounce = (func, wait) => { let timeout; return function executedFunction(...args) { const later = () => { clearTimeout(timeout); func(...args); }; clearTimeout(timeout); timeout = setTimeout(later, wait); }; };
 
-    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) {} } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => api.fetch('/metrics', { signal }), getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for(let [key, value] of queryParams.entries()){ if(!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
+    // 轻量级请求器 + /metrics 简易缓存，减少同一时段的重复请求
+    let __metricsInflight = null; let __metricsStamp = 0;
+    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) {} } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => { const now = Date.now(); if (__metricsInflight && (now - __metricsStamp) < 3000) return __metricsInflight; __metricsInflight = api.fetch('/metrics', { signal }); __metricsStamp = now; return __metricsInflight; }, getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for(let [key, value] of queryParams.entries()){ if(!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
     
 	const requeryApi = {
 		getConfig: (signal) => api.fetch(`/plugins/requery`, { signal }), 
@@ -1856,6 +1858,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const adguardManager = { async load() { try { state.adguardRules = await api.fetch('/plugins/adguard/rules') || []; } catch (error) { state.adguardRules = []; } this.render(); }, render() { renderRuleTable(elements.adguardRulesTbody, state.adguardRules, 'adguard'); }, };
     const diversionManager = { sdSetInstanceMap: { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn' }, async load() { try { const promises = Object.values(this.sdSetInstanceMap).map(tag => api.fetch(`/plugins/${tag}/config`)); const results = await Promise.allSettled(promises); state.diversionRules = results.filter(r => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap(r => r.value); } catch(e) { state.diversionRules = []; } this.render(); }, render() { renderRuleTable(elements.diversionRulesTbody, state.diversionRules, 'diversion'); }, };
     
+    // 流式计数工具：避免一次性创建超大字符串数组导致主线程卡顿
+    async function countLinesStreaming(url, signal) {
+        const res = await fetch(url, { signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const reader = res.body?.getReader();
+        if (!reader) { // 兼容性回退
+            const text = await res.text();
+            if (!text) return 0;
+            let n = 0; for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
+            if (text.length > 0 && text.charCodeAt(text.length - 1) !== 10) n++;
+            return n;
+        }
+        const decoder = new TextDecoder();
+        let { value, done } = await reader.read();
+        let leftover = '';
+        let count = 0;
+        while (!done) {
+            const chunkText = leftover + decoder.decode(value, { stream: true });
+            // 统计当前块中的换行符
+            for (let i = 0; i < chunkText.length; i++) if (chunkText.charCodeAt(i) === 10) count++;
+            // 处理最后一行未以 \n 结尾的情况：保留到下一块
+            const lastNl = chunkText.lastIndexOf('\n');
+            leftover = lastNl === -1 ? chunkText : chunkText.slice(lastNl + 1);
+            ({ value, done } = await reader.read());
+        }
+        // 最后一块
+        const finalText = leftover + decoder.decode();
+        if (finalText.length > 0) count++;
+        return count;
+    }
+
     async function updateDomainListStats(signal) {
         const listMap = {
             fakeip: { element: elements.fakeipDomainCount, endpoint: '/plugins/my_fakeiplist/show' },
@@ -1864,31 +1897,26 @@ document.addEventListener('DOMContentLoaded', () => {
             nov6: { element: elements.nov6DomainCount, endpoint: '/plugins/my_nov6list/show' },
         };
 
-        const promises = Object.values(listMap).map(item => api.fetch(item.endpoint, { signal }));
-        const backupPromise = requeryApi.getBackupCount(signal);
-        
-        const results = await Promise.allSettled(promises);
-
-        results.forEach((result, index) => {
-            const key = Object.keys(listMap)[index];
-            const { element } = listMap[key];
-            if (result.status === 'fulfilled' && typeof result.value === 'string') {
-                const count = result.value.trim() === '' ? 0 : result.value.trim().split('\n').length;
+        // 顺序 + 流式计数，进一步降低内存占用与主线程卡顿
+        for (const key of Object.keys(listMap)) {
+            const { element, endpoint } = listMap[key];
+            try {
+                const count = await countLinesStreaming(endpoint, signal);
                 element.textContent = count.toLocaleString();
-            } else {
-                element.textContent = '获取失败';
+            } catch (e) {
+                if (e.name !== 'AbortError') element.textContent = '获取失败';
             }
-        });
+        }
 
         try {
-            const backupRes = await backupPromise;
+            const backupRes = await requeryApi.getBackupCount(signal);
             if (backupRes && backupRes.status === 'success') {
                 elements.backupDomainCount.textContent = `${backupRes.count.toLocaleString()} 条`;
             } else {
                 elements.backupDomainCount.textContent = '获取失败';
             }
         } catch(e) {
-            elements.backupDomainCount.textContent = '获取失败';
+            if (e.name !== 'AbortError') elements.backupDomainCount.textContent = '获取失败';
         }
     }
 
@@ -2619,18 +2647,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!root) return;
         const seen = new Set();
         const map = new Map();
+
+        // 简易并发队列，避免系统控制页一次性触发过多请求
+        const SYS_MAX = 2; // 同时最多执行2个模块任务
+        const queue = [];
+        let running = 0;
+        const pump = () => {
+            while (running < SYS_MAX && queue.length > 0) {
+                const job = queue.shift();
+                running++;
+                Promise.resolve()
+                    .then(job)
+                    .catch(() => {})
+                    .finally(() => { running--; pump(); });
+            }
+        };
+        const enqueue = (fn) => { queue.push(fn); pump(); };
         const io = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting && !seen.has(entry.target)) {
                     seen.add(entry.target);
                     const fn = map.get(entry.target);
-                    if (typeof fn === 'function') {
+                    if (typeof fn === 'function') enqueue(() => {
                         if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-                            window.requestIdleCallback(() => fn(), { timeout: 1500 });
-                        } else {
-                            setTimeout(() => fn(), 300);
+                            return new Promise((resolve) => window.requestIdleCallback(() => { fn(); resolve(); }, { timeout: 1500 }));
                         }
-                    }
+                        return new Promise((resolve) => setTimeout(() => { fn(); resolve(); }, 300));
+                    });
                 }
             });
         }, { root, rootMargin: '50px' });
@@ -2648,7 +2691,16 @@ document.addEventListener('DOMContentLoaded', () => {
     async function init() {
         state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         themeManager.init();
-        await aliasManager.load(); 
+        // 根据进入页签决定是否首屏加载别名（仅日志/概览需要）。避免 system-control 首屏的额外请求。
+        const firstHash = window.location.hash || '#overview';
+        const firstTab = (document.querySelector(`.tab-link[href="${firstHash}"]`)?.dataset.tab) || firstHash.replace('#','');
+        if (firstTab === 'overview' || firstTab === 'log-query') {
+            await aliasManager.load();
+        } else {
+            // 延后到空闲时加载，供后续切换使用
+            if ('requestIdleCallback' in window) requestIdleCallback(() => aliasManager.load());
+            else setTimeout(() => aliasManager.load(), 1500);
+        }
         historyManager.load();
         autoRefreshManager.loadSettings();
         tableSorter.init();
@@ -2662,7 +2714,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setupLazyLoading();
         setupSystemControlLazyLoading();
         handleResize();
-        const initialHash = window.location.hash || '#overview';
+        const initialHash = firstHash;
         const initialLink = document.querySelector(`.tab-link[href="${initialHash}"]`);
         if (initialLink) handleNavigation(initialLink);
         // 首屏统一轻量刷新，所有重数据由懒加载或“刷新”按钮触发
