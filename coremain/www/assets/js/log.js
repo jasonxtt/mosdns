@@ -2645,7 +2645,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const initialHash = window.location.hash || '#overview';
         const initialLink = document.querySelector(`.tab-link[href="${initialHash}"]`);
         if (initialLink) handleNavigation(initialLink);
-        await updatePageData(true);
+        // 进入概览页时，避免一次性拉取所有排行/最慢查询等重数据，交给 IntersectionObserver 懒加载
+        const initialTab = initialLink?.dataset.tab || initialHash.replace('#','');
+        const forceAllFirstLoad = initialTab !== 'overview';
+        await updatePageData(forceAllFirstLoad);
         if (document.fonts?.ready) await document.fonts.ready;
         requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if(activeLink) updateNavSlider(activeLink); });
         elements.initialLoader.style.opacity = '0';
