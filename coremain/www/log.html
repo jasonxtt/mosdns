@@ -678,24 +678,28 @@
                 </div>
                 
                 <!-- 覆盖配置 -->
-                <div class="control-module" id="overrides-module">
+                <div class="control-module" id="overrides-module" style="grid-column: 1 / -1;">
                     <h3>
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M3 17v2h6v-2H3zm0-7v2h12V10H3zm0-7v2h18V3H3zm0 14h18v-2H3v2z"/></svg>
                         覆盖配置
                     </h3>
-                    <div class="control-item">
-                        <label for="override-socks5-log" class="field-label">socks5 代理</label>
-                        <input type="text" id="override-socks5-log" placeholder="host:port" style="max-width: 260px;">
-                        <small class="control-hint">留空表示不覆盖</small>
-                    </div>
-                    <div class="control-item">
-                        <label for="override-ecs-log" class="field-label">ECS IP</label>
-                        <input type="text" id="override-ecs-log" placeholder="IPv4 / IPv6" style="max-width: 260px;">
-                        <small class="control-hint">留空表示不覆盖</small>
-                    </div>
-                    <div class="button-group">
-                        <button id="overrides-load-btn-log" class="button secondary"><span>读取当前</span></button>
-                        <button id="overrides-save-btn-log" class="button primary"><span>保存</span></button>
+                    <div class="overrides-grid">
+                        <div class="control-item">
+                            <label for="override-socks5-log" class="field-label">socks5 代理</label>
+                            <input type="text" id="override-socks5-log" placeholder="host:port">
+                            <small class="control-hint">留空表示不覆盖</small>
+                        </div>
+                        <div class="control-item">
+                            <label for="override-ecs-log" class="field-label">ECS IP</label>
+                            <input type="text" id="override-ecs-log" placeholder="IPv4 / IPv6">
+                            <small class="control-hint">留空表示不覆盖</small>
+                        </div>
+                        <div class="overrides-actions">
+                            <div class="button-group">
+                                <button id="overrides-load-btn-log" class="button secondary"><span>读取当前</span></button>
+                                <button id="overrides-save-btn-log" class="button primary"><span>保存</span></button>
+                            </div>
+                        </div>
                     </div>
                     <p class="control-hint">保存后需重启 MosDNS 生效。</p>
                 </div>
