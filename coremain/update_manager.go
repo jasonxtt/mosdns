@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,8 +24,8 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"go.uber.org/zap"
+	"golang.org/x/net/proxy"
 	xcpu "golang.org/x/sys/cpu"
-	"runtime/debug"
 )
 
 const (
@@ -70,9 +71,8 @@ type UpdateStatus struct {
 	Cached           bool       `json:"cached"`
 	Message          string     `json:"message,omitempty"`
 	PendingRestart   bool       `json:"pending_restart,omitempty"`
-	// 新增：在 amd64 上提示可手动切到 v3 优化构建
-	AMD64V3Capable bool `json:"amd64_v3_capable,omitempty"`
-	CurrentIsV3    bool `json:"current_is_v3,omitempty"`
+	AMD64V3Capable   bool       `json:"amd64_v3_capable,omitempty"`
+	CurrentIsV3      bool       `json:"current_is_v3,omitempty"`
 }
 
 type UpdateActionResponse struct {
@@ -97,11 +97,9 @@ type UpdateManager struct {
 	currentAssetSignature string
 	pendingSignature      string
 	statePath             string
-	// 控制“固定 tag”回退行为：默认启用；也可切到 warn-only 或完全禁用
-	fixedTagMode fixedTagFallbackMode
+	fixedTagMode          fixedTagFallbackMode
 }
 
-// 固定 tag 回退模式
 type fixedTagFallbackMode int
 
 const (
@@ -141,8 +139,6 @@ func NewUpdateManager() *UpdateManager {
 		cacheTTL:       defaultCacheTTL,
 		currentVersion: GetBuildVersion(),
 	}
-	// 读取环境变量以控制固定 tag 回退逻辑（默认启用）
-	// MOSDNS_UPDATE_FIXED_TAG_MODE=enabled|warn-only|disabled
 	switch strings.ToLower(os.Getenv("MOSDNS_UPDATE_FIXED_TAG_MODE")) {
 	case "warn-only", "warnonly", "warn":
 		mgr.fixedTagMode = fixedTagFallbackWarnOnly
@@ -154,6 +150,79 @@ func NewUpdateManager() *UpdateManager {
 	mgr.initState()
 	return mgr
 }
+
+// <<< START OF ADDED CODE >>>
+
+// getHttpClientForUpdate dynamically creates an http.Client based on override settings.
+// It returns the client and a boolean indicating if a proxy was configured.
+func (m *UpdateManager) getHttpClientForUpdate() (client *http.Client, isProxy bool, err error) {
+	if MainConfigBaseDir == "" {
+		m.logWarn("MainConfigBaseDir is not set, cannot find overrides file, using direct connection", nil)
+		return m.httpClient, false, nil
+	}
+
+	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	data, err := os.ReadFile(overridesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File not found is normal, just use the default direct client.
+			return m.httpClient, false, nil
+		}
+		// Other read errors are problematic but we fall back to direct connection.
+		m.logWarn("failed to read config_overrides.json, falling back to direct connection", err)
+		return m.httpClient, false, nil
+	}
+
+	var overrides GlobalOverrides
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		m.logWarn("failed to parse config_overrides.json, falling back to direct connection", err)
+		return m.httpClient, false, nil
+	}
+
+	if overrides.Socks5 != "" {
+		m.logger().Info("using socks5 proxy for update", zap.String("proxy", overrides.Socks5))
+		dialer, err := proxy.SOCKS5("tcp", overrides.Socks5, nil, proxy.Direct)
+		if err != nil {
+			return nil, true, fmt.Errorf("failed to create socks5 dialer: %w", err)
+		}
+
+		contextDialer, ok := dialer.(proxy.ContextDialer)
+		if !ok {
+			return nil, true, errors.New("proxy dialer does not support context")
+		}
+
+		httpTransport := &http.Transport{
+			DialContext: contextDialer.DialContext,
+		}
+		return &http.Client{
+			Transport: httpTransport,
+			Timeout:   httpTimeout,
+		}, true, nil
+	}
+
+	// No socks5 config found in the file, use direct connection.
+	return m.httpClient, false, nil
+}
+
+// doRequestWithFallback handles the entire request lifecycle including proxy and fallback.
+func (m *UpdateManager) doRequestWithFallback(req *http.Request) (*http.Response, error) {
+	client, isProxy, err := m.getHttpClientForUpdate()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+
+	if err != nil && isProxy {
+		m.logWarn("request with proxy failed, retrying with direct connection", err, zap.String("url", req.URL.String()))
+		fallbackReq := req.Clone(req.Context())
+		return m.httpClient.Do(fallbackReq)
+	}
+
+	return resp, err
+}
+
+// <<< END OF ADDED CODE >>>
 
 func (m *UpdateManager) initState() {
 	exe, err := os.Executable()
@@ -271,13 +340,11 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 		CurrentSignature: m.currentAssetSignature,
 	}
 
-	// 提供 v3 能力提示用的标记（仅在 amd64 + linux/windows 下有意义）
 	if runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") {
 		status.AMD64V3Capable = cpuSupportsAMD64V3()
 		status.CurrentIsV3 = binaryIsAMD64V3Plus()
 	}
 
-	// 记录一次探测信息，便于排查未显示 v3 提示的情况
 	if lg := m.logger(); lg != nil {
 		goamd64 := readGOAMD64()
 		cpuModel := cpuModelName()
@@ -295,7 +362,6 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 			zap.Bool("cpu_bmi2", runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2),
 			zap.Bool("cpu_fma", runtime.GOARCH == "amd64" && xcpu.X86.HasFMA),
 		)
-		// 兼容 stdout/stderr 场景的简洁日志，便于快速排查（与 requery 插件日志一致风格）
 		stdlog.Printf("[update] arch=%s current=%s latest=%s update=%t goamd64=%s v3_capable=%t current_is_v3=%t cpu='%s' avx2=%t bmi1=%t bmi2=%t fma=%t",
 			status.Architecture, status.CurrentVersion, status.LatestVersion, status.UpdateAvailable, goamd64,
 			status.AMD64V3Capable, status.CurrentIsV3, cpuModel,
@@ -304,7 +370,6 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 			runtime.GOARCH == "amd64" && xcpu.X86.HasBMI2,
 			runtime.GOARCH == "amd64" && xcpu.X86.HasFMA,
 		)
-		// 中文直观概览
 		stdlog.Printf("[update] 概览：当前版本=%s 最新版本=%s 架构=%s CPU=%s CPU支持v3=%s 当前为v3构建=%s GOAMD64=%s 需要更新=%s",
 			status.CurrentVersion,
 			status.LatestVersion,
@@ -345,7 +410,6 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 		return UpdateActionResponse{Status: status}, ErrNoUpdateAvailable
 	}
 
-	// 若用户显式请求 v3，并且平台/CPU 支持，尝试切换到 v3 资产
 	if preferV3 && runtime.GOARCH == "amd64" && (runtime.GOOS == "linux" || runtime.GOOS == "windows") && cpuSupportsAMD64V3() {
 		if lg := m.logger(); lg != nil {
 			lg.Info("prefer v3 requested; trying to switch asset")
@@ -358,7 +422,6 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 				status.AssetSignature = buildAssetSignature(*v3)
 				status.UpdateAvailable = m.isUpdateNeeded(status.LatestVersion, status.AssetSignature)
 				if !status.UpdateAvailable {
-					// 即使版本相同，只要资产不同也视为需要更新（切换构建）
 					status.UpdateAvailable = status.AssetSignature != m.currentAssetSignature
 				}
 			} else {
@@ -410,7 +473,6 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 			action.Notes = fmt.Sprintf("写入新文件失败: %v", err)
 			return action, err
 		}
-		// 短文案：避免在 UI 中出现过长路径
 		action.Notes = "更新已下载，已生成 mosdns.exe.new，请手动替换并重启。"
 		action.RestartRequired = true
 		status.PendingRestart = true
@@ -429,7 +491,6 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 
 	action.Installed = true
 	action.RestartRequired = true
-	// 短文案：由前端呈现“自重启中”状态
 	action.Notes = "更新已安装，正在自重启…"
 
 	status.PendingRestart = true
@@ -439,11 +500,9 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 	m.recordInstalled(status.AssetSignature)
 	if err := m.triggerPostUpgradeHook(ctx); err != nil {
 		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", postUpgradeEndpoint))
-		// 简短降级提示
 		action.Notes = "更新已安装，请手动重启。"
 		status.Message = action.Notes
 	} else {
-		// 保持简短
 		action.Notes = "更新已安装，正在自重启…"
 		status.Message = action.Notes
 	}
@@ -463,13 +522,11 @@ func (m *UpdateManager) recordInstalled(signature string) {
 }
 
 func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
-	// 优先使用环境变量覆盖（便于自定义 API 端口/路径）
 	endpoint := strings.TrimSpace(os.Getenv("MOSDNS_RESTART_ENDPOINT"))
 	if endpoint == "" {
 		endpoint = postUpgradeEndpoint
 	}
 
-	// 先尝试通过 HTTP 端点触发重启
 	if endpoint != "" {
 		if ctx == nil {
 			ctx = context.Background()
@@ -483,25 +540,22 @@ func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
 			if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
 				req.Host = req.URL.Host
 			}
+			// This local call should not use proxy.
 			if resp, err := m.httpClient.Do(req); err == nil {
 				defer resp.Body.Close()
 				io.Copy(io.Discard, resp.Body)
 				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 					return nil
 				}
-				// 记录非 2xx 的响应，继续走本地回退
 				m.logWarn("self-restart hook returned non-2xx", fmt.Errorf("HTTP %s", resp.Status), zap.String("endpoint", endpoint))
 			} else {
-				// 记录 HTTP 失败，继续走本地回退
 				m.logWarn("self-restart hook request failed", err, zap.String("endpoint", endpoint))
 			}
 		} else {
-			// 构造请求失败，继续走本地回退
 			m.logWarn("self-restart hook request build failed", err, zap.String("endpoint", endpoint))
 		}
 	}
 
-	// 本地回退：直接在当前进程内发起自重启（仅非 Windows）
 	if runtime.GOOS != "windows" {
 		exe, err := os.Executable()
 		if err != nil {
@@ -510,7 +564,6 @@ func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
 		args := append([]string{exe}, os.Args[1:]...)
 		env := os.Environ()
 		go func() {
-			// 给上层 UI 一点时间处理 pending 状态
 			time.Sleep(500 * time.Millisecond)
 			_ = syscall.Exec(exe, args, env)
 		}()
@@ -526,23 +579,17 @@ func (m *UpdateManager) isUpdateNeeded(latest, signature string) bool {
 }
 
 func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
-	// 先做版本号等价判断：若版本一致，则不提示更新。
-	// 修复：版本相同也提示有新版本的问题（例如仅资产签名不同但 tag 未变）。
 	latestNorm := normalizeVersion(latest)
 	currentNorm := normalizeVersion(m.currentVersion)
 	if latestNorm != "" && currentNorm != "" && latestNorm == currentNorm {
 		return false
 	}
-
-	// 若能拿到资产签名，则以签名判断（用于真正的新版本或构建切换场景）。
 	if signature != "" {
 		if signature == m.currentAssetSignature || signature == m.pendingSignature {
 			return false
 		}
 		return true
 	}
-
-	// 退化到字符串比较。
 	if latestNorm == "" {
 		return false
 	}
@@ -552,8 +599,6 @@ func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
 	return latestNorm != currentNorm
 }
 
-// normalizeVersion 对版本号进行轻量归一化：去空格、转小写、去前导 'v'
-// 仅用于相等性判断，避免大小写或前缀差异造成误报。
 func normalizeVersion(v string) string {
 	s := strings.ToLower(strings.TrimSpace(v))
 	s = strings.TrimPrefix(s, "v")
@@ -561,7 +606,6 @@ func normalizeVersion(v string) string {
 }
 
 func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, error) {
-	// 固定 tag 回退路径已移除：仅使用 releases/latest
 	info, err := m.fetchLatestReleaseInfo(ctx)
 	if err != nil {
 		return releaseInfo{}, fmt.Errorf("获取最新版本失败: %v", err)
@@ -576,6 +620,7 @@ func (m *UpdateManager) fetchLatestReleaseInfo(ctx context.Context) (releaseInfo
 	return m.fetchLatestReleaseInfoHTML(ctx)
 }
 
+// NOTE: This is the duplicated function from the original file, preserved as requested.
 func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, error) {
 	url := fmt.Sprintf(githubReleaseAPI, githubOwner, githubRepo, releaseTag)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -590,7 +635,7 @@ func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, e
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := m.httpClient.Do(req)
+	resp, err := m.doRequestWithFallback(req) // <<< MODIFIED
 	if err != nil {
 		return releaseInfo{}, err
 	}
@@ -635,7 +680,7 @@ func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseI
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := m.httpClient.Do(req)
+	resp, err := m.doRequestWithFallback(req) // <<< MODIFIED
 	if err != nil {
 		return releaseInfo{}, err
 	}
@@ -660,7 +705,6 @@ func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseI
 	if payload.TagName == "" {
 		return releaseInfo{}, errors.New("API 未返回 tag 名称")
 	}
-	// 关键修复：确保通过 API 路径返回真实 tag，用于 UI 展示与 ReleaseURL 构造
 	return releaseInfo{tagName: payload.TagName, publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
 }
 
@@ -674,7 +718,6 @@ func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (release
 	if match := tagFromURLRegex.FindStringSubmatch(body); len(match) == 2 {
 		tag = match[1]
 	}
-	// 防止解析到 GitHub 占位符（如 *name）导致 404
 	if tag == "" || strings.Contains(tag, "*") {
 		if match := expandedTagRegex.FindStringSubmatch(body); len(match) == 2 {
 			tag = match[1]
@@ -684,7 +727,6 @@ func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (release
 		return releaseInfo{}, errors.New("无法从 latest 页面解析 tag（命中占位符或为空）")
 	}
 
-	// 发布时间（可选）
 	var publishedAt *time.Time
 	if match := relativeTimeRegex.FindStringSubmatch(body); len(match) == 2 {
 		if t, err := time.Parse(time.RFC3339, match[1]); err == nil {
@@ -703,6 +745,7 @@ func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (release
 	return releaseInfo{tagName: tag, publishedAt: publishedAt, assets: assets}, nil
 }
 
+// NOTE: This is the duplicated function from the original file, preserved as requested.
 func (m *UpdateManager) fetchReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
 	assetsURL := fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, releaseTag)
 	body, err := m.fetchHTML(ctx, assetsURL)
@@ -731,11 +774,13 @@ func (m *UpdateManager) fetchHTML(ctx context.Context, url string) (string, erro
 		return "", err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	resp, err := m.httpClient.Do(req)
+
+	resp, err := m.doRequestWithFallback(req) // <<< MODIFIED
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return "", fmt.Errorf("请求 %s 失败: %s (%s)", url, resp.Status, strings.TrimSpace(string(body)))
@@ -792,8 +837,6 @@ func selectAsset(assets []githubAsset) *githubAsset {
 	return nil
 }
 
-// binaryIsAMD64V3Plus 通过读取当前二进制的构建信息，判断是否为
-// amd64 v3（或更高，如 v4）构建。读取失败则返回 false（保守选择传统包）。
 func binaryIsAMD64V3Plus() bool {
 	if runtime.GOARCH != "amd64" {
 		return false
@@ -806,21 +849,16 @@ func binaryIsAMD64V3Plus() bool {
 			}
 		}
 	}
-	// 未能读到 GOAMD64，保守处理：按非 v3 处理
 	return false
 }
 
-// cpuSupportsAMD64V3 检测 CPU 是否支持 v3 关键指令（AVX2、BMI1、BMI2、FMA）。
-// 注意：这不是当前二进制的构建档位，而是硬件能力探测。
 func cpuSupportsAMD64V3() bool {
 	if runtime.GOARCH != "amd64" {
 		return false
 	}
-	// 依据 Go 官方 GOAMD64 v3 的近似集合进行判断（保守取交集）。
 	return xcpu.X86.HasAVX2 && xcpu.X86.HasBMI1 && xcpu.X86.HasBMI2 && xcpu.X86.HasFMA
 }
 
-// readGOAMD64 返回当前二进制的 GOAMD64 构建档位（v1/v2/v3/v4），未知则返回空串。
 func readGOAMD64() string {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range bi.Settings {
@@ -832,7 +870,6 @@ func readGOAMD64() string {
 	return ""
 }
 
-// cpuModelName 在 Linux 上尝试读取 /proc/cpuinfo 的 model name；其他平台返回空串。
 func cpuModelName() string {
 	if runtime.GOOS != "linux" {
 		return ""
@@ -852,7 +889,6 @@ func cpuModelName() string {
 	return ""
 }
 
-// yesNoCN 将布尔值转换为“是/否”。
 func yesNoCN(b bool) string {
 	if b {
 		return "是"
@@ -860,7 +896,6 @@ func yesNoCN(b bool) string {
 	return "否"
 }
 
-// nonEmpty 返回 s，否则返回 fallback。
 func nonEmpty(s, fallback string) string {
 	if strings.TrimSpace(s) == "" {
 		return fallback
@@ -920,7 +955,6 @@ func parseAssetsFromHTML(html string) []githubAsset {
 	return result
 }
 
-// findV3Asset 在支持 v3 的 amd64 平台上，返回 v3 优化包。
 func findV3Asset(assets []githubAsset) *githubAsset {
 	if runtime.GOARCH != "amd64" {
 		return nil
@@ -948,7 +982,8 @@ func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, 
 		return "", err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	resp, err := m.httpClient.Do(req)
+
+	resp, err := m.doRequestWithFallback(req) // <<< MODIFIED
 	if err != nil {
 		return "", err
 	}
@@ -965,6 +1000,7 @@ func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, 
 	defer tmpFile.Close()
 
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		os.Remove(tmpFile.Name())
 		return "", err
 	}
 
