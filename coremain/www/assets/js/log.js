@@ -607,6 +607,8 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch2', name: '指定 Client', desc: '对特定客户端 IP 应用分流策略', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch4', name: '过期缓存', desc: '启用 Lazy Cache（乐观缓存）', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
+	    { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
+	    { tag: 'switch8', name: '开关', desc: '第8号开关', tip: '尚未分配功能。', valueForOn: 'A' },
         ],
     
         init() {
@@ -716,6 +718,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 await api.fetch(`/plugins/${tag}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: valueToPost }) });
                 state.featureSwitches[tag] = valueToPost;
                 ui.showToast(`“${profile.name}” 已${checkbox.checked ? '启用' : '禁用'}`);
+        if (tag === 'switch9') {
+            (async () => {
+                ui.showToast('附加操作：正在清空核心缓存...', 'info');
+                const results = await Promise.allSettled([
+                    api.fetch('/plugins/cache_all/flush'),
+                    api.fetch('/plugins/cache_all_noleak/flush')
+                ]);
+                
+                const failedCount = results.filter(r => r.status === 'rejected').length;
+                if (failedCount > 0) {
+                    ui.showToast(`附加操作：核心缓存清空完成，有 ${failedCount} 个失败。`, 'error');
+                } else {
+                    ui.showToast('附加操作：核心缓存已成功清空！', 'success');
+                }
+            })(); 
+        }
             } catch (error) {
                 ui.showToast(`切换“${profile.name}”失败`, 'error');
                 checkbox.checked = !checkbox.checked;
