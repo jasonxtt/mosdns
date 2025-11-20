@@ -25,7 +25,6 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
-	"github.com/miekg/dns"
 	"strconv"
 	"strings"
 )
@@ -93,8 +92,6 @@ func (t *TTL) Exec(_ context.Context, qCtx *query_context.Context) error {
 				dnsutils.ApplyMaximumTTL(r, t.max)
 			}
 		}
-		r.SetRcode(qCtx.Q(), dns.RcodeSuccess)
 	}
 	return nil
 }
-
