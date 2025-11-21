@@ -686,10 +686,10 @@ func (a *AliAPIUpstream) ExchangeContext(ctx context.Context, req []byte) (resp 
 	if aliDNSResult.Status == dns.RcodeSuccess {
 		for _, ans := range aliDNSResult.Answer {
 			// Keeping the original logic to only add records matching the question name.
-			if ans.Name == qName {
+			// if ans.Name == qName {
 				record := getDNSRecord(ans)
 				responseMsg.Answer = append(responseMsg.Answer, record)
-			}
+			// }
 		}
 	} else {
 		// Log DNS-level errors (like NXDOMAIN, SERVFAIL) for debugging.
