@@ -73,7 +73,23 @@ func (c *cnameRemover) Exec(ctx context.Context, qCtx *query_context.Context) er
 		}
 	}
 	// =============================================================
+	// 目的：防止上游DNS只返回了CNAME但没有返回IP（不完整响应）时，
+	// 本插件误将唯一的CNAME删除导致返回空包。
+	hasIP := false
+	for _, rr := range r.Answer {
+		// 只要发现 A 或 AAAA 记录，说明包含 IP
+		if rr.Header().Rrtype == dns.TypeA || rr.Header().Rrtype == dns.TypeAAAA {
+			hasIP = true
+			break
+		}
+	}
 
+	// 如果遍历完发现没有 IP 记录，说明这是一个纯 CNAME 链（或者其他非IP响应）。
+	// 此时不能执行删除操作，必须保留 CNAME 供客户端进行递归解析。
+	if !hasIP {
+		return nil
+	}
+	
 	qName := qCtx.QQuestion().Name
 
 	// ==================== 变更点 2: 高效的切片操作 ====================
