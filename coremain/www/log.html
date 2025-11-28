@@ -324,6 +324,7 @@
                                 <a href="#" class="list-mgmt-link" data-list-tag="greylist">灰名单</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="ddnslist">DDNS 域名</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="client_ip">客户端 IP</a>
+                                <a href="#" class="list-mgmt-link" data-list-tag="direct_ip">直连 IP</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="rewrite">重定向</a>
                             </nav>
                             <div class="list-mgmt-content">
@@ -334,6 +335,7 @@
                                     <button id="list-save-btn" class="button primary"><span>保存</span></button>
                                 </div>
                                 <p id="list-mgmt-client-ip-hint" style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">打开此开关：系统-功能开关-指定 Client，同时mosdns作为dns下发给客户端，此名单/功能才生效；生效时，只有指定客户端IP可以获取fakeip。</p>
+                                <p id="list-mgmt-direct-ip-hint" style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">不在任何域名清单中的域名解析后的IP属于此IP清单时，此域名向被归入直连域名。以苹果公司IP段为例：17.0.0.0/8</p>
                                 <p id="list-mgmt-rewrite-hint" style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">格式: &lt;域名&gt; &lt;IP或域名&gt;。例如: <code>example.com 1.2.3.4</code> 或 <code>test.com example.com</code>。支持 full:, domain: 等匹配规则。</p>
                             </div>
                         </div>
