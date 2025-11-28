@@ -141,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
         listContentInfo: document.getElementById('list-content-info'),
         listSaveBtn: document.getElementById('list-save-btn'),
         listMgmtClientIpHint: document.getElementById('list-mgmt-client-ip-hint'),
+	listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
         listMgmtRewriteHint: document.getElementById('list-mgmt-rewrite-hint'),
 
         featureSwitchesModule: document.getElementById('feature-switches-module'),
@@ -608,7 +609,8 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch4', name: '过期缓存', desc: '启用 Lazy Cache（乐观缓存）', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
 	    { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
-	    { tag: 'switch8', name: '开关', desc: '第8号开关', tip: '尚未分配功能。', valueForOn: 'A' },
+	    { tag: 'switch8', name: 'IPV4优先', desc: 'Prefer IPV4（不建议开启）', tip: '当一个域名有IPV4解析记录时，不返回IPV6解析结果。', valueForOn: 'A' },
+	    { tag: 'switch10', name: 'IPV6优先', desc: 'Prefer IPV6（不建议开启）', tip: '当一个域名有IPV6解析记录时，不返回IPV4解析结果。', valueForOn: 'A' },
         ],
     
         init() {
@@ -2248,6 +2250,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'greylist', name: '灰名单' },
             { tag: 'ddnslist', name: 'DDNS 域名' },
             { tag: 'client_ip', name: '客户端 IP' },
+            { tag: 'direct_ip', name: '直连 IP' },
             { tag: 'rewrite', name: '重定向' }
         ],
 
@@ -2278,6 +2281,9 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.listMgmtNav.querySelectorAll('.list-mgmt-link').forEach(l => l.classList.toggle('active', l.dataset.listTag === tag));
             
             elements.listMgmtClientIpHint.style.display = (tag === 'client_ip') ? 'block' : 'none';
+            if (elements.listMgmtDirectIpHint) {
+                elements.listMgmtDirectIpHint.style.display = (tag === 'direct_ip') ? 'block' : 'none';
+            }
             if (elements.listMgmtRewriteHint) {
                 elements.listMgmtRewriteHint.style.display = (tag === 'rewrite') ? 'block' : 'none';
             }
