@@ -2486,7 +2486,7 @@ function handleResize() {
 
                 <div class="card-body">
                     <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1rem;">
-                        在此配置全局文本替换规则。支持将 DNS 应答中的特定 IP 或域名替换为其他值。
+                        在此配置替换规则，可在mosdns启动前热替换上游dns、socks5、ecs ip等所有key对应的value值。
                     </p>
                     
                     <div style="overflow-x: auto; width: 100%;">
