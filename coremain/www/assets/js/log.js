@@ -1838,7 +1838,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    function handleResize() { 
+function handleResize() { 
         const wasMobile = state.isMobile; 
         state.isMobile = window.innerWidth <= CONSTANTS.MOBILE_BREAKPOINT; 
         
@@ -1862,6 +1862,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.isTouchDevice) elements.body.classList.add('touch'); else elements.body.classList.remove('touch'); 
         requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if (activeLink) updateNavSlider(activeLink); }); 
         adjustLogSearchLayout();
+
+        // -- [修改] -- 动态调整系统控制页的列宽比例
+        // 目标：增加"域名列表统计"宽度，减小"版本与更新"宽度
+        const domainModule = document.getElementById('domain-stats-module');
+        if (domainModule) {
+            const gridContainer = domainModule.parentElement;
+            // 仅在 Grid 布局且非移动端堆叠模式下调整 (通常阈值是 1200px 或 1024px)
+            if (gridContainer && window.getComputedStyle(gridContainer).display === 'grid' && window.innerWidth > 1200) {
+                // 原比例通常是 1fr 1fr 1fr
+                // 调整为: 域名统计(1.3倍) - 系统信息(1倍) - 版本更新(0.8倍)
+                gridContainer.style.gridTemplateColumns = '1.3fr 1fr 0.8fr';
+            } else if (gridContainer) {
+                // 屏幕较窄或移动端时，清除内联样式，回归 CSS 默认的响应式布局
+                gridContainer.style.gridTemplateColumns = '';
+            }
+        }
     }
     
     function renderRuleTable(tbody, rules, mode) {
@@ -2381,44 +2397,243 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // 覆盖配置管理器（/api/v1/overrides）
+// -- [修改] -- 终极修复版：修复头部图标及状态显示
     const overridesManager = {
+        state: { replacements: [] },
+
+        getElements() {
+            const get = (id) => document.getElementById(id) || document.getElementById(id.replace('-log', ''));
+            return {
+                module: get('overrides-module'), // 旧卡片 DOM
+                socks5: get('override-socks5-log'),
+                ecs: get('override-ecs-log'),
+                oldSaveBtn: get('overrides-save-btn-log'),
+                oldLoadBtn: get('overrides-load-btn-log')
+            };
+        },
+
+        // --- 主入口 ---
         async load(silent = false) {
-            if (!elements.overrideSocks5Input || !elements.overrideEcsInput) return;
+            const els = this.getElements();
+            if (!els.socks5) return;
+
+            // 1. 隐藏旧按钮
+            if (els.oldSaveBtn) els.oldSaveBtn.style.display = 'none';
+            if (els.oldLoadBtn) els.oldLoadBtn.style.display = 'none';
+            
+            // 2. 注入新板块
+            this.injectNewCard();
+
             try {
                 const data = await api.fetch('/api/v1/overrides');
-                elements.overrideSocks5Input.value = (data && data.socks5) || '';
-                elements.overrideEcsInput.value = (data && data.ecs) || '';
+                
+                if (els.socks5) els.socks5.value = (data && data.socks5) || '';
+                if (els.ecs) els.ecs.value = (data && data.ecs) || '';
+                
+                this.state.replacements = (data && data.replacements) ? data.replacements : [];
+                this.renderReplacementsTable();
+
                 if (!silent) ui.showToast('已读取当前覆盖配置');
             } catch (e) {
-                ui.showToast('读取覆盖配置失败', 'error');
+                if (!silent) ui.showToast('读取覆盖配置失败', 'error');
             }
         },
+
+        // --- 核心逻辑：创建并正确布局新卡片 ---
+        injectNewCard() {
+            if (document.getElementById('replacements-card')) return;
+
+            const els = this.getElements();
+            if (!els.module || !els.module.parentNode) return;
+
+            // 1. 获取旧卡片的计算样式以保持布局一致
+            const computedStyle = window.getComputedStyle(els.module);
+            const gridColumn = computedStyle.getPropertyValue('grid-column');
+            const marginLeft = computedStyle.getPropertyValue('margin-left');
+            const marginRight = computedStyle.getPropertyValue('margin-right');
+            const width = computedStyle.getPropertyValue('width');
+
+            // 2. 创建新卡片
+            const newCard = document.createElement('div');
+            newCard.id = 'replacements-card';
+            newCard.className = els.module.className || 'card'; 
+            
+            // 3. 强制应用布局样式
+            if (gridColumn && gridColumn !== 'auto') {
+                newCard.style.gridColumn = gridColumn;
+            } else {
+                newCard.style.gridColumn = '1 / -1';
+            }
+            
+            newCard.style.marginLeft = marginLeft;
+            newCard.style.marginRight = marginRight;
+            newCard.style.width = width;
+            newCard.style.marginTop = '1.5rem';
+
+            // 4. 填充内容 (添加了 SVG 图标和状态列)
+            newCard.innerHTML = `
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); display: flex; align-items: center;">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style="margin-right: 0.5rem; color: var(--color-accent-primary);">
+                            <path d="M7.5 5.6L5 7 6.4 4.5 5 2 7.5 3.4 10 2 8.6 4.5 10 7 7.5 5.6zm12 9.8L22 17l-2.5 1.4L18.1 22l-1.4-2.5L14.2 18l2.5-1.4L18.1 14l1.4 2.5zM11 10c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6zm-8 8c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6z"/>
+                        </svg>
+                        通用值替换规则
+                    </h3>
+                    <button class="button secondary small" id="rep-add-btn">
+                        <span>+ 添加规则</span>
+                    </button>
+                </div>
+
+                <div class="card-body">
+                    <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1rem;">
+                        在此配置全局文本替换规则。支持将 DNS 应答中的特定 IP 或域名替换为其他值。
+                    </p>
+                    
+                    <div style="overflow-x: auto; width: 100%;">
+                        <table class="data-table" style="width: 100%; min-width: 700px; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: var(--color-bg-secondary);">
+                                    <th style="padding: 10px; text-align: left; width: 15%;">状态</th>
+                                    <th style="padding: 10px; text-align: left; width: 25%;">原值 (查找)</th>
+                                    <th style="padding: 10px; text-align: left; width: 25%;">新值 (替换)</th>
+                                    <th style="padding: 10px; text-align: left;">备注</th>
+                                    <th style="padding: 10px; text-align: center; width: 60px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rep-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card-footer" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; align-items: center; gap: 1rem;">
+                    <span style="color: var(--color-text-secondary); font-size: 0.85em;">此操作将应用上方所有的配置</span>
+                    <button class="button primary" id="rep-save-btn" style="min-width: 120px;">
+                        <span>保存并重启</span>
+                    </button>
+                </div>
+            `;
+
+            // 5. 插入 DOM
+            els.module.parentNode.insertBefore(newCard, els.module.nextSibling);
+
+            // 6. 绑定事件
+            newCard.querySelector('#rep-add-btn').addEventListener('click', () => {
+                this.state.replacements.push({ original: '', new: '', comment: '' }); // 新增行没有 result，会显示“未保存”
+                this.renderReplacementsTable();
+            });
+
+            newCard.querySelector('#rep-save-btn').addEventListener('click', () => this.save());
+
+            const tbody = newCard.querySelector('#rep-tbody');
+            tbody.addEventListener('click', (e) => {
+                const btn = e.target.closest('.rep-del-btn');
+                if (btn) {
+                    const idx = parseInt(btn.dataset.index);
+                    this.state.replacements.splice(idx, 1);
+                    this.renderReplacementsTable();
+                }
+            });
+
+            tbody.addEventListener('input', (e) => {
+                if (e.target.matches('input')) {
+                    const idx = parseInt(e.target.dataset.index);
+                    const field = e.target.dataset.field;
+                    this.state.replacements[idx][field] = e.target.value;
+                }
+            });
+        },
+
+        renderReplacementsTable() {
+            const tbody = document.getElementById('rep-tbody');
+            if (!tbody) return;
+
+            if (this.state.replacements.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="padding: 2rem; color: var(--color-text-secondary); font-style: italic;">暂无替换规则</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = this.state.replacements.map((rule, index) => {
+                // 解析状态标签
+                let statusHtml = '<span class="response-tag other" style="font-size: 0.8em; opacity: 0.7;">未保存</span>';
+                if (rule.result) {
+                    if (rule.result.startsWith('Success')) {
+                        // 绿色，表示生效
+                        statusHtml = `<span class="response-tag noerror" style="font-size: 0.8em;">${rule.result}</span>`;
+                    } else if (rule.result.includes('Not Found')) {
+                        // 橙/红色，表示未找到匹配项
+                        statusHtml = `<span class="response-tag nxdomain" style="font-size: 0.8em;">${rule.result}</span>`;
+                    } else {
+                        statusHtml = `<span class="response-tag other" style="font-size: 0.8em;">${rule.result}</span>`;
+                    }
+                }
+
+                return `
+                    <tr style="border-bottom: 1px solid var(--color-border);">
+                        <td style="padding: 8px;">
+                            ${statusHtml}
+                        </td>
+                        <td style="padding: 8px;">
+                            <input type="text" class="input" style="width: 100%;" value="${rule.original || ''}" data-index="${index}" data-field="original" placeholder="例如: 1.1.1.1">
+                        </td>
+                        <td style="padding: 8px;">
+                            <input type="text" class="input" style="width: 100%;" value="${rule.new || ''}" data-index="${index}" data-field="new" placeholder="例如: 127.0.0.1">
+                        </td>
+                        <td style="padding: 8px;">
+                            <input type="text" class="input" style="width: 100%;" value="${rule.comment || ''}" data-index="${index}" data-field="comment" placeholder="备注 (可选)">
+                        </td>
+                        <td style="padding: 8px; text-align: center;">
+                            <button class="button danger small rep-del-btn" data-index="${index}" title="删除此行" style="padding: 6px 10px;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        },
+
         async save() {
-            if (!elements.overrideSocks5Input || !elements.overrideEcsInput) return;
-            const socks5 = elements.overrideSocks5Input.value.trim();
-            const ecs = elements.overrideEcsInput.value.trim();
-            const payload = {};
-            if (socks5) payload.socks5 = socks5;
-            if (ecs) payload.ecs = ecs;
-            if (Object.keys(payload).length === 0) { ui.showToast('没有可保存的覆盖项'); return; }
+            const els = this.getElements();
+            if (!els.socks5 || !els.ecs) return;
+            
+            const btn = document.getElementById('rep-save-btn');
+            ui.setLoading(btn, true);
+
+            const socks5 = els.socks5.value.trim();
+            const ecs = els.ecs.value.trim();
+            // 过滤掉空行
+            const validReplacements = this.state.replacements
+                .map(r => ({
+                    original: r.original.trim(),
+                    new: r.new.trim(),
+                    comment: r.comment ? r.comment.trim() : ''
+                }))
+                .filter(r => r.original && r.new);
+
+            const payload = {
+                socks5: socks5,
+                ecs: ecs,
+                replacements: validReplacements
+            };
+            
             try {
+                // 发送 POST 请求
                 await api.fetch('/api/v1/overrides', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                ui.showToast('已保存，正在重启应用配置…', 'success');
-                // 调用系统重启接口，短延迟后自动刷新
+                ui.showToast('配置已保存，正在重启服务…', 'success');
                 try {
                     await api.fetch('/api/v1/system/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delay_ms: 300 }) });
-                    // 给进程切换留出时间
+                    // 重启后刷新页面
                     setTimeout(() => { location.reload(); }, 4000);
                 } catch (err) {
-                    ui.showToast('自动重启失败，请手动重启', 'error');
+                    ui.showToast('自动重启请求失败，请尝试手动重启', 'error');
+                    ui.setLoading(btn, false);
                 }
             } catch (e) {
-                ui.showToast('保存覆盖配置失败', 'error');
+                ui.showToast('保存配置失败', 'error');
+                console.error("Save Error:", e);
+                ui.setLoading(btn, false);
             }
         }
     };
-
 
     function setupEventListeners() {
         // -- [修改] -- 统一处理所有弹窗的关闭行为（遮罩层点击和ESC键）
