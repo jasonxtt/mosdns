@@ -611,6 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	    { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
 	    { tag: 'switch8', name: 'IPV4优先', desc: 'Prefer IPV4（不建议开启）', tip: '当一个域名有IPV4解析记录时，不返回IPV6解析结果。', valueForOn: 'A' },
 	    { tag: 'switch10', name: 'IPV6优先', desc: 'Prefer IPV6（不建议开启）', tip: '当一个域名有IPV6解析记录时，不返回IPV4解析结果。', valueForOn: 'A' },
+	    { tag: 'switch11', name: '使用阿里私有DOH', desc: '打开前在通用值替换规则中添加DOH配置。', tip: '不管开关是否打开，都会并发运营商dns。', valueForOn: 'A' },
         ],
     
         init() {
@@ -1312,7 +1313,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const colspan = state.isMobile ? 1 : (tbody.previousElementSibling?.rows[0]?.cells.length || 2); 
             const emptyRow = document.createElement('tr'); 
             emptyRow.className = 'empty-state-row'; 
-            emptyRow.innerHTML = `<td colspan="${colspan}"><div class="empty-state-content"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71,3.29C21.32,2.9,20.69,2.9,20.3,3.29L3.29,20.3c-0.39,0.39-0.39,1.02,0,1.41C3.48,21.9,3.74,22,4,22s0.52-0.1,0.71-0.29L21.71,4.7C22.1,4.31,22.1,3.68,21.71,3.29z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48,10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8c0-2.33,1-4.45,2.65-5.92l11.27,11.27C16.45,19,14.33,20,12,20z"></path></svg><strong>暂无数据</strong><p>${message}</p>${ctaButton}</div></td>`; 
+            emptyRow.innerHTML = `<td colspan="${colspan}"><div class="empty-state-content"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71,3.29C21.32,2.9,20.69,2.9,20.3,3.29L3.29,20.3c-0.39,0.39-0.39,1.02,0,1.41C3.48,21.9,3.74,22,4,22s0.52-0.1,0.71-0.29L21.71,4.7C22.1,4.31,22.1,3.68,21.71,3.29z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48 10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8c0-2.33,1-4.45,2.65-5.92l11.27,11.27C16.45,19,14.33,20,12,20z"></path></svg><strong>暂无数据</strong><p>${message}</p>${ctaButton}</div></td>`; 
             tbody.appendChild(emptyRow); 
             return; 
         } 
@@ -1395,7 +1396,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const placeholder = elements.shuntResultsBody.querySelector('.lazy-placeholder');
         if (placeholder) placeholder.style.display = 'none';
         if (!data || data.length === 0) {
-            elements.shuntResultsBody.innerHTML = `<div class="empty-state-content" style="padding: 2rem 0;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71,3.29C21.32,2.9,20.69,2.9,20.3,3.29L3.29,20.3c-0.39,0.39-0.39,1.02,0,1.41C3.48,21.9,3.74,22,4,22s0.52-0.1,0.71-0.29L21.71,4.7C22.1,4.31,22.1,3.68,21.71,3.29z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48,10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8c0-2.33,1-4.45,2.65-5.92l11.27,11.27C16.45,19,14.33,20,12,20z"></path></svg><strong>暂无数据</strong><p>没有检测到分流结果。</p></div>`;
+            elements.shuntResultsBody.innerHTML = `<div class="empty-state-content" style="padding: 2rem 0;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71,3.29C21.32,2.9,20.69,2.9,20.3,3.29L3.29,20.3c-0.39,0.39-0.39,1.02,0,1.41C3.48,21.9,3.74,22,4,22s0.52-0.1,0.71-0.29L21.71,4.7C22.1,4.31,22.1,3.68,21.71,3.29z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48 10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8c0-2.33,1-4.45,2.65-5.92l11.27,11.27C16.45,19,14.33,20,12,20z"></path></svg><strong>暂无数据</strong><p>没有检测到分流结果。</p></div>`;
             return;
         }
         const total = data.reduce((sum, item) => sum + item.count, 0);
@@ -2396,6 +2397,197 @@ function handleResize() {
             }
         }
     };
+    
+    // Config Manager: MosDNS 远程配置更新及本地备份
+    const configManager = {
+        init() {
+            this.injectCard();
+            this.loadSettings();
+            this.bindEvents();
+        },
+
+        injectCard() {
+            const updateModule = document.getElementById('update-module');
+            if (!updateModule || !updateModule.parentNode) return;
+
+            // 1. 获取参考卡片的样式以保持布局一致
+            const computedStyle = window.getComputedStyle(updateModule);
+            const gridColumn = computedStyle.getPropertyValue('grid-column');
+            
+            // 2. 创建新卡片
+            const card = document.createElement('div');
+            card.id = 'config-manager-card';
+            card.className = 'card';
+            
+            if (gridColumn && gridColumn !== 'auto') {
+                card.style.gridColumn = gridColumn;
+            } else {
+                card.style.gridColumn = '1 / -1';
+            }
+            card.style.marginTop = '1.5rem';
+
+            // 3. 填充内容
+            card.innerHTML = `
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); display: flex; align-items: center;">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style="margin-right: 0.5rem; color: var(--color-accent-primary);">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 12v4h-2v-4H8l4-4 4 4h-3zm-1-9c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
+                            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"></path>
+                        </svg>
+                        配置管理
+                    </h3>
+                </div>
+
+                <div class="card-body">
+                    <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1.5rem;">
+                        管理 MosDNS 的本地配置。您可以备份当前配置到本地，或者从远程 URL 下载配置包覆盖当前设置（支持自动重启）。
+                    </p>
+                    
+                    <div style="display: grid; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="cfg-local-dir" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">MosDNS 本地工作目录</label>
+                            <input type="text" id="cfg-local-dir" class="input" placeholder="例如: /etc/mosdns 或 C:\mosdns" style="width: 100%;">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cfg-remote-url" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">远程配置下载 URL (ZIP)</label>
+                            <input type="text" id="cfg-remote-url" class="input" placeholder="例如: https://github.com/user/repo/archive/master.zip" style="width: 100%;">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-footer" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; align-items: center; gap: 1rem;">
+                    <button class="button secondary" id="cfg-backup-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                        <span>备份配置到本地</span>
+                    </button>
+                    <button class="button primary" id="cfg-update-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                        <span>应用远程配置</span>
+                    </button>
+                </div>
+            `;
+
+            // 4. 插入 DOM (插入到 updateModule 之后)
+            updateModule.parentNode.insertBefore(card, updateModule.nextSibling);
+        },
+
+        loadSettings() {
+            const savedDir = localStorage.getItem('mosdns-config-dir');
+            const savedUrl = localStorage.getItem('mosdns-config-url');
+            const dirInput = document.getElementById('cfg-local-dir');
+            const urlInput = document.getElementById('cfg-remote-url');
+            
+            if (dirInput && savedDir) dirInput.value = savedDir;
+            if (urlInput && savedUrl) urlInput.value = savedUrl;
+        },
+
+        saveSettings() {
+            const dirInput = document.getElementById('cfg-local-dir');
+            const urlInput = document.getElementById('cfg-remote-url');
+            if (dirInput) localStorage.setItem('mosdns-config-dir', dirInput.value.trim());
+            if (urlInput) localStorage.setItem('mosdns-config-url', urlInput.value.trim());
+        },
+
+        bindEvents() {
+            const backupBtn = document.getElementById('cfg-backup-btn');
+            const updateBtn = document.getElementById('cfg-update-btn');
+            const dirInput = document.getElementById('cfg-local-dir');
+            const urlInput = document.getElementById('cfg-remote-url');
+
+            // 自动保存输入
+            dirInput?.addEventListener('change', () => this.saveSettings());
+            urlInput?.addEventListener('change', () => this.saveSettings());
+
+            backupBtn?.addEventListener('click', () => this.handleBackup(backupBtn));
+            updateBtn?.addEventListener('click', () => this.handleUpdate(updateBtn));
+        },
+
+        async handleBackup(btn) {
+            const dir = document.getElementById('cfg-local-dir').value.trim();
+            if (!dir) {
+                ui.showToast('请先输入 MosDNS 本地工作目录', 'error');
+                return;
+            }
+            this.saveSettings();
+            ui.setLoading(btn, true);
+
+            try {
+                const response = await fetch('/api/v1/config/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dir })
+                });
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                // 尝试从 Content-Disposition 获取文件名
+                const disposition = response.headers.get('Content-Disposition');
+                let filename = 'mosdns_backup.zip';
+                if (disposition && disposition.indexOf('attachment') !== -1) {
+                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    const matches = filenameRegex.exec(disposition);
+                    if (matches != null && matches[1]) { 
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                ui.showToast('备份文件下载开始', 'success');
+            } catch (error) {
+                console.error('Backup failed:', error);
+                ui.showToast(`备份失败: ${error.message}`, 'error');
+            } finally {
+                ui.setLoading(btn, false);
+            }
+        },
+
+        async handleUpdate(btn) {
+            const dir = document.getElementById('cfg-local-dir').value.trim();
+            const url = document.getElementById('cfg-remote-url').value.trim();
+
+            if (!dir || !url) {
+                ui.showToast('请完整填写本地目录和远程 URL', 'error');
+                return;
+            }
+            
+            if (!confirm('确定要从远程 URL 更新配置吗？\n\n1. 当前配置将备份到 backup 子目录。\n2. 新配置将覆盖现有文件。\n3. MosDNS 将自动重启。\n\n此操作存在风险，请确保 URL 可信。')) {
+                return;
+            }
+
+            this.saveSettings();
+            ui.setLoading(btn, true);
+
+            try {
+                const res = await api.fetch('/api/v1/config/update_from_url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, dir })
+                });
+
+                ui.showToast(res.message || '更新成功，正在重启...', 'success');
+                
+                // 等待重启
+                setTimeout(() => {
+                    location.reload();
+                }, 4000);
+            } catch (error) {
+                console.error('Update failed:', error);
+                ui.showToast(`更新失败: ${error.message}`, 'error');
+                ui.setLoading(btn, false);
+            }
+        }
+    };
 
 // -- [修改] -- 终极修复版：修复头部图标及状态显示
     const overridesManager = {
@@ -2486,7 +2678,7 @@ function handleResize() {
 
                 <div class="card-body">
                     <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1rem;">
-                        在此配置替换规则，可在mosdns启动前热替换上游dns、socks5、ecs ip等所有key对应的value值。
+                        在此配置替换规则，可在mosdns启动前热替换上游dns、socks5、ecs ip等所有key对应的value值，ecs ip可在ipw.cn中查询，覆盖配置中的值在此处可被再次替换。
                     </p>
                     
                     <div style="overflow-x: auto; width: 100%;">
@@ -2506,7 +2698,7 @@ function handleResize() {
                 </div>
 
                 <div class="card-footer" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; align-items: center; gap: 1rem;">
-                    <span style="color: var(--color-text-secondary); font-size: 0.85em;">此操作将应用上方所有的配置</span>
+                    <span style="color: var(--color-text-secondary); font-size: 0.85em;">保存应用覆盖配置/通用值替换规则</span>
                     <button class="button primary" id="rep-save-btn" style="min-width: 120px;">
                         <span>保存并重启</span>
                     </button>
@@ -3034,6 +3226,10 @@ function handleResize() {
         // 绑定 info-icon 提示（例如日志容量的说明图标）
         bindInfoIconTooltips();
         updateManager.init();
+        
+        // -- [修改] -- 初始化配置管理器
+        configManager.init();
+        
 		mountGlobalInfoIconDelegation();
         setupEventListeners();
         setupGlowEffect();
