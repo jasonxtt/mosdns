@@ -40,6 +40,8 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 
 - 自 2025-11-06 起，客户端仅使用 `releases/latest` 获取更新信息；不再回退到固定 tag（例如 `v5-ph-srs`）。
 - 发布侧无需再向固定 tag 上传资产；请使用版本化标签发布即可。
+- 
+![mosdns解析流程](https://github.com/user-attachments/assets/c4b0c10c-7c99-4dbb-922c-64de1d566f98)
 
 <img width="1559" height="896" alt="image" src="https://github.com/user-attachments/assets/3a5d7f92-ee34-4612-a0c0-f97fbc2f2b59" />
 
