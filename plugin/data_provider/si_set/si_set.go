@@ -94,6 +94,8 @@ type SiSet struct {
 var _ data_provider.IPMatcherProvider = (*SiSet)(nil)
 var _ io.Closer = (*SiSet)(nil)
 
+var _ netlist.Matcher = (*SiSet)(nil)
+
 // newSiSet initializes the si_set plugin.
 func newSiSet(bp *coremain.BP, args any) (any, error) {
 	cfg := args.(*Args)
@@ -154,8 +156,24 @@ func newSiSet(bp *coremain.BP, args any) (any, error) {
 }
 
 // GetIPMatcher provides the currently active IP matcher.
+// [MODIFIED] Return the plugin instance itself instead of the internal list snapshot.
+// This allows external callers to always use the proxy method `Match`, which delegates
+// to the latest internal list.
 func (p *SiSet) GetIPMatcher() netlist.Matcher {
-	return p.matcher.Load().(netlist.Matcher)
+	return p
+}
+
+// [NEW] Match implements netlist.Matcher.
+// It atomically loads the latest internal matcher to perform the check.
+// This ensures any update via API or auto-update is immediately effective
+// without restarting the service.
+func (p *SiSet) Match(addr netip.Addr) bool {
+	// Atomic Load: Extremely fast (nanosecond scale) and thread-safe.
+	m, ok := p.matcher.Load().(netlist.Matcher)
+	if !ok || m == nil {
+		return false
+	}
+	return m.Match(addr)
 }
 
 // Close gracefully shuts down the plugin.
