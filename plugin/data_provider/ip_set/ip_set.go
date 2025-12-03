@@ -32,6 +32,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
@@ -56,19 +57,30 @@ type Args struct {
 
 var _ data_provider.IPMatcherProvider = (*IPSet)(nil)
 
+var _ netlist.Matcher = (*IPSet)(nil)
+
 // IPSet implements IPMatcherProvider and holds state
 type IPSet struct {
-	mg    []netlist.Matcher
+	matcherVal atomic.Value
+
 	list  *netlist.List
 	files []string
-	mutex sync.RWMutex
+
+	otherSets []netlist.Matcher
+
+	mutex sync.Mutex
 }
 
-// GetIPMatcher returns the combined matcher
 func (d *IPSet) GetIPMatcher() netlist.Matcher {
-	d.mutex.RLock()
-	defer d.mutex.RUnlock()
-	return MatcherGroup(d.mg)
+	return d
+}
+
+func (d *IPSet) Match(addr netip.Addr) bool {
+	m, ok := d.matcherVal.Load().(netlist.Matcher)
+	if !ok || m == nil {
+		return false
+	}
+	return m.Match(addr)
 }
 
 // Init plugin, build IPSet and register HTTP API
@@ -81,7 +93,7 @@ func Init(bp *coremain.BP, args any) (any, error) {
 	return p, nil
 }
 
-// NewIPSet creates a new IPSet, loading plain IPs, files (text or .srs), then referenced sets.
+// NewIPSet creates a new IPSet
 func NewIPSet(bp *coremain.BP, args *Args) (*IPSet, error) {
 	p := &IPSet{files: args.Files, list: netlist.NewList()}
 
@@ -90,9 +102,6 @@ func NewIPSet(bp *coremain.BP, args *Args) (*IPSet, error) {
 		return nil, err
 	}
 	p.list.Sort()
-	if p.list.Len() > 0 {
-		p.mg = append(p.mg, p.list)
-	}
 
 	// load other sets by tag
 	for _, tag := range args.Sets {
@@ -100,10 +109,26 @@ func NewIPSet(bp *coremain.BP, args *Args) (*IPSet, error) {
 		if provider == nil {
 			return nil, fmt.Errorf("%s is not an IPMatcherProvider", tag)
 		}
-		p.mg = append(p.mg, provider.GetIPMatcher())
+		p.otherSets = append(p.otherSets, provider.GetIPMatcher())
 	}
 
+	p.rebuildSnapshot()
+
 	return p, nil
+}
+
+func (d *IPSet) rebuildSnapshot() {
+	var mg MatcherGroup
+
+	if d.list != nil && d.list.Len() > 0 {
+		mg = append(mg, d.list)
+	}
+
+	if len(d.otherSets) > 0 {
+		mg = append(mg, d.otherSets...)
+	}
+
+	d.matcherVal.Store(mg)
 }
 
 // api registers HTTP routes: show, save, flush, post
@@ -112,18 +137,22 @@ func (d *IPSet) api() *chi.Mux {
 
 	// GET /show: list in-memory prefixes
 	r.Get("/show", func(w http.ResponseWriter, r *http.Request) {
-		d.mutex.RLock()
-		defer d.mutex.RUnlock()
+		d.mutex.Lock()
+		l := d.list 
+		d.mutex.Unlock()
+
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		d.list.ForEach(func(pfx netip.Prefix) {
-			io.WriteString(w, normalizePrefix(pfx).String()+"\n")
-		})
+		if l != nil {
+			l.ForEach(func(pfx netip.Prefix) {
+				io.WriteString(w, normalizePrefix(pfx).String()+"\n")
+			})
+		}
 	})
 
 	// GET /save: persist to files
 	r.Get("/save", func(w http.ResponseWriter, r *http.Request) {
-		d.mutex.RLock()
-		defer d.mutex.RUnlock()
+		d.mutex.Lock()
+		defer d.mutex.Unlock()
 		if err := d.saveToFiles(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -134,13 +163,12 @@ func (d *IPSet) api() *chi.Mux {
 	// GET /flush: clear in-memory and save empty list
 	r.Get("/flush", func(w http.ResponseWriter, r *http.Request) {
 		d.mutex.Lock()
-		defer d.mutex.Unlock() // Use defer for safety
+		defer d.mutex.Unlock()
 
 		d.list = netlist.NewList()
-		// MODIFIED: Simplified the update of the matcher group.
-		d.mg = []netlist.Matcher{d.list}
+		
+		d.rebuildSnapshot()
 
-		// MODIFIED: Moved saveToFiles inside the lock to ensure atomicity.
 		if err := d.saveToFiles(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -165,13 +193,12 @@ func (d *IPSet) api() *chi.Mux {
 		tmpList.Sort()
 
 		d.mutex.Lock()
-		defer d.mutex.Unlock() // Use defer for safety
+		defer d.mutex.Unlock()
 
-		d.list = tmpList
-		d.mg = []netlist.Matcher{d.list}
+		d.list = tmpList 
+		
+		d.rebuildSnapshot()
 
-		// BUG FIX: Moved saveToFiles inside the lock to fix a race condition.
-		// This ensures that the newly posted data is what gets saved, atomically.
 		if err := d.saveToFiles(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -198,7 +225,7 @@ func (d *IPSet) saveToFiles() error {
 			}
 		})
 		if writeErr != nil {
-			f.Close() // Attempt to close even on error
+			f.Close()
 			return writeErr
 		}
 		if err := w.Flush(); err != nil {
@@ -228,7 +255,6 @@ func parseNetipPrefix(s string) (netip.Prefix, error) {
 	if err != nil {
 		return netip.Prefix{}, err
 	}
-	// MODIFIED: Simplified to use PrefixFrom which is more direct and doesn't return an error.
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
@@ -258,15 +284,12 @@ func loadFromFile(path string, l *netlist.List) error {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// MODIFIED: Improve robustness by not treating a non-existent file as a fatal error.
 		if os.IsNotExist(err) {
 			fmt.Printf("[ip_set] file not found, skipping: %s\n", path)
 			return nil
 		}
 		return err
 	}
-
-	// PERFORMANCE: The pre-scan for `lastTxt` is removed to avoid reading large files twice.
 
 	// try .srs binary format
 	if ok, cnt, lastSrs := tryLoadSRS(data, l); ok {
