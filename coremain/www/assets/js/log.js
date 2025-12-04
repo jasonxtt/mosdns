@@ -607,7 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch4', name: '过期缓存', desc: '启用 Lazy Cache（乐观缓存）', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
 	    { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
-	    { tag: 'switch11', name: '使用阿里私有DOH', desc: '打开前在通用值替换规则中添加DOH配置。', tip: '不管开关是否打开，都会并发运营商dns。', valueForOn: 'A' },
+	    { tag: 'switch11', name: '使用阿里私有DOH', desc: '打开前在上游DNS设置中添加DOH配置。', tip: '不管开关是否打开，都会并发运营商dns。', valueForOn: 'A' },
             { tag: 'switch2', name: '指定 Client fakeip', desc: '只允许指定的客户端科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不允许科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽AAAA请求类型', tip: '无IPV6网络环境建议开启', valueForOn: 'A' },
@@ -2670,36 +2670,48 @@ function handleResize() {
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style="margin-right: 0.5rem; color: var(--color-accent-primary);">
                             <path d="M7.5 5.6L5 7 6.4 4.5 5 2 7.5 3.4 10 2 8.6 4.5 10 7 7.5 5.6zm12 9.8L22 17l-2.5 1.4L18.1 22l-1.4-2.5L14.2 18l2.5-1.4L18.1 14l1.4 2.5zM11 10c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6zm-8 8c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6z"/>
                         </svg>
-                        通用值替换规则
+                        上游DNS设置/其它设置
                     </h3>
                     <button class="button secondary small" id="rep-add-btn">
                         <span>+ 添加规则</span>
                     </button>
                 </div>
 
-                <div class="card-body">
-                    <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1rem;">
-                        在此配置替换规则，可在mosdns启动前热替换上游dns、socks5、ecs ip等所有key对应的value值，ecs ip可在ipw.cn中查询，覆盖配置中的值在此处可被再次替换。
-                    </p>
-                    
-                    <div style="overflow-x: auto; width: 100%;">
-                        <table class="data-table" style="width: 100%; min-width: 700px; border-collapse: collapse;">
-                            <thead>
-                                <tr style="background: var(--color-bg-secondary);">
-                                    <th style="padding: 10px; text-align: left; width: 15%;">状态</th>
-                                    <th style="padding: 10px; text-align: left; width: 25%;">原值 (查找)</th>
-                                    <th style="padding: 10px; text-align: left; width: 25%;">新值 (替换)</th>
-                                    <th style="padding: 10px; text-align: left;">备注</th>
-                                    <th style="padding: 10px; text-align: center; width: 60px;">操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="rep-tbody"></tbody>
-                        </table>
-                    </div>
-                </div>
+<div class="card-body">
+    <!-- 增加了 white-space: pre-wrap; 以及 line-height: 1.5; 增加行高提升阅读体验 -->
+    <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1rem; white-space: pre-wrap; line-height: 1.5;">远程下载的mosdns配置为通用模板，需要在此处替换上游dns等相关信息，此处信息存储于运行目录的config_overrides.json中。
+原值 (查找)为配置模板中预设的初始值，新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。
 
+下面是模板一些必要替换的原值的说明
+udp://127.0.0.1:7874，替换为sing-box dns，用于对国外域名返回fakeip。
+114.114.114.114，替换为运营商dns，用于返回最优DNS结果。
+127.0.0.1:7777，替换为:7777，取消仅监听127.0.0.1限制
+127.0.0.1:8888，替换为:8888，取消仅监听127.0.0.1限制
+
+下面是模板一些可选替换的原值的说明
+udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
+123.123.110.123，填写ipw.cn显示的ipv4地址或者本城市任意ipv4地址，传递给阿里私有doh。
+888888，替换为阿里私有doh Account ID。
+888888_88888，替换为阿里私有doh AccessKey ID。
+999999999，替换为阿里私有doh AccessKey Secret。</p>
+    
+    <div style="overflow-x: auto; width: 100%;">
+        <table class="data-table" style="width: 100%; min-width: 700px; border-collapse: collapse;">
+            <thead>
+                <tr style="background: var(--color-bg-secondary);">
+                    <th style="padding: 10px; text-align: left; width: 15%;">状态</th>
+                    <th style="padding: 10px; text-align: left; width: 25%;">原值 (查找)</th>
+                    <th style="padding: 10px; text-align: left; width: 25%;">新值 (替换)</th>
+                    <th style="padding: 10px; text-align: left;">备注</th>
+                    <th style="padding: 10px; text-align: center; width: 60px;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="rep-tbody"></tbody>
+        </table>
+    </div>
+</div>
                 <div class="card-footer" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; align-items: center; gap: 1rem;">
-                    <span style="color: var(--color-text-secondary); font-size: 0.85em;">保存应用覆盖配置/通用值替换规则</span>
+                    <span style="color: var(--color-text-secondary); font-size: 0.85em;">保存应用SOCKS5/ECS IP/上游DNS设置/其它设置</span>
                     <button class="button primary" id="rep-save-btn" style="min-width: 120px;">
                         <span>保存并重启</span>
                     </button>
