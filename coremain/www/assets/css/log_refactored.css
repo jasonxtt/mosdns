@@ -1152,3 +1152,45 @@ dialog.card:hover {
   .requery-primary-btn { flex: 1; }
   .requery-scheduler-grid { grid-template-columns: 1fr; }
 }
+/* === 移动端适配代码 (安全版 - 仅针对覆盖配置模块) === */
+@media (max-width: 768px) {
+    /* 1. 强制栅格/Flex容器变为竖向排列 */
+    .overrides-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 15px !important;
+    }
+
+    /* 2. 限定只影响 overrides-grid 内部的 control-item */
+    .overrides-grid .control-item {
+        width: 100% !important;
+        min-width: 100% !important;
+        margin-right: 0 !important;
+        /* 恢复默认的 flex 布局，防止被全局样式覆盖 */
+        display: flex !important; 
+        flex-direction: column !important; /* 让 label 和 input 上下排列 */
+        align-items: flex-start !important;
+    }
+
+    /* 3. 限定只影响 overrides-grid 内部的 input */
+    .overrides-grid .control-item input {
+        width: 100% !important;
+        margin-left: 0 !important; /* 清除可能存在的左边距 */
+    }
+
+    /* 4. 限定只影响 overrides-grid 内部的提示文字 */
+    .overrides-grid .control-hint {
+        white-space: normal !important;
+        display: block !important;
+        width: 100% !important;
+        margin-top: 5px !important;
+    }
+
+    /* 5. 调整按钮组 */
+    .overrides-actions {
+        width: 100% !important;
+        margin-top: 10px !important;
+        display: flex;
+        justify-content: flex-end;
+    }
+}
