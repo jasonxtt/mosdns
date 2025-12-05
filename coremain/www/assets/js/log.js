@@ -557,10 +557,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (sourceData.length > 0) {
                         hasSourceData = true;
                         sourceData.forEach(item => {
+                            let linkHtml = item.count.toLocaleString();
+                            let listType = null;
+                            let listTitle = item.alias;
+
+                            if (item.alias.includes('fakeip')) listType = 'fakeip';
+                            else if (item.alias.includes('realip')) listType = 'realip';
+                            else if (item.alias.includes('nov4')) listType = 'nov4';
+                            else if (item.alias.includes('nov6')) listType = 'nov6';
+                            else if (item.alias.includes('notin')) listType = 'notin';
+
+                            if (listType) {
+                                linkHtml = `<a href="#" class="control-item-link" data-list-type="${listType}" data-list-title="${listTitle}">${item.count.toLocaleString()}</a>`;
+                            }
+
                             html += `
                                 <tr>
                                     <td>${item.alias}</td>
-                                    <td class="text-right">${item.count.toLocaleString()}</td>
+                                    <td class="text-right">${linkHtml}</td>
                                 </tr>
                             `;
                         });
