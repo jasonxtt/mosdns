@@ -1,0 +1,476 @@
+/* ========================================
+   UI/UX Enhancements V3.4.0 - Fixed
+   Accessibility & User Experience Improvements
+   ======================================== */
+
+/* ========================================
+   1. Enhanced Focus States (Accessibility)
+   ======================================== */
+
+/* Global focus-visible for keyboard navigation */
+*:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+    transition: outline-offset 0.2s ease;
+}
+
+/* Remove default outline for mouse users */
+*:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* Enhanced button focus */
+.button:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+    box-shadow:
+        0 0 0 4px color-mix(in srgb, var(--color-accent-primary) 20%, transparent),
+        0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Enhanced link focus */
+a:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Enhanced input focus */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+}
+
+/* Tab link focus */
+.tab-link:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+    border-radius: var(--border-radius-sm);
+}
+
+/* Clickable link focus (preserve table link functionality) */
+tbody td a.clickable-link:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* ========================================
+   2. Mobile Touch Targets (44x44px minimum)
+   ======================================== */
+
+@media (max-width: 768px) {
+
+    /* Ensure minimum touch target size */
+    .button,
+    .refresh-btn,
+    .tab-link,
+    .main-nav a {
+        min-height: 44px;
+        min-width: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Ensure clickable links in tables are touch-friendly */
+    tbody td a.clickable-link {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.5rem;
+    }
+
+    /* Slightly larger font for mobile readability */
+    html {
+        font-size: 17px;
+    }
+
+    /* More comfortable spacing on mobile */
+    .container {
+        padding: 1.5rem 1rem 4rem;
+    }
+
+    /* Comfortable table row height */
+    tbody tr {
+        min-height: 48px;
+    }
+
+    /* NOTE: .switch is NOT modified here to preserve its original 50x28px design */
+}
+
+/* ========================================
+   3. Font Size System
+   ======================================== */
+
+:root {
+    --font-size-xs: 0.75rem;
+    /* 12px */
+    --font-size-sm: 0.875rem;
+    /* 14px */
+    --font-size-base: 1rem;
+    /* 16px */
+    --font-size-lg: 1.125rem;
+    /* 18px */
+    --font-size-xl: 1.25rem;
+    /* 20px */
+    --font-size-2xl: 1.5rem;
+    /* 24px */
+    --font-size-3xl: 1.875rem;
+    /* 30px */
+    --font-size-4xl: 2.25rem;
+    /* 36px */
+}
+
+.text-xs {
+    font-size: var(--font-size-xs);
+}
+
+.text-sm {
+    font-size: var(--font-size-sm);
+}
+
+.text-base {
+    font-size: var(--font-size-base);
+}
+
+.text-lg {
+    font-size: var(--font-size-lg);
+}
+
+.text-xl {
+    font-size: var(--font-size-xl);
+}
+
+.text-2xl {
+    font-size: var(--font-size-2xl);
+}
+
+.text-3xl {
+    font-size: var(--font-size-3xl);
+}
+
+.text-4xl {
+    font-size: var(--font-size-4xl);
+}
+
+/* ========================================
+   4. Button Size Variants
+   ======================================== */
+
+.button-sm {
+    padding: 0.5rem 1rem;
+    font-size: var(--font-size-sm);
+    min-height: 36px;
+}
+
+.button {
+    min-height: 40px;
+}
+
+.button-lg {
+    padding: 1rem 2rem;
+    font-size: var(--font-size-lg);
+    min-height: 48px;
+}
+
+/* ========================================
+   5. Table Density Options
+   ======================================== */
+
+.table-compact tbody tr {
+    height: 40px;
+}
+
+.table-compact td,
+.table-compact th {
+    padding: 0.5rem 0.75rem;
+}
+
+.table-normal tbody tr {
+    height: 48px;
+}
+
+.table-comfortable tbody tr {
+    height: 56px;
+}
+
+.table-comfortable td,
+.table-comfortable th {
+    padding: 1rem 1.25rem;
+}
+
+.table-striped tbody tr:nth-child(even) {
+    background-color: color-mix(in srgb, var(--color-bg-alt) 50%, transparent);
+}
+
+/* ========================================
+   6. Loading States - Skeleton Screens
+   ======================================== */
+
+.skeleton {
+    background: linear-gradient(90deg,
+            var(--color-bg-alt) 25%,
+            color-mix(in srgb, var(--color-border) 50%, var(--color-bg-alt)) 50%,
+            var(--color-bg-alt) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--border-radius-sm);
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+.skeleton-text {
+    height: 1em;
+    margin-bottom: 0.5em;
+}
+
+.skeleton-title {
+    height: 1.5em;
+    width: 60%;
+    margin-bottom: 0.75em;
+}
+
+.skeleton-card {
+    height: 200px;
+    width: 100%;
+}
+
+/* ========================================
+   7. Enhanced Dark Mode Contrast
+   ======================================== */
+
+[data-theme="dark"] {
+    --color-bg: #0a0d14;
+    --color-bg-card: #151922;
+    --color-text-primary: #e6edf3;
+}
+
+[data-theme="dark"] .card {
+    box-shadow:
+        0 4px 10px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .stat-card {
+    box-shadow:
+        0 10px 30px -5px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* ========================================
+   8. Micro-interactions
+   ======================================== */
+
+.button:active {
+    transform: scale(0.98);
+}
+
+input:not(:placeholder-shown) {
+    animation: typing-glow 0.3s ease;
+}
+
+@keyframes typing-glow {
+
+    0%,
+    100% {
+        box-shadow: none;
+    }
+
+    50% {
+        box-shadow: 0 0 8px color-mix(in srgb, var(--color-accent-primary) 30%, transparent);
+    }
+}
+
+.card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+/* ========================================
+   9. Improved Empty States
+   ======================================== */
+
+.empty-state {
+    padding: 4rem 2rem;
+    text-align: center;
+}
+
+.empty-state-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 1.5rem;
+    opacity: 0.3;
+}
+
+.empty-state-title {
+    font-size: var(--font-size-xl);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--color-text-primary);
+}
+
+.empty-state-description {
+    font-size: var(--font-size-base);
+    color: var(--color-text-secondary);
+    margin-bottom: 1.5rem;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* ========================================
+   10. Glassmorphism Effects
+   ======================================== */
+
+.glass {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="dark"] .glass {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ========================================
+   11. Responsive Breakpoints
+   ======================================== */
+
+@media (max-width: 640px) {
+    .hide-xs {
+        display: none !important;
+    }
+
+    .show-xs {
+        display: block !important;
+    }
+}
+
+@media (min-width: 640px) {
+    .hide-sm {
+        display: none !important;
+    }
+
+    .show-sm {
+        display: block !important;
+    }
+}
+
+@media (min-width: 768px) {
+    .hide-md {
+        display: none !important;
+    }
+
+    .show-md {
+        display: block !important;
+    }
+}
+
+@media (min-width: 1024px) {
+    .hide-lg {
+        display: none !important;
+    }
+
+    .show-lg {
+        display: block !important;
+    }
+}
+
+@media (min-width: 1280px) {
+    .hide-xl {
+        display: none !important;
+    }
+
+    .show-xl {
+        display: block !important;
+    }
+}
+
+/* ========================================
+   12. Utility Classes
+   ======================================== */
+
+.mt-0 {
+    margin-top: 0;
+}
+
+.mt-1 {
+    margin-top: 0.25rem;
+}
+
+.mt-2 {
+    margin-top: 0.5rem;
+}
+
+.mt-3 {
+    margin-top: 0.75rem;
+}
+
+.mt-4 {
+    margin-top: 1rem;
+}
+
+.mb-0 {
+    margin-bottom: 0;
+}
+
+.mb-1 {
+    margin-bottom: 0.25rem;
+}
+
+.mb-2 {
+    margin-bottom: 0.5rem;
+}
+
+.mb-3 {
+    margin-bottom: 0.75rem;
+}
+
+.mb-4 {
+    margin-bottom: 1rem;
+}
+
+.text-left {
+    text-align: left;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.text-right {
+    text-align: right;
+}
+
+.font-normal {
+    font-weight: 400;
+}
+
+.font-medium {
+    font-weight: 500;
+}
+
+.font-semibold {
+    font-weight: 600;
+}
+
+.font-bold {
+    font-weight: 700;
+}

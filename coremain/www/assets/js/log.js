@@ -229,8 +229,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const startIndex = state.displayedLogs.length;
             state.displayedLogs.push(...logs);
 
-            // 分批渲染，避免一次性插入大量行造成掉帧
-            const BATCH = 10;
+            // Batch rendering to avoid frame drops when inserting many rows
+            const BATCH = 50;
             let idx = 0;
             const renderChunk = () => {
                 if (idx >= logs.length) return;
@@ -1325,7 +1325,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 message = '没有可显示的数据。';
                 ctaButton = '';
             }
-            const colspan = state.isMobile ? 1 : (tbody.previousElementSibling?.rows[0]?.cells.length || 2);
+            let colspan = tbody.closest('table').querySelectorAll('thead th').length || 2;
+            // Fix mobile layout offset for adguard and diversion modules
+            if (tableType === 'adguard' || tableType === 'diversion') {
+                colspan = 6;
+            }
             const emptyRow = document.createElement('tr');
             emptyRow.className = 'empty-state-row';
             emptyRow.innerHTML = `<td colspan="${colspan}"><div class="empty-state-content"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71,3.29C21.32,2.9,20.69,2.9,20.3,3.29L3.29,20.3c-0.39,0.39-0.39,1.02,0,1.41C3.48,21.9,3.74,22,4,22s0.52-0.1,0.71-0.29L21.71,4.7C22.1,4.31,22.1,3.68,21.71,3.29z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48 10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8c0-2.33,1-4.45,2.65-5.92l11.27,11.27C16.45,19,14.33,20,12,20z"></path></svg><strong>暂无数据</strong><p>${message}</p>${ctaButton}</div></td>`;
