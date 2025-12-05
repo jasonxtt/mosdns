@@ -1,77 +1,73 @@
-/* ========================================
-   Performance Optimizations
-   ======================================== */
+/* Performance Optimizations for Mosdns Dashboard */
 
-/* CSS Containment - Reduces reflow calculations by 30-40% */
-.card {
-    contain: layout style paint;
+/* 1. CSS Containment
+   Isolates subtrees to improve rendering performance.
+   Browsers can skip layout/paint for off-screen or static content.
+*/
+
+/* Apply containment to heavy layout containers */
+.container-fluid {
+    content-visibility: auto;
+    /* Skips rendering if off-screen */
+    contain-intrinsic-size: 1000px;
+    /* Placeholder height to prevent scrollbar jumping */
 }
 
-.card:hover {
-    will-change: transform, box-shadow;
-}
-
-.control-module {
-    contain: layout style;
-}
-
-.stat-card {
-    contain: layout style;
-}
-
-/* Optimize table rendering performance */
-.mobile-card-layout tr {
-    contain: layout style;
-}
-
-/* Optimize modal performance */
-dialog {
-    contain: layout style paint;
-}
-
-/* Optimize button animations - Improves smoothness by 20-30% */
-.button:hover {
-    will-change: transform;
-}
-
-.refresh-btn:hover {
-    will-change: transform;
-}
-
-/* Optimize navigation transitions */
-.tab-link {
-    will-change: opacity, color;
-}
-
-/* Optimize card hover effects */
-.stat-card:hover {
-    will-change: transform, box-shadow;
-}
-
-/* Optimize scroll performance */
-.scrollable-table-container {
+/* Optimize table rendering */
+.table-responsive {
+    contain: paint layout;
+    /* Isolate table layout */
     will-change: scroll-position;
+    /* Hint for smooth scrolling */
 }
 
-/* Optimize list item rendering */
-tbody tr {
-    contain: layout style;
+/* Optimize module cards */
+.card {
+    contain: content;
+    /* Isolate card content */
+    content-visibility: auto;
+    contain-intrinsic-size: 200px;
 }
 
-/* Optimize input field performance */
-input:focus,
-select:focus,
-textarea:focus {
-    will-change: border-color, box-shadow;
-}
+/* 2. Hardware Acceleration Hints
+   Use sparingly to avoid excessive memory usage.
+*/
 
-/* Optimize loading animations */
-.spinner {
-    will-change: transform;
-}
-
-/* Optimize toast notifications */
-#toast {
-    contain: layout style paint;
+/* Optimize charts and heavy visual elements */
+canvas {
     will-change: transform, opacity;
+    transform: translateZ(0);
+    /* Trigger GPU composition */
+}
+
+/* Optimize modal dialogs */
+.modal-content {
+    will-change: transform, opacity;
+}
+
+/* 3. Layout Stability */
+
+/* Prevent layout shifts for images/icons */
+img,
+svg {
+    aspect-ratio: attr(width) / attr(height);
+}
+
+/* 4. Text Rendering Speed */
+body {
+    text-rendering: optimizeSpeed;
+    /* Prioritize speed over geometric precision */
+}
+
+/* 5. Reduced Motion (Accessibility & Performance) */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }
