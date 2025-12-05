@@ -1,0 +1,368 @@
+/* ===============================================
+   MosDNS Dashboard - 增强样式
+   系统子菜单、动效、SVG图标统一
+   =============================================== */
+
+/* ===============================================
+   动效与视觉增强
+   =============================================== */
+
+.card,
+.control-module {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card:hover,
+.control-module:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+}
+
+.control-module--mini:hover {
+    transform: translateY(-2px);
+}
+
+.button {
+    position: relative;
+    overflow: hidden;
+}
+
+.button::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.4s ease, height 0.4s ease;
+}
+
+.button:active::before {
+    width: 200px;
+    height: 200px;
+}
+
+table tbody tr {
+    transition: background-color 0.2s ease;
+}
+
+.color-swatch {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.color-swatch:hover {
+    transform: scale(1.15);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.switch .slider::before {
+    transition: transform 0.25s cubic-bezier(0.68, -0.2, 0.27, 1.2);
+}
+
+@keyframes fadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tab-content:not(.hidden) {
+    animation: fadeSlideIn 0.3s ease-out;
+}
+
+dialog[open] {
+    animation: dialogOpen 0.2s ease-out;
+}
+
+@keyframes dialogOpen {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* ===============================================
+   系统控制子菜单样式
+   =============================================== */
+
+.system-sub-nav {
+    display: flex;
+    gap: 0.5rem;
+    background: var(--color-bg-alt);
+    padding: 0.25rem;
+    border-radius: var(--border-radius-md);
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--color-border);
+    flex-wrap: wrap;
+}
+
+.system-sub-nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.9rem;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+}
+
+.system-sub-nav-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.system-sub-nav-btn:hover {
+    color: var(--color-text-primary);
+    background: rgba(79, 70, 229, 0.1);
+}
+
+.system-sub-nav-btn.active {
+    background: var(--color-accent-primary);
+    color: var(--color-accent-text);
+    box-shadow: var(--shadow-sm);
+}
+
+/* 隐藏“全部”按钮 */
+.system-sub-nav-btn[data-category="all"] {
+    display: none !important;
+}
+
+@media (max-width: 768px) {
+    .system-sub-nav {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .system-sub-nav-btn span {
+        display: none;
+    }
+
+    .system-sub-nav-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+}
+
+/* ===============================================
+   模块头部和描述样式
+   =============================================== */
+
+.module-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.module-header h3 {
+    margin: 0;
+}
+
+.module-desc {
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+}
+
+/* ===============================================
+   SVG 图标统一样式
+   =============================================== */
+
+.control-module h3 svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    color: var(--color-accent-primary);
+}
+
+.button svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.button.small svg {
+    width: 14px;
+    height: 14px;
+}
+
+.tab-link svg,
+.main-nav svg {
+    width: 18px;
+    height: 18px;
+}
+
+.status-indicator svg {
+    width: 12px;
+    height: 12px;
+}
+
+.info-icon svg,
+.info-inline svg {
+    width: 14px;
+    height: 14px;
+    color: var(--color-text-secondary);
+}
+
+.control-module h3 svg,
+.button svg,
+.tab-link svg {
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.button:hover svg {
+    transform: scale(1.05);
+}
+
+/* ===============================================
+   系统控制模块布局优化 (Flex 流式布局)
+   =============================================== */
+
+.control-panel-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    align-items: stretch;
+    /* 确保等高 */
+}
+
+/* 让卡片自动平分空间，最小宽度 300px */
+.control-panel-grid .control-module {
+    display: flex;
+    flex-direction: column;
+    /* 核心：自动伸缩，基础宽度 300px */
+    flex: 1 1 300px;
+    /* 移除固定宽度，让 flex 控制 */
+    width: auto;
+    min-width: 0;
+    /* 防止内容撑破 flex item */
+
+    height: auto;
+    /* 让内容决定高度，或者由 align-items: stretch 拉伸 */
+    min-height: 180px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+/* 给最后一个元素（通常是按钮组）设置 margin-top: auto */
+.control-panel-grid .control-module>.button-group:last-child,
+.control-panel-grid .control-module>.card-footer:last-child,
+.control-panel-grid .control-module>form:last-child {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border);
+}
+
+/* 
+   例外规则：必须全宽的模块 
+   强制占满 100% 宽度
+*/
+
+/* 1. 缓存管理 & 2. 上游DNS设置 & 3. 功能开关 */
+.control-panel-grid>.control-module:has(#cache-stats-table),
+#replacements-card,
+#feature-switches-module {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+/* 响应式微调：手机屏幕下 */
+@media (max-width: 600px) {
+    .control-panel-grid .control-module {
+        flex: 1 1 100%;
+        /* 强制单列 */
+    }
+}
+
+/* ===============================================
+   特定模块内部布局修复
+   =============================================== */
+
+/* 修复 SOCKS5/ECS IP 模块布局问题 */
+/* 核心修复：覆盖 HTML 中的内联 style="display: flex..."，强制垂直排列 */
+#overrides-module .overrides-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem !important;
+    width: 100%;
+}
+
+/* 确保内部每个项目占满宽度 */
+#overrides-module .control-item,
+#socks-ecs-module .control-item {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    /* label 和 input 上下排列 */
+    align-items: stretch !important;
+    gap: 0.5rem;
+    margin-bottom: 0 !important;
+}
+
+#overrides-module input,
+#socks-ecs-module input {
+    width: 100%;
+    max-width: 100%;
+}
+
+/* 确保说明文字有足够宽度且正常换行 */
+#overrides-module p,
+#overrides-module span,
+#overrides-module small,
+#socks-ecs-module p,
+#socks-ecs-module span,
+#socks-ecs-module small {
+    white-space: normal;
+    width: 100%;
+    display: block;
+    color: var(--color-text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+/* ===============================================
+   高级设置模块排序
+   =============================================== */
+#requery-module {
+    order: 1;
+}
+
+#overrides-module,
+#socks-ecs-module {
+    order: 2;
+}
+
+#feature-switches-module {
+    order: 3;
+}
