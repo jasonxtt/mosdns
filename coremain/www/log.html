@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="dark" data-color-scheme="indigo" data-layout="comfortable">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mosdns 仪表盘 V3.2.6 Optimized</title>
     <link rel="stylesheet" href="assets/css/log_refactored.css">
+    <link rel="stylesheet" href="assets/css/enhancements.css">
 
     <!-- [新功能] 为 Requery 插件添加的独立样式 -->
     <style>
@@ -17,6 +19,7 @@
             height: 24px;
             border: 1px solid var(--color-border);
         }
+
         .requery-progress-bar-fill {
             height: 100%;
             background-color: var(--color-accent-primary);
@@ -24,6 +27,7 @@
             transition: width 0.3s ease-out;
             border-radius: var(--border-radius-sm);
         }
+
         .requery-progress-bar-text {
             position: absolute;
             top: 50%;
@@ -32,20 +36,25 @@
             color: var(--color-accent-text);
             font-weight: 600;
             font-size: 0.8rem;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
             white-space: nowrap;
         }
+
         [data-theme="light"] .requery-progress-bar-text {
-             color: var(--color-accent-text);
+            color: var(--color-accent-text);
         }
+
         [hidden] {
             display: none !important;
         }
+
         /* -- 修正样式 -- */
         #requery-interval-input {
-            min-width: 80px; /* 确保能显示4位数字 */
+            min-width: 80px;
+            /* 确保能显示4位数字 */
             text-align: center;
         }
+
         .requery-scheduler-grid {
             display: grid;
             grid-template-columns: auto 1fr;
@@ -53,6 +62,7 @@
             align-items: center;
             width: 100%;
         }
+
         .info-icon {
             color: var(--color-text-secondary);
             cursor: help;
@@ -60,8 +70,11 @@
         }
     </style>
 </head>
+
 <body>
-    <div id="initial-loader"><div class="spinner"></div></div>
+    <div id="initial-loader">
+        <div class="spinner"></div>
+    </div>
     <div id="answers-tooltip"></div>
 
     <main class="container">
@@ -82,7 +95,10 @@
                 </div>
                 <span id="last-updated" class="last-updated"></span>
                 <button id="global-refresh-btn" class="refresh-btn" title="刷新数据" aria-label="刷新数据" aria-busy="false">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
+                    </svg>
                 </button>
             </div>
         </header>
@@ -92,7 +108,8 @@
         <dialog id="log-detail-modal" class="card">
             <header class="modal-header">
                 <h2>查询详情</h2>
-                <button class="button secondary" id="close-log-detail-modal" aria-label="Close" style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
+                <button class="button secondary" id="close-log-detail-modal" aria-label="Close"
+                    style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
             </header>
             <div id="log-detail-modal-body" class="modal-body">
                 <!-- Content will be injected by JavaScript -->
@@ -102,7 +119,8 @@
         <dialog id="data-view-modal" class="card">
             <header class="modal-header">
                 <h2 id="data-view-modal-title">数据查看</h2>
-                <button class="button secondary" id="close-data-view-modal" aria-label="Close" style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
+                <button class="button secondary" id="close-data-view-modal" aria-label="Close"
+                    style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
             </header>
             <div class="modal-body" id="data-view-modal-body">
                 <input type="search" id="data-view-search" placeholder="搜索..." style="margin-bottom: 1rem;">
@@ -118,7 +136,8 @@
         <dialog id="alias-modal" class="card">
             <header class="modal-header">
                 <h2>管理客户端别名</h2>
-                <button class="button secondary" id="close-alias-modal" aria-label="Close" style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
+                <button class="button secondary" id="close-alias-modal" aria-label="Close"
+                    style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
             </header>
             <div class="modal-body">
                 <form id="manual-alias-form">
@@ -131,20 +150,21 @@
             </div>
             <footer class="modal-footer">
                 <div class="footer-actions-left">
-                     <button id="import-aliases-btn" class="button secondary"><span>导入</span></button>
-                     <button id="export-aliases-btn" class="button secondary"><span>导出</span></button>
+                    <button id="import-aliases-btn" class="button secondary"><span>导入</span></button>
+                    <button id="export-aliases-btn" class="button secondary"><span>导出</span></button>
                 </div>
                 <div class="footer-actions-right">
-                     <button id="save-all-aliases-btn" class="button primary"><span>全部保存</span></button>
+                    <button id="save-all-aliases-btn" class="button primary"><span>全部保存</span></button>
                 </div>
             </footer>
         </dialog>
         <input type="file" id="import-alias-file-input" accept=".json" style="display: none;">
-        
+
         <dialog id="rule-modal" class="card">
             <header class="modal-header">
                 <h2 id="modal-title">添加规则</h2>
-                <button class="button secondary" id="close-rule-modal" aria-label="Close" style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
+                <button class="button secondary" id="close-rule-modal" aria-label="Close"
+                    style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
             </header>
             <form id="rule-form">
                 <div class="modal-body">
@@ -167,7 +187,8 @@
                     </div>
                     <div class="form-field" id="rule-files-wrapper" style="display: none;">
                         <label for="rule-files">本地文件路径</label>
-                        <input type="text" id="rule-files" name="files" placeholder="例如: /mosdns/geosite-cn.srs" required>
+                        <input type="text" id="rule-files" name="files" placeholder="例如: /mosdns/geosite-cn.srs"
+                            required>
                     </div>
                     <div class="form-field">
                         <label for="rule-url">清单网址 (URL)</label>
@@ -182,13 +203,16 @@
                     </div>
                     <div class="form-field">
                         <label for="rule-update-interval">更新间隔 (小时)</label>
-                        <input type="number" id="rule-update-interval" name="update_interval_hours" min="1" value="24" style="width: 120px;">
+                        <input type="number" id="rule-update-interval" name="update_interval_hours" min="1" value="24"
+                            style="width: 120px;">
                     </div>
                 </div>
                 <footer class="modal-footer">
                     <div class="footer-actions-right">
-                        <button type="button" id="cancel-rule-modal-btn" class="button secondary"><span>取消</span></button>
-                        <button type="submit" id="save-rule-btn" class="button primary" data-default-text="保存"><span>保存</span></button>
+                        <button type="button" id="cancel-rule-modal-btn"
+                            class="button secondary"><span>取消</span></button>
+                        <button type="submit" id="save-rule-btn" class="button primary"
+                            data-default-text="保存"><span>保存</span></button>
                     </div>
                 </footer>
             </form>
@@ -197,9 +221,22 @@
         <section id="overview-tab" class="tab-content active" role="tabpanel">
             <div class="stats-grid">
                 <div class="stat-card default-gradient-1">
-                     <svg class="icon-bg-pattern" width="100%" height="100%"><defs><pattern id="p1" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><circle cx="2.5" cy="2.5" r="2.5" fill="currentColor"></circle></pattern></defs><rect width="100%" height="100%" fill="url(#p1)"></rect></svg>
+                    <svg class="icon-bg-pattern" width="100%" height="100%">
+                        <defs>
+                            <pattern id="p1" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse"
+                                patternTransform="rotate(45)">
+                                <circle cx="2.5" cy="2.5" r="2.5" fill="currentColor"></circle>
+                            </pattern>
+                        </defs>
+                        <rect width="100%" height="100%" fill="url(#p1)"></rect>
+                    </svg>
                     <div class="stat-card-content">
-                        <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M11.25 4.53335C11.6642 4.44457 12.0858 4.44457 12.5 4.53335C17.1524 5.54133 21 9.80443 21 14.6465C21 19.9806 16.9706 22 12 22C7.02944 22 3 19.9806 3 14.6465C3 9.80443 6.84759 5.54133 11.25 4.53335ZM12 2C6.47715 2 2 7.02165 2 14.6465C2 21.4939 6.27609 24 12 24C17.7239 24 22 21.4939 22 14.6465C22 7.02165 17.5228 2 12 2Z"></path></svg><span>最新日志条目数</span></h3>
+                        <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24"
+                                height="24">
+                                <path
+                                    d="M11.25 4.53335C11.6642 4.44457 12.0858 4.44457 12.5 4.53335C17.1524 5.54133 21 9.80443 21 14.6465C21 19.9806 16.9706 22 12 22C7.02944 22 3 19.9806 3 14.6465C3 9.80443 6.84759 5.54133 11.25 4.53335ZM12 2C6.47715 2 2 7.02165 2 14.6465C2 21.4939 6.27609 24 12 24C17.7239 24 22 21.4939 22 14.6465C22 7.02165 17.5228 2 12 2Z">
+                                </path>
+                            </svg><span>最新日志条目数</span></h3>
                         <div class="stat-card-main">
                             <div id="total-queries" class="value">--</div>
                             <span id="total-queries-change" class="stat-change" style="visibility: hidden;"></span>
@@ -208,9 +245,22 @@
                     </div>
                 </div>
                 <div class="stat-card theme-gradient">
-                     <svg class="icon-bg-pattern" width="100%" height="100%"><defs><pattern id="p2" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse" patternTransform="rotate(135)"><rect width="5" height="5" fill="currentColor"></rect></pattern></defs><rect width="100%" height="100%" fill="url(#p2)"></rect></svg>
+                    <svg class="icon-bg-pattern" width="100%" height="100%">
+                        <defs>
+                            <pattern id="p2" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse"
+                                patternTransform="rotate(135)">
+                                <rect width="5" height="5" fill="currentColor"></rect>
+                            </pattern>
+                        </defs>
+                        <rect width="100%" height="100%" fill="url(#p2)"></rect>
+                    </svg>
                     <div class="stat-card-content">
-                        <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V12L16.5 15.5L15.0858 16.9142L11 12.8284V7Z"></path></svg><span>平均处理时间 (ms)</span></h3>
+                        <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24"
+                                height="24">
+                                <path
+                                    d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V12L16.5 15.5L15.0858 16.9142L11 12.8284V7Z">
+                                </path>
+                            </svg><span>平均处理时间 (ms)</span></h3>
                         <div class="stat-card-main">
                             <div id="avg-duration" class="value">--</div>
                             <span id="avg-duration-change" class="stat-change" style="visibility: hidden;"></span>
@@ -219,39 +269,73 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="overview-grid">
                 <div class="card lazy-load-card" id="top-domains-card">
-                    <header class="card-header"><h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM13 13.5V18H11V13.5C9.34315 13.5 8 12.1569 8 10.5C8 8.84315 9.34315 7.5 11 7.5V6H13V7.5C14.6569 7.5 16 8.84315 16 10.5C16 12.1569 14.6569 13.5 13 13.5Z"></path></svg>域名请求排行</h2></header>
+                    <header class="card-header">
+                        <h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM13 13.5V18H11V13.5C9.34315 13.5 8 12.1569 8 10.5C8 8.84315 9.34315 7.5 11 7.5V6H13V7.5C14.6569 7.5 16 8.84315 16 10.5C16 12.1569 14.6569 13.5 13 13.5Z">
+                                </path>
+                            </svg>域名请求排行</h2>
+                    </header>
                     <div class="card-body">
-                        <div class="lazy-placeholder"><div class="spinner"></div></div>
+                        <div class="lazy-placeholder">
+                            <div class="spinner"></div>
+                        </div>
                         <div class="scrollable-table-container">
                             <table class="mobile-card-layout">
-                                <thead><tr><th>域名</th><th class="text-right hide-on-mobile">请求数</th></tr></thead>
+                                <thead>
+                                    <tr>
+                                        <th>域名</th>
+                                        <th class="text-right hide-on-mobile">请求数</th>
+                                    </tr>
+                                </thead>
                                 <tbody id="top-domains-body"></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="card lazy-load-card" id="top-clients-card">
-                    <header class="card-header"><h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2ZM12 4C14.2091 4 16 5.79086 16 8C16 10.2091 14.2091 12 12 12C9.79086 12 8 10.2091 8 8C8 5.79086 9.79086 4 12 4ZM12 20C10.0576 20 8.22596 19.3433 6.74542 18.1818C8.34978 16.7383 10.1132 16 12 16C13.8868 16 15.6502 16.7383 17.2546 18.1818C15.774 19.3433 13.9424 20 12 20Z"></path></svg>客户端请求排行</h2></header>
+                    <header class="card-header">
+                        <h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2ZM12 4C14.2091 4 16 5.79086 16 8C16 10.2091 14.2091 12 12 12C9.79086 12 8 10.2091 8 8C8 5.79086 9.79086 4 12 4ZM12 20C10.0576 20 8.22596 19.3433 6.74542 18.1818C8.34978 16.7383 10.1132 16 12 16C13.8868 16 15.6502 16.7383 17.2546 18.1818C15.774 19.3433 13.9424 20 12 20Z">
+                                </path>
+                            </svg>客户端请求排行</h2>
+                    </header>
                     <div class="card-body">
-                        <div class="lazy-placeholder"><div class="spinner"></div></div>
+                        <div class="lazy-placeholder">
+                            <div class="spinner"></div>
+                        </div>
                         <div class="scrollable-table-container">
                             <table class="mobile-card-layout">
-                                <thead><tr><th>客户端</th><th class="text-right hide-on-mobile">请求数</th></tr></thead>
+                                <thead>
+                                    <tr>
+                                        <th>客户端</th>
+                                        <th class="text-right hide-on-mobile">请求数</th>
+                                    </tr>
+                                </thead>
                                 <tbody id="top-clients-body"></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
-           
+
                 <div class="card lazy-load-card" id="slowest-queries-card">
-                    <header class="card-header"><h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 17.5228 2 12 2ZM11.1716 12.8284L15.0858 16.7426L16.5 15.3284L13.2929 12.1213C13.6834 11.5 14 10.7071 14 9.82843C14 7.87563 12.4477 6.32328 10.5 6.32328C8.55228 6.32328 7 7.87563 7 9.82843C7 11.7812 8.55228 13.3336 10.5 13.3336C10.7071 13.3336 10.95 13.1517 11.1716 12.8284Z"></path></svg>最慢查询</h2></header>
+                    <header class="card-header">
+                        <h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 17.5228 2 12 2ZM11.1716 12.8284L15.0858 16.7426L16.5 15.3284L13.2929 12.1213C13.6834 11.5 14 10.7071 14 9.82843C14 7.87563 12.4477 6.32328 10.5 6.32328C8.55228 6.32328 7 7.87563 7 9.82843C7 11.7812 8.55228 13.3336 10.5 13.3336C10.7071 13.3336 10.95 13.1517 11.1716 12.8284Z">
+                                </path>
+                            </svg>最慢查询</h2>
+                    </header>
                     <div class="card-body">
-                        <div class="lazy-placeholder"><div class="spinner"></div></div>
-                         <div class="scrollable-table-container">
+                        <div class="lazy-placeholder">
+                            <div class="spinner"></div>
+                        </div>
+                        <div class="scrollable-table-container">
                             <table id="slowest-queries-table" class="mobile-card-layout">
                                 <thead>
                                     <tr>
@@ -267,9 +351,17 @@
                 </div>
 
                 <div class="card lazy-load-card" id="shunt-results-card">
-                    <header class="card-header"><h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M18.5 7.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm-10 0a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm0 10a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0ZM6 10v4a1 1 0 0 0 1 1h4.5v-1.5H7.5a.5.5 0 0 1-.5-.5v-3h7.5a2.5 2.5 0 0 0 2.5-2.5V5H8.75A4.5 4.5 0 0 0 6 7.25V10Z"></path></svg>分流结果统计</h2></header>
+                    <header class="card-header">
+                        <h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M18.5 7.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm-10 0a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm0 10a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0ZM6 10v4a1 1 0 0 0 1 1h4.5v-1.5H7.5a.5.5 0 0 1-.5-.5v-3h7.5a2.5 2.5 0 0 0 2.5-2.5V5H8.75A4.5 4.5 0 0 0 6 7.25V10Z">
+                                </path>
+                            </svg>分流结果统计</h2>
+                    </header>
                     <div class="card-body" id="shunt-results-body">
-                        <div class="lazy-placeholder"><div class="spinner"></div></div>
+                        <div class="lazy-placeholder">
+                            <div class="spinner"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -285,24 +377,32 @@
                 </header>
                 <div class="card-body">
                     <div id="log-search-container-original">
-                         <input type="search" id="log-search" placeholder="全局搜索... (使用 &quot;引号&quot; 精确匹配)">
-                         <button id="manage-aliases-btn-mobile" class="button secondary show-on-mobile" style="display: none;"><span>管理别名</span></button>
+                        <input type="search" id="log-search" placeholder="全局搜索... (使用 &quot;引号&quot; 精确匹配)">
+                        <button id="manage-aliases-btn-mobile" class="button secondary show-on-mobile"
+                            style="display: none;"><span>管理别名</span></button>
                     </div>
                     <div id="search-results-info"></div>
                     <div class="scrollable-table-container" id="log-query-table-container">
                         <table id="log-table" class="mobile-card-layout">
                             <thead id="log-table-head">
                                 <tr>
-                                    <th class="hide-on-mobile" data-sortable data-sort-key="query_time" style="width: 15%;">时间 <span class="sort-indicator"></span></th>
-                                    <th data-sortable data-sort-key="query_name" style="width: 40%;">域名 / 响应 <span class="sort-indicator"></span></th>
-                                    <th class="hide-on-mobile" data-sortable data-sort-key="query_type" style="width: 10%;">类型 <span class="sort-indicator"></span></th>
-                                    <th class="hide-on-mobile text-center" data-sortable data-sort-key="duration_ms" style="width: 15%;">耗时(ms) <span class="sort-indicator"></span></th>
-                                    <th class="hide-on-mobile" data-sortable data-sort-key="client_ip" style="width: 20%;">客户端 <span class="sort-indicator"></span></th>
+                                    <th class="hide-on-mobile" data-sortable data-sort-key="query_time"
+                                        style="width: 15%;">时间 <span class="sort-indicator"></span></th>
+                                    <th data-sortable data-sort-key="query_name" style="width: 40%;">域名 / 响应 <span
+                                            class="sort-indicator"></span></th>
+                                    <th class="hide-on-mobile" data-sortable data-sort-key="query_type"
+                                        style="width: 10%;">类型 <span class="sort-indicator"></span></th>
+                                    <th class="hide-on-mobile text-center" data-sortable data-sort-key="duration_ms"
+                                        style="width: 15%;">耗时(ms) <span class="sort-indicator"></span></th>
+                                    <th class="hide-on-mobile" data-sortable data-sort-key="client_ip"
+                                        style="width: 20%;">客户端 <span class="sort-indicator"></span></th>
                                 </tr>
                             </thead>
                             <tbody id="log-table-body"></tbody>
                         </table>
-                        <div id="log-loader"><div class="spinner" style="width:1.5rem; height:1.5rem; border-width:3px;"></div></div>
+                        <div id="log-loader">
+                            <div class="spinner" style="width:1.5rem; height:1.5rem; border-width:3px;"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -310,7 +410,7 @@
 
         <section id="rules-tab" class="tab-content">
             <div class="card rules-card">
-                 <div class="card-body no-padding">
+                <div class="card-body no-padding">
                     <nav class="sub-nav">
                         <a class="sub-nav-link active" data-sub-tab="list-mgmt">名单管理</a>
                         <a class="sub-nav-link" data-sub-tab="adguard">广告拦截</a>
@@ -328,26 +428,44 @@
                                 <a href="#" class="list-mgmt-link" data-list-tag="rewrite">重定向</a>
                             </nav>
                             <div class="list-mgmt-content">
-                                <div class="lazy-placeholder" id="list-content-loader" style="min-height: 300px;"><div class="spinner"></div></div>
-                                <textarea id="list-content-textarea" spellcheck="false" style="display: none;"></textarea>
+                                <div class="lazy-placeholder" id="list-content-loader" style="min-height: 300px;">
+                                    <div class="spinner"></div>
+                                </div>
+                                <textarea id="list-content-textarea" spellcheck="false"
+                                    style="display: none;"></textarea>
                                 <div class="list-mgmt-footer">
                                     <span id="list-content-info"></span>
                                     <button id="list-save-btn" class="button primary"><span>保存</span></button>
                                 </div>
-                                <p id="list-mgmt-client-ip-hint" style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">打开此开关：系统-功能开关-指定 Client fakeip/指定 Client realip，同时mosdns作为dns下发给客户端，此名单/功能才生效；生效时，只有指定的客户端可以获取fakeip/指定客户端不可以获取fakeip。</p>
-                                <p id="list-mgmt-direct-ip-hint" style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">不在任何域名清单中的域名解析后的IP属于此IP清单时，此域名向被归入直连域名。以苹果公司IP段为例：17.0.0.0/8</p>
-                                <p id="list-mgmt-rewrite-hint" style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">格式: &lt;域名&gt; &lt;IP或域名&gt;。例如: <code>example.com 1.2.3.4</code> 或 <code>test.com example.com</code>。支持 full:, domain: 等匹配规则。</p>
+                                <p id="list-mgmt-client-ip-hint"
+                                    style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
+                                    打开此开关：系统-功能开关-指定 Client fakeip/指定 Client
+                                    realip，同时mosdns作为dns下发给客户端，此名单/功能才生效；生效时，只有指定的客户端可以获取fakeip/指定客户端不可以获取fakeip。</p>
+                                <p id="list-mgmt-direct-ip-hint"
+                                    style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
+                                    不在任何域名清单中的域名解析后的IP属于此IP清单时，此域名向被归入直连域名。以苹果公司IP段为例：17.0.0.0/8</p>
+                                <p id="list-mgmt-rewrite-hint"
+                                    style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
+                                    格式: &lt;域名&gt; &lt;IP或域名&gt;。例如: <code>example.com 1.2.3.4</code> 或
+                                    <code>test.com example.com</code>。支持 full:, domain: 等匹配规则。
+                                </p>
                             </div>
                         </div>
                     </div>
                     <div id="adguard-sub-tab" class="sub-tab-content" style="padding: 0 1.25rem 1.25rem;">
                         <div class="rule-actions-wrapper">
                             <button id="add-adguard-rule-btn" class="button primary">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path>
+                                </svg>
                                 <span>添加拦截规则</span>
                             </button>
                             <button id="check-adguard-updates-btn" class="button secondary">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1333 2 19.536 4.30641 21.1009 7.82362L18.3294 8.76801C17.1523 6.22352 14.7951 4.5 12 4.5C7.85786 4.5 4.5 7.85786 4.5 12C4.5 16.1421 7.85786 19.5 12 19.5C15.2443 19.5 17.9739 17.4478 18.9472 14.5H16.5V12.5H22V18.5H20V15.118C18.6468 19.068 15.5849 22 12 22Z"></path></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                    <path
+                                        d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1333 2 19.536 4.30641 21.1009 7.82362L18.3294 8.76801C17.1523 6.22352 14.7951 4.5 12 4.5C7.85786 4.5 4.5 7.85786 4.5 12C4.5 16.1421 7.85786 19.5 12 19.5C15.2443 19.5 17.9739 17.4478 18.9472 14.5H16.5V12.5H22V18.5H20V15.118C18.6468 19.068 15.5849 22 12 22Z">
+                                    </path>
+                                </svg>
                                 <span>检查更新</span>
                             </button>
                         </div>
@@ -368,12 +486,26 @@
                         </div>
                     </div>
                     <div id="diversion-sub-tab" class="sub-tab-content" style="padding: 0 1.25rem 1.25rem;">
-                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
                             <p style="color: var(--color-text-secondary); font-size: 0.9rem;">注意：请勿随意删除或禁用系统默认的分流规则！</p>
-                            <button id="add-diversion-rule-btn" class="button primary">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path></svg>
-                                <span>添加分流规则</span>
-                            </button>
+                            <div style="display: flex; gap: 0.75rem; margin-left: auto;">
+                                <button id="add-diversion-rule-btn" class="button primary">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path>
+                                    </svg>
+                                    <span>添加分流规则</span>
+                                </button>
+                                <button id="diversion-help-btn" class="button secondary" style="padding: 0.75rem 1rem;"
+                                    title="规则说明">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                                        width="20" height="20">
+                                        <path
+                                            d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 15H13V17H11V15ZM13 13.3551V14H11V12.5C11 11.9477 11.4477 11.5 12 11.5C12.8284 11.5 13.5 10.8284 13.5 10C13.5 9.17157 12.8284 8.5 12 8.5C11.2723 8.5 10.6656 9.01823 10.5288 9.70577L8.56731 9.31346C8.88637 7.70919 10.302 6.5 12 6.5C13.933 6.5 15.5 8.067 15.5 10C15.5 11.5855 14.4457 12.9248 13 13.3551Z">
+                                        </path>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="scrollable-table-container" id="diversion-table-container">
                             <table id="diversion-rules-table">
@@ -392,25 +524,35 @@
                             </table>
                         </div>
                     </div>
-                 </div>
+                </div>
             </div>
         </section>
-        
+
         <section id="system-control-tab" class="tab-content">
-             <div class="control-panel-grid">
+            <div class="control-panel-grid">
                 <!-- Row 1 -->
                 <div class="control-module control-module--mini">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM11 11H7V13H11V17H13V13H17V11H13V7H11V11Z"></path></svg>审计控制</h3>
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z">
+                            </path>
+                        </svg>审计控制</h3>
                     <div class="control-item">
                         <strong>运行状态:</strong> <span id="audit-status">查询中...</span>
                     </div>
                     <div class="button-group">
-                        <button id="toggle-audit-btn" class="button primary" disabled data-default-text="请稍后"><span>请稍后</span></button>
-                        <button id="clear-audit-btn" class="button danger" data-default-text="清空日志"><span>清空日志</span></button>
+                        <button id="toggle-audit-btn" class="button primary" disabled
+                            data-default-text="请稍后"><span>请稍后</span></button>
+                        <button id="clear-audit-btn" class="button danger"
+                            data-default-text="清空日志"><span>清空日志</span></button>
                     </div>
                 </div>
                 <div class="control-module control-module--mini">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C7.02944 3 3 7.02944 3 12C3 16.9706 7.02944 21 12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3ZM12 19C8.13401 19 5 15.866 5 12C5 8.13401 8.13401 5 12 5C15.866 5 19 8.13401 19 12C19 15.866 15.866 19 12 19ZM12 10.5C12.8284 10.5 13.5 11.1716 13.5 12C13.5 12.8284 12.8284 13.5 12 13.5C11.1716 13.5 10.5 12.8284 10.5 12C10.5 11.1716 11.1716 10.5 12 10.5Z"></path></svg>日志容量</h3>
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z">
+                            </path>
+                        </svg>日志容量</h3>
                     <div class="control-item">
                         <strong>当前容量:</strong> <span id="audit-capacity">查询中...</span>
                     </div>
@@ -420,13 +562,22 @@
                     </form>
                     <div class="control-item tip-inline" style="margin-top: -0.25rem;">
                         <span class="info-inline" aria-hidden="true">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z"></path></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14"
+                                height="14">
+                                <path
+                                    d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z">
+                                </path>
+                            </svg>
                         </span>
                         <small class="tip-text">设置新容量将清空日志。</small>
                     </div>
                 </div>
                 <div class="control-module control-module--mini" id="auto-refresh-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5C12.4142 2.5 12.75 2.83579 12.75 3.25V5.03131C15.2635 5.50376 17.25 7.49021 17.7224 9.99993H19.5C19.9142 9.99993 20.25 10.3357 20.25 10.75V13.25C20.25 13.6642 19.9142 14 19.5 14H17.7224C17.25 16.5097 15.2635 18.4962 12.75 18.9686V20.75C12.75 21.1642 12.4142 21.5 12 21.5C11.5858 21.5 11.25 21.1642 11.25 20.75V18.9686C8.73652 18.4962 6.75 16.5097 6.27758 14H4.5C4.08579 14 3.75 13.6642 3.75 13.25V10.75C3.75 10.3357 4.08579 9.99993 4.5 9.99993H6.27758C6.75 7.49021 8.73652 5.50376 11.25 5.03131V3.25C11.25 2.83579 11.5858 2.5 12 2.5ZM12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7Z"></path></svg>自动刷新</h3>
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M12 2.5C12.4142 2.5 12.75 2.83579 12.75 3.25V5.03131C15.2635 5.50376 17.25 7.49021 17.7224 9.99993H19.5C19.9142 9.99993 20.25 10.3357 20.25 10.75V13.25C20.25 13.6642 19.9142 14 19.5 14H17.7224C17.25 16.5097 15.2635 18.4962 12.75 18.9686V20.75C12.75 21.1642 12.4142 21.5 12 21.5C11.5858 21.5 11.25 21.1642 11.25 20.75V18.9686C8.73652 18.4962 6.75 16.5097 6.27758 14H4.5C4.08579 14 3.75 13.6642 3.75 13.25V10.75C3.75 10.3357 4.08579 9.99993 4.5 9.99993H6.27758C6.75 7.49021 8.73652 5.50376 11.25 5.03131V3.25C11.25 2.83579 11.5858 2.5 12 2.5ZM12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7Z">
+                            </path>
+                        </svg>自动刷新</h3>
                     <form id="auto-refresh-form" class="auto-refresh-form">
                         <label class="switch" for="auto-refresh-toggle" style="display: contents; cursor: pointer;">
                             <strong>启用</strong>
@@ -442,42 +593,56 @@
                     </form>
                 </div>
                 <div class="control-module control-module--mini" id="appearance-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V12L16.5 15.5L15.0858 16.9142L11 12.8284V7Z"></path></svg>主题与外观</h3>
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 7H13V12L16.5 15.5L15.0858 16.9142L11 12.8284V7Z">
+                            </path>
+                        </svg>主题与外观</h3>
                     <div class="control-item">
                         <strong>颜色主题</strong>
                         <div class="color-palette">
-                            <button class="color-swatch" data-color="indigo" style="background-color: #4f46e5;" title="靛蓝" aria-label="靛蓝"></button>
-                            <button class="color-swatch" data-color="pink" style="background-color: #ec4899;" title="粉色" aria-label="粉色"></button>
-                            <button class="color-swatch" data-color="teal" style="background-color: #14b8a6;" title="青色" aria-label="青色"></button>
-                            <button class="color-swatch" data-color="orange" style="background-color: #f97316;" title="橙色" aria-label="橙色"></button>
-                            <button class="color-swatch" data-color="green" style="background-color: #22c55e;" title="绿色" aria-label="绿色"></button>
-                            <button class="color-swatch" data-color="violet" style="background-color: #8b5cf6;" title="紫色" aria-label="紫色"></button>
+                            <button class="color-swatch" data-color="indigo" style="background-color: #4f46e5;"
+                                title="靛蓝" aria-label="靛蓝"></button>
+                            <button class="color-swatch" data-color="pink" style="background-color: #ec4899;" title="粉色"
+                                aria-label="粉色"></button>
+                            <button class="color-swatch" data-color="teal" style="background-color: #14b8a6;" title="青色"
+                                aria-label="青色"></button>
+                            <button class="color-swatch" data-color="orange" style="background-color: #f97316;"
+                                title="橙色" aria-label="橙色"></button>
+                            <button class="color-swatch" data-color="green" style="background-color: #22c55e;"
+                                title="绿色" aria-label="绿色"></button>
+                            <button class="color-swatch" data-color="violet" style="background-color: #8b5cf6;"
+                                title="紫色" aria-label="紫色"></button>
                         </div>
                     </div>
                     <div class="control-item">
                         <strong>界面风格</strong>
                         <select id="theme-switcher-select">
-                           <option value="light">明亮</option>
-                           <option value="dark">黑暗</option>
-                           <option value="sakura">夜樱</option>
-                           <option value="evergreen">常青</option>
-                           <option value="starlight">星光</option>
-                           <option value="dusk">黄昏</option>
-                           <option value="terra">赤土</option>
+                            <option value="light">明亮</option>
+                            <option value="dark">黑暗</option>
+                            <option value="sakura">夜樱</option>
+                            <option value="evergreen">常青</option>
+                            <option value="starlight">星光</option>
+                            <option value="dusk">黄昏</option>
+                            <option value="terra">赤土</option>
                         </select>
                     </div>
                     <div class="control-item">
                         <strong>界面密度</strong>
                         <select id="layout-density-select">
-                           <option value="comfortable">舒适</option>
-                           <option value="compact">紧凑</option>
+                            <option value="comfortable">舒适</option>
+                            <option value="compact">紧凑</option>
                         </select>
                     </div>
                 </div>
 
                 <!-- Row 2 -->
-                 <div class="control-module" style="grid-column: 1 / -1;">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12.98,2.05C12.67,2.02 12.33,2.02 12.02,2.05C8.44,2.37 5.5,5.29 5.06,8.87C5.02,9.2 5,9.55 5,9.91L5.02,9.99C4.38,10.12 3.8,10.66 3.8,11.35V12.5C3.8,13.25 4.41,13.88 5.16,13.98L5.18,14C5.5,17.56 8.44,20.5 12.02,20.94C12.33,20.98 12.67,20.98 12.98,20.94C16.56,20.5 19.5,17.56 19.82,14L19.84,13.98C20.59,13.88 21.2,13.25 21.2,12.5V11.35C21.2,10.66 20.62,10.12 19.98,9.99L20,9.91C20,9.55 19.98,9.2 19.94,8.87C19.5,5.29 16.56,2.37 12.98,2.05ZM10,7L14,10L10,13V7Z"></path></svg>缓存管理</h3>
+                <div class="control-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M4 3h16c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2zm0 2v4h7V5H4zm9 0v4h7V5h-7zm-9 6v4h7v-4H4zm9 0v4h7v-4h-7zm-9 6v2h7v-2H4zm9 0v2h7v-2h-7z">
+                            </path>
+                        </svg>缓存管理</h3>
                     <div class="scrollable-table-container" style="max-height: none; overflow-y: visible;">
                         <table id="cache-stats-table" class="mobile-card-layout">
                             <thead>
@@ -498,10 +663,14 @@
                         </table>
                     </div>
                 </div>
-                
+
                 <!-- Row 3 -->
                 <div class="control-module" id="domain-stats-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M4 19h16v-7h2v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8h2v7zM20 3H4v7h2V5h12v5h2V4a1 1 0 0 0-1-1zm-8 4h-2v2H8v2h2v2h2v-2h2v-2h-2V7z"></path></svg>域名列表统计</h3>
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M4 19h16v-7h2v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8h2v7zM20 3H4v7h2V5h12v5h2V4a1 1 0 0 0-1-1zm-8 4h-2v2H8v2h2v2h2v-2h2v-2h-2V7z">
+                            </path>
+                        </svg>域名列表统计</h3>
                     <div class="scrollable-table-container" style="max-height: none; overflow-y: visible;">
                         <table id="domain-stats-table">
                             <thead>
@@ -513,19 +682,23 @@
                             <tbody>
                                 <tr>
                                     <td><strong>FakeIP 域名</strong></td>
-                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="fakeip" data-list-title="FakeIP 域名" id="fakeip-domain-count">--</a></td>
+                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="fakeip"
+                                            data-list-title="FakeIP 域名" id="fakeip-domain-count">--</a></td>
                                 </tr>
                                 <tr>
                                     <td><strong>RealIP 域名</strong></td>
-                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="realip" data-list-title="RealIP 域名" id="realip-domain-count">--</a></td>
+                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="realip"
+                                            data-list-title="RealIP 域名" id="realip-domain-count">--</a></td>
                                 </tr>
                                 <tr>
                                     <td><strong>无 V4 域名</strong></td>
-                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="nov4" data-list-title="无 V4 域名" id="nov4-domain-count">--</a></td>
+                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="nov4"
+                                            data-list-title="无 V4 域名" id="nov4-domain-count">--</a></td>
                                 </tr>
                                 <tr>
                                     <td><strong>无 V6 域名</strong></td>
-                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="nov6" data-list-title="无 V6 域名" id="nov6-domain-count">--</a></td>
+                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="nov6"
+                                            data-list-title="无 V6 域名" id="nov6-domain-count">--</a></td>
                                 </tr>
                                 <tr>
                                     <td><strong>全部域名 (备份总表)</strong></td>
@@ -536,24 +709,37 @@
                     </div>
                 </div>
                 <div class="control-module" id="system-info-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M13,9H11V7h2m0,10H11V11h2m8-4.5,V19a2,2,0,0,1-2,2H5a2,2,0,0,1-2-2V5A2,2,0,0,1,5,3H16.5L21,7.5M15,4H5V19H19V8.5L15,4.5Z"/></svg>系统信息</h3>
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M13,9H11V7h2m0,10H11V11h2m8-4.5,V19a2,2,0,0,1-2,2H5a2,2,0,0,1-2-2V5A2,2,0,0,1,5,3H16.5L21,7.5M15,4H5V19H19V8.5L15,4.5Z" />
+                        </svg>系统信息</h3>
                     <div id="system-info-container" class="info-grid">
                         <!-- System info will be injected by JS -->
                     </div>
                 </div>
                 <div class="control-module" id="update-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 4v6h-2V6.41l-4.29 4.3-1.42-1.42 4.3-4.29H14V4h7zM5 17.59l4.29-4.3 1.42 1.42-4.3 4.29H10V20H3v-6h2v3.59z"></path></svg>版本与更新</h3>
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M21 4v6h-2V6.41l-4.29 4.3-1.42-1.42 4.3-4.29H14V4h7zM5 17.59l4.29-4.3 1.42 1.42-4.3 4.29H10V20H3v-6h2v3.59z">
+                            </path>
+                        </svg>版本与更新</h3>
 
                     <!-- 顶部：版本信息 + 操作按钮 -->
                     <div class="update-header">
                         <div class="update-versions">
-                            <div class="control-item"><strong>当前版本</strong> <span id="update-current-version" class="chip">检测中...</span></div>
-                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version" class="chip">--</span> <span id="update-inline-badge" class="badge" style="display:none">已是最新</span></div>
+                            <div class="control-item"><strong>当前版本</strong> <span id="update-current-version"
+                                    class="chip">检测中...</span></div>
+                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version"
+                                    class="chip">--</span> <span id="update-inline-badge" class="badge"
+                                    style="display:none">已是最新</span></div>
                         </div>
                         <div class="button-group update-actions">
-                            <button id="update-check-btn" class="button secondary" data-default-text="强制检查"><span>强制检查</span></button>
-                            <button id="update-apply-btn" class="button primary" data-default-text="立即更新" disabled><span>立即更新</span></button>
-                            <button id="update-force-btn" class="button danger" data-default-text="强制更新"><span>强制更新</span></button>
+                            <button id="update-check-btn" class="button secondary"
+                                data-default-text="强制检查"><span>强制检查</span></button>
+                            <button id="update-apply-btn" class="button primary" data-default-text="立即更新"
+                                disabled><span>立即更新</span></button>
+                            <button id="update-force-btn" class="button danger"
+                                data-default-text="强制更新"><span>强制更新</span></button>
                         </div>
                     </div>
 
@@ -590,28 +776,37 @@
                         </div>
                         <div class="update-auto-grid">
                             <label for="update-interval-input" class="field-label">间隔 (分钟)</label>
-                            <input type="number" id="update-interval-input" min="5" max="1440" value="1440" style="max-width: 140px;">
+                            <input type="number" id="update-interval-input" min="5" max="1440" value="1440"
+                                style="max-width: 140px;">
                         </div>
                         <p class="control-hint" id="update-hint-text"></p>
                     </div>
                 </div>
 
                 <!-- Row 4 -->
-                <div class="control-module" id="requery-module" style="grid-column: 1 / -1;">
+                <div class="control-module" id="requery-module" style="display: none;">
                     <h3>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4C16.97 4 21 8.03 21 13C21 17.97 16.97 22 12 22C7.03 22 3 17.97 3 13C3 8.03 7.03 4 12 4ZM12 2C5.925 2 1 6.925 1 13C1 19.075 5.925 24 12 24C18.075 24 23 19.075 23 13C23 6.925 18.075 2 12 2ZM12 14.5L8 10.5L9.41 9.09L11 10.67V6H13V10.67L14.59 9.09L16 10.5L12 14.5Z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20"
+                            height="20">
+                            <path
+                                d="M12 4C16.97 4 21 8.03 21 13C21 17.97 16.97 22 12 22C7.03 22 3 17.97 3 13C3 8.03 7.03 4 12 4ZM12 2C5.925 2 1 6.925 1 13C1 19.075 5.925 24 12 24C18.075 24 23 19.075 23 13C23 6.925 18.075 2 12 2ZM12 14.5L8 10.5L9.41 9.09L11 10.67V6H13V10.67L14.59 9.09L16 10.5L12 14.5Z" />
+                        </svg>
                         刷新分流缓存
                     </h3>
 
                     <!-- 顶部状态 + 主操作按钮 -->
                     <div class="requery-header">
                         <div class="requery-status-group">
-                            <div class="control-item"><strong>当前状态</strong> <span id="requery-status-text" class="chip">查询中...</span></div>
-                            <div class="control-item"><strong>上次运行</strong> <span id="requery-last-run">查询中...</span></div>
+                            <div class="control-item"><strong>当前状态</strong> <span id="requery-status-text"
+                                    class="chip">查询中...</span></div>
+                            <div class="control-item"><strong>上次运行</strong> <span id="requery-last-run">查询中...</span>
+                            </div>
                         </div>
                         <div class="requery-actions">
-                            <button id="requery-trigger-btn" class="button primary requery-primary-btn" data-default-text="开始全新任务"><span>开始全新任务</span></button>
-                            <button id="requery-cancel-btn" class="button danger requery-primary-btn" data-default-text="取消任务" hidden><span>取消任务</span></button>
+                            <button id="requery-trigger-btn" class="button primary requery-primary-btn"
+                                data-default-text="开始全新任务"><span>开始全新任务</span></button>
+                            <button id="requery-cancel-btn" class="button danger requery-primary-btn"
+                                data-default-text="取消任务" hidden><span>取消任务</span></button>
                         </div>
                     </div>
 
@@ -636,7 +831,12 @@
                             <label for="requery-start-datetime-input" class="field-label">
                                 首次执行时间
                                 <span class="info-icon" title="输入您的本地时间。留空则表示插件启动后，到达下个间隔时间点时执行。">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z"></path></svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                                        width="16" height="16">
+                                        <path
+                                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v2h-2V7zm0 4h2v6h-2v-6z">
+                                        </path>
+                                    </svg>
                                 </span>
                             </label>
                             <input type="datetime-local" id="requery-start-datetime-input">
@@ -650,28 +850,45 @@
                     <div class="requery-important">
                         <strong>重要操作</strong>
                         <div class="button-group requery-important-actions">
-                            <button id="save-shunt-rules-btn" class="button primary" data-default-text="保存分流规则"><span>保存分流规则</span></button>
-                            <button id="clear-shunt-rules-btn" class="button danger" data-default-text="清空分流规则"><span>清空分流规则</span></button>
-                            <button id="requery-clear-backup-btn" class="button danger" data-default-text="清空全量备份"><span>清空全量备份</span></button>
+                            <button id="save-shunt-rules-btn" class="button primary"
+                                data-default-text="保存分流规则"><span>保存分流规则</span></button>
+                            <button id="clear-shunt-rules-btn" class="button danger"
+                                data-default-text="清空分流规则"><span>清空分流规则</span></button>
+                            <button id="requery-clear-backup-btn" class="button danger"
+                                data-default-text="清空全量备份"><span>清空全量备份</span></button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Row 5 -->
-                <div class="control-module" id="feature-switches-module" style="grid-column: 1 / -1;">
+                <div class="control-module" id="feature-switches-module" style="display: none;">
                     <h3>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M17.5,12a5.5,5.5,0,1,1-5.5-5.5A5.5,5.5,0,0,1,17.5,12Zm-11,0A5.5,5.5,0,1,0,12,6.5,5.5,5.5,0,0,0,6.5,12ZM12,4.5a7.5,7.5,0,1,1-7.5,7.5A7.5,7.5,0,0,1,12,4.5Z M12,2A10,10,0,1,0,22,12,10,10,0,0,0,12,2Z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20"
+                            height="20">
+                            <path
+                                d="M17.5,12a5.5,5.5,0,1,1-5.5-5.5A5.5,5.5,0,0,1,17.5,12Zm-11,0A5.5,5.5,0,1,0,12,6.5,5.5,5.5,0,0,0,6.5,12ZM12,4.5a7.5,7.5,0,1,1-7.5,7.5A7.5,7.5,0,0,1,12,4.5Z M12,2A10,10,0,1,0,22,12,10,10,0,0,0,12,2Z" />
+                        </svg>
                         功能开关
                     </h3>
                     <div class="control-item">
                         <strong>核心运行模式</strong>
                         <div id="core-mode-switch-group" class="segmented-control">
                             <button id="core-mode-A-btn" class="button" data-mode="A">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"></path></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                                    width="18" height="18">
+                                    <path
+                                        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z">
+                                    </path>
+                                </svg>
                                 <span>兼容模式</span>
                             </button>
                             <button id="core-mode-B-btn" class="button" data-mode="B">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"></path></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                                    width="18" height="18">
+                                    <path
+                                        d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z">
+                                    </path>
+                                </svg>
                                 <span>安全模式</span>
                             </button>
                         </div>
@@ -680,11 +897,14 @@
                         <!-- Switches will be injected by JS -->
                     </div>
                 </div>
-                
+
                 <!-- 覆盖配置 -->
-                <div class="control-module" id="overrides-module" style="grid-column: 1 / -1;">
+                <div class="control-module" id="overrides-module" style="display: none;">
                     <h3>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M3 17v2h6v-2H3zm0-7v2h12V10H3zm0-7v2h18V3H3zm0 14h18v-2H3v2z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20"
+                            height="20">
+                            <path d="M3 17v2h6v-2H3zm0-7v2h12V10H3zm0-7v2h18V3H3zm0 14h18v-2H3v2z" />
+                        </svg>
                         SOCKS5/ECS IP
                     </h3>
                     <div class="overrides-grid" style="display: flex; align-items: flex-start; gap: 20px;">
@@ -696,7 +916,8 @@
                         <div class="control-item">
                             <label for="override-ecs-log" class="field-label">ECS IP</label>
                             <input type="text" id="override-ecs-log" placeholder="IPv4 / IPv6">
-                            <small class="control-hint">传递至上游国外DNS，以返回对此IP最友好的DNS结果，填写ipw.cn显示的ipv6地址或者本城市任意ipv6地址。</small>
+                            <small
+                                class="control-hint">传递至上游国外DNS，以返回对此IP最友好的DNS结果，填写ipw.cn显示的ipv6地址或者本城市任意ipv6地址。</small>
                         </div>
                         <div class="overrides-actions">
                             <div class="button-group">
@@ -711,7 +932,8 @@
             </div>
         </section>
     </main>
-    
+
     <script src="assets/js/log.js"></script>
 </body>
+
 </html>

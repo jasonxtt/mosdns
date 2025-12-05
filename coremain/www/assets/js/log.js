@@ -7,7 +7,7 @@ function lockScroll() {
     document.body.style.top = `-${savedScrollY}px`;
     document.body.style.width = '100%';
     // 保持滚动条占位，防止页面宽度变化导致抖动
-    document.body.style.overflowY = 'scroll'; 
+    document.body.style.overflowY = 'scroll';
 }
 
 function unlockScroll() {
@@ -32,24 +32,24 @@ function closeAndUnlock(dialogElement) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-		const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 30, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
-		let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
-	const elements = { 
-        html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'), 
-        colorSwatches: document.querySelectorAll('.color-swatch'), 
+    const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 30, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
+    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
+    const elements = {
+        html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'),
+        colorSwatches: document.querySelectorAll('.color-swatch'),
         themeSwitcher: document.getElementById('theme-switcher-select'),
         layoutSwitcher: document.getElementById('layout-density-select'),
-        mainNav: document.querySelector('.main-nav'), navSlider: document.querySelector('.main-nav-slider'), 
-        tabLinks: document.querySelectorAll('.tab-link'), tabContents: document.querySelectorAll('.tab-content'), 
-        globalRefreshBtn: document.getElementById('global-refresh-btn'), lastUpdated: document.getElementById('last-updated'), 
-        autoRefreshToggle: document.getElementById('auto-refresh-toggle'), autoRefreshIntervalInput: document.getElementById('auto-refresh-interval'), autoRefreshForm: document.getElementById('auto-refresh-form'), 
-        totalQueries: document.getElementById('total-queries'), avgDuration: document.getElementById('avg-duration'), 
+        mainNav: document.querySelector('.main-nav'), navSlider: document.querySelector('.main-nav-slider'),
+        tabLinks: document.querySelectorAll('.tab-link'), tabContents: document.querySelectorAll('.tab-content'),
+        globalRefreshBtn: document.getElementById('global-refresh-btn'), lastUpdated: document.getElementById('last-updated'),
+        autoRefreshToggle: document.getElementById('auto-refresh-toggle'), autoRefreshIntervalInput: document.getElementById('auto-refresh-interval'), autoRefreshForm: document.getElementById('auto-refresh-form'),
+        totalQueries: document.getElementById('total-queries'), avgDuration: document.getElementById('avg-duration'),
         totalQueriesChange: document.getElementById('total-queries-change'), avgDurationChange: document.getElementById('avg-duration-change'),
-        sparklineTotal: document.getElementById('sparkline-total'), sparklineAvg: document.getElementById('sparkline-avg'), 
-        auditStatus: document.getElementById('audit-status'), toggleAuditBtn: document.getElementById('toggle-audit-btn'), clearAuditBtn: document.getElementById('clear-audit-btn'), 
-        auditCapacity: document.getElementById('audit-capacity'), capacityForm: document.getElementById('capacity-form'), newCapacityInput: document.getElementById('new-capacity'), 
+        sparklineTotal: document.getElementById('sparkline-total'), sparklineAvg: document.getElementById('sparkline-avg'),
+        auditStatus: document.getElementById('audit-status'), toggleAuditBtn: document.getElementById('toggle-audit-btn'), clearAuditBtn: document.getElementById('clear-audit-btn'),
+        auditCapacity: document.getElementById('audit-capacity'), capacityForm: document.getElementById('capacity-form'), newCapacityInput: document.getElementById('new-capacity'),
         cacheStatsTbody: document.getElementById('cache-stats-tbody'),
-        topDomainsBody: document.getElementById('top-domains-body'), topClientsBody: document.getElementById('top-clients-body'), slowestQueriesBody: document.getElementById('slowest-queries-body'), 
+        topDomainsBody: document.getElementById('top-domains-body'), topClientsBody: document.getElementById('top-clients-body'), slowestQueriesBody: document.getElementById('slowest-queries-body'),
         shuntResultsBody: document.getElementById('shunt-results-body'),
         // 覆盖配置元素
         overridesModule: document.getElementById('overrides-module'),
@@ -58,13 +58,13 @@ document.addEventListener('DOMContentLoaded', () => {
         overridesLoadBtn: document.getElementById('overrides-load-btn-log'),
         overridesSaveBtn: document.getElementById('overrides-save-btn-log'),
         logTable: document.getElementById('log-table'), logTableHead: document.getElementById('log-table-head'), logTableBody: document.getElementById('log-table-body'),
-        logQueryTab: document.getElementById('log-query-tab'), 
-        logSearch: document.getElementById('log-search'), logQueryTableContainer: document.getElementById('log-query-table-container'), logLoader: document.getElementById('log-loader'), 
+        logQueryTab: document.getElementById('log-query-tab'),
+        logSearch: document.getElementById('log-search'), logQueryTableContainer: document.getElementById('log-query-table-container'), logLoader: document.getElementById('log-loader'),
         searchResultsInfo: document.getElementById('search-results-info'),
-        toast: document.getElementById('toast'), 
+        toast: document.getElementById('toast'),
         tooltip: document.getElementById('answers-tooltip'),
-        aliasModal: document.getElementById('alias-modal'), manageAliasesBtn: document.getElementById('manage-aliases-btn'), manageAliasesBtnMobile: document.getElementById('manage-aliases-btn-mobile'), manualAliasForm: document.getElementById('manual-alias-form'), 
-        aliasListContainer: document.getElementById('alias-list-container'), importAliasInput: document.getElementById('import-alias-file-input'), saveAllAliasesBtn: document.getElementById('save-all-aliases-btn'), 
+        aliasModal: document.getElementById('alias-modal'), manageAliasesBtn: document.getElementById('manage-aliases-btn'), manageAliasesBtnMobile: document.getElementById('manage-aliases-btn-mobile'), manualAliasForm: document.getElementById('manual-alias-form'),
+        aliasListContainer: document.getElementById('alias-list-container'), importAliasInput: document.getElementById('import-alias-file-input'), saveAllAliasesBtn: document.getElementById('save-all-aliases-btn'),
         systemControlTabIndicator: document.querySelector('a[data-tab="system-control"] .status-indicator'),
         addAdguardRuleBtn: document.getElementById('add-adguard-rule-btn'),
         checkAdguardUpdatesBtn: document.getElementById('check-adguard-updates-btn'),
@@ -85,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
         logDetailModal: document.getElementById('log-detail-modal'),
         logDetailModalBody: document.getElementById('log-detail-modal-body'),
         closeLogDetailModalBtn: document.getElementById('close-log-detail-modal'),
-        
+
         requeryModule: document.getElementById('requery-module'),
         requeryStatusText: document.getElementById('requery-status-text'),
         requeryProgressContainer: document.getElementById('requery-progress-container'),
@@ -98,31 +98,31 @@ document.addEventListener('DOMContentLoaded', () => {
         requerySchedulerToggle: document.getElementById('requery-scheduler-toggle'),
         requeryIntervalInput: document.getElementById('requery-interval-input'),
         requeryStartDatetimeInput: document.getElementById('requery-start-datetime-input'),
-	requeryClearBackupBtn: document.getElementById('requery-clear-backup-btn'),
-	requeryDomainStatsTbody: document.getElementById('requery-domain-stats-tbody'),
-	requeryRefreshStatsBtn: document.getElementById('requery-refresh-stats-btn'),
-	updateModule: document.getElementById('update-module'),
-	updateCurrentVersion: document.getElementById('update-current-version'),
+        requeryClearBackupBtn: document.getElementById('requery-clear-backup-btn'),
+        requeryDomainStatsTbody: document.getElementById('requery-domain-stats-tbody'),
+        requeryRefreshStatsBtn: document.getElementById('requery-refresh-stats-btn'),
+        updateModule: document.getElementById('update-module'),
+        updateCurrentVersion: document.getElementById('update-current-version'),
         updateLatestVersion: document.getElementById('update-latest-version'),
         updateInlineBadge: document.getElementById('update-inline-badge'),
         updateStatusBanner: document.getElementById('update-status-banner'),
         updateStatusText: document.getElementById('update-status-text'),
         updateLastChecked: document.getElementById('update-last-checked'),
         updateTargetInfo: document.getElementById('update-target-info'),
-            updateCheckBtn: document.getElementById('update-check-btn'),
-            updateApplyBtn: document.getElementById('update-apply-btn'),
-            updateForceBtn: document.getElementById('update-force-btn'),
+        updateCheckBtn: document.getElementById('update-check-btn'),
+        updateApplyBtn: document.getElementById('update-apply-btn'),
+        updateForceBtn: document.getElementById('update-force-btn'),
         updateV3Callout: document.getElementById('update-v3-callout'),
         updateV3Btn: document.getElementById('update-v3-btn'),
-	updateAutoToggle: document.getElementById('update-auto-toggle'),
-	updateIntervalInput: document.getElementById('update-interval-input'),
-	updateHintText: document.getElementById('update-hint-text'),
+        updateAutoToggle: document.getElementById('update-auto-toggle'),
+        updateIntervalInput: document.getElementById('update-interval-input'),
+        updateHintText: document.getElementById('update-hint-text'),
 
         fakeipDomainCount: document.getElementById('fakeip-domain-count'),
         realipDomainCount: document.getElementById('realip-domain-count'),
         nov4DomainCount: document.getElementById('nov4-domain-count'),
         nov6DomainCount: document.getElementById('nov6-domain-count'),
-        backupDomainCount: document.getElementById('backup-domain-count'), 
+        backupDomainCount: document.getElementById('backup-domain-count'),
 
         saveShuntRulesBtn: document.getElementById('save-shunt-rules-btn'),
         clearShuntRulesBtn: document.getElementById('clear-shunt-rules-btn'),
@@ -134,14 +134,14 @@ document.addEventListener('DOMContentLoaded', () => {
         dataViewSearch: document.getElementById('data-view-search'),
         dataViewModalInfo: document.getElementById('data-view-modal-info'),
         dataViewTableContainer: document.getElementById('data-view-table-container'),
-        
+
         listMgmtNav: document.querySelector('.list-mgmt-nav'),
         listContentLoader: document.getElementById('list-content-loader'),
         listContentTextArea: document.getElementById('list-content-textarea'),
         listContentInfo: document.getElementById('list-content-info'),
         listSaveBtn: document.getElementById('list-save-btn'),
         listMgmtClientIpHint: document.getElementById('list-mgmt-client-ip-hint'),
-	listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
+        listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
         listMgmtRewriteHint: document.getElementById('list-mgmt-rewrite-hint'),
 
         featureSwitchesModule: document.getElementById('feature-switches-module'),
@@ -150,25 +150,25 @@ document.addEventListener('DOMContentLoaded', () => {
         systemInfoContainer: document.getElementById('system-info-container'),
     };
     let toastTimeout;
-    
-    const SHUNT_RULE_SAVE_PATHS = ['top_domains/save','my_fakeiplist/save', 'my_nodenov4list/save', 'my_nodenov6list/save', 'my_notinlist/save', 'my_nov4list/save', 'my_nov6list/save', 'my_realiplist/save'];
+
+    const SHUNT_RULE_SAVE_PATHS = ['top_domains/save', 'my_fakeiplist/save', 'my_nodenov4list/save', 'my_nodenov6list/save', 'my_notinlist/save', 'my_nov4list/save', 'my_nov6list/save', 'my_realiplist/save'];
     const SHUNT_RULE_FLUSH_PATHS = ['top_domains/flush', 'my_fakeiplist/flush', 'my_nodenov4list/flush', 'my_nodenov6list/flush', 'my_notinlist/flush', 'my_nov4list/flush', 'my_nov6list/flush', 'my_realiplist/flush'];
 
     const debounce = (func, wait) => { let timeout; return function executedFunction(...args) { const later = () => { clearTimeout(timeout); func(...args); }; clearTimeout(timeout); timeout = setTimeout(later, wait); }; };
 
     // 轻量级请求器 + /metrics 简易缓存，减少同一时段的重复请求
     let __metricsInflight = null; let __metricsStamp = 0;
-    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) {} } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => { const now = Date.now(); if (__metricsInflight && (now - __metricsStamp) < 3000) return __metricsInflight; __metricsInflight = api.fetch('/metrics', { signal }); __metricsStamp = now; return __metricsInflight; }, getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for(let [key, value] of queryParams.entries()){ if(!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
-    
-	const requeryApi = {
-		getConfig: (signal) => api.fetch(`/plugins/requery`, { signal }), 
-		getStatus: (signal) => api.fetch(`/plugins/requery/status`, { signal }),
-		trigger: () => api.fetch(`/plugins/requery/trigger`, { method: 'POST' }),
-		cancel: () => api.fetch(`/plugins/requery/cancel`, { method: 'POST' }),
-		updateSchedulerConfig: (config) => api.fetch(`/plugins/requery/scheduler/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) }),
-		clearBackup: () => api.fetch(`/plugins/requery/clear_backup`, { method: 'POST' }),
-		getBackupCount: (signal) => api.fetch(`/plugins/requery/stats/backup_file_count`, { signal }),
-	};
+    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) { } } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => { const now = Date.now(); if (__metricsInflight && (now - __metricsStamp) < 3000) return __metricsInflight; __metricsInflight = api.fetch('/metrics', { signal }); __metricsStamp = now; return __metricsInflight; }, getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for (let [key, value] of queryParams.entries()) { if (!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
+
+    const requeryApi = {
+        getConfig: (signal) => api.fetch(`/plugins/requery`, { signal }),
+        getStatus: (signal) => api.fetch(`/plugins/requery/status`, { signal }),
+        trigger: () => api.fetch(`/plugins/requery/trigger`, { method: 'POST' }),
+        cancel: () => api.fetch(`/plugins/requery/cancel`, { method: 'POST' }),
+        updateSchedulerConfig: (config) => api.fetch(`/plugins/requery/scheduler/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) }),
+        clearBackup: () => api.fetch(`/plugins/requery/clear_backup`, { method: 'POST' }),
+        getBackupCount: (signal) => api.fetch(`/plugins/requery/stats/backup_file_count`, { signal }),
+    };
 
     const updateApi = {
         getStatus: (signal) => api.fetch(`/api/v1/update/status`, { signal }),
@@ -210,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ui = {
         showToast(message, type = 'success') { if (!elements.toast) return; clearTimeout(toastTimeout); const icon = type === 'success' ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg>` : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"></path></svg>`; elements.toast.innerHTML = `${icon}<span>${message}</span>`; elements.toast.className = `show ${type}`; const hideToast = () => { elements.toast.className = elements.toast.className.replace('show', ''); }; elements.toast.onmouseenter = () => clearTimeout(toastTimeout); elements.toast.onmouseleave = () => toastTimeout = setTimeout(hideToast, CONSTANTS.TOAST_DURATION); toastTimeout = setTimeout(hideToast, CONSTANTS.TOAST_DURATION); },
         setLoading(button, isLoading) { if (!button) return; const textSpan = button.querySelector('span'); button.disabled = isLoading; button.setAttribute('aria-busy', String(isLoading)); if (textSpan) { if (isLoading) { if (!button.dataset.defaultText) { button.dataset.defaultText = textSpan.textContent; } textSpan.textContent = '处理中...'; } else { if (button.dataset.defaultText) { textSpan.textContent = button.dataset.defaultText; } } } },
-        updateStatus(isCapturing) { if (!elements.toggleAuditBtn || !elements.auditStatus) return; this.setLoading(elements.toggleAuditBtn, false); const statusIndicator = elements.systemControlTabIndicator; if(statusIndicator) statusIndicator.className = 'status-indicator'; if (typeof isCapturing === 'boolean') { state.isCapturing = isCapturing; elements.auditStatus.textContent = isCapturing ? '运行中' : '已停止'; elements.auditStatus.style.color = isCapturing ? 'var(--color-success)' : 'var(--color-danger)'; const actionText = isCapturing ? '关闭审计' : '开启审计'; elements.toggleAuditBtn.querySelector('span').textContent = actionText; elements.toggleAuditBtn.dataset.defaultText = actionText; elements.toggleAuditBtn.className = `button ${isCapturing ? 'danger' : 'primary'}`; if(statusIndicator) statusIndicator.classList.add(isCapturing ? 'running' : 'stopped'); } else { elements.auditStatus.textContent = '未知'; elements.auditStatus.style.color = 'var(--color-text-secondary)'; elements.toggleAuditBtn.querySelector('span').textContent = '刷新状态'; elements.toggleAuditBtn.dataset.defaultText = '刷新状态'; } },
+        updateStatus(isCapturing) { if (!elements.toggleAuditBtn || !elements.auditStatus) return; this.setLoading(elements.toggleAuditBtn, false); const statusIndicator = elements.systemControlTabIndicator; if (statusIndicator) statusIndicator.className = 'status-indicator'; if (typeof isCapturing === 'boolean') { state.isCapturing = isCapturing; elements.auditStatus.textContent = isCapturing ? '运行中' : '已停止'; elements.auditStatus.style.color = isCapturing ? 'var(--color-success)' : 'var(--color-danger)'; const actionText = isCapturing ? '关闭审计' : '开启审计'; elements.toggleAuditBtn.querySelector('span').textContent = actionText; elements.toggleAuditBtn.dataset.defaultText = actionText; elements.toggleAuditBtn.className = `button ${isCapturing ? 'danger' : 'primary'}`; if (statusIndicator) statusIndicator.classList.add(isCapturing ? 'running' : 'stopped'); } else { elements.auditStatus.textContent = '未知'; elements.auditStatus.style.color = 'var(--color-text-secondary)'; elements.toggleAuditBtn.querySelector('span').textContent = '刷新状态'; elements.toggleAuditBtn.dataset.defaultText = '刷新状态'; } },
         updateCapacity(capacity) { if (elements.auditCapacity) elements.auditCapacity.textContent = capacity != null ? `${capacity.toLocaleString()} 条` : '查询失败'; },
         updateOverviewStats() {
             const { totalQueries, avgDuration } = state.data;
@@ -218,14 +218,14 @@ document.addEventListener('DOMContentLoaded', () => {
             animateValue(elements.avgDuration, avgDuration.previous, avgDuration.current, CONSTANTS.ANIMATION_DURATION, 2);
             updateStatChange(elements.totalQueriesChange, totalQueries.previous, totalQueries.current);
             updateStatChange(elements.avgDurationChange, avgDuration.previous, avgDuration.current, true);
-            if (elements.sparklineTotal) elements.sparklineTotal.innerHTML = generateSparklineSVG(state.history.totalQueries); 
+            if (elements.sparklineTotal) elements.sparklineTotal.innerHTML = generateSparklineSVG(state.history.totalQueries);
             if (elements.sparklineAvg) elements.sparklineAvg.innerHTML = generateSparklineSVG(state.history.avgDuration, true);
         },
         renderLogTable(logs, append = false) {
             const tbody = elements.logTableBody;
             if (!tbody) return;
             if (!append) { tbody.innerHTML = ''; state.displayedLogs = []; }
-            if (logs.length === 0 && !append) { renderTable(tbody, [], () => {}, 'log-query'); return; }
+            if (logs.length === 0 && !append) { renderTable(tbody, [], () => { }, 'log-query'); return; }
             const startIndex = state.displayedLogs.length;
             state.displayedLogs.push(...logs);
 
@@ -261,11 +261,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (source === 'slowest' && logIndex !== null) data = state.slowestQueries[logIndex];
             else if (logIndex !== null) data = state.displayedLogs[logIndex];
-            
+
             if (!data) return;
 
             elements.logDetailModalBody.innerHTML = getDetailContentHTML(data);
-            
+
             // -- [修改] -- 采用新的滚动锁定机制
             lockScroll();
             elements.logDetailModal.showModal();
@@ -297,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 form.elements['update_interval_hours'].value = 24;
                 if (isDiversion) form.elements['type'].value = "";
             }
-            
+
             // -- [修改] -- 采用新的滚动锁定机制
             lockScroll();
             elements.ruleModal.showModal();
@@ -316,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.navSlider.style.width = `${linkRect.width}px`;
         elements.navSlider.style.transform = `translateX(${left}px)`;
     }
-    
+
     function formatDateForInputLocal(isoString) {
         if (!isoString || isoString.startsWith('0001-01-01')) {
             return '';
@@ -346,7 +346,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.requeryStartDatetimeInput.addEventListener('change', debouncedUpdate);
             elements.requeryClearBackupBtn.addEventListener('click', this.handleClearBackup.bind(this));
         },
-        
+
         async updateStatus(signal) {
             this.updateDomainCounts(signal); // 在更新状态时自动刷新统计
             try {
@@ -374,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 elements.requeryTriggerBtn.disabled = true;
                 return;
             }
-            
+
             const isRunning = status.task_state === 'running';
 
             let statusText = '空闲';
@@ -396,8 +396,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.stopPolling();
                     break;
                 default:
-                     this.stopPolling();
-                     break;
+                    this.stopPolling();
+                    break;
             }
             elements.requeryStatusText.textContent = statusText;
             elements.requeryStatusText.style.color = statusColor;
@@ -421,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 elements.requeryLastRun.textContent = '从未执行';
             }
-            
+
             elements.requerySchedulerToggle.checked = config.scheduler.enabled;
             elements.requeryIntervalInput.value = config.scheduler.interval_minutes;
             elements.requeryStartDatetimeInput.value = formatDateForInputLocal(config.scheduler.start_datetime);
@@ -435,14 +435,14 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.requeryTriggerBtn.disabled = isRunning;
             elements.requeryClearBackupBtn.disabled = isRunning;
         },
-        
+
         startPolling() {
             if (state.requery.pollId) return;
             state.requery.pollId = setInterval(() => {
                 this.updateStatus();
             }, 5000);
         },
-        
+
         stopPolling() {
             clearInterval(state.requery.pollId);
             state.requery.pollId = null;
@@ -474,60 +474,60 @@ document.addEventListener('DOMContentLoaded', () => {
                     ui.showToast('已发送取消请求', 'success');
                     elements.requeryCancelBtn.hidden = true;
                     elements.requeryTriggerBtn.hidden = false;
-                } catch (error) {} 
+                } catch (error) { }
                 finally {
                     ui.setLoading(btn, false);
                 }
             }
         },
-        
-        async handleUpdateSchedulerConfig() {
-             const isEnabled = elements.requerySchedulerToggle.checked;
-             const interval = parseInt(elements.requeryIntervalInput.value, 10);
-             const localTime = elements.requeryStartDatetimeInput.value;
 
-             if (isEnabled && (!interval || interval <= 0)) {
-                 ui.showToast('启用定时任务时，必须设置一个有效的间隔分钟数', 'error');
-                 return;
-             }
-             
-             let utcTime = '';
-             if (localTime) {
+        async handleUpdateSchedulerConfig() {
+            const isEnabled = elements.requerySchedulerToggle.checked;
+            const interval = parseInt(elements.requeryIntervalInput.value, 10);
+            const localTime = elements.requeryStartDatetimeInput.value;
+
+            if (isEnabled && (!interval || interval <= 0)) {
+                ui.showToast('启用定时任务时，必须设置一个有效的间隔分钟数', 'error');
+                return;
+            }
+
+            let utcTime = '';
+            if (localTime) {
                 try {
                     utcTime = new Date(localTime).toISOString();
                 } catch (e) {
                     ui.showToast('输入的首次执行时间格式无效', 'error');
                     return;
                 }
-             }
+            }
 
-             const newConfig = {
-                 enabled: isEnabled,
-                 interval_minutes: interval || 0,
-                 start_datetime: utcTime,
-             };
+            const newConfig = {
+                enabled: isEnabled,
+                interval_minutes: interval || 0,
+                start_datetime: utcTime,
+            };
 
-             try {
-                 await requeryApi.updateSchedulerConfig(newConfig);
-                 ui.showToast('定时任务配置已更新', 'success');
-                 if (state.requery.config) {
-                     state.requery.config.scheduler = newConfig;
-                     this.render();
-                 }
-             } catch (error) {}
+            try {
+                await requeryApi.updateSchedulerConfig(newConfig);
+                ui.showToast('定时任务配置已更新', 'success');
+                if (state.requery.config) {
+                    state.requery.config.scheduler = newConfig;
+                    this.render();
+                }
+            } catch (error) { }
         },
 
         async handleClearBackup(e) {
             if (confirm('【重要操作】确定要清空全量域名备份文件吗？\n这将删除所有累积的历史域名，下次任务将只处理源文件中的域名。')) {
-                 const btn = e.currentTarget;
-                 ui.setLoading(btn, true);
-                 try {
-                     await requeryApi.clearBackup();
-                     ui.showToast('全量备份文件已清空', 'success');
-                 } catch (error) {} 
-                 finally {
-                     ui.setLoading(btn, false);
-                 }
+                const btn = e.currentTarget;
+                ui.setLoading(btn, true);
+                try {
+                    await requeryApi.clearBackup();
+                    ui.showToast('全量备份文件已清空', 'success');
+                } catch (error) { }
+                finally {
+                    ui.setLoading(btn, false);
+                }
             }
         },
         async updateDomainCounts(signal) {
@@ -540,7 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const tbody = elements.requeryDomainStatsTbody;
             if (!tbody) return;
-            
+
             tbody.innerHTML = `<tr><td colspan="2">正在加载统计数据...</td></tr>`;
 
             try {
@@ -565,8 +565,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             `;
                         });
                     }
-                } 
-                
+                }
+
                 if (!hasSourceData) {
                     html += `<tr><td colspan="2" style="color: var(--color-danger);">获取源文件条目失败</td></tr>`;
                 }
@@ -601,20 +601,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const switchManager = {
         profiles: [
-            { tag: 'switch3', name: '核心运行模式', tip: '切换后将执行一次“全新任务”刷新分流缓存。兼容模式性能更高，安全模式防泄露和劫持能力更强。', modes: { 'A': { name: '兼容模式', icon: 'fa-globe-americas' }, 'B': { name: '安全模式', icon: 'fa-shield-alt' }}},
+            { tag: 'switch3', name: '核心运行模式', tip: '切换后将执行一次“全新任务”刷新分流缓存。兼容模式性能更高，安全模式防泄露和劫持能力更强。', modes: { 'A': { name: '兼容模式', icon: 'fa-globe-americas' }, 'B': { name: '安全模式', icon: 'fa-shield-alt' } } },
             { tag: 'switch1', name: '请求屏蔽', desc: '对无解析结果的请求进行屏蔽', tip: '建议开启，避免无ipv4及ipv6结果的非必要DNS解析。', valueForOn: 'A' },
             { tag: 'switch5', name: '类型屏蔽', desc: '屏蔽 SOA、PTR、HTTPS 等请求', tip: '建议开启，可减少不必要的网络请求，提高效率。', valueForOn: 'A' },
             { tag: 'switch4', name: '过期缓存', desc: '启用 Lazy Cache（乐观缓存）', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
-	    { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
-	    { tag: 'switch11', name: '使用阿里私有DOH', desc: '打开前在上游DNS设置中添加DOH配置。', tip: '不管开关是否打开，都会并发运营商dns。', valueForOn: 'A' },
+            { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
+            { tag: 'switch11', name: '使用阿里私有DOH', desc: '打开前在上游DNS设置中添加DOH配置。', tip: '不管开关是否打开，都会并发运营商dns。', valueForOn: 'A' },
             { tag: 'switch2', name: '指定 Client fakeip', desc: '只允许指定的客户端科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不允许科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽AAAA请求类型', tip: '无IPV6网络环境建议开启', valueForOn: 'A' },
-	    { tag: 'switch8', name: 'IPV4优先', desc: 'Prefer IPV4（不建议开启）', tip: '当一个域名有IPV4解析记录时，不返回IPV6解析结果。', valueForOn: 'A' },
-	    { tag: 'switch10', name: 'IPV6优先', desc: 'Prefer IPV6（不建议开启）', tip: '当一个域名有IPV6解析记录时，不返回IPV4解析结果。', valueForOn: 'A' },
+            { tag: 'switch8', name: 'IPV4优先', desc: 'Prefer IPV4（不建议开启）', tip: '当一个域名有IPV4解析记录时，不返回IPV6解析结果。', valueForOn: 'A' },
+            { tag: 'switch10', name: 'IPV6优先', desc: 'Prefer IPV6（不建议开启）', tip: '当一个域名有IPV6解析记录时，不返回IPV4解析结果。', valueForOn: 'A' },
         ],
-    
+
         init() {
             elements.coreModeSwitchGroup.addEventListener('click', e => {
                 const btn = e.target.closest('button');
@@ -622,7 +622,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.handleCoreSwitch(btn);
                 }
             });
-            
+
             elements.secondarySwitchesContainer.addEventListener('change', e => {
                 const input = e.target.closest('input[type="checkbox"]');
                 if (input) {
@@ -630,12 +630,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         },
-    
+
         async loadStatus(signal) {
             try {
                 const fetchPromises = this.profiles.map(p => api.fetch(`/plugins/${p.tag}/show`, { signal }));
                 const results = await Promise.allSettled(fetchPromises);
-    
+
                 results.forEach((result, index) => {
                     const profile = this.profiles[index];
                     if (result.status === 'fulfilled') {
@@ -648,18 +648,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.render();
             } catch (error) {
                 if (error.name !== 'AbortError') {
-                     elements.featureSwitchesModule.innerHTML = '<h3>功能开关</h3><p style="color:var(--color-danger)">加载开关状态失败。</p>';
+                    elements.featureSwitchesModule.innerHTML = '<h3>功能开关</h3><p style="color:var(--color-danger)">加载开关状态失败。</p>';
                 }
             }
         },
-    
+
         render() {
             const coreStatus = state.featureSwitches['switch3'];
             elements.coreModeSwitchGroup.querySelectorAll('button').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.mode === coreStatus);
                 btn.disabled = coreStatus === 'error';
             });
-    
+
             const secondaryProfiles = this.profiles.filter(p => !p.modes);
             let html = '';
             secondaryProfiles.forEach(profile => {
@@ -686,58 +686,58 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.secondarySwitchesContainer.innerHTML = html;
             bindInfoIconTooltips();
         },
-    
+
         async handleCoreSwitch(button) {
             const tag = 'switch3';
             const valueToPost = button.dataset.mode;
             ui.setLoading(button, true);
             button.parentElement.querySelectorAll('button').forEach(b => b.disabled = true);
-    
+
             try {
                 await api.fetch(`/plugins/${tag}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: valueToPost }) });
                 state.featureSwitches[tag] = valueToPost;
                 this.render();
                 ui.showToast('核心模式已切换，即将开始刷新分流缓存...', 'success');
                 await requeryManager.handleTrigger(null, true);
-    
+
             } catch (error) {
                 ui.showToast('切换核心模式失败!', 'error');
                 this.render();
             } finally {
                 ui.setLoading(button, false);
                 button.parentElement.querySelectorAll('button').forEach(b => b.disabled = false);
-                this.render(); 
+                this.render();
             }
         },
-    
+
         async handleSecondarySwitch(checkbox) {
             const tag = checkbox.dataset.switchTag;
             const profile = this.profiles.find(p => p.tag === tag);
             if (!profile) return;
-    
+
             checkbox.disabled = true;
             const valueToPost = checkbox.checked ? profile.valueForOn : (profile.valueForOn === 'A' ? 'B' : 'A');
-            
+
             try {
                 await api.fetch(`/plugins/${tag}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: valueToPost }) });
                 state.featureSwitches[tag] = valueToPost;
                 ui.showToast(`“${profile.name}” 已${checkbox.checked ? '启用' : '禁用'}`);
-        if (tag === 'switch9') {
-            (async () => {
-                ui.showToast('附加操作：正在清空核心缓存...', 'info');
-                const results = await Promise.allSettled([
-                    api.fetch('/plugins/cache_all/flush'),
-                    api.fetch('/plugins/cache_all_noleak/flush')
-                ]);
-                
-                const failedCount = results.filter(r => r.status === 'rejected').length;
-                if (failedCount > 0) {
-                    ui.showToast(`附加操作：核心缓存清空完成，有 ${failedCount} 个失败。`, 'error');
-                } else {
-                    ui.showToast('附加操作：核心缓存已成功清空！', 'success');
+                if (tag === 'switch9') {
+                    (async () => {
+                        ui.showToast('附加操作：正在清空核心缓存...', 'info');
+                        const results = await Promise.allSettled([
+                            api.fetch('/plugins/cache_all/flush'),
+                            api.fetch('/plugins/cache_all_noleak/flush')
+                        ]);
+
+                        const failedCount = results.filter(r => r.status === 'rejected').length;
+                        if (failedCount > 0) {
+                            ui.showToast(`附加操作：核心缓存清空完成，有 ${failedCount} 个失败。`, 'error');
+                        } else {
+                            ui.showToast('附加操作：核心缓存已成功清空！', 'success');
+                        }
+                    })();
                 }
-            })(); 
-        }
             } catch (error) {
                 ui.showToast(`切换“${profile.name}”失败`, 'error');
                 checkbox.checked = !checkbox.checked;
@@ -746,134 +746,134 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     };
-    
-	const updateManager = {
-		init() {
-			if (!elements.updateModule) return;
-			const autoCfg = this.loadAutoConfig();
-			state.update.auto.enabled = autoCfg.enabled;
-			state.update.auto.intervalMinutes = autoCfg.interval;
-			elements.updateAutoToggle.checked = autoCfg.enabled;
-			elements.updateIntervalInput.value = autoCfg.interval;
-			elements.updateAutoToggle.addEventListener('change', () => {
-				state.update.auto.enabled = elements.updateAutoToggle.checked;
-				this.persistAutoConfig();
-				this.applyAutoSchedule(true);
-			});
-			elements.updateIntervalInput.addEventListener('change', () => {
-				const val = parseInt(elements.updateIntervalInput.value, 10);
-				if (!Number.isFinite(val) || val < 5) {
-					elements.updateIntervalInput.value = state.update.auto.intervalMinutes;
-					ui.showToast('自动检查间隔至少为 5 分钟', 'error');
-					return;
-				}
-				state.update.auto.intervalMinutes = Math.min(val, 720);
-				this.persistAutoConfig();
-				this.applyAutoSchedule(true);
-			});
-			elements.updateCheckBtn?.addEventListener('click', () => this.forceCheck());
-			elements.updateApplyBtn?.addEventListener('click', () => this.applyUpdate());
-			this.applyAutoSchedule(false);
-			// 延迟到用户进入“系统控制”页或后台定时器触发时再检查更新，避免首屏加载转圈变慢
-			elements.updateForceBtn?.addEventListener('click', () => this.applyUpdate(true, elements.updateForceBtn));
-			elements.updateV3Btn?.addEventListener('click', () => this.applyUpdate(true, elements.updateV3Btn, true));
-		},
 
-		loadAutoConfig() {
-			try {
-				const raw = localStorage.getItem('mosdns-update-auto');
-				if (!raw) throw new Error('empty');
-				const parsed = JSON.parse(raw);
-				return {
-					enabled: Boolean(parsed.enabled),
-					interval: Number.isFinite(parsed.interval) ? parsed.interval : CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT,
-				};
-			} catch (e) {
-				return { enabled: true, interval: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT };
-			}
-		},
+    const updateManager = {
+        init() {
+            if (!elements.updateModule) return;
+            const autoCfg = this.loadAutoConfig();
+            state.update.auto.enabled = autoCfg.enabled;
+            state.update.auto.intervalMinutes = autoCfg.interval;
+            elements.updateAutoToggle.checked = autoCfg.enabled;
+            elements.updateIntervalInput.value = autoCfg.interval;
+            elements.updateAutoToggle.addEventListener('change', () => {
+                state.update.auto.enabled = elements.updateAutoToggle.checked;
+                this.persistAutoConfig();
+                this.applyAutoSchedule(true);
+            });
+            elements.updateIntervalInput.addEventListener('change', () => {
+                const val = parseInt(elements.updateIntervalInput.value, 10);
+                if (!Number.isFinite(val) || val < 5) {
+                    elements.updateIntervalInput.value = state.update.auto.intervalMinutes;
+                    ui.showToast('自动检查间隔至少为 5 分钟', 'error');
+                    return;
+                }
+                state.update.auto.intervalMinutes = Math.min(val, 720);
+                this.persistAutoConfig();
+                this.applyAutoSchedule(true);
+            });
+            elements.updateCheckBtn?.addEventListener('click', () => this.forceCheck());
+            elements.updateApplyBtn?.addEventListener('click', () => this.applyUpdate());
+            this.applyAutoSchedule(false);
+            // 延迟到用户进入“系统控制”页或后台定时器触发时再检查更新，避免首屏加载转圈变慢
+            elements.updateForceBtn?.addEventListener('click', () => this.applyUpdate(true, elements.updateForceBtn));
+            elements.updateV3Btn?.addEventListener('click', () => this.applyUpdate(true, elements.updateV3Btn, true));
+        },
 
-		persistAutoConfig() {
-			const payload = {
-				enabled: state.update.auto.enabled,
-				interval: state.update.auto.intervalMinutes,
-			};
-			try {
-				localStorage.setItem('mosdns-update-auto', JSON.stringify(payload));
-			} catch (e) {
-				console.warn('无法保存自动更新配置:', e);
-			}
-		},
+        loadAutoConfig() {
+            try {
+                const raw = localStorage.getItem('mosdns-update-auto');
+                if (!raw) throw new Error('empty');
+                const parsed = JSON.parse(raw);
+                return {
+                    enabled: Boolean(parsed.enabled),
+                    interval: Number.isFinite(parsed.interval) ? parsed.interval : CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT,
+                };
+            } catch (e) {
+                return { enabled: true, interval: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT };
+            }
+        },
 
-		applyAutoSchedule(resetTimer) {
-			if (resetTimer && state.update.auto.timerId) {
-				clearInterval(state.update.auto.timerId);
-				state.update.auto.timerId = null;
-			}
-			if (elements.updateIntervalInput) {
-				elements.updateIntervalInput.disabled = !state.update.auto.enabled;
-			}
-			if (!state.update.auto.enabled) {
-				this.setHint('自动检查已关闭。您可以随时手动检查更新。');
-				return;
-			}
-			const intervalMs = Math.max(state.update.auto.intervalMinutes, 5) * 60 * 1000;
-			this.setHint(`自动检查已启用，每 ${state.update.auto.intervalMinutes} 分钟检查一次。`);
-			if (!state.update.auto.timerId) {
-				state.update.auto.timerId = setInterval(() => {
-					this.refreshStatus();
-				}, intervalMs);
-			}
-		},
+        persistAutoConfig() {
+            const payload = {
+                enabled: state.update.auto.enabled,
+                interval: state.update.auto.intervalMinutes,
+            };
+            try {
+                localStorage.setItem('mosdns-update-auto', JSON.stringify(payload));
+            } catch (e) {
+                console.warn('无法保存自动更新配置:', e);
+            }
+        },
 
-		setHint(text) {
-			if (elements.updateHintText) {
-				elements.updateHintText.textContent = text;
-			}
-		},
+        applyAutoSchedule(resetTimer) {
+            if (resetTimer && state.update.auto.timerId) {
+                clearInterval(state.update.auto.timerId);
+                state.update.auto.timerId = null;
+            }
+            if (elements.updateIntervalInput) {
+                elements.updateIntervalInput.disabled = !state.update.auto.enabled;
+            }
+            if (!state.update.auto.enabled) {
+                this.setHint('自动检查已关闭。您可以随时手动检查更新。');
+                return;
+            }
+            const intervalMs = Math.max(state.update.auto.intervalMinutes, 5) * 60 * 1000;
+            this.setHint(`自动检查已启用，每 ${state.update.auto.intervalMinutes} 分钟检查一次。`);
+            if (!state.update.auto.timerId) {
+                state.update.auto.timerId = setInterval(() => {
+                    this.refreshStatus();
+                }, intervalMs);
+            }
+        },
 
-		// 监听自重启完成：服务可用且版本变化 / 不再 pending_restart 即视为成功
-		restartProbeTimerId: null,
-		restartProbeActive: false,
-		startRestartWatch(prevVersion) {
-			if (this.restartProbeActive) return;
-			this.restartProbeActive = true;
-			const deadline = Date.now() + 90_000; // 最长 90 秒
-			const ping = async () => {
-				if (Date.now() > deadline) {
-					clearInterval(this.restartProbeTimerId);
-					this.restartProbeActive = false;
-					ui.showToast('重启超时，请手动刷新页面', 'error');
-					return;
-				}
-				try {
-					const controller = new AbortController();
-					const t = setTimeout(() => controller.abort(), 1500);
-					const res = await fetch('/api/v1/update/status', { cache: 'no-store', signal: controller.signal });
-					clearTimeout(t);
-					if (!res.ok) throw new Error(String(res.status));
-					const st = await res.json();
-					// 成功条件：不再 pending，且版本已变化（若版本相同也可视为已就绪）
-					if (st && !st.pending_restart && st.current_version) {
-						clearInterval(this.restartProbeTimerId);
-						this.restartProbeActive = false;
-						ui.showToast('重启完成', 'success');
-						setTimeout(() => location.reload(), 800);
-					}
-				} catch (e) {
-					// 忽略错误，继续轮询
-				}
-			};
-			// 立即触发一次，随后每 1 秒一次
-			ping();
-			this.restartProbeTimerId = setInterval(ping, 1000);
-		},
+        setHint(text) {
+            if (elements.updateHintText) {
+                elements.updateHintText.textContent = text;
+            }
+        },
 
-		setUpdateLoading(isLoading, targetBtn) {
-			state.update.loading = isLoading;
-			if (targetBtn) ui.setLoading(targetBtn, isLoading);
-			this.refreshButtons();
-		},
+        // 监听自重启完成：服务可用且版本变化 / 不再 pending_restart 即视为成功
+        restartProbeTimerId: null,
+        restartProbeActive: false,
+        startRestartWatch(prevVersion) {
+            if (this.restartProbeActive) return;
+            this.restartProbeActive = true;
+            const deadline = Date.now() + 90_000; // 最长 90 秒
+            const ping = async () => {
+                if (Date.now() > deadline) {
+                    clearInterval(this.restartProbeTimerId);
+                    this.restartProbeActive = false;
+                    ui.showToast('重启超时，请手动刷新页面', 'error');
+                    return;
+                }
+                try {
+                    const controller = new AbortController();
+                    const t = setTimeout(() => controller.abort(), 1500);
+                    const res = await fetch('/api/v1/update/status', { cache: 'no-store', signal: controller.signal });
+                    clearTimeout(t);
+                    if (!res.ok) throw new Error(String(res.status));
+                    const st = await res.json();
+                    // 成功条件：不再 pending，且版本已变化（若版本相同也可视为已就绪）
+                    if (st && !st.pending_restart && st.current_version) {
+                        clearInterval(this.restartProbeTimerId);
+                        this.restartProbeActive = false;
+                        ui.showToast('重启完成', 'success');
+                        setTimeout(() => location.reload(), 800);
+                    }
+                } catch (e) {
+                    // 忽略错误，继续轮询
+                }
+            };
+            // 立即触发一次，随后每 1 秒一次
+            ping();
+            this.restartProbeTimerId = setInterval(ping, 1000);
+        },
+
+        setUpdateLoading(isLoading, targetBtn) {
+            state.update.loading = isLoading;
+            if (targetBtn) ui.setLoading(targetBtn, isLoading);
+            this.refreshButtons();
+        },
 
         canApply() {
             const status = state.update.status;
@@ -885,15 +885,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return Boolean(status.update_available && !sameVersion && status.download_url);
         },
 
-		refreshButtons() {
-			if (elements.updateApplyBtn) {
-				elements.updateApplyBtn.disabled = state.update.loading || !this.canApply();
-			}
-			if (elements.updateForceBtn) {
-				const hasDownload = Boolean(state.update.status?.download_url);
-				elements.updateForceBtn.disabled = state.update.loading || !hasDownload;
-			}
-		},
+        refreshButtons() {
+            if (elements.updateApplyBtn) {
+                elements.updateApplyBtn.disabled = state.update.loading || !this.canApply();
+            }
+            if (elements.updateForceBtn) {
+                const hasDownload = Boolean(state.update.status?.download_url);
+                elements.updateForceBtn.disabled = state.update.loading || !hasDownload;
+            }
+        },
 
         // 前端冗余保护：即使后端误报，也以版本号等价判断为准
         normalizeVer(v) {
@@ -915,8 +915,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (elements.updateStatusBanner) elements.updateStatusBanner.style.display = '';
             const effectiveUpdate = status.update_available && !sameVersion;
             elements.updateStatusText.textContent = status.message || (effectiveUpdate ? '发现新版本，可立即更新。' : '当前已是最新版本');
-			const lastChecked = status.checked_at ? new Date(status.checked_at) : null;
-			elements.updateLastChecked.textContent = lastChecked ? lastChecked.toLocaleString() : '--';
+            const lastChecked = status.checked_at ? new Date(status.checked_at) : null;
+            elements.updateLastChecked.textContent = lastChecked ? lastChecked.toLocaleString() : '--';
             if (elements.updateApplyBtn) {
                 const span = elements.updateApplyBtn.querySelector('span');
                 let label = '立即更新';
@@ -928,15 +928,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (span) span.textContent = label;
                 elements.updateApplyBtn.dataset.defaultText = label;
             }
-			if (elements.updateForceBtn) {
-				const span = elements.updateForceBtn.querySelector('span');
-				if (span) span.textContent = '强制更新';
-				elements.updateForceBtn.dataset.defaultText = '强制更新';
-			}
-			if (elements.updateCheckBtn) {
-				const span = elements.updateCheckBtn.querySelector('span');
-				if (span) { span.textContent = '强制检查'; elements.updateCheckBtn.dataset.defaultText = '强制检查'; }
-			}
+            if (elements.updateForceBtn) {
+                const span = elements.updateForceBtn.querySelector('span');
+                if (span) span.textContent = '强制更新';
+                elements.updateForceBtn.dataset.defaultText = '强制更新';
+            }
+            if (elements.updateCheckBtn) {
+                const span = elements.updateCheckBtn.querySelector('span');
+                if (span) { span.textContent = '强制检查'; elements.updateCheckBtn.dataset.defaultText = '强制检查'; }
+            }
             if (status.pending_restart) {
                 const isWindows = (status.architecture || '').startsWith('windows/');
                 const msg = isWindows ? '更新已安装，等待手动重启生效。' : '更新已安装，正在自重启…';
@@ -958,7 +958,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (status.message) {
                 // 截断过长信息，避免溢出
                 const trimmed = (status.message || '').toString();
-                elements.updateStatusText.textContent = trimmed.length > 120 ? trimmed.slice(0,117) + '…' : trimmed;
+                elements.updateStatusText.textContent = trimmed.length > 120 ? trimmed.slice(0, 117) + '…' : trimmed;
                 // 有更新：确保“立即更新”按钮可见
                 if (elements.updateApplyBtn) {
                     elements.updateApplyBtn.style.display = '';
@@ -974,16 +974,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
 
-		async refreshStatus(force = false) {
-			if (!elements.updateModule) return;
-			try {
-				const status = force ? await updateApi.forceCheck() : await updateApi.getStatus();
-				this.updateStatusUI(status);
-			} catch (error) {
-				console.error('检查更新失败:', error);
-				ui.showToast('检查更新失败，请稍后重试', 'error');
-			}
-		},
+        async refreshStatus(force = false) {
+            if (!elements.updateModule) return;
+            try {
+                const status = force ? await updateApi.forceCheck() : await updateApi.getStatus();
+                this.updateStatusUI(status);
+            } catch (error) {
+                console.error('检查更新失败:', error);
+                ui.showToast('检查更新失败，请稍后重试', 'error');
+            }
+        },
 
         async forceCheck() {
             if (state.update.loading) return;
@@ -1001,27 +1001,27 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
 
-		async applyUpdate(force = false, button = elements.updateApplyBtn, preferV3 = false) {
-			if (state.update.loading) return;
-			if (!force && !this.canApply()) return;
-			this.setUpdateLoading(true, button || elements.updateApplyBtn);
-			try {
-				const prevVersion = state.update.status?.current_version || '';
-				const result = await updateApi.apply(force, preferV3);
-				if (result.installed) {
-					ui.showToast(result.status?.message || '更新已安装，正在自重启…', 'success');
-				} else {
-					ui.showToast(result.status?.message || '更新已处理', 'info');
-				}
-				if (result.status) this.updateStatusUI(result.status);
-				// 非 Windows 且已进入 pending_restart，开始监听重启完成
-				const isWindows = (result.status?.architecture || '').startsWith('windows/');
-				if (!isWindows && result.status?.pending_restart) {
-					this.startRestartWatch(prevVersion);
-				}
-			} catch (error) {
-				console.error('执行更新失败:', error);
-				ui.showToast('更新失败，请检查日志', 'error');
+        async applyUpdate(force = false, button = elements.updateApplyBtn, preferV3 = false) {
+            if (state.update.loading) return;
+            if (!force && !this.canApply()) return;
+            this.setUpdateLoading(true, button || elements.updateApplyBtn);
+            try {
+                const prevVersion = state.update.status?.current_version || '';
+                const result = await updateApi.apply(force, preferV3);
+                if (result.installed) {
+                    ui.showToast(result.status?.message || '更新已安装，正在自重启…', 'success');
+                } else {
+                    ui.showToast(result.status?.message || '更新已处理', 'info');
+                }
+                if (result.status) this.updateStatusUI(result.status);
+                // 非 Windows 且已进入 pending_restart，开始监听重启完成
+                const isWindows = (result.status?.architecture || '').startsWith('windows/');
+                if (!isWindows && result.status?.pending_restart) {
+                    this.startRestartWatch(prevVersion);
+                }
+            } catch (error) {
+                console.error('执行更新失败:', error);
+                ui.showToast('更新失败，请检查日志', 'error');
             } finally {
                 this.setUpdateLoading(false, button || elements.updateApplyBtn);
                 this.applyAutoSchedule(true);
@@ -1032,25 +1032,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
-	};
+    };
 
-	const systemInfoManager = {
+    const systemInfoManager = {
         parseMetrics(metricsText) {
             const lines = metricsText.split('\n');
-            const metrics = { startTime: 0, cpuTime: 0, residentMemory: 0, heapIdleMemory: 0, threads: 0, openFds: 0, grs: 0,goVersion: "N/A" };
+            const metrics = { startTime: 0, cpuTime: 0, residentMemory: 0, heapIdleMemory: 0, threads: 0, openFds: 0, grs: 0, goVersion: "N/A" };
             lines.forEach(line => {
-                if (line.startsWith('process_start_time_seconds')) { metrics.startTime = parseFloat(line.split(' ')[1]) || 0; } 
-                else if (line.startsWith('process_cpu_seconds_total')) { metrics.cpuTime = parseFloat(line.split(' ')[1]) || 0; } 
-                else if (line.startsWith('process_resident_memory_bytes')) { metrics.residentMemory = parseFloat(line.split(' ')[1]) || 0; } 
-                else if (line.startsWith('go_memstats_heap_idle_bytes')) { metrics.heapIdleMemory = parseFloat(line.split(' ')[1]) || 0; } 
-                else if (line.startsWith('go_threads')) { metrics.threads = parseInt(line.split(' ')[1]) || 0; } 
-                else if (line.startsWith('process_open_fds')) { metrics.openFds = parseInt(line.split(' ')[1]) || 0; } 
+                if (line.startsWith('process_start_time_seconds')) { metrics.startTime = parseFloat(line.split(' ')[1]) || 0; }
+                else if (line.startsWith('process_cpu_seconds_total')) { metrics.cpuTime = parseFloat(line.split(' ')[1]) || 0; }
+                else if (line.startsWith('process_resident_memory_bytes')) { metrics.residentMemory = parseFloat(line.split(' ')[1]) || 0; }
+                else if (line.startsWith('go_memstats_heap_idle_bytes')) { metrics.heapIdleMemory = parseFloat(line.split(' ')[1]) || 0; }
+                else if (line.startsWith('go_threads')) { metrics.threads = parseInt(line.split(' ')[1]) || 0; }
+                else if (line.startsWith('process_open_fds')) { metrics.openFds = parseInt(line.split(' ')[1]) || 0; }
                 else if (line.startsWith('go_goroutines')) { metrics.grs = parseInt(line.split(' ')[1]) || 0; }
                 else if (line.startsWith('go_info{version="')) { const match = line.match(/go_info{version="([^"]+)"}/); if (match && match[1]) { metrics.goVersion = match[1]; } }
             });
             return metrics;
         },
-    
+
         update() {
             const data = state.systemInfo;
             const container = elements.systemInfoContainer;
@@ -1058,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 container.innerHTML = '<p>暂无系统信息</p>';
                 return;
             }
-    
+
             const items = [
                 { label: '启动时间', value: data.startTime ? new Date(data.startTime * 1000).toLocaleString() : 'N/A' },
                 { label: 'CPU 时间', value: `${data.cpuTime.toFixed(2)} 秒` },
@@ -1069,7 +1069,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { label: '打开文件描述符', value: data.openFds.toLocaleString() },
                 { label: 'go_goroutines', value: data.grs.toLocaleString() },
             ];
-    
+
             container.innerHTML = items.map(item => `
                 <div class="info-item">
                     <span class="info-item-label">${item.label}</span>
@@ -1077,7 +1077,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `).join('');
         },
-    
+
         async load(signal) {
             try {
                 const metricsText = await api.getMetrics(signal);
@@ -1182,11 +1182,11 @@ document.addEventListener('DOMContentLoaded', () => {
         async export() {
             try {
                 ui.showToast('正在从服务器获取最新配置...');
-                const aliasesToExport = await clientnameApi.get(); 
+                const aliasesToExport = await clientnameApi.get();
                 const normalizedAliases = {};
                 if (typeof aliasesToExport === 'object' && aliasesToExport !== null) {
                     for (const ip in aliasesToExport) {
-                       normalizedAliases[normalizeIP(ip)] = aliasesToExport[ip];
+                        normalizedAliases[normalizeIP(ip)] = aliasesToExport[ip];
                     }
                 } else {
                     throw new Error("从服务器返回的数据格式无效");
@@ -1202,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 ui.showToast('配置已导出', 'success');
-            } catch (error) {}
+            } catch (error) { }
         },
         import(file) {
             const reader = new FileReader();
@@ -1210,14 +1210,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const newAliases = JSON.parse(e.target.result);
                     if (typeof newAliases !== 'object' || newAliases === null || Array.isArray(newAliases)) throw new Error('无效的JSON对象格式');
-                    
+
                     for (const ip in newAliases) {
                         this.set(ip, newAliases[ip]);
                     }
-                    
+
                     ui.showToast('正在上传配置到服务器...');
                     await this.save();
-                    
+
                     await this.renderEditableList();
                     await updatePageData(false);
                     ui.showToast('配置已成功导入并上传', 'success');
@@ -1230,7 +1230,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const historyManager = { load: () => { const saved = JSON.parse(localStorage.getItem('mosdnsHistory')); if (saved) { state.history.totalQueries = saved.totalQueries || []; state.history.avgDuration = saved.avgDuration || []; } }, add(total, avg) { state.history.totalQueries.push(total ?? 0); state.history.avgDuration.push(avg ?? 0); if (state.history.totalQueries.length > CONSTANTS.HISTORY_LENGTH) state.history.totalQueries.shift(); this.save(); }, save: () => { localStorage.setItem('mosdnsHistory', JSON.stringify(state.history)); } };
-    
+
     const adjustLogSearchLayout = () => {
         const logSearch = document.getElementById('log-search');
         const originalContainer = document.getElementById('log-search-container-original');
@@ -1254,80 +1254,80 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     };
-    
-    const themeManager = { 
-        init() { 
-            const savedTheme = localStorage.getItem('mosdns-theme') || 'dark'; 
-            const savedColor = localStorage.getItem('mosdns-color') || 'indigo'; 
-            const savedLayout = localStorage.getItem('mosdns-layout') || 'comfortable'; 
-            this.setTheme(savedTheme, false); 
-            this.setColor(savedColor, false); 
-            this.setLayout(savedLayout, false); 
-            elements.themeSwitcher?.addEventListener('change', e => this.setTheme(e.target.value)); 
-            elements.layoutSwitcher?.addEventListener('change', e => this.setLayout(e.target.value)); 
-            elements.colorSwatches.forEach(swatch => { swatch.addEventListener('click', () => this.setColor(swatch.dataset.color)); }); 
-        }, 
-        setTheme(theme, save = true) { 
-            elements.html.setAttribute('data-theme', theme); 
-            if (elements.themeSwitcher) { elements.themeSwitcher.value = theme; } 
-            if (save) localStorage.setItem('mosdns-theme', theme); 
-        }, 
-        setColor(color, save = true) { 
-            elements.html.setAttribute('data-color-scheme', color); 
-            document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active')); 
-            document.querySelectorAll(`.color-swatch[data-color="${color}"]`).forEach(s => s.classList.add('active')); 
-            if(save) localStorage.setItem('mosdns-color', color); 
-        }, 
-        setLayout(layout, save = true) { 
-            elements.html.setAttribute('data-layout', layout); 
-            if (elements.layoutSwitcher) { elements.layoutSwitcher.value = layout; } 
-            if(save) localStorage.setItem('mosdns-layout', layout); 
+
+    const themeManager = {
+        init() {
+            const savedTheme = localStorage.getItem('mosdns-theme') || 'dark';
+            const savedColor = localStorage.getItem('mosdns-color') || 'indigo';
+            const savedLayout = localStorage.getItem('mosdns-layout') || 'comfortable';
+            this.setTheme(savedTheme, false);
+            this.setColor(savedColor, false);
+            this.setLayout(savedLayout, false);
+            elements.themeSwitcher?.addEventListener('change', e => this.setTheme(e.target.value));
+            elements.layoutSwitcher?.addEventListener('change', e => this.setLayout(e.target.value));
+            elements.colorSwatches.forEach(swatch => { swatch.addEventListener('click', () => this.setColor(swatch.dataset.color)); });
+        },
+        setTheme(theme, save = true) {
+            elements.html.setAttribute('data-theme', theme);
+            if (elements.themeSwitcher) { elements.themeSwitcher.value = theme; }
+            if (save) localStorage.setItem('mosdns-theme', theme);
+        },
+        setColor(color, save = true) {
+            elements.html.setAttribute('data-color-scheme', color);
+            document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll(`.color-swatch[data-color="${color}"]`).forEach(s => s.classList.add('active'));
+            if (save) localStorage.setItem('mosdns-color', color);
+        },
+        setLayout(layout, save = true) {
+            elements.html.setAttribute('data-layout', layout);
+            if (elements.layoutSwitcher) { elements.layoutSwitcher.value = layout; }
+            if (save) localStorage.setItem('mosdns-layout', layout);
             adjustLogSearchLayout();
-        } 
+        }
     };
 
     const animateValue = (element, start, end, duration, decimals = 0) => { if (!element || start === null || end === null) return; if (start === end) { element.textContent = (decimals > 0 ? parseFloat(end).toFixed(decimals) : Math.floor(end).toLocaleString()); return; } let startTimestamp = null; const step = (timestamp) => { if (!startTimestamp) startTimestamp = timestamp; const progress = Math.min((timestamp - startTimestamp) / duration, 1); const current = start + progress * (end - start); element.textContent = (decimals > 0 ? parseFloat(current).toFixed(decimals) : Math.floor(current).toLocaleString()); if (progress < 1) window.requestAnimationFrame(step); }; window.requestAnimationFrame(step); };
     const updateStatChange = (element, prev, curr, isTime = false) => { if (prev === null || curr === null || prev === 0) { element.style.visibility = 'hidden'; return; } const diff = curr - prev; const change = (diff / prev) * 100; if (Math.abs(change) < 0.1) { element.style.visibility = 'hidden'; return; } const direction = isTime ? (diff < 0 ? 'up' : 'down') : (diff > 0 ? 'up' : 'down'); const icon = direction === 'up' ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 8L18 14H6L12 8Z"></path></svg>' : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16L6 10H18L12 16Z"></path></svg>'; element.className = `stat-change ${direction}`; element.innerHTML = `${icon} ${Math.abs(change).toFixed(1)}%`; element.style.visibility = 'visible'; };
     const setupGlowEffect = () => { elements.container?.addEventListener('mousemove', (e) => { const card = e.target.closest('.card:not(dialog)'); if (card) { const rect = card.getBoundingClientRect(); card.style.setProperty('--glow-x', `${e.clientX - rect.left}px`); card.style.setProperty('--glow-y', `${e.clientY - rect.top}px`); } }); };
     const generateSparklineSVG = (data, isFloat = false, width = 300, height = 60) => { if (!data || data.length < 2) return ''; const numericData = data.map(Number); const maxVal = Math.max(...numericData); const minVal = Math.min(...numericData); const range = maxVal - minVal === 0 ? 1 : maxVal - minVal; const points = numericData.map((d, i) => { const x = (i / (data.length - 1)) * width; const y = height - ((d - minVal) / range) * height; return `${x.toFixed(2)},${y.toFixed(2)}`; }); const pathD = `M ${points.join(' L ')}`; const fillPathD = `${pathD} L ${width},${height} L 0,${height} Z`; return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><defs><linearGradient id="sparkline-gradient" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="var(--color-accent-primary)" stop-opacity="0.5" /><stop offset="100%" stop-color="var(--color-accent-primary)" stop-opacity="0" /></linearGradient></defs><path d="${fillPathD}" fill="url(#sparkline-gradient)" /><path d="${pathD}" class="sparkline-path" fill="none" /></svg>`; };
-    
-    const renderTable = (tbody, data, renderRow, tableType) => { 
-        if (!tbody) return; 
+
+    const renderTable = (tbody, data, renderRow, tableType) => {
+        if (!tbody) return;
         const placeholder = tbody.closest('.card')?.querySelector('.lazy-placeholder');
         if (placeholder) placeholder.style.display = 'none';
-        tbody.innerHTML = ''; 
-        if (!data || data.length === 0) { 
-            let message = '请确保审计功能已开启。'; 
-            let ctaButton = '<button class="button primary tab-link-action" data-tab="system-control">前往系统控制</button>'; 
-            if (tableType === 'log-query' && state.currentLogSearchTerm?.query) { 
-                message = `没有找到与 "<strong>${state.currentLogSearchTerm.query}</strong>" 匹配的记录。`; 
-                ctaButton = ''; 
+        tbody.innerHTML = '';
+        if (!data || data.length === 0) {
+            let message = '请确保审计功能已开启。';
+            let ctaButton = '<button class="button primary tab-link-action" data-tab="system-control">前往系统控制</button>';
+            if (tableType === 'log-query' && state.currentLogSearchTerm?.query) {
+                message = `没有找到与 "<strong>${state.currentLogSearchTerm.query}</strong>" 匹配的记录。`;
+                ctaButton = '';
             } else if (!state.isCapturing && tableType !== 'adguard' && tableType !== 'diversion') {
                 message = '审计功能当前已停止。';
             } else if (tableType === 'adguard' || tableType === 'diversion') {
-                 message = '暂无规则，请点击 "添加规则" 按钮新建一个。'; 
-                 ctaButton = '';
+                message = '暂无规则，请点击 "添加规则" 按钮新建一个。';
+                ctaButton = '';
             } else if (tableType === 'lazy') {
                 message = '没有可显示的数据。';
                 ctaButton = '';
             }
-            const colspan = state.isMobile ? 1 : (tbody.previousElementSibling?.rows[0]?.cells.length || 2); 
-            const emptyRow = document.createElement('tr'); 
-            emptyRow.className = 'empty-state-row'; 
-            emptyRow.innerHTML = `<td colspan="${colspan}"><div class="empty-state-content"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71,3.29C21.32,2.9,20.69,2.9,20.3,3.29L3.29,20.3c-0.39,0.39-0.39,1.02,0,1.41C3.48,21.9,3.74,22,4,22s0.52-0.1,0.71-0.29L21.71,4.7C22.1,4.31,22.1,3.68,21.71,3.29z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48 10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8c0-2.33,1-4.45,2.65-5.92l11.27,11.27C16.45,19,14.33,20,12,20z"></path></svg><strong>暂无数据</strong><p>${message}</p>${ctaButton}</div></td>`; 
-            tbody.appendChild(emptyRow); 
-            return; 
-        } 
-        const fragment = document.createDocumentFragment(); 
-        data.forEach((item, index) => { 
-            const row = renderRow(item, index); 
+            const colspan = state.isMobile ? 1 : (tbody.previousElementSibling?.rows[0]?.cells.length || 2);
+            const emptyRow = document.createElement('tr');
+            emptyRow.className = 'empty-state-row';
+            emptyRow.innerHTML = `<td colspan="${colspan}"><div class="empty-state-content"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.71,3.29C21.32,2.9,20.69,2.9,20.3,3.29L3.29,20.3c-0.39,0.39-0.39,1.02,0,1.41C3.48,21.9,3.74,22,4,22s0.52-0.1,0.71-0.29L21.71,4.7C22.1,4.31,22.1,3.68,21.71,3.29z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48 10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8c0-2.33,1-4.45,2.65-5.92l11.27,11.27C16.45,19,14.33,20,12,20z"></path></svg><strong>暂无数据</strong><p>${message}</p>${ctaButton}</div></td>`;
+            tbody.appendChild(emptyRow);
+            return;
+        }
+        const fragment = document.createDocumentFragment();
+        data.forEach((item, index) => {
+            const row = renderRow(item, index);
             row.classList.add('animate-in');
-            row.style.animationDelay = `${index * 20}ms`; 
-            fragment.appendChild(row); 
-        }); 
-        tbody.appendChild(fragment); 
+            row.style.animationDelay = `${index * 20}ms`;
+            fragment.appendChild(row);
+        });
+        tbody.appendChild(fragment);
     };
-    
+
     function renderSkeletonRows(tbody, rowCount, colCount) {
         tbody.innerHTML = '';
         const fragment = document.createDocumentFragment();
@@ -1343,7 +1343,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         tbody.appendChild(fragment);
     }
-    
+
     const renderTopDomains = (data) => renderTable(elements.topDomainsBody, data, (item, index) => {
         const tr = document.createElement('tr');
         tr.dataset.rankIndex = index;
@@ -1389,9 +1389,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return tr;
     }, 'lazy');
-    
+
     const renderSlowestQueries = (data) => renderTable(elements.slowestQueriesBody, data, renderSlowestQueryItemHTML, 'lazy');
-    
+
     const chartColors = ['#6d9dff', '#f778ba', '#2dd4bf', '#fb923c', '#a78bfa', '#fde047', '#ff8c8c'];
     const renderDonutChart = (data) => {
         const placeholder = elements.shuntResultsBody.querySelector('.lazy-placeholder');
@@ -1419,13 +1419,13 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.shuntResultsBody.innerHTML = `<div class="donut-chart-wrapper"><div class="donut-chart"><svg viewBox="0 0 160 160">${paths}</svg><div class="donut-chart-center-text"><div class="total">${total.toLocaleString()}</div><div class="label">总计</div></div></div><ul class="donut-legend">${legend}</ul></div>`;
     };
 
-	let updateController;
-	async function updatePageData(forceAll = false) {
-		if (state.isUpdating) return;
-		state.isUpdating = true;
-		if (updateController) updateController.abort();
-		updateController = new AbortController();
-		const { signal } = updateController;
+    let updateController;
+    async function updatePageData(forceAll = false) {
+        if (state.isUpdating) return;
+        state.isUpdating = true;
+        if (updateController) updateController.abort();
+        updateController = new AbortController();
+        const { signal } = updateController;
         ui.setLoading(elements.globalRefreshBtn, true);
         const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
         try {
@@ -1457,26 +1457,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 historyManager.add(stats.total_queries, stats.average_duration_ms);
             }
 
-            if (domainSetRankRes && domainSetRankRes.status === 'fulfilled') { 
-                state.domainSetRank = domainSetRankRes.value || []; 
-                renderDonutChart(state.domainSetRank); 
+            if (domainSetRankRes && domainSetRankRes.status === 'fulfilled') {
+                state.domainSetRank = domainSetRankRes.value || [];
+                renderDonutChart(state.domainSetRank);
             }
-            
-        // 系统控制：默认不在首屏/自动刷新时抓取重数据，改为“刷新按钮”触发或模块懒加载触发
-        if (activeTab === 'system-control' && forceAll) {
-            await Promise.allSettled([
-                state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
-                updateDomainListStats(signal),
-                cacheManager.updateStats(signal),
-                switchManager.loadStatus(signal),
-                systemInfoManager.load(signal),
-                updateManager.refreshStatus(false)
-            ]);
-        }
-            
+
+            // 系统控制：默认不在首屏/自动刷新时抓取重数据，改为“刷新按钮”触发或模块懒加载触发
+            if (activeTab === 'system-control' && forceAll) {
+                await Promise.allSettled([
+                    state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
+                    updateDomainListStats(signal),
+                    cacheManager.updateStats(signal),
+                    switchManager.loadStatus(signal),
+                    systemInfoManager.load(signal),
+                    updateManager.refreshStatus(false)
+                ]);
+            }
+
             if (forceAll) {
                 const [topDomainsRes, topClientsRes, slowestRes] = await Promise.allSettled([api.v2.getTopDomains(signal, 100), api.v2.getTopClients(signal, 100), api.v2.getSlowest(signal, 100)]);
-                
+
                 if (topDomainsRes.status === 'fulfilled') { state.topDomains = topDomainsRes.value || []; renderTopDomains(state.topDomains); }
                 if (topClientsRes.status === 'fulfilled') { state.topClients = topClientsRes.value || []; renderTopClients(state.topClients); }
                 if (slowestRes.status === 'fulfilled') { state.slowestQueries = slowestRes.value || []; renderSlowestQueries(state.slowestQueries); }
@@ -1494,13 +1494,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     await diversionManager.load();
                 }
             }
-        } catch (error) { if (error.name !== 'AbortError') console.error("Page update failed:", error); } 
-        finally { 
+        } catch (error) { if (error.name !== 'AbortError') console.error("Page update failed:", error); }
+        finally {
             ui.setLoading(elements.globalRefreshBtn, false);
-            state.isUpdating = false; 
+            state.isUpdating = false;
         }
     }
-    
+
     let logRequestController;
     async function fetchAndRenderLogs(page = 1, append = false) {
         if (state.isLogLoading && !append) return;
@@ -1516,12 +1516,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const { pagination, logs } = response;
             state.logPaginationInfo = pagination;
             state.currentLogPage = pagination.current_page;
-            if(!append) ui.updateSearchResultsInfo(pagination);
+            if (!append) ui.updateSearchResultsInfo(pagination);
             ui.renderLogTable(logs || [], append);
-        } catch (error) { if (error.name !== 'AbortError') { console.error("Failed to fetch logs:", error); ui.showToast('获取日志失败', 'error'); }
+        } catch (error) {
+            if (error.name !== 'AbortError') { console.error("Failed to fetch logs:", error); ui.showToast('获取日志失败', 'error'); }
         } finally { state.isLogLoading = false; if (elements.logLoader) elements.logLoader.style.display = 'none'; }
     }
-    
+
     const tableSorter = {
         init() { if (elements.logTableHead) elements.logTableHead.addEventListener('click', this.handleSort.bind(this)); this.updateHeaders(); },
         handleSort(e) { const th = e.target.closest('th[data-sortable]'); if (!th) return; const key = th.dataset.sortKey; if (state.logSort.key === key) { state.logSort.order = state.logSort.order === 'asc' ? 'desc' : 'asc'; } else { state.logSort.key = key; state.logSort.order = 'desc'; } this.sortLogs(); this.updateHeaders(); },
@@ -1543,7 +1544,7 @@ document.addEventListener('DOMContentLoaded', () => {
             rows.forEach(row => fragment.appendChild(row));
             tbody.appendChild(fragment);
         },
-        updateHeaders() { document.querySelectorAll('#log-table-head th[data-sortable]').forEach(th => { th.classList.remove('sorted'); const indicator = th.querySelector('.sort-indicator'); if(indicator) { if (th.dataset.sortKey === state.logSort.key) { th.classList.add('sorted'); indicator.textContent = state.logSort.order === 'asc' ? '▲' : '▼'; } else { indicator.textContent = ' '; } } }); }
+        updateHeaders() { document.querySelectorAll('#log-table-head th[data-sortable]').forEach(th => { th.classList.remove('sorted'); const indicator = th.querySelector('.sort-indicator'); if (indicator) { if (th.dataset.sortKey === state.logSort.key) { th.classList.add('sorted'); indicator.textContent = state.logSort.order === 'asc' ? '▲' : '▼'; } else { indicator.textContent = ' '; } } }); }
     };
 
     function applyLogFilterAndRender() {
@@ -1555,7 +1556,7 @@ document.addEventListener('DOMContentLoaded', () => {
             exact = true;
         } else if (!exact) {
             const ipFromAlias = aliasManager.getIpByAlias(query);
-            if (ipFromAlias) query = ipFromAlias; 
+            if (ipFromAlias) query = ipFromAlias;
         }
         state.currentLogSearchTerm = { query, exact };
         fetchAndRenderLogs(1, false);
@@ -1564,8 +1565,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadMoreLogs() { if (state.isLogLoading || !state.logPaginationInfo || state.currentLogPage >= state.logPaginationInfo.total_pages) return; fetchAndRenderLogs(state.currentLogPage + 1, true); }
     function formatDate(isoString) { return isoString ? new Date(isoString).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\//g, '-') : 'N/A'; }
     function formatRelativeTime(isoString) { if (!isoString) return 'N/A'; const diffInSeconds = Math.max(0, Math.round((new Date() - new Date(isoString)) / 1000)); if (diffInSeconds < 5) return '刚刚'; if (diffInSeconds < 60) return `${diffInSeconds}秒前`; if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}分钟前`; if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}小时前`; if (diffInSeconds < 86400 * 2) return `昨天`; return new Date(isoString).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }); }
-    
-    function updateLastUpdated() { 
+
+    function updateLastUpdated() {
         if (elements.lastUpdated) {
             if (state.lastUpdateTime) {
                 const relativeTime = formatRelativeTime(state.lastUpdateTime.toISOString());
@@ -1575,7 +1576,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
-    
+
     function createInteractiveLine(value, copyValue, filterValue, isExact = false, isSmall = false) {
         const copyIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"></path></svg>`;
         const filterIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"></path></svg>`;
@@ -1621,12 +1622,12 @@ document.addEventListener('DOMContentLoaded', () => {
             _positionAndShow(targetElement, getTooltipHTML(data, source));
         };
         const _hide = () => { tooltip.classList.remove('visible'); tooltip.addEventListener('transitionend', () => { if (!tooltip.classList.contains('visible')) tooltip.style.visibility = 'hidden'; }, { once: true }); };
-        return { 
-            handleTriggerEnter(targetElement) { clearTimeout(hideTimeout); showTimeout = setTimeout(() => _display(targetElement), CONSTANTS.TOOLTIP_SHOW_DELAY); }, 
-            handleTriggerLeave() { clearTimeout(showTimeout); hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); }, 
-            handleTooltipEnter() { clearTimeout(hideTimeout); }, 
-            handleTooltipLeave() { hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); }, 
-            show(targetElement) { _display(targetElement); }, 
+        return {
+            handleTriggerEnter(targetElement) { clearTimeout(hideTimeout); showTimeout = setTimeout(() => _display(targetElement), CONSTANTS.TOOLTIP_SHOW_DELAY); },
+            handleTriggerLeave() { clearTimeout(showTimeout); hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); },
+            handleTooltipEnter() { clearTimeout(hideTimeout); },
+            handleTooltipLeave() { hideTimeout = setTimeout(_hide, CONSTANTS.TOOLTIP_HIDE_DELAY); },
+            show(targetElement) { _display(targetElement); },
             hide() { _hide(); },
             showText(targetElement, text) {
                 if (!text) return;
@@ -1683,21 +1684,21 @@ document.addEventListener('DOMContentLoaded', () => {
     function getDetailContentHTML(data) {
         if (!data) return '';
         const queryInfo = {}, responseInfo = {}; let answers = [];
-        const { ra, aa, tc } = data.response_flags || {}; const flagItems = [ra && 'RA', aa && 'AA', tc && 'TC'].filter(Boolean); 
+        const { ra, aa, tc } = data.response_flags || {}; const flagItems = [ra && 'RA', aa && 'AA', tc && 'TC'].filter(Boolean);
         queryInfo['域名'] = createInteractiveLine(data.query_name, data.query_name, data.query_name, false);
         queryInfo['时间'] = `<span>${formatDate(data.query_time)}</span>`;
         queryInfo['客户端'] = createInteractiveLine(aliasManager.getDisplayName(data.client_ip) + ` (${data.client_ip})`, data.client_ip, data.client_ip, true);
         queryInfo['类型'] = `<span>${data.query_type || 'N/A'}</span>`;
-        if (data.query_class) queryInfo['类别'] = `<span>${data.query_class}</span>`; 
+        if (data.query_class) queryInfo['类别'] = `<span>${data.query_class}</span>`;
         if (data.domain_set) queryInfo['分流规则'] = createInteractiveLine(data.domain_set, data.domain_set, data.domain_set, true);
         if (data.trace_id) queryInfo['Trace ID'] = createInteractiveLine(data.trace_id, data.trace_id, data.trace_id, true);
-        
-        responseInfo['耗时'] = `<span>${data.duration_ms.toFixed(2)} ms</span>`; 
+
+        responseInfo['耗时'] = `<span>${data.duration_ms.toFixed(2)} ms</span>`;
         let statusText = data.response_code || 'N/A';
-        if(data.is_blocked) statusText += ' (已拦截)';
-        responseInfo['状态'] = `<span>${statusText}</span>`; 
-        if (flagItems.length) responseInfo['标志'] = `<span>${flagItems.join(', ')}</span>`; 
-        answers = data.answers || []; 
+        if (data.is_blocked) statusText += ' (已拦截)';
+        responseInfo['状态'] = `<span>${statusText}</span>`;
+        if (flagItems.length) responseInfo['标志'] = `<span>${flagItems.join(', ')}</span>`;
+        answers = data.answers || [];
         const buildList = (obj) => Object.entries(obj).map(([key, value]) => `<li><strong>${key}</strong> ${value}</li>`).join('');
         let html = '<h5>查询信息</h5><ul>' + buildList(queryInfo) + '</ul>';
         html += '<h5>响应信息</h5><ul>' + buildList(responseInfo) + '</ul>';
@@ -1709,7 +1710,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function getRuleTagHTML(log) { if (!log || !log.domain_set) return ''; const ruleName = log.domain_set; const bgColor = state.shuntColors[ruleName]; if (!bgColor) return ''; const textColor = getContrastingTextColor(bgColor); return `<span class="rule-tag" style="background-color: ${bgColor}; color: ${textColor};" title="分流规则: ${ruleName}">${ruleName}</span>`; }
     function getResponseTagHTML(log) { if (!log) return ''; const code = log.response_code || 'UNKNOWN'; let tagClass = 'other'; if (code === 'NOERROR') tagClass = 'noerror'; else if (code === 'NXDOMAIN') tagClass = 'nxdomain'; else if (code === 'SERVFAIL') tagClass = 'servfail'; else if (code === 'REFUSED') tagClass = 'refused'; return `<span class="response-tag ${tagClass}">${code}</span>`; }
     function getResponseSummary(log) { if (!log) return ''; if (log.response_code !== 'NOERROR') return getResponseTagHTML(log); if (log.answers?.length > 0) { const firstIp = log.answers.find(a => a.type === 'A' || a.type === 'AAAA'); const firstCname = log.answers.find(a => a.type === 'CNAME'); let mainText = firstIp?.data ?? firstCname?.data ?? log.answers[0].data; if (mainText.length > 25) mainText = mainText.substring(0, 22) + '...'; if (log.answers.length > 1) mainText += ` (+${log.answers.length - 1})`; return `<span class="truncate-text">${mainText}</span>`; } return '<span>(empty)</span>'; }
-    
+
     function renderDomainResponseCellHTML(log, source = 'log') {
         const ruleColor = log.domain_set ? state.shuntColors[log.domain_set] : null;
         const domainStyle = (source === 'slowest' && ruleColor) ? `style="color: ${ruleColor}; font-weight: 700;"` : '';
@@ -1719,7 +1720,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function getLogRowClass(log) { if (log.is_blocked) return 'is-blocked'; if (['SERVFAIL', 'NXDOMAIN', 'REFUSED'].includes(log.response_code)) return 'is-fail'; return ''; }
 
-    function renderLogItemHTML(log, globalIndex) { 
+    function renderLogItemHTML(log, globalIndex) {
         const tr = document.createElement('tr'); tr.dataset.logIndex = globalIndex; tr.className = getLogRowClass(log);
         if (state.isMobile) {
             tr.innerHTML = `
@@ -1734,19 +1735,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${getRuleTagHTML(log)}
                         </div>
                     </div>
-                </td>`; 
+                </td>`;
         } else {
-             tr.innerHTML = `
+            tr.innerHTML = `
                 <td>${formatRelativeTime(log.query_time)}</td>
                 <td>${renderDomainResponseCellHTML(log)}</td>
                 <td>${log.query_type}</td>
                 <td class="text-center numeric duration-cell">${log.duration_ms.toFixed(2)}</td>
                 <td>${aliasManager.getAliasedClientHTML(log.client_ip)}</td>`;
         }
-        return tr; 
+        return tr;
     }
 
-    function renderSlowestQueryItemHTML(log, index) { 
+    function renderSlowestQueryItemHTML(log, index) {
         const tr = document.createElement('tr'); tr.dataset.logIndex = index; tr.dataset.logSource = 'slowest'; tr.className = getLogRowClass(log);
         if (state.isMobile) {
             tr.innerHTML = `
@@ -1768,53 +1769,53 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${aliasManager.getAliasedClientHTML(log.client_ip)}</td>
                 <td class="text-right numeric duration-cell">${log.duration_ms.toFixed(2)}</td>`;
         }
-        return tr; 
+        return tr;
     }
 
-    function getTooltipHTML(data, source) { 
-        if (!data) return ''; 
-        const queryInfo = {}, responseInfo = {}; let answers = []; 
-        if (['domain', 'client', 'domain_set'].includes(source)) { queryInfo['请求数'] = data.count.toLocaleString(); } else { 
-            const { ra, aa, tc } = data.response_flags || {}; const flagItems = [ra && 'RA', aa && 'AA', tc && 'TC'].filter(Boolean); 
+    function getTooltipHTML(data, source) {
+        if (!data) return '';
+        const queryInfo = {}, responseInfo = {}; let answers = [];
+        if (['domain', 'client', 'domain_set'].includes(source)) { queryInfo['请求数'] = data.count.toLocaleString(); } else {
+            const { ra, aa, tc } = data.response_flags || {}; const flagItems = [ra && 'RA', aa && 'AA', tc && 'TC'].filter(Boolean);
             queryInfo['完整域名'] = createInteractiveLine(data.query_name, data.query_name, data.query_name, false, true);
             queryInfo['精确时间'] = `<small>${formatDate(data.query_time)}</small>`;
             queryInfo['客户端'] = createInteractiveLine(aliasManager.getDisplayName(data.client_ip), data.client_ip, data.client_ip, true, true);
-            queryInfo['类型'] = `<small>${data.query_type || 'N/A'}</small>`; 
+            queryInfo['类型'] = `<small>${data.query_type || 'N/A'}</small>`;
             if (data.query_class) queryInfo['类别'] = `<small>${data.query_class}</small>`;
             if (data.domain_set) queryInfo['规则'] = createInteractiveLine(data.domain_set, data.domain_set, data.domain_set, true, true);
             responseInfo['耗时'] = `<small>${data.duration_ms.toFixed(2)} ms</small>`;
             responseInfo['状态'] = `<small>${data.response_code || 'N/A'}${data.is_blocked ? ' (Blocked)' : ''}</small>`;
             if (flagItems.length) responseInfo['标志'] = `<small>${flagItems.join(', ')}</small>`;
             if (data.trace_id) { queryInfo['Trace ID'] = createInteractiveLine(data.trace_id, data.trace_id, data.trace_id, true, true); }
-            answers = data.answers || []; 
-        } 
-        const buildList = (obj) => Object.entries(obj).map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join(''); 
-        let tooltipHTML = ``; 
-        if (Object.keys(queryInfo).length) tooltipHTML += `<h5>查询信息</h5><ul>${buildList(queryInfo)}</ul>`; 
-        if (Object.keys(responseInfo).length) tooltipHTML += `<h5 style="margin-top:0.75rem;">响应信息</h5><ul>${buildList(responseInfo)}</ul>`; 
-        if (answers.length) tooltipHTML += `<h5 style="margin-top:0.75rem;">应答记录 (${answers.length})</h5><ul>${answers.map(ans => `<li>[${ans.type}] ${ans.data} <small>(TTL: ${ans.ttl}s)</small></li>`).join('')}</ul>`; 
-        return tooltipHTML; 
+            answers = data.answers || [];
+        }
+        const buildList = (obj) => Object.entries(obj).map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join('');
+        let tooltipHTML = ``;
+        if (Object.keys(queryInfo).length) tooltipHTML += `<h5>查询信息</h5><ul>${buildList(queryInfo)}</ul>`;
+        if (Object.keys(responseInfo).length) tooltipHTML += `<h5 style="margin-top:0.75rem;">响应信息</h5><ul>${buildList(responseInfo)}</ul>`;
+        if (answers.length) tooltipHTML += `<h5 style="margin-top:0.75rem;">应答记录 (${answers.length})</h5><ul>${answers.map(ans => `<li>[${ans.type}] ${ans.data} <small>(TTL: ${ans.ttl}s)</small></li>`).join('')}</ul>`;
+        return tooltipHTML;
     }
 
     const autoRefreshManager = {
         start() { this.stop(); if (state.autoRefresh.enabled && state.autoRefresh.intervalSeconds >= 5) { state.autoRefresh.intervalId = setInterval(() => updatePageData(false), state.autoRefresh.intervalSeconds * 1000); } },
         stop() { clearInterval(state.autoRefresh.intervalId); state.autoRefresh.intervalId = null; },
         updateSettings(enabled, seconds) { state.autoRefresh.enabled = enabled; state.autoRefresh.intervalSeconds = Math.max(seconds, 5); localStorage.setItem('mosdnsAutoRefresh', JSON.stringify({ enabled, intervalSeconds: state.autoRefresh.intervalSeconds })); ui.showToast(`自动刷新已${enabled ? `开启, 频率: ${state.autoRefresh.intervalSeconds}秒` : '关闭'}`, 'success'); this.start(); },
-        loadSettings() { 
-            const saved = JSON.parse(localStorage.getItem('mosdnsAutoRefresh')); 
-            if (saved) { 
-                state.autoRefresh.enabled = saved.enabled ?? false; 
-                state.autoRefresh.intervalSeconds = saved.intervalSeconds || CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL; 
+        loadSettings() {
+            const saved = JSON.parse(localStorage.getItem('mosdnsAutoRefresh'));
+            if (saved) {
+                state.autoRefresh.enabled = saved.enabled ?? false;
+                state.autoRefresh.intervalSeconds = saved.intervalSeconds || CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL;
             } else {
-                state.autoRefresh.enabled = false; 
+                state.autoRefresh.enabled = false;
                 state.autoRefresh.intervalSeconds = CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL;
             }
-            elements.autoRefreshToggle.checked = state.autoRefresh.enabled; 
-            elements.autoRefreshIntervalInput.value = state.autoRefresh.intervalSeconds; 
-            elements.autoRefreshIntervalInput.disabled = !state.autoRefresh.enabled; 
+            elements.autoRefreshToggle.checked = state.autoRefresh.enabled;
+            elements.autoRefreshIntervalInput.value = state.autoRefresh.intervalSeconds;
+            elements.autoRefreshIntervalInput.disabled = !state.autoRefresh.enabled;
         }
     };
-    
+
     function handleNavigation(targetLink) {
         elements.tabLinks.forEach(link => link.classList.remove('active'));
         targetLink.classList.add('active');
@@ -1839,13 +1840,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
-    
-function handleResize() { 
-        const wasMobile = state.isMobile; 
-        state.isMobile = window.innerWidth <= CONSTANTS.MOBILE_BREAKPOINT; 
-        
-        if (wasMobile !== state.isMobile) { 
-            const activeTab = document.querySelector('.tab-link.active')?.dataset.tab; 
+
+    function handleResize() {
+        const wasMobile = state.isMobile;
+        state.isMobile = window.innerWidth <= CONSTANTS.MOBILE_BREAKPOINT;
+
+        if (wasMobile !== state.isMobile) {
+            const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
             if (activeTab === 'log-query') {
                 ui.renderLogTable(state.displayedLogs);
             } else if (activeTab === 'overview') {
@@ -1858,11 +1859,11 @@ function handleResize() {
             } else if (activeTab === 'system-control') {
                 cacheManager.renderTable();
             }
-            updateLastUpdated(); 
-        } 
-        
-        if (state.isTouchDevice) elements.body.classList.add('touch'); else elements.body.classList.remove('touch'); 
-        requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if (activeLink) updateNavSlider(activeLink); }); 
+            updateLastUpdated();
+        }
+
+        if (state.isTouchDevice) elements.body.classList.add('touch'); else elements.body.classList.remove('touch');
+        requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if (activeLink) updateNavSlider(activeLink); });
         adjustLogSearchLayout();
 
         // -- [修改] -- 动态调整系统控制页的列宽比例
@@ -1881,39 +1882,39 @@ function handleResize() {
             }
         }
     }
-    
+
     function renderRuleTable(tbody, rules, mode) {
-        tbody.closest('table').classList.toggle('mobile-rule-card-layout', state.isMobile); 
-        const sortedRules = [...rules].sort((a, b) => (a.name || '').localeCompare(b.name || '')); 
-        renderTable(tbody, sortedRules, (rule, index) => { 
-            const item = state.isMobile ? renderRuleMobileCard(rule, mode) : renderRuleTableRow(rule, mode); 
-            item.dataset.ruleId = mode === 'adguard' ? rule.id : rule.name; 
-            if(rule.type) item.dataset.ruleType = rule.type; 
-            return item; 
-        }, mode); 
+        tbody.closest('table').classList.toggle('mobile-rule-card-layout', state.isMobile);
+        const sortedRules = [...rules].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        renderTable(tbody, sortedRules, (rule, index) => {
+            const item = state.isMobile ? renderRuleMobileCard(rule, mode) : renderRuleTableRow(rule, mode);
+            item.dataset.ruleId = mode === 'adguard' ? rule.id : rule.name;
+            if (rule.type) item.dataset.ruleType = rule.type;
+            return item;
+        }, mode);
     }
 
     function renderRuleTableRow(rule, mode) { const tr = document.createElement('tr'); const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? new Date(rule.last_updated).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') : '—'; let html = `<td class="text-center"><label class="switch"><input type="checkbox" class="rule-enabled-toggle" ${rule.enabled ? 'checked' : ''}><span class="slider"></span></label></td><td>${rule.name}</td>`; if (mode === 'diversion') { html += `<td><span class="response-tag other">${rule.type}</span></td>`; } html += `<td><span class="truncate-text" title="${rule.url}">${rule.url}</span></td><td class="text-right">${(rule.rule_count || 0).toLocaleString()}</td><td>${lastUpdated}</td><td class="text-center"><div style="display: inline-flex; gap: 0.5rem; white-space: nowrap;">`; if (mode === 'diversion' && rule.url) { html += `<button class="button secondary rule-update-btn" style="padding: 0.4rem 0.8rem;" title="更新此规则"><span>更新</span></button>`; } html += `<button class="button secondary rule-edit-btn" style="padding: 0.4rem 0.8rem;"><span>编辑</span></button><button class="button danger rule-delete-btn" style="padding: 0.4rem 0.8rem;"><span>删除</span></button></div></td>`; tr.innerHTML = html; return tr; }
-    
-    function renderRuleMobileCard(rule, mode) { 
+
+    function renderRuleMobileCard(rule, mode) {
         const card = document.createElement('div'); card.className = 'rule-card';
-        const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? formatRelativeTime(rule.last_updated) : '从未'; 
-        let metaHtml = `<span class="url" title="${rule.url}">${rule.url}</span>`; 
-        if (mode === 'diversion') metaHtml += `<span><span class="response-tag other">${rule.type}</span></span>`; 
-        metaHtml += `<span><strong>规则数:</strong> ${(rule.rule_count || 0).toLocaleString()}</span><span><strong>更新于:</strong> ${lastUpdated}</span>`; 
-        let actionsHtml = ''; 
-        if (mode === 'diversion' && rule.url) actionsHtml += `<button class="button secondary rule-update-btn"><span>更新</span></button>`; 
-        actionsHtml += `<button class="button secondary rule-edit-btn"><span>编辑</span></button><button class="button danger rule-delete-btn"><span>删除</span></button>`; 
-        card.innerHTML = `<div class="rule-card-toggle"><label class="switch"><input type="checkbox" class="rule-enabled-toggle" ${rule.enabled ? 'checked' : ''}><span class="slider"></span></label></div><div class="rule-card-name">${rule.name}</div><div class="rule-card-meta">${metaHtml}</div><div class="rule-card-actions">${actionsHtml}</div>`; 
-        return card; 
+        const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? formatRelativeTime(rule.last_updated) : '从未';
+        let metaHtml = `<span class="url" title="${rule.url}">${rule.url}</span>`;
+        if (mode === 'diversion') metaHtml += `<span><span class="response-tag other">${rule.type}</span></span>`;
+        metaHtml += `<span><strong>规则数:</strong> ${(rule.rule_count || 0).toLocaleString()}</span><span><strong>更新于:</strong> ${lastUpdated}</span>`;
+        let actionsHtml = '';
+        if (mode === 'diversion' && rule.url) actionsHtml += `<button class="button secondary rule-update-btn"><span>更新</span></button>`;
+        actionsHtml += `<button class="button secondary rule-edit-btn"><span>编辑</span></button><button class="button danger rule-delete-btn"><span>删除</span></button>`;
+        card.innerHTML = `<div class="rule-card-toggle"><label class="switch"><input type="checkbox" class="rule-enabled-toggle" ${rule.enabled ? 'checked' : ''}><span class="slider"></span></label></div><div class="rule-card-name">${rule.name}</div><div class="rule-card-meta">${metaHtml}</div><div class="rule-card-actions">${actionsHtml}</div>`;
+        return card;
     }
 
-    async function handleAdguardUpdateCheck() { ui.setLoading(elements.checkAdguardUpdatesBtn, true); ui.showToast('已开始在后台更新所有启用的拦截规则...'); try { await api.fetch('/plugins/adguard/update', { method: 'POST' }); ui.showToast('更新请求已发送，5秒后自动刷新列表...', 'success'); await new Promise(resolve => setTimeout(resolve, 5000)); await adguardManager.load(); ui.showToast('拦截规则列表已刷新！', 'success'); } catch (e) {} finally { ui.setLoading(elements.checkAdguardUpdatesBtn, false); } }
-    async function handleRuleTableClick(event, mode) { const target = event.target.closest('button, input.rule-enabled-toggle'); if (!target) return; const itemElement = target.closest('[data-rule-id]'); if (!itemElement) return; const id = itemElement.dataset.ruleId; const rules = mode === 'adguard' ? state.adguardRules : state.diversionRules; const rule = rules.find(r => (mode === 'adguard' ? r.id : r.name) === id); if (!rule) return; if (target.matches('.rule-edit-btn')) ui.openRuleModal(mode, rule); else if (target.matches('.rule-delete-btn')) { if (confirm(`确定要删除规则 "${rule.name}" 吗？此操作不可恢复。`)) { ui.setLoading(target, true); try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'DELETE' }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'DELETE' }); ui.showToast(`规则 "${rule.name}" 已删除`); await (mode === 'adguard' ? adguardManager.load() : diversionManager.load()); } catch(e) { console.error(`Failed to delete rule ${id}:`, e); } finally { ui.setLoading(target, false); } } } else if (target.matches('.rule-update-btn')) { ui.setLoading(target, true); ui.showToast(`正在后台更新规则 "${rule.name}"...`); try { await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/update/${id}`, { method: 'POST' }); ui.showToast('更新请求已发送, 5秒后自动刷新', 'success'); setTimeout(() => diversionManager.load(), 5000); } catch(e) {} finally { ui.setLoading(target, false); } } else if (target.matches('.rule-enabled-toggle')) { const updatedRule = { ...rule, enabled: target.checked }; target.disabled = true; try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); rule.enabled = target.checked; ui.showToast(`规则 "${rule.name}" 已${target.checked ? '启用' : '禁用'}`); } catch (error) { target.checked = !target.checked; } finally { target.disabled = false; } } }
+    async function handleAdguardUpdateCheck() { ui.setLoading(elements.checkAdguardUpdatesBtn, true); ui.showToast('已开始在后台更新所有启用的拦截规则...'); try { await api.fetch('/plugins/adguard/update', { method: 'POST' }); ui.showToast('更新请求已发送，5秒后自动刷新列表...', 'success'); await new Promise(resolve => setTimeout(resolve, 5000)); await adguardManager.load(); ui.showToast('拦截规则列表已刷新！', 'success'); } catch (e) { } finally { ui.setLoading(elements.checkAdguardUpdatesBtn, false); } }
+    async function handleRuleTableClick(event, mode) { const target = event.target.closest('button, input.rule-enabled-toggle'); if (!target) return; const itemElement = target.closest('[data-rule-id]'); if (!itemElement) return; const id = itemElement.dataset.ruleId; const rules = mode === 'adguard' ? state.adguardRules : state.diversionRules; const rule = rules.find(r => (mode === 'adguard' ? r.id : r.name) === id); if (!rule) return; if (target.matches('.rule-edit-btn')) ui.openRuleModal(mode, rule); else if (target.matches('.rule-delete-btn')) { if (confirm(`确定要删除规则 "${rule.name}" 吗？此操作不可恢复。`)) { ui.setLoading(target, true); try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'DELETE' }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'DELETE' }); ui.showToast(`规则 "${rule.name}" 已删除`); await (mode === 'adguard' ? adguardManager.load() : diversionManager.load()); } catch (e) { console.error(`Failed to delete rule ${id}:`, e); } finally { ui.setLoading(target, false); } } } else if (target.matches('.rule-update-btn')) { ui.setLoading(target, true); ui.showToast(`正在后台更新规则 "${rule.name}"...`); try { await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/update/${id}`, { method: 'POST' }); ui.showToast('更新请求已发送, 5秒后自动刷新', 'success'); setTimeout(() => diversionManager.load(), 5000); } catch (e) { } finally { ui.setLoading(target, false); } } else if (target.matches('.rule-enabled-toggle')) { const updatedRule = { ...rule, enabled: target.checked }; target.disabled = true; try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); rule.enabled = target.checked; ui.showToast(`规则 "${rule.name}" 已${target.checked ? '启用' : '禁用'}`); } catch (error) { target.checked = !target.checked; } finally { target.disabled = false; } } }
     async function handleRuleFormSubmit(event) { event.preventDefault(); ui.setLoading(elements.saveRuleBtn, true); const form = elements.ruleForm; const mode = form.elements['mode'].value; const id = form.elements['id'].value; try { if (mode === 'adguard') { const data = { name: form.elements['name'].value, url: form.elements['url'].value, auto_update: form.elements['auto_update'].checked, update_interval_hours: parseInt(form.elements['update_interval_hours'].value, 10) || 24 }; if (id) { const originalRule = state.adguardRules.find(r => r.id === id); await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...originalRule, ...data }) }); } else { await api.fetch('/plugins/adguard/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, enabled: true }) }); } ui.showToast(`广告拦截规则${id ? '更新' : '添加'}成功`); await adguardManager.load(); } else { const data = { name: form.elements['name'].value, url: form.elements['url'].value, type: form.elements['type'].value, files: form.elements['files'].value, auto_update: form.elements['auto_update'].checked, update_interval_hours: parseInt(form.elements['update_interval_hours'].value, 10) || 24 }; const pluginTag = diversionManager.sdSetInstanceMap[data.type]; if (!pluginTag) throw new Error('无效的分流规则类型'); if (id) { const originalRule = state.diversionRules.find(r => r.name === id); if (data.name !== id) { if (!confirm(`规则名称已从 "${id}" 更改为 "${data.name}"。\n\n这将删除旧规则并创建一个新规则，确定要继续吗？`)) throw new Error('User cancelled name change.'); await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[originalRule.type]}/config/${id}`, { method: 'DELETE' }); await api.fetch(`/plugins/${pluginTag}/config/${data.name}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, enabled: originalRule.enabled }) }); } else { await api.fetch(`/plugins/${pluginTag}/config/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...originalRule, ...data }) }); } } else { await api.fetch(`/plugins/${pluginTag}/config/${data.name}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, enabled: true }) }); } ui.showToast(`分流规则${id ? '更新' : '添加'}成功`); await diversionManager.load(); if (!id || (id && data.name !== id)) { ui.showToast('正在后台获取规则详情...'); setTimeout(() => diversionManager.load(), 5000); } } ui.closeRuleModal(); } catch (err) { console.error(`${mode} form submission failed:`, err); } finally { ui.setLoading(elements.saveRuleBtn, false); } }
     const adguardManager = { async load() { try { state.adguardRules = await api.fetch('/plugins/adguard/rules') || []; } catch (error) { state.adguardRules = []; } this.render(); }, render() { renderRuleTable(elements.adguardRulesTbody, state.adguardRules, 'adguard'); }, };
-    const diversionManager = { sdSetInstanceMap: { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn', 'cuscn': 'cuscn', 'cusnocn': 'cusnocn' }, async load() { try { const promises = Object.values(this.sdSetInstanceMap).map(tag => api.fetch(`/plugins/${tag}/config`)); const results = await Promise.allSettled(promises); state.diversionRules = results.filter(r => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap(r => r.value); } catch(e) { state.diversionRules = []; } this.render(); }, render() { renderRuleTable(elements.diversionRulesTbody, state.diversionRules, 'diversion'); }, };
-    
+    const diversionManager = { sdSetInstanceMap: { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn', 'cuscn': 'cuscn', 'cusnocn': 'cusnocn' }, async load() { try { const promises = Object.values(this.sdSetInstanceMap).map(tag => api.fetch(`/plugins/${tag}/config`)); const results = await Promise.allSettled(promises); state.diversionRules = results.filter(r => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap(r => r.value); } catch (e) { state.diversionRules = []; } this.render(); }, render() { renderRuleTable(elements.diversionRulesTbody, state.diversionRules, 'diversion'); }, };
+
     // 流式计数工具：避免一次性创建超大字符串数组导致主线程卡顿
     async function countLinesStreaming(url, signal) {
         const res = await fetch(url, { signal });
@@ -1971,7 +1972,7 @@ function handleResize() {
             } else {
                 elements.backupDomainCount.textContent = '获取失败';
             }
-        } catch(e) {
+        } catch (e) {
             if (e.name !== 'AbortError') elements.backupDomainCount.textContent = '获取失败';
         }
     }
@@ -1980,7 +1981,7 @@ function handleResize() {
         if (!elements.dataViewTableContainer) return;
 
         elements.dataViewTableContainer.innerHTML = '';
-        
+
         if (entries.length === 0) {
             elements.dataViewTableContainer.innerHTML = '<div class="empty-state-content" style="padding: 2rem 0;"><p>此列表为空或没有匹配的条目。</p></div>';
         } else if (type === 'cache') {
@@ -2002,7 +2003,7 @@ function handleResize() {
                 const bodyEl = document.createElement('div');
                 bodyEl.className = 'accordion-body';
                 collapseEl.appendChild(bodyEl);
-                
+
                 itemEl.append(headerEl, collapseEl);
                 accordionContainer.appendChild(itemEl);
 
@@ -2016,41 +2017,41 @@ function handleResize() {
                 buttonEl.addEventListener('click', () => {
                     const isCollapsed = buttonEl.classList.contains('collapsed');
                     if (isCollapsed && bodyEl.innerHTML === '') {
-                         const dnsMsgIndex = item.fullText.indexOf('DNS Message:');
-                         const metadataText = dnsMsgIndex !== -1 ? item.fullText.substring(0, dnsMsgIndex) : item.fullText;
-                         const dnsMessageText = dnsMsgIndex !== -1 ? item.fullText.substring(dnsMsgIndex) : 'DNS Message not found.';
+                        const dnsMsgIndex = item.fullText.indexOf('DNS Message:');
+                        const metadataText = dnsMsgIndex !== -1 ? item.fullText.substring(0, dnsMsgIndex) : item.fullText;
+                        const dnsMessageText = dnsMsgIndex !== -1 ? item.fullText.substring(dnsMsgIndex) : 'DNS Message not found.';
 
-                         const metadataTable = document.createElement('table');
-                         metadataTable.className = 'data-table';
-                         const tbody = document.createElement('tbody');
-                         metadataText.trim().split('\n').forEach(line => {
-                             const parts = line.match(/^([^:]+):\s*(.*)$/);
-                             if (parts) {
-                                 const tr = document.createElement('tr');
-                                 tr.innerHTML = `<td>${parts[1].trim()}</td><td>${parts[2].trim()}</td>`;
-                                 tbody.appendChild(tr);
-                             }
-                         });
-                         metadataTable.appendChild(tbody);
-                         
-                         const pre = document.createElement('pre');
-                         pre.innerHTML = `<code>${dnsMessageText.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`;
-                         
-                         bodyEl.appendChild(metadataTable);
-                         bodyEl.appendChild(pre);
+                        const metadataTable = document.createElement('table');
+                        metadataTable.className = 'data-table';
+                        const tbody = document.createElement('tbody');
+                        metadataText.trim().split('\n').forEach(line => {
+                            const parts = line.match(/^([^:]+):\s*(.*)$/);
+                            if (parts) {
+                                const tr = document.createElement('tr');
+                                tr.innerHTML = `<td>${parts[1].trim()}</td><td>${parts[2].trim()}</td>`;
+                                tbody.appendChild(tr);
+                            }
+                        });
+                        metadataTable.appendChild(tbody);
+
+                        const pre = document.createElement('pre');
+                        pre.innerHTML = `<code>${dnsMessageText.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`;
+
+                        bodyEl.appendChild(metadataTable);
+                        bodyEl.appendChild(pre);
                     }
 
                     // 切换可见性
                     buttonEl.classList.toggle('collapsed');
                     collapseEl.classList.toggle('show');
-                    
+
                     // 使用 max-height 实现动画，同时保证可收起
                     collapseEl.style.maxHeight = collapseEl.classList.contains('show') ? (bodyEl.scrollHeight + 'px') : '0px';
                 });
             });
             elements.dataViewTableContainer.appendChild(accordionContainer);
         } else { // domain list
-             elements.dataViewTableContainer.innerHTML = `
+            elements.dataViewTableContainer.innerHTML = `
                 <table class="mobile-card-layout">
                     <thead>
                         <tr>
@@ -2063,7 +2064,7 @@ function handleResize() {
                     </tbody>
                 </table>`;
         }
-        
+
         elements.dataViewModalInfo.textContent = `总计: ${state.dataView.rawEntries.length} | 显示: ${entries.length}`;
     }
 
@@ -2113,7 +2114,7 @@ function handleResize() {
                     return { id: index + 1, value: line };
                 });
             }
-            
+
             state.dataView.viewType = viewType;
             state.dataView.filteredEntries = state.dataView.rawEntries;
             renderDataViewTable(state.dataView.filteredEntries, viewType);
@@ -2132,7 +2133,7 @@ function handleResize() {
         try {
             const requests = SHUNT_RULE_SAVE_PATHS.map(path => api.fetch(`/plugins/${path}`));
             const results = await Promise.allSettled(requests);
-            
+
             const failed = results.filter(r => r.status === 'rejected');
             if (failed.length > 0) {
                 ui.showToast(`部分规则保存失败 (${failed.length}/${results.length})`, 'error');
@@ -2141,7 +2142,7 @@ function handleResize() {
                 ui.showToast('所有分流规则已成功保存', 'success');
             }
         } catch (e) {
-             ui.showToast('保存操作时发生未知错误', 'error');
+            ui.showToast('保存操作时发生未知错误', 'error');
         } finally {
             ui.setLoading(elements.saveShuntRulesBtn, false);
         }
@@ -2210,20 +2211,20 @@ function handleResize() {
             const tbody = elements.cacheStatsTbody;
             if (!tbody) return;
             tbody.innerHTML = '';
-            
+
             if (isError) {
                 const cols = state.isMobile ? 1 : 8;
                 tbody.innerHTML = `<tr><td colspan="${cols}" style="text-align:center; color: var(--color-danger);">缓存数据加载失败</td></tr>`;
                 return;
             }
-            
+
             this.config.forEach(cache => {
                 const tr = document.createElement('tr');
                 const stats = state.cacheStats[cache.key] || { query_total: 0, hit_total: 0, lazy_hit_total: 0, size_current: 0 };
-                
+
                 const hitRate = stats.query_total > 0 ? (stats.hit_total / stats.query_total * 100).toFixed(2) + '%' : '0.00%';
                 const lazyRate = stats.query_total > 0 ? (stats.lazy_hit_total / stats.query_total * 100).toFixed(2) + '%' : '0.00%';
-                
+
                 if (state.isMobile) {
                     tr.innerHTML = `
                         <td>
@@ -2258,7 +2259,7 @@ function handleResize() {
             });
         }
     };
-    
+
     const listManager = {
         MAX_LINES: 500,
         currentTag: null,
@@ -2287,17 +2288,17 @@ function handleResize() {
             else setTimeout(() => this.loadList('whitelist'), 1200);
             state.listManagerInitialized = true;
         },
-        
+
         async loadList(tag) {
             this.currentTag = tag;
             // Abort any previous in-flight request and reset textarea to avoid old content persisting
-            try { this._abortController?.abort(); } catch (_) {}
+            try { this._abortController?.abort(); } catch (_) { }
             this._abortController = new AbortController();
             // Clear previous content so switching lists reflects immediately
             elements.listContentTextArea.value = '';
             elements.listContentTextArea.scrollTop = 0;
             elements.listMgmtNav.querySelectorAll('.list-mgmt-link').forEach(l => l.classList.toggle('active', l.dataset.listTag === tag));
-            
+
             elements.listMgmtClientIpHint.style.display = (tag === 'client_ip') ? 'block' : 'none';
             if (elements.listMgmtDirectIpHint) {
                 elements.listMgmtDirectIpHint.style.display = (tag === 'direct_ip') ? 'block' : 'none';
@@ -2338,7 +2339,7 @@ function handleResize() {
                             if (shownLines >= CHUNK_LIMIT) {
                                 // 够了，取消后续读取
                                 cancelled = true;
-                                try { reader.cancel(); } catch (_) {}
+                                try { reader.cancel(); } catch (_) { }
                                 break;
                             }
                         }
@@ -2398,7 +2399,7 @@ function handleResize() {
             }
         }
     };
-    
+
     // Config Manager: MosDNS 远程配置更新及本地备份
     const configManager = {
         init() {
@@ -2411,65 +2412,45 @@ function handleResize() {
             const updateModule = document.getElementById('update-module');
             if (!updateModule || !updateModule.parentNode) return;
 
-            // 1. 获取参考卡片的样式以保持布局一致
-            const computedStyle = window.getComputedStyle(updateModule);
-            const gridColumn = computedStyle.getPropertyValue('grid-column');
-            
-            // 2. 创建新卡片
+            // 创建新卡片，使用 control-module 类以保持一致性
             const card = document.createElement('div');
             card.id = 'config-manager-card';
-            card.className = 'card';
-            
-            if (gridColumn && gridColumn !== 'auto') {
-                card.style.gridColumn = gridColumn;
-            } else {
-                card.style.gridColumn = '1 / -1';
-            }
-            card.style.marginTop = '1.5rem';
+            card.className = 'control-module';
+            card.style.gridColumn = '1 / -1';
 
-            // 3. 填充内容
+            // 填充内容，使用与其他 control-module 一致的结构
             card.innerHTML = `
-                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); display: flex; align-items: center;">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style="margin-right: 0.5rem; color: var(--color-accent-primary);">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 12v4h-2v-4H8l4-4 4 4h-3zm-1-9c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"></path>
-                            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"></path>
-                        </svg>
-                        配置管理
-                    </h3>
+                <h3>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+                    </svg>
+                    配置管理
+                </h3>
+                <p class="module-desc">管理 MosDNS 的本地配置。您可以备份当前配置到本地，或者从远程 URL 下载配置包覆盖当前设置。</p>
+                
+                <div class="control-item">
+                    <label for="cfg-local-dir" class="field-label">MosDNS 本地工作目录</label>
+                    <input type="text" id="cfg-local-dir" class="input" placeholder="例如: /etc/mosdns 或 C:\\mosdns">
                 </div>
 
-                <div class="card-body">
-                    <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1.5rem;">
-                        管理 MosDNS 的本地配置。您可以备份当前配置到本地，或者从远程 URL 下载配置包覆盖当前设置（支持自动重启）。
-                    </p>
-                    
-                    <div style="display: grid; gap: 1rem;">
-                        <div class="form-group">
-                            <label for="cfg-local-dir" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">MosDNS 本地工作目录</label>
-                            <input type="text" id="cfg-local-dir" class="input" placeholder="例如: /etc/mosdns 或 C:\mosdns" style="width: 100%;">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="cfg-remote-url" style="font-weight: 600; margin-bottom: 0.5rem; display: block;">远程配置下载 URL (ZIP)</label>
-                            <input type="text" id="cfg-remote-url" class="input" placeholder="例如: https://github.com/user/repo/archive/master.zip" style="width: 100%;">
-                        </div>
-                    </div>
+                <div class="control-item">
+                    <label for="cfg-remote-url" class="field-label">远程配置下载 URL (ZIP)</label>
+                    <input type="text" id="cfg-remote-url" class="input" placeholder="例如: https://github.com/user/repo/archive/master.zip">
                 </div>
 
-                <div class="card-footer" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; align-items: center; gap: 1rem;">
+                <div class="button-group" style="margin-top: 1rem; justify-content: flex-end;">
                     <button class="button secondary" id="cfg-backup-btn">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-                        <span>备份配置到本地</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                        <span>备份配置</span>
                     </button>
                     <button class="button primary" id="cfg-update-btn">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
                         <span>应用远程配置</span>
                     </button>
                 </div>
             `;
 
-            // 4. 插入 DOM (插入到 updateModule 之后)
+            // 插入 DOM (插入到 updateModule 之后)
             updateModule.parentNode.insertBefore(card, updateModule.nextSibling);
         },
 
@@ -2478,7 +2459,7 @@ function handleResize() {
             const savedUrl = localStorage.getItem('mosdns-config-url');
             const dirInput = document.getElementById('cfg-local-dir');
             const urlInput = document.getElementById('cfg-remote-url');
-            
+
             if (dirInput && savedDir) dirInput.value = savedDir;
             if (urlInput && savedUrl) urlInput.value = savedUrl;
         },
@@ -2536,7 +2517,7 @@ function handleResize() {
                 if (disposition && disposition.indexOf('attachment') !== -1) {
                     const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
                     const matches = filenameRegex.exec(disposition);
-                    if (matches != null && matches[1]) { 
+                    if (matches != null && matches[1]) {
                         filename = matches[1].replace(/['"]/g, '');
                     }
                 }
@@ -2561,7 +2542,7 @@ function handleResize() {
                 ui.showToast('请完整填写本地目录和远程 URL', 'error');
                 return;
             }
-            
+
             if (!confirm('确定要从远程 URL 更新配置吗？\n\n1. 当前配置将备份到 backup 子目录。\n2. 新配置将覆盖现有文件。\n3. MosDNS 将自动重启。\n\n此操作存在风险，请确保 URL 可信。')) {
                 return;
             }
@@ -2577,7 +2558,7 @@ function handleResize() {
                 });
 
                 ui.showToast(res.message || '更新成功，正在重启...', 'success');
-                
+
                 // 等待重启
                 setTimeout(() => {
                     location.reload();
@@ -2590,7 +2571,7 @@ function handleResize() {
         }
     };
 
-// -- [修改] -- 终极修复版：修复头部图标及状态显示
+    // -- [修改] -- 终极修复版：修复头部图标及状态显示
     const overridesManager = {
         state: { replacements: [] },
 
@@ -2613,16 +2594,16 @@ function handleResize() {
             // 1. 隐藏旧按钮
             if (els.oldSaveBtn) els.oldSaveBtn.style.display = 'none';
             if (els.oldLoadBtn) els.oldLoadBtn.style.display = 'none';
-            
+
             // 2. 注入新板块
             this.injectNewCard();
 
             try {
                 const data = await api.fetch('/api/v1/overrides');
-                
+
                 if (els.socks5) els.socks5.value = (data && data.socks5) || '';
                 if (els.ecs) els.ecs.value = (data && data.ecs) || '';
-                
+
                 this.state.replacements = (data && data.replacements) ? data.replacements : [];
                 this.renderReplacementsTable();
 
@@ -2639,35 +2620,17 @@ function handleResize() {
             const els = this.getElements();
             if (!els.module || !els.module.parentNode) return;
 
-            // 1. 获取旧卡片的计算样式以保持布局一致
-            const computedStyle = window.getComputedStyle(els.module);
-            const gridColumn = computedStyle.getPropertyValue('grid-column');
-            const marginLeft = computedStyle.getPropertyValue('margin-left');
-            const marginRight = computedStyle.getPropertyValue('margin-right');
-            const width = computedStyle.getPropertyValue('width');
-
-            // 2. 创建新卡片
+            // 创建新卡片，使用 control-module 类以保持一致性
             const newCard = document.createElement('div');
             newCard.id = 'replacements-card';
-            newCard.className = els.module.className || 'card'; 
-            
-            // 3. 强制应用布局样式
-            if (gridColumn && gridColumn !== 'auto') {
-                newCard.style.gridColumn = gridColumn;
-            } else {
-                newCard.style.gridColumn = '1 / -1';
-            }
-            
-            newCard.style.marginLeft = marginLeft;
-            newCard.style.marginRight = marginRight;
-            newCard.style.width = width;
-            newCard.style.marginTop = '1.5rem';
+            newCard.className = 'control-module';
+            newCard.style.gridColumn = '1 / -1';
 
-            // 4. 填充内容 (添加了 SVG 图标和状态列)
+            // 填充内容
             newCard.innerHTML = `
-                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <h3 style="margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); display: flex; align-items: center;">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style="margin-right: 0.5rem; color: var(--color-accent-primary);">
+                <div class="module-header">
+                    <h3>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M7.5 5.6L5 7 6.4 4.5 5 2 7.5 3.4 10 2 8.6 4.5 10 7 7.5 5.6zm12 9.8L22 17l-2.5 1.4L18.1 22l-1.4-2.5L14.2 18l2.5-1.4L18.1 14l1.4 2.5zM11 10c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6zm-8 8c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6z"/>
                         </svg>
                         上游DNS设置/其它设置
@@ -2677,49 +2640,34 @@ function handleResize() {
                     </button>
                 </div>
 
-<div class="card-body">
-    <!-- 增加了 white-space: pre-wrap; 以及 line-height: 1.5; 增加行高提升阅读体验 -->
-    <p style="color: var(--color-text-secondary); font-size: 0.9em; margin-bottom: 1rem; white-space: pre-wrap; line-height: 1.5;">远程下载的mosdns配置为通用模板，需要在此处替换上游dns等相关信息，此处信息存储于运行目录的config_overrides.json中。
-原值 (查找)为配置模板中预设的初始值，新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。
+                <p class="module-desc">远程下载的mosdns配置为通用模板，需要在此处替换上游dns等相关信息，此处信息存储于运行目录的config_overrides.json中。原值为配置模板中预设的初始值，新值将替换初始值在mosdns启动时加载。</p>
+                
+                <div class="scrollable-table-container">
+                    <table class="data-table mobile-card-layout">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%;">状态</th>
+                                <th style="width: 25%;">原值 (查找)</th>
+                                <th style="width: 25%;">新值 (替换)</th>
+                                <th>备注</th>
+                                <th style="width: 60px; text-align: center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rep-tbody"></tbody>
+                    </table>
+                </div>
 
-下面是模板一些必要替换的原值的说明
-udp://127.0.0.1:7874，替换为sing-box dns，用于对国外域名返回fakeip。
-114.114.114.114，替换为运营商dns，用于返回最优DNS结果。
-127.0.0.1:7777，替换为:7777，取消仅监听127.0.0.1限制
-127.0.0.1:8888，替换为:8888，取消仅监听127.0.0.1限制
-
-下面是模板一些可选替换的原值的说明
-udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
-123.123.110.123，填写ipw.cn显示的ipv4地址或者本城市任意ipv4地址，传递给阿里私有doh。
-888888，替换为阿里私有doh Account ID。
-888888_88888，替换为阿里私有doh AccessKey ID。
-999999999，替换为阿里私有doh AccessKey Secret。</p>
-    
-    <div style="overflow-x: auto; width: 100%;">
-        <table class="data-table" style="width: 100%; min-width: 700px; border-collapse: collapse;">
-            <thead>
-                <tr style="background: var(--color-bg-secondary);">
-                    <th style="padding: 10px; text-align: left; width: 15%;">状态</th>
-                    <th style="padding: 10px; text-align: left; width: 25%;">原值 (查找)</th>
-                    <th style="padding: 10px; text-align: left; width: 25%;">新值 (替换)</th>
-                    <th style="padding: 10px; text-align: left;">备注</th>
-                    <th style="padding: 10px; text-align: center; width: 60px;">操作</th>
-                </tr>
-            </thead>
-            <tbody id="rep-tbody"></tbody>
-        </table>
-    </div>
-</div>
-                <div class="card-footer" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; align-items: center; gap: 1rem;">
-                    <span style="color: var(--color-text-secondary); font-size: 0.85em;">保存应用SOCKS5/ECS IP/上游DNS设置/其它设置</span>
-                    <button class="button primary" id="rep-save-btn" style="min-width: 120px;">
+                <div class="button-group" style="margin-top: 1rem; justify-content: flex-end;">
+                    <span style="color: var(--color-text-secondary); font-size: 0.85em; margin-right: auto;">保存应用SOCKS5/ECS IP/上游DNS设置</span>
+                    <button class="button primary" id="rep-save-btn">
                         <span>保存并重启</span>
                     </button>
                 </div>
             `;
 
-            // 5. 插入 DOM
+            // 插入 DOM
             els.module.parentNode.insertBefore(newCard, els.module.nextSibling);
+
 
             // 6. 绑定事件
             newCard.querySelector('#rep-add-btn').addEventListener('click', () => {
@@ -2799,7 +2747,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         async save() {
             const els = this.getElements();
             if (!els.socks5 || !els.ecs) return;
-            
+
             const btn = document.getElementById('rep-save-btn');
             ui.setLoading(btn, true);
 
@@ -2819,7 +2767,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                 ecs: ecs,
                 replacements: validReplacements
             };
-            
+
             try {
                 // 发送 POST 请求
                 await api.fetch('/api/v1/overrides', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -2864,9 +2812,9 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         window.addEventListener('resize', debounce(handleResize, 150));
         elements.globalRefreshBtn?.addEventListener('click', () => updatePageData(true));
         setInterval(updateLastUpdated, 5000);
-        elements.autoRefreshForm.addEventListener('change', (e) => { if(['checkbox', 'number'].includes(e.target.type)) { const enabled = elements.autoRefreshToggle.checked; const interval = parseInt(elements.autoRefreshIntervalInput.value, 10); elements.autoRefreshIntervalInput.disabled = !enabled; autoRefreshManager.updateSettings(enabled, interval); } });
+        elements.autoRefreshForm.addEventListener('change', (e) => { if (['checkbox', 'number'].includes(e.target.type)) { const enabled = elements.autoRefreshToggle.checked; const interval = parseInt(elements.autoRefreshIntervalInput.value, 10); elements.autoRefreshIntervalInput.disabled = !enabled; autoRefreshManager.updateSettings(enabled, interval); } });
         document.addEventListener('visibilitychange', () => document.hidden ? autoRefreshManager.stop() : autoRefreshManager.start());
-        
+
         elements.toggleAuditBtn?.addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             ui.setLoading(btn, true);
@@ -2895,7 +2843,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                 }
             }
         });
-        
+
         elements.capacityForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const newCapacity = parseInt(elements.newCapacityInput.value, 10);
@@ -2922,7 +2870,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
 
         elements.logSearch?.addEventListener('input', debounce(applyLogFilterAndRender, 300));
         elements.logQueryTableContainer?.addEventListener('scroll', () => { const { scrollTop, scrollHeight, clientHeight } = elements.logQueryTableContainer; if (clientHeight + scrollTop >= scrollHeight - 200) loadMoreLogs(); }, { passive: true });
-        
+
         const handleInteractiveClick = (e) => {
             const interactiveButton = e.target.closest('.copy-btn, .filter-btn');
             const clickableLink = e.target.closest('.clickable-link, .tab-link-action');
@@ -2943,10 +2891,10 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                         textArea.value = textToCopy;
                         textArea.style.position = "absolute";
                         textArea.style.left = "-9999px";
-                        
+
                         const parentElement = elements.logDetailModal.open ? elements.logDetailModal : document.body;
                         parentElement.appendChild(textArea);
-                        
+
                         textArea.select();
                         try {
                             document.execCommand('copy');
@@ -2985,7 +2933,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                     }
                 } else if (clickableLink.matches('.tab-link-action')) {
                     const link = document.querySelector(`.tab-link[data-tab="${clickableLink.dataset.tab}"]`);
-                    if(link) handleNavigation(link);
+                    if (link) handleNavigation(link);
                 }
             } else if (logRow) {
                 ui.openLogDetailModal(logRow);
@@ -2999,18 +2947,18 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         elements.body.addEventListener('mouseout', e => { if (state.isTouchDevice) return; const trigger = e.target.closest('[data-log-index], [data-rank-index], [data-rule-id]'); if (trigger) tooltipManager.handleTriggerLeave(); });
         elements.tooltip.addEventListener('mouseenter', () => tooltipManager.handleTooltipEnter());
         elements.tooltip.addEventListener('mouseleave', () => tooltipManager.handleTooltipLeave());
-        
+
         // -- [修改] -- 所有关闭按钮都使用新的统一函数
         elements.closeLogDetailModalBtn?.addEventListener('click', () => closeAndUnlock(elements.logDetailModal));
-        
-        if (elements.aliasModal) { 
-            [elements.manageAliasesBtn, elements.manageAliasesBtnMobile].forEach(btn => btn?.addEventListener('click', async () => { 
-                await aliasManager.renderEditableList(); 
+
+        if (elements.aliasModal) {
+            [elements.manageAliasesBtn, elements.manageAliasesBtnMobile].forEach(btn => btn?.addEventListener('click', async () => {
+                await aliasManager.renderEditableList();
                 lockScroll();
-                elements.aliasModal.showModal(); 
-            })); 
-            document.getElementById('close-alias-modal')?.addEventListener('click', () => closeAndUnlock(elements.aliasModal)); 
-            
+                elements.aliasModal.showModal();
+            }));
+            document.getElementById('close-alias-modal')?.addEventListener('click', () => closeAndUnlock(elements.aliasModal));
+
             elements.saveAllAliasesBtn?.addEventListener('click', async () => {
                 const btn = elements.saveAllAliasesBtn;
                 ui.setLoading(btn, true);
@@ -3019,8 +2967,8 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                 } finally {
                     ui.setLoading(btn, false);
                 }
-            }); 
-            
+            });
+
             document.getElementById('export-aliases-btn')?.addEventListener('click', async (e) => {
                 const btn = e.currentTarget;
                 ui.setLoading(btn, true);
@@ -3031,9 +2979,9 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                 }
             });
 
-            document.getElementById('import-aliases-btn')?.addEventListener('click', () => elements.importAliasInput?.click()); 
-            elements.importAliasInput?.addEventListener('change', (e) => { if (e.target.files?.length > 0) { aliasManager.import(e.target.files[0]); e.target.value = ''; } }); 
-            
+            document.getElementById('import-aliases-btn')?.addEventListener('click', () => elements.importAliasInput?.click());
+            elements.importAliasInput?.addEventListener('change', (e) => { if (e.target.files?.length > 0) { aliasManager.import(e.target.files[0]); e.target.value = ''; } });
+
             elements.manualAliasForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const btn = e.currentTarget.querySelector('button');
@@ -3051,11 +2999,11 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                     } else {
                         ui.showToast('IP地址和别名均不能为空', 'error');
                     }
-                } catch (err) {} 
+                } catch (err) { }
                 finally {
                     ui.setLoading(btn, false);
                 }
-            }); 
+            });
         }
         elements.ruleForm.addEventListener('submit', handleRuleFormSubmit);
         elements.closeRuleModalBtn.addEventListener('click', () => closeAndUnlock(elements.ruleModal));
@@ -3065,7 +3013,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         elements.adguardRulesTbody.addEventListener('click', (e) => handleRuleTableClick(e, 'adguard'));
         elements.addDiversionRuleBtn.addEventListener('click', () => ui.openRuleModal('diversion'));
         elements.diversionRulesTbody.addEventListener('click', (e) => handleRuleTableClick(e, 'diversion'));
-        
+
         elements.rulesSubNavLinks.forEach(link => {
             link.addEventListener('click', () => {
                 elements.rulesSubNavLinks.forEach(l => l.classList.remove('active'));
@@ -3074,7 +3022,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                 elements.rulesSubTabContents.forEach(content => {
                     content.classList.toggle('active', content.id === `${tabId}-sub-tab`);
                 });
-        
+
                 if (tabId === 'list-mgmt' && !state.listManagerInitialized) {
                     listManager.init();
                 } else if (tabId === 'adguard' && state.adguardRules.length === 0) {
@@ -3086,27 +3034,27 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                 }
             });
         });
-        
-    
+
+
         document.body.addEventListener('click', (e) => {
             const domainListLink = e.target.closest('a.control-item-link[data-list-type]');
             const cacheListLink = e.target.closest('a.control-item-link[data-cache-tag]');
             const clearCacheBtn = e.target.closest('.clear-cache-btn[data-cache-tag]');
 
             if (domainListLink) {
-                 e.preventDefault();
+                e.preventDefault();
                 openDataViewModal({
                     listType: domainListLink.dataset.listType,
                     title: domainListLink.dataset.listTitle
                 });
             } else if (cacheListLink) {
-                 e.preventDefault();
+                e.preventDefault();
                 openDataViewModal({
                     cacheTag: cacheListLink.dataset.cacheTag,
                     title: cacheListLink.dataset.cacheTitle
                 });
             } else if (clearCacheBtn) {
-                 e.preventDefault();
+                e.preventDefault();
                 const cacheTag = clearCacheBtn.dataset.cacheTag;
                 if (confirm(`确定要清空缓存 "${cacheTag}" 吗？`)) {
                     ui.setLoading(clearCacheBtn, true);
@@ -3129,12 +3077,12 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         elements.dataViewSearch?.addEventListener('input', debounce(() => {
             const searchTerm = elements.dataViewSearch.value.toLowerCase();
             if (state.dataView.viewType === 'cache') {
-                state.dataView.filteredEntries = state.dataView.rawEntries.filter(item => 
+                state.dataView.filteredEntries = state.dataView.rawEntries.filter(item =>
                     item.headerTitle.toLowerCase().includes(searchTerm) ||
                     item.fullText.toLowerCase().includes(searchTerm)
                 );
             } else {
-                state.dataView.filteredEntries = state.dataView.rawEntries.filter(item => 
+                state.dataView.filteredEntries = state.dataView.rawEntries.filter(item =>
                     item.value.toLowerCase().includes(searchTerm)
                 );
             }
@@ -3144,7 +3092,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         elements.saveShuntRulesBtn?.addEventListener('click', saveAllShuntRules);
         elements.clearShuntRulesBtn?.addEventListener('click', clearAllShuntRules);
     }
-    
+
     function setupLazyLoading() {
         const lazyLoadObserver = new IntersectionObserver((entries, observer) => {
             entries.forEach(entry => {
@@ -3181,7 +3129,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
                 running++;
                 Promise.resolve()
                     .then(job)
-                    .catch(() => {})
+                    .catch(() => { })
                     .finally(() => { running--; pump(); });
             }
         };
@@ -3216,7 +3164,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         themeManager.init();
         // 根据进入页签决定是否首屏加载别名（仅日志/概览需要）。避免 system-control 首屏的额外请求。
         const firstHash = window.location.hash || '#overview';
-        const firstTab = (document.querySelector(`.tab-link[href="${firstHash}"]`)?.dataset.tab) || firstHash.replace('#','');
+        const firstTab = (document.querySelector(`.tab-link[href="${firstHash}"]`)?.dataset.tab) || firstHash.replace('#', '');
         const loadAliasesAsync = () => aliasManager.load().then(() => {
             // 别名加载后，如当前在 log-query，轻量重渲染以显示别名
             const activeTab = document.querySelector('.tab-link.active')?.dataset.tab;
@@ -3239,11 +3187,11 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         // 绑定 info-icon 提示（例如日志容量的说明图标）
         bindInfoIconTooltips();
         updateManager.init();
-        
+
         // -- [修改] -- 初始化配置管理器
         configManager.init();
-        
-		mountGlobalInfoIconDelegation();
+
+        mountGlobalInfoIconDelegation();
         setupEventListeners();
         setupGlowEffect();
         setupLazyLoading();
@@ -3255,7 +3203,7 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
         // 首屏统一轻量刷新，所有重数据由懒加载或“刷新”按钮触发
         await updatePageData(false);
         if (document.fonts?.ready) await document.fonts.ready;
-        requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if(activeLink) updateNavSlider(activeLink); });
+        requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if (activeLink) updateNavSlider(activeLink); });
         elements.initialLoader.style.opacity = '0';
         elements.initialLoader.addEventListener('transitionend', () => elements.initialLoader.remove());
         if (!document.hidden) autoRefreshManager.start();
@@ -3263,4 +3211,209 @@ udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
     }
 
     init();
+});
+
+// ===============================================
+// 系统控制子菜单模块 (独立初始化)
+// ===============================================
+document.addEventListener('DOMContentLoaded', function () {
+    // 延迟初始化，确保主代码已执行
+    initSystemSubNav();
+
+    function initSystemSubNav() {
+        const systemTab = document.getElementById('system-control-tab');
+        if (!systemTab) return;
+
+        const grid = systemTab.querySelector('.control-panel-grid');
+        if (!grid || systemTab.querySelector('.system-sub-nav')) return; // 已存在则跳过
+
+        // 创建子导航
+        const subNav = document.createElement('nav');
+        subNav.className = 'system-sub-nav';
+        subNav.setAttribute('role', 'tablist');
+        subNav.innerHTML = `
+            <button class="system-sub-nav-btn active" data-category="all" role="tab">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                <span>全部</span>
+            </button>
+            <button class="system-sub-nav-btn" data-category="basic" role="tab">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12.9 6.858l4.242 4.243L7.242 21H3v-4.243l9.9-9.9zm1.414-1.414l2.121-2.122a1 1 0 0 1 1.414 0l2.829 2.829a1 1 0 0 1 0 1.414l-2.122 2.121-4.242-4.242z"/></svg>
+                <span>基础设置</span>
+            </button>
+            <button class="system-sub-nav-btn" data-category="data" role="tab">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M4 19h16v-7h2v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8h2v7zM20 3H4v7h2V5h12v5h2V4a1 1 0 0 0-1-1z"/></svg>
+                <span>数据管理</span>
+            </button>
+            <button class="system-sub-nav-btn" data-category="system" role="tab">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1l9.5 5.5v11L12 23l-9.5-5.5v-11L12 1zm0 2.31L4.5 7.65v8.7l7.5 4.34 7.5-4.34V7.65L12 3.31z"/></svg>
+                <span>系统信息</span>
+            </button>
+            <button class="system-sub-nav-btn" data-category="advanced" role="tab">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>
+                <span>高级设置</span>
+            </button>
+        `;
+        systemTab.insertBefore(subNav, grid);
+
+        // 给模块添加分类 (按模块顺序)
+        const modules = grid.querySelectorAll('.control-module');
+        const moduleArray = Array.from(modules);
+
+        moduleArray.forEach(function (mod, index) {
+            // 已有分类则跳过
+            if (mod.dataset.category) return;
+
+            const id = mod.id;
+
+            // 按 ID 分配类别
+            if (id === 'auto-refresh-module' || id === 'appearance-module') {
+                mod.dataset.category = 'basic';
+            } else if (id === 'domain-stats-module') {
+                mod.dataset.category = 'data';
+            } else if (id === 'system-info-module' || id === 'update-module') {
+                mod.dataset.category = 'system';
+            } else if (id === 'requery-module' || id === 'feature-switches-module' || id === 'overrides-module') {
+                mod.dataset.category = 'advanced';
+            } else if (mod.querySelector('#cache-stats-table')) {
+                mod.dataset.category = 'data';
+            } else if (index < 4 && mod.classList.contains('control-module--mini')) {
+                // 前4个 mini 模块（审计、日志容量、自动刷新、外观）属于基础设置
+                mod.dataset.category = 'basic';
+            } else {
+                // 未分类的模块默认放入高级设置
+                mod.dataset.category = 'advanced';
+            }
+        });
+
+        // 分类函数 - 给新模块分配类别
+        function categorizeModules() {
+            grid.querySelectorAll('.control-module').forEach(function (mod, index) {
+                if (mod.dataset.category) return; // 已分类跳过
+
+                const id = mod.id;
+                if (id === 'auto-refresh-module' || id === 'appearance-module') {
+                    mod.dataset.category = 'basic';
+                } else if (id === 'domain-stats-module') {
+                    mod.dataset.category = 'data';
+                } else if (id === 'system-info-module' || id === 'update-module') {
+                    mod.dataset.category = 'system';
+                } else if (id === 'requery-module' || id === 'feature-switches-module' || id === 'overrides-module' || id === 'replacements-card' || id === 'socks-ecs-module') {
+                    mod.dataset.category = 'advanced';
+                } else if (mod.querySelector('#cache-stats-table')) {
+                    mod.dataset.category = 'data';
+                } else if (mod.classList.contains('control-module--mini')) {
+                    mod.dataset.category = 'basic';
+                } else {
+                    mod.dataset.category = 'advanced';
+                }
+            });
+        }
+
+        // 子导航点击事件
+        subNav.addEventListener('click', function (e) {
+            var btn = e.target.closest('.system-sub-nav-btn');
+            if (!btn) return;
+
+            var category = btn.dataset.category;
+
+            // 更新按钮激活状态
+            subNav.querySelectorAll('.system-sub-nav-btn').forEach(function (b) {
+                b.classList.remove('active');
+            });
+            btn.classList.add('active');
+
+            // 重新分类（处理动态加载的模块）
+            categorizeModules();
+
+            // 获取最新模块列表并过滤
+            var allModules = grid.querySelectorAll('.control-module');
+            allModules.forEach(function (mod) {
+                var modCat = mod.dataset.category;
+                if (category === 'all' || modCat === category) {
+                    mod.style.display = '';
+                } else {
+                    mod.style.display = 'none';
+                }
+            });
+
+            // 处理配置管理卡片 (config-manager-card)
+            var configCard = document.getElementById('config-manager-card');
+            if (configCard) {
+                // 配置管理属于"系统信息"分类
+                if (category === 'all' || category === 'system') {
+                    configCard.style.display = '';
+                } else {
+                    configCard.style.display = 'none';
+                }
+            }
+        });
+
+        // 监听动态添加的模块
+        var currentCategory = 'basic'; // 默认显示基础设置
+        // 初始化时立即触发一次过滤
+        var basicBtn = subNav.querySelector('.system-sub-nav-btn[data-category="basic"]');
+        if (basicBtn) basicBtn.click();
+
+        var observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                mutation.addedNodes.forEach(function (node) {
+                    if (node.nodeType === 1 && node.classList && node.classList.contains('control-module')) {
+                        // 给新模块分类
+                        if (!node.dataset.category) {
+                            node.dataset.category = 'advanced'; // 默认高级设置
+                        }
+                        // 根据当前选中的分类决定是否显示
+                        var activeBtn = subNav.querySelector('.system-sub-nav-btn.active');
+                        if (activeBtn) {
+                            var cat = activeBtn.dataset.category;
+                            if (cat !== 'all' && node.dataset.category !== cat) {
+                                node.style.display = 'none';
+                            }
+                        }
+                    }
+                });
+            });
+        });
+        observer.observe(grid, { childList: true, subtree: false });
+
+        console.log('System sub-navigation initialized');
+
+        // 绑定分流规则帮助按钮
+        const helpBtn = document.getElementById('diversion-help-btn');
+        if (helpBtn) {
+            helpBtn.addEventListener('click', function () {
+                const modalHtml = `
+                    <dialog id="help-modal" class="card" style="padding: 0; max-width: 500px; width: 90%; border: none; box-shadow: var(--shadow-lg); border-radius: var(--border-radius-lg);">
+                        <header class="card-header" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid var(--color-border);">
+                            <h3 style="margin: 0;">分流规则说明</h3>
+                            <button class="button icon-only" onclick="this.closest('dialog').close(); this.closest('dialog').remove();" style="background: transparent; border: none; cursor: pointer;">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+                            </button>
+                        </header>
+                        <div class="card-body" style="padding: 1.5rem;">
+                            <div style="line-height: 1.6; font-size: 0.95rem;">
+                                <p style="margin-bottom: 0.5rem;"><strong>geositecn:</strong> 中国大陆域名列表，用于直连。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>geositenocn:</strong> 非中国大陆域名列表，用于代理。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>geoipcn:</strong> 中国大陆 IP 列表。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>cuscn:</strong> 自定义中国大陆域名。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>cusnocn:</strong> 自定义非中国大陆域名。</p>
+                            </div>
+                        </div>
+                        <footer class="modal-footer" style="padding: 1rem 1.5rem; border-top: 1px solid var(--color-border); text-align: right;">
+                            <button class="button primary" onclick="this.closest('dialog').close(); this.closest('dialog').remove();">关闭</button>
+                        </footer>
+                    </dialog>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+                const modal = document.getElementById('help-modal');
+                modal.showModal();
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        modal.close();
+                        modal.remove();
+                    }
+                });
+            });
+        }
+    }
 });
