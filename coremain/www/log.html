@@ -5,11 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Mosdns 仪表盘 V3.4.2.10 Mobile Fix</title>
+    <title>Mosdns 仪表盘 V3.4.3.1 Layout Optimization</title>
     <link rel="stylesheet" href="assets/css/log_refactored.min.css">
     <link rel="stylesheet" href="assets/css/enhancements.css">
     <link rel="stylesheet" href="assets/css/performance.css">
     <link rel="stylesheet" href="assets/css/ui-enhancements.css">
+
 
 
     <!-- Performance Optimizations: Resource Preloading -->
@@ -871,7 +872,7 @@
                     </div>
                 </div>
 
-                <!-- Row 3 -->
+                <!-- Row 3: Data Management Section -->
                 <div class="control-module" id="domain-stats-module">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -915,82 +916,6 @@
                         </table>
                     </div>
                 </div>
-                <div class="control-module" id="system-info-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                            <path
-                                d="M13,9H11V7h2m0,10H11V11h2m8-4.5,V19a2,2,0,0,1-2,2H5a2,2,0,0,1-2-2V5A2,2,0,0,1,5,3H16.5L21,7.5M15,4H5V19H19V8.5L15,4.5Z" />
-                        </svg>系统信息</h3>
-                    <div id="system-info-container" class="info-grid">
-                        <!-- System info will be injected by JS -->
-                    </div>
-                </div>
-                <div class="control-module" id="update-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                            <path
-                                d="M21 4v6h-2V6.41l-4.29 4.3-1.42-1.42 4.3-4.29H14V4h7zM5 17.59l4.29-4.3 1.42 1.42-4.3 4.29H10V20H3v-6h2v3.59z">
-                            </path>
-                        </svg>版本与更新</h3>
-
-                    <!-- 顶部：版本信息 + 操作按钮 -->
-                    <div class="update-header">
-                        <div class="update-versions">
-                            <div class="control-item"><strong>当前版本</strong> <span id="update-current-version"
-                                    class="chip">检测中...</span></div>
-                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version"
-                                    class="chip">--</span> <span id="update-inline-badge" class="badge"
-                                    style="display:none">已是最新</span></div>
-                        </div>
-                        <div class="button-group update-actions">
-                            <button id="update-check-btn" class="button secondary"
-                                data-default-text="强制检查"><span>强制检查</span></button>
-                            <button id="update-apply-btn" class="button primary" data-default-text="立即更新"
-                                disabled><span>立即更新</span></button>
-                            <button id="update-force-btn" class="button danger"
-                                data-default-text="强制更新"><span>强制更新</span></button>
-                        </div>
-                    </div>
-
-                    <!-- 状态横幅 -->
-                    <div id="update-status-banner" class="update-status-banner" role="status" aria-live="polite">
-                        <span id="update-status-text">等待检查</span>
-                    </div>
-
-                    <!-- v3 手动切换提示（仅 amd64 且 CPU 支持 v3、当前非 v3 构建时显示） -->
-                    <div id="update-v3-callout" class="callout info" style="display:none">
-                        <div class="callout-content">
-                            <strong>可用的 v3 优化构建</strong>
-                            <p>检测到此设备支持 amd64 v3 指令集，当前运行的是通用版。您可以手动切换到 v3 优化构建以获得更佳性能（不会自动切换）。</p>
-                        </div>
-                        <div class="callout-actions">
-                            <button id="update-v3-btn" class="button primary"><span>切换为 v3（手动）</span></button>
-                        </div>
-                    </div>
-
-                    <!-- 元信息：上次检查、匹配构建 -->
-                    <div class="update-meta-grid">
-                        <div class="control-item"><strong>上次检查</strong> <span id="update-last-checked">--</span></div>
-                        <div class="control-item"><strong>匹配构建</strong> <code id="update-target-info">--</code></div>
-                    </div>
-
-                    <!-- 自动检查设置 -->
-                    <div class="update-auto">
-                        <div class="control-item">
-                            <strong>自动检查</strong>
-                            <label class="switch" style="margin-left:auto;">
-                                <input type="checkbox" id="update-auto-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="update-auto-grid">
-                            <label for="update-interval-input" class="field-label">间隔 (分钟)</label>
-                            <input type="number" id="update-interval-input" min="5" max="1440" value="1440"
-                                style="max-width: 140px;">
-                        </div>
-                        <p class="control-hint" id="update-hint-text"></p>
-                    </div>
-                </div>
-
-                <!-- Row 4 -->
                 <div class="control-module" id="requery-module" style="display: none;">
                     <h3>
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20"
@@ -1067,6 +992,84 @@
                     </div>
                 </div>
 
+
+                <div class="control-module" id="system-info-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M13,9H11V7h2m0,10H11V11h2m8-4.5,V19a2,2,0,0,1-2,2H5a2,2,0,0,1-2-2V5A2,2,0,0,1,5,3H16.5L21,7.5M15,4H5V19H19V8.5L15,4.5Z" />
+                        </svg>系统信息</h3>
+                    <div id="system-info-container" class="info-grid">
+                        <!-- System info will be injected by JS -->
+                    </div>
+                </div>
+                <div class="control-module" id="update-module">
+                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M21 4v6h-2V6.41l-4.29 4.3-1.42-1.42 4.3-4.29H14V4h7zM5 17.59l4.29-4.3 1.42 1.42-4.3 4.29H10V20H3v-6h2v3.59z">
+                            </path>
+                        </svg>版本与更新</h3>
+
+                    <!-- 顶部：版本信息 + 操作按钮 -->
+                    <div class="update-header">
+                        <div class="update-versions">
+                            <div class="control-item"><strong>当前版本</strong> <span id="update-current-version"
+                                    class="chip">检测中...</span></div>
+                            <div class="control-item"><strong>最新版本</strong> <span id="update-latest-version"
+                                    class="chip">--</span> <span id="update-inline-badge" class="badge"
+                                    style="display:none">已是最新</span></div>
+                        </div>
+                        <div class="button-group update-actions">
+                            <button id="update-check-btn" class="button secondary"
+                                data-default-text="强制检查"><span>强制检查</span></button>
+                            <button id="update-apply-btn" class="button primary" data-default-text="立即更新"
+                                disabled><span>立即更新</span></button>
+                            <button id="update-force-btn" class="button danger"
+                                data-default-text="强制更新"><span>强制更新</span></button>
+                        </div>
+                    </div>
+
+                    <!-- 状态横幅 -->
+                    <div id="update-status-banner" class="update-status-banner" role="status" aria-live="polite">
+                        <span id="update-status-text">等待检查</span>
+                    </div>
+
+                    <!-- v3 手动切换提示（仅 amd64 且 CPU 支持 v3、当前非 v3 构建时显示） -->
+                    <div id="update-v3-callout" class="callout info" style="display:none">
+                        <div class="callout-content">
+                            <strong>可用的 v3 优化构建</strong>
+                            <p>检测到此设备支持 amd64 v3 指令集，当前运行的是通用版。您可以手动切换到 v3 优化构建以获得更佳性能（不会自动切换）。</p>
+                        </div>
+                        <div class="callout-actions">
+                            <button id="update-v3-btn" class="button primary"><span>切换为 v3（手动）</span></button>
+                        </div>
+                    </div>
+
+                    <!-- 元信息：上次检查、匹配构建 -->
+                    <div class="update-meta-grid">
+                        <div class="control-item"><strong>上次检查</strong> <span id="update-last-checked">--</span>
+                        </div>
+                        <div class="control-item"><strong>匹配构建</strong> <code id="update-target-info">--</code>
+                        </div>
+                    </div>
+
+                    <!-- 自动检查设置 -->
+                    <div class="update-auto">
+                        <div class="control-item">
+                            <strong>自动检查</strong>
+                            <label class="switch" style="margin-left:auto;">
+                                <input type="checkbox" id="update-auto-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="update-auto-grid">
+                            <label for="update-interval-input" class="field-label">间隔 (分钟)</label>
+                            <input type="number" id="update-interval-input" min="5" max="1440" value="1440"
+                                style="max-width: 140px;">
+                        </div>
+                        <p class="control-hint" id="update-hint-text"></p>
+                    </div>
+                </div>
+
                 <!-- Row 5 -->
                 <div class="control-module" id="feature-switches-module" style="display: none;">
                     <h3>
@@ -1114,19 +1117,22 @@
                         </svg>
                         SOCKS5/ECS IP
                     </h3>
-                    <div class="overrides-grid" style="display: flex; align-items: flex-start; gap: 20px;">
-                        <div class="control-item">
-                            <label for="override-socks5-log" class="field-label">socks5 代理</label>
-                            <input type="text" id="override-socks5-log" placeholder="host:port">
-                            <small class="control-hint">用于版本更新、远程配置下载、上游国外DNS代理。</small>
+                    <div class="overrides-wrapper">
+                        <div class="overrides-inputs"
+                            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+                            <div class="control-item" style="margin-bottom: 0;">
+                                <label for="override-socks5-log" class="field-label">socks5 代理</label>
+                                <input type="text" id="override-socks5-log" placeholder="host:port">
+                                <small class="control-hint">用于版本更新、远程配置下载、上游国外DNS代理。</small>
+                            </div>
+                            <div class="control-item" style="margin-bottom: 0;">
+                                <label for="override-ecs-log" class="field-label">ECS IP</label>
+                                <input type="text" id="override-ecs-log" placeholder="IPv4 / IPv6">
+                                <small
+                                    class="control-hint">传递至上游国外DNS，以返回对此IP最友好的DNS结果，填写ipw.cn显示的ipv6地址或者本城市任意ipv6地址。</small>
+                            </div>
                         </div>
-                        <div class="control-item">
-                            <label for="override-ecs-log" class="field-label">ECS IP</label>
-                            <input type="text" id="override-ecs-log" placeholder="IPv4 / IPv6">
-                            <small
-                                class="control-hint">传递至上游国外DNS，以返回对此IP最友好的DNS结果，填写ipw.cn显示的ipv6地址或者本城市任意ipv6地址。</small>
-                        </div>
-                        <div class="overrides-actions">
+                        <div class="overrides-actions" style="margin-top: 15px;">
                             <div class="button-group">
                                 <button id="overrides-load-btn-log" class="button secondary"><span>读取当前</span></button>
                                 <button id="overrides-save-btn-log" class="button primary"><span>保存</span></button>
