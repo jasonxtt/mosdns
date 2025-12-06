@@ -5,11 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Mosdns 仪表盘 V3.4.1 Bugfix</title>
-    <link rel="stylesheet" href="assets/css/log_refactored.css">
+    <title>Mosdns 仪表盘 V3.4.2.10 Mobile Fix</title>
+    <link rel="stylesheet" href="assets/css/log_refactored.min.css">
     <link rel="stylesheet" href="assets/css/enhancements.css">
     <link rel="stylesheet" href="assets/css/performance.css">
     <link rel="stylesheet" href="assets/css/ui-enhancements.css">
+
 
     <!-- Performance Optimizations: Resource Preloading -->
     <link rel="preconnect" href="/api">
@@ -17,6 +18,205 @@
 
     <!-- [新功能] 为 Requery 插件添加的独立样式 -->
     <style>
+        /* === MOBILE V2 CRITICAL STYLES: SCROLLING TABLE STRATEGY === */
+        @media (max-width: 768px) {
+
+            /* 1. 通用表格横向滚动容器 */
+            html body .scrollable-table-container {
+                display: block !important;
+                width: 100% !important;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+                margin-bottom: 1rem;
+                padding-bottom: 5px;
+                border: 1px solid var(--color-border);
+                border-radius: var(--border-radius-md);
+            }
+
+            /* 2. 缓存管理表格 */
+            html body #cache-stats-table {
+                display: table !important;
+                width: 100% !important;
+                min-width: 600px !important;
+                border-collapse: collapse !important;
+            }
+
+            /* 3. 上游DNS表格 (和其他数据表格) */
+            html body .data-table {
+                display: table !important;
+                width: 100% !important;
+                min-width: 600px !important;
+            }
+
+            /* 强制显示表头 */
+            html body #cache-stats-table thead,
+            html body .data-table thead {
+                display: table-header-group !important;
+            }
+
+            html body #cache-stats-table tbody,
+            html body .data-table tbody {
+                display: table-row-group !important;
+            }
+
+            html body #cache-stats-table tr,
+            html body .data-table tr {
+                display: table-row !important;
+                background-color: transparent !important;
+                border-bottom: 1px solid var(--color-border) !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                box-shadow: none !important;
+            }
+
+            /* 恢复被 hide-on-mobile 隐藏的列 */
+            html body #cache-stats-table th.hide-on-mobile,
+            html body #cache-stats-table td.hide-on-mobile,
+            html body .data-table th.hide-on-mobile,
+            html body .data-table td.hide-on-mobile {
+                display: table-cell !important;
+            }
+
+            html body #cache-stats-table th,
+            html body #cache-stats-table td,
+            html body .data-table th,
+            html body .data-table td {
+                display: table-cell !important;
+                padding: 0.75rem 0.5rem !important;
+                border: none !important;
+                white-space: nowrap !important;
+                vertical-align: middle !important;
+            }
+
+            /* 输入框在表格中自适应 */
+            html body .data-table input {
+                min-width: 120px !important;
+            }
+
+            /* 4. 系统信息 - 双列布局 */
+            html body #system-info-container {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr !important;
+                gap: 0.75rem !important;
+                width: 100% !important;
+            }
+
+            html body #system-info-container .info-item {
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: center !important;
+                padding: 0.75rem !important;
+                background-color: var(--color-bg-card) !important;
+                border: 1px solid var(--color-border) !important;
+                border-radius: var(--border-radius-sm) !important;
+                margin: 0 !important;
+            }
+
+            html body #system-info-container .info-item-label {
+                font-size: 0.75rem !important;
+                color: var(--color-text-secondary) !important;
+                margin-bottom: 0.25rem !important;
+            }
+
+            html body #system-info-container .info-item-value {
+                font-size: 0.9rem !important;
+                font-weight: 600 !important;
+                word-break: break-all !important;
+                color: var(--color-text-primary) !important;
+            }
+
+            /* 5. 版本与更新 - 紧凑布局优化 */
+            html body .update-versions {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr !important;
+                gap: 10px !important;
+            }
+
+            html body .update-versions .control-item {
+                margin-bottom: 0 !important;
+                width: auto !important;
+            }
+
+            html body .update-actions {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr 1fr !important;
+                gap: 8px !important;
+                justify-content: stretch !important;
+            }
+
+            html body .update-actions button {
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0.6rem 0.2rem !important;
+                font-size: 0.75rem !important;
+                white-space: nowrap !important;
+            }
+
+            html body .update-auto {
+                display: flex !important;
+                flex-direction: row !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                gap: 10px !important;
+                flex-wrap: nowrap !important;
+            }
+
+            html body .update-auto .control-item {
+                margin-bottom: 0 !important;
+                width: auto !important;
+                flex: 0 0 auto !important;
+                display: flex !important;
+                align-items: center !important;
+                gap: 8px !important;
+            }
+
+            html body .update-auto-grid {
+                display: flex !important;
+                flex-direction: row !important;
+                align-items: center !important;
+                gap: 5px !important;
+                flex: 1 !important;
+                justify-content: flex-end !important;
+                margin-top: 0 !important;
+            }
+
+            html body .update-auto-grid label {
+                white-space: nowrap !important;
+                font-size: 0.85rem !important;
+                margin-bottom: 0 !important;
+            }
+
+            html body .update-auto-grid input {
+                width: 60px !important;
+                padding: 4px !important;
+                height: 30px !important;
+                text-align: center !important;
+            }
+
+            /* 6. 排行榜与其他列表 (包括域名列表统计) - 强制不换行 */
+            html body #top-domains-body td,
+            html body #top-clients-body td,
+            html body #slowest-queries-body td,
+            html body #adguard-rules-tbody td,
+            html body #diversion-rules-tbody td,
+            html body #domain-stats-table td,
+            html body #domain-stats-table th {
+                white-space: nowrap !important;
+                word-break: keep-all !important;
+            }
+
+            html body .mobile-card-layout tbody td {
+                white-space: nowrap !important;
+            }
+
+            /* 之前的杂项 */
+            html body #overrides-module .control-item {
+                display: block !important;
+                width: 100% !important;
+                margin-bottom: 15px !important;
+            }
+        }
+
         .requery-progress-bar {
             width: 100%;
             background-color: var(--color-bg-alt);

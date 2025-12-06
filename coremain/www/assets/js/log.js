@@ -2228,6 +2228,13 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTable(isError = false) {
             const tbody = elements.cacheStatsTbody;
             if (!tbody) return;
+
+            // Apply mobile-card-layout class to table based on screen size
+            const table = tbody.closest('table');
+            if (table) {
+                table.classList.toggle('mobile-card-layout', state.isMobile);
+            }
+
             tbody.innerHTML = '';
 
             if (isError) {
@@ -2243,36 +2250,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const hitRate = stats.query_total > 0 ? (stats.hit_total / stats.query_total * 100).toFixed(2) + '%' : '0.00%';
                 const lazyRate = stats.query_total > 0 ? (stats.lazy_hit_total / stats.query_total * 100).toFixed(2) + '%' : '0.00%';
 
-                if (state.isMobile) {
-                    tr.innerHTML = `
-                        <td>
-                            <div class="cache-card-mobile">
-                                <div class="cache-card-header">
-                                    <strong class="cache-name">${cache.name}</strong>
-                                    <button class="button danger clear-cache-btn" data-cache-tag="${cache.tag}" style="padding: 0.4rem 0.8rem;"><span>清空</span></button>
-                                </div>
-                                <div class="cache-card-body">
-                                    <div><span>请求总数</span><strong>${stats.query_total.toLocaleString()}</strong></div>
-                                    <div><span>缓存命中</span><strong>${stats.hit_total.toLocaleString()}</strong></div>
-                                    <div><span>过期命中</span><strong>${stats.lazy_hit_total.toLocaleString()}</strong></div>
-                                    <div><span>命中率</span><strong>${hitRate}</strong></div>
-                                    <div><span>过期命中率</span><strong>${lazyRate}</strong></div>
-                                    <div><span>条目数</span><a href="#" class="control-item-link" data-cache-tag="${cache.tag}" data-cache-title="${cache.name}"><strong style="color:var(--color-accent-primary);">${stats.size_current.toLocaleString()}</strong></a></div>
-                                </div>
-                            </div>
-                        </td>`;
-                } else {
-                    tr.innerHTML = `
-                        <td>${cache.name}</td>
-                        <td class="text-right">${stats.query_total.toLocaleString()}</td>
-                        <td class="text-right">${stats.hit_total.toLocaleString()}</td>
-                        <td class="text-right">${stats.lazy_hit_total.toLocaleString()}</td>
-                        <td class="text-right">${hitRate}</td>
-                        <td class="text-right">${lazyRate}</td>
-                        <td class="text-right"><a href="#" class="control-item-link" data-cache-tag="${cache.tag}" data-cache-title="${cache.name}">${stats.size_current.toLocaleString()}</a></td>
-                        <td class="text-center"><button class="button danger clear-cache-btn" data-cache-tag="${cache.tag}" style="padding: 0.4rem 0.8rem;"><span>清空</span></button></td>
-                    `;
-                }
+                // 统一使用表格结构，不再区分 Mobile/PC HTML结构，通过CSS实现横向滚动
+                tr.innerHTML = `
+                    <td>
+                        <div class="cache-name-wrapper" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${cache.name}">${cache.name}</div>
+                    </td>
+                    <td class="text-right">${stats.query_total.toLocaleString()}</td>
+                    <td class="text-right">${stats.hit_total.toLocaleString()}</td>
+                    <td class="text-right">${stats.lazy_hit_total.toLocaleString()}</td>
+                    <td class="text-right">${hitRate}</td>
+                    <td class="text-right">${lazyRate}</td>
+                    <td class="text-right"><a href="#" class="control-item-link" data-cache-tag="${cache.tag}" data-cache-title="${cache.name}">${stats.size_current.toLocaleString()}</a></td>
+                    <td class="text-center"><button class="button danger clear-cache-btn" data-cache-tag="${cache.tag}" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">清空</button></td>
+                `;
                 tbody.appendChild(tr);
             });
         }
@@ -2661,7 +2651,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <p class="module-desc">远程下载的mosdns配置为通用模板，需要在此处替换上游dns等相关信息，此处信息存储于运行目录的config_overrides.json中。原值为配置模板中预设的初始值，新值将替换初始值在mosdns启动时加载。</p>
                 
                 <div class="scrollable-table-container">
-                    <table class="data-table mobile-card-layout">
+                    <table class="data-table" style="min-width: 650px;">
                         <thead>
                             <tr>
                                 <th style="width: 15%;">状态</th>
