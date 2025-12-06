@@ -5,11 +5,63 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Mosdns 仪表盘 V3.4.3.1 Layout Optimization</title>
+    <title>Mosdns Dashboard v3.4.3.3</title>
     <link rel="stylesheet" href="assets/css/log_refactored.min.css">
     <link rel="stylesheet" href="assets/css/enhancements.css">
     <link rel="stylesheet" href="assets/css/performance.css">
     <link rel="stylesheet" href="assets/css/ui-enhancements.css">
+    <style>
+        /* v3.4.3.3 Chart Mode Styles */
+
+        /* 1. Independent Mode: Stats Grid Modifications */
+        .stats-grid.independent-mode .sparkline-container {
+            display: none !important;
+        }
+
+        /* 2. Independent Chart Panel */
+        #independent-chart-panel {
+            background: var(--color-bg-card);
+            border-radius: var(--border-radius-lg);
+            border: 1px solid var(--color-border);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* Big Chart Styles */
+        .independent-charts-wrapper svg {
+            width: 100%;
+            height: 100%;
+            overflow: visible;
+        }
+
+        .independent-charts-wrapper svg path {
+            stroke-width: 2;
+            vector-effect: non-scaling-stroke;
+        }
+
+        .independent-charts-wrapper svg path.sparkline-path {
+            stroke-width: 2.5;
+            filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+        }
+
+        /* Reduce opacity of pattern in independent mode cards since they are smaller */
+        .stats-grid.independent-mode .icon-bg-pattern {
+            opacity: 0.05;
+        }
+
+        /* Animation */
+        @keyframes fadeSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
 
 
 
@@ -478,6 +530,36 @@
                 </div>
             </div>
 
+            <!-- Independent Chart Panel -->
+            <div id="independent-chart-panel" class="control-module"
+                style="display:none; margin-top: 1.5rem; animation: fadeSlideIn 0.3s ease-out;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20"
+                            height="20" style="color: var(--color-accent-primary);">
+                            <path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6z" />
+                        </svg>
+                        趋势分析
+                    </h3>
+                    <div class="chart-legend" style="display: flex; gap: 1rem; font-size: 0.85rem;">
+                        <div style="display: flex; align-items: center; gap: 0.3rem;">
+                            <span
+                                style="display:inline-block; width:12px; height:3px; background-color: var(--color-accent-primary); border-radius: 2px;"></span>
+                            <span>查询量</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.3rem;">
+                            <span
+                                style="display:inline-block; width:12px; height:3px; background-color: #f59e0b; border-radius: 2px;"></span>
+                            <span>延迟</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="independent-charts-wrapper">
+                    <div id="big-sparkline-merged" style="height: 200px; width: 100%;"></div>
+                </div>
+            </div>
+
             <div class="overview-grid">
                 <div class="card lazy-load-card" id="top-domains-card">
                     <header class="card-header">
@@ -786,19 +868,22 @@
                                 d="M12 2.5C12.4142 2.5 12.75 2.83579 12.75 3.25V5.03131C15.2635 5.50376 17.25 7.49021 17.7224 9.99993H19.5C19.9142 9.99993 20.25 10.3357 20.25 10.75V13.25C20.25 13.6642 19.9142 14 19.5 14H17.7224C17.25 16.5097 15.2635 18.4962 12.75 18.9686V20.75C12.75 21.1642 12.4142 21.5 12 21.5C11.5858 21.5 11.25 21.1642 11.25 20.75V18.9686C8.73652 18.4962 6.75 16.5097 6.27758 14H4.5C4.08579 14 3.75 13.6642 3.75 13.25V10.75C3.75 10.3357 4.08579 9.99993 4.5 9.99993H6.27758C6.75 7.49021 8.73652 5.50376 11.25 5.03131V3.25C11.25 2.83579 11.5858 2.5 12 2.5ZM12 7C9.23858 7 7 9.23858 7 12C7 14.7614 9.23858 17 12 17C14.7614 17 17 14.7614 17 12C17 9.23858 14.7614 7 12 7Z">
                             </path>
                         </svg>自动刷新</h3>
-                    <form id="auto-refresh-form" class="auto-refresh-form">
-                        <label class="switch" for="auto-refresh-toggle" style="display: contents; cursor: pointer;">
-                            <strong>启用</strong>
-                            <label class="switch">
-                                <input type="checkbox" id="auto-refresh-toggle">
-                                <span class="slider"></span>
-                            </label>
+                    <div class="control-item">
+                        <strong>启用状态</strong>
+                        <label class="switch" style="margin-left:auto;">
+                            <input type="checkbox" id="auto-refresh-toggle">
+                            <span class="slider"></span>
                         </label>
-                        <div>
-                            <input type="number" id="auto-refresh-interval" min="5">
-                            <span>秒/次</span>
-                        </div>
-                    </form>
+                    </div>
+                    <div class="control-item">
+                        <strong>刷新间隔</strong>
+                        <form id="auto-refresh-form"
+                            style="margin-left: auto; display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="number" id="auto-refresh-interval" min="3"
+                                style="width: 80px; text-align: center;">
+                            <span style="color: var(--color-text-secondary); font-size: 0.9rem;">秒</span>
+                        </form>
+                    </div>
                 </div>
                 <div class="control-module control-module--mini" id="appearance-module">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -841,6 +926,13 @@
                             <option value="comfortable">舒适</option>
                             <option value="compact">紧凑</option>
                         </select>
+                    </div>
+                    <div class="control-item" style="justify-content: space-between;">
+                        <strong>独立图表模式</strong>
+                        <label class="switch">
+                            <input type="checkbox" id="overview-chart-mode-toggle">
+                            <span class="slider"></span>
+                        </label>
                     </div>
                 </div>
 
@@ -1141,7 +1233,6 @@
                     </div>
                     <!-- 保存后自动重启，无需提示 -->
                 </div>
-
             </div>
         </section>
     </main>
