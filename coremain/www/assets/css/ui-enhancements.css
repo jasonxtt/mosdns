@@ -36,7 +36,7 @@ tbody td a.clickable-link:focus-visible {
     button,
     .btn,
     select,
-    input[type="checkbox"],
+    input[type="checkbox"]:not(#auto-refresh-toggle):not(#overview-chart-mode-toggle):not(#requery-scheduler-toggle):not(#update-auto-toggle),
     .nav-link {
         min-height: 44px;
         /* Apple Human Interface Guidelines */
@@ -44,6 +44,24 @@ tbody td a.clickable-link:focus-visible {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+    }
+
+    /* Fix Switch Input being visible/large on mobile */
+    .switch input[type="checkbox"] {
+        min-height: 0 !important;
+        min-width: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        opacity: 0 !important;
+        position: absolute !important;
+        appearance: none !important;
+    }
+
+    /* Prevent double arrows on select */
+    select {
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
     }
 
     /* Fix for table rows on mobile */
