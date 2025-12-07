@@ -1,0 +1,73 @@
+/* Performance Optimizations for Mosdns Dashboard */
+
+/* 1. CSS Containment
+   Isolates subtrees to improve rendering performance.
+   Browsers can skip layout/paint for off-screen or static content.
+*/
+
+/* Apply containment to heavy layout containers */
+.container-fluid {
+    content-visibility: auto;
+    /* Skips rendering if off-screen */
+    contain-intrinsic-size: 1000px;
+    /* Placeholder height to prevent scrollbar jumping */
+}
+
+/* Optimize table rendering */
+.table-responsive {
+    contain: paint layout;
+    /* Isolate table layout */
+    will-change: scroll-position;
+    /* Hint for smooth scrolling */
+}
+
+/* Optimize module cards */
+.card {
+    contain: content;
+    /* Isolate card content */
+    content-visibility: auto;
+    contain-intrinsic-size: 200px;
+}
+
+/* 2. Hardware Acceleration Hints
+   Use sparingly to avoid excessive memory usage.
+*/
+
+/* Optimize charts and heavy visual elements */
+canvas {
+    will-change: transform, opacity;
+    transform: translateZ(0);
+    /* Trigger GPU composition */
+}
+
+/* Optimize modal dialogs */
+.modal-content {
+    will-change: transform, opacity;
+}
+
+/* 3. Layout Stability */
+
+/* Prevent layout shifts for images/icons */
+img,
+svg {
+    aspect-ratio: attr(width) / attr(height);
+}
+
+/* 4. Text Rendering Speed */
+body {
+    text-rendering: optimizeSpeed;
+    /* Prioritize speed over geometric precision */
+}
+
+/* 5. Reduced Motion (Accessibility & Performance) */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
