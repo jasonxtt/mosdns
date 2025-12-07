@@ -1,0 +1,143 @@
+/* UI/UX Enhancements for Mosdns Dashboard V3.4.1 */
+
+/* 1. Accessibility Improvements (WCAG 2.1 AA) */
+
+/* Improved Focus States */
+:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(var(--color-primary-rgb), 0.2);
+}
+
+/* Specific fix for clickable links in tables to prevent layout shifts */
+tbody td a.clickable-link:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+    /* Draw inside to prevent overflow */
+    box-shadow: none;
+    background-color: rgba(var(--color-primary-rgb), 0.1);
+    border-radius: 4px;
+    text-decoration: none;
+}
+
+/* Better Contrast for Text */
+.text-muted {
+    color: #6c757d;
+    /* WCAG compliant gray */
+}
+
+[data-theme="dark"] .text-muted {
+    color: #adb5bd;
+}
+
+/* 2. Mobile Touch Targets */
+@media (max-width: 768px) {
+
+    button,
+    .btn,
+    select,
+    input[type="checkbox"]:not(#auto-refresh-toggle):not(#overview-chart-mode-toggle):not(#requery-scheduler-toggle):not(#update-auto-toggle),
+    .nav-link {
+        min-height: 44px;
+        /* Apple Human Interface Guidelines */
+        min-width: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Fix Switch Input being visible/large on mobile */
+    .switch input[type="checkbox"] {
+        min-height: 0 !important;
+        min-width: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        opacity: 0 !important;
+        position: absolute !important;
+        appearance: none !important;
+    }
+
+    /* Prevent double arrows on select */
+    select {
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+    }
+
+    /* Fix for table rows on mobile */
+    tr {
+        height: 48px;
+    }
+
+    /* Ensure switch toggle doesn't get deformed */
+    .switch {
+        /* Do NOT force min-width/height on the switch container itself if it breaks layout */
+        /* Instead, ensure the clickable area (label) is large enough */
+    }
+}
+
+/* 3. Font Size System */
+:root {
+    --font-size-xs: 0.75rem;
+    --font-size-sm: 0.875rem;
+    --font-size-base: 1rem;
+    --font-size-lg: 1.125rem;
+    --font-size-xl: 1.25rem;
+}
+
+body {
+    font-size: var(--font-size-base);
+    line-height: 1.5;
+}
+
+/* 4. Button Variants */
+.btn-xs {
+    padding: 0.125rem 0.25rem;
+    font-size: var(--font-size-xs);
+}
+
+.btn-xl {
+    padding: 0.5rem 1rem;
+    font-size: var(--font-size-xl);
+}
+
+/* 5. Table Density */
+.table-dense th,
+.table-dense td {
+    padding: 0.25rem 0.5rem;
+}
+
+/* 6. Skeleton Loading Animation */
+@keyframes skeleton-loading {
+    0% {
+        background-color: var(--color-bg-secondary);
+    }
+
+    50% {
+        background-color: var(--color-bg-tertiary);
+    }
+
+    100% {
+        background-color: var(--color-bg-secondary);
+    }
+}
+
+.skeleton {
+    animation: skeleton-loading 1.5s infinite ease-in-out;
+    border-radius: 4px;
+    color: transparent !important;
+    pointer-events: none;
+}
+
+/* 7. Glassmorphism Effects (Optional) */
+.glass-panel {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+[data-theme="dark"] .glass-panel {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}

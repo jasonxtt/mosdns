@@ -1368,6 +1368,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const setupGlowEffect = () => { elements.container?.addEventListener('mousemove', (e) => { const card = e.target.closest('.card:not(dialog)'); if (card) { const rect = card.getBoundingClientRect(); card.style.setProperty('--glow-x', `${e.clientX - rect.left}px`); card.style.setProperty('--glow-y', `${e.clientY - rect.top}px`); } }); };
 
     // 双波段图表生成器 (独立模式使用 - 增强版)
+    // EWMA (Exponential Weighted Moving Average) 平滑算法
+    const applyEWMA = (data, alpha = 0.4) => {
+        if (!data || data.length < 2) return data;
+        const smoothed = [data[0]]; // 第一个值保持不变
+        for (let i = 1; i < data.length; i++) {
+            smoothed[i] = alpha * data[i] + (1 - alpha) * smoothed[i - 1];
+        }
+        return smoothed;
+    };
+
     const generateDualSparklineSVG = (data1, data2, timestamps, width = 800, height = 200) => {
         if (!data1 || data1.length < 2 || !data2 || data2.length < 2) return '';
 
@@ -1380,6 +1390,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const chartW = width - pad.left - pad.right;
         const chartH = height - pad.top - pad.bottom;
 
+
         const getPoints = (data, max) => {
             const range = max === 0 ? 1 : max;
             return data.map((d, i) => {
@@ -1389,14 +1400,25 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         };
 
-        const max1 = Math.max(...data1);
-        const max2 = Math.max(...data2);
+        // 应用 EWMA 平滑（查询量用 0.4，响应时间用 0.3 更平滑）
+        const smoothed1 = applyEWMA(data1, 0.4);
+        const smoothed2 = applyEWMA(data2, 0.3);
 
-        const points1 = getPoints(data1, max1);
-        const points2 = getPoints(data2, max2);
+        const max1 = Math.max(...smoothed1);
+        const max2 = Math.max(...smoothed2);
 
+        // 原始数据路径（虚线显示）
+        const pointsRaw1 = getPoints(data1, max1);
+        const pointsRaw2 = getPoints(data2, max2);
+        const pathRaw1 = `M ${pointsRaw1.join(' L ')}`;
+        const pathRaw2 = `M ${pointsRaw2.join(' L ')}`;
+
+        // 平滑数据路径（实线显示）
+        const points1 = getPoints(smoothed1, max1);
+        const points2 = getPoints(smoothed2, max2);
         const path1 = `M ${points1.join(' L ')}`;
         const path2 = `M ${points2.join(' L ')}`;
+
 
         const area1 = `${path1} L ${pad.left + chartW},${pad.top + chartH} L ${pad.left},${pad.top + chartH} Z`;
         const area2 = `${path2} L ${pad.left + chartW},${pad.top + chartH} L ${pad.left},${pad.top + chartH} Z`;
@@ -1416,6 +1438,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 </g>
                 <path d="${area1}" fill="url(#grad-primary)" />
                 <path d="${area2}" fill="url(#grad-amber)" />
+                <!-- 原始数据（虚线，半透明） -->
+                <path d="${pathRaw1}" fill="none" stroke="var(--color-accent-primary)" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="3,3" vector-effect="non-scaling-stroke"/>
+                <path d="${pathRaw2}" fill="none" stroke="#f59e0b" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="3,3" vector-effect="non-scaling-stroke"/>
+                <!-- 平滑数据（实线，粗） -->
                 <path d="${path1}" fill="none" stroke="var(--color-accent-primary)" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
                 <path d="${path2}" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
                 <g fill="var(--color-text-secondary)" text-anchor="end" style="font-weight:500; font-size:11px;">
@@ -1433,7 +1459,27 @@ document.addEventListener('DOMContentLoaded', () => {
             </svg>`;
     };
 
-    const generateSparklineSVG = (data, isFloat = false, width = 300, height = 60) => { if (!data || data.length < 2) return ''; const numericData = data.map(Number); const maxVal = Math.max(...numericData); const minVal = Math.min(...numericData); const range = maxVal - minVal === 0 ? 1 : maxVal - minVal; const points = numericData.map((d, i) => { const x = (i / (data.length - 1)) * width; const y = height - ((d - minVal) / range) * height; return `${x.toFixed(2)},${y.toFixed(2)}`; }); const pathD = `M ${points.join(' L ')}`; const fillPathD = `${pathD} L ${width},${height} L 0,${height} Z`; return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><defs><linearGradient id="sparkline-gradient" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="var(--color-accent-primary)" stop-opacity="0.5" /><stop offset="100%" stop-color="var(--color-accent-primary)" stop-opacity="0" /></linearGradient></defs><path d="${fillPathD}" fill="url(#sparkline-gradient)" /><path d="${pathD}" class="sparkline-path" fill="none" /></svg>`; };
+    const generateSparklineSVG = (data, isFloat = false, width = 300, height = 60) => {
+        if (!data || data.length < 2) return '';
+
+        // 应用 EWMA 平滑
+        const smoothed = applyEWMA(data.map(Number), isFloat ? 0.3 : 0.4);
+
+        const maxVal = Math.max(...smoothed);
+        const minVal = Math.min(...smoothed);
+        const range = maxVal - minVal === 0 ? 1 : maxVal - minVal;
+
+        const points = smoothed.map((d, i) => {
+            const x = (i / (smoothed.length - 1)) * width;
+            const y = height - ((d - minVal) / range) * height;
+            return `${x.toFixed(2)},${y.toFixed(2)}`;
+        });
+
+        const pathD = `M ${points.join(' L ')}`;
+        const fillPathD = `${pathD} L ${width},${height} L 0,${height} Z`;
+
+        return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"><defs><linearGradient id="sparkline-gradient" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="var(--color-accent-primary)" stop-opacity="0.5" /><stop offset="100%" stop-color="var(--color-accent-primary)" stop-opacity="0" /></linearGradient></defs><path d="${fillPathD}" fill="url(#sparkline-gradient)" /><path d="${pathD}" class="sparkline-path" fill="none" /></svg>`;
+    };
 
     const renderTable = (tbody, data, renderRow, tableType) => {
         if (!tbody) return;
@@ -3334,11 +3380,25 @@ document.addEventListener('DOMContentLoaded', () => {
         setupGlowEffect();
         setupLazyLoading();
         setupSystemControlLazyLoading();
+
+        // -- [新增] -- 移动端预加载优化：提前加载常用模块数据
+        if (window.innerWidth <= CONSTANTS.MOBILE_BREAKPOINT) {
+            // 延迟500ms后开始预加载，避免阻塞首屏
+            setTimeout(() => {
+                // 预加载系统控制页的关键模块
+                Promise.allSettled([
+                    switchManager.loadStatus(),
+                    overridesManager.load(true),
+                    updateManager.refreshStatus(false)
+                ]).catch(() => { });
+            }, 500);
+        }
+
         handleResize();
         const initialHash = firstHash;
         const initialLink = document.querySelector(`.tab-link[href="${initialHash}"]`);
         if (initialLink) handleNavigation(initialLink);
-        // 首屏统一轻量刷新，所有重数据由懒加载或“刷新”按钮触发
+        // 首屏统一轻量刷新，所有重数据由懒加载或"刷新"按钮触发
         await updatePageData(false);
         if (document.fonts?.ready) await document.fonts.ready;
         requestAnimationFrame(() => { const activeLink = document.querySelector('.tab-link.active'); if (activeLink) updateNavSlider(activeLink); });
