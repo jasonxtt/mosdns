@@ -4,6 +4,75 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 魔改版本配置语法基本无差异，仅添加了一些插件，具体参见fakeip分流大法总教程中mosdns配置
 下载预编译文件、更新日志，详见: [release](https://github.com/yyysuo/mosdns/releases)
 
+在线初始化重置
+1：备份整个mosdns文件夹
+2：web上更新2进制
+3：在系统-配置管理部分
+MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mosdns
+远程配置下载 URL (ZIP)填入：https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns1204all.zip
+然后点击：应用远程配置，mosdns自动重启。
+4：在web ui上按自己的需求调整功能开关部分。
+5：在web ui上按mosdns配置说明填写SOCKS5/ECS IP部分和上游DNS设置/其它设置部分。
+
+
+离线全新安装
+1：这里下载对应自己架构的2进制，比如放入/cus/bin/
+https://github.com/yyysuo/mosdns/releases
+2：这里下载全量初始化配置，比如解析至/cus/mosdns/下
+https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns1204all.zip
+3：运行命令
+/cus/bin/mosdns start -c /cus/mosdns/config_custom.yaml -d /cus/mosdns
+4：在web ui上按自己的需求调整功能开关部分。
+5：在web ui上按mosdns配置说明填写SOCKS5/ECS IP部分和上游DNS设置/其它设置部分。
+
+
+mosdns配置说明：
+远程下载的mosdns配置为通用模板，需要在此处替换上游dns等相关信息，此处信息存储于运行目录的config_overrides.json中。
+原值 (查找)为配置模板中预设的初始值，新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。
+
+下面是模板一些必要替换的原值的说明
+udp://127.0.0.1:7874，替换为sing-box dns，用于对国外域名返回fakeip。
+114.114.114.114，替换为运营商dns，用于返回最优DNS结果。
+127.0.0.1:7777，替换为:7777，取消仅监听127.0.0.1限制
+127.0.0.1:8888，替换为:8888，取消仅监听127.0.0.1限制
+
+下面是模板一些可选替换的原值的说明
+udp://127.0.0.1:1053，替换为mihomo dns，不使用CNToMihomo可不配置。
+123.123.110.123，填写ipw.cn显示的ipv4地址或者本城市任意ipv4地址，传递给阿里私有doh。
+888888，替换为阿里私有doh Account ID。
+888888_88888，替换为阿里私有doh AccessKey ID。
+999999999，替换为阿里私有doh AccessKey Secret。
+
+2025年12月9日更新：
+在mosdns1204all配置的基础上升级
+1：备份整个mosdns文件夹
+2：web上更新2进制
+3：在系统-配置管理部分
+MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mosdns
+远程配置下载 URL (ZIP)填入：https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup1.zip
+然后点击：应用远程配置，mosdns自动重启。
+
+
+![mosdns解析流程](https://github.com/user-attachments/assets/c4b0c10c-7c99-4dbb-922c-64de1d566f98)
+
+<img width="1559" height="896" alt="image" src="https://github.com/user-attachments/assets/3a5d7f92-ee34-4612-a0c0-f97fbc2f2b59" />
+
+<img width="1545" height="852" alt="image" src="https://github.com/user-attachments/assets/4c8c72ae-636a-42e3-a645-059e4ca89f12" />
+
+<img width="1558" height="902" alt="image" src="https://github.com/user-attachments/assets/e60b8530-e9fb-4792-a711-6d5e03b11f4f" />
+
+<img width="1586" height="896" alt="image" src="https://github.com/user-attachments/assets/9236b9b5-6058-43fa-899a-a669c04372b5" />
+
+<img width="1551" height="899" alt="image" src="https://github.com/user-attachments/assets/80a53a63-957b-4b04-abe5-d0976972da11" />
+
+<img width="1558" height="904" alt="image" src="https://github.com/user-attachments/assets/2318f836-efe8-45aa-9dbd-b6faffaa11fa" />
+
+<img width="1568" height="900" alt="image" src="https://github.com/user-attachments/assets/1ff7afe5-abeb-413d-88e3-98481a28c8a9" />
+
+<img width="1564" height="906" alt="image" src="https://github.com/user-attachments/assets/83e7c8fe-7cbb-474a-8f71-a52fc1f8dba3" />
+
+<img width="1561" height="893" alt="image" src="https://github.com/user-attachments/assets/e91b7a6e-53e3-4be9-ae54-e750843292c6" />
+
 ## 版本与下载
 
 - 版本号规范（自 2025-11-06 起）
@@ -41,24 +110,4 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 - 自 2025-11-06 起，客户端仅使用 `releases/latest` 获取更新信息；不再回退到固定 tag（例如 `v5-ph-srs`）。
 - 发布侧无需再向固定 tag 上传资产；请使用版本化标签发布即可。
 - 
-![mosdns解析流程](https://github.com/user-attachments/assets/c4b0c10c-7c99-4dbb-922c-64de1d566f98)
-
-<img width="1559" height="896" alt="image" src="https://github.com/user-attachments/assets/3a5d7f92-ee34-4612-a0c0-f97fbc2f2b59" />
-
-<img width="1545" height="852" alt="image" src="https://github.com/user-attachments/assets/4c8c72ae-636a-42e3-a645-059e4ca89f12" />
-
-<img width="1558" height="902" alt="image" src="https://github.com/user-attachments/assets/e60b8530-e9fb-4792-a711-6d5e03b11f4f" />
-
-<img width="1586" height="896" alt="image" src="https://github.com/user-attachments/assets/9236b9b5-6058-43fa-899a-a669c04372b5" />
-
-<img width="1551" height="899" alt="image" src="https://github.com/user-attachments/assets/80a53a63-957b-4b04-abe5-d0976972da11" />
-
-<img width="1558" height="904" alt="image" src="https://github.com/user-attachments/assets/2318f836-efe8-45aa-9dbd-b6faffaa11fa" />
-
-<img width="1568" height="900" alt="image" src="https://github.com/user-attachments/assets/1ff7afe5-abeb-413d-88e3-98481a28c8a9" />
-
-<img width="1564" height="906" alt="image" src="https://github.com/user-attachments/assets/83e7c8fe-7cbb-474a-8f71-a52fc1f8dba3" />
-
-<img width="1561" height="893" alt="image" src="https://github.com/user-attachments/assets/e91b7a6e-53e3-4be9-ae54-e750843292c6" />
-
 
