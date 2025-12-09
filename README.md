@@ -62,7 +62,41 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 <img width="1590" height="885" alt="image" src="https://github.com/user-attachments/assets/62e34ea4-35ff-45cf-9d4b-ad4d05d9e9a2" />
 
 
+### 下面是如何查找新值、ecs ip、socks5的补充说明
 
+#### mosdns ui 系统-高级设置-上游DNS设置/其它设置部分：
+
+- **添加第1条数据**：原值固定写 `114.114.114.114`，新值为你的运营商dns。
+- **添加第2条数据**：原值固定写 `udp://127.0.0.1:7874`。
+  如果 sing-box 和 mosdns 在一个虚拟机上，新值去你 sing-box 的配置文件中去找，找到 `inbounds` 部分类似这样的配置：
+  ```json
+  "inbounds": [
+    {
+      "type": "direct",
+      "tag": "in-dns",
+      "sniff": false,
+      "listen": "::",
+      "listen_port": 7800
+    },
+  ```
+  那新值就填 `udp://127.0.0.1:7800`，注意你的端口和ip可能不一样。
+
+#### mosdns ui 系统-高级设置-SOCKS5/ECS IP部分：
+
+1. **第1条数据**：打开 https://ipw.cn/ ，如果有ipv4、ipv6的ip，就把ipv6 ip填入ECS IP框中；如果没有，就写ipv4地址。
+2. **第2条数据**：打开sing-box配置文件，找到类似如下的配置：
+   ```json
+       {
+         "type": "socks",
+         "listen": "0.0.0.0",
+         "listen_port": 7900,
+         "tcp_multi_path": false,
+         "udp_fragment": false,
+         "sniff": false,
+         "users": []
+       },
+   ```
+   如果 sing-box 和 mosdns 在一个虚拟机上，那么 socks5 代理就填 `127.0.0.1:7900`，注意你的端口和ip可能不一样。
 
 ![mosdns解析流程](https://github.com/user-attachments/assets/c4b0c10c-7c99-4dbb-922c-64de1d566f98)
 
