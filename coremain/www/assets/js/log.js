@@ -632,7 +632,8 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch3', name: '核心运行模式', tip: '切换后将执行一次“全新任务”刷新分流缓存。兼容模式性能更高，安全模式防泄露和劫持能力更强。', modes: { 'A': { name: '兼容模式', icon: 'fa-globe-americas' }, 'B': { name: '安全模式', icon: 'fa-shield-alt' } } },
             { tag: 'switch1', name: '请求屏蔽', desc: '对无解析结果的请求进行屏蔽', tip: '建议开启，避免无ipv4及ipv6结果的非必要DNS解析。', valueForOn: 'A' },
             { tag: 'switch5', name: '类型屏蔽', desc: '屏蔽 SOA、PTR、HTTPS 等请求', tip: '建议开启，可减少不必要的网络请求，提高效率。', valueForOn: 'A' },
-            { tag: 'switch4', name: '过期缓存', desc: '启用 Lazy Cache（乐观缓存）', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
+            { tag: 'switch4', name: '过期缓存1', desc: '启用国内缓存、国外缓存 (兼容)、国外缓存 (安全)', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
+            { tag: 'switch13', name: '过期缓存2', desc: '启用全部缓存 (兼容)、全部缓存 (安全)，缓存fakeip，直面客户端', tip: '建议开启，折腾时可临时关闭，排除干扰。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
             { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
             { tag: 'switch11', name: '使用阿里私有DOH', desc: '打开前在上游DNS设置中添加DOH配置。', tip: '不管开关是否打开，都会并发运营商dns。', valueForOn: 'A' },
@@ -2824,7 +2825,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </button>
                 </div>
 
-                <p class="module-desc">远程下载的mosdns配置为通用模板，需要在此处替换上游dns等相关信息，此处信息存储于运行目录的config_overrides.json中。原值为配置模板中预设的初始值，新值将替换初始值在mosdns启动时加载。</p>
+                <p class="module-desc">配置说明：https://github.com/yyysuo/mosdns</p>
                 
                 <div class="scrollable-table-container">
                     <table class="data-table" style="min-width: 650px;">
