@@ -77,6 +77,7 @@ import (
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher14"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher15"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher16"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/nftadd"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/aliapi"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/cname_remover"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/adguard"
