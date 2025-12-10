@@ -4,6 +4,17 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 下载: https://github.com/yyysuo/mosdns/releases  
 魔改版本配置语法基本无差异，仅添加了一些插件，具体参见fakeip分流大法总教程中mosdns配置 下载预编译文件、更新日志。
 
+### 2025年12月10日更新：
+
+**在12月9日配置的基础上升级**
+
+1. 备份整个mosdns文件夹
+2. web上更新2进制
+3. 在系统-配置管理部分  
+   MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如 `/cus/mosdns`  
+   远程配置下载 URL (ZIP)填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup2.zip`  
+   然后点击：应用远程配置，mosdns自动重启。
+4. 更新说明：https://github.com/yyysuo/firetv/blob/master/mosdnsconfigupdate/mosdns20251204allup2%E4%BD%BF%E7%94%A8%E6%96%B9%E6%B3%95.txt
 ### 2025年12月9日更新：
 
 **在mosdns1204all配置的基础上升级**
