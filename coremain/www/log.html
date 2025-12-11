@@ -713,6 +713,7 @@
                                 <a href="#" class="list-mgmt-link active" data-list-tag="whitelist">白名单</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="blocklist">黑名单</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="greylist">灰名单</a>
+                                <a href="#" class="list-mgmt-link" data-list-tag="realiplist">RealIP 域名</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="ddnslist">DDNS 域名</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="client_ip">客户端 IP</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="direct_ip">直连 IP</a>
@@ -739,6 +740,10 @@
                                     style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
                                     格式: &lt;域名&gt; &lt;IP或域名&gt;。例如: <code>example.com 1.2.3.4</code> 或
                                     <code>test.com example.com</code>。支持 full:, domain: 等匹配规则。
+                                </p>
+                                <p id="list-mgmt-realip-hint"
+                                    style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
+                                    在此名单中的域名解析结果将强制返回真实 IP (RealIP)，而不使用 FakeIP。适用于必须使用真实 IP 连接的域名。
                                 </p>
                             </div>
                         </div>
