@@ -143,6 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
         listContentTextArea: document.getElementById('list-content-textarea'),
         listContentInfo: document.getElementById('list-content-info'),
         listSaveBtn: document.getElementById('list-save-btn'),
+	listMgmtRealIPHint: document.getElementById('list-mgmt-realip-hint'),
         listMgmtClientIpHint: document.getElementById('list-mgmt-client-ip-hint'),
         listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
         listMgmtRewriteHint: document.getElementById('list-mgmt-rewrite-hint'),
@@ -2452,6 +2453,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'whitelist', name: '白名单' },
             { tag: 'blocklist', name: '黑名单' },
             { tag: 'greylist', name: '灰名单' },
+            { tag: 'realiplist', name: 'RealIP 域名' },
             { tag: 'ddnslist', name: 'DDNS 域名' },
             { tag: 'client_ip', name: '客户端 IP' },
             { tag: 'direct_ip', name: '直连 IP' },
@@ -2490,6 +2492,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (elements.listMgmtRewriteHint) {
                 elements.listMgmtRewriteHint.style.display = (tag === 'rewrite') ? 'block' : 'none';
+            }
+            if (elements.listMgmtRealIPHint) {
+                elements.listMgmtRealIPHint.style.display = (tag === 'realiplist') ? 'block' : 'none';
             }
 
             elements.listContentLoader.style.display = 'flex';
