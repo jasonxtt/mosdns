@@ -86,7 +86,7 @@ func handleSelfRestart(w http.ResponseWriter, r *http.Request) {
 
 		// --- [核心逻辑 2]：执行重启 ---
 		
-		pid := os.Getpid()
+		// pid := os.Getpid()
 		args := os.Args[1:]
 
 		argsStr := ""
