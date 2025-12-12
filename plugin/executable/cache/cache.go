@@ -23,7 +23,7 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"github.com/go-chi/chi/v5"
 	"github.com/klauspost/compress/gzip"
-	"github.com/miekg/dns" // <--- FIX: Corrected import path
+	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
@@ -50,14 +50,11 @@ const (
 	dumpMaximumBlockLength = 1 << 20 // 1M block. 8kb pre entry. Should be enough.
 )
 
-// --- START: MODIFICATION 1 of 2 ---
-// Added constants required by the new keyToString function.
 const (
 	adBit = 1 << iota
 	cdBit
 	doBit
 )
-// --- END: MODIFICATION 1 of 2 ---
 
 var _ sequence.RecursiveExecutable = (*Cache)(nil)
 
@@ -123,6 +120,10 @@ type Cache struct {
 	closeOnce    sync.Once
 	closeNotify  chan struct{}
 	updatedKey   atomic.Uint64
+
+	// dumpMu protects the dump file writing process to ensure thread safety
+	// between auto-dump loop and manual /save API call.
+	dumpMu sync.Mutex
 
 	queryTotal   prometheus.Counter
 	hitTotal     prometheus.Counter
@@ -375,6 +376,10 @@ func (c *Cache) startDumpLoop() {
 }
 
 func (c *Cache) dumpCache() error {
+	// Added lock to ensure thread safety between auto-dump and /save API
+	c.dumpMu.Lock()
+	defer c.dumpMu.Unlock()
+
 	if len(c.args.DumpFile) == 0 {
 		return nil
 	}
@@ -423,6 +428,27 @@ func (c *Cache) Api() *chi.Mux {
 			return
 		}
 	})
+
+	// Added /save endpoint to manually trigger saving cache to dump_file
+	r.Get("/save", func(w http.ResponseWriter, req *http.Request) {
+		if len(c.args.DumpFile) == 0 {
+			http.Error(w, "dump_file is not configured in config file", http.StatusBadRequest)
+			return
+		}
+
+		c.logger.Info("saving cache to disk via api")
+		// This is safe because dumpCache now uses a mutex
+		err := c.dumpCache()
+		if err != nil {
+			c.logger.Error("failed to save cache via api", zap.Error(err))
+			http.Error(w, fmt.Sprintf("failed to save cache: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(fmt.Sprintf("Cache successfully saved to %s\n", c.args.DumpFile)))
+	})
+
 	r.Post("/load_dump", func(w http.ResponseWriter, req *http.Request) {
 		if _, err := c.readDump(req.Body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -431,15 +457,12 @@ func (c *Cache) Api() *chi.Mux {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// 新增：以纯文本方式展示完整缓存记录
 	r.Get("/show", func(w http.ResponseWriter, req *http.Request) {
-		// 设为纯文本，并让浏览器 inline 打开，文件名 *.txt
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Disposition", `inline; filename="cache.txt"`)
 
 		now := time.Now()
 		err := c.backend.Range(func(k key, v *item, cacheExpirationTime time.Time) error {
-			// 如果不想跳过过期条目，可删掉下面 4 行
 			if cacheExpirationTime.Before(now) {
 				return nil
 			}
@@ -463,8 +486,6 @@ func (c *Cache) Api() *chi.Mux {
 	return r
 }
 
-// --- START: MODIFICATION 2 of 2 ---
-// Replaced the old keyToString function with the new, correct version.
 // keyToString 把底层 []byte key 转成人类可读的 "domain TYPE CLASS [flags] [ecs]"
 func keyToString(k key) string {
 	data := []byte(k)
@@ -494,7 +515,7 @@ func keyToString(k key) string {
 	}
 	qtype := binary.BigEndian.Uint16(data[offset : offset+2])
 	offset += 2
-	
+
 	// 3. 解析域名
 	if len(data) < offset+1 {
 		return fmt.Sprintf("invalid_key(len<4): %x", data)
@@ -532,14 +553,12 @@ func keyToString(k key) string {
 	// 6. 组装最终结果
 	return strings.Join(parts, " ")
 }
-// --- END: MODIFICATION 2 of 2 ---
 
 // dnsMsgToString 将 *dns.Msg 转为可读文本
 func dnsMsgToString(msg *dns.Msg) string {
 	if msg == nil {
 		return "<nil>\n"
 	}
-	// msg.String() 自带多行格式
 	return strings.TrimSpace(msg.String()) + "\n"
 }
 
