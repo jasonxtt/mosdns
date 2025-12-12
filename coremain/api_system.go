@@ -108,7 +108,7 @@ func handleSelfRestart(w http.ResponseWriter, r *http.Request) {
 
 		cmd := exec.Command("/bin/sh", "-c", shellCmd)
 		// 使用 Setsid 脱离父进程，替代 nohup
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		setProcessGroup(cmd)
 
 		if err := cmd.Start(); err != nil {
 			if lg := GlobalUpdateManager.logger(); lg != nil {
