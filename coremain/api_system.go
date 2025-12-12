@@ -97,7 +97,7 @@ func handleSelfRestart(w http.ResponseWriter, r *http.Request) {
 
 		// 构造重启命令: kill -15 触发优雅关闭 -> sleep 1 等待 -> 启动新进程
 // 将 kill 去掉，保留 sleep
-shellCmd := fmt.Sprintf("sleep 0.1 && \"%s\"%s >/dev/null 2>&1",
+shellCmd := fmt.Sprintf("sleep 0.5 && \"%s\"%s >/dev/null 2>&1",
     exe, argsStr)
 
 		fmt.Printf("\n[RESTART] Attempting graceful restart sequence...\n[RESTART] CMD: %s\n\n", shellCmd)
