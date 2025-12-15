@@ -898,7 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 ping(); // 立即执行第一次
                 this.restartProbeTimerId = setInterval(ping, 1000); // 随后每秒执行
-            }, 5000);
+            }, 6000);
         },
 
         setUpdateLoading(isLoading, targetBtn) {
