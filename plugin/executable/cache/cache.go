@@ -305,7 +305,8 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	cachedResp, lazyHit, domainSet := getRespFromCache(msgKey, backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
 	if lazyHit {
 		c.lazyHitTotal.Inc()
-		c.doLazyUpdate(msgKey, qCtx, next)
+		// [Optimization 1] 传入 backend，避免重复计算哈希
+		c.doLazyUpdate(msgKey, qCtx, next, backend)
 	}
 	if cachedResp != nil {
 		c.hitTotal.Inc()
@@ -329,10 +330,10 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	return err
 }
 
-func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next sequence.ChainWalker) {
+// [Optimization 1] 增加 backend 参数
+func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next sequence.ChainWalker, backend *cache.Cache[key, *item]) {
 	qCtxCopy := qCtx.Copy()
-	// [修改点] 预先定位分片，避免在闭包中重复计算
-	backend := c.getShard(msgKey)
+	// [Optimization 1] backend 已从外部传入，删除原先的 getShard 调用
 
 	lazyUpdateFunc := func() (any, error) {
 		defer c.lazyUpdateSF.Forget(msgKey)
@@ -356,7 +357,10 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 		c.logger.Debug("lazy cache updated", qCtx.InfoField())
 		return nil, nil
 	}
-	c.lazyUpdateSF.DoChan(msgKey, lazyUpdateFunc)
+	// [Optimization 2] 使用 go routine + Do 代替 DoChan，减少无用的 Channel 分配
+	go func() {
+		_, _, _ = c.lazyUpdateSF.Do(msgKey, lazyUpdateFunc)
+	}()
 }
 
 func (c *Cache) Close() error {
