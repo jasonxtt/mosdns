@@ -43,7 +43,10 @@ func Test_cachePlugin_Dump(t *testing.T) {
 
 	// Fill the cache
 	for i := 0; i < 32*dumpBlockSize; i++ {
-		c.backend.Store(key(strconv.Itoa(i)), v, hourLater)
+		k := strconv.Itoa(i)
+		// [修改点] 原代码是 c.backend.Store(...)
+		// 新代码：先获取分片，再存储
+		c.getShard(k).Store(key(k), v, hourLater)
 	}
 
 	buf := new(bytes.Buffer)
