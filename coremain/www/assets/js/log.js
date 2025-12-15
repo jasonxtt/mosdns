@@ -2747,12 +2747,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify({ url, dir })
                 });
 
-                ui.showToast(res.message || '更新成功，正在重启...', 'success');
+                ui.showToast(res.message || '更新成功，6秒后重启...', 'success');
 
                 // 等待重启
                 setTimeout(() => {
                     location.reload();
-                }, 4000);
+                }, 6000);
             } catch (error) {
                 console.error('Update failed:', error);
                 ui.showToast(`更新失败: ${error.message}`, 'error');
@@ -2961,7 +2961,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 // 发送 POST 请求
                 await api.fetch('/api/v1/overrides', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                ui.showToast('配置已保存，正在重启服务…', 'success');
+                ui.showToast('配置已保存，4秒后重启服务…', 'success');
                 try {
                     await api.fetch('/api/v1/system/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delay_ms: 300 }) });
                     // 重启后刷新页面
