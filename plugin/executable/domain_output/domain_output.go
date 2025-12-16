@@ -59,6 +59,9 @@ type domainOutput struct {
 	workerDoneChan  chan struct{}
 
 	domainSetURL string
+
+	// [新增修复] 确保 Close 只执行一次
+	closeOnce sync.Once
 }
 
 type WriteMode int
@@ -230,7 +233,6 @@ func (d *domainOutput) doWriteFiles(statsData map[string]int) {
 	// 写入 stat 文件
 	writeFile(d.fileStat, func(w io.Writer) error {
 		for domain, count := range statsData {
-			// [FIXED] Removed extra "+ \n" to prevent double newlines.
 			if _, err := w.Write([]byte(fmt.Sprintf("%010d %s\n", count, domain))); err != nil {
 				return err
 			}
@@ -241,7 +243,6 @@ func (d *domainOutput) doWriteFiles(statsData map[string]int) {
 	// 写入 rule 文件
 	writeFile(d.fileRule, func(w io.Writer) error {
 		for domain := range statsData {
-			// [FIXED] Removed extra "+ \n" to prevent double newlines.
 			if _, err := w.Write([]byte(fmt.Sprintf("full:%s\n", domain))); err != nil {
 				return err
 			}
@@ -285,7 +286,6 @@ func (d *domainOutput) loadFromFile() {
 	var domain string
 	var count int
 	for {
-		// fmt.Fscanf can handle extra newlines gracefully.
 		_, err := fmt.Fscanf(file, "%d %s\n", &count, &domain)
 		if err != nil {
 			break
@@ -314,7 +314,11 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]int) {
 	}
 
 	go func() {
-		req, err := http.NewRequest("POST", d.domainSetURL, bytes.NewReader(body))
+		// [优化] 添加超时 context，避免阻塞
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, "POST", d.domainSetURL, bytes.NewReader(body))
 		if err != nil {
 			fmt.Printf("[domain_output] create POST request error: %v\n", err)
 			return
@@ -322,6 +326,7 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]int) {
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
+			// 在关闭时连接被拒绝是正常的，因为服务器可能正在重启
 			fmt.Printf("[domain_output] POST to domain_set error: %v\n", err)
 			return
 		}
@@ -331,14 +336,18 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]int) {
 	}()
 }
 
+// Close closes the plugin.
+// [修复] 使用 sync.Once 确保 Close 只执行一次，防止 channel 重复关闭 panic
 func (d *domainOutput) Close() error {
-	fmt.Println("[domain_output] initiating shutdown...")
-	close(d.stopChan)
-	<-d.workerDoneChan
+	d.closeOnce.Do(func() {
+		fmt.Println("[domain_output] initiating shutdown...")
+		close(d.stopChan)
+		<-d.workerDoneChan
 
-	d.performWrite(WriteModeSave)
+		d.performWrite(WriteModeSave)
 
-	fmt.Println("[domain_output] shutdown complete.")
+		fmt.Println("[domain_output] shutdown complete.")
+	})
 	return nil
 }
 
@@ -369,12 +378,9 @@ func (d *domainOutput) Api() *chi.Mux {
 		w.Write([]byte("domain_output files saved."))
 	})
 
-	// GET /plugins/{tag}/show
-	// Directly reads from memory, sorts, and returns real-time statistics as plain text.
 	r.Get("/show", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text-plain; charset=utf-8")
 
-		// 1. Safely copy statistics from memory.
 		d.mu.Lock()
 		statsCopy := make(map[string]int, len(d.stats))
 		for domain, count := range d.stats {
@@ -382,7 +388,6 @@ func (d *domainOutput) Api() *chi.Mux {
 		}
 		d.mu.Unlock()
 
-		// 2. For better readability, sort the results (descending by count).
 		type domainStat struct {
 			Domain string
 			Count  int
@@ -395,9 +400,7 @@ func (d *domainOutput) Api() *chi.Mux {
 			return statsSlice[i].Count > statsSlice[j].Count
 		})
 
-		// 3. Format and write the sorted data to the HTTP response.
 		for _, stat := range statsSlice {
-			// %010d format is consistent with the original file_stat format.
 			if _, err := fmt.Fprintf(w, "%010d %s\n", stat.Count, stat.Domain); err != nil {
 				fmt.Printf("[domain_output] failed to write to http response: %v\n", err)
 				return
