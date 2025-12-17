@@ -3004,7 +3004,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('resize', debounce(handleResize, 150));
         elements.globalRefreshBtn?.addEventListener('click', () => updatePageData(true));
         setInterval(updateLastUpdated, 5000);
-        elements.autoRefreshForm.addEventListener('change', (e) => { if (['checkbox', 'number'].includes(e.target.type)) { const enabled = elements.autoRefreshToggle.checked; const interval = parseInt(elements.autoRefreshIntervalInput.value, 10); elements.autoRefreshIntervalInput.disabled = !enabled; autoRefreshManager.updateSettings(enabled, interval); } });
+        [elements.autoRefreshToggle, elements.autoRefreshIntervalInput].forEach(el => el && el.addEventListener('change', () => { const enabled = elements.autoRefreshToggle.checked; elements.autoRefreshIntervalInput.disabled = !enabled; autoRefreshManager.updateSettings(enabled, parseInt(elements.autoRefreshIntervalInput.value, 10) || 15); }));
         document.addEventListener('visibilitychange', () => document.hidden ? autoRefreshManager.stop() : autoRefreshManager.start());
 
         elements.toggleAuditBtn?.addEventListener('click', async (e) => {
