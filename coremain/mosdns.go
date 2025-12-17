@@ -361,6 +361,45 @@ func (m *Mosdns) initHttpMux() {
 	m.httpMux.Get("/rlog", redirectToLog)
 	m.httpMux.Get("/assets/*", staticAssetHandler)
 
+	// [新增逻辑] 自动扫描配置目录下 ui 目录的子文件夹并挂载为前端版本
+	uiBaseDir := filepath.Join(MainConfigBaseDir, "ui")
+	// 检查 ui 目录是否存在
+	if info, err := os.Stat(uiBaseDir); err == nil && info.IsDir() {
+		// 定义保留的路由名称，防止外部文件夹覆盖核心功能
+		reservedPaths := map[string]bool{
+			"graphic": true, "log": true, "plog": true, "rlog": true, "assets": true,
+			"debug": true, "metrics": true, "plugins": true, "api": true, "": true,
+		}
+
+		// 读取子目录
+		entries, err := os.ReadDir(uiBaseDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					dirName := entry.Name()
+
+					// 检查是否与保留名称冲突
+					if reservedPaths[dirName] {
+						m.logger.Warn("skipping external ui directory due to naming conflict with reserved route",
+							zap.String("name", dirName))
+						continue
+					}
+
+					// 挂载目录
+					routePath := "/" + dirName
+					fsPath := filepath.Join(uiBaseDir, dirName)
+
+					// 使用 http.StripPrefix 确保访问子路径时(如 /v1/index.html)能映射到正确的文件
+					m.httpMux.Mount(routePath, http.StripPrefix(routePath, http.FileServer(http.Dir(fsPath))))
+
+					m.logger.Info("auto-mounted external ui version",
+						zap.String("route", routePath),
+						zap.String("path", fsPath))
+				}
+			}
+		}
+	}
+
 	// Register pprof.
 	m.httpMux.Route("/debug/pprof", func(r chi.Router) {
 		r.Get("/*", pprof.Index)
