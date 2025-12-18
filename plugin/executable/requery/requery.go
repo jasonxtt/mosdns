@@ -114,7 +114,7 @@ type Config struct {
 
 type DomainProcessing struct {
 	SourceFiles []SourceFile `json:"source_files"`
-	OutputFile  string       `json:"output_file"`
+    // OutputFile 已删除
 }
 
 type SourceFile struct {
@@ -137,6 +137,7 @@ type ExecutionSettings struct {
 	QueriesPerSecond int    `json:"queries_per_second"`
 	ResolverAddress  string `json:"resolver_address"`
 	URLCallDelayMS   int    `json:"url_call_delay_ms"`
+	DateRangeDays    int    `json:"date_range_days"` // 新增配置项：日期范围
 }
 
 type Status struct {
@@ -203,11 +204,11 @@ func (p *Requery) runTask(ctx context.Context) {
 		return
 	}
 
-	// Step 2 & 3: Consolidate domains and write backup
-	log.Println("[requery] Step 2 & 3: Merging domains and creating backup...")
-	domains, err := p.mergeAndBackupDomains(ctx)
+	// Step 2 & 3: Consolidate domains (Merge only, no backup read/write)
+	log.Println("[requery] Step 2 & 3: Merging domains from source files...")
+	domains, err := p.mergeAndFilterDomains(ctx)
 	if err != nil {
-		p.setFailedState("failed during domain merge and backup: %v", err)
+		p.setFailedState("failed during domain merge: %v", err)
 		return
 	}
 	if len(domains) == 0 {
@@ -247,20 +248,22 @@ func (p *Requery) runTask(ctx context.Context) {
 	log.Println("[requery] Task completed successfully.")
 }
 
-// mergeAndBackupDomains handles steps 2 and 3 of the workflow with accumulator logic.
-func (p *Requery) mergeAndBackupDomains(ctx context.Context) ([]string, error) {
-	existingDomains, err := p.readDomainsFromFile(p.config.DomainProcessing.OutputFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read existing backup file %s: %w", p.config.DomainProcessing.OutputFile, err)
-	}
-	domainSet := make(map[string]struct{}, len(existingDomains))
-	for _, domain := range existingDomains {
-		domainSet[domain] = struct{}{}
-	}
-	log.Printf("[requery] Loaded %d unique domains from existing backup file.", len(domainSet))
-
+// mergeAndFilterDomains handles reading source files, parsing formats, and filtering by date.
+// It no longer reads or writes the backup file.
+func (p *Requery) mergeAndFilterDomains(ctx context.Context) ([]string, error) {
+	// 初始化域名集合，用于去重
+	domainSet := make(map[string]struct{})
+	
+	// 准备正则：匹配 full: 开头
 	domainPattern := regexp.MustCompile(`^full:(.+)`)
-	newDomainsFound := 0
+
+	// 获取日期过滤配置，默认为 30 天
+	limitDays := p.config.ExecutionSettings.DateRangeDays
+	if limitDays <= 0 {
+		limitDays = 30
+	}
+
+	processedCount := 0
 
 	for _, sourceFile := range p.config.DomainProcessing.SourceFiles {
 		select {
@@ -281,20 +284,52 @@ func (p *Requery) mergeAndBackupDomains(ctx context.Context) ([]string, error) {
 
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
-			matches := domainPattern.FindStringSubmatch(scanner.Text())
-			if len(matches) > 1 {
-				domain := strings.TrimSpace(matches[1])
-				if _, exists := domainSet[domain]; !exists {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+
+			// 判断格式
+			if strings.HasPrefix(line, "full:") {
+				// 格式 1: full:moxie.foxnews.com
+				matches := domainPattern.FindStringSubmatch(line)
+				if len(matches) > 1 {
+					domain := strings.TrimSpace(matches[1])
 					domainSet[domain] = struct{}{}
-					newDomainsFound++
+				}
+			} else if len(line) > 0 && line[0] >= '0' && line[0] <= '9' {
+				// 格式 2: 0000000004 2025-12-18 moxie.foxnews.com (数字开头)
+				// 解析字段：[0]=次数 [1]=日期 [2]=域名
+				fields := strings.Fields(line)
+				if len(fields) >= 3 {
+					dateStr := fields[1]
+					domain := fields[2]
+
+					// 检查日期是否过期
+					parsedTime, err := time.Parse("2006-01-02", dateStr)
+					if err == nil {
+						// 计算距离今天有多少天
+						// 如果 time.Since(parsedTime) > limitDays * 24h，则过期
+						daysDiff := time.Since(parsedTime).Hours() / 24
+						if daysDiff <= float64(limitDays) {
+							domainSet[domain] = struct{}{}
+						}
+						// 如果超过天数，则忽略不加载
+					} else {
+						// 日期解析失败，保守起见如果不是合法日期则忽略，或者选择记录日志
+						// 这里选择忽略该条目
+					}
 				}
 			}
+			processedCount++
 		}
+
 		if err := scanner.Err(); err != nil {
 			return nil, fmt.Errorf("error reading source file %s: %w", sourceFile.Path, err)
 		}
 	}
-	log.Printf("[requery] Found %d new domains from source files. Total unique domains: %d.", newDomainsFound, len(domainSet))
+	
+	log.Printf("[requery] Processed source files. Total unique domains loaded (within %d days): %d.", limitDays, len(domainSet))
 
 	if len(domainSet) == 0 {
 		return []string{}, nil
@@ -305,11 +340,7 @@ func (p *Requery) mergeAndBackupDomains(ctx context.Context) ([]string, error) {
 		domains = append(domains, domain)
 	}
 
-	backupData := strings.Join(domains, "\n")
-	if err := os.WriteFile(p.config.DomainProcessing.OutputFile, []byte(backupData), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write updated backup file %s: %w", p.config.DomainProcessing.OutputFile, err)
-	}
-	log.Printf("[requery] Successfully wrote %d total domains to backup file.", len(domains))
+	// 此时不再写入 output_file (requery_backup.txt)
 	
 	return domains, nil
 }
@@ -374,9 +405,6 @@ func (p *Requery) api() *chi.Mux {
 	r.Post("/cancel", p.handleCancelTask)
 	r.Post("/scheduler/config", p.handleUpdateScheduler)
 	r.Get("/stats/source_file_counts", p.handleGetSourceFileCounts)
-	r.Get("/stats/backup_file_count", p.handleGetBackupFileCount)
-	r.Post("/clear_backup", p.handleClearBackupFile)
-
 	return r
 }
 
@@ -423,16 +451,29 @@ func (p *Requery) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Requery) handleUpdateScheduler(w http.ResponseWriter, r *http.Request) {
-	var newSchedulerConf SchedulerConfig
-    if err := json.NewDecoder(r.Body).Decode(&newSchedulerConf); err != nil {
-        p.jsonError(w, "Invalid JSON body", http.StatusBadRequest)
-        return
-    }
+	// [修改] 定义一个扩展的结构体来接收包含 date_range_days 的 JSON
+	type SchedulerUpdatePayload struct {
+		SchedulerConfig       // 嵌入原有的 SchedulerConfig 字段 (Enabled, StartDatetime, IntervalMinutes)
+		DateRangeDays   int   `json:"date_range_days"` // 新增字段
+	}
+
+	var payload SchedulerUpdatePayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		p.jsonError(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.config.Scheduler = newSchedulerConf
+	// [修改] 分别更新 Scheduler 和 ExecutionSettings
+	p.config.Scheduler = payload.SchedulerConfig
+	
+	// 只有当传入了有效天数时才更新 (防止意外归零)
+	if payload.DateRangeDays > 0 {
+		p.config.ExecutionSettings.DateRangeDays = payload.DateRangeDays
+	}
+
 	if err := p.saveConfigUnlocked(); err != nil {
 		p.jsonError(w, "Failed to save updated config", http.StatusInternalServerError)
 		return
@@ -441,26 +482,8 @@ func (p *Requery) handleUpdateScheduler(w http.ResponseWriter, r *http.Request) 
 	p.jsonResponse(w, map[string]string{"status": "success", "message": "Scheduler configuration updated successfully."}, http.StatusOK)
 }
 
-func (p *Requery) handleClearBackupFile(w http.ResponseWriter, r *http.Request) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.config.Status.TaskState == "running" {
-		p.jsonError(w, "Cannot clear backup file while a task is running.", http.StatusConflict)
-		return
-	}
-
-	filePath := p.config.DomainProcessing.OutputFile
-	if err := os.Truncate(filePath, 0); err != nil {
-		if !os.IsNotExist(err) {
-			p.jsonError(w, "Failed to clear backup file: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	log.Printf("[requery] Backup file %s has been cleared via API.", filePath)
-	p.jsonResponse(w, map[string]string{"status": "success", "message": "Backup file has been cleared."}, http.StatusOK)
-}
+// [已删除] handleClearBackupFile
+// [已删除] handleGetBackupFileCount
 
 func (p *Requery) handleGetSourceFileCounts(w http.ResponseWriter, r *http.Request) {
 	log.Println("[requery] API: Getting source file counts...")
@@ -506,43 +529,6 @@ func (p *Requery) handleGetSourceFileCounts(w http.ResponseWriter, r *http.Reque
 	p.jsonResponse(w, map[string]any{"status": "success", "data": counts}, http.StatusOK)
 }
 
-func (p *Requery) handleGetBackupFileCount(w http.ResponseWriter, r *http.Request) {
-	p.mu.RLock()
-	filePath := p.config.DomainProcessing.OutputFile
-	p.mu.RUnlock()
-
-	// if p.config.Status.TaskState == "running" {
-	// 	p.jsonError(w, "Cannot get count while a task is running.", http.StatusConflict)
-	// 	return
-	// }
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			p.jsonResponse(w, map[string]any{"status": "success", "count": 0}, http.StatusOK)
-			return
-		}
-		p.jsonError(w, "Failed to open backup file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer file.Close()
-
-	count := 0
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		if len(strings.TrimSpace(scanner.Text())) > 0 {
-			count++
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		p.jsonError(w, "Error while scanning backup file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	p.jsonResponse(w, map[string]any{"status": "success", "count": count}, http.StatusOK)
-}
-
 // ----------------------------------------------------------------------------
 // 5. Helper and Utility Functions
 // ----------------------------------------------------------------------------
@@ -556,6 +542,8 @@ func (p *Requery) loadConfig() error {
 		if os.IsNotExist(err) {
 			log.Printf("[requery] config file %s not found, initializing with default empty config.", p.filePath)
 			p.config = &Config{Status: Status{TaskState: "idle"}}
+			// 设置默认值
+			p.config.ExecutionSettings.DateRangeDays = 30
 			return p.saveConfigUnlocked()
 		}
 		return err
@@ -567,14 +555,31 @@ func (p *Requery) loadConfig() error {
 	}
 	p.config = &cfg
 
+	// 检查并设置默认值，如果有变更则需要回写配置
+	configChanged := false
+
 	if p.config.Status.TaskState == "" {
 		p.config.Status.TaskState = "idle"
+		configChanged = true // 严格来说这只是内存状态修正，但也可以保存
 	}
 	if p.config.ExecutionSettings.URLCallDelayMS == 0 {
 		p.config.ExecutionSettings.URLCallDelayMS = 50 // Default value
+		configChanged = true
 	}
 	if p.config.ExecutionSettings.QueriesPerSecond == 0 {
 		p.config.ExecutionSettings.QueriesPerSecond = 100 // Default value
+		configChanged = true
+	}
+	if p.config.ExecutionSettings.DateRangeDays <= 0 {
+		p.config.ExecutionSettings.DateRangeDays = 30 // Default value (Requirement 4)
+		configChanged = true
+	}
+
+	if configChanged {
+		log.Println("[requery] Configuration defaults applied, saving updated config.")
+		if err := p.saveConfigUnlocked(); err != nil {
+			return fmt.Errorf("failed to save config after applying defaults: %w", err)
+		}
 	}
 
 	return nil
@@ -717,27 +722,6 @@ func (p *Requery) callURLs(ctx context.Context, urls []string) error {
 		}
 	}
 	return nil
-}
-
-func (p *Requery) readDomainsFromFile(filePath string) ([]string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	defer file.Close()
-
-	var domains []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			domains = append(domains, line)
-		}
-	}
-	return domains, scanner.Err()
 }
 
 func (p *Requery) setFailedState(format string, args ...any) {
