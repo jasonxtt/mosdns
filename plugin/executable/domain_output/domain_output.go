@@ -1,6 +1,7 @@
 package domain_output
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,10 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
+	"github.com/go-chi/chi/v5"
 )
 
 const PluginType = "domain_output"
@@ -40,6 +41,12 @@ type Args struct {
 	DomainSetURL   string `yaml:"domain_set_url"`
 }
 
+// statEntry 存储域名统计信息：次数和最后访问日期
+type statEntry struct {
+	Count    int
+	LastDate string
+}
+
 type domainOutput struct {
 	fileStat       string
 	fileRule       string
@@ -49,10 +56,14 @@ type domainOutput struct {
 	maxEntries     int
 	dumpInterval   time.Duration
 
-	stats        map[string]int
+	// 修改 stats 类型以存储更多信息
+	stats        map[string]*statEntry
 	mu           sync.Mutex
 	totalCount   int
 	entryCounter int
+
+	// 缓存当前日期字符串，避免在高频 Exec 中频繁调用 time.Now().Format
+	currentDate string
 
 	writeSignalChan chan struct{}
 	stopChan        chan struct{}
@@ -85,11 +96,12 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		appendedString:  cfg.AppendedString,
 		maxEntries:      cfg.MaxEntries,
 		dumpInterval:    time.Duration(cfg.DumpInterval) * time.Second,
-		stats:           make(map[string]int),
+		stats:           make(map[string]*statEntry),
 		writeSignalChan: make(chan struct{}, 1),
 		stopChan:        make(chan struct{}),
 		workerDoneChan:  make(chan struct{}),
 		domainSetURL:    cfg.DomainSetURL,
+		currentDate:     time.Now().Format("2006-01-02"), // 初始化当前日期
 	}
 	d.loadFromFile()
 
@@ -123,10 +135,11 @@ func QuickSetup(_ sequence.BQ, s string) (any, error) {
 		pattern:         pattern,
 		maxEntries:      maxEntries,
 		dumpInterval:    time.Duration(dumpInterval) * time.Second,
-		stats:           make(map[string]int),
+		stats:           make(map[string]*statEntry),
 		writeSignalChan: make(chan struct{}, 1),
 		stopChan:        make(chan struct{}),
 		workerDoneChan:  make(chan struct{}),
+		currentDate:     time.Now().Format("2006-01-02"),
 	}
 	if len(params) == 7 {
 		d.domainSetURL = params[6]
@@ -142,7 +155,22 @@ func (d *domainOutput) Exec(ctx context.Context, qCtx *query_context.Context) er
 	d.mu.Lock()
 	for _, question := range qCtx.Q().Question {
 		domain := strings.TrimSuffix(question.Name, ".")
-		d.stats[domain]++
+		
+		entry, exists := d.stats[domain]
+		if !exists {
+			entry = &statEntry{
+				Count:    0,
+				LastDate: d.currentDate,
+			}
+			d.stats[domain] = entry
+		}
+		
+		entry.Count++
+		// 只有日期变化时才更新，字符串赋值开销很小
+		if entry.LastDate != d.currentDate {
+			entry.LastDate = d.currentDate
+		}
+
 		d.totalCount++
 		d.entryCounter++
 	}
@@ -178,13 +206,18 @@ func (d *domainOutput) startWorker() {
 func (d *domainOutput) performWrite(mode WriteMode) {
 	d.mu.Lock()
 
-	var statsToDump map[string]int
+	// 在每次写入操作前更新当前日期缓存，这样 Exec 中就不需要频繁调用 time.Now()
+	// 误差最多为一个 dumpInterval，对于“最近一次访问日期”是完全可接受的
+	d.currentDate = time.Now().Format("2006-01-02")
+
+	var statsToDump map[string]*statEntry
 
 	switch mode {
 	case WriteModePeriodic:
-		statsToDump = make(map[string]int, len(d.stats))
+		statsToDump = make(map[string]*statEntry, len(d.stats))
 		for k, v := range d.stats {
-			statsToDump[k] = v
+			// 复制一份数据快照
+			statsToDump[k] = &statEntry{Count: v.Count, LastDate: v.LastDate}
 		}
 		if len(statsToDump) == 0 {
 			d.mu.Unlock()
@@ -192,14 +225,14 @@ func (d *domainOutput) performWrite(mode WriteMode) {
 		}
 		d.entryCounter = 0
 	case WriteModeFlush:
-		statsToDump = make(map[string]int)
-		d.stats = make(map[string]int)
+		statsToDump = make(map[string]*statEntry)
+		d.stats = make(map[string]*statEntry)
 		d.totalCount = 0
 		d.entryCounter = 0
 	case WriteModeSave:
-		statsToDump = make(map[string]int, len(d.stats))
+		statsToDump = make(map[string]*statEntry, len(d.stats))
 		for k, v := range d.stats {
-			statsToDump[k] = v
+			statsToDump[k] = &statEntry{Count: v.Count, LastDate: v.LastDate}
 		}
 		d.entryCounter = 0
 	}
@@ -213,7 +246,7 @@ func (d *domainOutput) performWrite(mode WriteMode) {
 	}
 }
 
-func (d *domainOutput) doWriteFiles(statsData map[string]int) {
+func (d *domainOutput) doWriteFiles(statsData map[string]*statEntry) {
 	writeFile := func(filePath string, writeContent func(io.Writer) error) {
 		if filePath == "" {
 			return
@@ -230,10 +263,27 @@ func (d *domainOutput) doWriteFiles(statsData map[string]int) {
 		}
 	}
 
-	// 写入 stat 文件
+	// 准备排序数据
+	type sortItem struct {
+		Domain string
+		Entry  *statEntry
+	}
+	sortedItems := make([]sortItem, 0, len(statsData))
+	for k, v := range statsData {
+		sortedItems = append(sortedItems, sortItem{Domain: k, Entry: v})
+	}
+
+	// 按总访问次数从大到小排序
+	sort.Slice(sortedItems, func(i, j int) bool {
+		return sortedItems[i].Entry.Count > sortedItems[j].Entry.Count
+	})
+
+	// 写入 stat 文件 (3列: 次数 日期 域名)
 	writeFile(d.fileStat, func(w io.Writer) error {
-		for domain, count := range statsData {
-			if _, err := w.Write([]byte(fmt.Sprintf("%010d %s\n", count, domain))); err != nil {
+		for _, item := range sortedItems {
+			// 格式: 0000000100 2023-10-01 example.com
+			line := fmt.Sprintf("%010d %s %s\n", item.Entry.Count, item.Entry.LastDate, item.Domain)
+			if _, err := w.Write([]byte(line)); err != nil {
 				return err
 			}
 		}
@@ -242,8 +292,9 @@ func (d *domainOutput) doWriteFiles(statsData map[string]int) {
 
 	// 写入 rule 文件
 	writeFile(d.fileRule, func(w io.Writer) error {
-		for domain := range statsData {
-			if _, err := w.Write([]byte(fmt.Sprintf("full:%s\n", domain))); err != nil {
+		// rule 文件不需要特别排序，但复用 sortedItems 可以保持一致性
+		for _, item := range sortedItems {
+			if _, err := w.Write([]byte(fmt.Sprintf("full:%s\n", item.Domain))); err != nil {
 				return err
 			}
 		}
@@ -260,8 +311,8 @@ func (d *domainOutput) doWriteFiles(statsData map[string]int) {
 				return err
 			}
 		}
-		for domain := range statsData {
-			line := strings.ReplaceAll(d.pattern, "DOMAIN", domain)
+		for _, item := range sortedItems {
+			line := strings.ReplaceAll(d.pattern, "DOMAIN", item.Domain)
 			if _, err := w.Write([]byte(line + "\n")); err != nil {
 				return err
 			}
@@ -283,20 +334,56 @@ func (d *domainOutput) loadFromFile() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	var domain string
-	var count int
-	for {
-		_, err := fmt.Fscanf(file, "%d %s\n", &count, &domain)
-		if err != nil {
-			break
+	scanner := bufio.NewScanner(file)
+	today := time.Now().Format("2006-01-02")
+	loadedCount := 0
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
 		}
-		d.stats[domain] = count
+		fields := strings.Fields(line)
+		
+		var count int
+		var domain string
+		var date string
+
+		// 兼容逻辑
+		if len(fields) == 2 {
+			// 旧格式: count domain
+			c, err := strconv.Atoi(fields[0])
+			if err != nil {
+				continue
+			}
+			count = c
+			domain = fields[1]
+			date = today // 旧格式默认使用今天
+		} else if len(fields) >= 3 {
+			// 新格式: count date domain
+			c, err := strconv.Atoi(fields[0])
+			if err != nil {
+				continue
+			}
+			count = c
+			date = fields[1]
+			domain = fields[2]
+		} else {
+			continue
+		}
+
+		d.stats[domain] = &statEntry{
+			Count:    count,
+			LastDate: date,
+		}
 		d.totalCount += count
+		loadedCount++
 	}
-	fmt.Printf("[domain_output] loaded %d entries from %s\n", len(d.stats), d.fileStat)
+
+	fmt.Printf("[domain_output] loaded %d entries from %s\n", loadedCount, d.fileStat)
 }
 
-func (d *domainOutput) pushToDomainSet(statsData map[string]int) {
+func (d *domainOutput) pushToDomainSet(statsData map[string]*statEntry) {
 	if d.domainSetURL == "" {
 		return
 	}
@@ -382,26 +469,29 @@ func (d *domainOutput) Api() *chi.Mux {
 		w.Header().Set("Content-Type", "text-plain; charset=utf-8")
 
 		d.mu.Lock()
-		statsCopy := make(map[string]int, len(d.stats))
-		for domain, count := range d.stats {
-			statsCopy[domain] = count
-		}
-		d.mu.Unlock()
-
+		// 复制数据用于展示
 		type domainStat struct {
 			Domain string
 			Count  int
+			Date   string
 		}
-		statsSlice := make([]domainStat, 0, len(statsCopy))
-		for domain, count := range statsCopy {
-			statsSlice = append(statsSlice, domainStat{Domain: domain, Count: count})
+		statsSlice := make([]domainStat, 0, len(d.stats))
+		for domain, entry := range d.stats {
+			statsSlice = append(statsSlice, domainStat{
+				Domain: domain,
+				Count:  entry.Count,
+				Date:   entry.LastDate,
+			})
 		}
+		d.mu.Unlock()
+
+		// 排序
 		sort.Slice(statsSlice, func(i, j int) bool {
 			return statsSlice[i].Count > statsSlice[j].Count
 		})
 
 		for _, stat := range statsSlice {
-			if _, err := fmt.Fprintf(w, "%010d %s\n", stat.Count, stat.Domain); err != nil {
+			if _, err := fmt.Fprintf(w, "%010d %s %s\n", stat.Count, stat.Date, stat.Domain); err != nil {
 				fmt.Printf("[domain_output] failed to write to http response: %v\n", err)
 				return
 			}
