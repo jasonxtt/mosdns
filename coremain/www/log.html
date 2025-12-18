@@ -1007,7 +1007,11 @@
                                             data-list-title="无 V6 域名" id="nov6-domain-count">--</a></td>
                                 </tr>
                                 <tr>
-                                    <td><strong>全部域名 (备份总表)</strong></td>
+                                    <td><strong>域名排行</strong></td>
+                                    <td class="text-right"><a href="#" class="control-item-link" data-list-type="total" data-list-title="域名排行" id="total-domain-count">--</a></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>刷新域名</strong></td>
                                     <td class="text-right"><span id="backup-domain-count">--</span></td>
                                 </tr>
                             </tbody>
@@ -1073,6 +1077,14 @@
 
                             <label for="requery-interval-input" class="field-label">间隔 (分钟)</label>
                             <input type="number" id="requery-interval-input" min="1">
+                            <label for="requery-date-range-input" class="field-label" title="仅刷新最近 N 天内查询过的域名">
+                                域名刷新天数
+                                <!-- 图标已移动到文字右侧，并将 margin-right 改为了 margin-left -->
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style="margin-left: 4px; color: var(--color-text-secondary); vertical-align: middle;">
+                                    <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/>
+                                </svg>
+                            </label>
+                            <input type="number" id="requery-date-range-input" min="1" value="30" style="text-align: center;">
                         </div>
                     </form>
 
@@ -1084,8 +1096,6 @@
                                 data-default-text="保存分流规则"><span>保存分流规则</span></button>
                             <button id="clear-shunt-rules-btn" class="button danger"
                                 data-default-text="清空分流规则"><span>清空分流规则</span></button>
-                            <button id="requery-clear-backup-btn" class="button danger"
-                                data-default-text="清空全量备份"><span>清空全量备份</span></button>
                         </div>
                     </div>
                 </div>
