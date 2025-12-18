@@ -4,6 +4,26 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 下载: https://github.com/yyysuo/mosdns/releases  
 魔改版本配置语法基本无差异，仅添加了一些插件，具体参见fakeip分流大法总教程中mosdns配置 下载预编译文件、更新日志。
 
+### 2025年12月18日更新：
+
+**在 mosdns20251204allup2 配置的基础上升级**
+
+1. 备份整个 mosdns 文件夹
+2. web 上更新2进制
+3. 在系统-配置管理部分  
+   MosDNS 本地工作目录填入自己的 mosdns 配置所在目录，比如 `/cus/mosdns`  
+   远程配置下载 URL (ZIP) 填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup3_1.zip`  
+   然后点击：应用远程配置，mosdns 自动重启。
+4. 在系统-数据管理-刷新分流缓存，点击：`开始全新任务` 按钮，此步骤将迁移域名记录至 `top_domains.txt`
+5. 等刷新分流缓存任务跑完  
+   MosDNS 本地工作目录填入自己的 mosdns 配置所在目录，比如 `/cus/mosdns`  
+   远程配置下载 URL (ZIP) 填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup3_2.zip`  
+   然后点击：应用远程配置，mosdns 自动重启。
+6. 手动删除 `/cus/mosdns/gen/requery_backup.txt`
+7. 更新说明：
+   * 此次更新不会覆盖个性化配置
+   * 功能变更：刷新分流缓存添加域名刷新天数，只刷新指定天数内有过访问记录的域名，使总域名表中低频访问域名逐渐不参与域名匹配与缓存。
+   
 ### 2025年12月10日更新：
 
 **在12月9日配置的基础上升级**
