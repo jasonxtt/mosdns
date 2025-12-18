@@ -100,8 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
         requerySchedulerForm: document.getElementById('requery-scheduler-form'),
         requerySchedulerToggle: document.getElementById('requery-scheduler-toggle'),
         requeryIntervalInput: document.getElementById('requery-interval-input'),
+        requeryDateRangeInput: document.getElementById('requery-date-range-input'),
         requeryStartDatetimeInput: document.getElementById('requery-start-datetime-input'),
-        requeryClearBackupBtn: document.getElementById('requery-clear-backup-btn'),
         requeryDomainStatsTbody: document.getElementById('requery-domain-stats-tbody'),
         requeryRefreshStatsBtn: document.getElementById('requery-refresh-stats-btn'),
         updateModule: document.getElementById('update-module'),
@@ -125,6 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
         realipDomainCount: document.getElementById('realip-domain-count'),
         nov4DomainCount: document.getElementById('nov4-domain-count'),
         nov6DomainCount: document.getElementById('nov6-domain-count'),
+        totalDomainCount: document.getElementById('total-domain-count'), 
         backupDomainCount: document.getElementById('backup-domain-count'),
 
         saveShuntRulesBtn: document.getElementById('save-shunt-rules-btn'),
@@ -170,8 +171,6 @@ document.addEventListener('DOMContentLoaded', () => {
         trigger: () => api.fetch(`/plugins/requery/trigger`, { method: 'POST' }),
         cancel: () => api.fetch(`/plugins/requery/cancel`, { method: 'POST' }),
         updateSchedulerConfig: (config) => api.fetch(`/plugins/requery/scheduler/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) }),
-        clearBackup: () => api.fetch(`/plugins/requery/clear_backup`, { method: 'POST' }),
-        getBackupCount: (signal) => api.fetch(`/plugins/requery/stats/backup_file_count`, { signal }),
     };
 
     const updateApi = {
@@ -358,8 +357,10 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.requeryCancelBtn.addEventListener('click', this.handleCancel.bind(this));
             elements.requerySchedulerToggle.addEventListener('change', this.handleUpdateSchedulerConfig.bind(this));
             elements.requeryIntervalInput.addEventListener('change', debouncedUpdate);
+            if (elements.requeryDateRangeInput) {
+                elements.requeryDateRangeInput.addEventListener('change', debouncedUpdate);
+            }
             elements.requeryStartDatetimeInput.addEventListener('change', debouncedUpdate);
-            elements.requeryClearBackupBtn.addEventListener('click', this.handleClearBackup.bind(this));
         },
 
         async updateStatus(signal) {
@@ -437,6 +438,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 elements.requeryLastRun.textContent = '从未执行';
             }
 
+            if (config.execution_settings && elements.requeryDateRangeInput) {
+                elements.requeryDateRangeInput.value = config.execution_settings.date_range_days || 30;
+            }
+
             elements.requerySchedulerToggle.checked = config.scheduler.enabled;
             elements.requeryIntervalInput.value = config.scheduler.interval_minutes;
             elements.requeryStartDatetimeInput.value = formatDateForInputLocal(config.scheduler.start_datetime);
@@ -500,6 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isEnabled = elements.requerySchedulerToggle.checked;
             const interval = parseInt(elements.requeryIntervalInput.value, 10);
             const localTime = elements.requeryStartDatetimeInput.value;
+            const dateRangeDays = parseInt(elements.requeryDateRangeInput.value, 10);
 
             if (isEnabled && (!interval || interval <= 0)) {
                 ui.showToast('启用定时任务时，必须设置一个有效的间隔分钟数', 'error');
@@ -516,10 +522,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            if (!dateRangeDays || dateRangeDays < 1) {
+                ui.showToast('域名刷新天数必须大于 0', 'error');
+                return;
+            }
+
             const newConfig = {
                 enabled: isEnabled,
                 interval_minutes: interval || 0,
                 start_datetime: utcTime,
+                date_range_days: dateRangeDays
             };
 
             try {
@@ -527,24 +539,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 ui.showToast('定时任务配置已更新', 'success');
                 if (state.requery.config) {
                     state.requery.config.scheduler = newConfig;
+                    if (!state.requery.config.execution_settings) state.requery.config.execution_settings = {};
+                    state.requery.config.execution_settings.date_range_days = dateRangeDays;
+
                     this.render();
                 }
             } catch (error) { }
         },
 
-        async handleClearBackup(e) {
-            if (confirm('【重要操作】确定要清空全量域名备份文件吗？\n这将删除所有累积的历史域名，下次任务将只处理源文件中的域名。')) {
-                const btn = e.currentTarget;
-                ui.setLoading(btn, true);
-                try {
-                    await requeryApi.clearBackup();
-                    ui.showToast('全量备份文件已清空', 'success');
-                } catch (error) { }
-                finally {
-                    ui.setLoading(btn, false);
-                }
-            }
-        },
         async updateDomainCounts(signal) {
             const btn = elements.requeryRefreshStatsBtn;
             if (btn) {
@@ -2144,12 +2146,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return count;
     }
 
-    async function updateDomainListStats(signal) {
+async function updateDomainListStats(signal) {
         const listMap = {
             fakeip: { element: elements.fakeipDomainCount, endpoint: '/plugins/my_fakeiplist/show' },
             realip: { element: elements.realipDomainCount, endpoint: '/plugins/my_realiplist/show' },
             nov4: { element: elements.nov4DomainCount, endpoint: '/plugins/my_nov4list/show' },
             nov6: { element: elements.nov6DomainCount, endpoint: '/plugins/my_nov6list/show' },
+            total: { element: elements.totalDomainCount, endpoint: '/plugins/top_domains/show' },
         };
 
         // 顺序 + 流式计数，进一步降低内存占用与主线程卡顿
@@ -2164,14 +2167,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const backupRes = await requeryApi.getBackupCount(signal);
-            if (backupRes && backupRes.status === 'success') {
-                elements.backupDomainCount.textContent = `${backupRes.count.toLocaleString()} 条`;
+            const status = state.requery.status;
+            
+            if (status && typeof status.last_run_domain_count === 'number') {
+                elements.backupDomainCount.textContent = `${status.last_run_domain_count.toLocaleString()} 条`;
+                elements.backupDomainCount.style.color = 'var(--color-accent-primary)';
             } else {
-                elements.backupDomainCount.textContent = '获取失败';
+                elements.backupDomainCount.textContent = '--';
             }
         } catch (e) {
-            if (e.name !== 'AbortError') elements.backupDomainCount.textContent = '获取失败';
+            console.error("更新统计显示出错:", e);
+            elements.backupDomainCount.textContent = '--';
         }
     }
 
@@ -2253,12 +2259,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 <table class="mobile-card-layout">
                     <thead>
                         <tr>
-                            <th style="width: 25%;">序号 / ID</th>
-                            <th>域名 / 值</th>
+                            <th style="width: 30%;">访问次数</th>
+                            <th style="width: 30%;">最近访问/加入日期</th>
+                            <th>域名</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${entries.map(item => `<tr><td>${item.id}</td><td>${item.value}</td></tr>`).join('')}
+                       ${entries.map(item => `
+                           <tr>
+                               <td>${item.count}</td>
+                               <td>${item.date}</td>
+                               <td>${item.domain}</td>
+                           </tr>
+                       `).join('')}
                     </tbody>
                 </table>`;
         }
@@ -2285,7 +2298,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     fakeip: '/plugins/my_fakeiplist/show',
                     realip: '/plugins/my_realiplist/show',
                     nov4: '/plugins/my_nov4list/show',
-                    nov6: '/plugins/my_nov6list/show'
+                    nov6: '/plugins/my_nov6list/show',
+                    total: '/plugins/top_domains/show'
                 };
                 const endpoint = endpointMap[listType];
                 if (!endpoint) throw new Error('Unknown list type');
@@ -2307,9 +2321,35 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 const lines = text.trim() ? text.trim().split('\n') : [];
                 state.dataView.rawEntries = lines.map((line, index) => {
-                    const parts = line.trim().match(/^(\S+)\s+(.*)$/);
-                    if (parts) return { id: parts[1], value: parts[2] };
-                    return { id: index + 1, value: line };
+                    const trimmed = line.trim();
+                    // 尝试匹配 3 列格式: Count Date Domain
+                    // 例如: 0000000002 2025-12-18 domain.com
+                    const match3 = trimmed.match(/^(\S+)\s+(\S+)\s+(.*)$/);
+                    
+                    if (match3) {
+                        return { 
+                            count: match3[1], 
+                            date: match3[2], 
+                            domain: match3[3] 
+                        };
+                    }
+                
+                    // 回退匹配 2 列格式: Count Domain
+                    const match2 = trimmed.match(/^(\S+)\s+(.*)$/);
+                    if (match2) {
+                        return { 
+                            count: match2[1], 
+                            date: '-', // 旧格式没有日期，显示占位符
+                            domain: match2[2] 
+                        };
+                    }
+                
+                    // 无法解析的情况
+                    return { 
+                        count: index + 1, 
+                        date: '-', 
+                        domain: trimmed 
+                    };
                 });
             }
 
@@ -3275,7 +3315,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
             } else {
                 state.dataView.filteredEntries = state.dataView.rawEntries.filter(item =>
-                    item.value.toLowerCase().includes(searchTerm)
+                    (item.domain && item.domain.toLowerCase().includes(searchTerm)) ||
+                    (item.date && item.date.toLowerCase().includes(searchTerm))
                 );
             }
             renderDataViewTable(state.dataView.filteredEntries, state.dataView.viewType);
