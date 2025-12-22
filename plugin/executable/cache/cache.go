@@ -33,9 +33,6 @@ import (
 
 const (
 	PluginType = "cache"
-	// shardCount 定义分片数量。必须是 2 的幂，这里设定为 256。
-	// 这意味着会有 256 个独立的锁和 Map，极大降低高并发下的锁竞争。
-	shardCount = 256
 )
 
 func init() {
@@ -116,19 +113,16 @@ func (a *Args) init() {
 }
 
 type Cache struct {
-	args   *Args
-	logger *zap.Logger
-
-	// [修改点] 这里原来是 backend *cache.Cache
-	// 现在改为数组，存储 256 个独立的分片 cache
-	shards [shardCount]*cache.Cache[key, *item]
-
+	args         *Args
+	logger       *zap.Logger
+	backend      *cache.Cache[key, *item]
 	lazyUpdateSF singleflight.Group
 	closeOnce    sync.Once
 	closeNotify  chan struct{}
 	updatedKey   atomic.Uint64
 
-	// [修改点] 新增 dumpMu 锁，保护文件写入操作
+	// dumpMu protects the dump file writing process to ensure thread safety
+	// between auto-dump loop and manual /save API call.
 	dumpMu sync.Mutex
 
 	queryTotal   prometheus.Counter
@@ -190,52 +184,38 @@ func NewCache(args *Args, opts Opts) *Cache {
 		excludeNets = append(excludeNets, ipnet)
 	}
 
-	// [修改点] 初始化 Cache 结构体
+	backend := cache.New[key, *item](cache.Opts{Size: args.Size})
+	lb := map[string]string{"tag": opts.MetricsTag}
 	p := &Cache{
 		args:        args,
 		logger:      logger,
+		backend:     backend,
 		closeNotify: make(chan struct{}),
 		excludeNets: excludeNets,
-	}
 
-	// [修改点] 初始化所有分片
-	// 将总容量 Size 平均分配给每个分片，防止总容量超标
-	shardSize := args.Size / shardCount
-	if shardSize < 4 {
-		shardSize = 4 // 最小保护
+		queryTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "query_total",
+			Help:        "The total number of processed queries",
+			ConstLabels: lb,
+		}),
+		hitTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "hit_total",
+			Help:        "The total number of queries that hit the cache",
+			ConstLabels: lb,
+		}),
+		lazyHitTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "lazy_hit_total",
+			Help:        "The total number of queries that hit the expired cache",
+			ConstLabels: lb,
+		}),
+		size: prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name:        "size_current",
+			Help:        "Current cache size in records",
+			ConstLabels: lb,
+		}, func() float64 {
+			return float64(backend.Len())
+		}),
 	}
-	for i := 0; i < shardCount; i++ {
-		p.shards[i] = cache.New[key, *item](cache.Opts{Size: shardSize})
-	}
-
-	lb := map[string]string{"tag": opts.MetricsTag}
-	p.queryTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name:        "query_total",
-		Help:        "The total number of processed queries",
-		ConstLabels: lb,
-	})
-	p.hitTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name:        "hit_total",
-		Help:        "The total number of queries that hit the cache",
-		ConstLabels: lb,
-	})
-	p.lazyHitTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name:        "lazy_hit_total",
-		Help:        "The total number of queries that hit the expired cache",
-		ConstLabels: lb,
-	})
-	p.size = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name:        "size_current",
-		Help:        "Current cache size in records",
-		ConstLabels: lb,
-	}, func() float64 {
-		// [修改点] 计算 Size 时需要累加所有分片
-		var total int
-		for i := 0; i < shardCount; i++ {
-			total += p.shards[i].Len()
-		}
-		return float64(total)
-	})
 
 	if err := p.loadDump(); err != nil {
 		p.logger.Error("failed to load cache dump", zap.Error(err))
@@ -243,18 +223,6 @@ func NewCache(args *Args, opts Opts) *Cache {
 	p.startDumpLoop()
 
 	return p
-}
-
-// [新增] getShard 使用 FNV-1a 算法计算 Key 的哈希值，并返回对应的分片
-// 这是一个极快且分布均匀的非加密哈希算法。
-func (c *Cache) getShard(k string) *cache.Cache[key, *item] {
-	var h uint32 = 2166136261
-	for i := 0; i < len(k); i++ {
-		h ^= uint32(k[i])
-		h *= 16777619
-	}
-	// 使用位运算取模 (因为 shardCount 是 256，即 2^8)
-	return c.shards[h&(shardCount-1)]
 }
 
 func (c *Cache) containsExcluded(msg *dns.Msg) bool {
@@ -299,14 +267,10 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 		return next.ExecNext(ctx, qCtx)
 	}
 
-	// [修改点] 先定位分片 backend
-	backend := c.getShard(msgKey)
-
-	cachedResp, lazyHit, domainSet := getRespFromCache(msgKey, backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
+	cachedResp, lazyHit, domainSet := getRespFromCache(msgKey, c.backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
 	if lazyHit {
 		c.lazyHitTotal.Inc()
-		// [Optimization 1] 传入 backend，避免重复计算哈希
-		c.doLazyUpdate(msgKey, qCtx, next, backend)
+		c.doLazyUpdate(msgKey, qCtx, next)
 	}
 	if cachedResp != nil {
 		c.hitTotal.Inc()
@@ -322,19 +286,15 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	r := qCtx.R()
 
 	if r != nil && !c.containsExcluded(r) {
-		// [修改点] 传入定位好的分片
-		saveRespToCache(msgKey, qCtx, backend, c.args.LazyCacheTTL)
+		saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL)
 		c.updatedKey.Add(1)
 	}
 
 	return err
 }
 
-// [Optimization 1] 增加 backend 参数
-func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next sequence.ChainWalker, backend *cache.Cache[key, *item]) {
+func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next sequence.ChainWalker) {
 	qCtxCopy := qCtx.Copy()
-	// [Optimization 1] backend 已从外部传入，删除原先的 getShard 调用
-
 	lazyUpdateFunc := func() (any, error) {
 		defer c.lazyUpdateSF.Forget(msgKey)
 		qCtx := qCtxCopy
@@ -350,17 +310,13 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 
 		r := qCtx.R()
 		if r != nil && !c.containsExcluded(r) {
-			// [修改点] 传入分片
-			saveRespToCache(msgKey, qCtx, backend, c.args.LazyCacheTTL)
+			saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL)
 			c.updatedKey.Add(1)
 		}
 		c.logger.Debug("lazy cache updated", qCtx.InfoField())
 		return nil, nil
 	}
-	// [Optimization 2] 使用 go routine + Do 代替 DoChan，减少无用的 Channel 分配
-	go func() {
-		_, _, _ = c.lazyUpdateSF.Do(msgKey, lazyUpdateFunc)
-	}()
+	c.lazyUpdateSF.DoChan(msgKey, lazyUpdateFunc)
 }
 
 func (c *Cache) Close() error {
@@ -370,11 +326,7 @@ func (c *Cache) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.closeNotify)
 	})
-	// [修改点] 关闭所有分片
-	for i := 0; i < shardCount; i++ {
-		_ = c.shards[i].Close()
-	}
-	return nil
+	return c.backend.Close()
 }
 
 func (c *Cache) loadDump() error {
@@ -424,7 +376,7 @@ func (c *Cache) startDumpLoop() {
 }
 
 func (c *Cache) dumpCache() error {
-	// [修改点] 加锁，防止自动 Dump 和手动 /save 冲突
+	// Added lock to ensure thread safety between auto-dump and /save API
 	c.dumpMu.Lock()
 	defer c.dumpMu.Unlock()
 
@@ -450,13 +402,14 @@ func (c *Cache) Api() *chi.Mux {
 
 	r.Get("/flush", func(w http.ResponseWriter, req *http.Request) {
 		c.logger.Info("flushing cache via api")
-		// [修改点] Flush 所有分片
-		for i := 0; i < shardCount; i++ {
-			c.shards[i].Flush()
-		}
+		// 1. Flush the in-memory cache.
+		c.backend.Flush()
 
+		// 2. Reset the updated key counter, as the cache is now empty.
 		c.updatedKey.Store(0)
 
+		// 3. Trigger a background dump to persist the empty state to the disk.
+		//    This is done asynchronously to avoid blocking the HTTP response.
 		go func() {
 			if err := c.dumpCache(); err != nil {
 				c.logger.Error("failed to dump cache after flushing", zap.Error(err))
@@ -476,7 +429,7 @@ func (c *Cache) Api() *chi.Mux {
 		}
 	})
 
-	// [新增] /save 接口：手动保存缓存到磁盘
+	// Added /save endpoint to manually trigger saving cache to dump_file
 	r.Get("/save", func(w http.ResponseWriter, req *http.Request) {
 		if len(c.args.DumpFile) == 0 {
 			http.Error(w, "dump_file is not configured in config file", http.StatusBadRequest)
@@ -484,7 +437,7 @@ func (c *Cache) Api() *chi.Mux {
 		}
 
 		c.logger.Info("saving cache to disk via api")
-		// 复用 dumpCache (已加锁)
+		// This is safe because dumpCache now uses a mutex
 		err := c.dumpCache()
 		if err != nil {
 			c.logger.Error("failed to save cache via api", zap.Error(err))
@@ -509,39 +462,37 @@ func (c *Cache) Api() *chi.Mux {
 		w.Header().Set("Content-Disposition", `inline; filename="cache.txt"`)
 
 		now := time.Now()
-		// [修改点] 遍历所有 256 个分片
-		for i := 0; i < shardCount; i++ {
-			err := c.shards[i].Range(func(k key, v *item, cacheExpirationTime time.Time) error {
-				if cacheExpirationTime.Before(now) {
-					return nil
-				}
-
-				fmt.Fprintf(w, "----- Cache Entry -----\n")
-				fmt.Fprintf(w, "Key:           %s\n", keyToString(k))
-				if v.domainSet != "" {
-					fmt.Fprintf(w, "DomainSet:     %s\n", v.domainSet)
-				}
-				fmt.Fprintf(w, "StoredTime:    %s\n", v.storedTime.Format(time.RFC3339))
-				fmt.Fprintf(w, "MsgExpire:     %s\n", v.expirationTime.Format(time.RFC3339))
-				fmt.Fprintf(w, "CacheExpire:   %s\n", cacheExpirationTime.Format(time.RFC3339))
-				fmt.Fprintf(w, "DNS Message:\n%s\n", dnsMsgToString(v.resp))
+		err := c.backend.Range(func(k key, v *item, cacheExpirationTime time.Time) error {
+			if cacheExpirationTime.Before(now) {
 				return nil
-			})
-			if err != nil {
-				c.logger.Warn("failed to iterate shard during show", zap.Int("shard", i), zap.Error(err))
-				// 继续遍历其他分片，不直接中断
 			}
+
+			fmt.Fprintf(w, "----- Cache Entry -----\n")
+			fmt.Fprintf(w, "Key:           %s\n", keyToString(k))
+			if v.domainSet != "" {
+				fmt.Fprintf(w, "DomainSet:     %s\n", v.domainSet)
+			}
+			fmt.Fprintf(w, "StoredTime:    %s\n", v.storedTime.Format(time.RFC3339))
+			fmt.Fprintf(w, "MsgExpire:     %s\n", v.expirationTime.Format(time.RFC3339))
+			fmt.Fprintf(w, "CacheExpire:   %s\n", cacheExpirationTime.Format(time.RFC3339))
+			fmt.Fprintf(w, "DNS Message:\n%s\n", dnsMsgToString(v.resp))
+			return nil
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to enumerate cache: %v", err), http.StatusInternalServerError)
 		}
 	})
 
 	return r
 }
 
+// keyToString 把底层 []byte key 转成人类可读的 "domain TYPE CLASS [flags] [ecs]"
 func keyToString(k key) string {
 	data := []byte(k)
 	offset := 0
 	var parts []string
 
+	// 1. 解析标志位 (1 byte)
 	if len(data) < offset+1 {
 		return fmt.Sprintf("invalid_key(len<1): %x", data)
 	}
@@ -558,12 +509,14 @@ func keyToString(k key) string {
 		flags = append(flags, "DO")
 	}
 
+	// 2. 解析查询类型 (2 bytes)
 	if len(data) < offset+2 {
 		return fmt.Sprintf("invalid_key(len<3): %x", data)
 	}
 	qtype := binary.BigEndian.Uint16(data[offset : offset+2])
 	offset += 2
 
+	// 3. 解析域名
 	if len(data) < offset+1 {
 		return fmt.Sprintf("invalid_key(len<4): %x", data)
 	}
@@ -573,14 +526,16 @@ func keyToString(k key) string {
 		return fmt.Sprintf("invalid_key(incomplete_name): %x", data)
 	}
 	qname := string(data[offset : offset+nameLen])
-	parts = append(parts, qname, dns.TypeToString[qtype], "IN")
+	parts = append(parts, qname, dns.TypeToString[qtype], "IN") // 假设 Class 总是 IN
 	offset += nameLen
 
+	// 4. 添加解析出的标志位到结果中
 	if len(flags) > 0 {
 		parts = append(parts, fmt.Sprintf("[flags:%s]", strings.Join(flags, ",")))
 	}
 
-	if offset < len(data) {
+	// 5. 解析 ECS (可选)
+	if offset < len(data) { // 如果键中还有剩余数据，那必定是 ECS
 		if len(data) < offset+1 {
 			parts = append(parts, "[ecs:invalid_len_byte]")
 		} else {
@@ -595,9 +550,11 @@ func keyToString(k key) string {
 		}
 	}
 
+	// 6. 组装最终结果
 	return strings.Join(parts, " ")
 }
 
+// dnsMsgToString 将 *dns.Msg 转为可读文本
 func dnsMsgToString(msg *dns.Msg) string {
 	if msg == nil {
 		return "<nil>\n"
@@ -652,14 +609,9 @@ func (c *Cache) writeDump(w io.Writer) (int, error) {
 		}
 		return nil
 	}
-
-	// [修改点] 遍历所有分片，汇总写入同一个文件
-	for i := 0; i < shardCount; i++ {
-		if err := c.shards[i].Range(rangeFunc); err != nil {
-			return en, err
-		}
+	if err := c.backend.Range(rangeFunc); err != nil {
+		return en, err
 	}
-
 	if len(block.GetEntries()) > 0 {
 		if err := writeBlock(); err != nil {
 			return en, err
@@ -680,7 +632,6 @@ func (c *Cache) readDump(r io.Reader) (int, error) {
 
 	var errReadHeaderEOF = errors.New("")
 	readBlock := func() error {
-		// [恢复] 使用 pool.GetBuf 减少内存分配
 		h := pool.GetBuf(8)
 		defer pool.ReleaseBuf(h)
 		_, err := io.ReadFull(gr, *h)
@@ -720,10 +671,7 @@ func (c *Cache) readDump(r io.Reader) (int, error) {
 				expirationTime: msgExpTime,
 				domainSet:      entry.GetDomainSet(),
 			}
-			// [修改点] 读取时重新计算分片，确保数据落入正确的桶
-			// 这里的 key(entry.GetKey()) 转换成了 string 类型，然后 getShard 计算 Hash
-			backend := c.getShard(string(entry.GetKey()))
-			backend.Store(key(entry.GetKey()), i, cacheExpTime)
+			c.backend.Store(key(entry.GetKey()), i, cacheExpTime)
 		}
 		return nil
 	}
