@@ -241,8 +241,8 @@ func (d *domainOutput) performWrite(mode WriteMode) {
 
 	d.doWriteFiles(statsToDump)
 
-	if len(statsToDump) > 0 || mode == WriteModeFlush || mode == WriteModeSave {
-		d.pushToDomainSet(statsToDump)
+	if len(statsToDump) > 0 || mode == WriteModeFlush {
+	    d.pushToDomainSet(statsToDump)
 	}
 }
 
