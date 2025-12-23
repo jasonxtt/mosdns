@@ -150,7 +150,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 			<-closeSignal
 
 			// Stop the audit worker gracefully.
-			GlobalAuditCollector.StopWorker()
+			GlobalAuditCollector.Stop()
 
 			m.logger.Info("starting shutdown sequences")
 			for tag, p := range m.plugins {
@@ -160,6 +160,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 				}
 			}
 			m.logger.Info("all plugins were closed")
+            GlobalAuditCollector.StopWorker()
 		}()
 	})
 
