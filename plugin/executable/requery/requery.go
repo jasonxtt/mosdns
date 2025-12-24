@@ -348,13 +348,20 @@ func (p *Requery) mergeAndFilterDomains(ctx context.Context) ([]string, error) {
 // resendDNSQueries handles step 6 of the workflow.
 func (p *Requery) resendDNSQueries(ctx context.Context, domains []string) error {
 	var wg sync.WaitGroup
-	ticker := time.NewTicker(time.Second / time.Duration(p.config.ExecutionSettings.QueriesPerSecond))
+	// 确保 QueriesPerSecond 大于 0，防止除以零 panic
+	qps := p.config.ExecutionSettings.QueriesPerSecond
+	if qps <= 0 {
+		qps = 100
+	}
+	ticker := time.NewTicker(time.Second / time.Duration(qps))
 	defer ticker.Stop()
 	
 	dnsClient := new(dns.Client)
+	// 设置超时，防止请求挂起
+	dnsClient.Timeout = 2 * time.Second 
 
 	for i := 0; i < len(domains); i++ {
-		domain := domains[i]
+		rawDomainStr := domains[i] // 这里的字符串可能带后缀，也可能不带
 		
 		select {
 		case <-ticker.C:
@@ -364,23 +371,61 @@ func (p *Requery) resendDNSQueries(ctx context.Context, domains []string) error 
 			return ctx.Err()
 		}
 
+		// --- 新增逻辑：解析域名和 Flags ---
+		// 1. 分割字符串
+		parts := strings.Split(rawDomainStr, "|")
+		realDomain := parts[0] // 始终是域名部分
+		
+		// 2. 解析 Flags
+		var useAD, useCD, useDO bool
+		if len(parts) > 1 {
+			for _, flag := range parts[1:] {
+				switch flag {
+				case "AD":
+					useAD = true
+				case "CD":
+					useCD = true
+				case "DO":
+					useDO = true
+				}
+			}
+		}
+
+		// 3. 辅助函数：创建带正确 Flag 的消息
+		createMsg := func(qtype uint16) *dns.Msg {
+			m := new(dns.Msg)
+			m.SetQuestion(dns.Fqdn(realDomain), qtype)
+			
+			// 还原原始请求的 Flags
+			m.AuthenticatedData = useAD
+			m.CheckingDisabled = useCD
+			if useDO {
+				m.SetEdns0(4096, true) 
+			}
+			// 建议开启递归查询，模拟普通客户端行为
+			m.RecursionDesired = true 
+			return m
+		}
+		// ----------------------------------
+
 		wg.Add(2)
 		
-		go func(qtype uint16) {
+		// 发送 A 记录
+		go func() {
 			defer wg.Done()
-			msg := new(dns.Msg)
-			msg.SetQuestion(dns.Fqdn(domain), qtype)
+			msg := createMsg(dns.TypeA)
 			_, _, _ = dnsClient.ExchangeContext(ctx, msg, p.config.ExecutionSettings.ResolverAddress)
-		}(dns.TypeA)
+		}()
 		
-		go func(qtype uint16) {
+		// 发送 AAAA 记录
+		go func() {
 			defer wg.Done()
-			msg := new(dns.Msg)
-			msg.SetQuestion(dns.Fqdn(domain), qtype)
+			msg := createMsg(dns.TypeAAAA)
 			_, _, _ = dnsClient.ExchangeContext(ctx, msg, p.config.ExecutionSettings.ResolverAddress)
-		}(dns.TypeAAAA)
+		}()
 
 		newProcessed := atomic.AddInt64(&p.config.Status.Progress.Processed, 1)
+		// 减少保存频率，优化 IO
 		if newProcessed%100 == 0 || int(newProcessed) == len(domains) {
 			p.mu.Lock()
 			_ = p.saveConfigUnlocked()
