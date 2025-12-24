@@ -153,20 +153,43 @@ func QuickSetup(_ sequence.BQ, s string) (any, error) {
 
 func (d *domainOutput) Exec(ctx context.Context, qCtx *query_context.Context) error {
 	d.mu.Lock()
-	for _, question := range qCtx.Q().Question {
-		domain := strings.TrimSuffix(question.Name, ".")
+	
+	// --- 新增逻辑：根据 Flag 生成后缀 ---
+	q := qCtx.Q()
+	var flags []string
+	// 严格按照 RFC 6840 和 mosdns cache 的逻辑记录关键 Flag
+	if q.AuthenticatedData {
+		flags = append(flags, "AD")
+	}
+	if q.CheckingDisabled {
+		flags = append(flags, "CD")
+	}
+	// 检查 EDNS0 DO 位
+	if opt := q.IsEdns0(); opt != nil && opt.Do() {
+		flags = append(flags, "DO")
+	}
+
+	suffix := ""
+	if len(flags) > 0 {
+		suffix = "|" + strings.Join(flags, "|") // 例如: "|AD|DO"
+	}
+	// ----------------------------------
+
+	for _, question := range q.Question {
+		rawDomain := strings.TrimSuffix(question.Name, ".")
+		// Key 变为: 域名 + 后缀 (如果无 flag，suffix 为空，Key 就是域名本身)
+		storageKey := rawDomain + suffix
 		
-		entry, exists := d.stats[domain]
+		entry, exists := d.stats[storageKey]
 		if !exists {
 			entry = &statEntry{
 				Count:    0,
 				LastDate: d.currentDate,
 			}
-			d.stats[domain] = entry
+			d.stats[storageKey] = entry
 		}
 		
 		entry.Count++
-		// 只有日期变化时才更新，字符串赋值开销很小
 		if entry.LastDate != d.currentDate {
 			entry.LastDate = d.currentDate
 		}
@@ -251,7 +274,8 @@ func (d *domainOutput) doWriteFiles(statsData map[string]*statEntry) {
 		if filePath == "" {
 			return
 		}
-		file, err := os.Create(filePath)
+		// 使用 O_TRUNC 确保文件被重写
+		file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			fmt.Printf("[domain_output] failed to create file %s: %v\n", filePath, err)
 			return
@@ -265,12 +289,12 @@ func (d *domainOutput) doWriteFiles(statsData map[string]*statEntry) {
 
 	// 准备排序数据
 	type sortItem struct {
-		Domain string
-		Entry  *statEntry
+		Key   string 
+		Entry *statEntry
 	}
 	sortedItems := make([]sortItem, 0, len(statsData))
 	for k, v := range statsData {
-		sortedItems = append(sortedItems, sortItem{Domain: k, Entry: v})
+		sortedItems = append(sortedItems, sortItem{Key: k, Entry: v})
 	}
 
 	// 按总访问次数从大到小排序
@@ -278,11 +302,11 @@ func (d *domainOutput) doWriteFiles(statsData map[string]*statEntry) {
 		return sortedItems[i].Entry.Count > sortedItems[j].Entry.Count
 	})
 
-	// 写入 stat 文件 (3列: 次数 日期 域名)
+	// 1. 写入 stat 文件 (包含 Flags 信息，供 requery 精准还原)
+	// 这里的 item.Key 可能是 "google.com" 也可能是 "google.com|AD"
 	writeFile(d.fileStat, func(w io.Writer) error {
 		for _, item := range sortedItems {
-			// 格式: 0000000100 2023-10-01 example.com
-			line := fmt.Sprintf("%010d %s %s\n", item.Entry.Count, item.Entry.LastDate, item.Domain)
+			line := fmt.Sprintf("%010d %s %s\n", item.Entry.Count, item.Entry.LastDate, item.Key)
 			if _, err := w.Write([]byte(line)); err != nil {
 				return err
 			}
@@ -290,18 +314,27 @@ func (d *domainOutput) doWriteFiles(statsData map[string]*statEntry) {
 		return nil
 	})
 
-	// 写入 rule 文件
+	// 2. 写入 rule 文件 (必须剔除 Flags 并去重，保持 full:example.com 纯净)
 	writeFile(d.fileRule, func(w io.Writer) error {
-		// rule 文件不需要特别排序，但复用 sortedItems 可以保持一致性
+		seen := make(map[string]bool) // 用于去重
+
 		for _, item := range sortedItems {
-			if _, err := w.Write([]byte(fmt.Sprintf("full:%s\n", item.Domain))); err != nil {
+			// 分割 Key，只取域名部分。如果是 "google.com"，parts[0] 就是它自己。
+			domainOnly := strings.Split(item.Key, "|")[0]
+
+			if seen[domainOnly] {
+				continue
+			}
+			seen[domainOnly] = true
+
+			if _, err := w.Write([]byte(fmt.Sprintf("full:%s\n", domainOnly))); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
 
-	// 写入 genRule 文件
+	// 3. 写入 genRule 文件 (同样剔除 Flags)
 	writeFile(d.genRule, func(w io.Writer) error {
 		if d.pattern == "" {
 			return nil
@@ -311,8 +344,17 @@ func (d *domainOutput) doWriteFiles(statsData map[string]*statEntry) {
 				return err
 			}
 		}
+		
+		seen := make(map[string]bool)
+
 		for _, item := range sortedItems {
-			line := strings.ReplaceAll(d.pattern, "DOMAIN", item.Domain)
+			domainOnly := strings.Split(item.Key, "|")[0]
+			if seen[domainOnly] {
+				continue
+			}
+			seen[domainOnly] = true
+
+			line := strings.ReplaceAll(d.pattern, "DOMAIN", domainOnly)
 			if _, err := w.Write([]byte(line + "\n")); err != nil {
 				return err
 			}
