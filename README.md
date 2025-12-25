@@ -4,47 +4,12 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 下载: https://github.com/yyysuo/mosdns/releases  
 魔改版本配置语法基本无差异，仅添加了一些插件，具体参见fakeip分流大法总教程中mosdns配置 下载预编译文件、更新日志。
 
-### 2025年12月18日更新：
+### 保存个性化配置
 
-**在 mosdns20251204allup2 配置的基础上升级**
-
-1. 备份整个 mosdns 文件夹
-2. web 上更新2进制
-3. 在系统-配置管理部分  
-   MosDNS 本地工作目录填入自己的 mosdns 配置所在目录，比如 `/cus/mosdns`  
-   远程配置下载 URL (ZIP) 填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup3_1.zip`  
-   然后点击：应用远程配置，mosdns 自动重启。
-4. 在系统-数据管理-刷新分流缓存，点击：`开始全新任务` 按钮，此步骤将迁移域名记录至 `top_domains.txt`
-5. 等刷新分流缓存任务跑完  
-   MosDNS 本地工作目录填入自己的 mosdns 配置所在目录，比如 `/cus/mosdns`  
-   远程配置下载 URL (ZIP) 填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup3_2.zip`  
-   然后点击：应用远程配置，mosdns 自动重启。
-6. 手动删除 `/cus/mosdns/gen/requery_backup.txt`
-7. 更新说明：
-   * 此次更新不会覆盖个性化配置
-   * 功能变更：刷新分流缓存添加域名刷新天数，只刷新指定天数内有过访问记录的域名，使总域名表中低频访问域名逐渐不参与域名匹配与缓存。
-   
-### 2025年12月10日更新：
-
-**在12月9日配置的基础上升级**
-
-1. 备份整个mosdns文件夹
-2. web上更新2进制
-3. 在系统-配置管理部分  
-   MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如 `/cus/mosdns`  
-   远程配置下载 URL (ZIP)填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup2.zip`  
-   然后点击：应用远程配置，mosdns自动重启。
-4. 更新说明：https://github.com/yyysuo/firetv/blob/master/mosdnsconfigupdate/mosdns20251204allup2%E4%BD%BF%E7%94%A8%E6%96%B9%E6%B3%95.txt
-### 2025年12月9日更新：
-
-**在mosdns1204all配置的基础上升级**
-
-1. 备份整个mosdns文件夹
-2. web上更新2进制
-3. 在系统-配置管理部分  
-   MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如 `/cus/mosdns`  
-   远程配置下载 URL (ZIP)填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251204allup1.zip`  
-   然后点击：应用远程配置，mosdns自动重启。
+1. gen/top_domains.txt
+2. rule文件夹
+3. config_overrides.json
+离线全新安装/在线初始化重置后，可以将上述文件（不要删除对应位置的文件夹，需要按文件覆盖）覆盖至对应位置，即可恢复个性化配置。
 
 ### 在线初始化重置
 
@@ -52,7 +17,7 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 2. web上更新2进制
 3. 在系统-配置管理部分  
    MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如 `/cus/mosdns`  
-   远程配置下载 URL (ZIP)填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns1204all.zip`  
+   远程配置下载 URL (ZIP)填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns1225all.zip`  
    然后点击：应用远程配置，mosdns自动重启。
 4. 在web ui上按自己的需求调整功能开关部分。
 5. 在web ui上按mosdns配置说明填写SOCKS5/ECS IP部分和上游DNS设置/其它设置部分。
@@ -62,7 +27,7 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 1. 这里下载对应自己架构的2进制，比如放入 `/cus/bin/`  
    https://github.com/yyysuo/mosdns/releases
 2. 这里下载全量初始化配置，比如解析至 `/cus/mosdns/` 下  
-   https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns1204all.zip
+   https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns1225all.zip
 3. 运行命令
    ```bash
    /cus/bin/mosdns start -c /cus/mosdns/config_custom.yaml -d /cus/mosdns
@@ -72,8 +37,8 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 
 ### mosdns配置说明：
 
-远程下载的mosdns配置为通用模板，需要在此处替换上游dns等相关信息，此处信息存储于运行目录的 `config_overrides.json` 中。  
-原值 (查找)为配置模板中预设的初始值，新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。
+远程下载的mosdns配置为通用模板，需要在此处设置上游dns等相关信息，此处信息存储于运行目录的 `config_overrides.json` 中。  
+原值 (查找)为配置模板中预设的初始值（不要修改！），新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。
 
 **下面是模板一些必要替换的原值的说明**
 
@@ -89,6 +54,7 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 - `888888`，替换为阿里私有doh Account ID。
 - `888888_88888`，替换为阿里私有doh AccessKey ID。
 - `999999999`，替换为阿里私有doh AccessKey Secret。
+- nft功能说明：https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns%20nft%E8%A7%84%E5%88%99%E6%B7%BB%E5%8A%A0%E5%8A%9F%E8%83%BD%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E
 
 <img width="1590" height="885" alt="image" src="https://github.com/user-attachments/assets/62e34ea4-35ff-45cf-9d4b-ad4d05d9e9a2" />
 
