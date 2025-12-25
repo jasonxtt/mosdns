@@ -147,6 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
 	listMgmtRealIPHint: document.getElementById('list-mgmt-realip-hint'),
         listMgmtClientIpHint: document.getElementById('list-mgmt-client-ip-hint'),
         listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
+        listMgmtNFTIpHint: document.getElementById('list-mgmt-nft-ip-hint'),
         listMgmtRewriteHint: document.getElementById('list-mgmt-rewrite-hint'),
 
         featureSwitchesModule: document.getElementById('feature-switches-module'),
@@ -2500,6 +2501,7 @@ async function updateDomainListStats(signal) {
             { tag: 'ddnslist', name: 'DDNS 域名' },
             { tag: 'client_ip', name: '客户端 IP' },
             { tag: 'direct_ip', name: '直连 IP' },
+            { tag: 'nft_ip', name: 'NFT IP' },
             { tag: 'rewrite', name: '重定向' }
         ],
 
@@ -2532,6 +2534,9 @@ async function updateDomainListStats(signal) {
             elements.listMgmtClientIpHint.style.display = (tag === 'client_ip') ? 'block' : 'none';
             if (elements.listMgmtDirectIpHint) {
                 elements.listMgmtDirectIpHint.style.display = (tag === 'direct_ip') ? 'block' : 'none';
+            }
+            if (elements.listMgmtNFTIpHint) {
+                elements.listMgmtNFTIpHint.style.display = (tag === 'nft_ip') ? 'block' : 'none';
             }
             if (elements.listMgmtRewriteHint) {
                 elements.listMgmtRewriteHint.style.display = (tag === 'rewrite') ? 'block' : 'none';
