@@ -49,6 +49,7 @@ type RuleSource struct {
 	Files               string    `json:"files"`
 	URL                 string    `json:"url"`
 	Enabled             bool      `json:"enabled"`
+	EnableRegexp        bool      `json:"enable_regexp,omitempty"` // Added: 默认为 false
 	AutoUpdate          bool      `json:"auto_update"`
 	UpdateIntervalHours int       `json:"update_interval_hours"`
 	RuleCount           int       `json:"rule_count"`
@@ -248,7 +249,8 @@ func (p *SdSet) reloadAllRules() error {
 			continue
 		}
 
-		ok, count, lastRule := tryLoadSRS(b, newMatcher)
+		// Modified: pass src.EnableRegexp
+		ok, count, lastRule := tryLoadSRS(b, newMatcher, src.EnableRegexp)
 		if !ok {
 			log.Printf("[%s] ERROR: failed to load SRS file for source '%s' from %s", PluginType, src.Name, src.Files)
 			continue
@@ -286,6 +288,7 @@ func (p *SdSet) downloadAndUpdateLocalFile(ctx context.Context, sourceName strin
 	}
 	sourceURL := source.URL
 	localFile := source.Files
+	enableRegexp := source.EnableRegexp // Added: retrieve config
 	p.mu.RUnlock()
 
 	if sourceURL == "" {
@@ -317,7 +320,8 @@ func (p *SdSet) downloadAndUpdateLocalFile(ctx context.Context, sourceName strin
 	}
 
 	tempMatcher := domain.NewDomainMixMatcher()
-	ok, count, _ := tryLoadSRS(srsData, tempMatcher)
+	// Modified: pass enableRegexp to validation
+	ok, count, _ := tryLoadSRS(srsData, tempMatcher, enableRegexp)
 	if !ok {
 		return fmt.Errorf("downloaded file for '%s' is not a valid SRS file or is corrupted", sourceName)
 	}
@@ -446,6 +450,7 @@ func (p *SdSet) api() *chi.Mux {
 			existing.Files = reqData.Files
 			existing.URL = reqData.URL
 			existing.Enabled = reqData.Enabled
+			existing.EnableRegexp = reqData.EnableRegexp // Added: update config
 			existing.AutoUpdate = reqData.AutoUpdate
 			existing.UpdateIntervalHours = reqData.UpdateIntervalHours
 			updatedSource = existing
@@ -514,7 +519,8 @@ var (
 
 const ruleSetVersionCurrent = 3
 
-func tryLoadSRS(b []byte, m *domain.MixMatcher[struct{}]) (ok bool, count int, lastRule string) {
+// Modified: added enableRegexp parameter
+func tryLoadSRS(b []byte, m *domain.MixMatcher[struct{}], enableRegexp bool) (ok bool, count int, lastRule string) {
 	r := bytes.NewReader(b)
 	var mb [3]byte
 	if _, err := io.ReadFull(r, mb[:]); err != nil || mb != magicBytes {
@@ -535,12 +541,13 @@ func tryLoadSRS(b []byte, m *domain.MixMatcher[struct{}]) (ok bool, count int, l
 		return false, 0, ""
 	}
 	for i := uint64(0); i < length; i++ {
-		count += readRuleCompat(br, m, &lastRule)
+		count += readRuleCompat(br, m, &lastRule, enableRegexp)
 	}
 	return true, count, lastRule
 }
 
-func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string) int {
+// Modified: added enableRegexp parameter
+func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string, enableRegexp bool) int {
 	ct := 0
 	mode, err := r.ReadByte()
 	if err != nil {
@@ -548,19 +555,20 @@ func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *strin
 	}
 	switch mode {
 	case 0:
-		ct += readDefaultRuleCompat(r, m, last)
+		ct += readDefaultRuleCompat(r, m, last, enableRegexp)
 	case 1:
 		r.ReadByte()
 		n, _ := binary.ReadUvarint(r)
 		for i := uint64(0); i < n; i++ {
-			ct += readRuleCompat(r, m, last)
+			ct += readRuleCompat(r, m, last, enableRegexp)
 		}
 		r.ReadByte()
 	}
 	return ct
 }
 
-func readDefaultRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string) int {
+// Modified: added enableRegexp parameter and logic
+func readDefaultRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string, enableRegexp bool) int {
 	count := 0
 	for {
 		item, err := r.ReadByte()
@@ -596,10 +604,13 @@ func readDefaultRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last
 			}
 		case ruleItemDomainRegex:
 			sl, _ := varbin.ReadValue[[]string](r, binary.BigEndian)
-			for _, d := range sl {
-				*last = "regexp:" + d
-				if m.Add(*last, struct{}{}) == nil {
-					count++
+			// Modified: check enableRegexp before adding
+			if enableRegexp {
+				for _, d := range sl {
+					*last = "regexp:" + d
+					if m.Add(*last, struct{}{}) == nil {
+						count++
+					}
 				}
 			}
 		case ruleItemFinal:
