@@ -145,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
         listContentInfo: document.getElementById('list-content-info'),
         listSaveBtn: document.getElementById('list-save-btn'),
 	listMgmtRealIPHint: document.getElementById('list-mgmt-realip-hint'),
+	listMgmtCnFakeipFilterHint: document.getElementById('list-mgmt-cnfakeipfilter-hint'),
         listMgmtClientIpHint: document.getElementById('list-mgmt-client-ip-hint'),
         listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
         listMgmtNFTIpHint: document.getElementById('list-mgmt-nft-ip-hint'),
@@ -650,7 +651,9 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch13', name: '过期缓存2', desc: '启用全部缓存 (兼容)、全部缓存 (安全)，缓存fakeip，直面客户端', tip: '建议开启，折腾时可临时关闭，排除干扰。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
             { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
-            { tag: 'switch11', name: '使用阿里私有DOH', desc: '打开前在上游DNS设置中添加DOH配置。', tip: '不管开关是否打开，都会并发运营商dns。', valueForOn: 'A' },
+            { tag: 'switch11', name: '使用阿里私有DOH', desc: '国内上游并发请求至阿里私有DOH。', tip: '打开前在上游DNS设置中添加DOH配置。', valueForOn: 'A' },
+            { tag: 'switch14', name: '使用运营商DNS', desc: '国内上游并发请求至运营商DNS。', tip: '打开前在上游DNS设置中修改运营商DNS配置。', valueForOn: 'A' },
+            { tag: 'switch15', name: '使用其它DNS', desc: '国内上游并发请求至阿里UDP DNS。', tip: '单独开启时也可替换quic://223.5.5.5为其它DNS。', valueForOn: 'A' },
             { tag: 'switch2', name: '指定 Client fakeip', desc: '只允许指定的客户端科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不允许科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽AAAA请求类型', tip: '无IPV6网络环境建议开启', valueForOn: 'A' },
@@ -2507,7 +2510,8 @@ async function updateDomainListStats(signal) {
             { tag: 'whitelist', name: '白名单' },
             { tag: 'blocklist', name: '黑名单' },
             { tag: 'greylist', name: '灰名单' },
-            { tag: 'realiplist', name: 'RealIP 域名' },
+            { tag: 'realiplist', name: '!CN fakeip filter' },
+            { tag: 'cnfakeipfilter', name: 'CN fakeip filter' },
             { tag: 'ddnslist', name: 'DDNS 域名' },
             { tag: 'client_ip', name: '客户端 IP' },
             { tag: 'direct_ip', name: '直连 IP' },
@@ -2553,6 +2557,9 @@ async function updateDomainListStats(signal) {
             }
             if (elements.listMgmtRealIPHint) {
                 elements.listMgmtRealIPHint.style.display = (tag === 'realiplist') ? 'block' : 'none';
+            }
+            if (elements.listMgmtCnFakeipFilterHint) {
+                elements.listMgmtCnFakeipFilterHint.style.display = (tag === 'cnfakeipfilter') ? 'block' : 'none';
             }
 
             elements.listContentLoader.style.display = 'flex';
