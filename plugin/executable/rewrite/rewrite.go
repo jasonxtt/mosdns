@@ -265,7 +265,16 @@ func (r *Rewrite) handleDomainRewrite(ctx context.Context, qCtx *query_context.C
 
 	upstreamQuery := new(dns.Msg)
 	upstreamQuery.SetQuestion(targetDomain, qType)
-	upstreamQuery.SetEdns0(4096, true)
+	upstreamQuery.AuthenticatedData = originalQuery.AuthenticatedData 
+
+	upstreamQuery.RecursionDesired = originalQuery.RecursionDesired
+	upstreamQuery.CheckingDisabled = originalQuery.CheckingDisabled
+
+	if opt := originalQuery.IsEdns0(); opt != nil {
+		upstreamQuery.SetEdns0(1232, opt.Do())
+	} else {
+		upstreamQuery.SetEdns0(1232, false)
+	}
 
 	upstreamResp, _, err := r.dnsClient.ExchangeContext(ctx, upstreamQuery, r.dnsServerAddr)
 	if err != nil || upstreamResp == nil || upstreamResp.Rcode != dns.RcodeSuccess {
