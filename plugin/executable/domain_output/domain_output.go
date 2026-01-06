@@ -460,11 +460,6 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]*statEntry) {
 		vals = append(vals, fmt.Sprintf("full:%s", domainOnly))
 	}
 
-	// [修改 3] 如果过滤去重后没有数据，直接返回，不发送请求
-	if len(vals) == 0 {
-		return
-	}
-
 	payload := struct{ Values []string `json:"values"` }{Values: vals}
 	body, err := json.Marshal(payload)
 	if err != nil {
