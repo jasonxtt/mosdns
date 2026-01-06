@@ -24,7 +24,7 @@ import (
 	"testing"
 )
 
-func Test_parseExec(t *testing.T) {
+func Test_parseExecStr(t *testing.T) {
 
 	tests := []struct {
 		name     string
@@ -38,15 +38,18 @@ func Test_parseExec(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotTag, gotTyp, gotArgs := parseExec(tt.args)
-			if gotTag != tt.wantTag {
-				t.Errorf("parseExec() gotTag = %v, want %v", gotTag, tt.wantTag)
+			// [修改] 调用新的 parseExecStr 函数，接收结构体
+			got := parseExecStr(tt.args)
+			
+			// [修改] 验证结构体字段
+			if got.Tag != tt.wantTag {
+				t.Errorf("parseExecStr() gotTag = %v, want %v", got.Tag, tt.wantTag)
 			}
-			if gotTyp != tt.wantTyp {
-				t.Errorf("parseExec() gotTyp = %v, want %v", gotTyp, tt.wantTyp)
+			if got.Type != tt.wantTyp {
+				t.Errorf("parseExecStr() gotTyp = %v, want %v", got.Type, tt.wantTyp)
 			}
-			if gotArgs != tt.wantArgs {
-				t.Errorf("parseExec() gotArgs = %v, want %v", gotArgs, tt.wantArgs)
+			if got.Args != tt.wantArgs {
+				t.Errorf("parseExecStr() gotArgs = %v, want %v", got.Args, tt.wantArgs)
 			}
 		})
 	}
