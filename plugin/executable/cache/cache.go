@@ -305,7 +305,9 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 
 		err := next.ExecNext(ctx, qCtx)
 		if err != nil {
-			c.logger.Warn("failed to update lazy cache", qCtx.InfoField(), zap.Error(err))
+                                         if err != sequence.ErrExit {
+                                             c.logger.Warn("failed to update lazy cache", qCtx.InfoField(), zap.Error(err))
+                                         }
 		}
 
 		r := qCtx.R()
