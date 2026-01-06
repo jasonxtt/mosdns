@@ -114,11 +114,24 @@ func (h *EntryHandler) Handle(ctx context.Context, q *dns.Msg, serverMeta server
 	err := h.opts.Entry.Exec(ctx, qCtx)
 	var resp *dns.Msg
 	if err != nil {
-		h.opts.Logger.Warn("entry err", qCtx.InfoField(), zap.Error(err))
-		resp = new(dns.Msg)
-		resp.SetReply(q)
-		resp.Rcode = dns.RcodeServerFailure
-	} else {
+		// [修改开始] 特殊处理 ErrExit
+		// 如果错误是 sequence.ErrExit，说明是插件主动要求退出（任务完成或拦截）
+		// 我们将其视为“无错误”，继续向下执行，尝试返回 qCtx.R()
+		if err == sequence.ErrExit {
+			err = nil 
+		} else {
+			// 只有真正的错误才记录日志并返回 SERVFAIL
+			h.opts.Logger.Warn("entry err", qCtx.InfoField(), zap.Error(err))
+			resp = new(dns.Msg)
+			resp.SetReply(q)
+			resp.Rcode = dns.RcodeServerFailure
+		}
+		// [修改结束]
+	} 
+	
+	// 注意：上面的 if err != nil 块如果被 ErrExit 绕过了（err被置为nil），
+	// 这里 resp 依然是 nil，需要从 qCtx 获取
+	if resp == nil {
 		resp = qCtx.R()
 	}
 
