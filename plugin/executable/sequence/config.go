@@ -22,8 +22,14 @@ package sequence
 import "strings"
 
 type RuleArgs struct {
-	Matches []string `yaml:"matches"`
-	Exec    string   `yaml:"exec"`
+	Matches []string    `yaml:"matches"`
+	Exec    interface{} `yaml:"exec"` // Supports string or []string
+}
+
+type ExecConfig struct {
+	Tag  string
+	Type string
+	Args string
 }
 
 func parseArgs(ra RuleArgs) RuleConfig {
@@ -31,10 +37,19 @@ func parseArgs(ra RuleArgs) RuleConfig {
 	for _, s := range ra.Matches {
 		rc.Matches = append(rc.Matches, parseMatch(s))
 	}
-	tag, typ, args := parseExec(ra.Exec)
-	rc.Tag = tag
-	rc.Type = typ
-	rc.Args = args
+
+	switch v := ra.Exec.(type) {
+	case string:
+		if v != "" {
+			rc.Execs = append(rc.Execs, parseExecStr(v))
+		}
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				rc.Execs = append(rc.Execs, parseExecStr(s))
+			}
+		}
+	}
 	return rc
 }
 
@@ -54,24 +69,24 @@ func parseMatch(s string) MatchConfig {
 	return mc
 }
 
-func parseExec(s string) (tag string, typ string, args string) {
+func parseExecStr(s string) ExecConfig {
+	var ec ExecConfig
 	s = strings.TrimSpace(s)
 	p, args, _ := strings.Cut(s, " ")
 	args = strings.TrimSpace(args)
 	p, ok := trimPrefixField(p, "$")
 	if ok {
-		tag = p
+		ec.Tag = p
 	} else {
-		typ = p
+		ec.Type = p
 	}
-	return
+	ec.Args = args
+	return ec
 }
 
 type RuleConfig struct {
-	Matches []MatchConfig `yaml:"matches"`
-	Tag     string        `yaml:"tag"`
-	Type    string        `yaml:"type"`
-	Args    string        `yaml:"args"`
+	Matches []MatchConfig
+	Execs   []ExecConfig
 }
 
 type MatchConfig struct {
