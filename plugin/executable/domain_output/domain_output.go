@@ -39,6 +39,7 @@ type Args struct {
 	MaxEntries     int    `yaml:"max_entries"`
 	DumpInterval   int    `yaml:"dump_interval"`
 	DomainSetURL   string `yaml:"domain_set_url"`
+	EnableFlags    bool   `yaml:"enable_flags"`
 }
 
 // statEntry 存储域名统计信息：次数和最后访问日期
@@ -70,6 +71,7 @@ type domainOutput struct {
 	workerDoneChan  chan struct{}
 
 	domainSetURL string
+	enableFlags    bool
 
 	// [新增修复] 确保 Close 只执行一次
 	closeOnce sync.Once
@@ -81,6 +83,7 @@ const (
 	WriteModePeriodic WriteMode = iota
 	WriteModeFlush
 	WriteModeSave
+        WriteModeShutdown
 )
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -101,6 +104,7 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		stopChan:        make(chan struct{}),
 		workerDoneChan:  make(chan struct{}),
 		domainSetURL:    cfg.DomainSetURL,
+                enableFlags:     cfg.EnableFlags,
 		currentDate:     time.Now().Format("2006-01-02"), // 初始化当前日期
 	}
 	d.loadFromFile()
@@ -153,31 +157,35 @@ func QuickSetup(_ sequence.BQ, s string) (any, error) {
 
 func (d *domainOutput) Exec(ctx context.Context, qCtx *query_context.Context) error {
 	d.mu.Lock()
+
+	// [修复 1] 获取 DNS 请求对象
+	q := qCtx.Q()
+	
+	// [修复 2] 初始化后缀变量，默认为空
+	suffix := ""
 	
 	// --- 新增逻辑：根据 Flag 生成后缀 ---
-	q := qCtx.Q()
-	var flags []string
-	// 严格按照 RFC 6840 和 mosdns cache 的逻辑记录关键 Flag
-	if q.AuthenticatedData {
-		flags = append(flags, "AD")
-	}
-	if q.CheckingDisabled {
-		flags = append(flags, "CD")
-	}
-	// 检查 EDNS0 DO 位
-	if opt := q.IsEdns0(); opt != nil && opt.Do() {
-		flags = append(flags, "DO")
-	}
+	if d.enableFlags {
+		var flags []string
+		if q.AuthenticatedData {
+			flags = append(flags, "AD")
+		}
+		if q.CheckingDisabled {
+			flags = append(flags, "CD")
+		}
+		if opt := q.IsEdns0(); opt != nil && opt.Do() {
+			flags = append(flags, "DO")
+		}
 
-	suffix := ""
-	if len(flags) > 0 {
-		suffix = "|" + strings.Join(flags, "|") // 例如: "|AD|DO"
+		if len(flags) > 0 {
+			suffix = "|" + strings.Join(flags, "|")
+		}
 	}
 	// ----------------------------------
 
 	for _, question := range q.Question {
 		rawDomain := strings.TrimSuffix(question.Name, ".")
-		// Key 变为: 域名 + 后缀 (如果无 flag，suffix 为空，Key 就是域名本身)
+		// Key 变为: 域名 + 后缀 (如果 enableFlags 为 false，suffix 为空，Key 就是域名本身)
 		storageKey := rawDomain + suffix
 		
 		entry, exists := d.stats[storageKey]
@@ -252,7 +260,7 @@ func (d *domainOutput) performWrite(mode WriteMode) {
 		d.stats = make(map[string]*statEntry)
 		d.totalCount = 0
 		d.entryCounter = 0
-	case WriteModeSave:
+	case WriteModeSave, WriteModeShutdown:
 		statsToDump = make(map[string]*statEntry, len(d.stats))
 		for k, v := range d.stats {
 			statsToDump[k] = &statEntry{Count: v.Count, LastDate: v.LastDate}
@@ -264,7 +272,7 @@ func (d *domainOutput) performWrite(mode WriteMode) {
 
 	d.doWriteFiles(statsToDump)
 
-	if len(statsToDump) > 0 || mode == WriteModeFlush {
+	if mode != WriteModeShutdown {
 	    d.pushToDomainSet(statsToDump)
 	}
 }
@@ -430,9 +438,31 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]*statEntry) {
 		return
 	}
 
+	// [修改 1] 初始化去重 Map
+	// 无论 enable_flags 是否开启，去重都是安全的。
+	// 特别是当 enable_flags=true 时，必须把 "a.com|AD" 和 "a.com|DO" 合并为同一个 "a.com"
+	seen := make(map[string]bool)
 	vals := make([]string, 0, len(statsData))
-	for domain := range statsData {
-		vals = append(vals, fmt.Sprintf("full:%s", domain))
+
+	for key := range statsData {
+		// [修改 2] 强制剥离后缀
+		// strings.Split(key, "|")[0] 可以处理两种情况：
+		// A. key="google.com" (纯净) -> 结果 "google.com"
+		// B. key="google.com|AD" (带标) -> 结果 "google.com"
+		// 这保证了发给 domain_set 的永远是用于匹配的纯域名。
+		domainOnly := strings.Split(key, "|")[0]
+
+		if seen[domainOnly] {
+			continue
+		}
+		seen[domainOnly] = true
+
+		vals = append(vals, fmt.Sprintf("full:%s", domainOnly))
+	}
+
+	// [修改 3] 如果过滤去重后没有数据，直接返回，不发送请求
+	if len(vals) == 0 {
+		return
 	}
 
 	payload := struct{ Values []string `json:"values"` }{Values: vals}
@@ -443,7 +473,7 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]*statEntry) {
 	}
 
 	go func() {
-		// [优化] 添加超时 context，避免阻塞
+		// [保持优化] 使用带超时的 Context，防止 API 卡死
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
@@ -473,7 +503,7 @@ func (d *domainOutput) Close() error {
 		close(d.stopChan)
 		<-d.workerDoneChan
 
-		d.performWrite(WriteModeSave)
+		d.performWrite(WriteModeShutdown)
 
 		fmt.Println("[domain_output] shutdown complete.")
 	})
@@ -541,7 +571,7 @@ func (d *domainOutput) Api() *chi.Mux {
 	})
 
 	r.Get("/restartall", func(w http.ResponseWriter, req *http.Request) {
-		d.performWrite(WriteModeSave)
+		d.performWrite(WriteModeShutdown)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("mosdns restarted"))
 		go restartSelf()
