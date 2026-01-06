@@ -28,6 +28,9 @@ import (
 	"github.com/miekg/dns"
 )
 
+// [新增] 定义一个全局导出的错误变量，用于 exit 信号
+var ErrExit = fmt.Errorf("exit sequence")
+
 var _ RecursiveExecutable = (*ActionAccept)(nil)
 
 type ActionAccept struct{}
@@ -38,6 +41,20 @@ func (a ActionAccept) Exec(_ context.Context, _ *query_context.Context, _ ChainW
 
 func setupAccept(_ BQ, _ string) (any, error) {
 	return ActionAccept{}, nil
+}
+
+// [新增] Exit 插件实现
+var _ RecursiveExecutable = (*ActionExit)(nil)
+
+type ActionExit struct{}
+
+func (a ActionExit) Exec(_ context.Context, _ *query_context.Context, _ ChainWalker) error {
+	// 返回特殊错误，强制中断
+	return ErrExit
+}
+
+func setupExit(_ BQ, _ string) (any, error) {
+	return ActionExit{}, nil
 }
 
 var _ RecursiveExecutable = (*ActionReject)(nil)
