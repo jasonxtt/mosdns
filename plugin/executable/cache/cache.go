@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache"
+	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
@@ -26,6 +28,7 @@ import (
 	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	"golang.org/x/exp/constraints"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -57,6 +60,25 @@ const (
 )
 
 var _ sequence.RecursiveExecutable = (*Cache)(nil)
+
+// key defines the type used for cache keys.
+type key string
+
+var seed = maphash.MakeSeed()
+
+func (k key) Sum() uint64 {
+	return maphash.String(seed, string(k))
+}
+
+// item stores the cached response.
+// Optimization: resp is now []byte instead of *dns.Msg.
+// This significantly reduces GC overhead as the DNS message is stored as a flat byte slice.
+type item struct {
+	resp           []byte
+	storedTime     time.Time
+	expirationTime time.Time
+	domainSet      string
+}
 
 type Args struct {
 	Size         int      `yaml:"size"`
@@ -286,8 +308,9 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	r := qCtx.R()
 
 	if r != nil && !c.containsExcluded(r) {
-		saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL)
-		c.updatedKey.Add(1)
+		if saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL) {
+			c.updatedKey.Add(1)
+		}
 	}
 
 	return err
@@ -305,15 +328,16 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 
 		err := next.ExecNext(ctx, qCtx)
 		if err != nil {
-                                         if err != sequence.ErrExit {
-                                             c.logger.Warn("failed to update lazy cache", qCtx.InfoField(), zap.Error(err))
-                                         }
+			if err != sequence.ErrExit {
+				c.logger.Warn("failed to update lazy cache", qCtx.InfoField(), zap.Error(err))
+			}
 		}
 
 		r := qCtx.R()
 		if r != nil && !c.containsExcluded(r) {
-			saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL)
-			c.updatedKey.Add(1)
+			if saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL) {
+				c.updatedKey.Add(1)
+			}
 		}
 		c.logger.Debug("lazy cache updated", qCtx.InfoField())
 		return nil, nil
@@ -378,7 +402,6 @@ func (c *Cache) startDumpLoop() {
 }
 
 func (c *Cache) dumpCache() error {
-	// Added lock to ensure thread safety between auto-dump and /save API
 	c.dumpMu.Lock()
 	defer c.dumpMu.Unlock()
 
@@ -404,14 +427,9 @@ func (c *Cache) Api() *chi.Mux {
 
 	r.Get("/flush", func(w http.ResponseWriter, req *http.Request) {
 		c.logger.Info("flushing cache via api")
-		// 1. Flush the in-memory cache.
 		c.backend.Flush()
-
-		// 2. Reset the updated key counter, as the cache is now empty.
 		c.updatedKey.Store(0)
 
-		// 3. Trigger a background dump to persist the empty state to the disk.
-		//    This is done asynchronously to avoid blocking the HTTP response.
 		go func() {
 			if err := c.dumpCache(); err != nil {
 				c.logger.Error("failed to dump cache after flushing", zap.Error(err))
@@ -431,7 +449,6 @@ func (c *Cache) Api() *chi.Mux {
 		}
 	})
 
-	// Added /save endpoint to manually trigger saving cache to dump_file
 	r.Get("/save", func(w http.ResponseWriter, req *http.Request) {
 		if len(c.args.DumpFile) == 0 {
 			http.Error(w, "dump_file is not configured in config file", http.StatusBadRequest)
@@ -439,7 +456,6 @@ func (c *Cache) Api() *chi.Mux {
 		}
 
 		c.logger.Info("saving cache to disk via api")
-		// This is safe because dumpCache now uses a mutex
 		err := c.dumpCache()
 		if err != nil {
 			c.logger.Error("failed to save cache via api", zap.Error(err))
@@ -477,7 +493,14 @@ func (c *Cache) Api() *chi.Mux {
 			fmt.Fprintf(w, "StoredTime:    %s\n", v.storedTime.Format(time.RFC3339))
 			fmt.Fprintf(w, "MsgExpire:     %s\n", v.expirationTime.Format(time.RFC3339))
 			fmt.Fprintf(w, "CacheExpire:   %s\n", cacheExpirationTime.Format(time.RFC3339))
-			fmt.Fprintf(w, "DNS Message:\n%s\n", dnsMsgToString(v.resp))
+
+			// Optimized: Need to unpack on demand for display
+			tmpMsg := new(dns.Msg)
+			if err := tmpMsg.Unpack(v.resp); err == nil {
+				fmt.Fprintf(w, "DNS Message:\n%s\n", dnsMsgToString(tmpMsg))
+			} else {
+				fmt.Fprintf(w, "DNS Message:\n<failed to unpack>\n")
+			}
 			return nil
 		})
 		if err != nil {
@@ -488,13 +511,13 @@ func (c *Cache) Api() *chi.Mux {
 	return r
 }
 
-// keyToString 把底层 []byte key 转成人类可读的 "domain TYPE CLASS [flags] [ecs]"
+// keyToString converts internal []byte key to human readable format
 func keyToString(k key) string {
 	data := []byte(k)
 	offset := 0
 	var parts []string
 
-	// 1. 解析标志位 (1 byte)
+	// 1. flags (1 byte)
 	if len(data) < offset+1 {
 		return fmt.Sprintf("invalid_key(len<1): %x", data)
 	}
@@ -511,14 +534,14 @@ func keyToString(k key) string {
 		flags = append(flags, "DO")
 	}
 
-	// 2. 解析查询类型 (2 bytes)
+	// 2. QType (2 bytes)
 	if len(data) < offset+2 {
 		return fmt.Sprintf("invalid_key(len<3): %x", data)
 	}
 	qtype := binary.BigEndian.Uint16(data[offset : offset+2])
 	offset += 2
 
-	// 3. 解析域名
+	// 3. Name
 	if len(data) < offset+1 {
 		return fmt.Sprintf("invalid_key(len<4): %x", data)
 	}
@@ -528,16 +551,15 @@ func keyToString(k key) string {
 		return fmt.Sprintf("invalid_key(incomplete_name): %x", data)
 	}
 	qname := string(data[offset : offset+nameLen])
-	parts = append(parts, qname, dns.TypeToString[qtype], "IN") // 假设 Class 总是 IN
+	parts = append(parts, qname, dns.TypeToString[qtype], "IN")
 	offset += nameLen
 
-	// 4. 添加解析出的标志位到结果中
 	if len(flags) > 0 {
 		parts = append(parts, fmt.Sprintf("[flags:%s]", strings.Join(flags, ",")))
 	}
 
-	// 5. 解析 ECS (可选)
-	if offset < len(data) { // 如果键中还有剩余数据，那必定是 ECS
+	// 4. ECS (optional)
+	if offset < len(data) {
 		if len(data) < offset+1 {
 			parts = append(parts, "[ecs:invalid_len_byte]")
 		} else {
@@ -552,11 +574,9 @@ func keyToString(k key) string {
 		}
 	}
 
-	// 6. 组装最终结果
 	return strings.Join(parts, " ")
 }
 
-// dnsMsgToString 将 *dns.Msg 转为可读文本
 func dnsMsgToString(msg *dns.Msg) string {
 	if msg == nil {
 		return "<nil>\n"
@@ -593,16 +613,13 @@ func (c *Cache) writeDump(w io.Writer) (int, error) {
 		if cacheExpirationTime.Before(now) {
 			return nil
 		}
-		msg, err := v.resp.Pack()
-		if err != nil {
-			return fmt.Errorf("failed to pack msg, %w", err)
-		}
+		// Optimization: v.resp is already []byte, so we don't need to Pack() it here.
 		e := &CachedEntry{
 			Key:                 []byte(k),
 			CacheExpirationTime: cacheExpirationTime.Unix(),
 			MsgExpirationTime:   v.expirationTime.Unix(),
 			MsgStoredTime:       v.storedTime.Unix(),
-			Msg:                 msg,
+			Msg:                 v.resp, // Direct assignment
 			DomainSet:           v.domainSet,
 		}
 		block.Entries = append(block.Entries, e)
@@ -663,12 +680,10 @@ func (c *Cache) readDump(r io.Reader) (int, error) {
 			cacheExpTime := time.Unix(entry.GetCacheExpirationTime(), 0)
 			msgExpTime := time.Unix(entry.GetMsgExpirationTime(), 0)
 			storedTime := time.Unix(entry.GetMsgStoredTime(), 0)
-			resp := new(dns.Msg)
-			if err := resp.Unpack(entry.GetMsg()); err != nil {
-				return fmt.Errorf("failed to decode dns msg, %w", err)
-			}
+
+			// Optimization: Don't unpack. Store raw bytes directly.
 			i := &item{
-				resp:           resp,
+				resp:           entry.GetMsg(), // Store bytes
 				storedTime:     storedTime,
 				expirationTime: msgExpTime,
 				domainSet:      entry.GetDomainSet(),
@@ -692,4 +707,233 @@ func (c *Cache) readDump(r io.Reader) (int, error) {
 		return en, err
 	}
 	return en, gr.Close()
+}
+
+// -----------------------------------------------------------------------------------
+// Functions merged from utils.go (optimized for []byte storage)
+// -----------------------------------------------------------------------------------
+
+func getECSClient(qCtx *query_context.Context) string {
+	queryOpt := qCtx.QOpt()
+	// Check if query already has an ecs.
+	for _, o := range queryOpt.Option {
+		if o.Option() == dns.EDNS0SUBNET {
+			return o.String()
+		}
+	}
+	return ""
+}
+
+// getMsgKey returns a string key for the query msg, or an empty
+// string if query should not be cached.
+func getMsgKey(q *dns.Msg, qCtx *query_context.Context, useECS bool) string {
+	if q.Response || q.Opcode != dns.OpcodeQuery || len(q.Question) != 1 {
+		return ""
+	}
+
+	question := q.Question[0]
+	// bits + qtype + qname length + qname
+	totalLen := 1 + 2 + 1 + len(question.Name)
+	ecs := ""
+	if useECS {
+		ecs = getECSClient(qCtx)
+		// if useECS: bits + qtype + qname length + qname + ecs length + ecs
+		totalLen += 1 + len(ecs)
+	}
+	buf := make([]byte, totalLen)
+	b := byte(0)
+	// RFC 6840 5.7: The AD bit in a query as a signal
+	// indicating that the requester understands and is interested in the
+	// value of the AD bit in the response.
+	if q.AuthenticatedData {
+		b = b | adBit
+	}
+	if q.CheckingDisabled {
+		b = b | cdBit
+	}
+	if opt := q.IsEdns0(); opt != nil && opt.Do() {
+		b = b | doBit
+	}
+	buf[0] = b
+	buf[1] = byte(question.Qtype << 8)
+	buf[2] = byte(question.Qtype)
+	buf[3] = byte(len(question.Name))
+	copy(buf[4:], question.Name)
+	if len(ecs) > 0 {
+		buf[4+len(question.Name)] = byte(len(ecs))
+		copy(buf[4+len(question.Name)+1:], ecs)
+	}
+	return utils.BytesToStringUnsafe(buf)
+}
+
+func copyNoOpt(m *dns.Msg) *dns.Msg {
+	if m == nil {
+		return nil
+	}
+
+	m2 := new(dns.Msg)
+	m2.MsgHdr = m.MsgHdr
+	m2.Compress = m.Compress
+
+	if len(m.Question) > 0 {
+		m2.Question = make([]dns.Question, len(m.Question))
+		copy(m2.Question, m.Question)
+	}
+
+	lenExtra := len(m.Extra)
+	for _, r := range m.Extra {
+		if r.Header().Rrtype == dns.TypeOPT {
+			lenExtra--
+		}
+	}
+
+	s := make([]dns.RR, len(m.Answer)+len(m.Ns)+lenExtra)
+	m2.Answer, s = s[:0:len(m.Answer)], s[len(m.Answer):]
+	m2.Ns, s = s[:0:len(m.Ns)], s[len(m.Ns):]
+	m2.Extra = s[:0:lenExtra]
+
+	for _, r := range m.Answer {
+		m2.Answer = append(m2.Answer, dns.Copy(r))
+	}
+	for _, r := range m.Ns {
+		m2.Ns = append(m2.Ns, dns.Copy(r))
+	}
+
+	for _, r := range m.Extra {
+		if r.Header().Rrtype == dns.TypeOPT {
+			continue
+		}
+		m2.Extra = append(m2.Extra, dns.Copy(r))
+	}
+	return m2
+}
+
+func min[T constraints.Ordered](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// getRespFromCache returns the cached response from cache.
+// The ttl of returned msg will be changed properly.
+// Returned bool indicates whether this response is hit by lazy cache.
+// Note: Caller SHOULD change the msg id because it's not same as query's.
+func getRespFromCache(msgKey string, backend *cache.Cache[key, *item], lazyCacheEnabled bool, lazyTtl int) (*dns.Msg, bool, string) {
+	// Lookup cache
+	v, _, _ := backend.Get(key(msgKey))
+
+	// Cache hit
+	if v != nil {
+		now := time.Now()
+
+		// Helper to unpack bytes to msg
+		unpackMsg := func(data []byte) *dns.Msg {
+			m := new(dns.Msg)
+			if err := m.Unpack(data); err != nil {
+				return nil
+			}
+			return m
+		}
+
+		// Not expired.
+		if now.Before(v.expirationTime) {
+			// Optimization: Unpack bytes first
+			r := unpackMsg(v.resp)
+			if r == nil {
+				return nil, false, ""
+			}
+			// Optimized: Calculate elapsed time and subtract from TTL
+			// Previously: now.Sub(v.storedTime).Seconds()
+			dnsutils.SubtractTTL(r, uint32(now.Sub(v.storedTime).Seconds()))
+			return r, false, v.domainSet
+		}
+
+		// Msg expired but cache isn't. This is a lazy cache enabled entry.
+		// If lazy cache is enabled, return the response.
+		if lazyCacheEnabled {
+			// Optimization: Unpack bytes first
+			r := unpackMsg(v.resp)
+			if r == nil {
+				return nil, false, ""
+			}
+			dnsutils.SetTTL(r, uint32(lazyTtl))
+			return r, true, v.domainSet
+		}
+	}
+
+	// cache miss
+	return nil, false, ""
+}
+
+// saveRespToCache saves r to cache backend. It returns false if r
+// should not be cached and was skipped.
+func saveRespToCache(msgKey string, qCtx *query_context.Context, backend *cache.Cache[key, *item], lazyCacheTtl int) bool {
+	r := qCtx.R()
+	if r.Truncated != false {
+		return false
+	}
+
+	var msgTtl time.Duration
+	var cacheTtl time.Duration
+	switch r.Rcode {
+	case dns.RcodeNameError:
+		msgTtl = time.Second * 30
+		cacheTtl = msgTtl
+	case dns.RcodeServerFailure:
+		msgTtl = time.Second * 5
+		cacheTtl = msgTtl
+	case dns.RcodeSuccess:
+		minTTL := dnsutils.GetMinimalTTL(r)
+		if len(r.Answer) == 0 { // Empty answer. Set ttl between 0~300.
+			const maxEmtpyAnswerTtl = 300
+			msgTtl = time.Duration(min(minTTL, maxEmtpyAnswerTtl)) * time.Second
+			// Preservation: User modification 1 (lazyTTL for empty answer)
+			if lazyCacheTtl > 0 {
+				cacheTtl = time.Duration(lazyCacheTtl) * time.Second
+			} else {
+				cacheTtl = msgTtl
+			}
+		} else {
+			msgTtl = time.Duration(minTTL) * time.Second
+			if lazyCacheTtl > 0 {
+				cacheTtl = time.Duration(lazyCacheTtl) * time.Second
+			} else {
+				cacheTtl = msgTtl
+			}
+		}
+	}
+
+	// Preservation: User modification 2 (Safety Net)
+	const minCacheableTTL = 5 * time.Second
+	if msgTtl <= 0 {
+		msgTtl = minCacheableTTL
+	}
+	if cacheTtl <= 0 {
+		cacheTtl = minCacheableTTL
+	}
+
+	// Optimization: Copy message without OPT records, THEN pack to bytes
+	msgToCache := copyNoOpt(r)
+	packedMsg, err := msgToCache.Pack()
+	if err != nil {
+		// Failed to pack, skip caching
+		return false
+	}
+
+	now := time.Now()
+	v := &item{
+		resp:           packedMsg, // Store []byte
+		storedTime:     now,
+		expirationTime: now.Add(msgTtl),
+	}
+
+	if val, ok := qCtx.GetValue(query_context.KeyDomainSet); ok {
+		if name, isString := val.(string); isString {
+			v.domainSet = name
+		}
+	}
+
+	backend.Store(key(msgKey), v, now.Add(cacheTtl))
+	return true
 }
