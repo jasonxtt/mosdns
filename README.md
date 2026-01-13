@@ -18,6 +18,7 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
 1. gen/top_domains.txt
 2. rule文件夹
 3. config_overrides.json
+4. upstream_overrides.json
 离线全新安装/在线初始化重置后，可以将上述文件（不要删除对应位置的文件夹，需要按文件覆盖）覆盖至对应位置，即可恢复个性化配置。
 
 ### 在线初始化重置
@@ -29,7 +30,7 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
    远程配置下载 URL (ZIP)填入：`https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns1225all.zip`  
    然后点击：应用远程配置，mosdns自动重启。
 4. 在web ui上按自己的需求调整功能开关部分。
-5. 在web ui上按mosdns配置说明填写SOCKS5/ECS IP部分和上游DNS设置/其它设置部分。
+5. 在web ui上按mosdns配置说明填写SOCKS5/ECS IP部分、上游DNS设置、其它设置。
 
 ### 离线全新安装
 
@@ -42,38 +43,28 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
    /cus/bin/mosdns start -c /cus/mosdns/config_custom.yaml -d /cus/mosdns
    ```
 4. 在web ui上按自己的需求调整功能开关部分。
-5. 在web ui上按mosdns配置说明填写SOCKS5/ECS IP部分和上游DNS设置/其它设置部分。
+5. 在web ui上按mosdns配置说明填写SOCKS5/ECS IP部分、上游DNS设置、其它设置。
 
 ### mosdns配置说明：
 
-远程下载的mosdns配置为通用模板，需要在此处设置上游dns等相关信息，此处信息存储于运行目录的 `config_overrides.json` 中。  
-原值 (查找)为配置模板中预设的初始值（不要修改！），新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。
+远程下载的mosdns配置为通用模板，需要在此处设置上游dns等相关信息，此处信息存储于运行目录的 `config_overrides.json`、`upstream_overrides.json` 中。  
 
-**下面是模板一些必要替换的原值的说明**
+**上游DNS设置的说明**
 
-- `udp://127.0.0.1:7874`，替换为sing-box dns，用于对国外域名返回fakeip。
-- `114.114.114.114`，替换为运营商dns，用于返回最优DNS结果。
-- `127.0.0.1:7777`，替换为 `:7777`，取消仅监听127.0.0.1限制
-- `127.0.0.1:8888`，替换为 `:8888`，取消仅监听127.0.0.1限制
+- 预设了所有的dns，一般只需要打开和关闭，不需要新增。
+- domestic为国内组，foreign为国外组，mihomo和sing-box组只能设置1个上游。
+- 阿里私享DOH不需要可删除，开启需要设置相应的账户信息及ECS Client IP，可填入这里显示的ipv4 ip：https://ipw.cn/。
+- 需要将预设的运营商dns为自己的运营商dns。
+- cloudflare、google共3个上游，需要填入socks5代理，否则将遵循mosdns所在OS的路由。
+- mihomo需要设置为自己的mihomo dns入站
+- sing-box需要设置为自己的sing-box dns入站
 
-**下面是模板一些可选替换的原值的说明**
-
-- `udp://127.0.0.1:1053`，替换为mihomo dns，不使用CNToMihomo可不配置。
-- `123.123.110.123`，填写ipw.cn显示的ipv4地址或者本城市任意ipv4地址，传递给阿里私有doh。
-- `888888`，替换为阿里私有doh Account ID。
-- `888888_88888`，替换为阿里私有doh AccessKey ID。
-- `999999999`，替换为阿里私有doh AccessKey Secret。
+**其它设置说明**
+- 如果不需要nft功能，此处将不需要任何的配置，原配置可删除。
+- 原值 (查找)为配置模板中预设的初始值（不要修改！），新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。。
 - nft功能说明：https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns%20nft%E8%A7%84%E5%88%99%E6%B7%BB%E5%8A%A0%E5%8A%9F%E8%83%BD%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E
 
-<img width="1590" height="885" alt="image" src="https://github.com/user-attachments/assets/62e34ea4-35ff-45cf-9d4b-ad4d05d9e9a2" />
-
-
-### 下面是如何查找新值、ecs ip、socks5的补充说明
-
-#### mosdns ui 系统-高级设置-上游DNS设置/其它设置部分：
-
-- **添加第1条数据**：原值固定写 `114.114.114.114`，新值为你的运营商dns。
-- **添加第2条数据**：原值固定写 `udp://127.0.0.1:7874`。
+#### 如何查找sing-box dns入站：
   如果 sing-box 和 mosdns 在一个虚拟机上，新值去你 sing-box 的配置文件中去找，找到 `inbounds` 部分类似这样的配置：
   ```json
   "inbounds": [
@@ -85,24 +76,13 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
       "listen_port": 7800
     },
   ```
-  那新值就填 `udp://127.0.0.1:7800`，注意你的端口和ip可能不一样。
+  那sing-box dns入站就是： `udp://127.0.0.1:7800`。
 
 #### mosdns ui 系统-高级设置-SOCKS5/ECS IP部分：
 
-1. **第1条数据**：打开 https://ipw.cn/ ，如果有ipv4、ipv6的ip，就把ipv6 ip填入ECS IP框中；如果没有，就写ipv4地址。
-2. **第2条数据**：打开sing-box配置文件，找到类似如下的配置：
-   ```json
-       {
-         "type": "socks",
-         "listen": "0.0.0.0",
-         "listen_port": 7900,
-         "tcp_multi_path": false,
-         "udp_fragment": false,
-         "sniff": false,
-         "users": []
-       },
-   ```
-   如果 sing-box 和 mosdns 在一个虚拟机上，那么 socks5 代理就填 `127.0.0.1:7900`，注意你的端口和ip可能不一样。
+1. 此处socks5代理仅对规则文件下载、mosdns更新生效，不对上游DNS生效。
+2. **socks5 代理**：填写可用的socks5代理，不支持用户名密码。
+3. **ECS IP**：打开 https://ipw.cn/ ，如果有ipv4、ipv6的ip，就把ipv6 ip填入ECS IP框中；如果没有，就写ipv4地址。
 
 ![mosdns解析流程](https://github.com/user-attachments/assets/c4b0c10c-7c99-4dbb-922c-64de1d566f98)
 
