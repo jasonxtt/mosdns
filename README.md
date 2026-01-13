@@ -4,7 +4,15 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 下载: https://github.com/yyysuo/mosdns/releases  
 魔改版本配置语法基本无差异，仅添加了一些插件，具体参见fakeip分流大法总教程中mosdns配置 下载预编译文件、更新日志。
 
-### 在mosdns1225all配置的基础上保留域名总表（top_domians）/上游DNS配置（config_overrides.json）升级（不保留系统-高级设置-功能开关状态）
+### 手动保存个性化配置
+
+1. gen/top_domains.txt
+2. rule文件夹
+3. config_overrides.json
+4. upstream_overrides.json
+离线全新安装/在线初始化重置后，可以将上述文件（不要删除对应位置的文件夹，需要按文件覆盖）覆盖至对应位置，即可恢复个性化配置。
+
+### 在线升级配置
 
 1. 备份整个mosdns文件夹
 2. web上更新2进制
@@ -12,14 +20,6 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mosdns
 远程配置下载 URL (ZIP)填入：https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns20251225allup.zip
 然后点击：应用远程配置，mosdns自动重启。
-
-### 保存个性化配置
-
-1. gen/top_domains.txt
-2. rule文件夹
-3. config_overrides.json
-4. upstream_overrides.json
-离线全新安装/在线初始化重置后，可以将上述文件（不要删除对应位置的文件夹，需要按文件覆盖）覆盖至对应位置，即可恢复个性化配置。
 
 ### 在线初始化重置
 
@@ -78,7 +78,7 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
   ```
   那sing-box dns入站就是： `udp://127.0.0.1:7800`。
 
-#### mosdns ui 系统-高级设置-SOCKS5/ECS IP部分：
+#### mosdns ui 系统-高级设置-SOCKS5/ECS IP部分说明：
 
 1. 此处socks5代理仅对规则文件下载、mosdns更新生效，不对上游DNS生效。
 2. **socks5 代理**：填写可用的socks5代理，不支持用户名密码。
