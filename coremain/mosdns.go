@@ -118,6 +118,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	RegisterConfigManagerAPI(m.httpMux)
 	RegisterUpdateAPI(m.httpMux)     // For binary updates
 	RegisterSystemAPI(m.httpMux, m)     // For self-restart
+        RegisterUpstreamAPI(m.httpMux)
 
 	// Start http api server
 	if httpAddr := cfg.API.HTTP; len(httpAddr) > 0 {
