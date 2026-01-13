@@ -33,10 +33,16 @@ func Test_cachePlugin_Dump(t *testing.T) {
 	resp := new(dns.Msg)
 	resp.SetQuestion("test.", dns.TypeA)
 
+	// Fix: Pack the dns.Msg to []byte because item.resp is now []byte
+	packedResp, err := resp.Pack()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	now := time.Now()
 	hourLater := now.Add(time.Hour)
 	v := &item{
-		resp:           resp,
+		resp:           packedResp,
 		storedTime:     now,
 		expirationTime: hourLater,
 	}
