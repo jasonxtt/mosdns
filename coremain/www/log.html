@@ -486,6 +486,154 @@
             </form>
         </dialog>
 
+        <!-- [新增] 上游DNS弹窗 (修复后的版本) -->
+        <dialog id="upstream-modal" class="card">
+            <header class="modal-header">
+                <h2 id="upstream-modal-title">添加上游DNS</h2>
+                <button class="button secondary" id="close-upstream-modal" aria-label="Close" style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
+            </header>
+            <form id="upstream-form">
+                <div class="modal-body">
+                    <input type="hidden" id="upstream-original-tag" name="original_tag">
+                    
+                    <div class="form-field">
+                        <label for="upstream-group">所属组 (Plugin Tag)</label>
+                        <select id="upstream-group" name="plugin_tag" required></select>
+                    </div>
+                    
+                    <div class="form-field">
+                        <label for="upstream-tag">名称 (Upstream Tag)</label>
+                        <input type="text" id="upstream-tag" name="tag" placeholder="唯一标识，如 alidoh" required>
+                    </div>
+
+                    <div class="form-field">
+                        <label for="upstream-protocol">类型</label>
+                        <select id="upstream-protocol" name="protocol" required>
+                            <option value="udp">UDP</option>
+                            <option value="tcp">TCP</option>
+                            <option value="tls">DoT (TLS)</option>
+                            <option value="https">DoH (HTTPS)</option>
+                            <option value="quic">DoQ (QUIC)</option>
+                            <option value="aliapi">阿里 API (AliAPI)</option>
+                        </select>
+                    </div>
+
+                    <!-- 动态字段容器 -->
+                    <div id="upstream-dynamic-fields">
+                        
+                        <!-- 1. DNS 通用字段组 -->
+                        <div id="group-dns">
+                            <div class="form-field">
+                                <label for="upstream-addr">服务器地址 (Addr)</label>
+                                <input type="text" id="upstream-addr" name="addr" placeholder="格式: [protocol://]host[:port]">
+                                <small class="control-hint">例如: https://dns.google/dns-query 或 223.5.5.5</small>
+                            </div>
+                            <div class="form-field">
+                                <label for="upstream-dial-addr">拨号地址 (Dial Addr)</label>
+                                <input type="text" id="upstream-dial-addr" name="dial_addr" placeholder="可选，填IP可免去域名解析">
+                            </div>
+
+                            <!-- 动态子选项 -->
+                            <div class="form-field field-socks5" style="display:none;">
+                                <label for="upstream-socks5">Socks5 代理</label>
+                                <input type="text" id="upstream-socks5" name="socks5" placeholder="host:port">
+                            </div>
+                            <div class="form-field field-pipeline" style="display:none;">
+                                <div class="control-item" style="margin-bottom:0;">
+                                    <strong>Enable Pipeline</strong>
+                                    <label class="switch"><input type="checkbox" name="enable_pipeline"><span class="slider"></span></label>
+                                </div>
+                            </div>
+                            <div class="form-field field-http3" style="display:none;">
+                                <div class="control-item" style="margin-bottom:0;">
+                                    <strong>Enable HTTP/3</strong>
+                                    <label class="switch"><input type="checkbox" name="enable_http3"><span class="slider"></span></label>
+                                </div>
+                            </div>
+                            <div class="form-field field-tls-verify" style="display:none;">
+                                <div class="control-item" style="margin-bottom:0;">
+                                    <strong>Insecure Skip Verify</strong>
+                                    <label class="switch"><input type="checkbox" name="insecure_skip_verify"><span class="slider"></span></label>
+                                </div>
+                            </div>
+                            
+                            <div class="form-field">
+                                <label for="upstream-bootstrap">Bootstrap Server</label>
+                                <input type="text" id="upstream-bootstrap" name="bootstrap" placeholder="可选，解析服务器域名用的DNS">
+                            </div>
+                            <div class="form-field">
+                                <label for="upstream-bootstrap-ver">Bootstrap Version</label>
+                                <select id="upstream-bootstrap-ver" name="bootstrap_version">
+                                    <option value="0" selected>0 (自动/默认)</option>
+                                    <option value="4">4 (IPv4)</option>
+                                    <option value="6">6 (IPv6)</option>
+                                </select>
+                            </div>
+
+                            <div style="display: flex; gap: 1rem;">
+                                <div class="form-field" style="flex: 1;">
+                                    <label for="upstream-idle-timeout">Idle Timeout (秒)</label>
+                                    <input type="number" id="upstream-idle-timeout" name="idle_timeout" placeholder="空闲超时">
+                                </div>
+                                <!-- [新增] 查询超时 -->
+                                <div class="form-field" style="flex: 1;">
+                                    <label for="upstream-query-timeout">Query Timeout (毫秒)</label>
+                                    <input type="number" id="upstream-query-timeout" name="upstream_query_timeout" placeholder="查询超时">
+                                </div>
+                            </div>
+
+                            <!-- [新增] 高级网络设置 -->
+                            <div style="display: flex; gap: 1rem;">
+                                <div class="form-field" style="flex: 1;">
+                                    <label for="upstream-bind-device">Bind Device (网卡)</label>
+                                    <input type="text" id="upstream-bind-device" name="bind_to_device" placeholder="例如: eth0">
+                                </div>
+                                <div class="form-field" style="flex: 1;">
+                                    <label for="upstream-so-mark">SoMark (标记)</label>
+                                    <input type="number" id="upstream-so-mark" name="so_mark" placeholder="例如: 100">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 2. AliAPI 专用字段组 -->
+                        <div id="group-aliapi" style="display:none;">
+                            <div class="form-field">
+                                <label>Account ID</label>
+                                <input type="text" name="account_id">
+                            </div>
+                            <div class="form-field">
+                                <label>Access Key ID</label>
+                                <input type="text" name="access_key_id">
+                            </div>
+                            <div class="form-field">
+                                <label>Access Key Secret</label>
+                                <input type="text" name="access_key_secret">
+                            </div>
+                            <div class="form-field">
+                                <label>Server Addr</label>
+                                <input type="text" name="server_addr" value="223.5.5.5">
+                            </div>
+                            <div class="form-field">
+                                <label>ECS Client IP</label>
+                                <input type="text" name="ecs_client_ip">
+                            </div>
+                            <div class="form-field">
+                                <label>ECS Client Mask</label>
+                                <input type="number" name="ecs_client_mask" min="0" max="128">
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+                <footer class="modal-footer">
+                    <div class="footer-actions-right">
+                        <button type="button" id="cancel-upstream-modal" class="button secondary">取消</button>
+                        <button type="submit" id="save-upstream-btn" class="button primary">保存</button>
+                    </div>
+                </footer>
+            </form>
+        </dialog>
+
         <section id="overview-tab" class="tab-content active" role="tabpanel">
             <div class="stats-grid">
                 <div class="stat-card default-gradient-1">
@@ -599,7 +747,7 @@
                     <header class="card-header">
                         <h2><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                                 <path
-                                    d="M12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2ZM12 4C14.2091 4 16 5.79086 16 8C16 10.2091 14.2091 12 12 12C9.79086 12 8 10.2091 8 8C8 5.79086 9.79086 4 12 4ZM12 20C10.0576 20 8.22596 19.3433 6.74542 18.1818C8.34978 16.7383 10.1132 16 12 16C13.8868 16 15.6502 16.7383 17.2546 18.1818C15.774 19.3433 13.9424 20 12 20Z">
+                                    d="M12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C2 6.47715 17.5228 2 12 2ZM12 4C14.2091 4 16 5.79086 16 8C16 10.2091 14.2091 12 12 12C9.79086 12 8 10.2091 8 8C8 5.79086 9.79086 4 12 4ZM12 20C10.0576 20 8.22596 19.3433 6.74542 18.1818C8.34978 16.7383 10.1132 16 12 16C13.8868 16 15.6502 16.7383 17.2546 18.1818C15.774 19.3433 13.9424 20 12 20Z">
                                 </path>
                             </svg>客户端请求排行</h2>
                     </header>
@@ -814,7 +962,7 @@
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
                                         width="20" height="20">
                                         <path
-                                            d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 15H13V17H11V15ZM13 13.3551V14H11V12.5C11 11.9477 11.4477 11.5 12 11.5C12.8284 11.5 13.5 10.8284 13.5 10C13.5 9.17157 12.8284 8.5 12 8.5C11.2723 8.5 10.6656 9.01823 10.5288 9.70577L8.56731 9.31346C8.88637 7.70919 10.302 6.5 12 6.5C13.933 6.5 15.5 8.067 15.5 10C15.5 11.5855 14.4457 12.9248 13 13.3551Z">
+                                            d="M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C2 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 15H13V17H11V15ZM13 13.3551V14H11V12.5C11 11.9477 11.4477 11.5 12 11.5C12.8284 11.5 13.5 10.8284 13.5 10C13.5 9.17157 12.8284 8.5 12 8.5C11.2723 8.5 10.6656 9.01823 10.5288 9.70577L8.56731 9.31346C8.88637 7.70919 10.302 6.5 12 6.5C13.933 6.5 15.5 8.067 15.5 10C15.5 11.5855 14.4457 12.9248 13 13.3551Z">
                                         </path>
                                     </svg>
                                 </button>
@@ -1230,6 +1378,51 @@
                     </div>
                     <div id="secondary-switches-container" class="secondary-switches-grid">
                         <!-- Switches will be injected by JS -->
+                    </div>
+                </div>
+
+                <div class="control-module" id="upstream-dns-module" style="grid-column: 1 / -1;">
+                    <!-- 标题栏 -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h3 style="margin: 0;">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M4 19h16v-7h2v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8h2v7zM20 3H4v7h2V5h12v5h2V4a1 1 0 0 0-1-1z"></path>
+                            </svg>
+                            上游DNS设置
+                        </h3>
+                        <button id="add-upstream-btn" class="button primary small">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                            添加上游DNS
+                        </button>
+                    </div>
+
+                    <div class="scrollable-table-container">
+                        <table class="data-table" id="upstream-dns-table" style="min-width: 900px;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 80px; white-space: nowrap;">启用</th>
+                                    <th style="min-width: 120px;">所属组</th>
+                                    <th>名称</th>
+                                    <th>类型</th>
+                                    <!-- 修改点：稍微加宽，并强制不换行 -->
+                                    <th class="text-center" style="min-width: 100px; white-space: nowrap;">平均响应</th>
+                                    <!-- 修改点：改为居中对齐 text-center，视觉上最稳 -->
+                                    <th class="text-center">请求数</th>
+                                    <th class="text-center">错误数</th>
+                                    <th class="text-center">出错率</th>
+                                    <th class="text-center" style="width: 140px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="upstream-dns-tbody">
+                                <!-- JS 渲染内容 -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- 修改点：justify-content: flex-end 确保靠右 -->
+                    <div class="button-group" style="margin-top: 1rem; display: flex; justify-content: flex-end;">
+                         <!-- 修改点：去掉可能导致全宽的样式，或显式指定 auto 宽度 -->
+                         <button id="upstream-restart-btn" class="button primary" style="width: auto;">重启 MosDNS</button>
                     </div>
                 </div>
 
