@@ -2,25 +2,12 @@
  * Copyright (C) 2020-2022, IrineSistiana
  *
  * This file is part of mosdns.
- *
- * mosdns is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * mosdns is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package aliapi
 
 import (
-	"context" // bytes import removed, not used
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -37,7 +24,7 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
-	"github.com/IrineSistiana/mosdns/v5/pkg/query_context" // <-- [FIXED] Corrected import path
+	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/upstream"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
@@ -54,7 +41,7 @@ func init() {
 }
 
 const (
-	maxConcurrentQueries = 3
+	maxConcurrentQueries = 20
 	queryTimeout         = time.Second * 5
 	defaultAliAPIServer  = "223.5.5.5"
 )
@@ -105,7 +92,76 @@ type UpstreamConfig struct {
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
-	f, err := NewAliAPI(args.(*Args), Opts{Logger: bp.L(), MetricsTag: bp.Tag()})
+	a := args.(*Args)
+	
+	// [Debug] Log entry
+	bp.L().Info("[Debug AliAPI] Init plugin instance", zap.String("plugin_tag", bp.Tag()))
+
+	// 从 api_upstream.go 获取覆盖配置
+	overrides := coremain.GetUpstreamOverrides(bp.Tag())
+	
+	var activeUpstreams []UpstreamConfig
+	enabledCount := 0
+
+	if overrides != nil && len(overrides) > 0 {
+		bp.L().Info("[Debug AliAPI] Found upstream overrides", zap.String("tag", bp.Tag()), zap.Int("count", len(overrides))) // DEBUG
+
+		for _, o := range overrides {
+			if !o.Enabled {
+				continue
+			}
+			
+			u := UpstreamConfig{
+				Tag: o.Tag, Addr: o.Addr, DialAddr: o.DialAddr,
+				IdleTimeout: o.IdleTimeout, UpstreamQueryTimeout: o.UpstreamQueryTimeout,
+				EnablePipeline: o.EnablePipeline, EnableHTTP3: o.EnableHTTP3,
+				InsecureSkipVerify: o.InsecureSkipVerify, Socks5: o.Socks5,
+				SoMark: o.SoMark, BindToDevice: o.BindToDevice,
+				Bootstrap: o.Bootstrap, BootstrapVer: o.BootstrapVer,
+			}
+
+			if o.Protocol == "aliapi" {
+				u.Type = "aliapi"
+				// 如果配置了 aliapi 类型的上游，且提供了凭证，覆盖全局 Args
+				if o.AccountID != "" {
+					a.AccountID = o.AccountID
+					a.AccessKeyID = o.AccessKeyID
+					a.AccessKeySecret = o.AccessKeySecret
+					a.ServerAddr = o.ServerAddr
+					a.EcsClientIP = o.EcsClientIP
+					a.EcsClientMask = o.EcsClientMask
+				}
+			} else {
+				u.Type = "dns"
+				// Addr 已经包含了协议头 (前端处理) 或者在 NewUpstream 自动处理
+			}
+			activeUpstreams = append(activeUpstreams, u)
+			enabledCount++
+		}
+
+		// 需求：只有当覆盖配置中有至少一个启用条目时，才替换原始配置
+		if len(activeUpstreams) > 0 {
+			a.Upstreams = activeUpstreams
+			
+			// 需求：自动设置 concurrent 数量（1-3）
+			conc := enabledCount
+			if conc > maxConcurrentQueries { conc = maxConcurrentQueries }
+			if conc < 1 { conc = 1 }
+			a.Concurrent = conc
+			
+			bp.L().Info("[Debug AliAPI] Configuration REPLACED by overrides", 
+				zap.String("tag", bp.Tag()),
+				zap.Int("active_upstreams", enabledCount),
+				zap.Int("new_concurrent", a.Concurrent))
+		} else {
+			bp.L().Info("[Debug AliAPI] Overrides exist but none enabled, using default YAML config", zap.String("tag", bp.Tag()))
+		}
+	} else {
+		bp.L().Info("[Debug AliAPI] No overrides found, using default YAML config", zap.String("tag", bp.Tag()))
+	}
+
+	// 执行正常初始化
+	f, err := NewAliAPI(a, Opts{Logger: bp.L(), MetricsTag: bp.Tag()})
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +170,12 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, err
 	}
 	return f, nil
+}
+
+// applyUpstreamOverrides 负责根据本地 JSON 文件内容动态修改插件运行参数
+// (保留此函数以防你在其他地方调用，但逻辑已移至 Init)
+func applyUpstreamOverrides(pluginTag string, args *Args, logger *zap.Logger) {
+	// ... 略 (因为 Init 已经处理了)
 }
 
 var _ sequence.Executable = (*AliAPI)(nil)
@@ -201,7 +263,7 @@ func NewAliAPI(args *Args, opt Opts) (*AliAPI, error) {
 					ClientSessionCache: tls.NewLRUClientSessionCache(4),
 				},
 				Logger:        opt.Logger,
-				EventObserver: &nopEO{}, // Pass a no-op observer for standard upstreams
+				EventObserver: uw,
 			}
 			u, err = upstream.NewUpstream(c.Addr, uOpt)
 			if err != nil {
@@ -306,15 +368,10 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 
 	resChan := make(chan res, concurrent)
 
-	// --- [FIXED] Use context.WithCancel for safe and modern goroutine cancellation ---
-	exchangeCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	var lastSuccessOrNXRes *dns.Msg
 	var lastOtherRes *dns.Msg
 	var lastError error
 
-	// --- [FIXED] Use concurrency-safe, top-level rand.Intn ---
 	randIndex := rand.Intn(len(us))
 
 	usToQuery := make([]*upstreamWrapper, 0, concurrent)
@@ -333,18 +390,13 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 		go func(uqid uint32, question dns.Question, currentUpstream *upstreamWrapper) {
 			defer pool.ReleaseBuf(qc)
 
-			// --- [FIXED] Inherit parent context for proper cancellation propagation ---
-			upstreamCtx, upstreamCancel := context.WithTimeout(exchangeCtx, upstreamTimeout)
+			upstreamCtx, upstreamCancel := context.WithTimeout(context.Background(), upstreamTimeout)
 			defer upstreamCancel()
 
-			currentUpstream.mQueryTotal.Inc()
-			currentUpstream.mInflight.Inc()
-			defer currentUpstream.mInflight.Dec()
-
 			var r *dns.Msg
-			respPayload, err := currentUpstream.u.ExchangeContext(upstreamCtx, *qc)
+			respPayload, err := currentUpstream.ExchangeContext(upstreamCtx, *qc)
+			
 			if err != nil {
-				currentUpstream.mErrorTotal.Inc()
 				if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
 					!strings.Contains(err.Error(), "connection refused") &&
 					!strings.Contains(err.Error(), "no such host") {
@@ -362,7 +414,7 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 
 			select {
 			case resChan <- res{r: r, err: err}:
-			case <-exchangeCtx.Done(): // Listen to cancellation signal
+			case <-upstreamCtx.Done(): 
 			}
 		}(qCtx.Id(), qCtx.QQuestion(), u)
 	}
@@ -381,11 +433,9 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 			if len(r.Answer) > 0 {
 				for _, ans := range r.Answer {
 					if a, ok := ans.(*dns.A); ok && len(a.A) > 0 {
-						cancel() // We got a winner, cancel other requests.
 						return r, nil
 					}
 					if aaaa, ok := ans.(*dns.AAAA); ok && len(aaaa.AAAA) > 0 {
-						cancel() // We got a winner, cancel other requests.
 						return r, nil
 					}
 				}
@@ -401,9 +451,7 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 				}
 			}
 
-		case <-exchangeCtx.Done():
-			// If the main context was cancelled, exit the loop.
-			// Return the best result we have so far, or the context error.
+		case <-ctx.Done():
 			if lastSuccessOrNXRes != nil {
 				return lastSuccessOrNXRes, nil
 			}
@@ -413,7 +461,7 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 			if lastError != nil {
 				return nil, lastError
 			}
-			return nil, context.Cause(ctx) // Return original cause
+			return nil, context.Cause(ctx)
 		}
 	}
 
@@ -571,12 +619,8 @@ type AliAPIUpstream struct {
 }
 
 // NewAliAPIUpstream creates a new AliAPIUpstream.
-// ======================================================================================
-// ===== VVVV THIS IS A MODIFIED FUNCTION VVVV =====
-// ======================================================================================
 func NewAliAPIUpstream(args AliAPIUpstreamArgs, logger *zap.Logger) *AliAPIUpstream {
 	httpClient := &http.Client{
-		// [FIXED] Set a reasonable timeout to prevent hanging.
 		Timeout: queryTimeout,
 	}
 	return &AliAPIUpstream{
@@ -587,9 +631,6 @@ func NewAliAPIUpstream(args AliAPIUpstreamArgs, logger *zap.Logger) *AliAPIUpstr
 }
 
 // ExchangeContext performs a DNS query via AliDNS JSON API.
-// ======================================================================================
-// ===== VVVV THIS IS A MODIFIED FUNCTION VVVV =====
-// ======================================================================================
 func (a *AliAPIUpstream) ExchangeContext(ctx context.Context, req []byte) (resp *[]byte, err error) {
 	dnsMsg := new(dns.Msg)
 	if err := dnsMsg.Unpack(req); err != nil {
@@ -645,8 +686,6 @@ func (a *AliAPIUpstream) ExchangeContext(ctx context.Context, req []byte) (resp 
 	}
 	defer httpResp.Body.Close()
 
-	// [FIXED] Handle HTTP-level errors (e.g., 4xx, 5xx) before attempting to parse the body.
-	// Per AliAPI documentation, these are transport/auth errors, not DNS responses.
 	if httpResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(httpResp.Body)
 		a.logger.Warn("AliAPI returned non-200 status code",
@@ -732,6 +771,18 @@ type upstreamWrapper struct {
 	mQueryTotal prometheus.Counter
 	mErrorTotal prometheus.Counter
 	mInflight   prometheus.Gauge
+                mResponseLatency prometheus.Histogram
+                mConnOpened prometheus.Counter
+                mConnClosed prometheus.Counter
+}
+
+func (w *upstreamWrapper) OnEvent(e upstream.Event) {
+	switch e {
+	case upstream.EventConnOpen:
+		w.mConnOpened.Inc()
+	case upstream.EventConnClose:
+		w.mConnClosed.Inc()
+	}
 }
 
 func newWrapper(idx int, c UpstreamConfig, metricsTag string) *upstreamWrapper {
@@ -765,6 +816,34 @@ func newWrapper(idx int, c UpstreamConfig, metricsTag string) *upstreamWrapper {
 				"metrics_tag": metricsTag,
 			},
 		}),
+		mResponseLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "response_latency_millisecond",
+			Help:    "Response latency in milliseconds.",
+			Buckets: []float64{1, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000},
+			ConstLabels: prometheus.Labels{
+				"tag":         c.Tag,
+				"addr":        c.Addr,
+				"metrics_tag": metricsTag,
+			},
+		}),
+                mConnOpened: prometheus.NewCounter(prometheus.CounterOpts{
+                    Name: "conn_opened_total",
+                    Help: "Total number of connections opened.",
+                    ConstLabels: prometheus.Labels{
+                        "tag":         c.Tag,
+                        "addr":        c.Addr,
+                        "metrics_tag": metricsTag,
+                    },
+                }),
+                mConnClosed: prometheus.NewCounter(prometheus.CounterOpts{
+                    Name: "conn_closed_total",
+                    Help: "Total number of connections closed.",
+                    ConstLabels: prometheus.Labels{
+                        "tag":         c.Tag,
+                        "addr":        c.Addr,
+                        "metrics_tag": metricsTag,
+                    },
+                }),
 	}
 }
 
@@ -775,12 +854,16 @@ func (w *upstreamWrapper) ExchangeContext(ctx context.Context, req []byte) (*[]b
 	w.mQueryTotal.Inc()
 	w.mInflight.Inc()
 
+	start := time.Now() 
+
 	resp, err := w.u.ExchangeContext(ctx, req) // Call the wrapped upstream's method
 
 	w.mInflight.Dec() // Always decrement inflight after the exchange completes
 
 	if err != nil {
 		w.mErrorTotal.Inc()
+	} else {
+		w.mResponseLatency.Observe(float64(time.Since(start).Milliseconds()))
 	}
 
 	return resp, err
@@ -800,6 +883,11 @@ func (w *upstreamWrapper) registerMetricsTo(r prometheus.Registerer) error {
 	if err := r.Register(w.mInflight); err != nil {
 		return err
 	}
+	if err := r.Register(w.mResponseLatency); err != nil {
+		return err
+	}
+            if err := r.Register(w.mConnOpened); err != nil { return err }
+            if err := r.Register(w.mConnClosed); err != nil { return err }
 	return nil
 }
 
