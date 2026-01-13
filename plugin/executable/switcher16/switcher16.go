@@ -1,3 +1,4 @@
+// switcher16.go
 package switcher16
 
 import (
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
@@ -24,9 +26,9 @@ type Args struct {
 }
 
 type Switcher16 struct {
-	mutex    sync.RWMutex
-	value    string
+	value    atomic.Value
 	filePath string
+	writeMu  sync.Mutex
 }
 
 var globalSwitcher16 *Switcher16
@@ -48,13 +50,16 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, fmt.Errorf("cannot create dir for %s file: %w", PluginType, err)
 	}
 
+	var initVal string
 	data, err := os.ReadFile(sw.filePath)
 	if err == nil {
-		sw.value = strings.TrimSpace(string(data))
+		initVal = strings.TrimSpace(string(data))
 	} else {
-		sw.value = ""
-		_ = os.WriteFile(sw.filePath, []byte(sw.value), 0644)
+		initVal = ""
+		_ = os.WriteFile(sw.filePath, []byte(initVal), 0644)
 	}
+
+	sw.value.Store(initVal)
 
 	globalSwitcher16 = sw
 	bp.RegAPI(sw.Api())
@@ -69,29 +74,27 @@ func (s *Switcher16) Api() *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Get("/show", func(w http.ResponseWriter, r *http.Request) {
-		s.mutex.RLock()
-		defer s.mutex.RUnlock()
-		io.WriteString(w, s.value)
+		val := s.value.Load().(string)
+		io.WriteString(w, val)
 	})
 
 	r.Post("/post", func(w http.ResponseWriter, r *http.Request) {
 		var newVal string
-
 		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 			var body struct{ Value string }
 			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
 				newVal = body.Value
 			}
 		}
-
 		if newVal == "" {
 			r.ParseForm()
 			newVal = r.FormValue("value")
 		}
 
-		s.mutex.Lock()
-		s.value = newVal
-		s.mutex.Unlock()
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+
+		s.value.Store(newVal)
 
 		if err := os.WriteFile(s.filePath, []byte(newVal), 0644); err != nil {
 			http.Error(w, "failed to write switch file: "+err.Error(), http.StatusInternalServerError)
@@ -118,7 +121,6 @@ func (m *switchMatcher16) Match(_ context.Context, _ *query_context.Context) (bo
 	if globalSwitcher16 == nil {
 		return false, nil
 	}
-	globalSwitcher16.mutex.RLock()
-	defer globalSwitcher16.mutex.RUnlock()
-	return globalSwitcher16.value == m.expected, nil
+	currentVal := globalSwitcher16.value.Load().(string)
+	return currentVal == m.expected, nil
 }
