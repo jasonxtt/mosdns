@@ -54,7 +54,7 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
 - 预设了所有的dns，一般只需要打开和关闭，不需要新增。
 - domestic为国内组，foreign为国外组，mihomo和sing-box组只能设置1个上游。
 - 阿里私享DOH不需要可删除，开启需要设置相应的账户信息及ECS Client IP，可填入这里显示的ipv4 ip：https://ipw.cn/。
-- 需要将预设的运营商dns为自己的运营商dns。
+- 需要将预设的运营商dns更改为自己的运营商dns。
 - cloudflare、google共3个上游，需要填入socks5代理，否则将遵循mosdns所在OS的路由。
 - mihomo需要设置为自己的mihomo dns入站
 - sing-box需要设置为自己的sing-box dns入站
@@ -83,6 +83,8 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
 1. 此处socks5代理仅对规则文件下载、mosdns更新生效，不对上游DNS生效。
 2. **socks5 代理**：填写可用的socks5代理，不支持用户名密码。
 3. **ECS IP**：打开 https://ipw.cn/ ，如果有ipv4、ipv6的ip，就把ipv6 ip填入ECS IP框中；如果没有，就写ipv4地址。
+
+### 本项目mosdns配置解析流程
 
 ![mosdns解析流程](https://github.com/user-attachments/assets/c4b0c10c-7c99-4dbb-922c-64de1d566f98)
 
