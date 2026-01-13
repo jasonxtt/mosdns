@@ -635,6 +635,41 @@
         .log-item-meta .result {
             font-weight: bold;
         }
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--log-border-color);
+            margin-bottom: 1rem;
+            padding-bottom: 0.8rem;
+        }
+        .timeline-header .timeline-title {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        /* 当列表容器拥有 hide-false-logs 类时，隐藏失败的条目 */
+        .structured-log-list.hide-false-logs .log-item.result-fail {
+            display: none;
+        }
+        #toggle-false-btn {
+            background-color: var(--log-control-bg);
+            color: var(--log-text-color);
+            border: 1px solid var(--log-border-color);
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-control);
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s ease;
+        }
+        #toggle-false-btn:hover {
+            border-color: var(--log-accent-color);
+            background-color: color-mix(in srgb, var(--log-accent-color) 10%, var(--log-control-bg));
+        }
         .log-item-meta .result.ok { color: var(--log-timeline-matcher-ok-text); } /* Use fixed color */
         .log-item-meta .result.fail { color: var(--log-timeline-matcher-fail-text); } /* Use fixed color */
         .log-item-meta .time {
@@ -1920,6 +1955,9 @@
             container.innerHTML = tableHTML;
         }
 
+// 定义一个变量记录 False 条目的显示状态，默认 false (隐藏)
+        let showFalseLogs = false;
+
         function renderStructuredList(logs) {
             const container = getById('log-flowchart-container');
             container.innerHTML = ''; 
@@ -1931,11 +1969,56 @@
             const endTime = new Date(logs[logs.length-1].time);
             const duration = (endTime - startTime).toFixed(0);
 
+            // --- 修改开始：创建头部容器，包含标题和按钮 ---
+            const header = createElement('div', 'timeline-header');
+
             const title = createElement('h3', 'timeline-title');
             title.innerHTML = `DNS 查询流程: <strong>${domain}</strong> (总耗时: ${duration} ms)`;
-            container.appendChild(title);
+            
+            // 创建切换按钮
+            const toggleBtn = createElement('button', '', '', 'toggle-false-btn');
+            
+            // 更新按钮文本的辅助函数
+            const updateBtnState = () => {
+                if (showFalseLogs) {
+                    toggleBtn.innerHTML = `<i class="fas fa-eye-slash"></i> 隐藏 FALSE`;
+                    toggleBtn.style.color = 'var(--log-accent-color)';
+                } else {
+                    toggleBtn.innerHTML = `<i class="fas fa-eye"></i> 显示 FALSE`;
+                    toggleBtn.style.color = 'var(--log-text-color)';
+                }
+            };
+            
+            updateBtnState(); // 初始化按钮状态
+
+            // 按钮点击事件
+            toggleBtn.onclick = () => {
+                showFalseLogs = !showFalseLogs; // 切换状态
+                updateBtnState(); // 更新按钮文字
+                
+                // 切换列表容器的 class
+                const listEl = container.querySelector('.structured-log-list');
+                if (listEl) {
+                    if (showFalseLogs) {
+                        listEl.classList.remove('hide-false-logs');
+                    } else {
+                        listEl.classList.add('hide-false-logs');
+                    }
+                }
+            };
+
+            header.appendChild(title);
+            header.appendChild(toggleBtn);
+            container.appendChild(header);
+            // --- 修改结束 ---
 
             const list = createElement('div', 'structured-log-list');
+            
+            // --- 修改开始：根据默认状态应用 CSS 类 ---
+            if (!showFalseLogs) {
+                list.classList.add('hide-false-logs');
+            }
+            // --- 修改结束 ---
 
             let lastLoggerName = '';
             logs.forEach(log => {
