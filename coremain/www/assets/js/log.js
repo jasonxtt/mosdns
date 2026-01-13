@@ -651,9 +651,9 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch13', name: '过期缓存2', desc: '启用全部缓存 (兼容)、全部缓存 (安全)，缓存fakeip，直面客户端', tip: '建议开启，折腾时可临时关闭，排除干扰。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
             { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
-            { tag: 'switch11', name: '使用阿里私有DOH', desc: '国内上游并发请求至阿里私有DOH。', tip: '打开前在上游DNS设置中添加DOH配置。', valueForOn: 'A' },
-            { tag: 'switch14', name: '使用运营商DNS', desc: '国内上游并发请求至运营商DNS。', tip: '打开前在上游DNS设置中修改运营商DNS配置。', valueForOn: 'A' },
-            { tag: 'switch15', name: '使用其它DNS', desc: '国内上游并发请求至阿里UDP DNS。', tip: '单独开启时也可替换quic://223.5.5.5为其它DNS。', valueForOn: 'A' },
+//            { tag: 'switch11', name: '使用阿里私有DOH', desc: '国内上游并发请求至阿里私有DOH。', tip: '打开前在上游DNS设置中添加DOH配置。', valueForOn: 'A' },
+//            { tag: 'switch14', name: '使用运营商DNS', desc: '国内上游并发请求至运营商DNS。', tip: '打开前在上游DNS设置中修改运营商DNS配置。', valueForOn: 'A' },
+//            { tag: 'switch15', name: '使用其它DNS', desc: '国内上游并发请求至阿里UDP DNS。', tip: '单独开启时也可替换quic://223.5.5.5为其它DNS。', valueForOn: 'A' },
             { tag: 'switch2', name: '指定 Client fakeip', desc: '只允许指定的客户端科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不允许科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽AAAA请求类型', tip: '无IPV6网络环境建议开启', valueForOn: 'A' },
@@ -2888,7 +2888,7 @@ async function updateDomainListStats(signal) {
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M7.5 5.6L5 7 6.4 4.5 5 2 7.5 3.4 10 2 8.6 4.5 10 7 7.5 5.6zm12 9.8L22 17l-2.5 1.4L18.1 22l-1.4-2.5L14.2 18l2.5-1.4L18.1 14l1.4 2.5zM11 10c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6zm-8 8c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6z"/>
                         </svg>
-                        上游DNS设置/其它设置
+                        其它设置
                     </h3>
                     <button class="button secondary small" id="rep-add-btn">
                         <span>+ 添加规则</span>
@@ -3043,19 +3043,475 @@ async function updateDomainListStats(signal) {
         }
     };
 
+// [插入点] 修复后的 Upstream 管理器
+// [新增] 上游DNS管理器
+    const upstreamManager = {
+        state: {
+            tags: [],      // 后端发现的 aliapi tags
+            config: {},    // Map<pluginTag, Array<UpstreamConfig>>
+            metrics: {}    // 解析后的 metrics 数据
+        },
+
+        init() {
+            if (!document.getElementById('upstream-dns-module')) return;
+            
+            this.bindEvents();
+            // 如果已经在系统控制标签页，立即加载
+            const tab = document.getElementById('system-control-tab');
+            if (tab && tab.classList.contains('active')) {
+                this.loadData();
+            }
+        },
+
+        bindEvents() {
+            document.getElementById('add-upstream-btn')?.addEventListener('click', () => this.openModal());
+            document.getElementById('upstream-restart-btn')?.addEventListener('click', () => this.restartService());
+            
+            // 列表操作委托
+            document.getElementById('upstream-dns-tbody')?.addEventListener('click', (e) => {
+                const btn = e.target.closest('button');
+                if (!btn) return;
+                const row = btn.closest('tr');
+                const group = row.dataset.group;
+                const index = parseInt(row.dataset.index, 10);
+
+                if (btn.classList.contains('edit-btn')) {
+                    this.openModal(group, index);
+                } else if (btn.classList.contains('delete-btn')) {
+                    this.deleteUpstream(group, index);
+                }
+            });
+
+            // 启用开关委托
+            document.getElementById('upstream-dns-tbody')?.addEventListener('change', (e) => {
+                if (e.target.matches('.upstream-enable-toggle')) {
+                    const row = e.target.closest('tr');
+                    this.toggleEnable(row.dataset.group, parseInt(row.dataset.index, 10), e.target.checked);
+                }
+            });
+
+            const modal = document.getElementById('upstream-modal');
+            const form = document.getElementById('upstream-form');
+            const protocolSelect = document.getElementById('upstream-protocol');
+
+            document.getElementById('close-upstream-modal')?.addEventListener('click', () => closeAndUnlock(modal));
+            document.getElementById('cancel-upstream-modal')?.addEventListener('click', () => closeAndUnlock(modal));
+            
+            protocolSelect?.addEventListener('change', () => this.updateFormFields(protocolSelect.value));
+            
+            form?.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handleSave(new FormData(form));
+            });
+        },
+
+        async loadData() {
+            try {
+                const [tagsRes, configRes, metricsRaw] = await Promise.all([
+                    api.fetch('/api/v1/upstream/tags'),
+                    api.fetch('/api/v1/upstream/config'),
+                    api.getMetrics()
+                ]);
+
+                // 确保 tagsRes 是数组
+                this.state.tags = Array.isArray(tagsRes) ? tagsRes : [];
+                this.state.config = configRes || {};
+                this.parseMetrics(metricsRaw);
+                this.renderTable();
+            } catch (e) {
+                console.error("Upstream data load failed", e);
+                ui.showToast('加载上游配置失败', 'error');
+            }
+        },
+
+        parseMetrics(rawText) {
+            const parse = (prefix) => {
+                const regex = new RegExp(`${prefix}\\{[^}]*metrics_tag="([^"]+)"[^}]*tag="([^"]+)"[^}]*\\} ([0-9.]+)`, 'g');
+                const map = {};
+                let match;
+                while ((match = regex.exec(rawText)) !== null) {
+                    const group = match[1];
+                    const name = match[2];
+                    const val = parseFloat(match[3]);
+                    const key = `${group}|${name}`;
+                    map[key] = val;
+                }
+                return map;
+            };
+
+            this.state.metrics = { 
+                latSum: parse('mosdns_aliapi_response_latency_millisecond_sum'),
+                latCount: parse('mosdns_aliapi_response_latency_millisecond_count'),
+                queryTotal: parse('mosdns_aliapi_query_total'),
+                errorTotal: parse('mosdns_aliapi_error_total')
+            };
+        },
+
+        renderTable() {
+            const tbody = document.getElementById('upstream-dns-tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            let hasData = false;
+            
+            // [修改] 第一步：扁平化数据
+            // 将所有组的数据收集到一个数组中，并保留原始组名和原始索引以便后续操作
+            const allUpstreams = [];
+            
+            for (const [group, upstreams] of Object.entries(this.state.config)) {
+                if (!upstreams || !Array.isArray(upstreams)) continue;
+                
+                upstreams.forEach((u, idx) => {
+                    allUpstreams.push({
+                        u: u,                // 配置对象
+                        group: group,        // 所属组名
+                        originalIndex: idx   // 原始索引 (用于编辑/删除)
+                    });
+                });
+            }
+
+            if (allUpstreams.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding:2rem;">暂无上游配置，请点击添加。</td></tr>';
+                return;
+            }
+
+            // [修改] 第二步：全局排序
+            // 优先级 1: 是否启用 (启用的在最前)
+            // 优先级 2: 组名 (字母顺序)
+            // 优先级 3: Tag名 (字母顺序)
+            allUpstreams.sort((a, b) => {
+                // 1. 启用状态 (true=1, false=0)
+                const enabledDiff = (b.u.enabled ? 1 : 0) - (a.u.enabled ? 1 : 0);
+                if (enabledDiff !== 0) return enabledDiff;
+
+                // 2. 组名排序 (让同组的聚在一起，看起来更整齐)
+                const groupDiff = a.group.localeCompare(b.group);
+                if (groupDiff !== 0) return groupDiff;
+
+                // 3. Tag 名称排序
+                return (a.u.tag || '').localeCompare(b.u.tag || '');
+            });
+
+            // [修改] 第三步：渲染
+            allUpstreams.forEach((item) => {
+                hasData = true;
+                const u = item.u;
+                const group = item.group;
+                const index = item.originalIndex;
+
+                // 指标 key = 所属组|名称
+                const key = `${group}|${u.tag}`;
+                const stats = u.enabled ? this.getStats(key) : { avgLat: '-', query: '-', error: '-', rate: '-' };
+                
+                const tr = document.createElement('tr');
+                tr.dataset.group = group; // 绑定原始组名
+                tr.dataset.index = index; // 绑定原始索引
+                
+                // 禁用的行变半透明
+                if (!u.enabled) {
+                    tr.style.opacity = '0.6';
+                }
+
+                tr.innerHTML = `
+                    <td class="text-center">
+                        <label class="switch">
+                            <input type="checkbox" class="upstream-enable-toggle" ${u.enabled ? 'checked' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                    </td>
+                    <td>${group}</td>
+                    <td>${u.tag}</td>
+                    <td>${u.protocol}</td>
+                    <td class="text-center">${stats.avgLat}</td>
+                    <td class="text-center">${stats.query}</td>
+                    <td class="text-center">${stats.error}</td>
+                    <td class="text-center">${stats.rate}</td>
+                    <td class="text-center">
+                         <div style="display: inline-flex; gap: 0.5rem;">
+                            <button class="button secondary small edit-btn" style="padding: 0.3rem 0.6rem;">编辑</button>
+                            <button class="button danger small delete-btn" style="padding: 0.3rem 0.6rem;">删除</button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        },
+
+        getStats(key) {
+            const m = this.state.metrics;
+            const q = m.queryTotal[key] || 0;
+            const e = m.errorTotal[key] || 0;
+            const lSum = m.latSum[key] || 0;
+            const lCount = m.latCount[key] || 0;
+            const avg = lCount > 0 ? (lSum / lCount).toFixed(2) + ' ms' : '0 ms';
+            const rate = q > 0 ? ((e / q) * 100).toFixed(2) + '%' : '0.00%';
+            return { avgLat: avg, query: q, error: e, rate: rate };
+        },
+
+        openModal(group = null, index = null) {
+            const modal = document.getElementById('upstream-modal');
+            const form = document.getElementById('upstream-form');
+            const groupSelect = document.getElementById('upstream-group');
+            const protocolSelect = document.getElementById('upstream-protocol');
+            
+            form.reset();
+            
+            // 填充所属组下拉框
+            groupSelect.innerHTML = '';
+            const allGroups = new Set();
+            
+            // 1. 添加从后端读取到的 aliapi 插件的 Tag
+            if (Array.isArray(this.state.tags)) {
+                this.state.tags.forEach(t => {
+                    // 过滤非字符串 (防止 JS for-in 遍历数字索引等问题)
+                    if (t && typeof t === 'string' && isNaN(t)) {
+                        allGroups.add(t);
+                    }
+                });
+            }
+            
+            // 2. 添加配置文件中已存在的组名（即便当前未扫描到，也应允许编辑）
+            if (this.state.config && typeof this.state.config === 'object') {
+                Object.keys(this.state.config).forEach(k => {
+                    if (k && isNaN(k)) {
+                        allGroups.add(k);
+                    }
+                });
+            }
+            // 如果没有找到组，下拉框保持为空，用户点击保存时会提示"请选择所属组"
+            allGroups.forEach(g => {
+                const opt = document.createElement('option');
+                opt.value = g; opt.textContent = g;
+                groupSelect.appendChild(opt);
+            });
+
+            if (group && index !== null) {
+                // 编辑模式
+                document.getElementById('upstream-modal-title').textContent = '编辑上游DNS';
+                const u = this.state.config[group][index];
+                
+                groupSelect.value = group;
+                groupSelect.disabled = true; // 编辑时不允许改组
+                document.getElementById('upstream-original-tag').value = index; 
+                
+                form.elements['tag'].value = u.tag || '';
+                protocolSelect.value = u.protocol || 'udp';
+                
+                form.elements['addr'].value = u.addr || '';
+                form.elements['dial_addr'].value = u.dial_addr || '';
+                form.elements['socks5'].value = u.socks5 || '';
+                form.elements['bootstrap'].value = u.bootstrap || '';
+                form.elements['bootstrap_version'].value = u.bootstrap_version || 0;
+                
+                if(form.elements['enable_pipeline']) form.elements['enable_pipeline'].checked = !!u.enable_pipeline;
+                if(form.elements['enable_http3']) form.elements['enable_http3'].checked = !!u.enable_http3;
+                if(form.elements['insecure_skip_verify']) form.elements['insecure_skip_verify'].checked = !!u.insecure_skip_verify;
+                form.elements['idle_timeout'].value = u.idle_timeout || '';
+                form.elements['upstream_query_timeout'].value = u.upstream_query_timeout || '';
+                form.elements['bind_to_device'].value = u.bind_to_device || '';
+                form.elements['so_mark'].value = u.so_mark || '';
+
+                form.elements['account_id'].value = u.account_id || '';
+                form.elements['access_key_id'].value = u.access_key_id || '';
+                form.elements['access_key_secret'].value = u.access_key_secret || '';
+                form.elements['server_addr'].value = u.server_addr || '223.5.5.5';
+                form.elements['ecs_client_ip'].value = u.ecs_client_ip || '';
+                form.elements['ecs_client_mask'].value = u.ecs_client_mask || '';
+                
+            } else {
+                // 添加模式
+                document.getElementById('upstream-modal-title').textContent = '添加上游DNS';
+                groupSelect.disabled = false;
+                if(groupSelect.options.length > 0) groupSelect.selectedIndex = 0;
+                document.getElementById('upstream-original-tag').value = -1;
+                protocolSelect.value = 'aliapi'; 
+            }
+
+            this.updateFormFields(protocolSelect.value);
+            lockScroll();
+            modal.showModal();
+        },
+
+        updateFormFields(protocol) {
+            const groupDns = document.getElementById('group-dns');
+            const groupAliapi = document.getElementById('group-aliapi');
+            const show = (sel) => groupDns.querySelectorAll(sel).forEach(el => el.style.display = 'block');
+            const hide = (sel) => groupDns.querySelectorAll(sel).forEach(el => el.style.display = 'none');
+
+            if (protocol === 'aliapi') {
+                groupAliapi.style.display = 'block';
+                groupDns.style.display = 'none';
+            } else {
+                groupAliapi.style.display = 'none';
+                groupDns.style.display = 'block';
+
+                hide('.field-socks5, .field-pipeline, .field-http3, .field-tls-verify');
+
+                if (['tcp', 'dot', 'tls'].includes(protocol)) show('.field-pipeline');
+                if (['https', 'doh', 'quic', 'doq'].includes(protocol)) show('.field-http3'); 
+                if (['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocol)) {
+                     show('.field-tls-verify');
+                     show('.field-socks5');
+                }
+            }
+        },
+
+async handleSave(formData) {
+            const btn = document.getElementById('save-upstream-btn');
+            ui.setLoading(btn, true);
+
+            const groupSelect = document.getElementById('upstream-group');
+            const pluginTag = groupSelect.value;
+            if (!pluginTag) {
+                ui.showToast('请选择所属组', 'error');
+                ui.setLoading(btn, false);
+                return;
+            }
+
+            const idx = parseInt(document.getElementById('upstream-original-tag').value, 10);
+            
+            // [新增] 先获取协议，用于清洗数据
+            const protocol = formData.get('protocol'); 
+
+            // 构建对象
+            const newUpstream = {
+                tag: formData.get('tag'),
+                protocol: protocol,
+                
+                // [修改] 数据清洗逻辑：互斥字段置空
+                
+                // 1. DNS 通用字段 (非 AliAPI 时有效)
+                addr: (protocol !== 'aliapi') ? formData.get('addr') : '',
+                dial_addr: (protocol !== 'aliapi') ? formData.get('dial_addr') : '',
+                idle_timeout: (protocol !== 'aliapi') ? (parseInt(formData.get('idle_timeout')) || 0) : 0,
+                upstream_query_timeout: (protocol !== 'aliapi') ? (parseInt(formData.get('upstream_query_timeout')) || 0) : 0,
+                bind_to_device: (protocol !== 'aliapi') ? formData.get('bind_to_device') : '',
+                so_mark: (protocol !== 'aliapi') ? (parseInt(formData.get('so_mark')) || 0) : 0,
+                
+                enable_pipeline: (protocol !== 'aliapi') ? (formData.get('enable_pipeline') === 'on') : false,
+                enable_http3: (protocol !== 'aliapi') ? (formData.get('enable_http3') === 'on') : false,
+                insecure_skip_verify: (protocol !== 'aliapi') ? (formData.get('insecure_skip_verify') === 'on') : false,
+                socks5: (protocol !== 'aliapi') ? formData.get('socks5') : '',
+                bootstrap: (protocol !== 'aliapi') ? formData.get('bootstrap') : '',
+                bootstrap_version: (protocol !== 'aliapi') ? (parseInt(formData.get('bootstrap_version')) || 0) : 0,
+                
+                // 2. AliAPI 专用字段 (仅 AliAPI 时有效)
+                account_id: (protocol === 'aliapi') ? formData.get('account_id') : '',
+                access_key_id: (protocol === 'aliapi') ? formData.get('access_key_id') : '',
+                access_key_secret: (protocol === 'aliapi') ? formData.get('access_key_secret') : '',
+                server_addr: (protocol === 'aliapi') ? formData.get('server_addr') : '',
+                ecs_client_ip: (protocol === 'aliapi') ? formData.get('ecs_client_ip') : '',
+                ecs_client_mask: (protocol === 'aliapi') ? (parseInt(formData.get('ecs_client_mask')) || 0) : 0,
+            };
+
+            // 安全初始化
+            if (!this.state.config || typeof this.state.config !== 'object' || Array.isArray(this.state.config)) {
+                this.state.config = {};
+            }
+            if (!Array.isArray(this.state.config[pluginTag])) {
+                this.state.config[pluginTag] = [];
+            }
+
+            let list = this.state.config[pluginTag];
+
+            if (idx >= 0 && list[idx]) {
+                // 编辑：保留原 Enabled 状态
+                newUpstream.enabled = list[idx].enabled;
+                list[idx] = newUpstream;
+            } else {
+                // 新增：默认启用
+                newUpstream.enabled = true;
+                list.push(newUpstream);
+            }
+
+            try {
+                // 保存到后端
+                await api.fetch('/api/v1/upstream/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        plugin_tag: pluginTag, 
+                        upstreams: list 
+                    })
+                });
+                ui.showToast('保存成功');
+                closeAndUnlock(document.getElementById('upstream-modal'));
+                await this.loadData();
+            } catch (e) {
+                console.error("Save upstream error:", e);
+                ui.showToast('保存失败: ' + e.message, 'error');
+            } finally {
+                ui.setLoading(btn, false);
+            }
+        },
+        
+        async toggleEnable(group, index, enabled) {
+            const list = this.state.config[group];
+            if (!list || !list[index]) return;
+            // 乐观更新
+            list[index].enabled = enabled;
+            try {
+                await api.fetch('/api/v1/upstream/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ plugin_tag: group, upstreams: list })
+                });
+                this.renderTable();
+            } catch (e) {
+                ui.showToast('状态更新失败', 'error');
+                // 回滚
+                list[index].enabled = !enabled;
+                this.renderTable();
+            }
+        },
+
+        async deleteUpstream(group, index) {
+            if (!confirm('确定要删除此上游吗？')) return;
+            const list = this.state.config[group];
+            list.splice(index, 1);
+            try {
+                await api.fetch('/api/v1/upstream/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ plugin_tag: group, upstreams: list })
+                });
+                ui.showToast('已删除');
+                this.renderTable();
+            } catch (e) {
+                ui.showToast('删除失败', 'error');
+            }
+        },
+
+        async restartService() {
+            if(!confirm('重启 MosDNS 以应用更改？')) return;
+            try {
+                await api.fetch('/api/v1/system/restart', { method: 'POST', body: JSON.stringify({ delay_ms: 500 }) });
+                ui.showToast('正在重启...', 'success');
+                setTimeout(() => location.reload(), 4000);
+            } catch(e) {
+                ui.showToast('重启请求失败', 'error');
+            }
+        }
+    };
+    // [插入点结束]
+
     function setupEventListeners() {
         // -- [修改] -- 统一处理所有弹窗的关闭行为（遮罩层点击和ESC键）
         document.querySelectorAll('dialog').forEach(dialog => {
-            // 点击遮罩层时关闭
+            // 1. 点击遮罩层时关闭
             dialog.addEventListener('click', (event) => {
-                if (event.target === dialog) {
+                // [修改点] 增加判断：如果当前弹窗是 upstream-modal，则不响应遮罩层点击
+                if (event.target === dialog && dialog.id !== 'upstream-modal') {
                     closeAndUnlock(dialog);
                 }
             });
-            // 按 ESC 键时关闭
+            // 2. 按 ESC 键时关闭
             dialog.addEventListener('cancel', (event) => {
-                event.preventDefault(); // 阻止默认的关闭行为
-                closeAndUnlock(dialog);
+                event.preventDefault(); // 阻止浏览器默认的关闭行为（因为我们要在 closeAndUnlock 里处理滚动条解锁）
+                
+                // 如果你也希望 ESC 键在 upstream-modal 时失效，可以把下面的判断加上
+                // 但通常 ESC 关闭是符合用户习惯的，建议保留
+                closeAndUnlock(dialog); 
             });
         });
 
@@ -3413,6 +3869,7 @@ async function updateDomainListStats(signal) {
         watch('#requery-module', () => requeryManager.updateStatus());
         watch('#overrides-module', () => overridesManager.load(true));
         watch('#cache-stats-table', () => cacheManager.updateStats());
+        watch('#upstream-dns-module', () => upstreamManager.loadData());
     }
 
     async function init() {
@@ -3478,6 +3935,7 @@ async function updateDomainListStats(signal) {
         elements.initialLoader.addEventListener('transitionend', () => elements.initialLoader.remove());
         if (!document.hidden) autoRefreshManager.start();
         requeryManager.init();
+        upstreamManager.init();
     }
 
     init();
