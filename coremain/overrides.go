@@ -40,6 +40,8 @@ var (
 	// These variables cache the settings discovered from the original YAML config.
 	discoveredSocks5 string
 	discoveredECS    string
+	// [Debug] Exported for api_upstream.go
+	discoveredAliAPITags []string
 )
 
 // Prepare builds the lookup map for efficient execution.
@@ -58,44 +60,75 @@ func (g *GlobalOverrides) Prepare() {
 	}
 }
 
-// DiscoverAndCacheSettings iterates through the entire config object, including includes,
-// to find the first occurrence of socks5 and ecs settings.
+// DiscoverAndCacheSettings scans the config to find specific settings.
+// [Modified] Added heavy debug logging to trace plugin discovery.
 func DiscoverAndCacheSettings(cfg *Config) {
+	// [Debug] Log start
+	mlog.L().Info("[Debug Discovery] >>> Starting configuration discovery...")
+
 	var socks5Found, ecsFound bool
-	// Reset global vars before discovery
 	discoveredSocks5 = ""
 	discoveredECS = ""
+	discoveredAliAPITags = make([]string, 0)
+	tm := make(map[string]bool)
 
-	// Create a recursive function to traverse the config tree.
-	var discover func(c *Config)
-	discover = func(c *Config) {
-		// Discover in current level's plugins
-		for _, pluginConf := range c.Plugins {
-			if socks5Found && ecsFound {
-				return
-			}
-			discoverRecursive(pluginConf.Args, &socks5Found, &ecsFound)
+	// Recursive function to traverse config and includes
+	var discover func(c *Config, sourceFile string)
+	discover = func(c *Config, sourceFile string) {
+		if c == nil {
+			return
 		}
-		// Recurse into included configs
-		for _, includePath := range c.Include {
-			if socks5Found && ecsFound {
-				return
+
+		mlog.L().Info("[Debug Discovery] Scanning config scope", 
+			zap.String("source", sourceFile), 
+			zap.Int("plugins_count", len(c.Plugins)),
+			zap.Int("includes_count", len(c.Include)))
+
+		// 1. Scan Plugins in current config scope
+		// [FIXED] replaced unused 'i' with '_'
+		for _, pluginConf := range c.Plugins {
+			// [Debug] Print every plugin encountered (Commented out to reduce noise, enable if needed)
+			// mlog.L().Debug("[Debug Discovery] Checking plugin", zap.String("type", pluginConf.Type), zap.String("tag", pluginConf.Tag))
+
+			// Check for aliapi
+			if pluginConf.Type == "aliapi" && pluginConf.Tag != "" {
+				if !tm[pluginConf.Tag] {
+					mlog.L().Info("[Debug Discovery] FOUND aliapi tag", zap.String("tag", pluginConf.Tag), zap.String("source", sourceFile))
+					discoveredAliAPITags = append(discoveredAliAPITags, pluginConf.Tag)
+					tm[pluginConf.Tag] = true
+				} else {
+					mlog.L().Info("[Debug Discovery] Skipping duplicate aliapi tag", zap.String("tag", pluginConf.Tag))
+				}
 			}
+
+			// Check for socks5/ecs (Original logic)
+			if !socks5Found || !ecsFound {
+				discoverRecursive(pluginConf.Args, &socks5Found, &ecsFound)
+			}
+		}
+
+		// 2. Recurse into Includes
+		for _, includePath := range c.Include {
 			resolvedPath := includePath
 			if len(c.baseDir) > 0 && !filepath.IsAbs(includePath) {
 				resolvedPath = filepath.Join(c.baseDir, includePath)
 			}
-			// We have to re-read the sub-configs here. It's a bit inefficient but necessary.
+			
+			mlog.L().Info("[Debug Discovery] Reading include file", zap.String("path", resolvedPath))
+			
 			subCfg, _, err := loadConfig(resolvedPath)
 			if err == nil {
-				discover(subCfg)
+				discover(subCfg, resolvedPath)
+			} else {
+				mlog.L().Warn("[Debug Discovery] Failed to load include file", zap.String("path", resolvedPath), zap.Error(err))
 			}
 		}
 	}
 
-	discover(cfg)
-
-	mlog.L().Info("discovered original settings from all config files",
+	discover(cfg, "root_config")
+	
+	mlog.L().Info("[Debug Discovery] <<< Discovery finished", 
+		zap.Strings("all_aliapi_tags", discoveredAliAPITags),
 		zap.String("socks5", discoveredSocks5),
 		zap.String("ecs", discoveredECS))
 }
@@ -141,7 +174,6 @@ func discoverRecursive(data any, socks5Found, ecsFound *bool) {
 }
 
 // ApplyOverrides modifies a single PluginConfig based on the loaded overrides.
-// Modified signature to include 'tag' for logging purposes.
 func ApplyOverrides(tag string, pluginConf *PluginConfig, overrides *GlobalOverrides) {
 	pluginConf.Args = applyRecursive(tag, pluginConf.Args, overrides)
 }
@@ -154,14 +186,11 @@ func applyRecursive(tag string, data any, overrides *GlobalOverrides) any {
 
 	switch v := data.(type) {
 	case map[string]any:
-		// Priority 1: Original Socks5 logic
-		// We modify the map in place, effectively creating a "new" value for the specific key.
 		if overrides.Socks5 != "" {
 			if _, ok := v["socks5"]; ok {
 				v["socks5"] = overrides.Socks5
 			}
 		}
-		// Recurse to handle nested values (and potentially apply replacements on the modified socks5 value)
 		for key, val := range v {
 			v[key] = applyRecursive(tag, val, overrides)
 		}
@@ -172,18 +201,10 @@ func applyRecursive(tag string, data any, overrides *GlobalOverrides) any {
 		}
 		return v
 	case string:
-		// Use a variable to track the value as it passes through the logic chain.
 		currentVal := v
-
-		// Priority 1: Original ECS logic
-		// If ECS override is active, update currentVal. 
-		// DO NOT RETURN yet.
 		if overrides.ECS != "" && strings.HasPrefix(currentVal, "ecs ") {
 			currentVal = "ecs " + overrides.ECS
 		}
-
-		// Priority 2: Generic Replacement logic
-		// Always execute match using currentVal (which might be original or ECS-overridden).
 		if overrides.lookupMap != nil {
 			if rule, ok := overrides.lookupMap[currentVal]; ok {
 				atomic.AddInt64(&rule.appliedCount, 1)
@@ -195,8 +216,6 @@ func applyRecursive(tag string, data any, overrides *GlobalOverrides) any {
 				return rule.New
 			}
 		}
-
-		// Return the value (which might be original, or modified by ECS logic)
 		return currentVal
 	default:
 		return data
