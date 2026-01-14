@@ -3015,7 +3015,7 @@ async function updateDomainListStats(signal) {
                     new: r.new.trim(),
                     comment: r.comment ? r.comment.trim() : ''
                 }))
-                .filter(r => r.original && r.new);
+                .filter(r => r.original);
 
             const payload = {
                 socks5: socks5,
