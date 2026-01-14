@@ -1676,16 +1676,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderDonutChart(state.domainSetRank);
             }
 
-            // 系统控制：默认不在首屏/自动刷新时抓取重数据，改为“刷新按钮”触发或模块懒加载触发
-            if (activeTab === 'system-control' && forceAll) {
-                await Promise.allSettled([
-                    state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal),
-                    updateDomainListStats(signal),
-                    cacheManager.updateStats(signal),
-                    switchManager.loadStatus(signal),
-                    systemInfoManager.load(signal),
-                    updateManager.refreshStatus(false)
-                ]);
+            // 系统控制页刷新逻辑
+            if (activeTab === 'system-control') {
+                const sysPromises = [];
+                
+                // [新增] 只要在系统页，自动刷新时也更新上游DNS数据 (因为它包含动态的监控指标)
+                if (typeof upstreamManager !== 'undefined') {
+                    sysPromises.push(upstreamManager.loadData());
+                }
+
+                // 其他重数据仅在手动刷新(forceAll)时加载
+                if (forceAll) {
+                    sysPromises.push(state.requery.pollId ? Promise.resolve() : requeryManager.updateStatus(signal));
+                    sysPromises.push(updateDomainListStats(signal));
+                    sysPromises.push(cacheManager.updateStats(signal));
+                    sysPromises.push(switchManager.loadStatus(signal));
+                    sysPromises.push(systemInfoManager.load(signal));
+                    sysPromises.push(updateManager.refreshStatus(false));
+                }
+                
+                if (sysPromises.length > 0) {
+                    await Promise.allSettled(sysPromises);
+                }
             }
 
             if (forceAll) {
