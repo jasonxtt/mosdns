@@ -225,6 +225,11 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, msg, http.StatusBadRequest)
 			return
 		}
+
+		if !u.Enabled {
+			continue
+		}
+
 		if u.Protocol == "aliapi" {
 			if u.AccountID == "" || u.AccessKeyID == "" || u.AccessKeySecret == "" {
 				msg := fmt.Sprintf(`{"error": "Item #%d (%s): AliAPI requires account_id, access_key_id, and access_key_secret"}`, i+1, u.Tag)
