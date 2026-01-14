@@ -268,6 +268,10 @@
                 width: 100% !important;
                 margin-bottom: 15px !important;
             }
+
+            html body #upstream-dns-table {
+                min-width: 1100px !important;
+            }
         }
 
         .requery-progress-bar {
@@ -1397,16 +1401,14 @@
                     </div>
 
                     <div class="scrollable-table-container">
-                        <table class="data-table" id="upstream-dns-table" style="min-width: 900px;">
+                        <table class="data-table" id="upstream-dns-table" style="min-width: 1000px;">
                             <thead>
                                 <tr>
                                     <th style="width: 80px; white-space: nowrap;">启用</th>
                                     <th style="min-width: 120px;">所属组</th>
-                                    <th>名称</th>
-                                    <th>类型</th>
-                                    <!-- 修改点：稍微加宽，并强制不换行 -->
+                                    <th style="min-width: 100px;">名称</th>
+                                    <th style="min-width: 60px; white-space: nowrap;">类型</th>
                                     <th class="text-center" style="min-width: 100px; white-space: nowrap;">平均响应</th>
-                                    <!-- 修改点：改为居中对齐 text-center，视觉上最稳 -->
                                     <th class="text-center">请求数</th>
                                     <th class="text-center">错误数</th>
                                     <th class="text-center">出错率</th>
