@@ -45,12 +45,11 @@ var (
 )
 
 // Prepare builds the lookup map for efficient execution.
-// It ignores rules where Original or New is empty.
 func (g *GlobalOverrides) Prepare() {
 	g.lookupMap = make(map[string]*ReplacementRule)
 	if g.Replacements != nil {
 		for _, r := range g.Replacements {
-			if r.Original == "" || r.New == "" {
+			if r.Original == "" { 
 				continue
 			}
 			g.lookupMap[r.Original] = r
