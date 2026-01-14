@@ -3126,7 +3126,7 @@ async function updateDomainListStats(signal) {
 
         parseMetrics(rawText) {
             const parse = (prefix) => {
-                const regex = new RegExp(`${prefix}\\{[^}]*metrics_tag="([^"]+)"[^}]*tag="([^"]+)"[^}]*\\} ([0-9.]+)`, 'g');
+                const regex = new RegExp(`${prefix}\\{[^}]*metrics_tag="([^"]+)"[^}]*tag="([^"]+)"[^}]*\\} ([0-9.eE+-]+)`, 'g');
                 const map = {};
                 let match;
                 while ((match = regex.exec(rawText)) !== null) {
