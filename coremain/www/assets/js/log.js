@@ -1606,7 +1606,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const renderSlowestQueries = (data) => renderTable(elements.slowestQueriesBody, data, renderSlowestQueryItemHTML, 'lazy');
 
-    const chartColors = ['#6d9dff', '#f778ba', '#2dd4bf', '#fb923c', '#a78bfa', '#fde047', '#ff8c8c'];
+    const chartColors = ['#6d9dff', '#f778ba', '#2dd4bf', '#fb923c', '#a78bfa', '#fde047', '#ff8c8c', '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#64748b'];
     const renderDonutChart = (data) => {
         const placeholder = elements.shuntResultsBody.querySelector('.lazy-placeholder');
         if (placeholder) placeholder.style.display = 'none';
@@ -1938,12 +1938,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function getResponseSummary(log) { if (!log) return ''; if (log.response_code !== 'NOERROR') return getResponseTagHTML(log); if (log.answers?.length > 0) { const firstIp = log.answers.find(a => a.type === 'A' || a.type === 'AAAA'); const firstCname = log.answers.find(a => a.type === 'CNAME'); let mainText = firstIp?.data ?? firstCname?.data ?? log.answers[0].data; if (mainText.length > 25) mainText = mainText.substring(0, 22) + '...'; if (log.answers.length > 1) mainText += ` (+${log.answers.length - 1})`; return `<span class="truncate-text">${mainText}</span>`; } return '<span>(empty)</span>'; }
 
     function renderDomainResponseCellHTML(log, source = 'log') {
-        const ruleColor = log.domain_set ? state.shuntColors[log.domain_set] : null;
-        const domainStyle = (source === 'slowest' && ruleColor) ? `style="color: ${ruleColor}; font-weight: 700;"` : '';
-        const domainTitle = (source === 'slowest' && ruleColor) ? `${log.query_name} (规则: ${log.domain_set})` : log.query_name;
-        const ruleTag = (source === 'slowest' && ruleColor) ? '' : getRuleTagHTML(log);
-        return `<div class="domain-response-cell"><span class="domain-name truncate-text" ${domainStyle} title="${domainTitle}">${log.query_name}</span><div class="response-meta"><span class="response-summary">${getResponseSummary(log)}</span>${ruleTag}</div></div>`;
+        // [修改] 移除针对 slowest 的特殊处理，统一显示为 Tag 标签，确保颜色一致性
+        const ruleTag = getRuleTagHTML(log);
+        return `<div class="domain-response-cell"><span class="domain-name truncate-text" title="${log.query_name}">${log.query_name}</span><div class="response-meta"><span class="response-summary">${getResponseSummary(log)}</span>${ruleTag}</div></div>`;
     }
+
     function getLogRowClass(log) { if (log.is_blocked) return 'is-blocked'; if (['SERVFAIL', 'NXDOMAIN', 'REFUSED'].includes(log.response_code)) return 'is-fail'; return ''; }
 
     function renderLogItemHTML(log, globalIndex) {
@@ -3594,10 +3593,11 @@ async handleSave(formData) {
         elements.logSearch?.addEventListener('input', debounce(applyLogFilterAndRender, 300));
         elements.logQueryTableContainer?.addEventListener('scroll', () => { const { scrollTop, scrollHeight, clientHeight } = elements.logQueryTableContainer; if (clientHeight + scrollTop >= scrollHeight - 200) loadMoreLogs(); }, { passive: true });
 
-        const handleInteractiveClick = (e) => {
+const handleInteractiveClick = (e) => {
             const interactiveButton = e.target.closest('.copy-btn, .filter-btn');
             const clickableLink = e.target.closest('.clickable-link, .tab-link-action');
-            const logRow = e.target.closest('[data-log-index], [data-rank-index]');
+            // [修改] 增加选择器精确度，确保能稳定获取到行元素
+            const logRow = e.target.closest('tr[data-log-index], tr[data-rank-index]');
 
             if (interactiveButton) {
                 e.stopPropagation();
@@ -3614,10 +3614,8 @@ async handleSave(formData) {
                         textArea.value = textToCopy;
                         textArea.style.position = "absolute";
                         textArea.style.left = "-9999px";
-
                         const parentElement = elements.logDetailModal.open ? elements.logDetailModal : document.body;
                         parentElement.appendChild(textArea);
-
                         textArea.select();
                         try {
                             document.execCommand('copy');
@@ -3659,7 +3657,13 @@ async handleSave(formData) {
                     if (link) handleNavigation(link);
                 }
             } else if (logRow) {
-                ui.openLogDetailModal(logRow);
+                // [修改] 增加错误捕获，防止数据缺失导致白屏
+                try {
+                    ui.openLogDetailModal(logRow);
+                } catch (err) {
+                    console.error("Open modal failed:", err);
+                    ui.showToast("无法加载详情", "error");
+                }
             }
         };
 
