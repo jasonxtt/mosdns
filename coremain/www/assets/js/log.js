@@ -650,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch4', name: '过期缓存1', desc: '启用国内缓存、国外缓存 (兼容)、国外缓存 (安全)、国内域名fakeip缓存', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
             { tag: 'switch13', name: '过期缓存2', desc: '启用全部缓存 (兼容)、全部缓存 (安全)，缓存fakeip，直面客户端', tip: '建议开启，折腾时可临时关闭，排除干扰。', valueForOn: 'A' },
             { tag: 'switch7', name: '广告屏蔽', desc: '启用Adguard在线规则支持', tip: '此开关开启后，“广告拦截”页签中已启用的在线列表才会生效。', valueForOn: 'A' },
-            { tag: 'switch9', name: 'CNToMihomo', desc: '国内域名分流至Mihomo', tip: '自用开关，请自行配置Mihomo以及相关流量导入规则。', valueForOn: 'B' },
+            { tag: 'switch9', name: 'CNFakeIP', desc: '国内域名返回fakeip', tip: '请在上游dns中配置cnfake组的mihomo条目', valueForOn: 'B' },
 //            { tag: 'switch11', name: '使用阿里私有DOH', desc: '国内上游并发请求至阿里私有DOH。', tip: '打开前在上游DNS设置中添加DOH配置。', valueForOn: 'A' },
 //            { tag: 'switch14', name: '使用运营商DNS', desc: '国内上游并发请求至运营商DNS。', tip: '打开前在上游DNS设置中修改运营商DNS配置。', valueForOn: 'A' },
 //            { tag: 'switch15', name: '使用其它DNS', desc: '国内上游并发请求至阿里UDP DNS。', tip: '单独开启时也可替换quic://223.5.5.5为其它DNS。', valueForOn: 'A' },
@@ -3154,7 +3154,8 @@ async function updateDomainListStats(signal) {
                 latSum: parse('mosdns_aliapi_response_latency_millisecond_sum'),
                 latCount: parse('mosdns_aliapi_response_latency_millisecond_count'),
                 queryTotal: parse('mosdns_aliapi_query_total'),
-                errorTotal: parse('mosdns_aliapi_error_total')
+                errorTotal: parse('mosdns_aliapi_error_total'),
+                winnerTotal: parse('mosdns_aliapi_upstream_winner_total')
             };
         },
 
@@ -3235,6 +3236,8 @@ async function updateDomainListStats(signal) {
                     <td>${u.protocol}</td>
                     <td class="text-center">${stats.avgLat}</td>
                     <td class="text-center">${stats.query}</td>
+                    <td class="text-center">${stats.winner}</td>
+                    <td class="text-center">${stats.winRate}</td>
                     <td class="text-center">${stats.error}</td>
                     <td class="text-center">${stats.rate}</td>
                     <td class="text-center">
@@ -3252,11 +3255,13 @@ async function updateDomainListStats(signal) {
             const m = this.state.metrics;
             const q = m.queryTotal[key] || 0;
             const e = m.errorTotal[key] || 0;
+            const w = m.winnerTotal[key] || 0;
             const lSum = m.latSum[key] || 0;
             const lCount = m.latCount[key] || 0;
             const avg = lCount > 0 ? (lSum / lCount).toFixed(2) + ' ms' : '0 ms';
             const rate = q > 0 ? ((e / q) * 100).toFixed(2) + '%' : '0.00%';
-            return { avgLat: avg, query: q, error: e, rate: rate };
+            const winRate = q > 0 ? ((w / q) * 100).toFixed(2) + '%' : '0.00%';
+            return { avgLat: avg, query: q, error: e, rate: rate, winner: w, winRate: winRate };
         },
 
         openModal(group = null, index = null) {
