@@ -364,12 +364,15 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 	type res struct {
 		r   *dns.Msg
 		err error
+		u   *upstreamWrapper
 	}
 
 	resChan := make(chan res, concurrent)
 
 	var lastSuccessOrNXRes *dns.Msg
+	var lastSuccessOrNXResUpstream *upstreamWrapper
 	var lastOtherRes *dns.Msg
+	var lastOtherResUpstream *upstreamWrapper
 	var lastError error
 
 	randIndex := rand.Intn(len(us))
@@ -413,7 +416,7 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 			}
 
 			select {
-			case resChan <- res{r: r, err: err}:
+			case resChan <- res{r: r, err: err, u: currentUpstream}:
 			case <-upstreamCtx.Done(): 
 			}
 		}(qCtx.Id(), qCtx.QQuestion(), u)
@@ -422,7 +425,7 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 	for i := 0; i < len(usToQuery); i++ {
 		select {
 		case res := <-resChan:
-			r, err := res.r, res.err
+			r, err, u := res.r, res.err, res.u
 			if err != nil {
 				if lastError == nil {
 					lastError = err
@@ -433,9 +436,11 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 			if len(r.Answer) > 0 {
 				for _, ans := range r.Answer {
 					if a, ok := ans.(*dns.A); ok && len(a.A) > 0 {
+						u.mWinnerTotal.Inc()
 						return r, nil
 					}
 					if aaaa, ok := ans.(*dns.AAAA); ok && len(aaaa.AAAA) > 0 {
+						u.mWinnerTotal.Inc()
 						return r, nil
 					}
 				}
@@ -444,18 +449,22 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 			if r.Rcode == dns.RcodeSuccess || r.Rcode == dns.RcodeNameError {
 				if lastSuccessOrNXRes == nil {
 					lastSuccessOrNXRes = r
+					lastSuccessOrNXResUpstream = u
 				}
 			} else {
 				if lastOtherRes == nil {
 					lastOtherRes = r
+					lastOtherResUpstream = u
 				}
 			}
 
 		case <-ctx.Done():
 			if lastSuccessOrNXRes != nil {
+				lastSuccessOrNXResUpstream.mWinnerTotal.Inc()
 				return lastSuccessOrNXRes, nil
 			}
 			if lastOtherRes != nil {
+				lastOtherResUpstream.mWinnerTotal.Inc()
 				return lastOtherRes, nil
 			}
 			if lastError != nil {
@@ -466,9 +475,11 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 	}
 
 	if lastSuccessOrNXRes != nil {
+		lastSuccessOrNXResUpstream.mWinnerTotal.Inc()
 		return lastSuccessOrNXRes, nil
 	}
 	if lastOtherRes != nil {
+		lastOtherResUpstream.mWinnerTotal.Inc()
 		return lastOtherRes, nil
 	}
 	if lastError != nil {
@@ -770,10 +781,11 @@ type upstreamWrapper struct {
 
 	mQueryTotal prometheus.Counter
 	mErrorTotal prometheus.Counter
+        mWinnerTotal     prometheus.Counter
 	mInflight   prometheus.Gauge
-                mResponseLatency prometheus.Histogram
-                mConnOpened prometheus.Counter
-                mConnClosed prometheus.Counter
+        mResponseLatency prometheus.Histogram
+        mConnOpened prometheus.Counter
+        mConnClosed prometheus.Counter
 }
 
 func (w *upstreamWrapper) OnEvent(e upstream.Event) {
@@ -801,6 +813,15 @@ func newWrapper(idx int, c UpstreamConfig, metricsTag string) *upstreamWrapper {
 		mErrorTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "error_total",
 			Help: "Total number of query errors.",
+			ConstLabels: prometheus.Labels{
+				"tag":         c.Tag,
+				"addr":        c.Addr,
+				"metrics_tag": metricsTag,
+			},
+		}),
+		mWinnerTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "upstream_winner_total",
+			Help: "Total number of times this upstream result was selected as the final response.",
 			ConstLabels: prometheus.Labels{
 				"tag":         c.Tag,
 				"addr":        c.Addr,
@@ -878,6 +899,9 @@ func (w *upstreamWrapper) registerMetricsTo(r prometheus.Registerer) error {
 		return err
 	}
 	if err := r.Register(w.mErrorTotal); err != nil {
+		return err
+	}
+	if err := r.Register(w.mWinnerTotal); err != nil {
 		return err
 	}
 	if err := r.Register(w.mInflight); err != nil {
