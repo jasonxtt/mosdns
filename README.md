@@ -47,20 +47,22 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
 
 ### mosdns配置说明：
 
-远程下载的mosdns配置为通用模板，需要在此处设置上游dns等相关信息，此处信息存储于运行目录的 `config_overrides.json`、`upstream_overrides.json` 中。  
+- 远程下载的mosdns配置为通用模板，需要自行修改上游dns、socks5代理等相关信息。
+- 建议为foreign组3个上游分别填入socks5，同时设置SOCKS5/ECS IP板块的socks5。
+- 此处信息存储于运行目录的 `config_overrides.json`、`upstream_overrides.json` 中。  
 
 **上游DNS设置的说明**
 
 - 预设了所有的dns，一般只需要打开和关闭，不需要新增。
-- domestic为国内组，foreign为国外组，mihomo和sing-box组只能设置1个上游。
+- domestic为国内组，foreign为国外组，cnfake和nocnfake组只能设置1个上游。
 - 阿里私享DOH不需要可删除，开启需要设置相应的账户信息及ECS Client IP，可填入这里显示的ipv4 ip：https://ipw.cn/。
 - 需要将预设的运营商dns更改为自己的运营商dns。
-- cloudflare、google共3个上游，需要填入socks5代理，否则将遵循mosdns所在OS的路由。
-- mihomo需要设置为自己的mihomo dns入站
-- sing-box需要设置为自己的sing-box dns入站
+- foreign所属组共3个上游，需要填入socks5代理，否则将直连，或者遵循mosdns所在操作系统的系统代理。
+- 上游dns中的mihomo需要设置为自己的mihomo dns入站
+- 上游dns中的sing-box需要设置为自己的sing-box dns入站
 
 **其它设置说明**
-- 如果不需要nft功能，此处将不需要任何的配置，原配置可删除。
+- 如果不需要nft功能，此处将不需要任何的配置，原条目可删除。
 - 原值 (查找)为配置模板中预设的初始值（不要修改！），新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。。
 - nft功能说明：https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns%20nft%E8%A7%84%E5%88%99%E6%B7%BB%E5%8A%A0%E5%8A%9F%E8%83%BD%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E
 
@@ -85,6 +87,8 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
 3. **ECS IP**：打开 https://ipw.cn/ ，如果有ipv4、ipv6的ip，就把ipv6 ip填入ECS IP框中；如果没有，就写ipv4地址。
 
 ### 本项目mosdns配置解析流程
+
+
 
 ![mosdns解析流程](https://github.com/user-attachments/assets/c4b0c10c-7c99-4dbb-922c-64de1d566f98)
 
