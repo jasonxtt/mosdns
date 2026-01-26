@@ -40,7 +40,8 @@ func init() {
 	MustRegExecQuickSetup("return", setupReturn)
 	MustRegExecQuickSetup("goto", setupGoto)
 	MustRegExecQuickSetup("jump", setupJump)
-	MustRegExecQuickSetup("exit", setupExit) // [新增] 注册 exit
+	MustRegExecQuickSetup("exit", setupExit)
+	MustRegExecQuickSetup("try", setupTry)
 	MustRegMatchQuickSetup("_true", setupTrue)
 	MustRegMatchQuickSetup("_false", setupFalse)
 }
