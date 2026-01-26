@@ -31,3 +31,12 @@ type DomainMatcherProvider interface {
 type IPMatcherProvider interface {
 	GetIPMatcher() netlist.Matcher
 }
+
+// RuleExporter 是新增加的接口，允许插件导出其内部的文本规则列表，并支持变更通知。
+// 这允许 domain_mapper 插件聚合其他插件的规则。
+type RuleExporter interface {
+	// GetRules 返回当前生效的所有规则字符串（如 "full:google.com", "regexp:.*"）
+	GetRules() ([]string, error)
+	// Subscribe 注册一个回调函数，当规则集发生变化（文件更新、API上传等）时调用
+	Subscribe(callback func())
+}
