@@ -21,6 +21,7 @@ package sequence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -55,6 +56,57 @@ func (a ActionExit) Exec(_ context.Context, _ *query_context.Context, _ ChainWal
 
 func setupExit(_ BQ, _ string) (any, error) {
 	return ActionExit{}, nil
+}
+
+// [新增] Try 插件实现
+var _ RecursiveExecutable = (*ActionTry)(nil)
+
+type ActionTry struct {
+	Target Executable
+}
+
+func (a *ActionTry) Exec(ctx context.Context, qCtx *query_context.Context, next ChainWalker) error {
+	// 1. 执行目标插件/序列
+	err := a.Target.Exec(ctx, qCtx)
+
+	// 2. 关键判断：
+	// 如果 err 不为空，且包含 ErrExit 信号（errors.Is 会自动解包检查）
+	// 那么我们认为这是子序列想退出它自己，对于父序列来说，这视为“执行完毕”，
+	// 所以我们将 err 置为 nil，表示“已处理”。
+	if err != nil && errors.Is(err, ErrExit) {
+		err = nil
+	}
+
+	// 3. 如果是其他真正的错误（比如网络IO错误），则直接返回，中断整个链条
+	if err != nil {
+		return err
+	}
+
+	// 4. [最关键的一步]
+	// 错误已经被吞掉了（或者原本就没错误），现在必须告诉 MosDNS：
+	// “我这边完事了，请继续执行当前序列的下一个插件！”
+	// 如果不调用这一句，父序列就会在这里停下。
+	return next.ExecNext(ctx, qCtx)
+}
+
+func setupTry(bq BQ, s string) (any, error) {
+	// 解析参数，例如 "try $sequence_6666" 中的 "$sequence_6666"
+	pluginName := s
+	if len(s) > 0 && s[0] == '$' {
+		pluginName = s[1:]
+	}
+
+	p := bq.M().GetPlugin(pluginName)
+	if p == nil {
+		return nil, fmt.Errorf("can not find try target %s", s)
+	}
+
+	exec := ToExecutable(p)
+	if exec == nil {
+		return nil, fmt.Errorf("plugin %s is not executable", s)
+	}
+
+	return &ActionTry{Target: exec}, nil
 }
 
 var _ RecursiveExecutable = (*ActionReject)(nil)
