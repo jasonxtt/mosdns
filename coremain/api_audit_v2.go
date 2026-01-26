@@ -48,7 +48,9 @@ func RegisterAuditAPIV2(router *chi.Mux) {
 		r.Get("/rank/domain_set", handleV2GetDomainSetRank)
 		// --- ADDED END ---
 		r.Get("/rank/slowest", handleV2GetSlowestQueries)
-		r.Get("/logs", handleV2GetLogs)
+		
+		// [淇敼鐐筣 浠呮澶勪娇鐢ㄤ簡 WithAsyncGC 鍖呰鍣紝鍏朵綑閫昏緫鏈姩
+		r.Get("/logs", WithAsyncGC(handleV2GetLogs))
 	})
 }
 
