@@ -66,10 +66,79 @@ type SdSet struct {
 	httpClient      *http.Client
 	ctx             context.Context
 	cancel          context.CancelFunc
+
+	// 新增：订阅者
+	subscribers []func()
+	subsMu      sync.RWMutex
 }
 
 var _ data_provider.DomainMatcherProvider = (*SdSet)(nil)
 var _ io.Closer = (*SdSet)(nil)
+// 确保实现了 RuleExporter 接口
+var _ data_provider.RuleExporter = (*SdSet)(nil)
+
+// RuleReceiver 接口用于解耦 SRS 解析和具体的 Matcher
+type RuleReceiver interface {
+	Add(string, struct{}) error
+}
+
+// ruleCollector 用于 GetRules 时收集规则
+type ruleCollector struct {
+	rules []string
+}
+
+func (c *ruleCollector) Add(s string, _ struct{}) error {
+	c.rules = append(c.rules, s)
+	return nil
+}
+
+// Subscribe 实现 RuleExporter
+func (p *SdSet) Subscribe(cb func()) {
+	p.subsMu.Lock()
+	defer p.subsMu.Unlock()
+	p.subscribers = append(p.subscribers, cb)
+}
+
+// GetRules 实现 RuleExporter
+// 注意：这会读取所有启用的本地文件并重新解析规则，以获取字符串形式的规则列表
+func (p *SdSet) GetRules() ([]string, error) {
+	p.mu.RLock()
+	sourcesSnapshot := make([]*RuleSource, 0, len(p.sources))
+	for _, src := range p.sources {
+		if src.Enabled {
+			sourcesSnapshot = append(sourcesSnapshot, src)
+		}
+	}
+	p.mu.RUnlock()
+
+	collector := &ruleCollector{rules: make([]string, 0)}
+
+	for _, src := range sourcesSnapshot {
+		if src.Files == "" {
+			continue
+		}
+		b, err := os.ReadFile(src.Files)
+		if err != nil {
+			// 在导出模式下，如果文件不可读，记录日志但继续处理其他文件
+			log.Printf("[%s] GetRules: WARN: cannot read file %s: %v", PluginType, src.Files, err)
+			continue
+		}
+		// 使用通用的 tryLoadSRS，传入 collector
+		tryLoadSRS(b, collector, src.EnableRegexp)
+	}
+	return collector.rules, nil
+}
+
+func (p *SdSet) notifySubscribers() {
+	p.subsMu.RLock()
+	subs := make([]func(), len(p.subscribers))
+	copy(subs, p.subscribers)
+	p.subsMu.RUnlock()
+
+	for _, cb := range subs {
+		go cb()
+	}
+}
 
 func newSdSet(bp *coremain.BP, args any) (any, error) {
 	cfg := args.(*Args)
@@ -111,6 +180,7 @@ func newSdSet(bp *coremain.BP, args any) (any, error) {
 		httpClient:      httpClient,
 		ctx:             ctx,
 		cancel:          cancel,
+		subscribers:     make([]func(), 0),
 	}
 	p.matcher.Store(domain.NewDomainMixMatcher()) // 初始化为一个空的 matcher
 
@@ -275,6 +345,9 @@ func (p *SdSet) reloadAllRules() error {
 			log.Printf("[%s] ERROR: failed to save config after reloading rules: %v", PluginType, err)
 		}
 	}
+
+	// 规则更新完毕（无论是手动、API还是定时器），通知订阅者
+	p.notifySubscribers()
 
 	return nil
 }
@@ -519,8 +592,8 @@ var (
 
 const ruleSetVersionCurrent = 3
 
-// Modified: added enableRegexp parameter
-func tryLoadSRS(b []byte, m *domain.MixMatcher[struct{}], enableRegexp bool) (ok bool, count int, lastRule string) {
+// Modified: added enableRegexp parameter and RuleReceiver interface
+func tryLoadSRS(b []byte, m RuleReceiver, enableRegexp bool) (ok bool, count int, lastRule string) {
 	r := bytes.NewReader(b)
 	var mb [3]byte
 	if _, err := io.ReadFull(r, mb[:]); err != nil || mb != magicBytes {
@@ -546,8 +619,8 @@ func tryLoadSRS(b []byte, m *domain.MixMatcher[struct{}], enableRegexp bool) (ok
 	return true, count, lastRule
 }
 
-// Modified: added enableRegexp parameter
-func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string, enableRegexp bool) int {
+// Modified: added enableRegexp parameter and RuleReceiver interface
+func readRuleCompat(r *bufio.Reader, m RuleReceiver, last *string, enableRegexp bool) int {
 	ct := 0
 	mode, err := r.ReadByte()
 	if err != nil {
@@ -567,8 +640,8 @@ func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *strin
 	return ct
 }
 
-// Modified: added enableRegexp parameter and logic
-func readDefaultRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string, enableRegexp bool) int {
+// Modified: added enableRegexp parameter and RuleReceiver interface
+func readDefaultRuleCompat(r *bufio.Reader, m RuleReceiver, last *string, enableRegexp bool) int {
 	count := 0
 	for {
 		item, err := r.ReadByte()
