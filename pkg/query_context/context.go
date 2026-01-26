@@ -59,6 +59,7 @@ type Context struct {
 	// lazy init.
 	kv    map[uint32]any
 	marks map[uint32]struct{}
+	fastFlags uint64
 }
 
 var contextUid atomic.Uint32
@@ -200,6 +201,7 @@ func (ctx *Context) CopyTo(d *Context) *Context {
 
 	d.kv = copyMap(ctx.kv)
 	d.marks = copyMap(ctx.marks)
+	d.fastFlags = ctx.fastFlags
 	return d
 }
 
@@ -240,6 +242,25 @@ func (ctx *Context) HasMark(m uint32) bool {
 // DeleteMark deletes mark m from this Context.
 func (ctx *Context) DeleteMark(m uint32) {
 	delete(ctx.marks, m)
+}
+
+func (ctx *Context) SetFastFlag(f uint8) {
+	if f < 64 {
+		ctx.fastFlags |= (1 << f)
+	}
+}
+
+func (ctx *Context) HasFastFlag(f uint8) bool {
+	if f < 64 {
+		return (ctx.fastFlags & (1 << f)) != 0
+	}
+	return false
+}
+
+func (ctx *Context) DeleteFastFlag(f uint8) {
+    if f < 64 {
+        ctx.fastFlags &^= (1 << f)
+    }
 }
 
 // MarshalLogObject implements zapcore.ObjectMarshaler.
