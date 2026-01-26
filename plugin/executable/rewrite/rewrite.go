@@ -206,6 +206,8 @@ func (r *Rewrite) Exec(ctx context.Context, qCtx *query_context.Context, next se
 		return next.ExecNext(ctx, qCtx)
 	}
 
+    qCtx.StoreValue(query_context.KeyDomainSet, "重定向")
+
 	if target.isIP {
 		r.handleIPRewrite(qCtx, target.ip)
 	} else {
