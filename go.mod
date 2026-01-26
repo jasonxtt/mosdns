@@ -1,6 +1,6 @@
 module github.com/IrineSistiana/mosdns/v5
 
-go 1.25.6
+go 1.25.5
 
 require (
 	github.com/IrineSistiana/go-bytes-pool v0.0.0-20230918115058-c72bd9761c57
@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/kardianos/service v1.2.4
 	github.com/klauspost/compress v1.18.3
-	github.com/miekg/dns v1.1.69
+	github.com/miekg/dns v1.1.72
 	github.com/nadoo/ipset v0.5.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/quic-go/quic-go v0.58.0
