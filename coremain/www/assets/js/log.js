@@ -32,7 +32,7 @@ function closeAndUnlock(dialogElement) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-    const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 60, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 768, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
+    const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 60, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 1024, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
     let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
     const elements = {
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'),
@@ -2108,14 +2108,65 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderRuleTable(tbody, rules, mode) {
-        tbody.closest('table').classList.toggle('mobile-rule-card-layout', state.isMobile);
+function renderRuleTable(tbody, rules, mode) {
+        // [修复] 移除旧的 mobile-rule-card-layout 类，使用新的 mobile-card-view
+        tbody.closest('table').classList.toggle('mobile-card-view', state.isMobile);
+        
         const sortedRules = [...rules].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         renderTable(tbody, sortedRules, (rule, index) => {
-            const item = state.isMobile ? renderRuleMobileCard(rule, mode) : renderRuleTableRow(rule, mode);
-            item.dataset.ruleId = mode === 'adguard' ? rule.id : rule.name;
-            if (rule.type) item.dataset.ruleType = rule.type;
-            return item;
+            // [修复] 如果是移动端，强制使用新的卡片渲染逻辑
+            if (state.isMobile) {
+                const tr = document.createElement('tr');
+                tr.dataset.ruleId = mode === 'adguard' ? rule.id : rule.name;
+                if (rule.type) tr.dataset.ruleType = rule.type;
+
+                const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? formatRelativeTime(rule.last_updated) : '从未';
+                
+                // 构建卡片内容
+                tr.innerHTML = `
+                    <td>
+                        <div class="mobile-system-card">
+                            <div class="card-header">
+                                <div style="display:flex; flex-direction:column; max-width:70%;">
+                                    <span class="card-title">${rule.name}</span>
+                                    <small style="color:var(--color-text-secondary); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${rule.url}</small>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" class="rule-enabled-toggle" ${rule.enabled ? 'checked' : ''}>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="mobile-stats-grid">
+                                <div class="mobile-stat-item">
+                                    <span class="mobile-stat-label">规则数</span>
+                                    <span class="mobile-stat-value">${(rule.rule_count || 0).toLocaleString()}</span>
+                                </div>
+                                <div class="mobile-stat-item">
+                                    <span class="mobile-stat-label">上次更新</span>
+                                    <span class="mobile-stat-value">${lastUpdated}</span>
+                                </div>
+                                ${mode === 'diversion' ? `
+                                <div class="mobile-stat-item" style="grid-column: 1 / -1;">
+                                    <span class="mobile-stat-label">类型</span>
+                                    <span class="mobile-stat-value"><span class="response-tag other">${rule.type}</span></span>
+                                </div>` : ''}
+                            </div>
+                            <div class="mobile-card-actions">
+                                ${mode === 'diversion' && rule.url ? `<button class="button secondary small rule-update-btn" style="flex:1;">更新</button>` : ''}
+                                <button class="button secondary small rule-edit-btn" style="flex:1;">编辑</button>
+                                <button class="button danger small rule-delete-btn" style="flex:1;">删除</button>
+                            </div>
+                        </div>
+                    </td>
+                `;
+                return tr;
+            } else {
+                // PC 端保持原样
+                const item = renderRuleTableRow(rule, mode);
+                item.dataset.ruleId = mode === 'adguard' ? rule.id : rule.name;
+                if (rule.type) item.dataset.ruleType = rule.type;
+                return item;
+            }
         }, mode);
     }
 
@@ -2427,7 +2478,7 @@ async function updateDomainListStats(signal) {
         }
     }
 
-    const cacheManager = {
+const cacheManager = {
         config: [
             { key: 'cache_all', name: '全部缓存 (兼容)', tag: 'cache_all' },
             { key: 'cache_cn', name: '国内缓存', tag: 'cache_cn' },
@@ -2466,7 +2517,7 @@ async function updateDomainListStats(signal) {
             } catch (error) {
                 if (error.name !== 'AbortError') {
                     console.error("Failed to update cache stats:", error);
-                    this.renderTable(true); // Render with error state
+                    this.renderTable(true);
                 }
             }
         },
@@ -2475,10 +2526,16 @@ async function updateDomainListStats(signal) {
             const tbody = elements.cacheStatsTbody;
             if (!tbody) return;
 
-            // Apply mobile-card-layout class to table based on screen size
             const table = tbody.closest('table');
             if (table) {
-                table.classList.toggle('mobile-card-layout', state.isMobile);
+                // 关键：根据设备状态切换 CSS 类，触发 log.html 中的高权重样式覆盖
+                if (state.isMobile) {
+                    table.classList.add('mobile-card-view');
+                    table.classList.remove('mobile-card-layout'); 
+                } else {
+                    table.classList.remove('mobile-card-view');
+                    table.classList.remove('mobile-card-layout');
+                }
             }
 
             tbody.innerHTML = '';
@@ -2492,23 +2549,44 @@ async function updateDomainListStats(signal) {
             this.config.forEach(cache => {
                 const tr = document.createElement('tr');
                 const stats = state.cacheStats[cache.key] || { query_total: 0, hit_total: 0, lazy_hit_total: 0, size_current: 0 };
-
                 const hitRate = stats.query_total > 0 ? (stats.hit_total / stats.query_total * 100).toFixed(2) + '%' : '0.00%';
                 const lazyRate = stats.query_total > 0 ? (stats.lazy_hit_total / stats.query_total * 100).toFixed(2) + '%' : '0.00%';
 
-                // 统一使用表格结构，不再区分 Mobile/PC HTML结构，通过CSS实现横向滚动
-                tr.innerHTML = `
-                    <td>
-                        <div class="cache-name-wrapper" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${cache.name}">${cache.name}</div>
-                    </td>
-                    <td class="text-right">${stats.query_total.toLocaleString()}</td>
-                    <td class="text-right">${stats.hit_total.toLocaleString()}</td>
-                    <td class="text-right">${stats.lazy_hit_total.toLocaleString()}</td>
-                    <td class="text-right">${hitRate}</td>
-                    <td class="text-right">${lazyRate}</td>
-                    <td class="text-right"><a href="#" class="control-item-link" data-cache-tag="${cache.tag}" data-cache-title="${cache.name}">${stats.size_current.toLocaleString()}</a></td>
-                    <td class="text-center"><button class="button danger clear-cache-btn" data-cache-tag="${cache.tag}" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">清空</button></td>
-                `;
+                if (state.isMobile) {
+                    // 移动端卡片视图
+                    tr.innerHTML = `
+                        <td>
+                            <div class="mobile-system-card">
+                                <div class="card-header">
+                                    <div class="card-title">${cache.name}</div>
+                                    <button class="button danger small clear-cache-btn" data-cache-tag="${cache.tag}" style="padding: 0.3rem 0.6rem;">清空</button>
+                                </div>
+                                <div class="mobile-stats-grid">
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">条目数</span><span class="mobile-stat-value"><a href="#" class="control-item-link" data-cache-tag="${cache.tag}" data-cache-title="${cache.name}">${stats.size_current.toLocaleString()}</a></span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">请求总数</span><span class="mobile-stat-value">${stats.query_total.toLocaleString()}</span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">缓存命中</span><span class="mobile-stat-value">${stats.hit_total.toLocaleString()}</span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">命中率</span><span class="mobile-stat-value">${hitRate}</span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">过期命中</span><span class="mobile-stat-value">${stats.lazy_hit_total.toLocaleString()}</span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">过期命中率</span><span class="mobile-stat-value">${lazyRate}</span></div>
+                                </div>
+                            </div>
+                        </td>
+                    `;
+                } else {
+                    // PC端表格视图
+                    tr.innerHTML = `
+                        <td>
+                            <div class="cache-name-wrapper" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${cache.name}">${cache.name}</div>
+                        </td>
+                        <td class="text-right">${stats.query_total.toLocaleString()}</td>
+                        <td class="text-right">${stats.hit_total.toLocaleString()}</td>
+                        <td class="text-right">${stats.lazy_hit_total.toLocaleString()}</td>
+                        <td class="text-right">${hitRate}</td>
+                        <td class="text-right">${lazyRate}</td>
+                        <td class="text-right"><a href="#" class="control-item-link" data-cache-tag="${cache.tag}" data-cache-title="${cache.name}">${stats.size_current.toLocaleString()}</a></td>
+                        <td class="text-center"><button class="button danger clear-cache-btn" data-cache-tag="${cache.tag}" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">清空</button></td>
+                    `;
+                }
                 tbody.appendChild(tr);
             });
         }
@@ -2962,9 +3040,18 @@ async function updateDomainListStats(signal) {
             });
         },
 
-        renderReplacementsTable() {
+renderReplacementsTable() {
             const tbody = document.getElementById('rep-tbody');
             if (!tbody) return;
+
+            const table = tbody.closest('table');
+            if (table) {
+                if (state.isMobile) {
+                    table.classList.add('mobile-card-view');
+                } else {
+                    table.classList.remove('mobile-card-view');
+                }
+            }
 
             if (this.state.replacements.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="text-center" style="padding: 2rem; color: var(--color-text-secondary); font-style: italic;">暂无替换规则</td></tr>';
@@ -2972,41 +3059,70 @@ async function updateDomainListStats(signal) {
             }
 
             tbody.innerHTML = this.state.replacements.map((rule, index) => {
-                // 解析状态标签
                 let statusHtml = '<span class="response-tag other" style="font-size: 0.8em; opacity: 0.7;">未保存</span>';
                 if (rule.result) {
                     if (rule.result.startsWith('Success')) {
-                        // 绿色，表示生效
                         statusHtml = `<span class="response-tag noerror" style="font-size: 0.8em;">${rule.result}</span>`;
                     } else if (rule.result.includes('Not Found')) {
-                        // 橙/红色，表示未找到匹配项
                         statusHtml = `<span class="response-tag nxdomain" style="font-size: 0.8em;">${rule.result}</span>`;
                     } else {
                         statusHtml = `<span class="response-tag other" style="font-size: 0.8em;">${rule.result}</span>`;
                     }
                 }
 
-                return `
-                    <tr style="border-bottom: 1px solid var(--color-border);">
-                        <td style="padding: 8px;">
-                            ${statusHtml}
-                        </td>
-                        <td style="padding: 8px;">
-                            <input type="text" class="input" style="width: 100%;" value="${rule.original || ''}" data-index="${index}" data-field="original" placeholder="例如: 1.1.1.1">
-                        </td>
-                        <td style="padding: 8px;">
-                            <input type="text" class="input" style="width: 100%;" value="${rule.new || ''}" data-index="${index}" data-field="new" placeholder="例如: 127.0.0.1">
-                        </td>
-                        <td style="padding: 8px;">
-                            <input type="text" class="input" style="width: 100%;" value="${rule.comment || ''}" data-index="${index}" data-field="comment" placeholder="备注 (可选)">
-                        </td>
-                        <td style="padding: 8px; text-align: center;">
-                            <button class="button danger small rep-del-btn" data-index="${index}" title="删除此行" style="padding: 6px 10px;">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                if (state.isMobile) {
+                    // 移动端卡片视图
+                    return `
+                        <tr>
+                            <td>
+                                <div class="mobile-system-card">
+                                    <div class="card-header">
+                                        <div style="font-size:0.9rem; font-weight:600;">规则 #${index + 1}</div>
+                                        ${statusHtml}
+                                    </div>
+                                    <div class="mobile-override-row">
+                                        <div>
+                                            <label style="font-size:0.75rem; color:var(--color-text-secondary);">原值 (查找)</label>
+                                            <input type="text" class="input" value="${rule.original || ''}" data-index="${index}" data-field="original" placeholder="例如: 1.1.1.1">
+                                        </div>
+                                        <div>
+                                            <label style="font-size:0.75rem; color:var(--color-text-secondary);">新值 (替换)</label>
+                                            <input type="text" class="input" value="${rule.new || ''}" data-index="${index}" data-field="new" placeholder="例如: 127.0.0.1">
+                                        </div>
+                                        <div>
+                                            <label style="font-size:0.75rem; color:var(--color-text-secondary);">备注</label>
+                                            <input type="text" class="input" value="${rule.comment || ''}" data-index="${index}" data-field="comment" placeholder="可选">
+                                        </div>
+                                    </div>
+                                    <div style="text-align:right; margin-top:0.8rem;">
+                                        <button class="button danger small rep-del-btn" data-index="${index}" style="width:100%;">删除规则</button>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    // PC端表格视图
+                    return `
+                        <tr style="border-bottom: 1px solid var(--color-border);">
+                            <td style="padding: 8px;">${statusHtml}</td>
+                            <td style="padding: 8px;">
+                                <input type="text" class="input" style="width: 100%;" value="${rule.original || ''}" data-index="${index}" data-field="original" placeholder="例如: 1.1.1.1">
+                            </td>
+                            <td style="padding: 8px;">
+                                <input type="text" class="input" style="width: 100%;" value="${rule.new || ''}" data-index="${index}" data-field="new" placeholder="例如: 127.0.0.1">
+                            </td>
+                            <td style="padding: 8px;">
+                                <input type="text" class="input" style="width: 100%;" value="${rule.comment || ''}" data-index="${index}" data-field="comment" placeholder="备注 (可选)">
+                            </td>
+                            <td style="padding: 8px; text-align: center;">
+                                <button class="button danger small rep-del-btn" data-index="${index}" title="删除此行" style="padding: 6px 10px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }
             }).join('');
         },
 
@@ -3159,26 +3275,26 @@ async function updateDomainListStats(signal) {
             };
         },
 
-        renderTable() {
+renderTable() {
             const tbody = document.getElementById('upstream-dns-tbody');
             if (!tbody) return;
+            
+            const table = tbody.closest('table');
+            if (table) {
+                if (state.isMobile) {
+                    table.classList.add('mobile-card-view');
+                } else {
+                    table.classList.remove('mobile-card-view');
+                }
+            }
+
             tbody.innerHTML = '';
 
-            let hasData = false;
-            
-            // [修改] 第一步：扁平化数据
-            // 将所有组的数据收集到一个数组中，并保留原始组名和原始索引以便后续操作
             const allUpstreams = [];
-            
             for (const [group, upstreams] of Object.entries(this.state.config)) {
                 if (!upstreams || !Array.isArray(upstreams)) continue;
-                
                 upstreams.forEach((u, idx) => {
-                    allUpstreams.push({
-                        u: u,                // 配置对象
-                        group: group,        // 所属组名
-                        originalIndex: idx   // 原始索引 (用于编辑/删除)
-                    });
+                    allUpstreams.push({ u: u, group: group, originalIndex: idx });
                 });
             }
 
@@ -3187,66 +3303,85 @@ async function updateDomainListStats(signal) {
                 return;
             }
 
-            // [修改] 第二步：全局排序
-            // 优先级 1: 是否启用 (启用的在最前)
-            // 优先级 2: 组名 (字母顺序)
-            // 优先级 3: Tag名 (字母顺序)
             allUpstreams.sort((a, b) => {
-                // 1. 启用状态 (true=1, false=0)
                 const enabledDiff = (b.u.enabled ? 1 : 0) - (a.u.enabled ? 1 : 0);
                 if (enabledDiff !== 0) return enabledDiff;
-
-                // 2. 组名排序 (让同组的聚在一起，看起来更整齐)
                 const groupDiff = a.group.localeCompare(b.group);
                 if (groupDiff !== 0) return groupDiff;
-
-                // 3. Tag 名称排序
                 return (a.u.tag || '').localeCompare(b.u.tag || '');
             });
 
-            // [修改] 第三步：渲染
             allUpstreams.forEach((item) => {
-                hasData = true;
                 const u = item.u;
                 const group = item.group;
                 const index = item.originalIndex;
-
-                // 指标 key = 所属组|名称
                 const key = `${group}|${u.tag}`;
-                const stats = u.enabled ? this.getStats(key) : { avgLat: '-', query: '-', error: '-', rate: '-' };
+                const stats = u.enabled ? this.getStats(key) : { avgLat: '-', query: '-', error: '-', rate: '-', winner: '-', winRate: '-' };
                 
                 const tr = document.createElement('tr');
-                tr.dataset.group = group; // 绑定原始组名
-                tr.dataset.index = index; // 绑定原始索引
+                tr.dataset.group = group; 
+                tr.dataset.index = index; 
                 
-                // 禁用的行变半透明
-                if (!u.enabled) {
-                    tr.style.opacity = '0.6';
-                }
+                if (!u.enabled) tr.style.opacity = '0.6';
 
-                tr.innerHTML = `
-                    <td class="text-center">
-                        <label class="switch">
-                            <input type="checkbox" class="upstream-enable-toggle" ${u.enabled ? 'checked' : ''}>
-                            <span class="slider"></span>
-                        </label>
-                    </td>
-                    <td>${group}</td>
-                    <td>${u.tag}</td>
-                    <td>${u.protocol}</td>
-                    <td class="text-center">${stats.avgLat}</td>
-                    <td class="text-center">${stats.query}</td>
-                    <td class="text-center">${stats.winner}</td>
-                    <td class="text-center">${stats.winRate}</td>
-                    <td class="text-center">${stats.error}</td>
-                    <td class="text-center">${stats.rate}</td>
-                    <td class="text-center">
-                         <div style="display: inline-flex; gap: 0.5rem;">
-                            <button class="button secondary small edit-btn" style="padding: 0.3rem 0.6rem;">编辑</button>
-                            <button class="button danger small delete-btn" style="padding: 0.3rem 0.6rem;">删除</button>
-                        </div>
-                    </td>
-                `;
+                if (state.isMobile) {
+                    // [修复] 移动端卡片视图：补充采纳数和采纳率
+                    tr.innerHTML = `
+                        <td>
+                            <div class="mobile-system-card">
+                                <div class="card-header">
+                                    <div style="display:flex; flex-direction:column; max-width: 70%;">
+                                        <span class="card-title">${u.tag}</span>
+                                        <small style="color:var(--color-text-secondary); margin-top:4px;">${group} · ${u.protocol}</small>
+                                    </div>
+                                    <label class="switch">
+                                        <input type="checkbox" class="upstream-enable-toggle" ${u.enabled ? 'checked' : ''}>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="mobile-stats-grid">
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">平均响应</span><span class="mobile-stat-value">${stats.avgLat}</span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">请求数</span><span class="mobile-stat-value">${stats.query}</span></div>
+                                    
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">采纳数</span><span class="mobile-stat-value">${stats.winner}</span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">采纳率</span><span class="mobile-stat-value">${stats.winRate}</span></div>
+                                    
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">错误数</span><span class="mobile-stat-value" style="${stats.error > 0 ? 'color:var(--color-danger)' : ''}">${stats.error}</span></div>
+                                    <div class="mobile-stat-item"><span class="mobile-stat-label">出错率</span><span class="mobile-stat-value">${stats.rate}</span></div>
+                                </div>
+                                <div class="mobile-card-actions">
+                                    <button class="button secondary small edit-btn" style="flex:1;">编辑</button>
+                                    <button class="button danger small delete-btn" style="flex:1;">删除</button>
+                                </div>
+                            </div>
+                        </td>
+                    `;
+                } else {
+                    // PC端表格视图
+                    tr.innerHTML = `
+                        <td class="text-center">
+                            <label class="switch">
+                                <input type="checkbox" class="upstream-enable-toggle" ${u.enabled ? 'checked' : ''}>
+                                <span class="slider"></span>
+                            </label>
+                        </td>
+                        <td>${group}</td>
+                        <td>${u.tag}</td>
+                        <td>${u.protocol}</td>
+                        <td class="text-center">${stats.avgLat}</td>
+                        <td class="text-center">${stats.query}</td>
+                        <td class="text-center">${stats.winner}</td>
+                        <td class="text-center">${stats.winRate}</td>
+                        <td class="text-center">${stats.error}</td>
+                        <td class="text-center">${stats.rate}</td>
+                        <td class="text-center">
+                             <div style="display: inline-flex; gap: 0.5rem;">
+                                <button class="button secondary small edit-btn" style="padding: 0.3rem 0.6rem;">编辑</button>
+                                <button class="button danger small delete-btn" style="padding: 0.3rem 0.6rem;">删除</button>
+                            </div>
+                        </td>
+                    `;
+                }
                 tbody.appendChild(tr);
             });
         },
