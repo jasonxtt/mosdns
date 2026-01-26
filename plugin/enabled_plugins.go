@@ -23,9 +23,12 @@ package plugin
 import (
 	// data provider
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set_light"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/ip_set"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/sd_set"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/sd_set_light"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/si_set"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_mapper"
 
 	// matcher
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/client_ip"
@@ -41,6 +44,7 @@ import (
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/rcode"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/resp_ip"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/string_exp"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/fast_mark"
 
 	// executable
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/arbitrary"
@@ -87,6 +91,7 @@ import (
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence/fallback"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/sleep"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/tag_setter"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/ttl"
 
 	// executable and matcher
