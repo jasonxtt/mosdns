@@ -21,6 +21,7 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
+	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
@@ -90,6 +91,86 @@ type AdguardRule struct {
 	// 用于优雅关闭
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// 新增：订阅者支持
+	subscribers []func()
+	subsMu      sync.RWMutex
+}
+
+// 确保实现了必要的接口
+var _ data_provider.RuleExporter = (*AdguardRule)(nil)        // 新增接口
+var _ data_provider.DomainMatcherProvider = (*AdguardRule)(nil) // 原有接口
+
+// RuleReceiver 接口用于解耦解析和存储逻辑，使 parseRules 既能用于构建 Matcher 也能用于导出
+type RuleReceiver interface {
+	Add(string, struct{}) error
+}
+
+// ruleCollector 用于收集规则列表 (供 GetRules 使用)
+type ruleCollector struct {
+	rules []string
+}
+
+func (c *ruleCollector) Add(s string, _ struct{}) error {
+	c.rules = append(c.rules, s)
+	return nil
+}
+
+// noOpCollector 用于丢弃不需要的规则 (供 GetRules 忽略白名单使用)
+type noOpCollector struct{}
+
+func (c *noOpCollector) Add(_ string, _ struct{}) error { return nil }
+
+// Subscribe 实现 RuleExporter，允许 external plugin 监听变更
+func (p *AdguardRule) Subscribe(cb func()) {
+	p.subsMu.Lock()
+	defer p.subsMu.Unlock()
+	p.subscribers = append(p.subscribers, cb)
+}
+
+// GetRules 实现 RuleExporter
+// 注意：只导出 Deny (黑名单) 规则，忽略 Allow (白名单) 规则。
+func (p *AdguardRule) GetRules() ([]string, error) {
+	p.mu.RLock()
+	// 获取所有“已启用”的规则
+	enabledRules := make([]*OnlineRule, 0)
+	for _, rule := range p.onlineRules {
+		if rule.Enabled {
+			enabledRules = append(enabledRules, rule)
+		}
+	}
+	p.mu.RUnlock()
+
+	// 收集黑名单规则
+	denyCollector := &ruleCollector{rules: make([]string, 0)}
+	// 忽略白名单规则 (我们不希望把白名单导出给 domain_mapper 进行打标拦截)
+	allowCollector := &noOpCollector{}
+
+	for _, rule := range enabledRules {
+		file, err := os.Open(rule.localPath)
+		if err != nil {
+			// 仅记录日志，不中断其他文件的导出
+			log.Printf("[adguard_rule] GetRules: WARN: skipping enabled rule '%s', cannot open file: %v", rule.Name, err)
+			continue
+		}
+		// 复用 parseRules 逻辑
+		parseRules(file, allowCollector, denyCollector)
+		file.Close()
+	}
+
+	return denyCollector.rules, nil
+}
+
+// notifySubscribers 通知所有订阅者（domain_mapper）进行更新
+func (p *AdguardRule) notifySubscribers() {
+	p.subsMu.RLock()
+	subs := make([]func(), len(p.subscribers))
+	copy(subs, p.subscribers)
+	p.subsMu.RUnlock()
+
+	for _, cb := range subs {
+		go cb()
+	}
 }
 
 // newAdguardRule 是插件的初始化函数
@@ -143,6 +224,7 @@ func newAdguardRule(bp *coremain.BP, args any) (any, error) {
 		httpClient:   httpClient,
 		ctx:          ctx,
 		cancel:       cancel,
+		subscribers:  make([]func(), 0),
 	}
 
 	if err := p.loadConfig(); err != nil {
@@ -300,6 +382,7 @@ func (p *AdguardRule) reloadAllRules(ctx context.Context, initialLoad bool) {
 
 	p.updateAllRuleCounts()
 
+	// 构建新的 Matcher (用于本插件的原有功能)
 	newAllowMatcher := domain.NewDomainMixMatcher()
 	newDenyMatcher := domain.NewDomainMixMatcher()
 	totalRuleCount := 0
@@ -311,11 +394,11 @@ func (p *AdguardRule) reloadAllRules(ctx context.Context, initialLoad bool) {
 			continue
 		}
 
+		// 这里传入 Matcher，保持原功能不变
 		count, err := parseRules(file, newAllowMatcher, newDenyMatcher)
 		file.Close() // 确保文件句柄被关闭
 
 		if err != nil {
-			// 修复：检查并记录 parseRules 的错误
 			log.Printf("[adguard_rule] ERROR: failed to parse rule file for '%s' (%s): %v", rule.Name, rule.localPath, err)
 		}
 		totalRuleCount += count
@@ -327,6 +410,10 @@ func (p *AdguardRule) reloadAllRules(ctx context.Context, initialLoad bool) {
 	p.mu.Unlock()
 
 	log.Printf("[adguard_rule] finished reloading. Total active rules from enabled lists: %d", totalRuleCount)
+	
+	// [关键]: 更新完成后，通知所有订阅者 (如 domain_mapper)
+	// 因为 Add/Delete/Enable/Disable/Update 最终都会走到这里，所以都能触发通知
+	p.notifySubscribers()
 }
 
 // updateAllRuleCounts 遍历所有已知规则，并更新它们的 RuleCount 字段
@@ -345,7 +432,7 @@ func (p *AdguardRule) updateAllRuleCounts() {
 			continue
 		}
 		
-		// 修复：此处解析仅为计数，忽略错误是可接受的，但确保关闭文件
+		// 使用临时 Matcher 来统计数量，忽略解析错误
 		count, _ := parseRules(file, domain.NewDomainMixMatcher(), domain.NewDomainMixMatcher())
 		file.Close()
 
@@ -379,7 +466,6 @@ func (p *AdguardRule) downloadRule(ctx context.Context, ruleID string) error {
 
 	log.Printf("[adguard_rule] downloading rule '%s' from %s", ruleName, ruleURL)
 
-	// 修复：使用传入的、可取消的上下文
 	req, err := http.NewRequestWithContext(ctx, "GET", ruleURL, nil)
 	if err != nil {
 		return err
@@ -403,7 +489,7 @@ func (p *AdguardRule) downloadRule(ctx context.Context, ruleID string) error {
 	defer os.Remove(tmpFile.Name())
 
 	_, err = io.Copy(tmpFile, resp.Body)
-	tmpFile.Close() // 确保在重命名前关闭文件句柄
+	tmpFile.Close() // 确保在重命名前关闭
 	if err != nil {
 		return fmt.Errorf("failed to write to temp file for rule '%s': %w", ruleName, err)
 	}
@@ -432,7 +518,8 @@ var (
 )
 
 // parseRules 解析规则文件内容并填充到匹配器中
-func parseRules(reader io.Reader, allowM, denyM *domain.MixMatcher[struct{}]) (int, error) {
+// 修改点：参数 allowM 和 denyM 类型改为 RuleReceiver 接口，使其既支持 MixMatcher 也支持 ruleCollector
+func parseRules(reader io.Reader, allowM, denyM RuleReceiver) (int, error) {
 	scanner := bufio.NewScanner(reader)
 	count := 0
 	for scanner.Scan() {
@@ -440,17 +527,21 @@ func parseRules(reader io.Reader, allowM, denyM *domain.MixMatcher[struct{}]) (i
 		if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") {
 			continue
 		}
+		// 忽略 IP 规则
 		if strings.ContainsAny(line, "0123456789") && (strings.Contains(line, "127.0.0.1") || strings.Contains(line, "0.0.0.0") || strings.Contains(line, "::")) {
 			parts := strings.Fields(line)
 			if len(parts) > 1 {
 				continue
 			}
 		}
+		// 忽略元素隐藏规则
 		if strings.Contains(line, "#?#") || strings.Contains(line, "##") || strings.Contains(line, "$$") {
 			continue
 		}
 		var mosdnsRule string
 		parsed := false
+
+		// 解析逻辑
 		if matches := allowRuleRegex.FindStringSubmatch(line); len(matches) > 1 {
 			domainStr := cleanDomain(matches[1])
 			mosdnsRule = convertToMosdnsRule(domainStr)
@@ -498,7 +589,6 @@ func parseRules(reader io.Reader, allowM, denyM *domain.MixMatcher[struct{}]) (i
 			count++
 		}
 	}
-	// 修复：返回扫描过程中可能发生的 I/O 错误
 	return count, scanner.Err()
 }
 
@@ -614,7 +704,6 @@ func (p *AdguardRule) api() *chi.Mux {
 			return
 		}
 
-		// 修复：增加参数校验
 		newRule.Name = strings.TrimSpace(newRule.Name)
 		newRule.URL = strings.TrimSpace(newRule.URL)
 		if newRule.Name == "" || newRule.URL == "" {
@@ -639,6 +728,7 @@ func (p *AdguardRule) api() *chi.Mux {
 			return
 		}
 
+		// 下载新规则
 		go func(ruleID string) {
 			if newRule.Enabled {
 				downloadCtx, cancel := context.WithTimeout(p.ctx, downloadTimeout)
@@ -646,6 +736,7 @@ func (p *AdguardRule) api() *chi.Mux {
 				if err := p.downloadRule(downloadCtx, ruleID); err != nil {
 					log.Printf("[adguard_rule] ERROR: failed to download new rule: %v", err)
 				}
+				// 下载完成后触发 reload (进而触发 notify)
 				p.triggerReload(p.ctx)
 			}
 		}(newRule.ID)
@@ -663,7 +754,6 @@ func (p *AdguardRule) api() *chi.Mux {
 			return
 		}
 
-		// 修复：增加参数校验
 		updatedRuleData.Name = strings.TrimSpace(updatedRuleData.Name)
 		updatedRuleData.URL = strings.TrimSpace(updatedRuleData.URL)
 		if updatedRuleData.Name == "" || updatedRuleData.URL == "" {
@@ -695,6 +785,7 @@ func (p *AdguardRule) api() *chi.Mux {
 			return
 		}
 
+		// 配置变更触发 reload (进而触发 notify)
 		p.triggerReload(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rule)
@@ -723,6 +814,7 @@ func (p *AdguardRule) api() *chi.Mux {
 			return
 		}
 
+		// 删除规则触发 reload (进而触发 notify)
 		p.triggerReload(r.Context())
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -745,7 +837,6 @@ func (p *AdguardRule) api() *chi.Mux {
 				wg.Add(1)
 				go func(ruleID string) {
 					defer wg.Done()
-					// 使用插件自身的上下文来创建带超时的下载上下文
 					downloadCtx, cancel := context.WithTimeout(p.ctx, downloadTimeout)
 					defer cancel()
 					if err := p.downloadRule(downloadCtx, ruleID); err != nil {
@@ -756,6 +847,7 @@ func (p *AdguardRule) api() *chi.Mux {
 			wg.Wait()
 
 			log.Println("[adguard_rule] Manual update process finished.")
+			// 更新完成触发 reload (进而触发 notify)
 			p.triggerReload(p.ctx)
 		}()
 
