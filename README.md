@@ -4,8 +4,7 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 下载: https://github.com/yyysuo/mosdns/releases  
 魔改版本配置语法基本无差异，仅添加了一些插件，具体参见fakeip分流大法总教程中mosdns配置 下载预编译文件、更新日志。
 
-### 手动保存个性化配置
-更新日志：
+### 更新日志
 https://github.com/yyysuo/firetv/blob/master/mosdnsconfigupdate/mosdns2026%E6%9B%B4%E6%96%B0%E6%97%A5%E5%BF%97
 
 ### 手动保存个性化配置
