@@ -40,6 +40,8 @@ type domainPayload struct {
 
 var _ data_provider.DomainMatcherProvider = (*DomainSet)(nil)
 var _ domain.Matcher[struct{}] = (*DomainSet)(nil)
+// 确保实现了 RuleExporter 接口
+var _ data_provider.RuleExporter = (*DomainSet)(nil)
 
 type DomainSet struct {
 	mu     sync.RWMutex
@@ -48,6 +50,38 @@ type DomainSet struct {
 
 	ruleFile string
 	rules    []string
+
+	// 新增：订阅者列表
+	subscribers []func()
+}
+
+// GetRules 实现 RuleExporter 接口
+func (d *DomainSet) GetRules() ([]string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	// 返回规则的副本，防止外部修改
+	rulesCopy := make([]string, len(d.rules))
+	copy(rulesCopy, d.rules)
+	return rulesCopy, nil
+}
+
+// Subscribe 实现 RuleExporter 接口
+func (d *DomainSet) Subscribe(cb func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.subscribers = append(d.subscribers, cb)
+}
+
+// notifySubscribers 通知所有订阅者（异步执行）
+func (d *DomainSet) notifySubscribers() {
+	d.mu.RLock()
+	subs := make([]func(), len(d.subscribers))
+	copy(subs, d.subscribers)
+	d.mu.RUnlock()
+
+	for _, cb := range subs {
+		go cb()
+	}
 }
 
 // initAndLoadRules is a new internal function for loading rules within this plugin.
@@ -118,8 +152,9 @@ func (d *DomainSet) loadFileInternal(f string) ([]string, error) {
 func Init(bp *coremain.BP, args any) (any, error) {
 	cfg := args.(*Args)
 	ds := &DomainSet{
-		mixM:   domain.NewDomainMixMatcher(),
-		otherM: make([]domain.Matcher[struct{}], 0, len(cfg.Sets)),
+		mixM:        domain.NewDomainMixMatcher(),
+		otherM:      make([]domain.Matcher[struct{}], 0, len(cfg.Sets)),
+		subscribers: make([]func(), 0), // 初始化订阅者列表
 	}
 
 	if len(cfg.Files) > 0 {
@@ -222,6 +257,10 @@ func (d *DomainSet) api() *chi.Mux {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		
+		// 规则更新成功，通知订阅者
+		d.notifySubscribers()
+
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "domain_set replaced with %d entries", len(d.rules))
 	})
