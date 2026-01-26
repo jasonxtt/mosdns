@@ -69,261 +69,285 @@
     <link rel="preconnect" href="/api">
     <link rel="dns-prefetch" href="/api">
 
-    <!-- [新功能] 为 Requery 插件添加的独立样式 -->
-    <style>
-        /* === MOBILE V2 CRITICAL STYLES: SCROLLING TABLE STRATEGY === */
-        @media (max-width: 768px) {
+<style>
+        /* ==========================================================================
+           最终完美修正版 (2026-01-24 12:15)
+           1. [修复] 电脑端标签截断：移除 max-width 限制，允许长标签完整显示。
+           2. [修复] 手机端对齐：强制卡片内容左对齐，修复标题/副标题错位。
+           3. [保持] 之前的所有修复 (标签完整性、概览页高度、卡片布局)。
+           ========================================================================== */
 
-            /* 1. 通用表格横向滚动容器 */
-            html body .scrollable-table-container {
+        /* --- 1. PC/通用样式 --- */
+        .domain-response-cell .response-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            width: 100%;
+            min-width: 0;
+        }
+        
+        .domain-response-cell .response-summary {
+            flex: 1; 
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .domain-response-cell .rule-tag {
+            flex-shrink: 0;
+            /* [修复点1] 移除宽度限制，防止电脑端长标签显示不全 */
+            max-width: none !important; 
+            overflow: visible !important;
+            text-overflow: clip !important;
+            white-space: nowrap;
+        }
+
+        /* --- 移动端专用样式 (扩展到 1024px) --- */
+        @media (max-width: 1024px) {
+            
+            /* === A. 概览页高度控制 (保持 1.5倍高度) === */
+            html body #overview-tab .scrollable-table-container,
+            html body #log-query-tab .scrollable-table-container {
                 display: block !important;
                 width: 100% !important;
-                overflow-x: auto !important;
-                -webkit-overflow-scrolling: touch;
-                margin-bottom: 1rem;
-                padding-bottom: 5px;
+                height: auto !important;
+                min-height: 550px !important;
+                max-height: 550px !important;
+                overflow-y: auto !important;
+                border: 1px solid var(--color-border) !important;
+            }
+
+            /* === B. 日志/排行榜行布局修复 === */
+            
+            /* 1. Grid 布局 (两行显示) */
+            html body .mobile-log-row {
+                display: grid !important;
+                grid-template-areas: "domain time" "meta meta" !important;
+                grid-template-columns: 1fr auto !important;
+                grid-template-rows: auto auto !important;
+                height: auto !important;
+                min-height: 65px !important;
+                padding: 0.6rem 0 !important;
+                overflow: visible !important;
+            }
+
+            /* 2. Meta 区域 Block 布局 (自然换行) */
+            html body .mobile-log-row .meta {
+                grid-area: meta !important;
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                height: auto !important;
+                min-height: 28px !important;
+                margin-top: 0.5rem !important;
+                border-top: 1px solid var(--color-border) !important;
+                padding-top: 0.5rem !important;
+                width: 100% !important; 
+                white-space: normal !important;
+            }
+
+            /* 3. 标签样式 - inline-flex 完美居中 */
+            html body .mobile-log-row .meta .rule-tag,
+            html body .mobile-log-row .meta .response-tag {
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: auto !important;
+                height: auto !important;
+                min-height: 22px !important;
+                min-width: auto !important;
+                max-width: 100% !important;
+                padding: 2px 8px !important;
+                margin: 0 0 4px 0 !important;
+                font-size: 0.75rem !important;
+                line-height: 1.2 !important;
+                text-indent: 0 !important;
+                white-space: nowrap !important;
+                color: #fff !important;
+                border-radius: 4px !important;
+                flex-shrink: 0 !important;
+                overflow: visible !important;
+            }
+            
+            html body .mobile-log-row .meta .client {
+                display: inline-block !important;
+                margin-right: 8px !important;
+                font-weight: 500 !important;
+                vertical-align: middle !important;
+                white-space: nowrap !important;
+            }
+            
+            html body .mobile-log-row .meta .duration {
+                display: inline-block !important;
+                margin-right: 8px !important;
+                color: var(--color-text-secondary) !important;
+                vertical-align: middle !important;
+                white-space: nowrap !important;
+            }
+
+            html body .mobile-card-layout tr,
+            html body .mobile-card-layout td,
+            html body #log-table tr,
+            html body #log-table td,
+            html body #top-domains-body td,
+            html body #top-clients-body td,
+            html body #slowest-queries-body td {
+                height: auto !important;
+                overflow: visible !important;
+                white-space: normal !important;
+                word-break: break-all !important;
+            }
+
+            /* === C. 系统管理页 (卡片化) === */
+            html body #system-control-tab .scrollable-table-container,
+            html body #rules-tab .scrollable-table-container {
+                display: block !important;
+                width: 100% !important;
+                height: auto !important;
+                max-height: none !important;    
+                overflow-y: visible !important; 
+                overflow-x: hidden !important;
+                border: none !important;
+            }
+
+            html body table.mobile-card-view,
+            html body table.mobile-card-view > tbody,
+            html body table.mobile-card-view > tbody > tr,
+            html body table.mobile-card-view > tbody > tr > td {
+                display: block !important;
+                width: 100% !important;
+                min-width: 0 !important;
+                max-width: 100% !important;
+                box-sizing: border-box !important;
+                border: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                background: transparent !important;
+                height: auto !important;
+            }
+
+            html body table.mobile-card-view > thead { display: none !important; }
+
+            html body #cache-stats-table, 
+            html body #upstream-dns-table,
+            html body #adguard-rules-table,
+            html body #diversion-rules-table {
+                min-width: 0 !important;
+                width: 100% !important;
+                display: block !important;
+            }
+
+            html body table.mobile-card-view > tbody > tr { margin-bottom: 1rem !important; }
+
+            .mobile-system-card {
+                background: var(--color-bg-card);
                 border: 1px solid var(--color-border);
                 border-radius: var(--border-radius-md);
-            }
-
-            /* 2. 缓存管理表格 */
-            html body #cache-stats-table {
-                display: table !important;
+                padding: 1rem;
+                box-shadow: var(--shadow-sm);
+                display: flex;
+                flex-direction: column;
+                gap: 0.8rem;
                 width: 100% !important;
-                min-width: 600px !important;
-                border-collapse: collapse !important;
+                box-sizing: border-box !important;
+                
+                /* [修复点2] 强制左对齐，防止继承表格的居中属性 */
+                text-align: left !important;
             }
 
-            /* 3. 上游DNS表格 (和其他数据表格) */
-            html body .data-table {
-                display: table !important;
+            /* [修复处 1/3] 强制标题容器左对齐 */
+            .mobile-system-card .card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                border-bottom: 1px solid var(--color-border);
+                padding: 0 0 0.6rem 0 !important; /* 修改这里 */
+                margin-left: 0 !important;
+                margin-bottom: 0.2rem;
+            }
+
+            /* [修复处 2/3] 强制标题文字左对齐 */
+            .mobile-system-card .card-title {
+                font-weight: 600;
+                font-size: 1rem;
+                color: var(--color-text-primary);
+                line-height: 1.4;
+                word-break: break-all;
+                padding-left: 0 !important; /* 修改这里 */
+                margin-left: 0 !important;  /* 修改这里 */
+                text-align: left !important;
+            }
+
+            /* [修复处 3/3] 强制描述文字(cnfake那行)左对齐 */
+            .mobile-system-card .card-header + div {
+                padding-left: 0 !important; /* 修改这里 */
+                margin-left: 0 !important;
+                text-align: left !important;
+            }
+
+            .mobile-stats-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0.8rem;
+                width: 100%;
+            }
+
+            .mobile-stat-item {
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+            }
+
+            .mobile-stat-label {
+                font-size: 0.75rem;
+                color: var(--color-text-secondary);
+                margin-bottom: 2px;
+                white-space: nowrap;
+            }
+
+            .mobile-stat-value {
+                font-size: 0.9rem;
+                font-weight: 500;
+                color: var(--color-text-primary);
+                word-break: break-all;
+            }
+
+            .mobile-card-actions {
+                display: flex; 
+                gap: 0.8rem; 
+                justify-content: flex-end; 
+                margin-top: 0.5rem; 
+                border-top: 1px solid var(--color-border); 
+                padding-top: 0.8rem;
+            }
+
+            .mobile-override-row {
+                display: flex;
+                flex-direction: column;
+                gap: 0.8rem;
+            }
+            
+            .mobile-override-row input {
                 width: 100% !important;
-                min-width: 600px !important;
+                min-width: 0 !important;
             }
 
-            /* 强制显示表头 */
-            html body #cache-stats-table thead,
-            html body .data-table thead {
-                display: table-header-group !important;
-            }
-
-            html body #cache-stats-table tbody,
-            html body .data-table tbody {
-                display: table-row-group !important;
-            }
-
-            html body #cache-stats-table tr,
-            html body .data-table tr {
-                display: table-row !important;
-                background-color: transparent !important;
-                border-bottom: 1px solid var(--color-border) !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                box-shadow: none !important;
-            }
-
-            /* 恢复被 hide-on-mobile 隐藏的列 */
-            html body #cache-stats-table th.hide-on-mobile,
-            html body #cache-stats-table td.hide-on-mobile,
-            html body .data-table th.hide-on-mobile,
-            html body .data-table td.hide-on-mobile {
-                display: table-cell !important;
-            }
-
-            html body #cache-stats-table th,
-            html body #cache-stats-table td,
-            html body .data-table th,
-            html body .data-table td {
-                display: table-cell !important;
-                padding: 0.75rem 0.5rem !important;
-                border: none !important;
-                white-space: nowrap !important;
-                vertical-align: middle !important;
-            }
-
-            /* 输入框在表格中自适应 */
-            html body .data-table input {
-                min-width: 120px !important;
-            }
-
-            /* 4. 系统信息 - 双列布局 */
-            html body #system-info-container {
-                display: grid !important;
-                grid-template-columns: 1fr 1fr !important;
-                gap: 0.75rem !important;
-                width: 100% !important;
-            }
-
-            html body #system-info-container .info-item {
-                display: flex !important;
-                flex-direction: column !important;
-                justify-content: center !important;
-                padding: 0.75rem !important;
-                background-color: var(--color-bg-card) !important;
-                border: 1px solid var(--color-border) !important;
-                border-radius: var(--border-radius-sm) !important;
-                margin: 0 !important;
-            }
-
-            html body #system-info-container .info-item-label {
-                font-size: 0.75rem !important;
-                color: var(--color-text-secondary) !important;
-                margin-bottom: 0.25rem !important;
-            }
-
-            html body #system-info-container .info-item-value {
-                font-size: 0.9rem !important;
-                font-weight: 600 !important;
-                word-break: break-all !important;
-                color: var(--color-text-primary) !important;
-            }
-
-            /* 5. 版本与更新 - 紧凑布局优化 */
-            html body .update-versions {
-                display: grid !important;
-                grid-template-columns: 1fr 1fr !important;
-                gap: 10px !important;
-            }
-
-            html body .update-versions .control-item {
-                margin-bottom: 0 !important;
-                width: auto !important;
-            }
-
+            /* === D. 基础适配 === */
             html body .update-actions {
                 display: grid !important;
                 grid-template-columns: 1fr 1fr 1fr !important;
                 gap: 8px !important;
-                justify-content: stretch !important;
             }
-
             html body .update-actions button {
                 width: 100% !important;
                 margin: 0 !important;
                 padding: 0.6rem 0.2rem !important;
                 font-size: 0.75rem !important;
-                white-space: nowrap !important;
-            }
-
-            html body .update-auto {
-                display: flex !important;
-                flex-direction: row !important;
-                align-items: center !important;
-                justify-content: space-between !important;
-                gap: 10px !important;
-                flex-wrap: nowrap !important;
-            }
-
-            html body .update-auto .control-item {
-                margin-bottom: 0 !important;
-                width: auto !important;
-                flex: 0 0 auto !important;
-                display: flex !important;
-                align-items: center !important;
-                gap: 8px !important;
-            }
-
-            html body .update-auto-grid {
-                display: flex !important;
-                flex-direction: row !important;
-                align-items: center !important;
-                gap: 5px !important;
-                flex: 1 !important;
-                justify-content: flex-end !important;
-                margin-top: 0 !important;
-            }
-
-            html body .update-auto-grid label {
-                white-space: nowrap !important;
-                font-size: 0.85rem !important;
-                margin-bottom: 0 !important;
-            }
-
-            html body .update-auto-grid input {
-                width: 60px !important;
-                padding: 4px !important;
-                height: 30px !important;
-                text-align: center !important;
-            }
-
-            /* 6. 排行榜与其他列表 (包括域名列表统计) - 强制不换行 */
-            html body #top-domains-body td,
-            html body #top-clients-body td,
-            html body #slowest-queries-body td,
-            html body #adguard-rules-tbody td,
-            html body #diversion-rules-tbody td,
-            html body #domain-stats-table td,
-            html body #domain-stats-table th {
-                white-space: nowrap !important;
-                word-break: keep-all !important;
-            }
-
-            html body .mobile-card-layout tbody td {
-                white-space: nowrap !important;
-            }
-
-            /* 之前的杂项 */
-            html body #overrides-module .control-item {
-                display: block !important;
-                width: 100% !important;
-                margin-bottom: 15px !important;
-            }
-
-            html body #upstream-dns-table {
-                min-width: 1100px !important;
-            }
-
-            /* [修复] 强制恢复移动端日志列表 Tag 的正常显示 (消灭小圆点) */
-            html body .mobile-log-row .meta .rule-tag,
-            html body .mobile-log-row .meta .response-tag {
-                display: inline-block !important;
-                min-width: auto !important;
-                max-width: none !important;
-                width: auto !important;
-                height: auto !important;
-                min-height: 0 !important;
-                max-height: none !important;
-                
-                font-size: 0.75rem !important;
-                line-height: normal !important;
-                text-indent: 0 !important;
-                color: #fff !important;
-                
-                border-radius: 4px !important;
-                padding: 2px 6px !important;
-                margin: 0 !important;
-                overflow: visible !important;
-            }
-
-            /* [新增] 强制手机端日志始终显示第二行详细信息 */
-            html body .mobile-log-row {
-                /* 关键：强制 Grid 布局显示两行高度 */
-                grid-template-rows: auto auto !important; 
-                height: auto !important;
-                min-height: 60px !important; /* 给个最小高度防止塌缩 */
-                overflow: visible !important;
-            }
-
-            html body .mobile-log-row .meta {
-                display: flex !important;
-                visibility: visible !important;
-                opacity: 1 !important;
-                height: auto !important;
-                min-height: 24px !important; /* 确保有高度 */
-                margin-top: 0.5rem !important;
-                border-top: 1px solid var(--color-border) !important;
-                padding-top: 0.5rem !important;
-                flex-wrap: wrap !important; /* 防止内容过多挤在一行 */
-            }
-            
-            /* 强制 tr 元素完全显示 */
-            html body .mobile-card-layout tr {
-                height: auto !important;
-                max-height: none !important;
-                overflow: visible !important;
             }
         }
 
+        /* Requery 进度条样式 */
         .requery-progress-bar {
             width: 100%;
             background-color: var(--color-bg-alt);
@@ -333,7 +357,6 @@
             height: 24px;
             border: 1px solid var(--color-border);
         }
-
         .requery-progress-bar-fill {
             height: 100%;
             background-color: var(--color-accent-primary);
@@ -341,7 +364,6 @@
             transition: width 0.3s ease-out;
             border-radius: var(--border-radius-sm);
         }
-
         .requery-progress-bar-text {
             position: absolute;
             top: 50%;
@@ -350,38 +372,11 @@
             color: var(--color-accent-text);
             font-weight: 600;
             font-size: 0.8rem;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
             white-space: nowrap;
         }
-
-        [data-theme="light"] .requery-progress-bar-text {
-            color: var(--color-accent-text);
-        }
-
-        [hidden] {
-            display: none !important;
-        }
-
-        /* -- 修正样式 -- */
-        #requery-interval-input {
-            min-width: 80px;
-            /* 确保能显示4位数字 */
-            text-align: center;
-        }
-
-        .requery-scheduler-grid {
-            display: grid;
-            grid-template-columns: auto 1fr;
-            gap: 1rem;
-            align-items: center;
-            width: 100%;
-        }
-
-        .info-icon {
-            color: var(--color-text-secondary);
-            cursor: help;
-            margin-left: 0.5rem;
-        }
+        
+        [hidden] { display: none !important; }
+        .info-icon { color: var(--color-text-secondary); cursor: help; margin-left: 0.5rem; }
     </style>
 </head>
 
