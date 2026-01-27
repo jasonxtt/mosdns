@@ -385,7 +385,6 @@ func (d *domainOutput) loadFromFile() {
 	defer file.Close()
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	scanner := bufio.NewScanner(file)
 	today := time.Now().Format("2006-01-02")
@@ -432,7 +431,7 @@ func (d *domainOutput) loadFromFile() {
 		d.totalCount += count
 		loadedCount++
 	}
-
+        d.mu.Unlock() 
 	fmt.Printf("[domain_output] loaded %d entries from %s\n", loadedCount, d.fileStat)
         coremain.ManualGC()
 }
