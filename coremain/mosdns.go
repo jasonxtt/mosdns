@@ -260,7 +260,7 @@ func (m *Mosdns) initHttpMux() {
 			zap.String("method", r.Method))
 		metricsHandler.ServeHTTP(w, r)
 	})
-	m.httpMux.Method(http.MethodGet, "/metrics", wrappedMetricsHandler)
+	m.httpMux.Method(http.MethodGet, "/metrics", WithAsyncGC(wrappedMetricsHandler))
 
 	// [修改] 将原来的公共handler拆分为两个独立的handler
 
