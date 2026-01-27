@@ -17,8 +17,8 @@ func RegisterAuditAPI(router *chi.Mux) {
 		r.Post("/start", handleAuditStart)
 		r.Post("/stop", handleAuditStop)
 		r.Get("/status", handleAuditStatus)
-		r.Get("/logs", handleGetAuditLogs)
-		r.Post("/clear", handleClearAuditLogs)
+		r.Get("/logs", WithAsyncGC(handleGetAuditLogs))
+		r.Post("/clear", WithAsyncGC(handleClearAuditLogs))
 		// ADDED: New routes for capacity management
 		r.Get("/capacity", handleGetAuditCapacity)
 		r.Post("/capacity", handleSetAuditCapacity)
