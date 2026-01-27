@@ -194,19 +194,21 @@ func (d *DomainSetLight) Match(domainStr string) (value struct{}, ok bool) {
 	return struct{}{}, false
 }
 
+// ================== API FUNCTION (CORRECTED) ==================
+
 func (d *DomainSetLight) api() *chi.Mux {
 	r := chi.NewRouter()
 
-	r.Get("/show", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/show", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		d.mu.RLock()
 		defer d.mu.RUnlock()
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		for _, rule := range d.rules {
 			fmt.Fprintln(w, rule)
 		}
-	})
+	}))
 
-	r.Get("/save", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/save", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		d.mu.RLock()
 		defer d.mu.RUnlock()
 		if d.ruleFile == "" {
@@ -218,9 +220,9 @@ func (d *DomainSetLight) api() *chi.Mux {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
-	r.Post("/post", func(w http.ResponseWriter, r *http.Request) {
+	r.Post("/post", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		var p domainPayload
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -247,10 +249,12 @@ func (d *DomainSetLight) api() *chi.Mux {
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "domain_set_light replaced with %d entries", len(d.rules))
-	})
+	}))
 
 	return r
 }
+
+// ==============================================================
 
 func writeRulesToFile(path string, rules []string) error {
 	f, err := os.Create(path)
