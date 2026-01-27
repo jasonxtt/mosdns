@@ -420,7 +420,10 @@ func (c *AuditCollector) ClearLogs() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.logs = make([]AuditLog, 0, c.capacity)
+	if c.logs != nil {
+		c.logs = c.logs[:0]
+	}
+
 	c.head = 0
 	c.slowestQueries = make(slowestQueryHeap, 0, slowestQueriesCapacity)
 	heap.Init(&c.slowestQueries)
