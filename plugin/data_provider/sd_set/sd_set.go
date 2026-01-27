@@ -338,6 +338,7 @@ func (p *SdSet) reloadAllRules() error {
 
 	p.matcher.Store(newMatcher)
 	log.Printf("[%s] finished reloading. Total active rules: %d", PluginType, totalRules)
+        newMatcher = nil 
 
 	if rulesCountUpdated {
 		log.Printf("[%s] Rule counts have changed, saving configuration...", PluginType)
@@ -348,7 +349,7 @@ func (p *SdSet) reloadAllRules() error {
 
 	// 规则更新完毕（无论是手动、API还是定时器），通知订阅者
 	p.notifySubscribers()
-
+        coremain.ManualGC() 
 	return nil
 }
 
@@ -395,6 +396,7 @@ func (p *SdSet) downloadAndUpdateLocalFile(ctx context.Context, sourceName strin
 	tempMatcher := domain.NewDomainMixMatcher()
 	// Modified: pass enableRegexp to validation
 	ok, count, _ := tryLoadSRS(srsData, tempMatcher, enableRegexp)
+        tempMatcher = nil 
 	if !ok {
 		return fmt.Errorf("downloaded file for '%s' is not a valid SRS file or is corrupted", sourceName)
 	}
@@ -417,7 +419,7 @@ func (p *SdSet) downloadAndUpdateLocalFile(ctx context.Context, sourceName strin
 	if err := p.saveConfig(); err != nil {
 		log.Printf("[%s] ERROR: failed to save config after updating '%s': %v", PluginType, sourceName, err)
 	}
-
+        srsData = nil
 	return nil
 }
 
@@ -461,6 +463,7 @@ func (p *SdSet) backgroundUpdater() {
 			wg.Wait()
 			log.Printf("[%s] auto-update: downloads finished, triggering reload.", PluginType)
 			p.reloadAllRules()
+                        coremain.ManualGC()
 		case <-p.ctx.Done():
 			log.Printf("[%s] background updater is shutting down.", PluginType)
 			return
@@ -502,7 +505,7 @@ func (p *SdSet) api() *chi.Mux {
 		}()
 		jsonResponse(w, map[string]string{"message": fmt.Sprintf("update process for '%s' started in the background", name)}, http.StatusAccepted)
 	})
-	r.Put("/config/{name}", func(w http.ResponseWriter, r *http.Request) {
+	r.Put("/config/{name}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		var reqData RuleSource
 		if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
@@ -542,8 +545,8 @@ func (p *SdSet) api() *chi.Mux {
 		}
 		go p.reloadAllRules()
 		jsonResponse(w, updatedSource, statusCode)
-	})
-	r.Delete("/config/{name}", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	r.Delete("/config/{name}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		var srcToDelete *RuleSource
 		p.mu.Lock()
@@ -568,7 +571,7 @@ func (p *SdSet) api() *chi.Mux {
 		}
 		go p.reloadAllRules()
 		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 	return r
 }
 
