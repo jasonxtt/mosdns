@@ -411,9 +411,21 @@ func (p *AdguardRule) reloadAllRules(ctx context.Context, initialLoad bool) {
 
 	log.Printf("[adguard_rule] finished reloading. Total active rules from enabled lists: %d", totalRuleCount)
 	
+        newAllowMatcher = nil
+        newDenyMatcher = nil
+
 	// [关键]: 更新完成后，通知所有订阅者 (如 domain_mapper)
 	// 因为 Add/Delete/Enable/Disable/Update 最终都会走到这里，所以都能触发通知
 	p.notifySubscribers()
+        coremain.ManualGC()
+}
+
+type counterCollector struct {
+	count int
+}
+func (c *counterCollector) Add(_ string, _ struct{}) error {
+	c.count++
+	return nil
 }
 
 // updateAllRuleCounts 遍历所有已知规则，并更新它们的 RuleCount 字段
@@ -432,9 +444,13 @@ func (p *AdguardRule) updateAllRuleCounts() {
 			continue
 		}
 		
-		// 使用临时 Matcher 来统计数量，忽略解析错误
-		count, _ := parseRules(file, domain.NewDomainMixMatcher(), domain.NewDomainMixMatcher())
+		// --- 关键修改开始 ---
+		// 使用计数器代替真实的 Matcher。
+		// 这样 parseRules 在运行过程中不会构建复杂的 Trie 树和正则对象
+		counter := &counterCollector{}
+		count, _ := parseRules(file, counter, counter) 
 		file.Close()
+		// --- 关键修改结束 ---
 
 		if rule.RuleCount != count {
 			rule.RuleCount = count
@@ -648,6 +664,7 @@ func (p *AdguardRule) backgroundUpdater() {
 
 			log.Println("[adguard_rule] auto-update: downloads finished, triggering reload.")
 			p.triggerReload(p.ctx)
+			coremain.ManualGC()
 
 		case <-p.ctx.Done():
 			// 接收到关闭信号，退出循环
@@ -697,7 +714,7 @@ func (p *AdguardRule) api() *chi.Mux {
 		json.NewEncoder(w).Encode(rules)
 	})
 
-	r.Post("/rules", func(w http.ResponseWriter, r *http.Request) {
+	r.Post("/rules", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		var newRule OnlineRule
 		if err := json.NewDecoder(r.Body).Decode(&newRule); err != nil {
 			jsonError(w, "Invalid request body", http.StatusBadRequest)
@@ -744,9 +761,9 @@ func (p *AdguardRule) api() *chi.Mux {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(newRule)
-	})
+	}))
 
-	r.Put("/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
+	r.Put("/rules/{id}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		var updatedRuleData OnlineRule
 		if err := json.NewDecoder(r.Body).Decode(&updatedRuleData); err != nil {
@@ -789,9 +806,9 @@ func (p *AdguardRule) api() *chi.Mux {
 		p.triggerReload(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rule)
-	})
+	}))
 
-	r.Delete("/rules/{id}", func(w http.ResponseWriter, r *http.Request) {
+	r.Delete("/rules/{id}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 
 		p.mu.Lock()
@@ -817,9 +834,9 @@ func (p *AdguardRule) api() *chi.Mux {
 		// 删除规则触发 reload (进而触发 notify)
 		p.triggerReload(r.Context())
 		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 
-	r.Post("/update", func(w http.ResponseWriter, r *http.Request) {
+	r.Post("/update", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		log.Println("[adguard_rule] Manual update triggered for all enabled rules.")
 
 		go func() {
@@ -849,11 +866,12 @@ func (p *AdguardRule) api() *chi.Mux {
 			log.Println("[adguard_rule] Manual update process finished.")
 			// 更新完成触发 reload (进而触发 notify)
 			p.triggerReload(p.ctx)
+			coremain.ManualGC() 
 		}()
 
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintln(w, "Update process for enabled rules has been started in the background.")
-	})
+	}))
 
 	return r
 }
