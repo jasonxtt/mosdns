@@ -41,16 +41,14 @@ type V2PaginationInfo struct {
 // This function is completely separate from the v1 registration.
 func RegisterAuditAPIV2(router *chi.Mux) {
 	router.Route("/api/v2/audit", func(r chi.Router) {
-		r.Get("/stats", handleV2GetStats)
-		r.Get("/rank/domain", handleV2GetDomainRank)
-		r.Get("/rank/client", handleV2GetClientRank)
-		// --- ADDED START ---
-		r.Get("/rank/domain_set", handleV2GetDomainSetRank)
-		// --- ADDED END ---
-		r.Get("/rank/slowest", handleV2GetSlowestQueries)
+		// 为所有高频/重数据接口套上 WithAsyncGC
+		r.Get("/stats", WithAsyncGC(handleV2GetStats))           // 概览页调用
+		r.Get("/rank/domain", WithAsyncGC(handleV2GetDomainRank))   // 概览页调用
+		r.Get("/rank/client", WithAsyncGC(handleV2GetClientRank))   // 概览页调用
+		r.Get("/rank/domain_set", WithAsyncGC(handleV2GetDomainSetRank)) // 概览页调用
+		r.Get("/rank/slowest", WithAsyncGC(handleV2GetSlowestQueries))   // 概览页调用
 		
-		// [淇敼鐐筣 浠呮澶勪娇鐢ㄤ簡 WithAsyncGC 鍖呰鍣紝鍏朵綑閫昏緫鏈姩
-		r.Get("/logs", WithAsyncGC(handleV2GetLogs))
+		r.Get("/logs", WithAsyncGC(handleV2GetLogs)) // 已有的
 	})
 }
 
