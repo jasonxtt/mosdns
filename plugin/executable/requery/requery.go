@@ -178,7 +178,6 @@ func (p *Requery) runTask(ctx context.Context) {
 	// Defer block to ensure state is cleaned up on any exit path (success, failure, cancellation).
 	defer func() {
 		p.mu.Lock()
-		defer p.mu.Unlock()
 
 		if p.config.Status.TaskState == "running" {
 			p.config.Status.TaskState = "idle" // Assume success unless overridden
