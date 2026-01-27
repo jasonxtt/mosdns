@@ -528,24 +528,62 @@ func (c *AuditCollector) CalculateV2Stats() V2StatsResponse {
 	}
 }
 
+// rankHeap 实现一个小顶堆，用于保留 Count 最大的前 N 个元素
+type rankHeap []V2RankItem
+func (h rankHeap) Len() int           { return len(h) }
+func (h rankHeap) Less(i, j int) bool { return h[i].Count < h[j].Count } // 小顶堆逻辑
+func (h rankHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *rankHeap) Push(x any)        { *h = append(*h, x.(V2RankItem)) }
+func (h *rankHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+// --- 第二步：替换 getRankFromMap 函数 ---
+
 func (c *AuditCollector) getRankFromMap(sourceMap map[string]int, limit int) []V2RankItem {
 	if len(sourceMap) == 0 {
 		return []V2RankItem{}
 	}
 
-	rankList := make([]V2RankItem, 0, len(sourceMap))
+	// 如果 sourceMap 里的条目数本来就比 limit 少，直接排序返回，效率最高
+	if len(sourceMap) <= limit {
+		res := make([]V2RankItem, 0, len(sourceMap))
+		for k, v := range sourceMap {
+			res = append(res, V2RankItem{Key: k, Count: v})
+		}
+		sort.Slice(res, func(i, j int) bool {
+			return res[i].Count > res[j].Count
+		})
+		return res
+	}
+
+	// 生产级优化：使用堆排序算法
+	// 内存分配固定为 limit 大小，不再随唯一域名数量增加而飙升
+	h := &rankHeap{}
+	heap.Init(h)
+
 	for key, count := range sourceMap {
-		rankList = append(rankList, V2RankItem{Key: key, Count: count})
+		if h.Len() < limit {
+			heap.Push(h, V2RankItem{Key: key, Count: count})
+		} else if count > (*h)[0].Count {
+			// 如果当前项目的计数大于堆顶（当前前N名里的最小值），则替换掉堆顶
+			heap.Pop(h)
+			heap.Push(h, V2RankItem{Key: key, Count: count})
+		}
 	}
 
-	sort.Slice(rankList, func(i, j int) bool {
-		return rankList[i].Count > rankList[j].Count
-	})
-
-	if len(rankList) > limit {
-		return rankList[:limit]
+	// 将堆中数据取出
+	result := make([]V2RankItem, h.Len())
+	// 注意：堆顶是最小的，我们倒序填入结果数组，从而实现降序排列
+	for i := h.Len() - 1; i >= 0; i-- {
+		result[i] = heap.Pop(h).(V2RankItem)
 	}
-	return rankList
+
+	return result
 }
 
 type RankType string
@@ -593,90 +631,102 @@ func (c *AuditCollector) GetSlowestQueries(limit int) []AuditLog {
 	return snapshot
 }
 
+// GetV2Logs 获取分页日志 - 生产优化版
+// 解决了在大数据量下全量拷贝导致的内存飙升问题
 func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsResponse {
-	snapshot := c.getLogsSnapshot()
-	filteredLogs := make([]AuditLog, 0, len(snapshot))
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
-	for _, log := range snapshot {
+	totalLogs := len(c.logs)
+	if totalLogs == 0 || c.capacity == 0 {
+		return V2PaginatedLogsResponse{
+			Pagination: V2PaginationInfo{CurrentPage: params.Page, ItemsPerPage: params.Limit},
+			Logs:       []AuditLog{},
+		}
+	}
+
+	// 1. 参数预处理 (保持原逻辑)
+	if params.Page < 1 {
+		params.Page = 1
+	}
+	if params.Limit <= 0 {
+		params.Limit = 50
+	}
+	
+	searchTerm := params.Q
+	if params.Q != "" && !params.Exact {
+		searchTerm = strings.ToLower(searchTerm)
+	}
+
+	// 2. 准备分页变量
+	matchCount := 0
+	offset := (params.Page - 1) * params.Limit
+	// 结果集切片仅分配 Limit 大小，极大地节省内存
+	filteredLogs := make([]AuditLog, 0, params.Limit)
+
+	// 3. 计算遍历起始点 (环形缓冲区最新的一条是 head-1)
+	curr := (c.head - 1 + totalLogs) % totalLogs
+
+	// 4. 在 RLock 下直接遍历，不拷贝整个数组
+	for i := 0; i < totalLogs; i++ {
+		log := c.logs[curr]
+		isMatched := true
+
+		// --- 开始执行过滤逻辑 (完全继承自原源码) ---
 		if params.Q != "" {
-			var matchFunc func(string, string) bool
-			searchTerm := params.Q
+			foundInQ := false
+			matchFunc := strings.Contains
 			if params.Exact {
 				matchFunc = func(s, substr string) bool { return s == substr }
-			} else {
-				matchFunc = strings.Contains
-				searchTerm = strings.ToLower(searchTerm)
-			}
-			foundInQ := false
-			var haystack string
-
-			// Check QueryName
-			haystack = log.QueryName
-			if !params.Exact {
-				haystack = strings.ToLower(haystack)
-			}
-			if matchFunc(haystack, searchTerm) {
-				foundInQ = true
 			}
 
-			// Check ClientIP
+			// 检查 QueryName
+			haystack := log.QueryName
+			if !params.Exact { haystack = strings.ToLower(haystack) }
+			if matchFunc(haystack, searchTerm) { foundInQ = true }
+
+			// 检查 ClientIP
 			if !foundInQ {
 				haystack = log.ClientIP
-				if !params.Exact {
-					haystack = strings.ToLower(haystack)
-				}
-				if matchFunc(haystack, searchTerm) {
-					foundInQ = true
-				}
+				if !params.Exact { haystack = strings.ToLower(haystack) }
+				if matchFunc(haystack, searchTerm) { foundInQ = true }
 			}
 
-			// Check TraceID
+			// 检查 TraceID
 			if !foundInQ {
 				haystack = log.TraceID
-				if !params.Exact {
-					haystack = strings.ToLower(haystack)
-				}
-				if matchFunc(haystack, searchTerm) {
-					foundInQ = true
-				}
+				if !params.Exact { haystack = strings.ToLower(haystack) }
+				if matchFunc(haystack, searchTerm) { foundInQ = true }
 			}
 			
-			// Check DomainSet
+			// 检查 DomainSet
 			if !foundInQ && log.DomainSet != "" {
 				haystack = log.DomainSet
-				if !params.Exact {
-					haystack = strings.ToLower(haystack)
-				}
-				if matchFunc(haystack, searchTerm) {
-					foundInQ = true
-				}
+				if !params.Exact { haystack = strings.ToLower(haystack) }
+				if matchFunc(haystack, searchTerm) { foundInQ = true }
 			}
 
-			// Check Answers
+			// 检查 Answers
 			if !foundInQ {
 				for _, answer := range log.Answers {
 					haystack = answer.Data
-					if !params.Exact {
-						haystack = strings.ToLower(haystack)
-					}
+					if !params.Exact { haystack = strings.ToLower(haystack) }
 					if matchFunc(haystack, searchTerm) {
 						foundInQ = true
 						break
 					}
 				}
 			}
-			if !foundInQ {
-				continue
-			}
+			if !foundInQ { isMatched = false }
 		}
 
-		if params.ClientIP != "" && log.ClientIP != params.ClientIP {
-			continue
+		if isMatched && params.ClientIP != "" && log.ClientIP != params.ClientIP {
+			isMatched = false
 		}
-		if params.Domain != "" && !strings.Contains(log.QueryName, params.Domain) {
-			continue
+		if isMatched && params.Domain != "" && !strings.Contains(log.QueryName, params.Domain) {
+			isMatched = false
 		}
-		if params.AnswerIP != "" {
+		if isMatched && params.AnswerIP != "" {
 			found := false
 			for _, answer := range log.Answers {
 				if (answer.Type == "A" || answer.Type == "AAAA") && answer.Data == params.AnswerIP {
@@ -684,11 +734,9 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 					break
 				}
 			}
-			if !found {
-				continue
-			}
+			if !found { isMatched = false }
 		}
-		if params.AnswerCNAME != "" {
+		if isMatched && params.AnswerCNAME != "" {
 			found := false
 			for _, answer := range log.Answers {
 				if answer.Type == "CNAME" && strings.Contains(answer.Data, params.AnswerCNAME) {
@@ -696,37 +744,32 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 					break
 				}
 			}
-			if !found {
-				continue
+			if !found { isMatched = false }
+		}
+		// --- 过滤逻辑结束 ---
+
+		// 5. 分页截取处理
+		if isMatched {
+			// 只有在当前页码范围内的记录才执行拷贝
+			if matchCount >= offset && len(filteredLogs) < params.Limit {
+				filteredLogs = append(filteredLogs, log)
 			}
+			matchCount++
 		}
 
-		filteredLogs = append(filteredLogs, log)
+		// 移动到前一条记录
+		curr = (curr - 1 + totalLogs) % totalLogs
 	}
 
-	totalItems := len(filteredLogs)
-	if params.Page < 1 {
-		params.Page = 1
-	}
-	if params.Limit <= 0 {
-		params.Limit = 50
-	}
-	totalPages := int(math.Ceil(float64(totalItems) / float64(params.Limit)))
-	offset := (params.Page - 1) * params.Limit
-
-	var paginatedLogs []AuditLog
-	if offset >= totalItems {
-		paginatedLogs = []AuditLog{}
-	} else {
-		end := offset + params.Limit
-		if end > totalItems {
-			end = totalItems
-		}
-		paginatedLogs = filteredLogs[offset:end]
-	}
-
+	// 6. 返回结果
+	totalPages := int(math.Ceil(float64(matchCount) / float64(params.Limit)))
 	return V2PaginatedLogsResponse{
-		Pagination: V2PaginationInfo{TotalItems: totalItems, TotalPages: totalPages, CurrentPage: params.Page, ItemsPerPage: params.Limit},
-		Logs:       paginatedLogs,
+		Pagination: V2PaginationInfo{
+			TotalItems:   matchCount,
+			TotalPages:   totalPages,
+			CurrentPage:  params.Page,
+			ItemsPerPage: params.Limit,
+		},
+		Logs: filteredLogs,
 	}
 }
