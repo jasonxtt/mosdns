@@ -339,10 +339,16 @@ func (r *Rewrite) handlePost(w http.ResponseWriter, req *http.Request) {
 	r.rules = tmpRules
 	r.mu.Unlock()
 
+        tmpMatcher = nil 
+        tmpRules = nil
+
 	if err := writeRulesToFile(r.ruleFile, r.rules); err != nil {
 		http.Error(w, fmt.Sprintf("In-memory rules updated, but failed to write to file: %s", err), http.StatusInternalServerError)
 		return
 	}
+
+        coremain.ManualGC() 
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "rewrite rules replaced with %d entries", len(r.rules))
