@@ -183,6 +183,9 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 			zap.Int("total_rules_processed", totalRulesProcessed),
 			zap.Int("unique_domains", len(domainMap)),
 			zap.Duration("duration", time.Since(start)))
+
+		domainMap = nil 
+		coremain.ManualGC() 
 	}
 
 	// 3. 触发防抖更新
