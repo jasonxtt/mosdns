@@ -460,6 +460,7 @@ func (p *SdSetLight) backgroundUpdater() {
 			wg.Wait()
 			log.Printf("[%s] auto-update: downloads finished, triggering reload.", PluginType)
 			p.reloadAllRules()
+			coremain.ManualGC()
 		case <-p.ctx.Done():
 			log.Printf("[%s] background updater is shutting down.", PluginType)
 			return
@@ -498,10 +499,11 @@ func (p *SdSetLight) api() *chi.Mux {
 			}
 			log.Printf("[%s] manual update for '%s' successful, triggering reload.", PluginType, name)
 			p.reloadAllRules()
+			coremain.ManualGC()
 		}()
 		jsonResponse(w, map[string]string{"message": fmt.Sprintf("update process for '%s' started in the background", name)}, http.StatusAccepted)
 	})
-	r.Put("/config/{name}", func(w http.ResponseWriter, r *http.Request) {
+	r.Put("/config/{name}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		var reqData RuleSource
 		if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
@@ -541,8 +543,8 @@ func (p *SdSetLight) api() *chi.Mux {
 		}
 		go p.reloadAllRules()
 		jsonResponse(w, updatedSource, statusCode)
-	})
-	r.Delete("/config/{name}", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	r.Delete("/config/{name}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		var srcToDelete *RuleSource
 		p.mu.Lock()
@@ -567,7 +569,7 @@ func (p *SdSetLight) api() *chi.Mux {
 		}
 		go p.reloadAllRules()
 		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 	return r
 }
 
