@@ -167,6 +167,7 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, fmt.Errorf("failed to load rules: %w", err)
 	}
 	ds.rules = loadedRules
+                coremain.ManualGC()
 
 	for _, tag := range cfg.Sets {
 		provider, ok := bp.M().GetPlugin(tag).(data_provider.DomainMatcherProvider)
@@ -253,6 +254,9 @@ func (d *DomainSet) api() *chi.Mux {
 		d.rules = tmpRules
 		d.mu.Unlock()
 
+        tmpMix = nil
+        tmpRules = nil
+
 		if err := writeRulesToFile(d.ruleFile, d.rules); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -260,6 +264,8 @@ func (d *DomainSet) api() *chi.Mux {
 		
 		// 规则更新成功，通知订阅者
 		d.notifySubscribers()
+
+        coremain.ManualGC()
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "domain_set replaced with %d entries", len(d.rules))
