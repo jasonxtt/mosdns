@@ -15,7 +15,7 @@ import (
 // RegisterCaptureAPI registers the log capture APIs to the given router.
 func RegisterCaptureAPI(router *chi.Mux) {
 	router.Post("/api/v1/capture/start", handleStartCapture())
-	router.Get("/api/v1/capture/logs", handleGetLogs())
+	router.Get("/api/v1/capture/logs", WithAsyncGC(handleGetLogs()))
 }
 
 func handleStartCapture() http.HandlerFunc {
