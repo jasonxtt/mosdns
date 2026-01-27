@@ -193,6 +193,7 @@ func (p *Requery) runTask(ctx context.Context) {
 		_ = p.saveConfigUnlocked()
 
 		p.taskCancel = nil
+                p.mu.Unlock()
 		// [修改点] 调用核心包的通用内存清理函数
 		// 因为 ManualGC 内部是异步(go func)的，所以这里调用不会阻塞锁，非常安全
 		log.Println("[requery] Task finished, triggering background memory release...")
@@ -343,7 +344,7 @@ func (p *Requery) mergeAndFilterDomains(ctx context.Context) ([]string, error) {
 	for domain := range domainSet {
 		domains = append(domains, domain)
 	}
-
+        domainSet = nil 
 	// 此时不再写入 output_file (requery_backup.txt)
 	
 	return domains, nil
