@@ -275,6 +275,9 @@ func (d *domainOutput) performWrite(mode WriteMode) {
 	if mode != WriteModeShutdown {
 	    d.pushToDomainSet(statsToDump)
 	}
+        statsToDump = nil
+        coremain.ManualGC()
+
 }
 
 func (d *domainOutput) doWriteFiles(statsData map[string]*statEntry) {
@@ -431,6 +434,7 @@ func (d *domainOutput) loadFromFile() {
 	}
 
 	fmt.Printf("[domain_output] loaded %d entries from %s\n", loadedCount, d.fileStat)
+        coremain.ManualGC()
 }
 
 func (d *domainOutput) pushToDomainSet(statsData map[string]*statEntry) {
