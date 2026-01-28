@@ -171,6 +171,14 @@ func (p *AdguardRule) notifySubscribers() {
 	for _, cb := range subs {
 		go cb()
 	}
+
+    // 新增：给订阅者一点时间完成它们的重载工作，然后统一回收
+    if len(subs) > 0 {
+        time.AfterFunc(time.Second*5, func() {
+            log.Println("[adguard_rule] post-notification GC triggered")
+            coremain.ManualGC()
+        })
+    }
 }
 
 // newAdguardRule 是插件的初始化函数
