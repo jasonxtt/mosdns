@@ -425,7 +425,8 @@ func (c *Cache) dumpCache() error {
 func (c *Cache) Api() *chi.Mux {
 	r := chi.NewRouter()
 
-	r.Get("/flush", func(w http.ResponseWriter, req *http.Request) {
+	// 清空缓存 API：执行后打扫卫生
+	r.Get("/flush", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
 		c.logger.Info("flushing cache via api")
 		c.backend.Flush()
 		c.updatedKey.Store(0)
@@ -438,16 +439,16 @@ func (c *Cache) Api() *chi.Mux {
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("Cache flushed and a background dump has been triggered.\n"))
-	})
+	}))
 
-	r.Get("/dump", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("content-type", "application/octet-stream")
-		_, err := c.writeDump(w)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	})
+	r.Get("/dump", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
+	    w.Header().Set("content-type", "application/octet-stream")
+	    _, err := c.writeDump(w)
+	    if err != nil {
+	        http.Error(w, err.Error(), http.StatusInternalServerError)
+	        return
+	    }
+	}))
 
 	r.Get("/save", func(w http.ResponseWriter, req *http.Request) {
 		if len(c.args.DumpFile) == 0 {
@@ -467,46 +468,107 @@ func (c *Cache) Api() *chi.Mux {
 		_, _ = w.Write([]byte(fmt.Sprintf("Cache successfully saved to %s\n", c.args.DumpFile)))
 	})
 
-	r.Post("/load_dump", func(w http.ResponseWriter, req *http.Request) {
+	r.Post("/load_dump", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
 		if _, err := c.readDump(req.Body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-	})
+	}))
 
-	r.Get("/show", func(w http.ResponseWriter, req *http.Request) {
+	// 优化后的查询 API：支持分页、后端搜索和分级匹配
+// 优化后的查询 API：支持分页、后端搜索和分级匹配（内存极致优化版）
+	r.Get("/show", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Disposition", `inline; filename="cache.txt"`)
 
+		query := strings.ToLower(req.URL.Query().Get("q"))
+		limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+		offset, _ := strconv.Atoi(req.URL.Query().Get("offset"))
+
+		if limit <= 0 { limit = 100 }
+		if offset < 0 { offset = 0 }
+
+		isIPLike := strings.Contains(query, ".") || strings.Contains(query, ":")
+
 		now := time.Now()
+		matchedCount := 0
+		sentCount := 0
+		stopIteration := errors.New("limit reached")
+
+		// --- 生产级优化点 1: 对象复用 ---
+		// 在循环外创建对象，10万次循环只使用这一个内存地址，极大降低 GC 压力
+		reusableMsg := new(dns.Msg) 
+
 		err := c.backend.Range(func(k key, v *item, cacheExpirationTime time.Time) error {
 			if cacheExpirationTime.Before(now) {
 				return nil
 			}
 
-			fmt.Fprintf(w, "----- Cache Entry -----\n")
-			fmt.Fprintf(w, "Key:           %s\n", keyToString(k))
-			if v.domainSet != "" {
-				fmt.Fprintf(w, "DomainSet:     %s\n", v.domainSet)
-			}
-			fmt.Fprintf(w, "StoredTime:    %s\n", v.storedTime.Format(time.RFC3339))
-			fmt.Fprintf(w, "MsgExpire:     %s\n", v.expirationTime.Format(time.RFC3339))
-			fmt.Fprintf(w, "CacheExpire:   %s\n", cacheExpirationTime.Format(time.RFC3339))
+			keyStr := keyToString(k)
+			found := false
 
-			// Optimized: Need to unpack on demand for display
-			tmpMsg := new(dns.Msg)
-			if err := tmpMsg.Unpack(v.resp); err == nil {
-				fmt.Fprintf(w, "DNS Message:\n%s\n", dnsMsgToString(tmpMsg))
-			} else {
-				fmt.Fprintf(w, "DNS Message:\n<failed to unpack>\n")
+			// --- 第一级匹配：检查 Key (不解包，极速) ---
+			if query == "" || strings.Contains(strings.ToLower(keyStr), query) {
+				found = true
+			}
+
+			// --- 第二级匹配：启发式深度检查 ---
+			// 只有在 Key 没中且像 IP 时才解包
+			isDeepMatched := false
+			if !found && isIPLike {
+				// 使用复用对象解包
+				if err := reusableMsg.Unpack(v.resp); err == nil {
+					// 优化点 2: 仅对 Answer 字段进行匹配，而不是转全量字符串
+					// 这能避开 Question 区域的干扰并减少字符串计算
+					for _, rr := range reusableMsg.Answer {
+						if strings.Contains(rr.String(), query) {
+							found = true
+							isDeepMatched = true
+							break
+						}
+					}
+				}
+			}
+
+			if found {
+				matchedCount++
+				if matchedCount <= offset {
+					return nil
+				}
+
+				// 开始输出
+				fmt.Fprintf(w, "----- Cache Entry -----\n")
+				fmt.Fprintf(w, "Key:           %s\n", keyStr)
+				if v.domainSet != "" {
+					fmt.Fprintf(w, "DomainSet:     %s\n", v.domainSet)
+				}
+				fmt.Fprintf(w, "StoredTime:    %s\n", v.storedTime.Format(time.RFC3339))
+				fmt.Fprintf(w, "MsgExpire:     %s\n", v.expirationTime.Format(time.RFC3339))
+				fmt.Fprintf(w, "CacheExpire:   %s\n", cacheExpirationTime.Format(time.RFC3339))
+
+				// 如果刚才没解包（Key 匹配的情况），现在需要解包来显示详细内容
+				if !isDeepMatched {
+					if err := reusableMsg.Unpack(v.resp); err != nil {
+						fmt.Fprintf(w, "DNS Message:\n<failed to unpack>\n")
+						goto endLoop
+					}
+				}
+				fmt.Fprintf(w, "DNS Message:\n%s\n", dnsMsgToString(reusableMsg))
+
+			endLoop:
+				sentCount++
+				if sentCount >= limit {
+					return stopIteration
+				}
 			}
 			return nil
 		})
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to enumerate cache: %v", err), http.StatusInternalServerError)
+
+		if err != nil && err != stopIteration {
+			c.logger.Error("failed to enumerate cache", zap.Error(err))
 		}
-	})
+	}))
 
 	return r
 }
