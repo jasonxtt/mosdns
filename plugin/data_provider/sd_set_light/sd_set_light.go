@@ -107,29 +107,33 @@ func (p *SdSetLight) Subscribe(cb func()) {
 	p.subscribers = append(p.subscribers, cb)
 }
 
-// GetRules 实现 RuleExporter
+// 2. 修改 GetRules：改为实时流式读取，不留驻留内存
 func (p *SdSetLight) GetRules() ([]string, error) {
 	p.mu.RLock()
-	sourcesSnapshot := make([]*RuleSource, 0, len(p.sources))
+	type srcInfo struct {
+		path   string
+		regexp bool
+		count  int
+	}
+	var tasks []srcInfo
+	totalExpected := 0
 	for _, src := range p.sources {
-		if src.Enabled {
-			sourcesSnapshot = append(sourcesSnapshot, src)
+		if src.Enabled && src.Files != "" {
+			tasks = append(tasks, srcInfo{src.Files, src.EnableRegexp, src.RuleCount})
+			totalExpected += src.RuleCount
 		}
 	}
 	p.mu.RUnlock()
 
-	collector := &ruleCollector{rules: make([]string, 0)}
-
-	for _, src := range sourcesSnapshot {
-		if src.Files == "" {
-			continue
-		}
-		b, err := os.ReadFile(src.Files)
+	// 这里的 collector.rules 是临时的，会被 domain_mapper 使用后由其触发 GC 释放
+	collector := &ruleCollector{rules: make([]string, 0, totalExpected)}
+	for _, task := range tasks {
+		f, err := os.Open(task.path)
 		if err != nil {
-			log.Printf("[%s] GetRules: WARN: cannot read file %s: %v", PluginType, src.Files, err)
 			continue
 		}
-		tryLoadSRS(b, collector, src.EnableRegexp)
+		tryLoadSRS(f, collector, task.regexp)
+		f.Close()
 	}
 	return collector.rules, nil
 }
@@ -286,7 +290,7 @@ func (p *SdSetLight) saveConfig() error {
 }
 
 func (p *SdSetLight) reloadAllRules() error {
-	log.Printf("[%s] starting to reload all rules (headless mode)...", PluginType)
+	log.Printf("[%s] starting lightweight rule scan (zero-cache mode)...", PluginType)
 
 	p.mu.RLock()
 	sourcesSnapshot := make([]*RuleSource, 0, len(p.sources))
@@ -297,37 +301,29 @@ func (p *SdSetLight) reloadAllRules() error {
 	}
 	p.mu.RUnlock()
 
-	// [优化] 不构建 MixMatcher
-	totalRules := 0
 	rulesCountUpdated := false
 
 	for _, src := range sourcesSnapshot {
 		if src.Files == "" {
-			log.Printf("[%s] WARN: skipping enabled source '%s', local file path is empty.", PluginType, src.Name)
 			continue
 		}
 
-		b, err := os.ReadFile(src.Files)
+		// 流式打开文件，不读取内容到内存
+		f, err := os.Open(src.Files)
 		if err != nil {
-			log.Printf("[%s] WARN: skipping source '%s', cannot read file %s: %v", PluginType, src.Name, src.Files, err)
-			p.mu.Lock()
-			if s, ok := p.sources[src.Name]; ok && s.RuleCount != 0 {
-				s.RuleCount = 0
-				rulesCountUpdated = true
-			}
-			p.mu.Unlock()
+			log.Printf("[%s] WARN: cannot open source file %s: %v", PluginType, src.Files, err)
 			continue
 		}
 
-		// [优化] 使用计数器，只统计数量，不构建 Trie
+		// 使用计数器收集器：只计数，不产生任何字符串对象，不产生任何内存压力
 		counter := &counterCollector{}
-		ok, count, _ := tryLoadSRS(b, counter, src.EnableRegexp)
+		ok, count, _ := tryLoadSRS(f, counter, src.EnableRegexp) // 确保 tryLoadSRS 已改为 io.Reader 版本
+		f.Close()
+
 		if !ok {
-			log.Printf("[%s] ERROR: failed to load SRS file for source '%s' from %s", PluginType, src.Name, src.Files)
+			log.Printf("[%s] ERROR: failed to scan SRS file for source '%s'", PluginType, src.Name)
 			continue
 		}
-		totalRules += count
-		log.Printf("[%s] checked %d rules from source '%s'", PluginType, count, src.Name)
 
 		p.mu.Lock()
 		if s, ok := p.sources[src.Name]; ok && s.RuleCount != count {
@@ -337,16 +333,21 @@ func (p *SdSetLight) reloadAllRules() error {
 		p.mu.Unlock()
 	}
 
-	log.Printf("[%s] finished reloading. Total active rules: %d", PluginType, totalRules)
-
 	if rulesCountUpdated {
-		log.Printf("[%s] Rule counts have changed, saving configuration...", PluginType)
 		if err := p.saveConfig(); err != nil {
-			log.Printf("[%s] ERROR: failed to save config after reloading rules: %v", PluginType, err)
+			log.Printf("[%s] ERROR: failed to save config after scan: %v", PluginType, err)
 		}
 	}
 
+	// 通知订阅者（domain_mapper）开始重建
+	// 此时 domain_mapper 会调用 GetRules()，那里的 rules 是临时产生的
 	p.notifySubscribers()
+
+	// 异步清理扫描期间产生的极其微量的临时对象
+	go func() {
+		time.Sleep(1 * time.Second)
+		coremain.ManualGC()
+	}()
 
 	return nil
 }
@@ -363,47 +364,40 @@ func (p *SdSetLight) downloadAndUpdateLocalFile(ctx context.Context, sourceName 
 	enableRegexp := source.EnableRegexp
 	p.mu.RUnlock()
 
-	if sourceURL == "" {
-		return fmt.Errorf("source '%s' has no URL configured", sourceName)
-	}
-	if localFile == "" {
-		return fmt.Errorf("source '%s' has no local file path configured", sourceName)
-	}
-
-	log.Printf("[%s] downloading rule for '%s' from %s", PluginType, sourceName, sourceURL)
+	log.Printf("[%s] downloading %s", PluginType, sourceName)
 	req, err := http.NewRequestWithContext(ctx, "GET", sourceURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request for '%s': %w", sourceName, err)
+		return err
 	}
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("http request failed for '%s': %w", sourceName, err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status code for '%s': %d", sourceName, resp.StatusCode)
+		return fmt.Errorf("bad status: %d", resp.StatusCode)
 	}
 
+	// 这里依然需要读入内存进行校验，使用 bytes.NewReader 适配新接口
 	srsData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response body for '%s': %w", sourceName, err)
+		return err
 	}
 
-	// [优化] 使用计数器验证，不构建 Trie
+	// 校验逻辑
 	counter := &counterCollector{}
-	ok, count, _ := tryLoadSRS(srsData, counter, enableRegexp)
+	ok, count, _ := tryLoadSRS(bytes.NewReader(srsData), counter, enableRegexp) // 修复调用点
 	if !ok {
-		return fmt.Errorf("downloaded file for '%s' is not a valid SRS file or is corrupted", sourceName)
+		return fmt.Errorf("invalid SRS data")
 	}
-	log.Printf("[%s] downloaded file for '%s' validated successfully with %d rules.", PluginType, sourceName, count)
 
 	if err := os.MkdirAll(filepath.Dir(localFile), 0755); err != nil {
-		return fmt.Errorf("failed to create directory for '%s': %w", localFile, err)
+		return err
 	}
 	if err := os.WriteFile(localFile, srsData, 0644); err != nil {
-		return fmt.Errorf("failed to write srs file for '%s': %w", sourceName, err)
+		return err
 	}
 
 	p.mu.Lock()
@@ -413,11 +407,7 @@ func (p *SdSetLight) downloadAndUpdateLocalFile(ctx context.Context, sourceName 
 	}
 	p.mu.Unlock()
 
-	if err := p.saveConfig(); err != nil {
-		log.Printf("[%s] ERROR: failed to save config after updating '%s': %v", PluginType, sourceName, err)
-	}
-
-	return nil
+	return p.saveConfig()
 }
 
 func (p *SdSetLight) backgroundUpdater() {
@@ -594,8 +584,8 @@ var (
 const ruleSetVersionCurrent = 3
 
 // 修改：参数 m 类型改为 RuleReceiver
-func tryLoadSRS(b []byte, m RuleReceiver, enableRegexp bool) (ok bool, count int, lastRule string) {
-	r := bytes.NewReader(b)
+// 修改：参数 b 改为 io.Reader，函数名保持 tryLoadSRS 避免其他地方报错
+func tryLoadSRS(r io.Reader, m RuleReceiver, enableRegexp bool) (ok bool, count int, lastRule string) {
 	var mb [3]byte
 	if _, err := io.ReadFull(r, mb[:]); err != nil || mb != magicBytes {
 		return false, 0, ""
