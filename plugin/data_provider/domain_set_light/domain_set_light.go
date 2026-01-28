@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -199,12 +200,51 @@ func (d *DomainSetLight) Match(domainStr string) (value struct{}, ok bool) {
 func (d *DomainSetLight) api() *chi.Mux {
 	r := chi.NewRouter()
 
-	r.Get("/show", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
+// 优化后的 show 接口：支持分页和后端搜索
+	r.Get("/show", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) { // 这里定义的变量是 r
 		d.mu.RLock()
 		defer d.mu.RUnlock()
+
+		// 获取分页和搜索参数
+		query := strings.ToLower(r.URL.Query().Get("q"))
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))  // 修改这里：req -> r
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset")) // 修改这里：req -> r
+
+		if limit <= 0 {
+			limit = 100 
+		}
+		if offset < 0 {
+			offset = 0
+		}
+
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		
+		matchedCount := 0
+		sentCount := 0
+
 		for _, rule := range d.rules {
-			fmt.Fprintln(w, rule)
+			found := false
+			if query == "" {
+				found = true
+			} else {
+				if strings.Contains(strings.ToLower(rule), query) {
+					found = true
+				}
+			}
+
+			if found {
+				matchedCount++
+				if matchedCount <= offset {
+					continue
+				}
+
+				fmt.Fprintln(w, rule)
+				sentCount++
+
+				if sentCount >= limit {
+					break 
+				}
+			}
 		}
 	}))
 
