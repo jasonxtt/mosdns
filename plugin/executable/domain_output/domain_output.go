@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+                "container/heap"
 	"strings"
 	"sync"
 	"syscall"
@@ -85,6 +86,26 @@ const (
 	WriteModeSave
         WriteModeShutdown
 )
+
+// 辅助结构体：用于堆排序
+type outputRankItem struct {
+	Domain string
+	Count  int
+	Date   string
+}
+
+type outputRankHeap []outputRankItem
+func (h outputRankHeap) Len() int           { return len(h) }
+func (h outputRankHeap) Less(i, j int) bool { return h[i].Count < h[j].Count } // 小顶堆
+func (h outputRankHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *outputRankHeap) Push(x any)        { *h = append(*h, x.(outputRankItem)) }
+func (h *outputRankHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
 
 func Init(bp *coremain.BP, args any) (any, error) {
 	cfg := args.(*Args)
@@ -523,50 +544,84 @@ func restartSelf() {
 func (d *domainOutput) Api() *chi.Mux {
 	r := chi.NewRouter()
 
-	r.Get("/flush", func(w http.ResponseWriter, req *http.Request) {
+	r.Get("/flush", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		d.performWrite(WriteModeFlush)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("domain_output flushed and files rewritten."))
-	})
+	}))
 
-	r.Get("/save", func(w http.ResponseWriter, req *http.Request) {
+	r.Get("/save", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		d.performWrite(WriteModeSave)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("domain_output files saved."))
-	})
+	}))
 
-	r.Get("/show", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "text-plain; charset=utf-8")
+	// 优化后的 show 接口：修复了 heap 包调用路径和返回值问题
+	r.Get("/show", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+		// 获取参数
+		query := strings.ToLower(r.URL.Query().Get("q"))
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+		// 默认值设置
+		if limit <= 0 { limit = 100 }
+		if offset < 0 { offset = 0 }
+
+		h := &outputRankHeap{}
+		heap.Init(h) // 修正：直接使用 heap，不要带 container/
+		maxHeapSize := offset + limit
 
 		d.mu.Lock()
-		// 复制数据用于展示
-		type domainStat struct {
-			Domain string
-			Count  int
-			Date   string
-		}
-		statsSlice := make([]domainStat, 0, len(d.stats))
+		totalFiltered := 0 
 		for domain, entry := range d.stats {
-			statsSlice = append(statsSlice, domainStat{
-				Domain: domain,
-				Count:  entry.Count,
-				Date:   entry.LastDate,
-			})
+			// 1. 搜索过滤逻辑
+			matches := true
+			if query != "" {
+				if !strings.Contains(strings.ToLower(domain), query) {
+					matches = false
+				}
+			}
+
+			if matches {
+				totalFiltered++ 
+
+				// 2. 堆筛选：只保留 Count 最大的前 (offset + limit) 个
+				item := outputRankItem{Domain: domain, Count: entry.Count, Date: entry.LastDate}
+				if h.Len() < maxHeapSize {
+					heap.Push(h, item)
+				} else if item.Count > (*h)[0].Count {
+					heap.Pop(h)
+					heap.Push(h, item)
+				}
+			}
 		}
 		d.mu.Unlock()
 
-		// 排序
-		sort.Slice(statsSlice, func(i, j int) bool {
-			return statsSlice[i].Count > statsSlice[j].Count
-		})
+		// 设置总条数 Header
+		w.Header().Set("X-Total-Count", strconv.Itoa(totalFiltered))
+		w.Header().Set("Access-Control-Expose-Headers", "X-Total-Count")
 
-		for _, stat := range statsSlice {
+		// 3. 将堆内数据转换为排序切片
+		resultCount := h.Len()
+		sortedResult := make([]outputRankItem, resultCount)
+		for i := resultCount - 1; i >= 0; i-- {
+			sortedResult[i] = heap.Pop(h).(outputRankItem)
+		}
+
+		// 4. 分页截取并输出
+		if offset >= resultCount {
+			return 
+		}
+
+		for i := offset; i < resultCount; i++ {
+			stat := sortedResult[i]
 			if _, err := fmt.Fprintf(w, "%010d %s %s\n", stat.Count, stat.Date, stat.Domain); err != nil {
-				fmt.Printf("[domain_output] failed to write to http response: %v\n", err)
 				return
 			}
 		}
-	})
+	}))
 
 	r.Get("/restartall", func(w http.ResponseWriter, req *http.Request) {
 		d.performWrite(WriteModeShutdown)
