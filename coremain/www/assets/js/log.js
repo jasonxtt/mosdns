@@ -33,7 +33,7 @@ function closeAndUnlock(dialogElement) {
 
 document.addEventListener('DOMContentLoaded', () => {
     const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 60, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 1024, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
-    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [] }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
+    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [], viewType: 'domain', currentOffset: 0, currentLimit: 100, currentQuery: '', currentConfig: null, hasMore: true, totalCount: 0 }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
     const elements = {
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'),
         colorSwatches: document.querySelectorAll('.color-swatch'),
@@ -165,7 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 轻量级请求器 + /metrics 简易缓存，减少同一时段的重复请求
     let __metricsInflight = null; let __metricsStamp = 0;
-    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) { } } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const contentType = response.headers.get('content-type'); if (contentType && contentType.includes('application/json')) return response.json(); return response.text(); } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => { const now = Date.now(); if (__metricsInflight && (now - __metricsStamp) < 3000) return __metricsInflight; __metricsInflight = api.fetch('/metrics', { signal }); __metricsStamp = now; return __metricsInflight; }, getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for (let [key, value] of queryParams.entries()) { if (!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
+    const api = { fetch: async (url, options = {}) => { try { const response = await fetch(url, { ...options, signal: options.signal }); if (!response.ok) { let errorMsg = `API Error: ${response.status} ${response.statusText}`; try { const errorBody = await response.json(); if (errorBody && errorBody.error) { errorMsg = errorBody.error; } } catch (e) { try { errorMsg = await response.text() || errorMsg; } catch (textErr) { } } if (response.status !== 404) { ui.showToast(errorMsg, 'error'); } throw new Error(errorMsg); } const tc = response.headers.get('X-Total-Count'); const ct = response.headers.get('content-type'); const data = (ct && ct.includes('application/json')) ? await response.json() : await response.text(); return tc !== null ? { body: data, totalCount: parseInt(tc, 10) } : data; } catch (error) { if (error.name !== 'AbortError') { console.error(error); } throw error; } }, getStatus: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/status`, { signal }), getCapacity: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { signal }), start: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/start`, { method: 'POST' }), stop: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/stop`, { method: 'POST' }), clear: () => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/clear`, { method: 'POST' }), setCapacity: (capacity) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v1/audit/capacity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ capacity: parseInt(capacity, 10) }) }), getMetrics: (signal) => { const now = Date.now(); if (__metricsInflight && (now - __metricsStamp) < 3000) return __metricsInflight; __metricsInflight = api.fetch('/metrics', { signal }); __metricsStamp = now; return __metricsInflight; }, getCoreMode: (signal) => api.fetch('/plugins/switch3/show', { signal }), clearCache: (cacheTag) => api.fetch(`/plugins/${cacheTag}/flush`), getCacheContents: (cacheTag, signal) => api.fetch(`/plugins/${cacheTag}/show`, { signal }), v2: { getStats: (signal) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/stats`, { signal }), getTopDomains: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain?limit=${limit}`, { signal }), getTopClients: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/client?limit=${limit}`, { signal }), getSlowest: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/slowest?limit=${limit}`, { signal }), getDomainSetRank: (signal, limit = 50) => api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/rank/domain_set?limit=${limit}`, { signal }), getLogs: (signal, params = {}) => { const queryParams = new URLSearchParams({ page: 1, limit: CONSTANTS.LOGS_PER_PAGE, ...params }); for (let [key, value] of queryParams.entries()) { if (!value) { queryParams.delete(key); } } return api.fetch(`${CONSTANTS.API_BASE_URL}/api/v2/audit/logs?${queryParams}`, { signal }); } } };
 
     const requeryApi = {
         getConfig: (signal) => api.fetch(`/plugins/requery`, { signal }),
@@ -2222,7 +2222,7 @@ function renderRuleTable(tbody, rules, mode) {
         return count;
     }
 
-async function updateDomainListStats(signal) {
+    async function updateDomainListStats(signal) {
         const listMap = {
             fakeip: { element: elements.fakeipDomainCount, endpoint: '/plugins/my_fakeiplist/show' },
             realip: { element: elements.realipDomainCount, endpoint: '/plugins/my_realiplist/show' },
@@ -2231,12 +2231,18 @@ async function updateDomainListStats(signal) {
             total: { element: elements.totalDomainCount, endpoint: '/plugins/top_domains/show' },
         };
 
-        // 顺序 + 流式计数，进一步降低内存占用与主线程卡顿
         for (const key of Object.keys(listMap)) {
             const { element, endpoint } = listMap[key];
             try {
-                const count = await countLinesStreaming(endpoint, signal);
-                element.textContent = count.toLocaleString();
+                // 使用 api.fetch 获取带 Header 的结果，并加上 limit=1 极大地减少网络开销
+                const res = await api.fetch(endpoint + '?limit=1', { signal });
+                if (res && typeof res === 'object' && res.totalCount !== undefined) {
+                    element.textContent = res.totalCount.toLocaleString();
+                } else {
+                    // 兜底逻辑：如果 Header 获取失败，尝试原来的流式计数（由于后端限制，此时可能仍显示 100）
+                    const count = await countLinesStreaming(endpoint, signal);
+                    element.textContent = count.toLocaleString();
+                }
             } catch (e) {
                 if (e.name !== 'AbortError') element.textContent = '获取失败';
             }
@@ -2244,7 +2250,6 @@ async function updateDomainListStats(signal) {
 
         try {
             const status = state.requery.status;
-            
             if (status && typeof status.last_run_domain_count === 'number') {
                 elements.backupDomainCount.textContent = `${status.last_run_domain_count.toLocaleString()} 条`;
                 elements.backupDomainCount.style.color = 'var(--color-accent-primary)';
@@ -2252,21 +2257,36 @@ async function updateDomainListStats(signal) {
                 elements.backupDomainCount.textContent = '--';
             }
         } catch (e) {
-            console.error("更新统计显示出错:", e);
             elements.backupDomainCount.textContent = '--';
         }
     }
 
-    function renderDataViewTable(entries, type = 'domain') {
+    function renderDataViewTable(entries, type = 'domain', append = false) {
         if (!elements.dataViewTableContainer) return;
 
-        elements.dataViewTableContainer.innerHTML = '';
+        // 如果不是追加模式，或者容器内正在加载，则清空
+        if (!append || elements.dataViewTableContainer.querySelector('.lazy-placeholder')) {
+            elements.dataViewTableContainer.innerHTML = '';
+        }
 
-        if (entries.length === 0) {
-            elements.dataViewTableContainer.innerHTML = '<div class="empty-state-content" style="padding: 2rem 0;"><p>此列表为空或没有匹配的条目。</p></div>';
-        } else if (type === 'cache') {
-            const accordionContainer = document.createElement('div');
-            entries.forEach(item => {
+        if (entries.length === 0 && !append) {
+            elements.dataViewTableContainer.innerHTML = '<div class="empty-state-content" style="padding: 2rem 0;"><p>没有匹配的条目。</p></div>';
+            return;
+        }
+
+        // 计算本次需要渲染的新条目
+        // 逻辑：如果是追加，只取数组最后 limit 条（即最新获取的那批数据）
+        const itemsToRender = append ? entries.slice(-state.dataView.lastBatchSize) : entries;
+
+        if (type === 'cache') {
+            let accordionContainer = elements.dataViewTableContainer.querySelector('.accordion-container');
+            if (!accordionContainer) {
+                accordionContainer = document.createElement('div');
+                accordionContainer.className = 'accordion-container';
+                elements.dataViewTableContainer.appendChild(accordionContainer);
+            }
+
+            itemsToRender.forEach(item => {
                 const itemEl = document.createElement('div');
                 itemEl.className = 'accordion-item';
 
@@ -2287,9 +2307,8 @@ async function updateDomainListStats(signal) {
                 itemEl.append(headerEl, collapseEl);
                 accordionContainer.appendChild(itemEl);
 
-                // 标题整行可点击：但避免点击到按钮自身时触发两次
                 headerEl.addEventListener('click', (ev) => {
-                    if (ev.target === buttonEl || buttonEl.contains(ev.target)) return; // 直接点击按钮时，不在此重复触发
+                    if (ev.target === buttonEl || buttonEl.contains(ev.target)) return;
                     ev.preventDefault();
                     buttonEl.click();
                 });
@@ -2320,125 +2339,146 @@ async function updateDomainListStats(signal) {
                         bodyEl.appendChild(metadataTable);
                         bodyEl.appendChild(pre);
                     }
-
-                    // 切换可见性
                     buttonEl.classList.toggle('collapsed');
                     collapseEl.classList.toggle('show');
-
-                    // 使用 max-height 实现动画，同时保证可收起
                     collapseEl.style.maxHeight = collapseEl.classList.contains('show') ? (bodyEl.scrollHeight + 'px') : '0px';
                 });
             });
-            elements.dataViewTableContainer.appendChild(accordionContainer);
-        } else { // domain list
-            elements.dataViewTableContainer.innerHTML = `
-                <table class="mobile-card-layout">
-                    <thead>
-                        <tr>
-                            <th style="width: 30%;">访问次数</th>
-                            <th style="width: 30%;">最近访问/加入日期</th>
-                            <th>域名</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                       ${entries.map(item => `
-                           <tr>
-                               <td>${item.count}</td>
-                               <td>${item.date}</td>
-                               <td>${item.domain}</td>
-                           </tr>
-                       `).join('')}
-                    </tbody>
-                </table>`;
-        }
-
-        elements.dataViewModalInfo.textContent = `总计: ${state.dataView.rawEntries.length} | 显示: ${entries.length}`;
-    }
-
-    async function openDataViewModal(config) {
-        const { listType, cacheTag, title } = config;
-        elements.dataViewModalTitle.textContent = title;
-        elements.dataViewTableContainer.innerHTML = '<div class="lazy-placeholder"><div class="spinner"></div></div>';
-        elements.dataViewModalInfo.textContent = '正在加载...';
-        elements.dataViewSearch.value = '';
-
-        lockScroll();
-        elements.dataViewModal.showModal();
-
-        try {
-            let text = '';
-            let viewType = 'domain';
-
-            if (listType) {
-                const endpointMap = {
-                    fakeip: '/plugins/my_fakeiplist/show',
-                    realip: '/plugins/my_realiplist/show',
-                    nov4: '/plugins/my_nov4list/show',
-                    nov6: '/plugins/my_nov6list/show',
-                    total: '/plugins/top_domains/show'
-                };
-                const endpoint = endpointMap[listType];
-                if (!endpoint) throw new Error('Unknown list type');
-                text = await api.fetch(endpoint);
-            } else if (cacheTag) {
-                text = await api.getCacheContents(cacheTag);
-                viewType = 'cache';
+        } else { 
+            // 域名列表渲染
+            let tbody = elements.dataViewTableContainer.querySelector('tbody');
+            if (!tbody) {
+                elements.dataViewTableContainer.innerHTML = `
+                    <table class="mobile-card-layout">
+                        <thead>
+                            <tr>
+                                <th style="width: 20%;">次数</th>
+                                <th style="width: 30%;">最后日期</th>
+                                <th>域名</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>`;
+                tbody = elements.dataViewTableContainer.querySelector('tbody');
             }
 
+            const html = itemsToRender.map(item => `
+                <tr>
+                    <td>${item.count}</td>
+                    <td>${item.date}</td>
+                    <td>${item.domain}</td>
+                </tr>
+            `).join('');
+            tbody.insertAdjacentHTML('beforeend', html);
+        }
+    }
+
+    async function openDataViewModal(config, isLoadMore = false) {
+        const { listType, cacheTag, title } = config;
+        if (!isLoadMore) {
+            state.dataView.currentOffset = 0;
+            state.dataView.rawEntries = [];
+            state.dataView.hasMore = true;
+            state.dataView.totalCount = 0;
+            state.dataView.currentConfig = config;
+            elements.dataViewModalTitle.textContent = title;
+            elements.dataViewTableContainer.innerHTML = '<div class="lazy-placeholder"><div class="spinner"></div></div>';
+            elements.dataViewModalInfo.textContent = '正在加载...';
+            if (state.dataView.currentQuery === '' && !elements.dataViewSearch.value) {
+                elements.dataViewSearch.value = '';
+            }
+        }
+        if (!isLoadMore) lockScroll();
+        elements.dataViewModal.showModal();
+        try {
+            const q = encodeURIComponent(state.dataView.currentQuery);
+            const offset = state.dataView.currentOffset;
+            const limit = state.dataView.currentLimit;
+            let result;
+            let viewType = 'domain';
+            if (listType) {
+                const endpointMap = { fakeip: '/plugins/my_fakeiplist/show', realip: '/plugins/my_realiplist/show', nov4: '/plugins/my_nov4list/show', nov6: '/plugins/my_nov6list/show', total: '/plugins/top_domains/show' };
+                result = await api.fetch(`${endpointMap[listType]}?q=${q}&offset=${offset}&limit=${limit}`);
+                viewType = 'domain';
+            } else if (cacheTag) {
+                result = await api.fetch(`/plugins/${cacheTag}/show?q=${q}&offset=${offset}&limit=${limit}`);
+                viewType = 'cache';
+            }
+            let text = '';
+            if (result && typeof result === 'object' && result.totalCount !== undefined) {
+                text = result.body;
+                state.dataView.totalCount = result.totalCount;
+            } else {
+                text = result;
+            }
+            let newEntries = [];
             if (viewType === 'cache') {
                 const entries = text.trim() ? text.trim().split('----- Cache Entry -----').filter(entry => entry.trim() !== '') : [];
-                state.dataView.rawEntries = entries.map((entryText, index) => {
+                newEntries = entries.map((entryText, index) => {
                     const questionMatch = entryText.match(/;; QUESTION SECTION:\s*;\s*([^\s]+)/);
                     const domainSetMatch = entryText.match(/DomainSet:\s*(.+)/);
-                    let headerTitle = questionMatch ? questionMatch[1].replace(/\.$/, '') : `Cache Entry #${index + 1}`;
+                    let headerTitle = questionMatch ? questionMatch[1].replace(/\.$/, '') : `Entry #${state.dataView.currentOffset + index + 1}`;
                     if (domainSetMatch) headerTitle += ` [${domainSetMatch[1].trim()}]`;
-                    return { headerTitle, fullText: entryText, index };
+                    return { headerTitle, fullText: entryText };
                 });
             } else {
                 const lines = text.trim() ? text.trim().split('\n') : [];
-                state.dataView.rawEntries = lines.map((line, index) => {
+                newEntries = lines.map((line) => {
                     const trimmed = line.trim();
-                    // 尝试匹配 3 列格式: Count Date Domain
-                    // 例如: 0000000002 2025-12-18 domain.com
                     const match3 = trimmed.match(/^(\S+)\s+(\S+)\s+(.*)$/);
-                    
-                    if (match3) {
-                        return { 
-                            count: match3[1], 
-                            date: match3[2], 
-                            domain: match3[3] 
-                        };
-                    }
-                
-                    // 回退匹配 2 列格式: Count Domain
+                    if (match3) return { count: match3[1], date: match3[2], domain: match3[3] };
                     const match2 = trimmed.match(/^(\S+)\s+(.*)$/);
-                    if (match2) {
-                        return { 
-                            count: match2[1], 
-                            date: '-', // 旧格式没有日期，显示占位符
-                            domain: match2[2] 
-                        };
-                    }
-                
-                    // 无法解析的情况
-                    return { 
-                        count: index + 1, 
-                        date: '-', 
-                        domain: trimmed 
-                    };
+                    if (match2) return { count: match2[1], date: '-', domain: match2[2] };
+                    return { count: '-', date: '-', domain: trimmed };
                 });
             }
-
+            state.dataView.lastBatchSize = newEntries.length;
+            state.dataView.rawEntries = isLoadMore ? [...state.dataView.rawEntries, ...newEntries] : newEntries;
+            if (state.dataView.totalCount > 0) {
+                state.dataView.hasMore = state.dataView.rawEntries.length < state.dataView.totalCount;
+            } else {
+                state.dataView.hasMore = newEntries.length >= state.dataView.currentLimit;
+            }
             state.dataView.viewType = viewType;
-            state.dataView.filteredEntries = state.dataView.rawEntries;
-            renderDataViewTable(state.dataView.filteredEntries, viewType);
-
+            renderDataViewTable(state.dataView.rawEntries, viewType, isLoadMore);
+            state.dataView.currentOffset += newEntries.length;
+            updateDataViewFooter();
         } catch (error) {
-            elements.dataViewTableContainer.innerHTML = `<div class="empty-state-content" style="padding: 2rem 0;"><p style="color: var(--color-danger);">加载列表失败</p><small>${error.message}</small></div>`;
-            elements.dataViewModalInfo.textContent = `加载失败`;
+            console.error("Data view fetch error:", error);
+            if (!isLoadMore) elements.dataViewTableContainer.innerHTML = '<div class="empty-state-content"><p style="color:var(--color-danger);">加载失败或请求超时</p></div>';
+            elements.dataViewModalInfo.textContent = '请求异常';
         }
     }
 
+
+    function updateDataViewFooter() {
+        const currentCount = state.dataView.rawEntries.length;
+        const total = state.dataView.totalCount;
+        if (total > 0) {
+            elements.dataViewModalInfo.textContent = `当前显示: ${currentCount.toLocaleString()} / ${total.toLocaleString()} 条`;
+        } else {
+            elements.dataViewModalInfo.textContent = `当前显示: ${currentCount.toLocaleString()} 条`;
+        }
+        let loadMoreBtn = document.getElementById('dataview-load-more-btn');
+        if (state.dataView.hasMore) {
+            if (!loadMoreBtn) {
+                loadMoreBtn = document.createElement('button');
+                loadMoreBtn.id = 'dataview-load-more-btn';
+                loadMoreBtn.className = 'button primary small';
+                loadMoreBtn.style.cssText = 'margin-left: auto; height: 32px; padding: 0 15px; font-size: 0.85rem;';
+                loadMoreBtn.innerHTML = '<span>加载更多</span>';
+                loadMoreBtn.onclick = async () => {
+                    ui.setLoading(loadMoreBtn, true);
+                    await openDataViewModal(state.dataView.currentConfig, true);
+                    ui.setLoading(loadMoreBtn, false);
+                };
+                elements.dataViewModal.querySelector('.modal-footer').appendChild(loadMoreBtn);
+            }
+            loadMoreBtn.style.display = 'inline-flex';
+        } else if (loadMoreBtn) {
+            loadMoreBtn.style.display = 'none';
+        }
+    }
 
     async function saveAllShuntRules() {
         if (!confirm('确定要保存所有分流规则吗?')) return;
@@ -2593,7 +2633,7 @@ const cacheManager = {
     };
 
     const listManager = {
-        MAX_LINES: 500,
+        MAX_LINES: 10000,
         currentTag: null,
         profiles: [
             { tag: 'whitelist', name: '白名单' },
@@ -2658,7 +2698,11 @@ const cacheManager = {
 
             try {
                 // 流式读取，最多加载 MAX_LINES 行，避免一次性 split 大字符串拖慢主线程
-                const res = await fetch(`/plugins/${tag}/show`, { signal: this._abortController.signal });
+// 这里的 this.MAX_LINES 是 10000
+const res = await fetch(`/plugins/${tag}/show?limit=${this.MAX_LINES}`, { 
+    signal: this._abortController.signal 
+});
+
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const reader = res.body?.getReader();
                 let totalLines = 0, shownLines = 0;
@@ -3940,25 +3984,31 @@ const handleInteractiveClick = (e) => {
             }
         });
 
-        elements.closeDataViewModalBtn?.addEventListener('click', () => closeAndUnlock(elements.dataViewModal));
-        elements.dataViewSearch?.addEventListener('input', debounce(() => {
-            const searchTerm = elements.dataViewSearch.value.toLowerCase();
-            if (state.dataView.viewType === 'cache') {
-                state.dataView.filteredEntries = state.dataView.rawEntries.filter(item =>
-                    item.headerTitle.toLowerCase().includes(searchTerm) ||
-                    item.fullText.toLowerCase().includes(searchTerm)
-                );
-            } else {
-                state.dataView.filteredEntries = state.dataView.rawEntries.filter(item =>
-                    (item.domain && item.domain.toLowerCase().includes(searchTerm)) ||
-                    (item.date && item.date.toLowerCase().includes(searchTerm))
-                );
-            }
-            renderDataViewTable(state.dataView.filteredEntries, state.dataView.viewType);
-        }, 250));
+        // 1. 数据查看弹窗关闭监听
+        if (elements.closeDataViewModalBtn) {
+            elements.closeDataViewModalBtn.addEventListener('click', function() {
+                closeAndUnlock(elements.dataViewModal);
+            });
+        }
 
-        elements.saveShuntRulesBtn?.addEventListener('click', saveAllShuntRules);
-        elements.clearShuntRulesBtn?.addEventListener('click', clearAllShuntRules);
+        // 2. 数据查看搜索输入监听 (统一走后端分页和搜索)
+        if (elements.dataViewSearch) {
+            elements.dataViewSearch.addEventListener('input', debounce(function() {
+                var searchTerm = elements.dataViewSearch.value.trim();
+                // 更新全局查询词状态
+                state.dataView.currentQuery = searchTerm;
+                // 无论是缓存还是域名列表，现在都统一触发后端分页查询接口
+                openDataViewModal(state.dataView.currentConfig, false);
+            }, 400));
+        }
+
+        // 3. 分流规则重要操作按钮监听
+        if (elements.saveShuntRulesBtn) {
+            elements.saveShuntRulesBtn.addEventListener('click', saveAllShuntRules);
+        }
+        if (elements.clearShuntRulesBtn) {
+            elements.clearShuntRulesBtn.addEventListener('click', clearAllShuntRules);
+        }
     }
 
     function setupLazyLoading() {
