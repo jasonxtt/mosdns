@@ -8,7 +8,7 @@
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
- * mosdns is distributed in the hope that it will be useful,
+ * mosdns is distributed in the hope that it is useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
@@ -21,7 +21,6 @@ package ip_set
 
 import (
 	"bufio"
-	"bytes"
 	"compress/zlib"
 	"encoding/binary"
 	"encoding/json"
@@ -33,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
@@ -53,6 +53,12 @@ type Args struct {
 	IPs   []string `yaml:"ips"`
 	Sets  []string `yaml:"sets"`
 	Files []string `yaml:"files"`
+}
+
+// IPReceiver 定义了流式接收 IP 前缀的接口。
+// 使用变长参数 ...netip.Prefix 以匹配 *netlist.List 的方法签名。
+type IPReceiver interface {
+	Append(...netip.Prefix)
 }
 
 var _ data_provider.IPMatcherProvider = (*IPSet)(nil)
@@ -98,6 +104,7 @@ func NewIPSet(bp *coremain.BP, args *Args) (*IPSet, error) {
 	p := &IPSet{files: args.Files, list: netlist.NewList()}
 
 	// load IPs and files
+	// 直接传递 p.list，由于变长参数签名匹配，它现在符合 IPReceiver 接口。
 	if err := LoadFromIPsAndFiles(args.IPs, args.Files, p.list); err != nil {
 		return nil, err
 	}
@@ -113,6 +120,12 @@ func NewIPSet(bp *coremain.BP, args *Args) (*IPSet, error) {
 	}
 
 	p.rebuildSnapshot()
+
+	// 提示回收解析期间产生的临时对象
+	go func() {
+		time.Sleep(1 * time.Second)
+		coremain.ManualGC()
+	}()
 
 	return p, nil
 }
@@ -138,7 +151,7 @@ func (d *IPSet) api() *chi.Mux {
 	// GET /show: list in-memory prefixes
 	r.Get("/show", func(w http.ResponseWriter, r *http.Request) {
 		d.mutex.Lock()
-		l := d.list 
+		l := d.list
 		d.mutex.Unlock()
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -166,7 +179,7 @@ func (d *IPSet) api() *chi.Mux {
 		defer d.mutex.Unlock()
 
 		d.list = netlist.NewList()
-		
+
 		d.rebuildSnapshot()
 
 		if err := d.saveToFiles(); err != nil {
@@ -174,6 +187,7 @@ func (d *IPSet) api() *chi.Mux {
 			return
 		}
 		w.Write([]byte("ip_set flushed and saved"))
+		coremain.ManualGC()
 	})
 
 	// POST /post: replace in-memory list with provided values and save
@@ -195,8 +209,8 @@ func (d *IPSet) api() *chi.Mux {
 		d.mutex.Lock()
 		defer d.mutex.Unlock()
 
-		d.list = tmpList 
-		
+		d.list = tmpList
+
 		d.rebuildSnapshot()
 
 		if err := d.saveToFiles(); err != nil {
@@ -205,6 +219,7 @@ func (d *IPSet) api() *chi.Mux {
 		}
 
 		w.Write([]byte(fmt.Sprintf("ip_set replaced with %d entries", d.list.Len())))
+		coremain.ManualGC()
 	})
 
 	return r
@@ -239,12 +254,12 @@ func (d *IPSet) saveToFiles() error {
 	return nil
 }
 
-// LoadFromIPsAndFiles loads plain IPs and files (including .srs) into the list.
-func LoadFromIPsAndFiles(ips, files []string, l *netlist.List) error {
-	if err := loadFromIPs(ips, l); err != nil {
+// LoadFromIPsAndFiles loads plain IPs and files (including .srs) into the receiver.
+func LoadFromIPsAndFiles(ips, files []string, m IPReceiver) error {
+	if err := loadFromIPs(ips, m); err != nil {
 		return err
 	}
-	return loadFromFiles(files, l)
+	return loadFromFiles(files, m)
 }
 
 func parseNetipPrefix(s string) (netip.Prefix, error) {
@@ -258,31 +273,32 @@ func parseNetipPrefix(s string) (netip.Prefix, error) {
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
-func loadFromIPs(ips []string, l *netlist.List) error {
+func loadFromIPs(ips []string, m IPReceiver) error {
 	for i, s := range ips {
 		pfx, err := parseNetipPrefix(s)
 		if err != nil {
 			return fmt.Errorf("invalid ip #%d %s: %w", i, s, err)
 		}
-		l.Append(pfx)
+		m.Append(pfx)
 	}
 	return nil
 }
 
-func loadFromFiles(files []string, l *netlist.List) error {
+func loadFromFiles(files []string, m IPReceiver) error {
 	for i, f := range files {
-		if err := loadFromFile(f, l); err != nil {
+		if err := loadFromFile(f, m); err != nil {
 			return fmt.Errorf("failed to load file #%d %s: %w", i, f, err)
 		}
 	}
 	return nil
 }
 
-func loadFromFile(path string, l *netlist.List) error {
+func loadFromFile(path string, m IPReceiver) error {
 	if path == "" {
 		return nil
 	}
-	data, err := os.ReadFile(path)
+	// 内存优化：流式打开文件
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Printf("[ip_set] file not found, skipping: %s\n", path)
@@ -290,24 +306,47 @@ func loadFromFile(path string, l *netlist.List) error {
 		}
 		return err
 	}
+	defer f.Close()
 
-	// try .srs binary format
-	if ok, cnt, lastSrs := tryLoadSRS(data, l); ok {
-		fmt.Printf("[ip_set] loaded %d rules from srs file: %s\n", cnt, path)
-		if lastSrs != "" {
-			fmt.Printf("[ip_set] last srs rule: %s\n", lastSrs)
+	// 检查 SRS Magic
+	var magic [3]byte
+	n, _ := io.ReadFull(f, magic[:])
+	if n == 3 && magic == srsMagic {
+		f.Seek(0, 0)
+		if ok, cnt, lastSrs := tryLoadSRS(f, m); ok {
+			fmt.Printf("[ip_set] loaded %d rules from srs file: %s\n", cnt, path)
+			if lastSrs != "" {
+				fmt.Printf("[ip_set] last srs rule: %s\n", lastSrs)
+			}
+			return nil
 		}
-		return nil
 	}
 
 	// fallback to text lines
-	before := l.Len()
-	if err := netlist.LoadFromReader(l, bytes.NewReader(data)); err != nil {
-		return err
+	f.Seek(0, 0)
+	// 类型断言，如果 m 是 *netlist.List，则使用其内置的高速 LoadFromReader
+	if l, ok := m.(*netlist.List); ok {
+		before := l.Len()
+		if err := netlist.LoadFromReader(l, f); err != nil {
+			return err
+		}
+		after := l.Len()
+		fmt.Printf("[ip_set] loaded %d rules from text file: %s\n", after-before, path)
+		return nil
 	}
-	after := l.Len()
-	fmt.Printf("[ip_set] loaded %d rules from text file: %s\n", after-before, path)
-	return nil
+
+	// 兜底文本解析逻辑
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if pfx, err := parseNetipPrefix(line); err == nil {
+			m.Append(pfx)
+		}
+	}
+	return scanner.Err()
 }
 
 // MatcherGroup composes multiple netlist.Matchers
@@ -323,7 +362,7 @@ func (mg MatcherGroup) Match(addr netip.Addr) bool {
 	return false
 }
 
-// --- SRS parsing helpers ---
+// --- SRS parsing helpers (Memory Optimized) ---
 var (
 	srsMagic            = [3]byte{'S', 'R', 'S'}
 	ruleItemIPCIDR      = uint8(6)
@@ -331,8 +370,7 @@ var (
 	maxSupportedVersion = uint8(3)
 )
 
-func tryLoadSRS(data []byte, l *netlist.List) (bool, int, string) {
-	r := bytes.NewReader(data)
+func tryLoadSRS(r io.Reader, m IPReceiver) (bool, int, string) {
 	var mb [3]byte
 	if _, err := io.ReadFull(r, mb[:]); err != nil || mb != srsMagic {
 		return false, 0, ""
@@ -355,7 +393,7 @@ func tryLoadSRS(data []byte, l *netlist.List) (bool, int, string) {
 	count := 0
 	var last string
 	for i := uint64(0); i < length; i++ {
-		c, lr := readRule(br, l)
+		c, lr := readRule(br, m)
 		if lr != "" {
 			last = lr
 		}
@@ -364,7 +402,7 @@ func tryLoadSRS(data []byte, l *netlist.List) (bool, int, string) {
 	return true, count, last
 }
 
-func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
+func readRule(r *bufio.Reader, m IPReceiver) (int, string) {
 	ct := 0
 	var last string
 	mode, err := r.ReadByte()
@@ -373,7 +411,7 @@ func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
 	}
 	switch mode {
 	case 0:
-		c, lr := readDefault(r, l)
+		c, lr := readDefault(r, m)
 		ct += c
 		if lr != "" {
 			last = lr
@@ -382,7 +420,7 @@ func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
 		_, _ = r.ReadByte()
 		n, _ := binary.ReadUvarint(r)
 		for j := uint64(0); j < n; j++ {
-			c, lr := readRule(r, l)
+			c, lr := readRule(r, m)
 			ct += c
 			if lr != "" {
 				last = lr
@@ -393,7 +431,7 @@ func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
 	return ct, last
 }
 
-func readDefault(r *bufio.Reader, l *netlist.List) (int, string) {
+func readDefault(r *bufio.Reader, m IPReceiver) (int, string) {
 	count := 0
 	var last string
 	for {
@@ -403,14 +441,10 @@ func readDefault(r *bufio.Reader, l *netlist.List) (int, string) {
 		}
 		switch item {
 		case ruleItemIPCIDR:
-			ipset, err := parseIPSet(r)
+			// 内存优化：流式解析 IPSet 范围
+			err := streamParseIPSet(r, m, &count, &last)
 			if err != nil {
 				return count, last
-			}
-			for _, pfx := range ipset.Prefixes() {
-				l.Append(pfx)
-				count++
-				last = pfx.String()
 			}
 		case ruleItemFinal:
 			return count, last
@@ -421,41 +455,46 @@ func readDefault(r *bufio.Reader, l *netlist.List) (int, string) {
 	return count, last
 }
 
-func parseIPSet(r varbin.Reader) (netipx.IPSet, error) {
+func streamParseIPSet(r *bufio.Reader, m IPReceiver, count *int, last *string) error {
 	ver, err := r.ReadByte()
 	if err != nil {
-		return netipx.IPSet{}, err
+		return err
 	}
 	if ver != 1 {
-		return netipx.IPSet{}, fmt.Errorf("unsupported ipset version: %d", ver)
+		return fmt.Errorf("unsupported ipset version: %d", ver)
 	}
 	var length uint64
 	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
-		return netipx.IPSet{}, err
-	}
-	type ipRangeData struct{ From, To []byte }
-	ranges := make([]ipRangeData, length)
-	if err := varbin.Read(r, binary.BigEndian, &ranges); err != nil {
-		return netipx.IPSet{}, err
+		return err
 	}
 
-	var builder netipx.IPSetBuilder
-	for _, rr := range ranges {
-		from, ok := netip.AddrFromSlice(rr.From)
-		if !ok {
+	// 逐个处理 Range，消除原版中分配巨大切片的行为
+	for i := uint64(0); i < length; i++ {
+		from, err := varbin.ReadValue[[]byte](r, binary.BigEndian)
+		if err != nil {
+			return err
+		}
+		to, err := varbin.ReadValue[[]byte](r, binary.BigEndian)
+		if err != nil {
+			return err
+		}
+
+		fAddr, ok1 := netip.AddrFromSlice(from)
+		tAddr, ok2 := netip.AddrFromSlice(to)
+		if !ok1 || !ok2 {
 			continue
 		}
-		to, ok := netip.AddrFromSlice(rr.To)
-		if !ok {
-			continue
+
+		var builder netipx.IPSetBuilder
+		builder.AddRange(netipx.IPRangeFrom(fAddr, tAddr))
+		ipset, _ := builder.IPSet()
+		for _, pfx := range ipset.Prefixes() {
+			m.Append(pfx)
+			*count++
+			*last = pfx.String()
 		}
-		builder.AddRange(netipx.IPRangeFrom(from, to))
 	}
-	pPtr, err := builder.IPSet()
-	if err != nil {
-		return netipx.IPSet{}, err
-	}
-	return *pPtr, nil
+	return nil
 }
 
 func normalizePrefix(p netip.Prefix) netip.Prefix {
