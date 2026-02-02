@@ -77,6 +77,29 @@ type RuleSource struct {
 	LastUpdated         time.Time `json:"last_updated"`
 }
 
+// [新增] 接口定义，用于解耦。参考 sd_set_light
+type IPReceiver interface {
+	Add(netip.Prefix)
+}
+
+// [新增] 规则列表接收器 (用于 reloadAllRules)
+type listCollector struct {
+	l *netlist.List
+}
+
+func (c *listCollector) Add(p netip.Prefix) {
+	c.l.Append(p)
+}
+
+// [新增] 计数收集器 (用于校验，不存数据，省内存)
+type counterCollector struct {
+	count int
+}
+
+func (c *counterCollector) Add(_ netip.Prefix) {
+	c.count++
+}
+
 // SiSet implements IPMatcherProvider and holds the state for the plugin.
 type SiSet struct {
 	matcher atomic.Value // Stores a netlist.Matcher for concurrent-safe access.
@@ -255,7 +278,7 @@ func (p *SiSet) saveConfig() error {
 
 // reloadAllRules re-parses all enabled local SRS files into a new matcher.
 func (p *SiSet) reloadAllRules() error {
-	log.Printf("[%s] starting to reload all rules...", PluginType)
+	log.Printf("[%s] starting to reload all rules (optimized memory mode)...", PluginType)
 
 	p.mu.RLock()
 	// Create a snapshot of enabled sources to process.
@@ -268,6 +291,7 @@ func (p *SiSet) reloadAllRules() error {
 	p.mu.RUnlock()
 
 	newList := netlist.NewList()
+	collector := &listCollector{l: newList} // [优化] 使用收集器
 	totalRules := 0
 	configChanged := false
 
@@ -278,7 +302,8 @@ func (p *SiSet) reloadAllRules() error {
 		}
 
 		before := newList.Len()
-		err := loadFromFile(src.Files, newList)
+		// [优化] 改为流式加载，不再一次性 ReadFile
+		err := loadFromFile(src.Files, collector)
 		after := newList.Len()
 		count := after - before
 
@@ -320,6 +345,12 @@ func (p *SiSet) reloadAllRules() error {
 			log.Printf("[%s] ERROR: failed to save config after reloading rules: %v", PluginType, err)
 		}
 	}
+
+	// [优化] 异步清理扫描期间产生的临时对象
+	go func() {
+		time.Sleep(1 * time.Second)
+		coremain.ManualGC()
+	}()
 
 	return nil
 }
@@ -366,8 +397,9 @@ func (p *SiSet) downloadAndUpdateLocalFile(ctx context.Context, sourceName strin
 	}
 
 	// CRITICAL STEP: Validate the downloaded data in memory before writing to disk.
-	tempList := netlist.NewList()
-	ok, count, _ := tryLoadSRS(srsData, tempList)
+	// [优化] 使用 counterCollector，仅计数校验，不产生额外的 IP 对象内存开销
+	counter := &counterCollector{}
+	ok, count, _ := tryLoadSRS(bytes.NewReader(srsData), counter)
 	if !ok {
 		return fmt.Errorf("downloaded file for '%s' is not a valid SRS file or is corrupted", sourceName)
 	}
@@ -446,6 +478,7 @@ func (p *SiSet) backgroundUpdater() {
 			if err := p.reloadAllRules(); err != nil {
 				log.Printf("[%s] ERROR: failed to reload rules after auto-update: %v", PluginType, err)
 			}
+			coremain.ManualGC()
 		case <-p.ctx.Done():
 			log.Printf("[%s] background updater is shutting down.", PluginType)
 			return
@@ -493,13 +526,14 @@ func (p *SiSet) api() *chi.Mux {
 			if err := p.reloadAllRules(); err != nil {
 				log.Printf("[%s] ERROR: failed to reload rules after manual update: %v", PluginType, err)
 			}
+			coremain.ManualGC()
 		}()
 
 		jsonResponse(w, map[string]string{"message": fmt.Sprintf("update process for '%s' started in the background", name)}, http.StatusAccepted)
 	})
 
 	// PUT /config/{name}: Add a new rule source or update an existing one.
-	r.Put("/config/{name}", func(w http.ResponseWriter, r *http.Request) {
+	r.Put("/config/{name}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		var reqData RuleSource
 		if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
@@ -542,10 +576,10 @@ func (p *SiSet) api() *chi.Mux {
 		go p.reloadAllRules()
 
 		jsonResponse(w, updatedSource, statusCode)
-	})
+	}))
 
 	// DELETE /config/{name}: Delete a rule source and its local file.
-	r.Delete("/config/{name}", func(w http.ResponseWriter, r *http.Request) {
+	r.Delete("/config/{name}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 
 		var srcToDelete *RuleSource
@@ -578,7 +612,7 @@ func (p *SiSet) api() *chi.Mux {
 		go p.reloadAllRules()
 
 		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 
 	return r
 }
@@ -595,11 +629,14 @@ func jsonError(w http.ResponseWriter, message string, code int) {
 	jsonResponse(w, map[string]string{"error": message}, code)
 }
 
-func loadFromFile(path string, l *netlist.List) error {
+// [修改] 改为接收 IPReceiver 接口，并支持 io.Reader 流式解析
+func loadFromFile(path string, m IPReceiver) error {
 	if path == "" {
 		return nil
 	}
-	data, err := os.ReadFile(path)
+
+	// [优化] 流式读取文件，不再 ReadFile 到内存
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// This is not a fatal error during reload, just means the file isn't there yet.
@@ -608,9 +645,11 @@ func loadFromFile(path string, l *netlist.List) error {
 		}
 		return err
 	}
+	defer f.Close()
 
 	// Only try .srs binary format as per requirement.
-	ok, _, _ := tryLoadSRS(data, l)
+	// [优化] tryLoadSRS 参数改为 io.Reader
+	ok, _, _ := tryLoadSRS(f, m)
 	if !ok {
 		return fmt.Errorf("file %s is not a valid or supported SRS file", path)
 	}
@@ -618,7 +657,7 @@ func loadFromFile(path string, l *netlist.List) error {
 	return nil
 }
 
-// --- SRS Parsing Logic (Copied directly from ip_set.go) ---
+// --- SRS Parsing Logic (Optimized for low memory overhead) ---
 var (
 	srsMagic            = [3]byte{'S', 'R', 'S'}
 	ruleItemIPCIDR      = uint8(6)
@@ -626,8 +665,8 @@ var (
 	maxSupportedVersion = uint8(3)
 )
 
-func tryLoadSRS(data []byte, l *netlist.List) (bool, int, string) {
-	r := bytes.NewReader(data)
+// [修改] 参数 data []byte 改为 r io.Reader，收集器改为 IPReceiver 接口
+func tryLoadSRS(r io.Reader, m IPReceiver) (bool, int, string) {
 	var mb [3]byte
 	if _, err := io.ReadFull(r, mb[:]); err != nil || mb != srsMagic {
 		return false, 0, ""
@@ -650,7 +689,7 @@ func tryLoadSRS(data []byte, l *netlist.List) (bool, int, string) {
 	count := 0
 	var last string
 	for i := uint64(0); i < length; i++ {
-		c, lr := readRule(br, l)
+		c, lr := readRule(br, m)
 		if lr != "" {
 			last = lr
 		}
@@ -659,7 +698,8 @@ func tryLoadSRS(data []byte, l *netlist.List) (bool, int, string) {
 	return true, count, last
 }
 
-func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
+// [修改] 类型改为 IPReceiver 接口
+func readRule(r *bufio.Reader, m IPReceiver) (int, string) {
 	ct := 0
 	var last string
 	mode, err := r.ReadByte()
@@ -668,7 +708,7 @@ func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
 	}
 	switch mode {
 	case 0:
-		c, lr := readDefault(r, l)
+		c, lr := readDefault(r, m)
 		ct += c
 		if lr != "" {
 			last = lr
@@ -677,7 +717,7 @@ func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
 		_, _ = r.ReadByte()
 		n, _ := binary.ReadUvarint(r)
 		for j := uint64(0); j < n; j++ {
-			c, lr := readRule(r, l)
+			c, lr := readRule(r, m)
 			ct += c
 			if lr != "" {
 				last = lr
@@ -688,7 +728,8 @@ func readRule(r *bufio.Reader, l *netlist.List) (int, string) {
 	return ct, last
 }
 
-func readDefault(r *bufio.Reader, l *netlist.List) (int, string) {
+// [修改] 类型改为 IPReceiver 接口
+func readDefault(r *bufio.Reader, m IPReceiver) (int, string) {
 	count := 0
 	var last string
 	for {
@@ -698,14 +739,10 @@ func readDefault(r *bufio.Reader, l *netlist.List) (int, string) {
 		}
 		switch item {
 		case ruleItemIPCIDR:
-			ipset, err := parseIPSet(r)
+			// [核心优化点] parseIPSet 修改为逐个读取模式，直接注入 receiver，不再分配大数据切片
+			err := streamParseIPSet(r, m, &count, &last)
 			if err != nil {
 				return count, last
-			}
-			for _, pfx := range ipset.Prefixes() {
-				l.Append(pfx)
-				count++
-				last = pfx.String()
 			}
 		case ruleItemFinal:
 			return count, last
@@ -717,39 +754,49 @@ func readDefault(r *bufio.Reader, l *netlist.List) (int, string) {
 	return count, last
 }
 
-func parseIPSet(r varbin.Reader) (netipx.IPSet, error) {
+// [新增/优化] 原 parseIPSet 会分配巨大的 ranges 切片。
+// 现在改为 streamParseIPSet，在解析过程中逐个处理 Range，彻底消除内存尖峰。
+func streamParseIPSet(r *bufio.Reader, m IPReceiver, count *int, last *string) error {
 	ver, err := r.ReadByte()
 	if err != nil {
-		return netipx.IPSet{}, err
+		return err
 	}
 	if ver != 1 {
-		return netipx.IPSet{}, fmt.Errorf("unsupported ipset version: %d", ver)
+		return fmt.Errorf("unsupported ipset version: %d", ver)
 	}
 	var length uint64
 	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
-		return netipx.IPSet{}, err
-	}
-	type ipRangeData struct{ From, To []byte }
-	ranges := make([]ipRangeData, length)
-	if err := varbin.Read(r, binary.BigEndian, &ranges); err != nil {
-		return netipx.IPSet{}, err
+		return err
 	}
 
-	var builder netipx.IPSetBuilder
-	for _, rr := range ranges {
-		from, ok := netip.AddrFromSlice(rr.From)
-		if !ok {
+	// [优化] 核心逻辑：逐个循环解析 varbin 数据，不再分配巨大的 ranges 切片
+	for i := uint64(0); i < length; i++ {
+		// 读取单条 Range 数据
+		fromData, err := varbin.ReadValue[[]byte](r, binary.BigEndian)
+		if err != nil {
+			return err
+		}
+		toData, err := varbin.ReadValue[[]byte](r, binary.BigEndian)
+		if err != nil {
+			return err
+		}
+
+		from, ok1 := netip.AddrFromSlice(fromData)
+		to, ok2 := netip.AddrFromSlice(toData)
+		if !ok1 || !ok2 {
 			continue
 		}
-		to, ok := netip.AddrFromSlice(rr.To)
-		if !ok {
-			continue
-		}
+
+		// 使用 netipx 处理该 Range。
+		// 虽然这步会产生少量对象，但它是随用随抛的，不会堆积。
+		var builder netipx.IPSetBuilder
 		builder.AddRange(netipx.IPRangeFrom(from, to))
+		ipset, _ := builder.IPSet()
+		for _, pfx := range ipset.Prefixes() {
+			m.Add(pfx) // 注入最终的 netlist 或计数器
+			*count++
+			*last = pfx.String()
+		}
 	}
-	pPtr, err := builder.IPSet()
-	if err != nil {
-		return netipx.IPSet{}, err
-	}
-	return *pPtr, nil
+	return nil
 }
