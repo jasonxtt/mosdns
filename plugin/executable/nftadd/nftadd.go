@@ -273,6 +273,7 @@ func (p *NftAdd) startupNftRoutine() {
 		} else {
 			log.Printf("[%s] eBPF production proxy fully operational.", PluginType)
 		}
+		coremain.ManualGC() 
 	}
 
 	p.startupDone.Store(true)
@@ -458,6 +459,7 @@ func (p *NftAdd) setupEbpf(ipSet *netipx.IPSet) error {
 	if err := spec.LoadAndAssign(&objs, nil); err != nil {
 		return err
 	}
+	spec = nil 
 	p.ebpfMap = objs.RouteRules
 
 	lan, err := net.InterfaceByName(p.nftArgs.EbpfIface)
@@ -478,7 +480,7 @@ func (p *NftAdd) setupEbpf(ipSet *netipx.IPSet) error {
 		return err
 	}
 	p.ebpfLink = l
-
+	objs.IngressL2 = nil 
 	return p.syncEbpfMap(ipSet)
 }
 
