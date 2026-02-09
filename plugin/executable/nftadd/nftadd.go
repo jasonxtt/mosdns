@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	_ "embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -32,11 +33,16 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/go-chi/chi/v5"
 	"github.com/sagernet/sing/common/varbin"
 	"go4.org/netipx"
 	"golang.org/x/net/proxy"
 )
+
+//go:embed proxy.o
+var ebpfProg []byte
 
 const (
 	PluginType      = "nft_add"
@@ -63,6 +69,14 @@ type NftConfig struct {
 	SetV6        string `yaml:"set_v6"`
 	FixIPFile    string `yaml:"fixip"`   // path to fixip file
 	NftConfFile  string `yaml:"nftfile"` // path to base nft config file
+
+	// eBPF configurations
+	EbpfEnable     string `yaml:"ebpf_enable"`
+	EbpfIface      string `yaml:"ebpf_iface"`
+	MihomoPort     uint16 `yaml:"mihomo_port"`
+	SingboxPort    uint16 `yaml:"singbox_port"`
+	MihomoFakeIPv4 string `yaml:"mihomo_fakeip_v4"`
+	MihomoFakeIPv6 string `yaml:"mihomo_fakeip_v6"`
 }
 
 // RuleSource definition
@@ -93,6 +107,10 @@ type NftAdd struct {
 
 	// Marks if initial startup is done to prevent premature auto-updates
 	startupDone atomic.Bool
+
+	// eBPF runtime resources
+	ebpfLink link.Link
+	ebpfMap  *ebpf.Map
 }
 
 // Interface checks
@@ -169,7 +187,6 @@ func newNftAdd(bp *coremain.BP, args any) (any, error) {
 
 	return p, nil
 }
-
 // Match implementation
 func (p *NftAdd) Match(addr netip.Addr) bool {
 	m, ok := p.matcher.Load().(netlist.Matcher)
@@ -186,6 +203,13 @@ func (p *NftAdd) GetIPMatcher() netlist.Matcher {
 func (p *NftAdd) Close() error {
 	log.Printf("[%s] closing...", PluginType)
 	p.cancel()
+	if p.ebpfLink != nil {
+		p.ebpfLink.Close()
+	}
+	if p.ebpfMap != nil {
+		p.ebpfMap.Close()
+	}
+	p.cleanupRouting()
 	return nil
 }
 
@@ -241,6 +265,16 @@ func (p *NftAdd) startupNftRoutine() {
 	if err := p.flushAndFillSets(ipSet); err != nil {
 		log.Printf("[%s] ERROR: Failed to inject IPs: %v", PluginType, err)
 		return
+	}
+
+	// Step 4: Setup eBPF
+	if p.nftArgs.EbpfEnable == "ebpf_true" {
+		log.Printf("[%s] Phase 4: Setting up eBPF on interface %s...", PluginType, p.nftArgs.EbpfIface)
+		if err := p.setupEbpf(ipSet); err != nil {
+			log.Printf("[%s] ERROR: eBPF setup failed: %v", PluginType, err)
+		} else {
+			log.Printf("[%s] eBPF production proxy fully operational.", PluginType)
+		}
 	}
 
 	// Mark startup done, allow subsequent updates
@@ -337,6 +371,150 @@ func (p *NftAdd) flushAndFillSets(ipSet *netipx.IPSet) error {
 	return nil
 }
 
+// -----------------------------------------------------------------------------
+// eBPF Helper Logic
+// -----------------------------------------------------------------------------
+
+func (p *NftAdd) runCmd(cmd string) {
+	_ = exec.Command("sh", "-c", cmd).Run()
+}
+
+func (p *NftAdd) setupRouting() {
+	p.runCmd("ip rule del pref 1 2>/dev/null")
+	p.runCmd("ip rule del pref 2 2>/dev/null")
+	p.runCmd("ip rule del pref 3 2>/dev/null")
+	p.runCmd("ip rule del pref 4 2>/dev/null")
+	p.runCmd("ip rule del pref 5 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 1 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 2 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 3 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 4 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 5 2>/dev/null")
+
+	p.runCmd("ip rule add pref 1 iif lo to 10.0.0.0/8 lookup main")
+	p.runCmd("ip rule add pref 2 iif lo to 172.16.0.0/12 lookup main")
+	p.runCmd("ip rule add pref 3 iif lo to 192.168.0.0/16 lookup main")
+	p.runCmd("ip rule add pref 4 fwmark 1 table 100")
+	p.runCmd("ip rule add pref 5 fwmark 2 table 101")
+	p.runCmd("ip route add local default dev lo table 100 2>/dev/null")
+	p.runCmd("ip route add local default dev lo table 101 2>/dev/null")
+
+	p.runCmd("ip -6 rule add pref 2 iif lo to fe80::/10 lookup main")
+	p.runCmd("ip -6 rule add pref 3 fwmark 1 table 200")
+	p.runCmd("ip -6 rule add pref 4 fwmark 2 table 201")
+	p.runCmd("ip -6 route add local default dev lo table 200 2>/dev/null")
+	p.runCmd("ip -6 route add local default dev lo table 201 2>/dev/null")
+
+	p.runCmd("sysctl -w net.ipv4.ip_forward=1")
+	p.runCmd("sysctl -w net.ipv4.conf.all.rp_filter=0")
+	p.runCmd("sysctl -w net.ipv4.conf.lo.rp_filter=0")
+	p.runCmd("sysctl -w net.ipv4.conf.all.accept_local=1")
+	p.runCmd("sysctl -w net.ipv4.conf.lo.accept_local=1")
+	p.runCmd("sysctl -w net.ipv4.conf.all.route_localnet=1")
+}
+
+func (p *NftAdd) cleanupRouting() {
+	p.runCmd("ip rule del pref 1 2>/dev/null")
+	p.runCmd("ip rule del pref 2 2>/dev/null")
+	p.runCmd("ip rule del pref 3 2>/dev/null")
+	p.runCmd("ip rule del pref 4 2>/dev/null")
+	p.runCmd("ip rule del pref 5 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 1 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 2 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 3 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 4 2>/dev/null")
+	p.runCmd("ip -6 rule del pref 5 2>/dev/null")
+}
+
+func (p *NftAdd) packLpmKey(prefix netip.Prefix) []byte {
+	key := make([]byte, 20)
+	binary.LittleEndian.PutUint32(key[0:4], uint32(prefix.Bits()))
+	addr := prefix.Addr().As16()
+	copy(key[4:20], addr[:])
+	if prefix.Addr().Is4() {
+		v4 := prefix.Addr().As4()
+		copy(key[4:8], v4[:])
+		for i := 8; i < 20; i++ { key[i] = 0 }
+	}
+	return key
+}
+
+func (p *NftAdd) setupEbpf(ipSet *netipx.IPSet) error {
+	// Cleanup existing handles to ensure a fresh state (flush equivalent)
+	if p.ebpfLink != nil {
+		p.ebpfLink.Close()
+		p.ebpfLink = nil
+	}
+	if p.ebpfMap != nil {
+		p.ebpfMap.Close()
+		p.ebpfMap = nil
+	}
+
+	p.setupRouting()
+
+	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(ebpfProg))
+	if err != nil { return err }
+
+	consts := make(map[string]interface{})
+	if p.nftArgs.MihomoPort != 0 { consts["mihomo_port"] = p.nftArgs.MihomoPort }
+	if p.nftArgs.SingboxPort != 0 { consts["singbox_port"] = p.nftArgs.SingboxPort }
+	if len(consts) > 0 {
+		if err := spec.RewriteConstants(consts); err != nil {
+			log.Printf("[%s] warn: ebpf rewrite constants: %v", PluginType, err)
+		}
+	}
+
+	var objs struct {
+		IngressL2  *ebpf.Program `ebpf:"tc_ingress_l2"`
+		RouteRules *ebpf.Map     `ebpf:"route_rules"`
+	}
+
+	if err := spec.LoadAndAssign(&objs, nil); err != nil { return err }
+	p.ebpfMap = objs.RouteRules
+
+	lan, err := net.InterfaceByName(p.nftArgs.EbpfIface)
+	if err != nil {
+		objs.IngressL2.Close()
+		objs.RouteRules.Close()
+		return err
+	}
+
+	l, err := link.AttachTCX(link.TCXOptions{
+		Interface: lan.Index,
+		Program:   objs.IngressL2,
+		Attach:    ebpf.AttachTCXIngress,
+	})
+	if err != nil {
+		objs.IngressL2.Close()
+		objs.RouteRules.Close()
+		return err
+	}
+	p.ebpfLink = l
+
+	return p.syncEbpfMap(ipSet)
+}
+
+func (p *NftAdd) syncEbpfMap(ipSet *netipx.IPSet) error {
+	if p.ebpfMap == nil { return nil }
+
+	// 1. Fill Mark 2 (FakeIP)
+	mark2 := uint32(2)
+	fakeIPs := []string{p.nftArgs.MihomoFakeIPv4, p.nftArgs.MihomoFakeIPv6}
+	for _, cidr := range fakeIPs {
+		if cidr == "" { continue }
+		if prefix, err := netip.ParsePrefix(cidr); err == nil {
+			p.ebpfMap.Update(p.packLpmKey(prefix), &mark2, ebpf.UpdateAny)
+		}
+	}
+
+	// 2. Fill Mark 1 (Combined SRS + FixIP)
+	mark1 := uint32(1)
+	for _, pfx := range ipSet.Prefixes() {
+		p.ebpfMap.Update(p.packLpmKey(pfx), &mark1, ebpf.UpdateAny)
+	}
+
+	return nil
+}
 // -----------------------------------------------------------------------------
 // Helper functions: file parsing
 // -----------------------------------------------------------------------------
@@ -548,13 +726,19 @@ func (p *NftAdd) reloadAllRules() error {
 	// 2. Trigger NFT update (only if string matches "nft_true")
 	if p.startupDone.Load() && p.nftArgs.Enable == "nft_true" {
 		go func() {
-			log.Printf("[%s] Triggering NFT sync after reload...", PluginType)
+			log.Printf("[%s] Triggering NFT/eBPF sync after reload...", PluginType)
 			ipSet, err := p.buildFullIPSet()
 			if err != nil {
 				log.Printf("[%s] ERROR: buildFullIPSet failed during sync: %v", PluginType, err)
 				return
 			}
 			p.flushAndFillSets(ipSet)
+			if p.nftArgs.EbpfEnable == "ebpf_true" {
+				// Reload collection to ensure LPM map is flushed and updated
+				if err := p.setupEbpf(ipSet); err != nil {
+					log.Printf("[%s] ERROR: eBPF resync failed: %v", PluginType, err)
+				}
+			}
 		}()
 	}
 
