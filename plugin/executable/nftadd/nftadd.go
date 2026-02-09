@@ -1,3 +1,4 @@
+//go:build linux
 /*
  * Copyright (C) 2020-2022, IrineSistiana
  * Copyright (C) 2024, Modified for nft_add requirement
