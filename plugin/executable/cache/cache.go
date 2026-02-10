@@ -104,8 +104,9 @@ type l1Item struct {
 type l1Shard struct {
 	sync.RWMutex
 	items map[key]*l1Item
-	order []key // 记录存入顺序用于淘汰
-	pos   int   // 指针位置
+	order []key
+	pos   int
+	ref   map[key]bool
 }
 
 type Args struct {
@@ -275,6 +276,7 @@ func NewCache(args *Args, opts Opts) *Cache {
 		p.shards[i] = &l1Shard{
 			items: make(map[key]*l1Item, shardMaxSize),
 			order: make([]key, shardMaxSize),
+			ref:   make(map[key]bool, shardMaxSize),
 		}
 	}
 
@@ -290,18 +292,35 @@ func NewCache(args *Args, opts Opts) *Cache {
 func (s *l1Shard) updateL1(k key, msg *dns.Msg, storedTime, expirationTime time.Time, domainSet string) {
 	s.Lock()
 	defer s.Unlock()
-	// 如果已存在，仅更新内容并深拷贝确保安全
+
+	// 命中则更新并标记为最近使用
 	if _, ok := s.items[k]; ok {
 		s.items[k] = &l1Item{msg: msg.Copy(), storedTime: storedTime, expirationTime: expirationTime, domainSet: domainSet}
+		s.ref[k] = true
 		return
 	}
-	// 剔除旧记录
-	if oldKey := s.order[s.pos]; oldKey != "" && oldKey != k {
+
+	// CLOCK 淘汰循环
+	for {
+		oldKey := s.order[s.pos]
+		if oldKey == "" {
+			break
+		}
+
+		if s.ref[oldKey] {
+			s.ref[oldKey] = false
+			s.pos = (s.pos + 1) % shardMaxSize
+			continue
+		}
+
 		delete(s.items, oldKey)
+		delete(s.ref, oldKey)
+		break
 	}
-	// 存入新记录
+
 	s.items[k] = &l1Item{msg: msg.Copy(), storedTime: storedTime, expirationTime: expirationTime, domainSet: domainSet}
 	s.order[s.pos] = k
+	s.ref[k] = true
 	s.pos = (s.pos + 1) % shardMaxSize
 }
 
@@ -360,10 +379,14 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	now := time.Now()
 	if ok1 && now.Before(v1.expirationTime) {
 		c.hitTotal.Inc()
-		r := v1.msg.Copy() // 并发安全拷贝
+
+		// 仅 Copy 一次，避免 TTL 修改污染缓存
+		r := v1.msg.Copy()
 		dnsutils.SubtractTTL(r, uint32(now.Sub(v1.storedTime).Seconds()))
 		r.Id = q.Id
+
 		qCtx.SetResponse(r)
+
 		if v1.domainSet != "" {
 			qCtx.StoreValue(query_context.KeyDomainSet, v1.domainSet)
 		}
@@ -400,12 +423,14 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	if r != nil && !c.containsExcluded(r) {
 		if saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL) {
 			c.updatedKey.Add(1)
-			
+
 			// 同时更新 L1
 			minTTL := dnsutils.GetMinimalTTL(r)
 			var dset string
 			if val, ok := qCtx.GetValue(query_context.KeyDomainSet); ok {
-				if s, isString := val.(string); isString { dset = s }
+				if s, isString := val.(string); isString {
+					dset = s
+				}
 			}
 			shard.updateL1(k, r, now, now.Add(time.Duration(minTTL)*time.Second), dset)
 		}
@@ -442,7 +467,9 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 				minTTL := dnsutils.GetMinimalTTL(r)
 				var dset string
 				if val, ok := qCtx.GetValue(query_context.KeyDomainSet); ok {
-					if s, isString := val.(string); isString { dset = s }
+					if s, isString := val.(string); isString {
+						dset = s
+					}
 				}
 				shard.updateL1(k, r, time.Now(), time.Now().Add(time.Duration(minTTL)*time.Second), dset)
 			}
@@ -537,13 +564,14 @@ func (c *Cache) Api() *chi.Mux {
 	r.Get("/flush", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
 		c.logger.Info("flushing cache via api")
 		c.backend.Flush()
-		
+
 		// 清理 L1 分段桶
 		for i := 0; i < shardCount; i++ {
 			c.shards[i].Lock()
 			c.shards[i].items = make(map[key]*l1Item, shardMaxSize)
 			c.shards[i].order = make([]key, shardMaxSize)
 			c.shards[i].pos = 0
+			c.shards[i].ref = make(map[key]bool, shardMaxSize)
 			c.shards[i].Unlock()
 		}
 
@@ -560,12 +588,12 @@ func (c *Cache) Api() *chi.Mux {
 	}))
 
 	r.Get("/dump", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
-	    w.Header().Set("content-type", "application/octet-stream")
-	    _, err := c.writeDump(w)
-	    if err != nil {
-	        http.Error(w, err.Error(), http.StatusInternalServerError)
-	        return
-	    }
+		w.Header().Set("content-type", "application/octet-stream")
+		_, err := c.writeDump(w)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}))
 
 	r.Get("/save", func(w http.ResponseWriter, req *http.Request) {
@@ -603,8 +631,12 @@ func (c *Cache) Api() *chi.Mux {
 		limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 		offset, _ := strconv.Atoi(req.URL.Query().Get("offset"))
 
-		if limit <= 0 { limit = 100 }
-		if offset < 0 { offset = 0 }
+		if limit <= 0 {
+			limit = 100
+		}
+		if offset < 0 {
+			offset = 0
+		}
 
 		isIPLike := strings.Contains(query, ".") || strings.Contains(query, ":")
 
@@ -614,7 +646,7 @@ func (c *Cache) Api() *chi.Mux {
 		stopIteration := errors.New("limit reached")
 
 		// --- 生产级优化点 1: 对象复用 ---
-		reusableMsg := new(dns.Msg) 
+		reusableMsg := new(dns.Msg)
 
 		err := c.backend.Range(func(k key, v *item, cacheExpirationTime time.Time) error {
 			if cacheExpirationTime.Before(now) {
@@ -907,7 +939,7 @@ func getMsgKey(q *dns.Msg, qCtx *query_context.Context, useECS bool) string {
 		// if useECS: bits + qtype + qname length + qname + ecs length + ecs
 		totalLen += 1 + len(ecs)
 	}
-	
+
 	// 优化：从池获取缓冲区
 	bufPtr := keyBufferPool.Get().(*[]byte)
 	buf := (*bufPtr)[:0]
@@ -926,7 +958,7 @@ func getMsgKey(q *dns.Msg, qCtx *query_context.Context, useECS bool) string {
 	if opt := q.IsEdns0(); opt != nil && opt.Do() {
 		b = b | doBit
 	}
-	
+
 	buf = append(buf, b)
 	buf = append(buf, byte(question.Qtype>>8), byte(question.Qtype))
 	buf = append(buf, byte(len(question.Name)))
@@ -937,7 +969,7 @@ func getMsgKey(q *dns.Msg, qCtx *query_context.Context, useECS bool) string {
 	}
 
 	res := string(buf) // 安全拷贝
-	
+
 	*bufPtr = buf
 	keyBufferPool.Put(bufPtr)
 
