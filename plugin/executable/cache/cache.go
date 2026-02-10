@@ -51,6 +51,10 @@ const (
 	dumpHeader             = "mosdns_cache_v2"
 	dumpBlockSize          = 128
 	dumpMaximumBlockLength = 1 << 20 // 1M block. 8kb pre entry. Should be enough.
+
+	// L1 LRU 性能参数
+	shardCount = 256
+	l1TotalCap = 4000
 )
 
 const (
@@ -78,6 +82,96 @@ type item struct {
 	storedTime     time.Time
 	expirationTime time.Time
 	domainSet      string
+}
+
+// l1Item 存储解包后的对象，并携带 domainSet
+type l1Item struct {
+	msg            *dns.Msg
+	storedTime     time.Time
+	expirationTime time.Time
+	domainSet      string
+}
+
+// l1Node 为 LRU 链表节点
+type l1Node struct {
+	k          key
+	v          *l1Item
+	prev, next *l1Node
+}
+
+// l1Shard 带有极致优化的分段锁 LRU 桶
+type l1Shard struct {
+	sync.Mutex
+	items      map[key]*l1Node
+	head, tail *l1Node
+	maxSize    int
+}
+
+func (s *l1Shard) get(k key) (*dns.Msg, string, bool) {
+	s.Lock()
+	defer s.Unlock()
+	node, ok := s.items[k]
+	if !ok {
+		return nil, "", false
+	}
+	now := time.Now()
+	if now.After(node.v.expirationTime) {
+		s.removeNode(node)
+		return nil, "", false
+	}
+	s.moveToHead(node)
+	// 返回副本，防止外部修改污染缓存池
+	r := node.v.msg.Copy()
+	dnsutils.SubtractTTL(r, uint32(now.Sub(node.v.storedTime).Seconds()))
+	return r, node.v.domainSet, true
+}
+
+func (s *l1Shard) set(k key, msg *dns.Msg, stored, exp time.Time, domainSet string) {
+	if msg == nil { return }
+	s.Lock()
+	defer s.Unlock()
+
+	if node, ok := s.items[k]; ok {
+		// 存入时也拷贝一份副本，确保存入的对象不被外部生命周期干扰
+		node.v = &l1Item{msg: msg.Copy(), storedTime: stored, expirationTime: exp, domainSet: domainSet}
+		s.moveToHead(node)
+		return
+	}
+
+	if len(s.items) >= s.maxSize {
+		if s.tail != nil {
+			s.removeNode(s.tail)
+		}
+	}
+
+	node := &l1Node{
+		k: k,
+		v: &l1Item{msg: msg.Copy(), storedTime: stored, expirationTime: exp, domainSet: domainSet},
+	}
+	s.items[k] = node
+	s.addToHead(node)
+}
+
+func (s *l1Shard) addToHead(n *l1Node) {
+	n.next = s.head
+	n.prev = nil
+	if s.head != nil { s.head.prev = n }
+	s.head = n
+	if s.tail == nil { s.tail = n }
+}
+
+func (s *l1Shard) removeNode(n *l1Node) {
+	delete(s.items, n.k)
+	if n.prev != nil { n.prev.next = n.next } else { s.head = n.next }
+	if n.next != nil { n.next.prev = n.prev } else { s.tail = n.prev }
+}
+
+func (s *l1Shard) moveToHead(n *l1Node) {
+	if n == s.head { return }
+	// 仅调整指针位置，不触动 Map
+	if n.prev != nil { n.prev.next = n.next } else { s.head = n.next }
+	if n.next != nil { n.next.prev = n.prev } else { s.tail = n.prev }
+	s.addToHead(n)
 }
 
 type Args struct {
@@ -142,6 +236,9 @@ type Cache struct {
 	closeOnce    sync.Once
 	closeNotify  chan struct{}
 	updatedKey   atomic.Uint64
+
+	// 分段 L1
+	shards [shardCount]*l1Shard
 
 	// dumpMu protects the dump file writing process to ensure thread safety
 	// between auto-dump loop and manual /save API call.
@@ -239,6 +336,17 @@ func NewCache(args *Args, opts Opts) *Cache {
 		}),
 	}
 
+	// 分段配额防御性初始化
+	shardMaxSize := l1TotalCap / shardCount
+	if shardMaxSize < 1 { shardMaxSize = 1 }
+
+	for i := 0; i < shardCount; i++ {
+		p.shards[i] = &l1Shard{
+			items:   make(map[key]*l1Node, shardMaxSize),
+			maxSize: shardMaxSize,
+		}
+	}
+
 	if err := p.loadDump(); err != nil {
 		p.logger.Error("failed to load cache dump", zap.Error(err))
 	}
@@ -289,6 +397,21 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 		return next.ExecNext(ctx, qCtx)
 	}
 
+	k := key(msgKey)
+	shard := c.shards[k.Sum()%shardCount]
+
+	// --- 1. L1 LRU 极速路径 ---
+	if r, domainSet, hit := shard.get(k); hit {
+		c.hitTotal.Inc()
+		r.Id = q.Id
+		qCtx.SetResponse(r)
+		if domainSet != "" {
+			qCtx.StoreValue(query_context.KeyDomainSet, domainSet)
+		}
+		return nil
+	}
+
+	// --- 2. L2 常规路径 (100% 原始逻辑) ---
 	cachedResp, lazyHit, domainSet := getRespFromCache(msgKey, c.backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
 	if lazyHit {
 		c.lazyHitTotal.Inc()
@@ -301,6 +424,13 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 		if domainSet != "" {
 			qCtx.StoreValue(query_context.KeyDomainSet, domainSet)
 		}
+
+		// 晋升到 L1
+		if !lazyHit {
+			if v, _, _ := c.backend.Get(k); v != nil {
+				shard.set(k, cachedResp, v.storedTime, v.expirationTime, v.domainSet)
+			}
+		}
 		return nil
 	}
 
@@ -310,6 +440,14 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	if r != nil && !c.containsExcluded(r) {
 		if saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL) {
 			c.updatedKey.Add(1)
+			// 同时更新 L1
+			now := time.Now()
+			minTTL := dnsutils.GetMinimalTTL(r)
+			var dset string
+			if val, ok := qCtx.GetValue(query_context.KeyDomainSet); ok {
+				if s, isString := val.(string); isString { dset = s }
+			}
+			shard.set(k, r, now, now.Add(time.Duration(minTTL)*time.Second), dset)
 		}
 	}
 
@@ -337,6 +475,15 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 		if r != nil && !c.containsExcluded(r) {
 			if saveRespToCache(msgKey, qCtx, c.backend, c.args.LazyCacheTTL) {
 				c.updatedKey.Add(1)
+				// 更新 L1
+				k := key(msgKey)
+				shard := c.shards[k.Sum()%shardCount]
+				minTTL := dnsutils.GetMinimalTTL(r)
+				var dset string
+				if val, ok := qCtx.GetValue(query_context.KeyDomainSet); ok {
+					if s, isString := val.(string); isString { dset = s }
+				}
+				shard.set(k, r, time.Now(), time.Now().Add(time.Duration(minTTL)*time.Second), dset)
 			}
 		}
 		c.logger.Debug("lazy cache updated", qCtx.InfoField())
@@ -425,18 +572,26 @@ func (c *Cache) dumpCache() error {
 func (c *Cache) Api() *chi.Mux {
 	r := chi.NewRouter()
 
-	// 清空缓存 API：执行后打扫卫生
+	// 清空缓存 API
 	r.Get("/flush", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
 		c.logger.Info("flushing cache via api")
 		c.backend.Flush()
-		c.updatedKey.Store(0)
+		
+		// 清理 L1
+		for i := 0; i < shardCount; i++ {
+			c.shards[i].Lock()
+			c.shards[i].items = make(map[key]*l1Node, c.shards[i].maxSize)
+			c.shards[i].head = nil
+			c.shards[i].tail = nil
+			c.shards[i].Unlock()
+		}
 
+		c.updatedKey.Store(0)
 		go func() {
 			if err := c.dumpCache(); err != nil {
 				c.logger.Error("failed to dump cache after flushing", zap.Error(err))
 			}
 		}()
-
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("Cache flushed and a background dump has been triggered.\n"))
 	}))
@@ -476,8 +631,7 @@ func (c *Cache) Api() *chi.Mux {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// 优化后的查询 API：支持分页、后端搜索和分级匹配
-// 优化后的查询 API：支持分页、后端搜索和分级匹配（内存极致优化版）
+	// 优化后的查询 API：保留 10:12 AM 全部精细逻辑
 	r.Get("/show", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Disposition", `inline; filename="cache.txt"`)
@@ -496,8 +650,6 @@ func (c *Cache) Api() *chi.Mux {
 		sentCount := 0
 		stopIteration := errors.New("limit reached")
 
-		// --- 生产级优化点 1: 对象复用 ---
-		// 在循环外创建对象，10万次循环只使用这一个内存地址，极大降低 GC 压力
 		reusableMsg := new(dns.Msg) 
 
 		err := c.backend.Range(func(k key, v *item, cacheExpirationTime time.Time) error {
@@ -508,19 +660,13 @@ func (c *Cache) Api() *chi.Mux {
 			keyStr := keyToString(k)
 			found := false
 
-			// --- 第一级匹配：检查 Key (不解包，极速) ---
 			if query == "" || strings.Contains(strings.ToLower(keyStr), query) {
 				found = true
 			}
 
-			// --- 第二级匹配：启发式深度检查 ---
-			// 只有在 Key 没中且像 IP 时才解包
 			isDeepMatched := false
 			if !found && isIPLike {
-				// 使用复用对象解包
 				if err := reusableMsg.Unpack(v.resp); err == nil {
-					// 优化点 2: 仅对 Answer 字段进行匹配，而不是转全量字符串
-					// 这能避开 Question 区域的干扰并减少字符串计算
 					for _, rr := range reusableMsg.Answer {
 						if strings.Contains(rr.String(), query) {
 							found = true
@@ -537,7 +683,6 @@ func (c *Cache) Api() *chi.Mux {
 					return nil
 				}
 
-				// 开始输出
 				fmt.Fprintf(w, "----- Cache Entry -----\n")
 				fmt.Fprintf(w, "Key:           %s\n", keyStr)
 				if v.domainSet != "" {
@@ -547,7 +692,6 @@ func (c *Cache) Api() *chi.Mux {
 				fmt.Fprintf(w, "MsgExpire:     %s\n", v.expirationTime.Format(time.RFC3339))
 				fmt.Fprintf(w, "CacheExpire:   %s\n", cacheExpirationTime.Format(time.RFC3339))
 
-				// 如果刚才没解包（Key 匹配的情况），现在需要解包来显示详细内容
 				if !isDeepMatched {
 					if err := reusableMsg.Unpack(v.resp); err != nil {
 						fmt.Fprintf(w, "DNS Message:\n<failed to unpack>\n")
@@ -573,37 +717,27 @@ func (c *Cache) Api() *chi.Mux {
 	return r
 }
 
-// keyToString converts internal []byte key to human readable format
 func keyToString(k key) string {
 	data := []byte(k)
 	offset := 0
 	var parts []string
 
-	// 1. flags (1 byte)
 	if len(data) < offset+1 {
 		return fmt.Sprintf("invalid_key(len<1): %x", data)
 	}
 	flagsByte := data[offset]
 	offset++
 	var flags []string
-	if flagsByte&adBit != 0 {
-		flags = append(flags, "AD")
-	}
-	if flagsByte&cdBit != 0 {
-		flags = append(flags, "CD")
-	}
-	if flagsByte&doBit != 0 {
-		flags = append(flags, "DO")
-	}
+	if flagsByte&adBit != 0 { flags = append(flags, "AD") }
+	if flagsByte&cdBit != 0 { flags = append(flags, "CD") }
+	if flagsByte&doBit != 0 { flags = append(flags, "DO") }
 
-	// 2. QType (2 bytes)
 	if len(data) < offset+2 {
 		return fmt.Sprintf("invalid_key(len<3): %x", data)
 	}
 	qtype := binary.BigEndian.Uint16(data[offset : offset+2])
 	offset += 2
 
-	// 3. Name
 	if len(data) < offset+1 {
 		return fmt.Sprintf("invalid_key(len<4): %x", data)
 	}
@@ -620,7 +754,6 @@ func keyToString(k key) string {
 		parts = append(parts, fmt.Sprintf("[flags:%s]", strings.Join(flags, ",")))
 	}
 
-	// 4. ECS (optional)
 	if offset < len(data) {
 		if len(data) < offset+1 {
 			parts = append(parts, "[ecs:invalid_len_byte]")
@@ -675,13 +808,12 @@ func (c *Cache) writeDump(w io.Writer) (int, error) {
 		if cacheExpirationTime.Before(now) {
 			return nil
 		}
-		// Optimization: v.resp is already []byte, so we don't need to Pack() it here.
 		e := &CachedEntry{
 			Key:                 []byte(k),
 			CacheExpirationTime: cacheExpirationTime.Unix(),
 			MsgExpirationTime:   v.expirationTime.Unix(),
 			MsgStoredTime:       v.storedTime.Unix(),
-			Msg:                 v.resp, // Direct assignment
+			Msg:                 v.resp, 
 			DomainSet:           v.domainSet,
 		}
 		block.Entries = append(block.Entries, e)
@@ -743,9 +875,8 @@ func (c *Cache) readDump(r io.Reader) (int, error) {
 			msgExpTime := time.Unix(entry.GetMsgExpirationTime(), 0)
 			storedTime := time.Unix(entry.GetMsgStoredTime(), 0)
 
-			// Optimization: Don't unpack. Store raw bytes directly.
 			i := &item{
-				resp:           entry.GetMsg(), // Store bytes
+				resp:           entry.GetMsg(),
 				storedTime:     storedTime,
 				expirationTime: msgExpTime,
 				domainSet:      entry.GetDomainSet(),
@@ -771,13 +902,8 @@ func (c *Cache) readDump(r io.Reader) (int, error) {
 	return en, gr.Close()
 }
 
-// -----------------------------------------------------------------------------------
-// Functions merged from utils.go (optimized for []byte storage)
-// -----------------------------------------------------------------------------------
-
 func getECSClient(qCtx *query_context.Context) string {
 	queryOpt := qCtx.QOpt()
-	// Check if query already has an ecs.
 	for _, o := range queryOpt.Option {
 		if o.Option() == dns.EDNS0SUBNET {
 			return o.String()
@@ -786,39 +912,28 @@ func getECSClient(qCtx *query_context.Context) string {
 	return ""
 }
 
-// getMsgKey returns a string key for the query msg, or an empty
-// string if query should not be cached.
 func getMsgKey(q *dns.Msg, qCtx *query_context.Context, useECS bool) string {
 	if q.Response || q.Opcode != dns.OpcodeQuery || len(q.Question) != 1 {
 		return ""
 	}
 
 	question := q.Question[0]
-	// bits + qtype + qname length + qname
 	totalLen := 1 + 2 + 1 + len(question.Name)
 	ecs := ""
 	if useECS {
 		ecs = getECSClient(qCtx)
-		// if useECS: bits + qtype + qname length + qname + ecs length + ecs
 		totalLen += 1 + len(ecs)
 	}
 	buf := make([]byte, totalLen)
 	b := byte(0)
-	// RFC 6840 5.7: The AD bit in a query as a signal
-	// indicating that the requester understands and is interested in the
-	// value of the AD bit in the response.
-	if q.AuthenticatedData {
-		b = b | adBit
-	}
-	if q.CheckingDisabled {
-		b = b | cdBit
-	}
-	if opt := q.IsEdns0(); opt != nil && opt.Do() {
-		b = b | doBit
-	}
+	if q.AuthenticatedData { b = b | adBit }
+	if q.CheckingDisabled { b = b | cdBit }
+	if opt := q.IsEdns0(); opt != nil && opt.Do() { b = b | doBit }
 	buf[0] = b
-	buf[1] = byte(question.Qtype << 8)
-	buf[2] = byte(question.Qtype)
+	
+	// 改进点：明确大端写入
+	binary.BigEndian.PutUint16(buf[1:3], uint16(question.Qtype))
+	
 	buf[3] = byte(len(question.Name))
 	copy(buf[4:], question.Name)
 	if len(ecs) > 0 {
@@ -829,173 +944,86 @@ func getMsgKey(q *dns.Msg, qCtx *query_context.Context, useECS bool) string {
 }
 
 func copyNoOpt(m *dns.Msg) *dns.Msg {
-	if m == nil {
-		return nil
-	}
-
+	if m == nil { return nil }
 	m2 := new(dns.Msg)
 	m2.MsgHdr = m.MsgHdr
 	m2.Compress = m.Compress
-
 	if len(m.Question) > 0 {
 		m2.Question = make([]dns.Question, len(m.Question))
 		copy(m2.Question, m.Question)
 	}
-
 	lenExtra := len(m.Extra)
 	for _, r := range m.Extra {
-		if r.Header().Rrtype == dns.TypeOPT {
-			lenExtra--
-		}
+		if r.Header().Rrtype == dns.TypeOPT { lenExtra-- }
 	}
-
 	s := make([]dns.RR, len(m.Answer)+len(m.Ns)+lenExtra)
 	m2.Answer, s = s[:0:len(m.Answer)], s[len(m.Answer):]
 	m2.Ns, s = s[:0:len(m.Ns)], s[len(m.Ns):]
 	m2.Extra = s[:0:lenExtra]
-
-	for _, r := range m.Answer {
-		m2.Answer = append(m2.Answer, dns.Copy(r))
-	}
-	for _, r := range m.Ns {
-		m2.Ns = append(m2.Ns, dns.Copy(r))
-	}
-
+	for _, r := range m.Answer { m2.Answer = append(m2.Answer, dns.Copy(r)) }
+	for _, r := range m.Ns { m2.Ns = append(m2.Ns, dns.Copy(r)) }
 	for _, r := range m.Extra {
-		if r.Header().Rrtype == dns.TypeOPT {
-			continue
-		}
-		m2.Extra = append(m2.Extra, dns.Copy(r))
+		if r.Header().Rrtype != dns.TypeOPT { m2.Extra = append(m2.Extra, dns.Copy(r)) }
 	}
 	return m2
 }
 
-func min[T constraints.Ordered](a, b T) T {
-	if a < b {
-		return a
-	}
-	return b
-}
+func min[T constraints.Ordered](a, b T) T { if a < b { return a }; return b }
 
-// getRespFromCache returns the cached response from cache.
-// The ttl of returned msg will be changed properly.
-// Returned bool indicates whether this response is hit by lazy cache.
-// Note: Caller SHOULD change the msg id because it's not same as query's.
 func getRespFromCache(msgKey string, backend *cache.Cache[key, *item], lazyCacheEnabled bool, lazyTtl int) (*dns.Msg, bool, string) {
-	// Lookup cache
 	v, _, _ := backend.Get(key(msgKey))
-
-	// Cache hit
 	if v != nil {
 		now := time.Now()
-
-		// Helper to unpack bytes to msg
 		unpackMsg := func(data []byte) *dns.Msg {
 			m := new(dns.Msg)
-			if err := m.Unpack(data); err != nil {
-				return nil
-			}
+			if err := m.Unpack(data); err != nil { return nil }
 			return m
 		}
-
-		// Not expired.
 		if now.Before(v.expirationTime) {
-			// Optimization: Unpack bytes first
 			r := unpackMsg(v.resp)
-			if r == nil {
-				return nil, false, ""
-			}
-			// Optimized: Calculate elapsed time and subtract from TTL
-			// Previously: now.Sub(v.storedTime).Seconds()
+			if r == nil { return nil, false, "" }
 			dnsutils.SubtractTTL(r, uint32(now.Sub(v.storedTime).Seconds()))
 			return r, false, v.domainSet
 		}
-
-		// Msg expired but cache isn't. This is a lazy cache enabled entry.
-		// If lazy cache is enabled, return the response.
 		if lazyCacheEnabled {
-			// Optimization: Unpack bytes first
 			r := unpackMsg(v.resp)
-			if r == nil {
-				return nil, false, ""
-			}
+			if r == nil { return nil, false, "" }
 			dnsutils.SetTTL(r, uint32(lazyTtl))
 			return r, true, v.domainSet
 		}
 	}
-
-	// cache miss
 	return nil, false, ""
 }
 
-// saveRespToCache saves r to cache backend. It returns false if r
-// should not be cached and was skipped.
 func saveRespToCache(msgKey string, qCtx *query_context.Context, backend *cache.Cache[key, *item], lazyCacheTtl int) bool {
 	r := qCtx.R()
-	if r.Truncated != false {
-		return false
-	}
-
-	var msgTtl time.Duration
-	var cacheTtl time.Duration
+	if r.Truncated != false { return false }
+	var msgTtl, cacheTtl time.Duration
 	switch r.Rcode {
-	case dns.RcodeNameError:
-		msgTtl = time.Second * 30
-		cacheTtl = msgTtl
-	case dns.RcodeServerFailure:
-		msgTtl = time.Second * 5
-		cacheTtl = msgTtl
+	case dns.RcodeNameError: msgTtl = time.Second * 30; cacheTtl = msgTtl
+	case dns.RcodeServerFailure: msgTtl = time.Second * 5; cacheTtl = msgTtl
 	case dns.RcodeSuccess:
 		minTTL := dnsutils.GetMinimalTTL(r)
-		if len(r.Answer) == 0 { // Empty answer. Set ttl between 0~300.
+		if len(r.Answer) == 0 { 
 			const maxEmtpyAnswerTtl = 300
 			msgTtl = time.Duration(min(minTTL, maxEmtpyAnswerTtl)) * time.Second
-			// Preservation: User modification 1 (lazyTTL for empty answer)
-			if lazyCacheTtl > 0 {
-				cacheTtl = time.Duration(lazyCacheTtl) * time.Second
-			} else {
-				cacheTtl = msgTtl
-			}
+			if lazyCacheTtl > 0 { cacheTtl = time.Duration(lazyCacheTtl) * time.Second } else { cacheTtl = msgTtl }
 		} else {
 			msgTtl = time.Duration(minTTL) * time.Second
-			if lazyCacheTtl > 0 {
-				cacheTtl = time.Duration(lazyCacheTtl) * time.Second
-			} else {
-				cacheTtl = msgTtl
-			}
+			if lazyCacheTtl > 0 { cacheTtl = time.Duration(lazyCacheTtl) * time.Second } else { cacheTtl = msgTtl }
 		}
 	}
-
-	// Preservation: User modification 2 (Safety Net)
 	const minCacheableTTL = 5 * time.Second
-	if msgTtl <= 0 {
-		msgTtl = minCacheableTTL
-	}
-	if cacheTtl <= 0 {
-		cacheTtl = minCacheableTTL
-	}
-
-	// Optimization: Copy message without OPT records, THEN pack to bytes
+	if msgTtl <= 0 { msgTtl = minCacheableTTL }
+	if cacheTtl <= 0 { cacheTtl = minCacheableTTL }
 	msgToCache := copyNoOpt(r)
 	packedMsg, err := msgToCache.Pack()
-	if err != nil {
-		// Failed to pack, skip caching
-		return false
-	}
-
+	if err != nil { return false }
 	now := time.Now()
-	v := &item{
-		resp:           packedMsg, // Store []byte
-		storedTime:     now,
-		expirationTime: now.Add(msgTtl),
-	}
-
+	v := &item{resp: packedMsg, storedTime: now, expirationTime: now.Add(msgTtl)}
 	if val, ok := qCtx.GetValue(query_context.KeyDomainSet); ok {
-		if name, isString := val.(string); isString {
-			v.domainSet = name
-		}
+		if name, isString := val.(string); isString { v.domainSet = name }
 	}
-
 	backend.Store(key(msgKey), v, now.Add(cacheTtl))
 	return true
 }
