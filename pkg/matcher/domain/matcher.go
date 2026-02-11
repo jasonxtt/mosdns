@@ -34,6 +34,29 @@ var _ WriteableMatcher[any] = (*FullMatcher[any])(nil)
 var _ WriteableMatcher[any] = (*KeywordMatcher[any])(nil)
 var _ WriteableMatcher[any] = (*RegexMatcher[any])(nil)
 
+// 性能辅助函数：检查域名是否已经处于规范化状态（全小写，且末尾没有点），如果是，则无需分配新内存。
+func tryFastNormalize(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	needsChange := false
+	for i := 0; i < len(s); i++ {
+		if (s[i] >= 'A' && s[i] <= 'Z') || (i == len(s)-1 && s[i] == '.') {
+			needsChange = true
+			break
+		}
+	}
+	if !needsChange {
+		return s // 直接保留原始大小写引用，实现零分配
+	}
+	return NormalizeDomain(s)
+}
+
+// 内部高性能匹配接口
+type internalMatcher[T any] interface {
+	matchNormalized(s string) (T, bool)
+}
+
 type SubDomainMatcher[T any] struct {
 	root *labelNode[T]
 }
@@ -43,7 +66,10 @@ func NewSubDomainMatcher[T any]() *SubDomainMatcher[T] {
 }
 
 func (m *SubDomainMatcher[T]) Match(s string) (T, bool) {
-	s = NormalizeDomain(s)
+	return m.matchNormalized(tryFastNormalize(s))
+}
+
+func (m *SubDomainMatcher[T]) matchNormalized(s string) (T, bool) {
 	ds := NewReverseDomainScanner(s)
 	currentNode := m.root
 	v, ok := currentNode.getValue()
@@ -99,7 +125,10 @@ func (m *FullMatcher[T]) Add(s string, v T) error {
 }
 
 func (m *FullMatcher[T]) Match(s string) (v T, ok bool) {
-	s = NormalizeDomain(s)
+	return m.matchNormalized(tryFastNormalize(s))
+}
+
+func (m *FullMatcher[T]) matchNormalized(s string) (v T, ok bool) {
 	v, ok = m.m[s]
 	return
 }
@@ -125,7 +154,10 @@ func (m *KeywordMatcher[T]) Add(keyword string, v T) error {
 }
 
 func (m *KeywordMatcher[T]) Match(s string) (v T, ok bool) {
-	s = NormalizeDomain(s)
+	return m.matchNormalized(tryFastNormalize(s))
+}
+
+func (m *KeywordMatcher[T]) matchNormalized(s string) (v T, ok bool) {
 	for k, v := range m.kws {
 		if strings.Contains(s, k) {
 			return v, true
@@ -171,7 +203,10 @@ func (m *RegexMatcher[T]) Add(expr string, v T) error {
 }
 
 func (m *RegexMatcher[T]) Match(s string) (v T, ok bool) {
-	s = NormalizeDomain(s)
+	return m.matchNormalized(tryFastNormalize(s))
+}
+
+func (m *RegexMatcher[T]) matchNormalized(s string) (v T, ok bool) {
 	for _, e := range m.regs {
 		if e.reg.MatchString(s) {
 			return e.v, true
@@ -247,10 +282,20 @@ func (m *MixMatcher[T]) Add(s string, v T) error {
 }
 
 func (m *MixMatcher[T]) Match(s string) (v T, ok bool) {
-	for _, matcher := range [...]Matcher[T]{m.full, m.domain, m.regex, m.keyword} {
-		if v, ok = matcher.Match(s); ok {
-			return v, true
-		}
+	// 核心性能点：在此处统一计算一次规范化。如果是已经是规范的（比如 google.com），
+	// tryFastNormalize 会返回原字符串引用，实现零内存分配。
+	s = tryFastNormalize(s)
+	if v, ok = m.full.matchNormalized(s); ok {
+		return v, true
+	}
+	if v, ok = m.domain.matchNormalized(s); ok {
+		return v, true
+	}
+	if v, ok = m.regex.matchNormalized(s); ok {
+		return v, true
+	}
+	if v, ok = m.keyword.matchNormalized(s); ok {
+		return v, true
 	}
 	return
 }
