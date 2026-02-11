@@ -1,4 +1,3 @@
-//go:debug urlstrictcolons=0
 /*
  * Copyright (C) 2020-2022, IrineSistiana
  *
