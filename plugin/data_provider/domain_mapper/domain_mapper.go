@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
@@ -34,14 +35,13 @@ type Args struct {
 }
 
 type MatchResult struct {
-	Marks []uint8
-	Tags  []string
+	Marks      []uint8
+	JoinedTags string
 }
 
 type DomainMapper struct {
 	logger      *zap.Logger
-	mu          sync.RWMutex
-	matcher     *domain.MixMatcher[*MatchResult]
+	matcher     atomic.Value // holds *domain.MixMatcher[*MatchResult]
 	updateMu    sync.Mutex
 	updateTimer *time.Timer
 	ruleConfigs []RuleConfig
@@ -66,12 +66,13 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 
 	dm := &DomainMapper{
 		logger:      bp.L(),
-		matcher:     domain.NewMixMatcher[*MatchResult](),
 		ruleConfigs: cfg.Rules,
 		defaultMark: cfg.DefaultMark,
 		defaultTag:  cfg.DefaultTag,
 		providers:   make(map[string]data_provider.RuleExporter),
 	}
+	// Init with empty matcher
+	dm.matcher.Store(domain.NewMixMatcher[*MatchResult]())
 
 	for _, r := range cfg.Rules {
 		if _, loaded := dm.providers[r.Tag]; loaded {
@@ -88,11 +89,10 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		dm.providers[r.Tag] = exporter
 	}
 
-rebuild := func() {
-		dm.logger.Info("rebuilding with ultra-low fragmentation logic...")
-		start := time.Now() // 记录开始时间
+	rebuild := func() {
+		dm.logger.Info("rebuilding domain_mapper with zero-allocation query logic...")
+		start := time.Now()
 
-		// 1. 聚合阶段：使用位掩码和拼接字符串，完全不产生 MatchResult 对象
 		markMap := make(map[string]uint64)
 		tagMap := make(map[string]string)
 		totalRules := 0
@@ -126,7 +126,6 @@ rebuild := func() {
 			totalRules += len(rules)
 		}
 
-		// 2. 构建阶段：对象池化
 		pool := make(map[string]*MatchResult)
 		newMatcher := domain.NewMixMatcher[*MatchResult]()
 
@@ -136,32 +135,26 @@ rebuild := func() {
 			
 			res, exists := pool[sig]
 			if !exists {
-				res = &MatchResult{}
+				res = &MatchResult{
+					JoinedTags: tagsStr,
+				}
 				for i := uint8(0); i < 64; i++ {
 					if mask&(1<<i) != 0 {
 						res.Marks = append(res.Marks, i+1)
 					}
-				}
-				if tagsStr != "" {
-					res.Tags = strings.Split(tagsStr, "|")
 				}
 				pool[sig] = res
 			}
 			newMatcher.Add(ruleStr, res)
 		}
 
-		// 3. 替换与日志
-		dm.mu.Lock()
-		dm.matcher = newMatcher
-		dm.mu.Unlock()
+		dm.matcher.Store(newMatcher)
 
-		// 修复编译错误：在这里引用 start
 		dm.logger.Info("rebuild finished",
 			zap.Int("rules", totalRules),
-			zap.Int("pooled", len(pool)),
+			zap.Int("pooled_results", len(pool)),
 			zap.Duration("duration", time.Since(start)))
 
-		// 4. 清理
 		markMap = nil
 		tagMap = nil
 		pool = nil
@@ -169,7 +162,6 @@ rebuild := func() {
 		go func() {
 			time.Sleep(3 * time.Second)
 			coremain.ManualGC()
-			dm.logger.Info("domain_mapper: post-rebuild cleanup finished")
 		}()
 	}
 
@@ -191,29 +183,26 @@ rebuild := func() {
 	}
 
 	rebuild()
-
 	return dm, nil
 }
 
 func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) error {
 	q := qCtx.Q()
-	if len(q.Question) == 0 {
+	if q == nil || len(q.Question) == 0 {
 		return nil
 	}
-	qname := q.Question[0].Name
 
-	dm.mu.RLock()
-	matcher := dm.matcher
-	dm.mu.RUnlock()
-
-	result, ok := matcher.Match(qname)
+	// Atomic load ensures lock-free reading for high concurrency
+	matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
+	
+	result, ok := matcher.Match(q.Question[0].Name)
 	if ok && result != nil {
 		for _, mark := range result.Marks {
 			qCtx.SetFastFlag(mark)
 		}
-		if len(result.Tags) > 0 {
-			val := strings.Join(result.Tags, "|")
-			qCtx.StoreValue(query_context.KeyDomainSet, val)
+		// Zero-allocation: use pre-joined string
+		if result.JoinedTags != "" {
+			qCtx.StoreValue(query_context.KeyDomainSet, result.JoinedTags)
 		}
 	} else {
 		if dm.defaultMark != 0 {
