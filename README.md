@@ -65,9 +65,7 @@ MosDNS 本地工作目录填入自己的mosdns配置所在目录，比如/cus/mo
 - 上游dns中的sing-box需要设置为自己的sing-box dns入站
 
 **其它设置说明**
-- 如果不需要nft功能，此处将不需要任何的配置，原条目可删除。
 - 原值 (查找)为配置模板中预设的初始值（不要修改！），新值 (替换)将替换初始值在mosdns启动时加载，不会回写至配置模板，状态中的数字代表配置中有多少处原值被替换。。
-- nft功能说明：https://raw.githubusercontent.com/yyysuo/firetv/refs/heads/master/mosdnsconfigupdate/mosdns%20nft%E8%A7%84%E5%88%99%E6%B7%BB%E5%8A%A0%E5%8A%9F%E8%83%BD%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E
 
 #### 如何查找sing-box dns入站：
   如果 sing-box 和 mosdns 在一个虚拟机上，新值去你 sing-box 的配置文件中去找，找到 `inbounds` 部分类似这样的配置：

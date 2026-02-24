@@ -488,7 +488,6 @@
                             <option value="geoipcn">中国ip</option>
                             <option value="cuscn">cn@!cn</option>
                             <option value="cusnocn">!cn@cn</option>
-                            <option value="nft_add">添加到nft中的代理的ip</option>
                         </select>
                     </div>
                     <div class="form-field">
@@ -922,7 +921,6 @@
                                 <a href="#" class="list-mgmt-link" data-list-tag="ddnslist">DDNS 域名</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="client_ip">客户端 IP</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="direct_ip">直连 IP</a>
-                                <a href="#" class="list-mgmt-link" data-list-tag="nft_ip">NFT IP</a>
                                 <a href="#" class="list-mgmt-link" data-list-tag="rewrite">重定向</a>
                             </nav>
                             <div class="list-mgmt-content">
@@ -942,9 +940,6 @@
                                 <p id="list-mgmt-direct-ip-hint"
                                     style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
                                     不在任何域名清单中的域名解析后的IP属于此IP清单时，此域名向被归入直连域名。以苹果公司IP段为例：17.0.0.0/8</p>
-                                <p id="list-mgmt-nft-ip-hint"
-                                    style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
-                                    在nft功能开启时，此清单中ip段将被mosdns的nft插件添加到防火墙规则中（在线分流中更新netflix规则触发nft重载后生效，仅针对LAN生效）</p>
                                 <p id="list-mgmt-rewrite-hint"
                                     style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
                                     格式: &lt;域名&gt; &lt;IP或域名&gt;。例如: <code>example.com 1.2.3.4</code> 或
