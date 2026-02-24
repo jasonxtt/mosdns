@@ -29,6 +29,7 @@ jobs:
         run: python ./release.py
         env:
           CGO_ENABLED: '0'
+          VERSION: 'v5-tom-srs'
 
       - name: Publish
         uses: softprops/action-gh-release@v2

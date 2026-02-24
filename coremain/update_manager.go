@@ -29,9 +29,9 @@ import (
 )
 
 const (
-	githubOwner          = "yyysuo"
+	githubOwner          = "jasonxtt"
 	githubRepo           = "mosdns"
-	releaseTag           = "v5-ph-srs"
+	releaseTag           = "v5-tom-srs"
 	githubReleaseAPI     = "https://api.github.com/repos/%s/%s/releases/tags/%s"
 	githubLatestAPI      = "https://api.github.com/repos/%s/%s/releases/latest"
 	githubReleasePage    = "https://github.com/%s/%s/releases/tag/%s"
