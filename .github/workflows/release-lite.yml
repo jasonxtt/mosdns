@@ -14,12 +14,52 @@ concurrency:
 
 jobs:
   build:
-    name: build target ${{ matrix.index }}
+    name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        index: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+        include:
+          - index: 0
+            name: android-arm64
+          - index: 1
+            name: darwin-amd64
+          - index: 2
+            name: darwin-arm64
+          - index: 3
+            name: windows-amd64
+          - index: 4
+            name: windows-amd64-v3
+          - index: 5
+            name: windows-arm64
+          - index: 6
+            name: linux-amd64
+          - index: 7
+            name: linux-amd64-v3
+          - index: 8
+            name: linux-arm64
+          - index: 9
+            name: linux-armv5
+          - index: 10
+            name: linux-armv6
+          - index: 11
+            name: linux-armv7
+          - index: 12
+            name: linux-mips
+          - index: 13
+            name: linux-mips-softfloat
+          - index: 14
+            name: linux-mips64
+          - index: 15
+            name: linux-mips64-softfloat
+          - index: 16
+            name: linux-mipsle
+          - index: 17
+            name: linux-mipsle-softfloat
+          - index: 18
+            name: linux-mips64le
+          - index: 19
+            name: linux-mips64le-softfloat
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,7 +98,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mosdns-lite-${{ matrix.index }}
+          name: mosdns-lite-${{ matrix.name }}
           path: ./release/mosdns*.zip
           if-no-files-found: error
 
