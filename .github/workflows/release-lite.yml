@@ -1,0 +1,100 @@
+name: Release (lite)
+
+on:
+  push:
+    branches: ["lite"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build target ${{ matrix.index }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        index: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          check-latest: true
+
+      - name: Compute version strings
+        id: ver
+        run: |
+          BASE=$(sed -n 's/^\s*version\s*=\s*"\(.*\)"/\1/p' main.go | head -n1)
+          DATE=$(date +%Y%m%d)
+          SHA=$(git rev-parse --short=7 HEAD)
+          FULL="$BASE-$DATE-$SHA"
+          echo "VERSION=$BASE-lite" >> $GITHUB_ENV
+          echo "BUILD_DATE=$DATE" >> $GITHUB_ENV
+          echo "FULL_VERSION=$FULL" >> $GITHUB_ENV
+
+      - name: Build one target
+        run: python ./release.py -i ${{ matrix.index }}
+        env:
+          CGO_ENABLED: '0'
+          VERSION: ${{ env.VERSION }}
+          BUILD_DATE: ${{ env.BUILD_DATE }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosdns-lite-${{ matrix.index }}
+          path: ./release/mosdns*.zip
+          if-no-files-found: error
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare tag name
+        run: |
+          BASE=$(sed -n 's/^\s*version\s*=\s*"\(.*\)"/\1/p' main.go | head -n1)
+          DATE=$(date +%Y%m%d)
+          SHA=$(git rev-parse --short=7 HEAD)
+          echo "TAG_NAME=$BASE-lite-$DATE-$SHA" >> $GITHUB_ENV
+
+      - name: Read GO version from go.mod
+        run: |
+          GOV=$(awk '/^go / {print $2}' go.mod)
+          echo "GO_VERSION=$GOV" >> $GITHUB_ENV
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "Release ${{ env.TAG_NAME }}"
+          files: './artifacts/mosdns*.zip'
+          prerelease: false
+          generate_release_notes: true
+          append_body: true
+          body: "MosDNS-Lite (Installation Wizard) | Built with Go ${{ env.GO_VERSION }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
