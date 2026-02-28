@@ -1,0 +1,8 @@
+# CN 域名列表
+# 此文件由 MosDNS-Lite 安装向导生成
+# 中国大陆域名，用于分流判断
+
+# 示例：
+# qq.com
+# weibo.com
+# taobao.com

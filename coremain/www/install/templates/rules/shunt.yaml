@@ -1,0 +1,15 @@
+# 分流规则配置
+# 此文件由 MosDNS-Lite 安装向导生成
+
+rules:
+  - name: cn_domain
+    enabled: true
+    type: geosite_cn
+    auto_update: true
+    update_interval_hours: 24
+  
+  - name: proxy_domain
+    enabled: true
+    type: geositenocn
+    auto_update: true
+    update_interval_hours: 24

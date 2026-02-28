@@ -22,6 +22,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin"
@@ -31,10 +32,16 @@ import (
 )
 
 var (
-	version = "v5-ph-srs"
+	version      = "v5-ph-srs"
+	installMode  bool
+	installPort  int
+	mainArgsList []string
 )
 
 func init() {
+	mainArgsList = make([]string, len(os.Args))
+	copy(mainArgsList, os.Args)
+	
 	coremain.SetBuildVersion(version)
 	coremain.AddSubCmd(&cobra.Command{
 		Use:   "version",
@@ -43,9 +50,33 @@ func init() {
 			fmt.Println(version)
 		},
 	})
+
+	// 添加安装模式命令
+	installCmd := &cobra.Command{
+		Use:   "install-wizard",
+		Short: "Start installation wizard",
+		Run: func(cmd *cobra.Command, args []string) {
+			coremain.StartInstallWizard(installPort)
+		},
+	}
+	installCmd.Flags().BoolVarP(&installMode, "start", "s", false, "Start installation wizard")
+	installCmd.Flags().IntVarP(&installPort, "port", "p", 9098, "Installation wizard port")
+	coremain.AddSubCmd(installCmd)
 }
 
 func main() {
+	// 兼容旧用法：直接运行 mosdns -s
+	if len(mainArgsList) > 1 && (mainArgsList[1] == "-s" || mainArgsList[1] == "--start") {
+		port := 9098
+		for i := 2; i < len(mainArgsList); i++ {
+			if mainArgsList[i] == "-p" && i+1 < len(mainArgsList) {
+				fmt.Sscanf(mainArgsList[i+1], "%d", &port)
+			}
+		}
+		coremain.StartInstallWizard(port)
+		return
+	}
+
 	if err := coremain.Run(); err != nil {
 		mlog.S().Fatal(err)
 	}

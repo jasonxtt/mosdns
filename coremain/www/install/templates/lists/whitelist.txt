@@ -1,0 +1,7 @@
+# 白名单列表
+# 此文件由 MosDNS-Lite 安装向导生成
+# 在此添加需要放行的域名，每行一个
+
+# 示例：
+# example.com
+# test.example.com

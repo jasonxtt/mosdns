@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MosDNS-Lite 安装向导</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .wizard-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 700px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .wizard-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .wizard-header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .wizard-header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .wizard-progress {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .progress-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #6c757d;
+        }
+
+        .progress-step.active {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .progress-step.completed {
+            color: #28a745;
+        }
+
+        .progress-step .step-number {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .progress-step.active .step-number {
+            background: #667eea;
+            color: white;
+        }
+
+        .progress-step.completed .step-number {
+            background: #28a745;
+            color: white;
+        }
+
+        .wizard-body {
+            padding: 40px 30px;
+        }
+
+        .step-content {
+            display: none;
+        }
+
+        .step-content.active {
+            display: block;
+        }
+
+        .step-content h2 {
+            font-size: 22px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .step-content p {
+            color: #6c757d;
+            margin-bottom: 25px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group .hint {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        .preset-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .preset-btn {
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .preset-btn:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .preset-btn.selected {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .checkbox-item:hover {
+            border-color: #667eea;
+        }
+
+        .checkbox-item.selected {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .status-check {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .status-check.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-check.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-check .icon {
+            font-size: 20px;
+        }
+
+        .install-progress {
+            margin-top: 20px;
+        }
+
+        .progress-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .progress-item.running {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .progress-item.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .progress-item.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .progress-item .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #856404;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .wizard-footer {
+            padding: 20px 30px;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-secondary {
+            background: #e9ecef;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #dee2e6;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .success-message {
+            text-align: center;
+            padding: 30px;
+        }
+
+        .success-message .icon {
+            font-size: 64px;
+            color: #28a745;
+            margin-bottom: 20px;
+        }
+
+        .success-message h2 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .success-message p {
+            color: #6c757d;
+            margin-bottom: 20px;
+        }
+
+        .success-message .webui-link {
+            display: inline-block;
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .success-message .webui-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="wizard-container">
+        <div class="wizard-header">
+            <h1>🚀 MosDNS-Lite 安装向导</h1>
+            <p>简单 5 步，完成 MosDNS 安装与配置</p>
+        </div>
+
+        <div class="wizard-progress" id="wizard-progress">
+            <div class="progress-step active" data-step="1">
+                <span class="step-number">1</span>
+                <span>系统检查</span>
+            </div>
+            <div class="progress-step" data-step="2">
+                <span class="step-number">2</span>
+                <span>路径设置</span>
+            </div>
+            <div class="progress-step" data-step="3">
+                <span class="step-number">3</span>
+                <span>网络设置</span>
+            </div>
+            <div class="progress-step" data-step="4">
+                <span class="step-number">4</span>
+                <span>功能选择</span>
+            </div>
+            <div class="progress-step" data-step="5">
+                <span class="step-number">5</span>
+                <span>安装完成</span>
+            </div>
+        </div>
+
+        <div class="wizard-body">
+            <!-- 步骤 1: 系统检查 -->
+            <div class="step-content active" data-step="1">
+                <h2>系统环境检查</h2>
+                <p>正在检查系统环境，确保满足安装要求...</p>
+                
+                <div id="system-checks">
+                    <div class="status-check" id="check-root">
+                        <span class="icon">⏳</span>
+                        <span>检查 root 权限...</span>
+                    </div>
+                    <div class="status-check" id="check-port-53">
+                        <span class="icon">⏳</span>
+                        <span>检查端口 53 占用...</span>
+                    </div>
+                    <div class="status-check" id="check-port-9099">
+                        <span class="icon">⏳</span>
+                        <span>检查端口 9099 占用...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 步骤 2: 路径设置 -->
+            <div class="step-content" data-step="2">
+                <h2>安装路径设置</h2>
+                <p>配置 MosDNS 的工作目录和二进制文件位置</p>
+                
+                <div class="form-group">
+                    <label for="workDir">工作目录</label>
+                    <input type="text" id="workDir" value="/cus/mosdns" placeholder="/cus/mosdns">
+                    <div class="hint">MosDNS 配置文件和数据存储目录</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="binaryPath">二进制安装路径</label>
+                    <input type="text" id="binaryPath" value="/usr/local/bin/mosdns-lite" placeholder="/usr/local/bin/mosdns-lite">
+                    <div class="hint">MosDNS 可执行文件安装位置</div>
+                </div>
+            </div>
+
+            <!-- 步骤 3: 网络设置 -->
+            <div class="step-content" data-step="3">
+                <h2>网络设置</h2>
+                <p>配置 DNS 服务端口和上游 DNS 服务器</p>
+                
+                <div class="form-group">
+                    <label>DNS 监听端口</label>
+                    <input type="number" id="listenPort" value="53" placeholder="53">
+                    <div class="hint">DNS 服务监听端口（需要 root 权限绑定 53 端口）</div>
+                </div>
+
+                <div class="form-group">
+                    <label>管理界面端口</label>
+                    <input type="number" id="adminPort" value="9099" placeholder="9099">
+                    <div class="hint">WebUI 管理界面访问端口</div>
+                </div>
+
+                <div class="form-group">
+                    <label>上游 DNS 服务器</label>
+                    <div class="preset-options" id="upstream-presets">
+                        <button class="preset-btn selected" data-dns="223.5.5.5">阿里 DNS</button>
+                        <button class="preset-btn" data-dns="119.29.29.29">腾讯 DNS</button>
+                        <button class="preset-btn" data-dns="114.114.114.114">114 DNS</button>
+                        <button class="preset-btn" data-dns="custom">自定义</button>
+                    </div>
+                    <input type="text" id="upstreamDNS" value="223.5.5.5" placeholder="223.5.5.5">
+                    <div class="hint">推荐使用的上游 DNS 服务器地址</div>
+                </div>
+            </div>
+
+            <!-- 步骤 4: 功能选择 -->
+            <div class="step-content" data-step="4">
+                <h2>功能选择</h2>
+                <p>选择需要启用的 MosDNS 功能</p>
+                
+                <div class="checkbox-group">
+                    <label class="checkbox-item selected">
+                        <input type="checkbox" id="enableCache" checked>
+                        <div>
+                            <strong>启用缓存</strong>
+                            <div class="hint">缓存 DNS 查询结果，提升响应速度（推荐）</div>
+                        </div>
+                    </label>
+
+                    <label class="checkbox-item selected">
+                        <input type="checkbox" id="enableAdBlock" checked>
+                        <div>
+                            <strong>广告拦截</strong>
+                            <div class="hint">拦截广告和追踪域名</div>
+                        </div>
+                    </label>
+
+                    <label class="checkbox-item selected">
+                        <input type="checkbox" id="enableShunt" checked>
+                        <div>
+                            <strong>分流规则</strong>
+                            <div class="hint">根据域名自动选择最优解析路径</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 步骤 5: 安装进度 -->
+            <div class="step-content" data-step="5">
+                <h2>正在安装...</h2>
+                <p>请稍候，正在完成 MosDNS 安装</p>
+                
+                <div class="install-progress" id="install-progress">
+                    <div class="progress-item" id="step-check-permission">
+                        <span class="icon">⏳</span>
+                        <span>检查权限...</span>
+                    </div>
+                    <div class="progress-item" id="step-create-dir">
+                        <span class="icon">⏳</span>
+                        <span>创建目录...</span>
+                    </div>
+                    <div class="progress-item" id="step-generate-config">
+                        <span class="icon">⏳</span>
+                        <span>生成配置文件...</span>
+                    </div>
+                    <div class="progress-item" id="step-copy-binary">
+                        <span class="icon">⏳</span>
+                        <span>复制二进制文件...</span>
+                    </div>
+                    <div class="progress-item" id="step-install-systemd">
+                        <span class="icon">⏳</span>
+                        <span>注册 systemd 服务...</span>
+                    </div>
+                    <div class="progress-item" id="step-start-service">
+                        <span class="icon">⏳</span>
+                        <span>启动服务...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 安装完成 -->
+            <div class="step-content" id="step-complete">
+                <div class="success-message">
+                    <div class="icon">✅</div>
+                    <h2>安装完成！</h2>
+                    <p>MosDNS 已成功安装并启动</p>
+                    <a href="#" class="webui-link" id="webui-link" target="_blank">打开 WebUI 管理界面 →</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="wizard-footer" id="wizard-footer">
+            <button class="btn btn-secondary" id="btn-prev" disabled>上一步</button>
+            <button class="btn btn-primary" id="btn-next">下一步</button>
+        </div>
+    </div>
+
+    <script src="/assets/install.js"></script>
+</body>
+</html>

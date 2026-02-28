@@ -1,0 +1,9 @@
+# AdGuard 广告拦截规则
+# 此文件由 MosDNS-Lite 安装向导生成
+
+rules:
+  - name: adguard_default
+    enabled: true
+    url: https://adguardteam.github.io/AdGuardSDNSFilter/DNS/filter.txt
+    auto_update: true
+    update_interval_hours: 24

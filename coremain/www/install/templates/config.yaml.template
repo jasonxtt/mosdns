@@ -1,0 +1,41 @@
+log:
+  level: info
+
+plugins:
+  # === DNS 服务器监听 ===
+  - tag: udp_server
+    type: udp_server
+    args:
+      entry: sequence
+      listen: "0.0.0.0:{{.ListenPort}}"
+  
+  - tag: tcp_server
+    type: tcp_server
+    args:
+      entry: sequence
+      listen: "0.0.0.0:{{.ListenPort}}"
+  
+  # === 上游 DNS ===
+  - tag: upstream_cn
+    type: forward
+    args:
+      upstreams:
+        - addr: {{.UpstreamDNS}}
+          bootstrap: 223.5.5.5
+          dial_addr: 223.5.5.5
+  
+  # === 缓存配置 ===
+  - tag: cache
+    type: cache
+    args:
+      size: 8000
+      ttl: 86400
+      stale_ttl: 60
+  
+  # === 主处理序列 ===
+  - tag: sequence
+    type: sequence
+    args:
+      exec:
+        - cache
+        - upstream_cn
