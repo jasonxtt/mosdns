@@ -82,10 +82,10 @@ function handleNext() {
     collectStepData(currentStep);
 
     if (currentStep === 1) {
-        // 步骤 1 检查是否通过
-        const allChecks = document.querySelectorAll('.status-check.success');
-        if (allChecks.length < 3) {
-            alert('系统检查未通过，无法继续安装。');
+        // 步骤 1 检查是否通过（root 权限是必须的，端口可以忽略）
+        const rootCheck = document.getElementById('check-root');
+        if (!rootCheck.classList.contains('success')) {
+            alert('需要 root 权限才能安装 MosDNS。请使用 sudo ./mosdns-lite -s 运行。');
             return;
         }
     }
