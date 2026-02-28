@@ -1,23 +1,17 @@
 package coremain
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
-	"text/template"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
 )
 
 // InstallStatus 安装状态
@@ -309,23 +303,12 @@ func handleInstallApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetPath := "/usr/local/bin/mosdns-lite"
-	if err := copyFile(exePath, targetPath); err != nil {
+	if err := copyFile(exePath, targetPath, 0755); err != nil {
 		progress.Success = false
 		progress.Steps[len(progress.Steps)-1] = InstallStep{
 			Name:    "copy_binary",
 			Status:  "failed",
 			Message: fmt.Sprintf("复制二进制失败：%v", err),
-		}
-		json.NewEncoder(w).Encode(progress)
-		return
-	}
-
-	if err := os.Chmod(targetPath, 0755); err != nil {
-		progress.Success = false
-		progress.Steps[len(progress.Steps)-1] = InstallStep{
-			Name:    "copy_binary",
-			Status:  "failed",
-			Message: fmt.Sprintf("设置权限失败：%v", err),
 		}
 		json.NewEncoder(w).Encode(progress)
 		return
@@ -490,25 +473,7 @@ func copyEmbeddedFiles() error {
 	return nil
 }
 
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	if _, err := io.Copy(destFile, sourceFile); err != nil {
-		return err
-	}
-
-	return destFile.Sync()
-}
 
 func generateSystemdService(workDir string) []byte {
 	return []byte(fmt.Sprintf(`[Unit]
