@@ -20,6 +20,7 @@
 package qname
 
 import (
+	"context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
@@ -35,7 +36,11 @@ func init() {
 type Args = base.Args
 
 func QuickSetup(bq sequence.BQ, s string) (sequence.Matcher, error) {
-	return base.NewMatcher(bq, base.ParseQuickSetupArgs(s), matchQName)
+	m, err := base.NewMatcher(bq, base.ParseQuickSetupArgs(s), matchQName)
+	if err != nil {
+		return nil, err
+	}
+	return &fastQnameMatcher{Matcher: m}, nil
 }
 
 func matchQName(qCtx *query_context.Context, m domain.Matcher[struct{}]) (bool, error) {
@@ -45,4 +50,15 @@ func matchQName(qCtx *query_context.Context, m domain.Matcher[struct{}]) (bool, 
 		}
 	}
 	return false, nil
+}
+
+type fastQnameMatcher struct {
+	sequence.Matcher
+}
+
+func (f *fastQnameMatcher) GetFastCheck() func(qCtx *query_context.Context) bool {
+	return func(qCtx *query_context.Context) bool {
+		ok, _ := f.Matcher.Match(context.Background(), qCtx)
+		return ok
+	}
 }
