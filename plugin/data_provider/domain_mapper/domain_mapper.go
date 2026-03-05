@@ -214,3 +214,34 @@ func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) e
 	}
 	return nil
 }
+
+// GetFastExec implements sequence.fastExecutor
+func (dm *DomainMapper) GetFastExec() func(ctx context.Context, qCtx *query_context.Context) error {
+	defMark := dm.defaultMark
+	defTag := dm.defaultTag
+	return func(ctx context.Context, qCtx *query_context.Context) error {
+		q := qCtx.Q()
+		if q == nil || len(q.Question) == 0 {
+			return nil
+		}
+
+		matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
+		result, ok := matcher.Match(q.Question[0].Name)
+		if ok && result != nil {
+			for _, mark := range result.Marks {
+				qCtx.SetFastFlag(mark)
+			}
+			if result.JoinedTags != "" {
+				qCtx.StoreValue(query_context.KeyDomainSet, result.JoinedTags)
+			}
+		} else {
+			if defMark != 0 {
+				qCtx.SetFastFlag(defMark)
+			}
+			if defTag != "" {
+				qCtx.StoreValue(query_context.KeyDomainSet, defTag)
+			}
+		}
+		return nil
+	}
+}
