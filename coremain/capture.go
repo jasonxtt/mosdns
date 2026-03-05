@@ -2,6 +2,7 @@ package coremain
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -14,7 +15,7 @@ const LogMarkKey = 0xFEEDBEEF // ADDED: A globally accessible key for marking co
 // InMemoryLogCollector is a thread-safe in-memory log collector.
 type InMemoryLogCollector struct {
 	mu        sync.Mutex
-	capturing bool
+	capturing atomic.Bool
 	logs      []map[string]interface{}
 	stopTimer *time.Timer
 }
@@ -29,13 +30,14 @@ func (c *InMemoryLogCollector) StartCapture(duration time.Duration, logLevel zap
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.capturing {
+	if c.capturing.Load() {
 		c.stopTimer.Stop() // Stop previous timer if a new capture starts
 	}
 
 	// Reset log buffer for the new capture session.
 	c.logs = make([]map[string]interface{}, 0, 2048)
-	c.capturing = true
+	
+	c.capturing.Store(true)
 	logLevel.SetLevel(zap.DebugLevel) // Switch to DEBUG level
 
 	c.stopTimer = time.AfterFunc(duration, func() {
@@ -48,30 +50,33 @@ func (c *InMemoryLogCollector) StopCapture(logLevel zap.AtomicLevel) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !c.capturing {
+	if !c.capturing.Load() {
 		return
 	}
 
 	logLevel.SetLevel(zap.InfoLevel) // Restore to default INFO level
-	c.capturing = false
+	c.capturing.Store(false)
 	if c.stopTimer != nil {
 		c.stopTimer.Stop()
 	}
 }
 
 // AddLog adds a structured log entry to the in-memory buffer if capturing is active.
-func (c *InMemoryLogCollector) AddLog(entry zapcore.Entry, fields []zapcore.Field) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if !c.capturing {
+func (c *InMemoryLogCollector) AddLog(entry zapcore.Entry, fields[]zapcore.Field) {
+	if !c.capturing.Load() {
 		return
 	}
     
-    // Only capture debug level logs into memory.
-    if entry.Level != zap.DebugLevel {
-        return
-    }
+	if entry.Level != zap.DebugLevel {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.capturing.Load() {
+		return
+	}
 
 	// Convert fields to a map
 	enc := zapcore.NewMapObjectEncoder()
