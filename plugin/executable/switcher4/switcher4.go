@@ -133,3 +133,9 @@ func (m *switchMatcher4) GetFastCheck() func(qCtx *query_context.Context) bool {
 		return v == exp
 	}
 }
+func (s *Switcher4) GetValue() string {
+	if val, ok := s.value.Load().(string); ok {
+		return val
+	}
+	return ""
+}
