@@ -124,3 +124,12 @@ func (m *switchMatcher15) Match(_ context.Context, _ *query_context.Context) (bo
 	currentVal := globalSwitcher15.value.Load().(string)
 	return currentVal == m.expected, nil
 }
+
+func (m *switchMatcher15) GetFastCheck() func(qCtx *query_context.Context) bool {
+	exp := m.expected
+	return func(_ *query_context.Context) bool {
+		if globalSwitcher15 == nil { return false }
+		v, _ := globalSwitcher15.value.Load().(string)
+		return v == exp
+	}
+}
