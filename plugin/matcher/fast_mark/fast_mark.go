@@ -81,3 +81,23 @@ func newFastMarker(s string) (*fastMark, error) {
 
 	return &fastMark{flags: flags}, nil
 }
+
+func (m *fastMark) GetFastCheck() func(qCtx *query_context.Context) bool {
+	fList := m.flags
+	return func(qCtx *query_context.Context) bool {
+		for _, f := range fList {
+			if qCtx.HasFastFlag(f) { return true }
+		}
+		return false
+	}
+}
+
+func (m *fastMark) GetFastExec() func(context.Context, *query_context.Context) error {
+	fList := m.flags // 闭包逃逸优化
+	return func(_ context.Context, qCtx *query_context.Context) error {
+		for _, f := range fList {
+			qCtx.SetFastFlag(f)
+		}
+		return nil
+	}
+}
