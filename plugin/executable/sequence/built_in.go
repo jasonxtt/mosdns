@@ -153,11 +153,12 @@ func setupReturn(_ BQ, _ string) (any, error) {
 var _ RecursiveExecutable = (*ActionJump)(nil)
 
 type ActionJump struct {
-	To []*ChainNode
+	ToChain []*ChainNode
+	ToIns   []instruction
 }
 
 func (a *ActionJump) Exec(ctx context.Context, qCtx *query_context.Context, next ChainWalker) error {
-	w := NewChainWalker(a.To, &next, next.logger)
+	w := NewChainWalker(a.ToIns, a.ToChain, &next, next.logger)
 	return w.ExecNext(ctx, qCtx)
 }
 
@@ -166,17 +167,18 @@ func setupJump(bq BQ, s string) (any, error) {
 	if target == nil {
 		return nil, fmt.Errorf("can not find jump target %s", s)
 	}
-	return &ActionJump{To: target.chain}, nil
+	return &ActionJump{ToChain: target.chain, ToIns: target.instructions}, nil
 }
 
 var _ RecursiveExecutable = (*ActionGoto)(nil)
 
 type ActionGoto struct {
-	To []*ChainNode
+	ToChain[]*ChainNode
+	ToIns   []instruction
 }
 
 func (a ActionGoto) Exec(ctx context.Context, qCtx *query_context.Context, next ChainWalker) error {
-	w := NewChainWalker(a.To, nil, next.logger)
+	w := NewChainWalker(a.ToIns, a.ToChain, nil, next.logger)
 	return w.ExecNext(ctx, qCtx)
 }
 
@@ -185,7 +187,7 @@ func setupGoto(bq BQ, s string) (any, error) {
 	if gt == nil {
 		return nil, fmt.Errorf("can not find goto target %s", s)
 	}
-	return &ActionGoto{To: gt.chain}, nil
+	return &ActionGoto{ToChain: gt.chain, ToIns: gt.instructions}, nil
 }
 
 var _ Matcher = (*MatchAlwaysTrue)(nil)
@@ -210,4 +212,23 @@ func (m MatchAlwaysFalse) Match(_ context.Context, _ *query_context.Context) (bo
 
 func setupFalse(_ BQ, _ string) (Matcher, error) {
 	return MatchAlwaysFalse{}, nil
+}
+
+func (a ActionAccept) GetFastExec() func(context.Context, *query_context.Context) error {
+	return func(_ context.Context, _ *query_context.Context) error { return nil }
+}
+
+func (a ActionExit) GetFastExec() func(context.Context, *query_context.Context) error {
+	return func(_ context.Context, _ *query_context.Context) error { return ErrExit }
+}
+
+func (a ActionReject) GetFastExec() func(context.Context, *query_context.Context) error {
+	rcode := a.Rcode
+	return func(_ context.Context, qCtx *query_context.Context) error {
+		r := new(dns.Msg)
+		r.SetReply(qCtx.Q())
+		r.Rcode = rcode
+		qCtx.SetResponse(r)
+		return nil
+	}
 }
