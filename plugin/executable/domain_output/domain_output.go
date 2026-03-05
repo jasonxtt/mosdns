@@ -217,6 +217,41 @@ func (d *domainOutput) Exec(ctx context.Context, qCtx *query_context.Context) er
 	return nil
 }
 
+// GetFastExec implements sequence.fastExecutor
+func (d *domainOutput) GetFastExec() func(ctx context.Context, qCtx *query_context.Context) error {
+	// Pre-capture values for extreme performance and closure safety
+	enableFlags := d.enableFlags
+	rChan := d.recordChan
+
+	return func(ctx context.Context, qCtx *query_context.Context) error {
+		q := qCtx.Q()
+		if q == nil || len(q.Question) == 0 {
+			return nil
+		}
+
+		for _, question := range q.Question {
+			item := &logItem{
+				name: question.Name,
+			}
+
+			if enableFlags {
+				item.ad = q.AuthenticatedData
+				item.cd = q.CheckingDisabled
+				if opt := q.IsEdns0(); opt != nil {
+					item.do = opt.Do()
+				}
+			}
+
+			// Non-blocking send
+			select {
+			case rChan <- item:
+			default:
+			}
+		}
+		return nil
+	}
+}
+
 func (d *domainOutput) startWorker() {
 	ticker := time.NewTicker(d.dumpInterval)
 	defer ticker.Stop()
@@ -580,3 +615,5 @@ func (d *domainOutput) Api() *chi.Mux {
 
 	return r
 }
+
+var _ sequence.Executable = (*domainOutput)(nil)
