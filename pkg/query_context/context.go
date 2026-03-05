@@ -59,11 +59,15 @@ type Context struct {
 	kv    map[uint32]any
 	marks map[uint32]struct{}
 	fastFlags uint64
+
+	// Extreme Performance Patch: Cache for fast matching
+	FastQName string
+	FastQType uint16
 }
 
 var (
 	contextUid atomic.Uint32
-	// 性能补丁：预设随机位
+	// Performance patch: preset seed
 	traceSeed = uint32(time.Now().UnixNano())
 )
 
@@ -78,8 +82,8 @@ func NewContext(q *dns.Msg) *Context {
 	id := contextUid.Add(1)
 	val := traceSeed ^ id
 
-	// 性能优化：手动构建 8 位 Hex 字符串。
-	// string(b[:]) 在此处仅触发一次内存分配，相比 uuid.NewString() 减少了约 80% 的开销。
+	// Performance optimization: manual hex string construction (8 chars).
+	// string(b[:]) triggers only one allocation here.
 	var b [8]byte
 	b[0] = hexTable[(val>>28)&0x0f]
 	b[1] = hexTable[(val>>24)&0x0f]
@@ -97,6 +101,12 @@ func NewContext(q *dns.Msg) *Context {
 		query:     q,
 		clientOpt: addNewAndSwapOldOpt(q),
 	}
+
+	if len(q.Question) > 0 {
+		ctx.FastQName = q.Question[0].Name
+		ctx.FastQType = q.Question[0].Qtype
+	}
+
 	if ctx.clientOpt != nil {
 		ctx.respOpt = newOpt()
 
@@ -221,6 +231,9 @@ func (ctx *Context) CopyTo(d *Context) *Context {
 	d.kv = copyMap(ctx.kv)
 	d.marks = copyMap(ctx.marks)
 	d.fastFlags = ctx.fastFlags
+
+	d.FastQName = ctx.FastQName
+	d.FastQType = ctx.FastQType
 	return d
 }
 
@@ -280,6 +293,11 @@ func (ctx *Context) DeleteFastFlag(f uint8) {
 	if f < 64 {
 		ctx.fastFlags &^= (1 << f)
 	}
+}
+
+// Extreme Performance Patch: Bulk apply flags from bypass engine
+func (ctx *Context) ApplyFastFlags(flags uint64) {
+	ctx.fastFlags |= flags
 }
 
 // MarshalLogObject implements zapcore.ObjectMarshaler.
