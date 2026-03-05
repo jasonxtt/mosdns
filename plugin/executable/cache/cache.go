@@ -54,8 +54,8 @@ const (
 	dumpMaximumBlockLength = 1 << 20 // 1M block. 8kb pre entry. Should be enough.
 
 	shardCount   = 256  // 256分段锁，平衡锁竞争与内存开销
-	l1TotalCap   = 4000 // L1 总容量限制
-	shardMaxSize = 16   // 每个分段桶的配额 (4000/shardCount)
+	l1TotalCap   = 51200 // L1 总容量限制
+	shardMaxSize = 200   // 每个分段桶的配额 (51200/shardCount)
 
 	// 性能补丁：后台更新并发上限，保护 CPU 不被瞬间过期的缓存任务占满
 	maxConcurrentLazyUpdate = 256
