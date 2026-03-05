@@ -20,6 +20,7 @@
 package client_ip
 
 import (
+	"context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
@@ -35,7 +36,11 @@ func init() {
 type Args = base_ip.Args
 
 func QuickSetup(bq sequence.BQ, s string) (sequence.Matcher, error) {
-	return base_ip.NewMatcher(bq, base_ip.ParseQuickSetupArgs(s), matchClientAddr)
+	m, err := base_ip.NewMatcher(bq, base_ip.ParseQuickSetupArgs(s), matchClientAddr)
+	if err != nil {
+		return nil, err
+	}
+	return &fastClientIPMatcher{Matcher: m}, nil
 }
 
 func matchClientAddr(qCtx *query_context.Context, m netlist.Matcher) (bool, error) {
@@ -44,4 +49,15 @@ func matchClientAddr(qCtx *query_context.Context, m netlist.Matcher) (bool, erro
 		return false, nil
 	}
 	return m.Match(addr), nil
+}
+
+type fastClientIPMatcher struct {
+	sequence.Matcher
+}
+
+func (f *fastClientIPMatcher) GetFastCheck() func(qCtx *query_context.Context) bool {
+	return func(qCtx *query_context.Context) bool {
+		ok, _ := f.Matcher.Match(context.Background(), qCtx)
+		return ok
+	}
 }
