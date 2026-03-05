@@ -162,8 +162,12 @@ func TestSelector_Exec(t *testing.T) {
 				t.Errorf("Exec() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			r := qCtx.R()
-			if hasReply := msgAnsHasRR(r, tt.qtype); hasReply != tt.wantReply {
+            r := qCtx.R()
+			hasReply := false
+			if r != nil {
+				hasReply = msgAnsHasRR(r, tt.qtype)
+			}
+			if hasReply != tt.wantReply {
 				t.Errorf("Exec() hasReply = %v, wantReply %v", hasReply, tt.wantReply)
 			}
 		})
