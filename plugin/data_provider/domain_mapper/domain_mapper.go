@@ -41,7 +41,7 @@ type MatchResult struct {
 
 type DomainMapper struct {
 	logger      *zap.Logger
-	matcher     atomic.Value // holds *domain.MixMatcher[*MatchResult]
+	matcher     atomic.Value 
 	updateMu    sync.Mutex
 	updateTimer *time.Timer
 	ruleConfigs []RuleConfig
@@ -71,7 +71,6 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		defaultTag:  cfg.DefaultTag,
 		providers:   make(map[string]data_provider.RuleExporter),
 	}
-	// Init with empty matcher
 	dm.matcher.Store(domain.NewMixMatcher[*MatchResult]())
 
 	for _, r := range cfg.Rules {
@@ -186,13 +185,25 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 	return dm, nil
 }
 
+func (dm *DomainMapper) FastMatch(qname string) ([]uint8, string, bool) {
+	matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
+	result, ok := matcher.Match(qname)
+	if ok && result != nil {
+		return result.Marks, result.JoinedTags, true
+	}
+	return nil, "", false
+}
+
 func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) error {
+	if qCtx.HasFastFlag(1) || qCtx.HasFastFlag(2) || qCtx.HasFastFlag(3) || qCtx.HasFastFlag(5) || qCtx.HasFastFlag(6) {
+		return nil
+	}
+
 	q := qCtx.Q()
 	if q == nil || len(q.Question) == 0 {
 		return nil
 	}
 
-	// Atomic load ensures lock-free reading for high concurrency
 	matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
 	
 	result, ok := matcher.Match(q.Question[0].Name)
@@ -200,7 +211,6 @@ func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) e
 		for _, mark := range result.Marks {
 			qCtx.SetFastFlag(mark)
 		}
-		// Zero-allocation: use pre-joined string
 		if result.JoinedTags != "" {
 			qCtx.StoreValue(query_context.KeyDomainSet, result.JoinedTags)
 		}
@@ -215,11 +225,14 @@ func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) e
 	return nil
 }
 
-// GetFastExec implements sequence.fastExecutor
 func (dm *DomainMapper) GetFastExec() func(ctx context.Context, qCtx *query_context.Context) error {
 	defMark := dm.defaultMark
 	defTag := dm.defaultTag
 	return func(ctx context.Context, qCtx *query_context.Context) error {
+		if qCtx.HasFastFlag(1) || qCtx.HasFastFlag(2) || qCtx.HasFastFlag(3) || qCtx.HasFastFlag(5) || qCtx.HasFastFlag(6) {
+			return nil
+		}
+
 		q := qCtx.Q()
 		if q == nil || len(q.Question) == 0 {
 			return nil
