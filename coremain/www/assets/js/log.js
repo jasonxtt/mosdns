@@ -653,7 +653,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch9', name: 'CNFakeIP', desc: '国内域名返回fakeip', tip: '请在上游dns中配置cnfake组的mihomo条目', valueForOn: 'B' },
 //            { tag: 'switch11', name: '使用阿里私有DOH', desc: '国内上游并发请求至阿里私有DOH。', tip: '打开前在上游DNS设置中添加DOH配置。', valueForOn: 'A' },
 //            { tag: 'switch14', name: '使用运营商DNS', desc: '国内上游并发请求至运营商DNS。', tip: '打开前在上游DNS设置中修改运营商DNS配置。', valueForOn: 'A' },
-//            { tag: 'switch15', name: '使用其它DNS', desc: '国内上游并发请求至阿里UDP DNS。', tip: '单独开启时也可替换quic://223.5.5.5为其它DNS。', valueForOn: 'A' },
+            { tag: 'switch15', name: '极限加速', desc: '启用极限缓存，UDP性能翻倍，某些屏蔽日志不显示。', tip: '绕过miekg dns使用偏移量获取域名并缓存byte响应，重启会清空。', valueForOn: 'A' },
             { tag: 'switch2', name: '指定 Client fakeip', desc: '只允许指定的客户端科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不允许科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽AAAA请求类型', tip: '无IPV6网络环境建议开启', valueForOn: 'A' },
@@ -4352,3 +4352,4 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 });
+
