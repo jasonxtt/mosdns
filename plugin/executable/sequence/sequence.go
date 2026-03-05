@@ -46,12 +46,19 @@ func init() {
 	MustRegMatchQuickSetup("_false", setupFalse)
 }
 
+type fastMatcher interface {
+	GetFastCheck() func(qCtx *query_context.Context) bool
+}
+type fastExecutor interface {
+	GetFastExec() func(ctx context.Context, qCtx *query_context.Context) error
+}
+
 type Sequence struct {
 	chain            []*ChainNode
-	anonymousPlugins []any
+	anonymousPlugins[]any
 	logger           *zap.Logger
-	// [新增] 标记该序列是否为内联（隐式）序列
-	isInline bool 
+	isInline         bool
+	instructions[]instruction
 }
 
 func (s *Sequence) Close() error {
@@ -61,18 +68,18 @@ func (s *Sequence) Close() error {
 	return nil
 }
 
-type Args = []RuleArgs
+type Args =[]RuleArgs
 
 func Init(bp *coremain.BP, args any) (any, error) {
 	return NewSequence(NewBQ(bp.M(), bp.L()), *args.(*Args))
 }
 
-func NewSequence(bq BQ, ra []RuleArgs) (*Sequence, error) {
+func NewSequence(bq BQ, ra[]RuleArgs) (*Sequence, error) {
 	s := &Sequence{
 		logger: bq.L(),
 	}
 
-	var rc []RuleConfig
+	var rc[]RuleConfig
 	for _, ra := range ra {
 		rc = append(rc, parseArgs(ra))
 	}
@@ -80,14 +87,115 @@ func NewSequence(bq BQ, ra []RuleArgs) (*Sequence, error) {
 		_ = s.Close()
 		return nil, err
 	}
+	s.compile()
 	return s, nil
+}
+
+func (s *Sequence) compile() {
+	var ins[]instruction
+	for _, node := range s.chain {
+		instr := instruction{node: node}
+
+		// 1. 检查 Matchers 是否全都可以优化
+		allMatchersOptimizable := true
+		var checks[]func(qCtx *query_context.Context) bool
+
+		for _, m := range node.Matches {
+			if fm, ok := m.Matcher.(fastMatcher); ok {
+				if check := fm.GetFastCheck(); check != nil {
+					name := m.Name
+
+					// [终极优化] 预先识别哪些 Matcher 需要附加副作用 (KeyDomainSet)
+					isSwitch6 := strings.HasPrefix(name, "anonymous_match(switch6:")
+					isSwitch5 := strings.HasPrefix(name, "anonymous_match(switch5:")
+					isQnameDollar := strings.HasPrefix(name, "anonymous_match(qname: $")
+					isQnameNormal := strings.HasPrefix(name, "anonymous_match(qname: ")
+
+					if isSwitch6 || isSwitch5 || isQnameDollar || isQnameNormal {
+						// 预处理 qname 规则名，省去执行时的字符串截取开销
+						var ruleName string
+						if isQnameDollar {
+							ruleName = strings.TrimSuffix(strings.TrimPrefix(name, "anonymous_match(qname: $"), ")")
+						} else if isQnameNormal {
+							ruleName = strings.TrimSuffix(strings.TrimPrefix(name, "anonymous_match(qname: "), ")")
+						}
+
+						// 构造一个包装了打标签逻辑的“超级闭包”，完美留在快路径中！
+						wrappedCheck := func(qCtx *query_context.Context) bool {
+							matched := check(qCtx)
+							if matched {
+								if _, exists := qCtx.GetValue(query_context.KeyDomainSet); !exists {
+									if isSwitch6 {
+										if len(qCtx.Q().Question) > 0 && qCtx.Q().Question[0].Qtype == 28 {
+											qCtx.StoreValue(query_context.KeyDomainSet, "BANAAAA")
+										}
+									} else if isSwitch5 {
+										if len(qCtx.Q().Question) > 0 {
+											qtype := qCtx.Q().Question[0].Qtype
+											var domainSetName string
+											switch qtype {
+											case 6: // dns.TypeSOA
+												domainSetName = "BANSOA"
+											case 12: // dns.TypePTR
+												domainSetName = "BANPTR"
+											case 65: // dns.TypeHTTPS
+												domainSetName = "BANHTTPS"
+											}
+											if domainSetName != "" {
+												qCtx.StoreValue(query_context.KeyDomainSet, domainSetName)
+											}
+										}
+									} else if ruleName != "" {
+										qCtx.StoreValue(query_context.KeyDomainSet, ruleName)
+									}
+								}
+							}
+							return matched
+						}
+						checks = append(checks, wrappedCheck)
+					} else {
+						// 没有副作用的纯净检查器，直接加入
+						checks = append(checks, check)
+					}
+					continue
+				}
+			}
+			// 如果走到这里，说明该插件本身不支持快路径（没有实现 GetFastCheck）
+			allMatchersOptimizable = false
+			break
+		}
+
+		// 2. 检查 Executor 是否可以优化
+		var fExec func(context.Context, *query_context.Context) error
+		if allMatchersOptimizable {
+			if node.E != nil {
+				if fe, ok := node.E.(fastExecutor); ok {
+					fExec = fe.GetFastExec()
+				}
+			} else if node.RE != nil {
+				if fe, ok := node.RE.(fastExecutor); ok {
+					fExec = fe.GetFastExec()
+					instr.isTerminal = true
+				}
+			}
+		}
+
+		// 3. 标记 Simple 路径
+		if allMatchersOptimizable && fExec != nil {
+			instr.isSimple = true
+			instr.fastChecks = checks
+			instr.fastExec = fExec
+		}
+		ins = append(ins, instr)
+	}
+	s.instructions = ins
 }
 
 // Exec 执行序列逻辑
 func (s *Sequence) Exec(ctx context.Context, qCtx *query_context.Context) error {
-    walker := NewChainWalker(s.chain, nil, s.logger)
-    err := walker.ExecNext(ctx, qCtx)
-    return err // 直接返回，不做任何判断
+	// 组装并启动已经进化完毕的高性能 Walker
+	walker := NewChainWalker(s.instructions, s.chain, nil, s.logger)
+	return walker.ExecNext(ctx, qCtx)
 }
 
 func (s *Sequence) buildChain(bq BQ, rs []RuleConfig) error {
@@ -117,12 +225,12 @@ func (s *Sequence) newNode(bq BQ, r RuleConfig, ri int) (*ChainNode, error) {
 			n.PluginName = fmt.Sprintf("anonymous_exec(%s: %v)", ec.Type, ec.Args)
 		}
 	} else {
-		var names []string
+		var names[]string
 		for _, ec := range r.Execs {
 			if len(ec.Tag) > 0 {
 				names = append(names, ec.Tag)
 			} else {
-				names = append(names, ec.Type) 
+				names = append(names, ec.Type)
 			}
 		}
 		n.PluginName = fmt.Sprintf("multi_exec[%s]", strings.Join(names, ","))
@@ -146,23 +254,24 @@ func (s *Sequence) newNode(bq BQ, r RuleConfig, ri int) (*ChainNode, error) {
 		n.E = e
 		n.RE = re
 	} else if len(r.Execs) > 1 {
-		var subRules []RuleConfig
+		var subRules[]RuleConfig
 		for _, ec := range r.Execs {
 			subRules = append(subRules, RuleConfig{
-				Execs: []ExecConfig{ec}, 
+				Execs:[]ExecConfig{ec},
 			})
 		}
 
 		// [修改] 创建子序列时，标记 isInline = true
 		subSeq := &Sequence{
 			logger:   s.logger,
-			isInline: true, 
+			isInline: true,
 		}
-		
+
 		if err := subSeq.buildChain(bq, subRules); err != nil {
 			return nil, fmt.Errorf("failed to build multi-exec sequence: %w", err)
 		}
 
+		subSeq.compile()
 		s.anonymousPlugins = append(s.anonymousPlugins, subSeq)
 		n.E = subSeq
 	}
@@ -275,4 +384,19 @@ func (r reverseMatch) Match(ctx context.Context, qCtx *query_context.Context) (b
 		return false, err
 	}
 	return !ok, nil
+}
+
+func (r reverseMatch) GetFastCheck() func(qCtx *query_context.Context) bool {
+	if fm, ok := r.m.(fastMatcher); ok {
+		if innerCheck := fm.GetFastCheck(); innerCheck != nil {
+			return func(qCtx *query_context.Context) bool {
+				return !innerCheck(qCtx) 
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Sequence) GetFastExec() func(context.Context, *query_context.Context) error {
+	return s.Exec
 }
