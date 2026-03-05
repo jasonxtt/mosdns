@@ -20,13 +20,15 @@
 package resp_ip
 
 import (
+	"context"
+	"net"
+	"net/netip"
+
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"github.com/IrineSistiana/mosdns/v5/plugin/matcher/base_ip"
 	"github.com/miekg/dns"
-	"net"
-	"net/netip"
 )
 
 const PluginType = "resp_ip"
@@ -38,7 +40,11 @@ func init() {
 type Args = base_ip.Args
 
 func QuickSetup(bq sequence.BQ, s string) (sequence.Matcher, error) {
-	return base_ip.NewMatcher(bq, base_ip.ParseQuickSetupArgs(s), matchRespAddr)
+	m, err := base_ip.NewMatcher(bq, base_ip.ParseQuickSetupArgs(s), matchRespAddr)
+	if err != nil {
+		return nil, err
+	}
+	return &fastRespIPMatcher{Matcher: m}, nil
 }
 
 func matchRespAddr(qCtx *query_context.Context, m netlist.Matcher) (bool, error) {
@@ -62,4 +68,15 @@ func matchRespAddr(qCtx *query_context.Context, m netlist.Matcher) (bool, error)
 		}
 	}
 	return false, nil
+}
+
+type fastRespIPMatcher struct {
+	sequence.Matcher
+}
+
+func (f *fastRespIPMatcher) GetFastCheck() func(qCtx *query_context.Context) bool {
+	return func(qCtx *query_context.Context) bool {
+		ok, _ := f.Matcher.Match(context.Background(), qCtx)
+		return ok
+	}
 }
