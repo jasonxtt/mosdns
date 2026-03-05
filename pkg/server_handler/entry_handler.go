@@ -99,6 +99,10 @@ func (h *EntryHandler) Handle(ctx context.Context, q *dns.Msg, serverMeta server
 
 	qCtx := query_context.NewContext(q)
 	qCtx.ServerMeta = serverMeta
+	qCtx.ApplyFastFlags(serverMeta.PreFastFlags)
+	if serverMeta.PreFastDomainSet != "" {
+		qCtx.StoreValue(query_context.KeyDomainSet, serverMeta.PreFastDomainSet)
+	}
 
 	// --- FINAL MODIFICATION: The definitive logic to avoid double logging ---
 	// This single flag, passed from the server config, now controls both logging systems.
