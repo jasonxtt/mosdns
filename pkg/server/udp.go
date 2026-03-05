@@ -23,19 +23,23 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
 )
 
+const (
+	FastActionContinue = iota
+	FastActionReply
+)
+
 type UDPServerOpts struct {
-	Logger *zap.Logger
+	Logger     *zap.Logger
+	FastBypass func(reqLen int, buf []byte, clientAddr netip.AddrPort) (action int, respLen int, preMarks uint64, preDset string)
 }
 
-// ServeUDP starts a server at c. It returns if c had a read error.
-// It always returns a non-nil error.
-// h is required. logger is optional.
 func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
 	logger := opts.Logger
 	if logger == nil {
@@ -63,12 +67,33 @@ func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
 		n, oobn, _, remoteAddr, err := c.ReadMsgUDPAddrPort(*rb, ob)
 		if err != nil {
 			if n == 0 {
-				// Err with zero read. Most likely because c was closed.
 				return fmt.Errorf("unexpected read err: %w", err)
 			}
-			// Temporary err.
 			logger.Warn("read err", zap.Error(err))
 			continue
+		}
+
+		var dstIpFromCm net.IP
+		if oobReader != nil {
+			dstIpFromCm, _ = oobReader(ob[:oobn])
+		}
+
+		var preMarks uint64
+		var preDset string
+		if opts.FastBypass != nil {
+			action, respLen, marks, dset := opts.FastBypass(n, *rb, remoteAddr)
+			if action == FastActionReply {
+				if respLen > 0 {
+					var oob []byte
+					if oobWriter != nil && dstIpFromCm != nil {
+						oob = oobWriter(dstIpFromCm)
+					}
+					_, _, _ = c.WriteMsgUDPAddrPort((*rb)[:respLen], oob, remoteAddr)
+				}
+				continue
+			}
+			preMarks = marks
+			preDset = dset
 		}
 
 		q := new(dns.Msg)
@@ -77,18 +102,14 @@ func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
 			continue
 		}
 
-		var dstIpFromCm net.IP
-		if oobReader != nil {
-			var err error
-			dstIpFromCm, err = oobReader(ob[:oobn])
-			if err != nil {
-				logger.Error("failed to get dst address from oob", zap.Error(err))
-			}
-		}
-
-		// handle query
 		go func() {
-			payload := h.Handle(listenerCtx, q, QueryMeta{ClientAddr: remoteAddr.Addr(), FromUDP: true}, pool.PackBuffer)
+			payload := h.Handle(listenerCtx, q, QueryMeta{
+				ClientAddr:       remoteAddr.Addr(),
+				FromUDP:          true,
+				PreFastFlags:     preMarks,
+				PreFastDomainSet: preDset,
+			}, pool.PackBuffer)
+
 			if payload == nil {
 				return
 			}
