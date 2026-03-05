@@ -20,21 +20,62 @@
 package rcode
 
 import (
+	"context"
+	"strconv"
+	"strings"
+
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
-	"github.com/IrineSistiana/mosdns/v5/plugin/matcher/base_int"
 )
 
 const PluginType = "rcode"
 
 func init() {
-	sequence.MustRegMatchQuickSetup(PluginType, base_int.QuickSetup(matchRcode))
+	sequence.MustRegMatchQuickSetup(PluginType, QuickSetup)
 }
 
-func matchRcode(qCtx *query_context.Context, m base_int.IntMatcher) (bool, error) {
+type rcodeMatcher struct {
+	codes []int
+}
+
+func (m *rcodeMatcher) Match(_ context.Context, qCtx *query_context.Context) (bool, error) {
 	r := qCtx.R()
 	if r == nil {
 		return false, nil
 	}
-	return m.Has(r.Rcode), nil
+	for _, c := range m.codes {
+		if r.Rcode == c {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *rcodeMatcher) GetFastCheck() func(qCtx *query_context.Context) bool {
+	targets := m.codes
+	return func(qCtx *query_context.Context) bool {
+		r := qCtx.R()
+		if r == nil {
+			return false
+		}
+		rc := r.Rcode
+		for _, c := range targets {
+			if rc == c {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func QuickSetup(_ sequence.BQ, s string) (sequence.Matcher, error) {
+	var codes []int
+	for _, f := range strings.Fields(s) {
+		v, err := strconv.Atoi(f)
+		if err != nil {
+			return nil, err
+		}
+		codes = append(codes, v)
+	}
+	return &rcodeMatcher{codes: codes}, nil
 }
