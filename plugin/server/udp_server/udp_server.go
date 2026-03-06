@@ -73,7 +73,10 @@ func (s *UdpServer) Close() error {
 }
 
 type SwitchPlugin interface{ GetValue() string }
-type DomainMapperPlugin interface{ FastMatch(qname string) ([]uint8, string, bool) }
+type DomainMapperPlugin interface{ 
+	FastMatch(qname string) ([]uint8, string, bool) 
+	GetRunBit() uint8
+}
 type IPSetPlugin interface{ Match(addr netip.Addr) bool }
 
 type fastCacheItem struct {
@@ -271,6 +274,7 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 		var marks uint64
 		var dset string
 		if dm != nil {
+			marks |= (1 << dm.GetRunBit())
 			if mList, dsName, match := dm.FastMatch(qname); match {
 				for _, v := range mList {
 					if v < 64 { marks |= (1 << v) }
