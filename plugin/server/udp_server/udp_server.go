@@ -77,8 +77,8 @@ type DomainMapperPlugin interface{ FastMatch(qname string) ([]uint8, string, boo
 type IPSetPlugin interface{ Match(addr netip.Addr) bool }
 
 type fastCacheItem struct {
-	resp      []byte
 	expire    int64
+	resp      []byte
 	updating  uint32
 	domainSet string
 }
@@ -104,8 +104,6 @@ func (fc *fastCache) GetOrUpdating(hash uint64, reqLen int, buf []byte) (int, in
 
 	if ptr.resp != nil {
 		respLen := len(ptr.resp)
-		// Scheme 1: Response already pre-baked with clientTTL.
-		// Only replace TXID (first 2 bytes).
 		txid0, txid1 := buf[0], buf[1]
 		copy(buf, ptr.resp)
 		buf[0], buf[1] = txid0, txid1
@@ -117,7 +115,6 @@ func (fc *fastCache) GetOrUpdating(hash uint64, reqLen int, buf []byte) (int, in
 func (fc *fastCache) Store(qname string, qtype uint16, resp []byte, dset string) {
 	h := maphash.String(maphashSeed, qname) ^ uint64(qtype)
 	
-	// Scheme 1: Pre-bake clientTTL into the binary payload once.
 	bakedResp := make([]byte, len(resp))
 	copy(bakedResp, resp)
 	offsets := findTTLOffsets(bakedResp)
@@ -195,7 +192,7 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create socket, %w", err)
 	}
-	bp.L().Info("udp server started with extreme bypass", zap.Stringer("addr", c.LocalAddr()))
+	bp.L().Info("udp server started with fixed fast-path", zap.Stringer("addr", c.LocalAddr()))
 
 	go func() {
 		defer c.Close()
@@ -230,6 +227,25 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 		if sw15 == nil || sw15.GetValue() != "A" { return server.FastActionContinue, 0, 0, "" }
 		if reqLen < 12 { return server.FastActionContinue, 0, 0, "" }
 
+		// Phase 1: Protocol Blocking (QType 6, 12, 65) - Highest Priority
+		qtypeOff := 12
+		for qtypeOff < reqLen {
+			l := int(buf[qtypeOff])
+			if l == 0 { qtypeOff++; break }
+			if l&0xC0 == 0xC0 { qtypeOff += 2; break }
+			qtypeOff += l + 1
+		}
+		if qtypeOff+2 > reqLen { return server.FastActionContinue, 0, 0, "" }
+		qtype := binary.BigEndian.Uint16(buf[qtypeOff : qtypeOff+2])
+
+		if qtype == 6 || qtype == 12 || qtype == 65 {
+			if sw5 != nil && sw5.GetValue() == "A" { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
+		}
+		if qtype == 28 {
+			if sw6 != nil && sw6.GetValue() == "A" { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
+		}
+
+		// Phase 2: Domain Parsing (Restore Trailing Dot Logic)
 		offset := 12
 		var nameBuf [256]byte
 		nameLen := 0
@@ -245,22 +261,13 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			if offset+l > reqLen || nameLen+l+1 > 256 { return server.FastActionContinue, 0, 0, "" }
 			copy(nameBuf[nameLen:], buf[offset:offset+l])
 			nameLen += l
-			nameBuf[nameLen] = '.'
+			nameBuf[nameLen] = '.' // Restore: Always add dot after label
 			nameLen++
 			offset += l
 		}
-		if offset+4 > reqLen { return server.FastActionContinue, 0, 0, "" }
-
-		qtype := binary.BigEndian.Uint16(buf[offset : offset+2])
 		qname := unsafe.String(&nameBuf[0], nameLen)
 
-		if qtype == 6 || qtype == 12 || qtype == 65 {
-			if sw5 != nil && sw5.GetValue() == "A" { return server.FastActionReply, makeReject(reqLen, buf, offset+4, 0), 0, "" }
-		}
-		if qtype == 28 {
-			if sw6 != nil && sw6.GetValue() == "A" { return server.FastActionReply, makeReject(reqLen, buf, offset+4, 0), 0, "" }
-		}
-
+		// Phase 3: Domain Set Matching
 		var marks uint64
 		var dset string
 		if dm != nil {
@@ -272,33 +279,36 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			}
 		}
 
-		if sw1 != nil {
-			sw1Val := sw1.GetValue()
-			if (marks&(1<<1)) != 0 && sw1Val == "A" { return server.FastActionReply, makeReject(reqLen, buf, offset+4, 3), 0, "" }
-			if (marks&(1<<2)) != 0 && qtype == 1 && sw1Val == "A" { return server.FastActionReply, makeReject(reqLen, buf, offset+4, 0), 0, "" }
-			if (marks&(1<<3)) != 0 && qtype == 28 && sw1Val == "A" { return server.FastActionReply, makeReject(reqLen, buf, offset+4, 0), 0, "" }
+		// Phase 4: Absolute Rejections (Mark 1, 2, 3, 5) - Bypass Cache
+		if sw1 != nil && sw1.GetValue() == "A" {
+			if (marks & (1 << 1)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 3), 0, "" }
+			if (marks & (1 << 2)) != 0 && qtype == 1 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
+			if (marks & (1 << 3)) != 0 && qtype == 28 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
 		}
-		if sw7 != nil {
-			if (marks&(1<<5)) != 0 && sw7.GetValue() == "A" { return server.FastActionReply, makeReject(reqLen, buf, offset+4, 3), 0, "" }
+		if sw7 != nil && sw7.GetValue() == "A" {
+			if (marks & (1 << 5)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 3), 0, "" }
 		}
 
+		// Phase 5: Passthrough Routing (Mark 6, 39) - Bypass Cache
 		ipMatch := false
 		if ipSet != nil { ipMatch = ipSet.Match(remoteAddr.Addr().Unmap()) }
 		sw2Val, sw12Val := "", ""
 		if sw2 != nil { sw2Val = sw2.GetValue() }
 		if sw12 != nil { sw12Val = sw12.GetValue() }
 
-		if sw2Val == "A" && sw12Val == "B" && !ipMatch { marks |= (1 << 39)
-		} else if sw2Val == "B" && sw12Val == "A" && ipMatch { marks |= (1 << 39) }
-
-		if (marks & (1 << 39)) == 0 {
-			// Scheme 2 Correct Implementation: 
-			// Consistent hashing with Store by using maphash.String directly 
-			// on the already constructed qname string.
-			hKey := maphash.String(maphashSeed, qname) ^ uint64(qtype)
-			action, rLen, _, ds := fc.GetOrUpdating(hKey, reqLen, buf)
-			if action == server.FastActionReply { return action, rLen, 0, ds }
+		if (sw2Val == "A" && sw12Val == "B" && !ipMatch) || (sw2Val == "B" && sw12Val == "A" && ipMatch) {
+			marks |= (1 << 39)
 		}
+
+		if (marks & (1 << 6)) != 0 || (marks & (1 << 39)) != 0 {
+			return server.FastActionContinue, 0, marks, dset
+		}
+
+		// Phase 6: Normal Cache Logic
+		hKey := maphash.String(maphashSeed, qname) ^ uint64(qtype)
+		action, rLen, _, ds := fc.GetOrUpdating(hKey, reqLen, buf)
+		if action == server.FastActionReply { return action, rLen, 0, ds }
+
 		return server.FastActionContinue, 0, marks, dset
 	}
 }
