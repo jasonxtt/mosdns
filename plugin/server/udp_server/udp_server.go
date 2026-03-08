@@ -295,7 +295,10 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 
 		// Phase 5: Passthrough Routing (Mark 6, 39) - Bypass Cache
 		ipMatch := false
-		if ipSet != nil { ipMatch = ipSet.Match(remoteAddr.Addr().Unmap()) }
+		if ipSet != nil {
+			ipMatch = ipSet.Match(remoteAddr.Addr().Unmap())
+			marks |= (1 << 48)
+		}
 		sw2Val, sw12Val := "", ""
 		if sw2 != nil { sw2Val = sw2.GetValue() }
 		if sw12 != nil { sw12Val = sw12.GetValue() }
