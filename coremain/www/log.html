@@ -76,6 +76,73 @@
            2. [修复] 手机端对齐：强制卡片内容左对齐，修复标题/副标题错位。
            3. [保持] 之前的所有修复 (标签完整性、概览页高度、卡片布局)。
            ========================================================================== */
+/* ==========================================================================
+           [修复] 电脑端概览页：左侧(最慢查询)高度 强制跟随 右侧(分流统计)
+           ========================================================================== */
+        @media (min-width: 1025px) {
+            /* 1. 设置整个网格容器。确保它们在同一行。 */
+            html body .overview-grid {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr !important;
+                align-items: stretch !important; /* 关键：让左侧拉伸以对齐右侧 */
+            }
+
+            /* 2. 左侧卡片：核心技巧 */
+            /* 将高度设为 0 这样它就不会撑开行高。高度将完全由右侧卡片决定。 */
+            #slowest-queries-card {
+                height: 0 !important; 
+                min-height: 100% !important; 
+                display: flex !important;
+                flex-direction: column !important;
+                max-height: 120vh !important; /* 仍然保留你想要的最高上限 */
+            }
+
+            /* 3. 右侧卡片：自然生长 */
+            /* 它决定了这一行的高度。 */
+            #shunt-results-card {
+                height: auto !important;
+                display: flex !important;
+                flex-direction: column !important;
+                max-height: 120vh !important; 
+            }
+
+            /* 4. 内部容器调整 */
+            #slowest-queries-card .card-body, 
+            #shunt-results-card .card-body {
+                flex: 1 !important;
+                display: flex !important;
+                flex-direction: column !important;
+                min-height: 0 !important; 
+                justify-content: flex-start !important;
+            }
+
+            /* 5. 左侧表格容器：填满由右侧撑开的空间，超出则内部滚动 */
+            #slowest-queries-card .scrollable-table-container {
+                flex: 1 !important;
+                max-height: none !important;
+                overflow-y: auto !important;
+            }
+
+            /* 6. 右侧饼图：置顶对齐 */
+            #shunt-results-card .donut-chart-wrapper {
+                flex: 1 !important;
+                display: flex !important;
+                align-items: flex-start !important; 
+                min-height: 0 !important;
+                padding-top: 10px !important;
+            }
+            
+            #shunt-results-card .donut-legend {
+                max-height: 100% !important; 
+                overflow-y: auto !important;
+            }
+
+            /* 7. 滚动条美化 */
+            #slowest-queries-card .scrollable-table-container::-webkit-scrollbar,
+            #shunt-results-card .donut-legend::-webkit-scrollbar { width: 6px; }
+            #slowest-queries-card .scrollable-table-container::-webkit-scrollbar-thumb,
+            #shunt-results-card .donut-legend::-webkit-scrollbar-thumb { background-color: var(--color-border); border-radius: 4px; }
+        }
 
         /* --- 1. PC/通用样式 --- */
         .domain-response-cell .response-meta {
