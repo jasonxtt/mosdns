@@ -94,7 +94,7 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 	}
 
 	rebuild := func() {
-		dm.logger.Info("rebuilding domain_mapper with zero-allocation query logic...")
+		dm.logger.Info("rebuilding domain_mapper with logic inheritance...")
 		start := time.Now()
 
 		markMap := make(map[string]uint64)
@@ -128,6 +128,36 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 				}
 			}
 			totalRules += len(rules)
+		}
+
+		for ruleStr := range markMap {
+			dotPos := strings.Index(ruleStr, ":")
+			if dotPos == -1 {
+				continue
+			}
+			dName := ruleStr[dotPos+1:]
+
+			for {
+				nextDot := strings.Index(dName, ".")
+				if nextDot == -1 {
+					break
+				}
+				dName = dName[nextDot+1:]
+				ancestorKey := "domain:" + dName
+
+				if aMask, ok := markMap[ancestorKey]; ok {
+					markMap[ruleStr] |= aMask
+					aTags := tagMap[ancestorKey]
+					if aTags != "" {
+						cTags := tagMap[ruleStr]
+						if cTags == "" {
+							tagMap[ruleStr] = aTags
+						} else if !strings.Contains(cTags, aTags) {
+							tagMap[ruleStr] = cTags + "|" + aTags
+						}
+					}
+				}
+			}
 		}
 
 		pool := make(map[string]*MatchResult)
