@@ -52,6 +52,8 @@ type DomainMapper struct {
 	defaultTag  string
 	providers   map[string]data_provider.RuleExporter
 	runBit      uint8
+
+	hotMap      sync.Map
 }
 
 var _ sequence.Executable = (*DomainMapper)(nil)
@@ -163,6 +165,12 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		pool := make(map[string]*MatchResult)
 		newMatcher := domain.NewMixMatcher[*MatchResult]()
 
+		type hotEntry struct {
+			name string
+			res  *MatchResult
+		}
+		var hotEntries []hotEntry
+
 		for ruleStr, mask := range markMap {
 			tagsStr := tagMap[ruleStr]
 			sig := fmt.Sprintf("%d-%s", mask, tagsStr)
@@ -179,19 +187,38 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 				}
 				pool[sig] = res
 			}
-			newMatcher.Add(ruleStr, res)
+
+			if strings.HasPrefix(ruleStr, "full:") {
+				name := strings.TrimPrefix(ruleStr, "full:")
+				if !strings.HasSuffix(name, ".") {
+					name += "."
+				}
+				hotEntries = append(hotEntries, hotEntry{name: name, res: res})
+			} else {
+				newMatcher.Add(ruleStr, res)
+			}
 		}
 
 		dm.matcher.Store(newMatcher)
+		dm.hotMap.Range(func(key, value any) bool {
+			dm.hotMap.Delete(key)
+			return true
+		})
+
+		for _, e := range hotEntries {
+			dm.hotMap.Store(e.name, e.res)
+		}
 
 		dm.logger.Info("rebuild finished",
 			zap.Int("rules", totalRules),
 			zap.Int("pooled_results", len(pool)),
+			zap.Int("hot_entries", len(hotEntries)),
 			zap.Duration("duration", time.Since(start)))
 
 		markMap = nil
 		tagMap = nil
 		pool = nil
+		hotEntries = nil
 
 		go func() {
 			time.Sleep(3 * time.Second)
@@ -211,7 +238,7 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 	for t, p := range dm.providers {
 		pluginTag := t
 		p.Subscribe(func() {
-			dm.logger.Info("upstream rule provider updated", zap.String("plugin", pluginTag))
+			dm.logger.Info("upstream rule provider updated", zap.String(PluginType, pluginTag))
 			triggerUpdate()
 		})
 	}
@@ -220,7 +247,63 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 	return dm, nil
 }
 
+func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags string) {
+	key := domainName
+	if !strings.HasSuffix(key, ".") {
+		key = key + "."
+	}
+
+	for {
+		val, ok := dm.hotMap.Load(key)
+		if !ok {
+			actual, loaded := dm.hotMap.LoadOrStore(key, &MatchResult{Marks: marks, JoinedTags: joinedTags})
+			if !loaded {
+				return
+			}
+			val = actual
+		}
+
+		oldRes := val.(*MatchResult)
+		newMarks := make([]uint8, len(oldRes.Marks))
+		copy(newMarks, oldRes.Marks)
+		for _, m := range marks {
+			found := false
+			for _, om := range oldRes.Marks {
+				if om == m {
+					found = true
+					break
+				}
+			}
+			if !found {
+				newMarks = append(newMarks, m)
+			}
+		}
+
+		newTags := oldRes.JoinedTags
+		if joinedTags != "" {
+			if newTags == "" {
+				newTags = joinedTags
+			} else if !strings.Contains(newTags, joinedTags) {
+				newTags = newTags + "|" + joinedTags
+			}
+		}
+
+		newRes := &MatchResult{
+			Marks:      newMarks,
+			JoinedTags: newTags,
+		}
+
+		if dm.hotMap.CompareAndSwap(key, val, newRes) {
+			return
+		}
+	}
+}
+
 func (dm *DomainMapper) FastMatch(qname string) ([]uint8, string, bool) {
+	if val, ok := dm.hotMap.Load(qname); ok {
+		res := val.(*MatchResult)
+		return res.Marks, res.JoinedTags, true
+	}
 	matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
 	result, ok := matcher.Match(qname)
 	if ok && result != nil {
@@ -243,9 +326,21 @@ func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) e
 		return nil
 	}
 
+	name := q.Question[0].Name
+	if val, ok := dm.hotMap.Load(name); ok {
+		res := val.(*MatchResult)
+		for _, mark := range res.Marks {
+			qCtx.SetFastFlag(mark)
+		}
+		if res.JoinedTags != "" {
+			qCtx.StoreValue(query_context.KeyDomainSet, res.JoinedTags)
+		}
+		return nil
+	}
+
 	matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
 	
-	result, ok := matcher.Match(q.Question[0].Name)
+	result, ok := matcher.Match(name)
 	if ok && result != nil {
 		for _, mark := range result.Marks {
 			qCtx.SetFastFlag(mark)
@@ -278,8 +373,20 @@ func (dm *DomainMapper) GetFastExec() func(ctx context.Context, qCtx *query_cont
 			return nil
 		}
 
+		name := q.Question[0].Name
+		if val, ok := dm.hotMap.Load(name); ok {
+			res := val.(*MatchResult)
+			for _, mark := range res.Marks {
+				qCtx.SetFastFlag(mark)
+			}
+			if res.JoinedTags != "" {
+				qCtx.StoreValue(query_context.KeyDomainSet, res.JoinedTags)
+			}
+			return nil
+		}
+
 		matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
-		result, ok := matcher.Match(q.Question[0].Name)
+		result, ok := matcher.Match(name)
 		if ok && result != nil {
 			for _, mark := range result.Marks {
 				qCtx.SetFastFlag(mark)
