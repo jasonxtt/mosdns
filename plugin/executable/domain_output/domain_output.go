@@ -33,6 +33,10 @@ func init() {
 	sequence.MustRegExecQuickSetup(PluginType, QuickSetup)
 }
 
+type FastAdder interface {
+	QuickAdd(domainName string, marks []uint8, joinedTags string)
+}
+
 type Args struct {
 	FileStat       string `yaml:"file_stat"`
 	FileRule       string `yaml:"file_rule"`
@@ -43,11 +47,16 @@ type Args struct {
 	DumpInterval   int    `yaml:"dump_interval"`
 	DomainSetURL   string `yaml:"domain_set_url"`
 	EnableFlags    bool   `yaml:"enable_flags"`
+
+	TargetMapper   string `yaml:"target_mapper"`
+	TargetMark     uint8  `yaml:"target_mark"`
+	TargetTag      string `yaml:"target_tag"`
 }
 
 type statEntry struct {
 	Count    int
 	LastDate string
+	pushed   bool
 }
 
 // logItem carries raw data from Exec to background worker
@@ -83,6 +92,13 @@ type domainOutput struct {
 
 	domainSetURL string
 	enableFlags  bool
+
+	targetMapperName string
+	targetMapperObj  FastAdder
+	targetMark       uint8
+	targetTag        string
+
+	bp *coremain.BP
 
 	closeOnce sync.Once
 }
@@ -122,21 +138,26 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		cfg.DumpInterval = 60
 	}
 	d := &domainOutput{
-		fileStat:        cfg.FileStat,
-		fileRule:        cfg.FileRule,
-		genRule:         cfg.GenRule,
-		pattern:         cfg.Pattern,
-		appendedString:  cfg.AppendedString,
-		maxEntries:      cfg.MaxEntries,
-		dumpInterval:    time.Duration(cfg.DumpInterval) * time.Second,
-		stats:           make(map[string]*statEntry),
-		recordChan:      make(chan *logItem, RecordBufferLimit),
-		writeSignalChan: make(chan struct{}, 1),
-		stopChan:        make(chan struct{}),
-		workerDoneChan:  make(chan struct{}),
-		domainSetURL:    cfg.DomainSetURL,
-		enableFlags:     cfg.EnableFlags,
+		fileStat:         cfg.FileStat,
+		fileRule:         cfg.FileRule,
+		genRule:          cfg.GenRule,
+		pattern:          cfg.Pattern,
+		appendedString:   cfg.AppendedString,
+		maxEntries:       cfg.MaxEntries,
+		dumpInterval:     time.Duration(cfg.DumpInterval) * time.Second,
+		stats:            make(map[string]*statEntry),
+		recordChan:       make(chan *logItem, RecordBufferLimit),
+		writeSignalChan:  make(chan struct{}, 1),
+		stopChan:         make(chan struct{}),
+		workerDoneChan:   make(chan struct{}),
+		domainSetURL:     cfg.DomainSetURL,
+		enableFlags:      cfg.EnableFlags,
+		targetMapperName: cfg.TargetMapper,
+		targetMark:       cfg.TargetMark,
+		targetTag:        cfg.TargetTag,
+		bp:               bp,
 	}
+
 	d.currentDate.Store(time.Now().Format("2006-01-02"))
 	d.loadFromFile()
 
@@ -215,6 +236,22 @@ func (d *domainOutput) Exec(ctx context.Context, qCtx *query_context.Context) er
 	}
 
 	return nil
+}
+
+func (d *domainOutput) ensureMapperBound() bool {
+	if d.targetMapperObj != nil {
+		return true
+	}
+	if d.targetMapperName == "" || d.bp == nil {
+		return false
+	}
+	if p := d.bp.M().GetPlugin(d.targetMapperName); p != nil {
+		if fa, ok := p.(FastAdder); ok {
+			d.targetMapperObj = fa
+			return true
+		}
+	}
+	return false
 }
 
 // GetFastExec implements sequence.fastExecutor
@@ -310,9 +347,18 @@ func (d *domainOutput) processRecord(item *logItem) {
 		entry = &statEntry{
 			Count:    0,
 			LastDate: currDate,
+			pushed:   false,
 		}
 		d.stats[storageKey] = entry
 	}
+
+	if !entry.pushed {
+		if d.ensureMapperBound() {
+			d.targetMapperObj.QuickAdd(rawDomain, []uint8{d.targetMark}, d.targetTag)
+			entry.pushed = true
+		}
+	}
+
 	entry.Count++
 	if entry.LastDate != currDate {
 		entry.LastDate = currDate
@@ -477,10 +523,19 @@ func (d *domainOutput) loadFromFile() {
 			continue
 		}
 
-		d.stats[domain] = &statEntry{
+		e := &statEntry{
 			Count:    count,
 			LastDate: date,
+			pushed:   false,
 		}
+
+		if d.ensureMapperBound() {
+			domainOnly := strings.Split(domain, "|")[0]
+			d.targetMapperObj.QuickAdd(domainOnly, []uint8{d.targetMark}, d.targetTag)
+			e.pushed = true
+		}
+
+		d.stats[domain] = e
 		atomic.AddInt64(&d.totalCount, int64(count))
 	}
 	coremain.ManualGC()
