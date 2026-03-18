@@ -32,6 +32,7 @@ import (
 	"unsafe"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
+	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/pkg/server"
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
 	"github.com/IrineSistiana/mosdns/v5/plugin/server/server_utils"
@@ -150,7 +151,7 @@ func (h *fastHandler) Handle(ctx context.Context, q *dns.Msg, meta server.QueryM
 		return payload
 	}
 
-	if payload != nil && (meta.PreFastFlags&(1<<39)) == 0 && q.Opcode == dns.OpcodeQuery && len(q.Question) > 0 {
+	if payload != nil && (meta.PreFastFlags&(1<<30)) == 0 && q.Opcode == dns.OpcodeQuery && len(q.Question) > 0 {
 		var dsetName string
 		if h.dm != nil {
 			_, dsetName, _ = h.dm.FastMatch(q.Question[0].Name)
@@ -210,24 +211,21 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 
 func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.AddrPort) (int, int, uint64, string) {
 	var once sync.Once
-	var sw15, sw5, sw6, sw1, sw7, sw2, sw12 SwitchPlugin
+	var sw15 SwitchPlugin
 	var dm DomainMapperPlugin
 	var ipSet IPSetPlugin
 
 	return func(reqLen int, buf []byte, remoteAddr netip.AddrPort) (int, int, uint64, string) {
 		once.Do(func() {
 			if p := bp.M().GetPlugin("switch15"); p != nil { sw15, _ = p.(SwitchPlugin) }
-			if p := bp.M().GetPlugin("switch5"); p != nil { sw5, _ = p.(SwitchPlugin) }
-			if p := bp.M().GetPlugin("switch6"); p != nil { sw6, _ = p.(SwitchPlugin) }
-			if p := bp.M().GetPlugin("switch1"); p != nil { sw1, _ = p.(SwitchPlugin) }
-			if p := bp.M().GetPlugin("switch7"); p != nil { sw7, _ = p.(SwitchPlugin) }
-			if p := bp.M().GetPlugin("switch2"); p != nil { sw2, _ = p.(SwitchPlugin) }
-			if p := bp.M().GetPlugin("switch12"); p != nil { sw12, _ = p.(SwitchPlugin) }
 			if p := bp.M().GetPlugin("unified_matcher1"); p != nil { dm, _ = p.(DomainMapperPlugin) }
 			if p := bp.M().GetPlugin("client_ip"); p != nil { ipSet, _ = p.(IPSetPlugin) }
 		})
 
-		if sw15 == nil || sw15.GetValue() != "A" { return server.FastActionContinue, 0, 0, "" }
+		// Load global switch mask into local bypass marks
+		var marks uint64 = query_context.GlobalSwitchMask.Load()
+
+		if sw15 == nil || (marks & (1 << 46)) == 0 { return server.FastActionContinue, 0, 0, "" }
 		if reqLen < 12 { return server.FastActionContinue, 0, 0, "" }
 
 		// Phase 1: Protocol Blocking (QType 6, 12, 65) - Highest Priority
@@ -242,10 +240,10 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 		qtype := binary.BigEndian.Uint16(buf[qtypeOff : qtypeOff+2])
 
 		if qtype == 6 || qtype == 12 || qtype == 65 {
-			if sw5 != nil && sw5.GetValue() == "A" { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
+			if (marks & (1 << 36)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
 		}
 		if qtype == 28 {
-			if sw6 != nil && sw6.GetValue() == "A" { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
+			if (marks & (1 << 37)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
 		}
 
 		// Phase 2: Domain Parsing (Restore Trailing Dot Logic)
@@ -271,7 +269,6 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 		qname := unsafe.String(&nameBuf[0], nameLen)
 
 		// Phase 3: Domain Set Matching
-		var marks uint64
 		var dset string
 		if dm != nil {
 			marks |= (1 << dm.GetRunBit())
@@ -284,30 +281,32 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 		}
 
 		// Phase 4: Absolute Rejections (Mark 1, 2, 3, 5) - Bypass Cache
-		if sw1 != nil && sw1.GetValue() == "A" {
+		if (marks & (1 << 32)) != 0 {
 			if (marks & (1 << 1)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 3), 0, "" }
 			if (marks & (1 << 2)) != 0 && qtype == 1 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
 			if (marks & (1 << 3)) != 0 && qtype == 28 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
 		}
-		if sw7 != nil && sw7.GetValue() == "A" {
+		if (marks & (1 << 38)) != 0 {
 			if (marks & (1 << 5)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 3), 0, "" }
 		}
 
-		// Phase 5: Passthrough Routing (Mark 6, 39) - Bypass Cache
+		// Phase 5: Passthrough Routing (Mark 6, 30) - Bypass Cache
 		ipMatch := false
 		if ipSet != nil {
 			ipMatch = ipSet.Match(remoteAddr.Addr().Unmap())
 			marks |= (1 << 48)
 		}
-		sw2Val, sw12Val := "", ""
-		if sw2 != nil { sw2Val = sw2.GetValue() }
-		if sw12 != nil { sw12Val = sw12.GetValue() }
 
-		if (sw2Val == "A" && sw12Val == "B" && !ipMatch) || (sw2Val == "B" && sw12Val == "A" && ipMatch) {
-			marks |= (1 << 39)
+		sw2A := (marks & (1 << 33)) != 0
+		sw2B := (marks & (1 << 33)) == 0
+		sw12A := (marks & (1 << 43)) != 0
+		sw12B := (marks & (1 << 43)) == 0
+
+		if (sw2A && sw12B && !ipMatch) || (sw2B && sw12A && ipMatch) {
+			marks |= (1 << 30)
 		}
 
-		if (marks & (1 << 6)) != 0 || (marks & (1 << 39)) != 0 {
+		if (marks & (1 << 6)) != 0 || (marks & (1 << 30)) != 0 {
 			return server.FastActionContinue, 0, marks, dset
 		}
 
