@@ -69,6 +69,9 @@ var (
 	contextUid atomic.Uint32
 	// Performance patch: preset seed
 	traceSeed = uint32(time.Now().UnixNano())
+
+	// GlobalSwitchMask mirrors the state of 16 switchers into a bitmask (Bits 32-47)
+	GlobalSwitchMask atomic.Uint64
 )
 
 const hexTable = "0123456789abcdef"
@@ -100,6 +103,7 @@ func NewContext(q *dns.Msg) *Context {
 		startTime: time.Now(),
 		query:     q,
 		clientOpt: addNewAndSwapOldOpt(q),
+		fastFlags: GlobalSwitchMask.Load(),
 	}
 
 	if len(q.Question) > 0 {
