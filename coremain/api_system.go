@@ -62,6 +62,12 @@ func handleSelfRestart(m *Mosdns) http.HandlerFunc {
 			logger.Info("saving data for targeted plugins...")
 			
 			for tag, p := range m.plugins {
+				// 【新增防御与排查】：拦截 nil 插件并打印日志
+				if p == nil {
+					// 打印出是哪个 tag 的插件变成了 nil
+					logger.Warn("⚠️ 发现未初始化的插件 (nil plugin)", zap.String("tag", tag))
+					continue
+				}
 				// 获取类型名称
 				typeName := reflect.TypeOf(p).String()
 
