@@ -44,7 +44,7 @@ import (
 )
 
 //go:embed proxy.o
-var ebpfProg []byte
+var ebpfProg[]byte
 
 const (
 	PluginType      = "nft_add"
@@ -103,6 +103,7 @@ type NftConfig struct {
 	SetV6        string `yaml:"set_v6"`
 	FixIPFile    string `yaml:"fixip"`
 	NftConfFile  string `yaml:"nftfile"`
+	PureNftFile  string `yaml:"purenft"`
 
 	EbpfEnable     string `yaml:"ebpf_enable"`
 	EbpfIface      string `yaml:"ebpf_iface"`
@@ -110,6 +111,10 @@ type NftConfig struct {
 	SingboxPort    uint16 `yaml:"singbox_port"`
 	MihomoFakeIPv4 string `yaml:"mihomo_fakeip_v4"`
 	MihomoFakeIPv6 string `yaml:"mihomo_fakeip_v6"`
+
+	DnsHijack  string `yaml:"dns_hijack"`
+	HijackDip4 string `yaml:"hjack_dip4"`
+	HijackDip6 string `yaml:"hjack_dip6"`
 }
 
 type RuleSource struct {
@@ -252,11 +257,18 @@ func (p *NftAdd) startupNftRoutine() {
 		log.Printf("[%s] Phase 2: Resetting firewall table '%s'...", PluginType, p.nftArgs.Table)
 		exec.Command("nft", "delete", "table", p.nftArgs.TableFamily, p.nftArgs.Table).Run()
 
-		if _, err := os.Stat(p.nftArgs.NftConfFile); err == nil {
-			loadCmd := exec.Command("nft", "-f", p.nftArgs.NftConfFile)
-			if out, err := loadCmd.CombinedOutput(); err != nil {
-				log.Printf("[%s] FATAL: Failed to load nft config %s: %v. Output: %s", PluginType, p.nftArgs.NftConfFile, err, string(out))
-				return
+		confFile := p.nftArgs.NftConfFile
+		if p.nftArgs.EbpfEnable == "ebpf_false" && p.nftArgs.PureNftFile != "" {
+			confFile = p.nftArgs.PureNftFile
+		}
+
+		if confFile != "" {
+			if _, err := os.Stat(confFile); err == nil {
+				loadCmd := exec.Command("nft", "-f", confFile)
+				if out, err := loadCmd.CombinedOutput(); err != nil {
+					log.Printf("[%s] FATAL: Failed to load nft config %s: %v. Output: %s", PluginType, confFile, err, string(out))
+					return
+				}
 			}
 		}
 
@@ -286,7 +298,7 @@ func (p *NftAdd) buildFullIPSet() (*netipx.IPSet, error) {
 	receiver := &builderReceiver{builder: &builder}
 
 	p.mu.RLock()
-	var enabledFiles []string
+	var enabledFiles[]string
 	for _, src := range p.sources {
 		if src.Enabled && src.Files != "" {
 			enabledFiles = append(enabledFiles, src.Files)
@@ -317,7 +329,7 @@ func (p *NftAdd) buildFullIPSet() (*netipx.IPSet, error) {
 }
 
 func (p *NftAdd) flushAndFillSets(ipSet *netipx.IPSet) error {
-	var v4List, v6List []string
+	var v4List, v6List[]string
 	for _, pfx := range ipSet.Prefixes() {
 		if pfx.Addr().Is4() {
 			v4List = append(v4List, pfx.String())
@@ -447,6 +459,28 @@ func (p *NftAdd) setupEbpf(ipSet *netipx.IPSet) error {
 	if p.nftArgs.SingboxPort != 0 {
 		consts["singbox_port"] = p.nftArgs.SingboxPort
 	}
+
+	enableHijack := uint8(0)
+	var dip4 [4]byte
+	var dip6 [16]byte
+
+	if p.nftArgs.EbpfEnable == "ebpf_true" && p.nftArgs.DnsHijack == "ebpf_hijack" {
+		enableHijack = 1
+		if p.nftArgs.HijackDip4 != "" {
+			if addr, err := netip.ParseAddr(p.nftArgs.HijackDip4); err == nil && addr.Is4() {
+				dip4 = addr.As4()
+			}
+		}
+		if p.nftArgs.HijackDip6 != "" {
+			if addr, err := netip.ParseAddr(p.nftArgs.HijackDip6); err == nil && addr.Is6() {
+				dip6 = addr.As16()
+			}
+		}
+	}
+	consts["enable_dns_hijack"] = enableHijack
+	consts["hjack_dip4_bytes"] = dip4
+	consts["hjack_dip6_bytes"] = dip6
+
 	if len(consts) > 0 {
 		spec.RewriteConstants(consts)
 	}
@@ -490,7 +524,7 @@ func (p *NftAdd) syncEbpfMap(ipSet *netipx.IPSet) error {
 	}
 
 	mark2 := uint32(2)
-	fakeIPs := []string{p.nftArgs.MihomoFakeIPv4, p.nftArgs.MihomoFakeIPv6}
+	fakeIPs :=[]string{p.nftArgs.MihomoFakeIPv4, p.nftArgs.MihomoFakeIPv6}
 	for _, cidr := range fakeIPs {
 		if cidr == "" {
 			continue
@@ -669,7 +703,7 @@ func (p *NftAdd) loadConfig() error {
 		return err
 	}
 	if len(data) == 0 { return nil }
-	var sources []*RuleSource
+	var sources[]*RuleSource
 	if err := json.Unmarshal(data, &sources); err != nil {
 		return fmt.Errorf("failed to parse config json: %w", err)
 	}
@@ -795,7 +829,7 @@ func (p *NftAdd) backgroundUpdater() {
 		select {
 		case <-ticker.C:
 			p.mu.RLock()
-			var toUpdate []string
+			var toUpdate[]string
 			for name, src := range p.sources {
 				if src.Enabled && src.AutoUpdate && src.UpdateIntervalHours > 0 {
 					if time.Since(src.LastUpdated).Hours() >= float64(src.UpdateIntervalHours) {
@@ -831,7 +865,7 @@ func (p *NftAdd) api() *chi.Mux {
 	r.Get("/config", func(w http.ResponseWriter, r *http.Request) {
 		p.mu.RLock()
 		defer p.mu.RUnlock()
-		var sources []*RuleSource
+		var sources[]*RuleSource
 		for _, s := range p.sources { sources = append(sources, s) }
 		sort.Slice(sources, func(i, j int) bool { return sources[i].Name < sources[j].Name })
 		jsonResponse(w, sources, 200)
