@@ -20,6 +20,7 @@ import (
 )
 
 const PluginType = "switch15"
+const switchBit = 46
 
 type Args struct {
 	InitialValue string `yaml:"initial_value"`
@@ -60,10 +61,21 @@ func Init(bp *coremain.BP, args any) (any, error) {
 	}
 
 	sw.value.Store(initVal)
+	updateGlobalMask(initVal)
 
 	globalSwitcher15 = sw
 	bp.RegAPI(sw.Api())
 	return sw, nil
+}
+
+func updateGlobalMask(val string) {
+	mask := query_context.GlobalSwitchMask.Load()
+	if val == "A" {
+		mask |= (1 << switchBit)
+	} else {
+		mask &^= (1 << switchBit)
+	}
+	query_context.GlobalSwitchMask.Store(mask)
 }
 
 func (s *Switcher15) Exec(ctx context.Context, qCtx *query_context.Context, next sequence.ChainWalker) error {
@@ -95,6 +107,7 @@ func (s *Switcher15) Api() *chi.Mux {
 		defer s.writeMu.Unlock()
 
 		s.value.Store(newVal)
+		updateGlobalMask(newVal)
 
 		if err := os.WriteFile(s.filePath, []byte(newVal), 0644); err != nil {
 			http.Error(w, "failed to write switch file: "+err.Error(), http.StatusInternalServerError)
@@ -117,22 +130,28 @@ type switchMatcher15 struct {
 	expected string
 }
 
-func (m *switchMatcher15) Match(_ context.Context, _ *query_context.Context) (bool, error) {
-	if globalSwitcher15 == nil {
-		return false, nil
+func (m *switchMatcher15) Match(_ context.Context, qCtx *query_context.Context) (bool, error) {
+	if m.expected == "A" {
+		return qCtx.HasFastFlag(switchBit), nil
 	}
+	// Fallback for 'B' or other non-A expectations
+	if globalSwitcher15 == nil { return false, nil }
 	currentVal := globalSwitcher15.value.Load().(string)
 	return currentVal == m.expected, nil
 }
 
 func (m *switchMatcher15) GetFastCheck() func(qCtx *query_context.Context) bool {
 	exp := m.expected
-	return func(_ *query_context.Context) bool {
+	return func(qCtx *query_context.Context) bool {
+		if exp == "A" {
+			return qCtx.HasFastFlag(switchBit)
+		}
 		if globalSwitcher15 == nil { return false }
-		v, _ := globalSwitcher15.value.Load().(string)
+		v := globalSwitcher15.value.Load().(string)
 		return v == exp
 	}
 }
+
 func (s *Switcher15) GetValue() string {
 	if val, ok := s.value.Load().(string); ok {
 		return val
