@@ -657,8 +657,8 @@ document.addEventListener('DOMContentLoaded', () => {
             { tag: 'switch2', name: '指定 Client fakeip', desc: '只允许指定的客户端科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不允许科学', tip: '按需开启。需要 MosDNS 监听53端口，并正确配置 client_ip 名单。', valueForOn: 'A' },
             { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽AAAA请求类型', tip: '无IPV6网络环境建议开启', valueForOn: 'A' },
-            { tag: 'switch8', name: 'IPV4优先', desc: 'Prefer IPV4（不建议开启）', tip: '当一个域名有IPV4解析记录时，不返回IPV6解析结果。', valueForOn: 'A' },
-            { tag: 'switch10', name: 'IPV6优先', desc: 'Prefer IPV6（不建议开启）', tip: '当一个域名有IPV6解析记录时，不返回IPV4解析结果。', valueForOn: 'A' },
+//            { tag: 'switch8', name: 'IPV4优先', desc: 'Prefer IPV4（不建议开启）', tip: '当一个域名有IPV4解析记录时，不返回IPV6解析结果。', valueForOn: 'A' },
+//            { tag: 'switch10', name: 'IPV6优先', desc: 'Prefer IPV6（不建议开启）', tip: '当一个域名有IPV6解析记录时，不返回IPV4解析结果。', valueForOn: 'A' },
         ],
 
         init() {
@@ -4352,4 +4352,5 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 });
+
 
