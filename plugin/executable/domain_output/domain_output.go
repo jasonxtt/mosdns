@@ -498,6 +498,7 @@ func (d *domainOutput) loadFromFile() {
 	scanner := bufio.NewScanner(file)
 	today := time.Now().Format("2006-01-02")
 
+        _ = d.ensureMapperBound() 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -526,13 +527,7 @@ func (d *domainOutput) loadFromFile() {
 		e := &statEntry{
 			Count:    count,
 			LastDate: date,
-			pushed:   false,
-		}
-
-		if d.ensureMapperBound() {
-			domainOnly := strings.Split(domain, "|")[0]
-			d.targetMapperObj.QuickAdd(domainOnly, []uint8{d.targetMark}, d.targetTag)
-			e.pushed = true
+			pushed:   true,
 		}
 
 		d.stats[domain] = e
