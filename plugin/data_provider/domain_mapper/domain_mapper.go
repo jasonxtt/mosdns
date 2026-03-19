@@ -256,7 +256,33 @@ func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags st
 	for {
 		val, ok := dm.hotMap.Load(key)
 		if !ok {
-			actual, loaded := dm.hotMap.LoadOrStore(key, &MatchResult{Marks: marks, JoinedTags: joinedTags})
+			newMarks := make([]uint8, len(marks))
+			copy(newMarks, marks)
+			newTags := joinedTags
+
+			matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
+			if res, matchOk := matcher.Match(key); matchOk && res != nil {
+				for _, m := range res.Marks {
+					found := false
+					for _, existingM := range newMarks {
+						if existingM == m {
+							found = true
+							break
+						}
+					}
+					if !found {
+						newMarks = append(newMarks, m)
+					}
+				}
+				if res.JoinedTags != "" {
+					if newTags == "" {
+						newTags = res.JoinedTags
+					} else if !strings.Contains(newTags, res.JoinedTags) {
+						newTags = newTags + "|" + res.JoinedTags
+					}
+				}
+			}
+			actual, loaded := dm.hotMap.LoadOrStore(key, &MatchResult{Marks: newMarks, JoinedTags: newTags})
 			if !loaded {
 				return
 			}
