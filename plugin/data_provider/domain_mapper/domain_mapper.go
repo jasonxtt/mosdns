@@ -137,7 +137,24 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 			if dotPos == -1 {
 				continue
 			}
-			dName := ruleStr[dotPos+1:]
+			originalDName := ruleStr[dotPos+1:]
+			dName := originalDName
+
+			if strings.HasPrefix(ruleStr, "full:") {
+				ancestorKey := "domain:" + originalDName
+				if aMask, ok := markMap[ancestorKey]; ok {
+					markMap[ruleStr] |= aMask
+					aTags := tagMap[ancestorKey]
+					if aTags != "" {
+						cTags := tagMap[ruleStr]
+						if cTags == "" {
+							tagMap[ruleStr] = aTags
+						} else if !strings.Contains(cTags, aTags) {
+							tagMap[ruleStr] = cTags + "|" + aTags
+						}
+					}
+				}
+			}
 
 			for {
 				nextDot := strings.Index(dName, ".")
