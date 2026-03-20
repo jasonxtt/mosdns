@@ -30,19 +30,25 @@ type NftConfig struct {
 	SetV6        string `yaml:"set_v6"`
 	FixIPFile    string `yaml:"fixip"`
 	NftConfFile  string `yaml:"nftfile"`
+	PureNftFile  string `yaml:"purenft"` 
 
-	// eBPF configurations (必须保留这些字段以适配 YAML 解析)
+	// eBPF configurations
 	EbpfEnable     string `yaml:"ebpf_enable"`
 	EbpfIface      string `yaml:"ebpf_iface"`
 	MihomoPort     uint16 `yaml:"mihomo_port"`
 	SingboxPort    uint16 `yaml:"singbox_port"`
 	MihomoFakeIPv4 string `yaml:"mihomo_fakeip_v4"`
 	MihomoFakeIPv6 string `yaml:"mihomo_fakeip_v6"`
+
+	// DNS Hijack (必须保留这些字段以适配 YAML 解析)
+	DnsHijack  string `yaml:"dns_hijack"`
+	HijackDip4 string `yaml:"hjack_dip4"`
+	HijackDip6 string `yaml:"hjack_dip6"`
 }
 
 // 模拟 Match 方法以满足可能的接口需求
+type NftAdd struct{}
+
 func (p *NftAdd) Match(addr any) bool {
 	return false
 }
-
-type NftAdd struct{}
