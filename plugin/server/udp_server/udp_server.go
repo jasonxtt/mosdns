@@ -46,6 +46,7 @@ const (
 	cacheMask   = cacheSize - 1
 	internalTTL = 5
 	clientTTL   = 10
+	asyncRefreshMark = 1 << 60 
 )
 
 var maphashSeed = maphash.MakeSeed()
@@ -146,6 +147,17 @@ type fastHandler struct {
 
 func (h *fastHandler) Handle(ctx context.Context, q *dns.Msg, meta server.QueryMeta, pack func(*dns.Msg) (*[]byte, error)) *[]byte {
 	payload := h.next.Handle(ctx, q, meta, pack)
+
+    if (meta.PreFastFlags & asyncRefreshMark) != 0 {
+        if payload != nil && q.Opcode == dns.OpcodeQuery && len(q.Question) > 0 {
+            var dsetName string
+            if h.dm != nil {
+                _, dsetName, _ = h.dm.FastMatch(q.Question[0].Name)
+            }
+            h.fc.Store(q.Question[0].Name, q.Question[0].Qtype, *payload, dsetName)
+        }
+        return nil
+    }
 	
 	if h.sw != nil && h.sw.GetValue() != "A" {
 		return payload
@@ -185,7 +197,6 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 
 	fc := newFastCache()
 	wrappedHandler := &fastHandler{next: dh, fc: fc, dm: dm, sw: sw15}
-	fastBypass := buildFastBypass(bp, fc)
 
 	socketOpt := server_utils.ListenerSocketOpts{
 		SO_REUSEPORT: true,
@@ -196,6 +207,8 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create socket, %w", err)
 	}
+
+	fastBypass := buildFastBypass(bp, fc, c.(*net.UDPConn))
 	bp.L().Info("udp server started with fixed fast-path", zap.Stringer("addr", c.LocalAddr()))
 
 	go func() {
@@ -209,7 +222,7 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 	return &UdpServer{args: args, c: c}, nil
 }
 
-func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.AddrPort) (int, int, uint64, string) {
+func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int, []byte, netip.AddrPort) (int, int, uint64, string) {
 	var once sync.Once
 	var sw15 SwitchPlugin
 	var dm DomainMapperPlugin
@@ -222,13 +235,11 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			if p := bp.M().GetPlugin("client_ip"); p != nil { ipSet, _ = p.(IPSetPlugin) }
 		})
 
-		// Load global switch mask into local bypass marks
 		var marks uint64 = query_context.GlobalSwitchMask.Load()
 
 		if sw15 == nil || (marks & (1 << 46)) == 0 { return server.FastActionContinue, 0, 0, "" }
 		if reqLen < 12 { return server.FastActionContinue, 0, 0, "" }
 
-		// Phase 1: Protocol Blocking (QType 6, 12, 65) - Highest Priority
 		qtypeOff := 12
 		for qtypeOff < reqLen {
 			l := int(buf[qtypeOff])
@@ -246,7 +257,6 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			if (marks & (1 << 37)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
 		}
 
-		// Phase 2: Domain Parsing (Restore Trailing Dot Logic)
 		offset := 12
 		var nameBuf [256]byte
 		nameLen := 0
@@ -262,13 +272,12 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			if offset+l > reqLen || nameLen+l+1 > 256 { return server.FastActionContinue, 0, 0, "" }
 			copy(nameBuf[nameLen:], buf[offset:offset+l])
 			nameLen += l
-			nameBuf[nameLen] = '.' // Restore: Always add dot after label
+			nameBuf[nameLen] = '.' 
 			nameLen++
 			offset += l
 		}
 		qname := unsafe.String(&nameBuf[0], nameLen)
 
-		// Phase 3: Domain Set Matching
 		var dset string
 		if dm != nil {
 			marks |= (1 << dm.GetRunBit())
@@ -280,7 +289,6 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			}
 		}
 
-		// Phase 4: Absolute Rejections (Mark 1, 2, 3, 5) - Bypass Cache
 		if (marks & (1 << 32)) != 0 {
 			if (marks & (1 << 1)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 3), 0, "" }
 			if (marks & (1 << 2)) != 0 && qtype == 1 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, "" }
@@ -290,7 +298,6 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			if (marks & (1 << 5)) != 0 { return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 3), 0, "" }
 		}
 
-		// Phase 5: Passthrough Routing (Mark 6, 30) - Bypass Cache
 		ipMatch := false
 		if ipSet != nil {
 			ipMatch = ipSet.Match(remoteAddr.Addr().Unmap())
@@ -310,11 +317,35 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache) func(int, []byte, netip.Add
 			return server.FastActionContinue, 0, marks, dset
 		}
 
-		// Phase 6: Normal Cache Logic
 		hKey := maphash.String(maphashSeed, qname) ^ uint64(qtype)
-		action, rLen, _, ds := fc.GetOrUpdating(hKey, reqLen, buf)
-		if action == server.FastActionReply { return action, rLen, 0, ds }
+		ptr := fc.m[hKey&cacheMask].Load()
 
+		if ptr != nil {
+			now := time.Now().Unix()
+			expireTime := atomic.LoadInt64(&ptr.expire)
+			if now > expireTime {
+				isStuck := now > expireTime+10
+				if atomic.LoadUint32(&ptr.updating) == 0 || isStuck {
+					if atomic.CompareAndSwapUint32(&ptr.updating, 0, 1) || (isStuck && atomic.CompareAndSwapUint32(&ptr.updating, 1, 1)) {
+						atomic.StoreInt64(&ptr.expire, now+5)
+
+						respLen := len(ptr.resp)
+						bakedStale := make([]byte, respLen)
+						copy(bakedStale, ptr.resp)
+						bakedStale[0], bakedStale[1] = buf[0], buf[1]
+
+						_, _ = conn.WriteToUDPAddrPort(bakedStale, remoteAddr)
+
+						return server.FastActionContinue, 0, marks|asyncRefreshMark, dset
+					}
+				}
+			}
+		}
+
+		action, rLen, _, ds := fc.GetOrUpdating(hKey, reqLen, buf)
+		if action == server.FastActionReply {
+			return action, rLen, 0, ds
+		}
 		return server.FastActionContinue, 0, marks, dset
 	}
 }
