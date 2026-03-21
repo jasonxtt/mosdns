@@ -324,6 +324,9 @@ func makeReject(reqLen int, buf []byte, offset int, rcode byte) int {
 	buf[2] |= 0x80
 	buf[3] |= 0x80
 	buf[3] = (buf[3] & 0xF0) | (rcode & 0x0F)
+	buf[6], buf[7] = 0, 0
+	buf[8], buf[9] = 0, 0
+	buf[10], buf[11] = 0, 0
 	return offset
 }
 
