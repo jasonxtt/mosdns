@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/maphash"
-	"log"
+//	"log"
 	"net"
 	"net/netip"
 	"sync"
@@ -280,7 +280,7 @@ func startRingbufListener(bp *coremain.BP, h *fastHandler, rd *ringbuf.Reader) {
 			return &b, err
 		}
 
-		log.Printf("[Go-Ringbuf] Triggering async refresh for Stale Cache.")
+//		log.Printf("[Go-Ringbuf] Triggering async refresh for Stale Cache.")
 		h.Handle(context.Background(), msg, meta, packFunc)
 	}
 }
