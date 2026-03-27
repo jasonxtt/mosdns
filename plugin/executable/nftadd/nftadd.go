@@ -1,12 +1,5 @@
 //go:build linux
 
-/*
- * Copyright (C) 2020-2022, IrineSistiana
- * Copyright (C) 2024, Modified for nft_add requirement
- *
- * This file is part of mosdns.
- */
-
 package nft_add
 
 import (
@@ -44,7 +37,10 @@ import (
 )
 
 //go:embed proxy.o
-var ebpfProg[]byte
+var ebpfProg []byte
+
+//go:embed dnscache.o
+var dnsProg []byte
 
 const (
 	PluginType      = "nft_add"
@@ -55,7 +51,6 @@ func init() {
 	coremain.RegNewPluginFunc(PluginType, newNftAdd, func() any { return new(Args) })
 }
 
-// IPReceiver is used for streaming IP data into different targets
 type IPReceiver interface {
 	AddPrefix(netip.Prefix) error
 }
@@ -87,7 +82,6 @@ func (r *counterReceiver) AddPrefix(_ netip.Prefix) error {
 	return nil
 }
 
-// Args holds the configuration
 type Args struct {
 	Socks5      string    `yaml:"socks5,omitempty"`
 	LocalConfig string    `yaml:"local_config"`
@@ -141,8 +135,9 @@ type NftAdd struct {
 	cancel          context.CancelFunc
 
 	startupDone atomic.Bool
-	ebpfLink    link.Link
+	ebpfLinks   []link.Link
 	ebpfMap     *ebpf.Map
+	dnsPrograms []*ebpf.Program
 }
 
 var _ data_provider.IPMatcherProvider = (*NftAdd)(nil)
@@ -165,15 +160,12 @@ func newNftAdd(bp *coremain.BP, args any) (any, error) {
 	}
 	if cfg.Socks5 != "" {
 		dialer, err := proxy.SOCKS5("tcp", cfg.Socks5, nil, proxy.Direct)
-		if err != nil {
-			return nil, fmt.Errorf("%s: failed to create SOCKS5 dialer: %w", PluginType, err)
+		if err == nil {
+			if contextDialer, ok := dialer.(proxy.ContextDialer); ok {
+				transport.DialContext = contextDialer.DialContext
+				transport.Proxy = nil
+			}
 		}
-		contextDialer, ok := dialer.(proxy.ContextDialer)
-		if !ok {
-			return nil, fmt.Errorf("%s: created dialer does not support context", PluginType)
-		}
-		transport.DialContext = contextDialer.DialContext
-		transport.Proxy = nil
 	}
 	httpClient := &http.Client{
 		Timeout:   downloadTimeout,
@@ -219,19 +211,22 @@ func (p *NftAdd) GetIPMatcher() netlist.Matcher {
 func (p *NftAdd) Close() error {
 	log.Printf("[%s] closing...", PluginType)
 	p.cancel()
-	if p.ebpfLink != nil {
-		p.ebpfLink.Close()
+
+	for _, l := range p.ebpfLinks {
+		l.Close()
 	}
-	if p.ebpfMap != nil {
-		p.ebpfMap.Close()
+	for _, prg := range p.dnsPrograms {
+		prg.Close()
 	}
+
+	os.Remove("/sys/fs/bpf/mosdns_fast_cache")
+	os.Remove("/sys/fs/bpf/mosdns_ringbuf")
+	os.Remove("/sys/fs/bpf/mosdns_dns_jmp")
+	os.Remove("/sys/fs/bpf/mosdns_jmp_dns")
+	
 	p.cleanupRouting()
 	return nil
 }
-
-// -----------------------------------------------------------------------------
-// NFT Core Logic
-// -----------------------------------------------------------------------------
 
 func (p *NftAdd) startupNftRoutine() {
 	delay := time.Duration(p.nftArgs.StartupDelay) * time.Second
@@ -279,13 +274,13 @@ func (p *NftAdd) startupNftRoutine() {
 	}
 
 	if p.nftArgs.EbpfEnable == "ebpf_true" {
-		log.Printf("[%s] Phase 4: Setting up eBPF on interface %s...", PluginType, p.nftArgs.EbpfIface)
+		log.Printf("[%s] Phase 4: Setting up modular eBPF on interface %s...", PluginType, p.nftArgs.EbpfIface)
 		if err := p.setupEbpf(ipSet); err != nil {
 			log.Printf("[%s] ERROR: eBPF setup failed: %v", PluginType, err)
 		} else {
-			log.Printf("[%s] eBPF production proxy fully operational.", PluginType)
+			log.Printf("[%s] eBPF production modular proxy fully operational.", PluginType)
 		}
-		coremain.ManualGC() 
+		coremain.ManualGC()
 	}
 
 	p.startupDone.Store(true)
@@ -298,7 +293,7 @@ func (p *NftAdd) buildFullIPSet() (*netipx.IPSet, error) {
 	receiver := &builderReceiver{builder: &builder}
 
 	p.mu.RLock()
-	var enabledFiles[]string
+	var enabledFiles []string
 	for _, src := range p.sources {
 		if src.Enabled && src.Files != "" {
 			enabledFiles = append(enabledFiles, src.Files)
@@ -329,7 +324,7 @@ func (p *NftAdd) buildFullIPSet() (*netipx.IPSet, error) {
 }
 
 func (p *NftAdd) flushAndFillSets(ipSet *netipx.IPSet) error {
-	var v4List, v6List[]string
+	var v4List, v6List []string
 	for _, pfx := range ipSet.Prefixes() {
 		if pfx.Addr().Is4() {
 			v4List = append(v4List, pfx.String())
@@ -364,10 +359,6 @@ func (p *NftAdd) flushAndFillSets(ipSet *netipx.IPSet) error {
 	}
 	return nil
 }
-
-// -----------------------------------------------------------------------------
-// eBPF Helper Logic
-// -----------------------------------------------------------------------------
 
 func (p *NftAdd) runCmd(cmd string) {
 	_ = exec.Command("sh", "-c", cmd).Run()
@@ -436,87 +427,115 @@ func (p *NftAdd) packLpmKey(prefix netip.Prefix) []byte {
 }
 
 func (p *NftAdd) setupEbpf(ipSet *netipx.IPSet) error {
-	if p.ebpfLink != nil {
-		p.ebpfLink.Close()
-		p.ebpfLink = nil
-	}
-	if p.ebpfMap != nil {
-		p.ebpfMap.Close()
-		p.ebpfMap = nil
-	}
-
 	p.setupRouting()
-
-	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(ebpfProg))
-	if err != nil {
-		return err
-	}
-
-	consts := make(map[string]interface{})
-	if p.nftArgs.MihomoPort != 0 {
-		consts["mihomo_port"] = p.nftArgs.MihomoPort
-	}
-	if p.nftArgs.SingboxPort != 0 {
-		consts["singbox_port"] = p.nftArgs.SingboxPort
-	}
-
-	enableHijack := uint8(0)
-	var dip4 [4]byte
-	var dip6 [16]byte
-
-	if p.nftArgs.EbpfEnable == "ebpf_true" && p.nftArgs.DnsHijack == "ebpf_hijack" {
-		enableHijack = 1
-		if p.nftArgs.HijackDip4 != "" {
-			if addr, err := netip.ParseAddr(p.nftArgs.HijackDip4); err == nil && addr.Is4() {
-				b := addr.As4()
-				dip4 := binary.LittleEndian.Uint32(b[:])
-				consts["hjack_dip4"] = dip4
-			}
-		}
-		if p.nftArgs.HijackDip6 != "" {
-			if addr, err := netip.ParseAddr(p.nftArgs.HijackDip6); err == nil && addr.Is6() {
-				consts["hjack_dip6"] = addr.As16() 
-			}
-		}
-	}
-	consts["enable_dns_hijack"] = enableHijack
-	consts["hjack_dip4_bytes"] = dip4
-	consts["hjack_dip6_bytes"] = dip6
-
-	if len(consts) > 0 {
-		spec.RewriteConstants(consts)
-	}
-
-	var objs struct {
-		IngressL2  *ebpf.Program `ebpf:"tc_ingress_l2"`
-		RouteRules *ebpf.Map     `ebpf:"route_rules"`
-	}
-
-	if err := spec.LoadAndAssign(&objs, nil); err != nil {
-		return err
-	}
-	spec = nil 
-	p.ebpfMap = objs.RouteRules
-
+	os.MkdirAll("/sys/fs/bpf", 0755)
 	lan, err := net.InterfaceByName(p.nftArgs.EbpfIface)
 	if err != nil {
-		objs.IngressL2.Close()
-		objs.RouteRules.Close()
 		return err
 	}
+
+	specDNS, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(dnsProg))
+	if err != nil {
+		return err
+	}
+
+	for _, prog := range specDNS.Programs {
+		prog.Type = ebpf.SchedCLS
+		prog.AttachType = 0
+	}
+
+	dnsConsts := make(map[string]interface{})
+	if p.nftArgs.EbpfEnable == "ebpf_true" && p.nftArgs.DnsHijack == "ebpf_hijack" {
+		if addr, err := netip.ParseAddr(p.nftArgs.HijackDip4); err == nil && addr.Is4() {
+			b := addr.As4()
+			dnsConsts["hjack_dip4"] = binary.LittleEndian.Uint32(b[:])
+			dnsConsts["enable_dns_hijack"] = uint8(1)
+		}
+	}
+	if len(dnsConsts) > 0 {
+		specDNS.RewriteConstants(dnsConsts)
+	}
+
+	var objsDNS struct {
+		DnsMain       *ebpf.Program `ebpf:"tc_dns_main"`
+		DnsResp       *ebpf.Program `ebpf:"tc_dns_resp"`
+		FastDnsCache  *ebpf.Map     `ebpf:"fast_dns_cache"`
+		RingbufEvents *ebpf.Map     `ebpf:"ringbuf_events"`
+		DnsJmp        *ebpf.Map     `ebpf:"dns_jmp"`
+	}
+	if err := specDNS.LoadAndAssign(&objsDNS, nil); err != nil {
+		return fmt.Errorf("load dnscache error: %w", err)
+	}
+
+	p.dnsPrograms = append(p.dnsPrograms, objsDNS.DnsMain, objsDNS.DnsResp)
+
+	key0 := uint32(0)
+	valResp := uint32(objsDNS.DnsResp.FD())
+	if err := objsDNS.DnsJmp.Update(&key0, &valResp, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to link dns main to resp: %w", err)
+	}
+
+	_ = objsDNS.FastDnsCache.Pin("/sys/fs/bpf/mosdns_fast_cache")
+	_ = objsDNS.RingbufEvents.Pin("/sys/fs/bpf/mosdns_ringbuf")
+	
+	os.Remove("/sys/fs/bpf/mosdns_dns_jmp")
+	_ = objsDNS.DnsJmp.Pin("/sys/fs/bpf/mosdns_dns_jmp")
+
+	specProxy, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(ebpfProg))
+	if err != nil {
+		return err
+	}
+
+	for _, prog := range specProxy.Programs {
+		prog.Type = ebpf.SchedCLS
+		prog.AttachType = 0
+	}
+
+	proxyConsts := make(map[string]interface{})
+	if p.nftArgs.MihomoPort != 0 {
+		proxyConsts["mihomo_port"] = p.nftArgs.MihomoPort
+	}
+	if p.nftArgs.SingboxPort != 0 {
+		proxyConsts["singbox_port"] = p.nftArgs.SingboxPort
+	}
+	if p.nftArgs.EbpfEnable == "ebpf_true" && p.nftArgs.DnsHijack == "ebpf_hijack" {
+		if addr, err := netip.ParseAddr(p.nftArgs.HijackDip6); err == nil && addr.Is6() {
+			proxyConsts["hjack_dip6"] = addr.As16()
+			proxyConsts["enable_dns_hijack"] = uint8(1)
+		}
+	}
+	if len(proxyConsts) > 0 {
+		specProxy.RewriteConstants(proxyConsts)
+	}
+
+	var objsProxy struct {
+		IngressL2  *ebpf.Program `ebpf:"tc_ingress_l2"`
+		RouteRules *ebpf.Map     `ebpf:"route_rules"`
+		JmpDNS     *ebpf.Map     `ebpf:"jmp_dns"`
+	}
+	if err := specProxy.LoadAndAssign(&objsProxy, nil); err != nil {
+		return fmt.Errorf("load proxy error: %w", err)
+	}
+	p.ebpfMap = objsProxy.RouteRules
+
+	valMain := uint32(objsDNS.DnsMain.FD())
+	if err := objsProxy.JmpDNS.Update(&key0, &valMain, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("failed to link main proxy to dns module: %w", err)
+	}
+
+	os.Remove("/sys/fs/bpf/mosdns_jmp_dns")
+	_ = objsProxy.JmpDNS.Pin("/sys/fs/bpf/mosdns_jmp_dns")
 
 	l, err := link.AttachTCX(link.TCXOptions{
 		Interface: lan.Index,
-		Program:   objs.IngressL2,
+		Program:   objsProxy.IngressL2,
 		Attach:    ebpf.AttachTCXIngress,
 	})
 	if err != nil {
-		objs.IngressL2.Close()
-		objs.RouteRules.Close()
 		return err
 	}
-	p.ebpfLink = l
-	objs.IngressL2 = nil 
+	p.ebpfLinks = append(p.ebpfLinks, l)
+
 	return p.syncEbpfMap(ipSet)
 }
 
@@ -526,7 +545,7 @@ func (p *NftAdd) syncEbpfMap(ipSet *netipx.IPSet) error {
 	}
 
 	mark2 := uint32(2)
-	fakeIPs :=[]string{p.nftArgs.MihomoFakeIPv4, p.nftArgs.MihomoFakeIPv6}
+	fakeIPs := []string{p.nftArgs.MihomoFakeIPv4, p.nftArgs.MihomoFakeIPv6}
 	for _, cidr := range fakeIPs {
 		if cidr == "" {
 			continue
@@ -542,15 +561,11 @@ func (p *NftAdd) syncEbpfMap(ipSet *netipx.IPSet) error {
 	}
 	return nil
 }
-// -----------------------------------------------------------------------------
-// Helper functions: file parsing (Streaming Mode)
-// -----------------------------------------------------------------------------
 
 func loadFixIPToReceiver(path string, receiver IPReceiver) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("[%s] WARN: fixip file %s not found, skipping.", PluginType, path)
 			return nil
 		}
 		return err
@@ -558,14 +573,12 @@ func loadFixIPToReceiver(path string, receiver IPReceiver) error {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	lineNum := 0
 	for scanner.Scan() {
-		lineNum++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		if pfx, err := netip.ParsePrefix(line); err == nil {
 			receiver.AddPrefix(pfx)
 			continue
@@ -574,7 +587,6 @@ func loadFixIPToReceiver(path string, receiver IPReceiver) error {
 			receiver.AddPrefix(netip.PrefixFrom(addr, addr.BitLen()))
 			continue
 		}
-		log.Printf("[%s] WARN: invalid ip/cidr in fixip file line %d: %s", PluginType, lineNum, line)
 	}
 	return scanner.Err()
 }
@@ -622,14 +634,18 @@ func readRuleToReceiver(r *bufio.Reader, receiver IPReceiver) (int, string) {
 	case 0:
 		c, lr := readDefaultToReceiver(r, receiver)
 		ct += c
-		if lr != "" { last = lr }
+		if lr != "" {
+			last = lr
+		}
 	case 1:
 		_, _ = r.ReadByte()
 		n, _ := binary.ReadUvarint(r)
 		for j := uint64(0); j < n; j++ {
 			c, lr := readRuleToReceiver(r, receiver)
 			ct += c
-			if lr != "" { last = lr }
+			if lr != "" {
+				last = lr
+			}
 		}
 		_, _ = r.ReadByte()
 	}
@@ -644,8 +660,7 @@ func readDefaultToReceiver(r *bufio.Reader, receiver IPReceiver) (int, string) {
 		if err != nil || item == ruleItemFinal {
 			break
 		}
-		switch item {
-		case ruleItemIPCIDR:
+		if item == ruleItemIPCIDR {
 			ipset, err := parseIPSet(r)
 			if err != nil {
 				return count, last
@@ -655,8 +670,6 @@ func readDefaultToReceiver(r *bufio.Reader, receiver IPReceiver) (int, string) {
 				count++
 				last = pfx.String()
 			}
-		default:
-			// unknown item
 		}
 	}
 	return count, last
@@ -668,22 +681,17 @@ func parseIPSet(r varbin.Reader) (netipx.IPSet, error) {
 		return netipx.IPSet{}, fmt.Errorf("unsupported ipset version")
 	}
 	var length uint64
-	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
-		return netipx.IPSet{}, err
-	}
+	binary.Read(r, binary.BigEndian, &length)
 	type ipRangeData struct{ From, To []byte }
 	ranges := make([]ipRangeData, length)
-	if err := varbin.Read(r, binary.BigEndian, &ranges); err != nil {
-		return netipx.IPSet{}, err
-	}
-
+	varbin.Read(r, binary.BigEndian, &ranges)
 	var builder netipx.IPSetBuilder
 	for _, rr := range ranges {
-		from, ok := netip.AddrFromSlice(rr.From)
-		if !ok { continue }
-		to, ok := netip.AddrFromSlice(rr.To)
-		if !ok { continue }
-		builder.AddRange(netipx.IPRangeFrom(from, to))
+		from, ok1 := netip.AddrFromSlice(rr.From)
+		to, ok2 := netip.AddrFromSlice(rr.To)
+		if ok1 && ok2 {
+			builder.AddRange(netipx.IPRangeFrom(from, to))
+		}
 	}
 	pPtr, err := builder.IPSet()
 	if err != nil {
@@ -692,26 +700,28 @@ func parseIPSet(r varbin.Reader) (netipx.IPSet, error) {
 	return *pPtr, nil
 }
 
-// -----------------------------------------------------------------------------
-// Logic: Config, Updater, API
-// -----------------------------------------------------------------------------
-
 func (p *NftAdd) loadConfig() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	data, err := os.ReadFile(p.localConfigFile)
 	if err != nil {
-		if os.IsNotExist(err) { return nil }
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-	if len(data) == 0 { return nil }
-	var sources[]*RuleSource
+	if len(data) == 0 {
+		return nil
+	}
+	var sources []*RuleSource
 	if err := json.Unmarshal(data, &sources); err != nil {
 		return fmt.Errorf("failed to parse config json: %w", err)
 	}
 	p.sources = make(map[string]*RuleSource, len(sources))
 	for _, src := range sources {
-		if src.Name != "" { p.sources[src.Name] = src }
+		if src.Name != "" {
+			p.sources[src.Name] = src
+		}
 	}
 	return nil
 }
@@ -727,10 +737,9 @@ func (p *NftAdd) saveConfig() error {
 	sort.Slice(sourcesSnapshot, func(i, j int) bool {
 		return sourcesSnapshot[i].Name < sourcesSnapshot[j].Name
 	})
-	data, err := json.MarshalIndent(sourcesSnapshot, "", "  ")
-	if err != nil { return err }
+	data, _ := json.MarshalIndent(sourcesSnapshot, "", "  ")
 	tmpFile := p.localConfigFile + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil { return err }
+	os.WriteFile(tmpFile, data, 0644)
 	return os.Rename(tmpFile, p.localConfigFile)
 }
 
@@ -738,7 +747,9 @@ func (p *NftAdd) reloadAllRules() error {
 	p.mu.RLock()
 	enabledSources := make([]*RuleSource, 0, len(p.sources))
 	for _, src := range p.sources {
-		if src.Enabled { enabledSources = append(enabledSources, src) }
+		if src.Enabled {
+			enabledSources = append(enabledSources, src)
+		}
 	}
 	p.mu.RUnlock()
 
@@ -748,10 +759,11 @@ func (p *NftAdd) reloadAllRules() error {
 	lReceiver := &listReceiver{l: newList}
 
 	for _, src := range enabledSources {
-		if src.Files == "" { continue }
+		if src.Files == "" {
+			continue
+		}
 		f, err := os.Open(src.Files)
 		if err != nil {
-			log.Printf("[%s] ERROR opening %s: %v", PluginType, src.Files, err)
 			continue
 		}
 		ok, count, _ := tryLoadSRSStream(f, lReceiver)
@@ -771,19 +783,19 @@ func (p *NftAdd) reloadAllRules() error {
 
 	newList.Sort()
 	p.matcher.Store(newList)
-	log.Printf("[%s] DNS rules reloaded. Total: %d", PluginType, totalRules)
-	if configChanged { p.saveConfig() }
+	if configChanged {
+		p.saveConfig()
+	}
 
 	if p.startupDone.Load() && p.nftArgs.Enable == "nft_true" {
 		go func() {
-			log.Printf("[%s] Triggering NFT/eBPF sync after reload...", PluginType)
 			ipSet, err := p.buildFullIPSet()
-			if err != nil { return }
+			if err != nil {
+				return
+			}
 			p.flushAndFillSets(ipSet)
 			if p.nftArgs.EbpfEnable == "ebpf_true" {
-				if err := p.setupEbpf(ipSet); err != nil {
-					log.Printf("[%s] ERROR: eBPF resync failed: %v", PluginType, err)
-				}
+				p.setupEbpf(ipSet)
 			}
 			coremain.ManualGC()
 		}()
@@ -794,36 +806,43 @@ func (p *NftAdd) reloadAllRules() error {
 func (p *NftAdd) downloadAndUpdateLocalFile(ctx context.Context, sourceName string) error {
 	p.mu.RLock()
 	source, ok := p.sources[sourceName]
-	if !ok { p.mu.RUnlock(); return fmt.Errorf("source not found") }
+	if !ok {
+		p.mu.RUnlock()
+		return fmt.Errorf("source not found")
+	}
 	url := source.URL
 	localFile := source.Files
 	p.mu.RUnlock()
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil { return err }
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
 	resp, err := p.httpClient.Do(req)
-	if err != nil { return err }
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK { return fmt.Errorf("http %d", resp.StatusCode) }
-	data, err := io.ReadAll(resp.Body)
-	if err != nil { return err }
-	counter := &counterReceiver{}
-	ok, count, _ := tryLoadSRSStream(bytes.NewReader(data), counter)
-	if !ok { return fmt.Errorf("invalid srs data") }
-	os.MkdirAll(filepath.Dir(localFile), 0755)
-	if err := os.WriteFile(localFile, data, 0644); err != nil { return err }
-	p.mu.Lock()
-	if s, ok := p.sources[sourceName]; ok {
-		s.RuleCount = count
-		s.LastUpdated = time.Now()
+	if err != nil {
+		return err
 	}
-	p.mu.Unlock()
-	return p.saveConfig()
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	counter := &counterReceiver{}
+	if ok, count, _ := tryLoadSRSStream(bytes.NewReader(data), counter); !ok {
+		return fmt.Errorf("invalid srs data")
+	} else {
+		os.MkdirAll(filepath.Dir(localFile), 0755)
+		os.WriteFile(localFile, data, 0644)
+		p.mu.Lock()
+		if s, ok := p.sources[sourceName]; ok {
+			s.RuleCount = count
+			s.LastUpdated = time.Now()
+		}
+		p.mu.Unlock()
+		return p.saveConfig()
+	}
 }
 
 func (p *NftAdd) backgroundUpdater() {
 	select {
 	case <-time.After(1 * time.Minute):
-	case <-p.ctx.Done(): return
+	case <-p.ctx.Done():
+		return
 	}
 	ticker := time.NewTicker(10 * time.Minute)
 	defer ticker.Stop()
@@ -831,7 +850,7 @@ func (p *NftAdd) backgroundUpdater() {
 		select {
 		case <-ticker.C:
 			p.mu.RLock()
-			var toUpdate[]string
+			var toUpdate []string
 			for name, src := range p.sources {
 				if src.Enabled && src.AutoUpdate && src.UpdateIntervalHours > 0 {
 					if time.Since(src.LastUpdated).Hours() >= float64(src.UpdateIntervalHours) {
@@ -848,16 +867,15 @@ func (p *NftAdd) backgroundUpdater() {
 						defer wg.Done()
 						ctx, cancel := context.WithTimeout(p.ctx, downloadTimeout)
 						defer cancel()
-						if err := p.downloadAndUpdateLocalFile(ctx, n); err != nil {
-							log.Printf("[%s] auto-update failed for %s: %v", PluginType, n, err)
-						}
+						p.downloadAndUpdateLocalFile(ctx, n)
 					}(name)
 				}
 				wg.Wait()
 				p.reloadAllRules()
 				coremain.ManualGC()
 			}
-		case <-p.ctx.Done(): return
+		case <-p.ctx.Done():
+			return
 		}
 	}
 }
@@ -867,8 +885,10 @@ func (p *NftAdd) api() *chi.Mux {
 	r.Get("/config", func(w http.ResponseWriter, r *http.Request) {
 		p.mu.RLock()
 		defer p.mu.RUnlock()
-		var sources[]*RuleSource
-		for _, s := range p.sources { sources = append(sources, s) }
+		var sources []*RuleSource
+		for _, s := range p.sources {
+			sources = append(sources, s)
+		}
 		sort.Slice(sources, func(i, j int) bool { return sources[i].Name < sources[j].Name })
 		jsonResponse(w, sources, 200)
 	})
@@ -877,7 +897,9 @@ func (p *NftAdd) api() *chi.Mux {
 		go func() {
 			ctx, cancel := context.WithTimeout(p.ctx, downloadTimeout*2)
 			defer cancel()
-			if err := p.downloadAndUpdateLocalFile(ctx, name); err == nil { p.reloadAllRules() }
+			if err := p.downloadAndUpdateLocalFile(ctx, name); err == nil {
+				p.reloadAllRules()
+			}
 		}()
 		jsonResponse(w, map[string]string{"status": "started"}, 202)
 	})
@@ -885,7 +907,8 @@ func (p *NftAdd) api() *chi.Mux {
 		name := chi.URLParam(r, "name")
 		var req RuleSource
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			jsonError(w, "bad request", 400); return
+			jsonError(w, "bad request", 400)
+			return
 		}
 		req.Name = name
 		p.mu.Lock()
@@ -917,7 +940,9 @@ func (p *NftAdd) api() *chi.Mux {
 			p.saveConfig()
 			go p.reloadAllRules()
 			w.WriteHeader(204)
-		} else { w.WriteHeader(404) }
+		} else {
+			w.WriteHeader(404)
+		}
 	})
 	return r
 }
