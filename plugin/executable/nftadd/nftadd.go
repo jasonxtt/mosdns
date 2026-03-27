@@ -468,12 +468,14 @@ func (p *NftAdd) setupEbpf(ipSet *netipx.IPSet) error {
 		enableHijack = 1
 		if p.nftArgs.HijackDip4 != "" {
 			if addr, err := netip.ParseAddr(p.nftArgs.HijackDip4); err == nil && addr.Is4() {
-				dip4 = addr.As4()
+				b := addr.As4()
+				dip4 := binary.LittleEndian.Uint32(b[:])
+				consts["hjack_dip4"] = dip4
 			}
 		}
 		if p.nftArgs.HijackDip6 != "" {
 			if addr, err := netip.ParseAddr(p.nftArgs.HijackDip6); err == nil && addr.Is6() {
-				dip6 = addr.As16()
+				consts["hjack_dip6"] = addr.As16() 
 			}
 		}
 	}
