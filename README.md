@@ -7,6 +7,8 @@ fakeip分流大法总教程：https://drive.google.com/drive/u/1/folders/1ldD2Xq
 ### 更新日志
 https://github.com/yyysuo/firetv/blob/master/mosdnsconfigupdate/mosdns2026%E6%9B%B4%E6%96%B0%E6%97%A5%E5%BF%97
 
+2026年3月27日增加ebpf过期缓存功能
+
 ### 手动保存个性化配置
 
 1. gen/top_domains.txt
