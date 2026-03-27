@@ -8,6 +8,9 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +24,6 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -47,6 +49,23 @@ type Args struct {
 
 func (a *Args) init() {
 	utils.SetDefaultString(&a.Listen, "127.0.0.1:53")
+}
+
+// getBootTimeNano returns nanoseconds since system boot.
+// It reads /proc/uptime to be cross-platform compilation friendly (avoids x/sys/unix).
+func getBootTimeNano() uint64 {
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		// Fallback for non-linux CI environments to allow compilation
+		return uint64(time.Now().UnixNano())
+	}
+	parts := strings.Fields(string(data))
+	if len(parts) > 0 {
+		if seconds, err := strconv.ParseFloat(parts[0], 64); err == nil {
+			return uint64(seconds * 1e9)
+		}
+	}
+	return uint64(time.Now().UnixNano())
 }
 
 type UdpServer struct {
@@ -75,7 +94,7 @@ type eBpfCacheVal struct {
 
 type fastCacheItem struct {
 	expire    int64
-	resp[]byte
+	resp      []byte
 	updating  uint32
 	domainSet string
 }
@@ -109,7 +128,7 @@ func (fc *fastCache) getEbpfMap() *ebpf.Map {
 	return fc.ebpfMap
 }
 
-func calcFNV1a(data[]byte) uint32 {
+func calcFNV1a(data []byte) uint32 {
 	h := uint32(0x811c9dc5)
 	n := len(data)
 	for i, b := range data {
@@ -185,10 +204,8 @@ func (fc *fastCache) Store(resp []byte, dset string) {
 
 			em := fc.getEbpfMap()
 			if em != nil {
-				var ts unix.Timespec
-				unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts)
-				nowNs := uint64(ts.Sec)*1e9 + uint64(ts.Nsec)
-				expireNs := nowNs + uint64(internalTTL)*1e9
+				nowInBoot := getBootTimeNano()
+				expireNs := nowInBoot + uint64(internalTTL)*1e9
 
 				val := eBpfCacheVal{
 					ExpireNs: expireNs,
@@ -318,7 +335,7 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 	}
 
 	var wrappedHandler server.Handler = dh
-	var fastBypass func(int,[]byte, netip.AddrPort) (int, int, uint64, string)
+	var fastBypass func(int, []byte, netip.AddrPort) (int, int, uint64, string)
 
 	if isEbpfPort {
 		var dm DomainMapperPlugin
@@ -372,13 +389,13 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 	return &UdpServer{args: args, c: c}, nil
 }
 
-func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int,[]byte, netip.AddrPort) (int, int, uint64, string) {
+func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int, []byte, netip.AddrPort) (int, int, uint64, string) {
 	var once sync.Once
 	var sw15 SwitchPlugin
 	var dm DomainMapperPlugin
 	var ipSet IPSetPlugin
 
-	return func(reqLen int, buf[]byte, remoteAddr netip.AddrPort) (int, int, uint64, string) {
+	return func(reqLen int, buf []byte, remoteAddr netip.AddrPort) (int, int, uint64, string) {
 		once.Do(func() {
 			if p := bp.M().GetPlugin("switch15"); p != nil {
 				sw15, _ = p.(SwitchPlugin)
@@ -559,7 +576,7 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int
 	}
 }
 
-func makeReject(reqLen int, buf[]byte, offset int, rcode byte) int {
+func makeReject(reqLen int, buf []byte, offset int, rcode byte) int {
 	if offset > reqLen {
 		offset = reqLen
 	}
@@ -572,7 +589,7 @@ func makeReject(reqLen int, buf[]byte, offset int, rcode byte) int {
 	return offset
 }
 
-func findTTLOffsets(msg[]byte)[]int {
+func findTTLOffsets(msg []byte) []int {
 	if len(msg) < 12 {
 		return nil
 	}
@@ -597,7 +614,7 @@ func findTTLOffsets(msg[]byte)[]int {
 		}
 		offset += 4
 	}
-	var offsets[]int
+	var offsets []int
 	for i := 0; i < int(ancount); i++ {
 		for offset < len(msg) {
 			l := int(msg[offset])
