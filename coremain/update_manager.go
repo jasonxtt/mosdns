@@ -1,7 +1,9 @@
 package coremain
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -29,9 +31,8 @@ import (
 )
 
 const (
-	githubOwner          = "yyysuo"
+	githubOwner          = "jasonxtt-lab"
 	githubRepo           = "mosdns"
-	releaseTag           = "v5-ph-srs"
 	githubReleaseAPI     = "https://api.github.com/repos/%s/%s/releases/tags/%s"
 	githubLatestAPI      = "https://api.github.com/repos/%s/%s/releases/latest"
 	githubReleasePage    = "https://github.com/%s/%s/releases/tag/%s"
@@ -325,9 +326,6 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 	}
 
 	tag := rel.tagName
-	if tag == "" {
-		tag = releaseTag
-	}
 	status := UpdateStatus{
 		CurrentVersion:   m.currentVersion,
 		LatestVersion:    tag,
@@ -440,7 +438,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 		return UpdateActionResponse{Status: status}, errors.New(note)
 	}
 
-	assetFile, err := m.downloadAsset(ctx, status.DownloadURL)
+	assetFile, err := m.downloadAsset(ctx, status.DownloadURL, status.AssetName)
 	if err != nil {
 		status.Message = fmt.Sprintf("下载失败: %v", err)
 		return UpdateActionResponse{Status: status}, err
@@ -453,7 +451,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 		}
 	}
 
-	extractedBinary, mode, err := extractBinaryFromZip(assetFile)
+	extractedBinary, mode, err := extractBinaryFromArchive(assetFile, status.AssetName)
 	if err != nil {
 		status.Message = fmt.Sprintf("解压失败: %v", err)
 		return UpdateActionResponse{Status: status}, err
@@ -622,7 +620,12 @@ func (m *UpdateManager) fetchLatestReleaseInfo(ctx context.Context) (releaseInfo
 
 // NOTE: This is the duplicated function from the original file, preserved as requested.
 func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, error) {
-	url := fmt.Sprintf(githubReleaseAPI, githubOwner, githubRepo, releaseTag)
+	tag := strings.TrimSpace(os.Getenv("MOSDNS_UPDATE_RELEASE_TAG"))
+	if tag == "" {
+		return m.fetchLatestReleaseInfoAPI(ctx)
+	}
+
+	url := fmt.Sprintf(githubReleaseAPI, githubOwner, githubRepo, tag)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return releaseInfo{}, err
@@ -659,9 +662,9 @@ func (m *UpdateManager) fetchReleaseInfoAPI(ctx context.Context) (releaseInfo, e
 		return releaseInfo{}, err
 	}
 
-	tag := payload.TagName
+	tag = payload.TagName
 	if tag == "" {
-		tag = releaseTag
+		tag = strings.TrimSpace(os.Getenv("MOSDNS_UPDATE_RELEASE_TAG"))
 	}
 	return releaseInfo{tagName: tag, publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
 }
@@ -747,7 +750,12 @@ func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (release
 
 // NOTE: This is the duplicated function from the original file, preserved as requested.
 func (m *UpdateManager) fetchReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
-	assetsURL := fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, releaseTag)
+	tag := strings.TrimSpace(os.Getenv("MOSDNS_UPDATE_RELEASE_TAG"))
+	if tag == "" {
+		return m.fetchLatestReleaseInfoHTML(ctx)
+	}
+
+	assetsURL := fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, tag)
 	body, err := m.fetchHTML(ctx, assetsURL)
 	if err != nil {
 		return releaseInfo{}, err
@@ -765,7 +773,7 @@ func (m *UpdateManager) fetchReleaseInfoHTML(ctx context.Context) (releaseInfo, 
 		}
 	}
 
-	return releaseInfo{publishedAt: publishedAt, assets: assets}, nil
+	return releaseInfo{tagName: tag, publishedAt: publishedAt, assets: assets}, nil
 }
 
 func (m *UpdateManager) fetchHTML(ctx context.Context, url string) (string, error) {
@@ -799,14 +807,30 @@ func selectAsset(assets []githubAsset) *githubAsset {
 		switch runtime.GOARCH {
 		case "amd64":
 			if binaryIsAMD64V3Plus() {
-				candidates = []string{"mosdns-linux-amd64-v3.zip", "mosdns-linux-amd64.zip"}
+				candidates = []string{
+					"-linux-amd64-v3.tar.gz",
+					"-linux-amd64.tar.gz",
+					"mosdns-linux-amd64-v3.zip",
+					"mosdns-linux-amd64.zip",
+				}
 			} else {
-				candidates = []string{"mosdns-linux-amd64.zip"}
+				candidates = []string{
+					"-linux-amd64.tar.gz",
+					"mosdns-linux-amd64.zip",
+				}
 			}
 		case "arm64":
-			candidates = []string{"mosdns-linux-arm64.zip"}
+			candidates = []string{
+				"-linux-arm64.tar.gz",
+				"mosdns-linux-arm64.zip",
+			}
 		case "arm":
-			candidates = []string{"mosdns-linux-arm-7.zip", "mosdns-linux-arm-6.zip", "mosdns-linux-arm-5.zip"}
+			candidates = []string{
+				"-linux-armv7.tar.gz",
+				"mosdns-linux-arm-7.zip",
+				"mosdns-linux-arm-6.zip",
+				"mosdns-linux-arm-5.zip",
+			}
 		case "mips", "mips64", "mips64le", "mipsle":
 			candidates = append(candidates, fmt.Sprintf("mosdns-linux-%s.zip", runtime.GOARCH))
 		}
@@ -826,7 +850,7 @@ func selectAsset(assets []githubAsset) *githubAsset {
 
 	for _, name := range candidates {
 		for idx := range assets {
-			if assets[idx].Name == name {
+			if assetNameMatches(assets[idx].Name, name) {
 				return &assets[idx]
 			}
 		}
@@ -962,21 +986,28 @@ func findV3Asset(assets []githubAsset) *githubAsset {
 	want := ""
 	switch runtime.GOOS {
 	case "linux":
-		want = "mosdns-linux-amd64-v3.zip"
+		want = "-linux-amd64-v3.tar.gz"
 	case "windows":
 		want = "mosdns-windows-amd64-v3.zip"
 	default:
 		return nil
 	}
 	for i := range assets {
-		if assets[i].Name == want {
+		if assetNameMatches(assets[i].Name, want) {
 			return &assets[i]
 		}
 	}
 	return nil
 }
 
-func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, error) {
+func assetNameMatches(assetName, pattern string) bool {
+	if assetName == pattern {
+		return true
+	}
+	return strings.HasPrefix(pattern, "-") && strings.HasSuffix(assetName, pattern)
+}
+
+func (m *UpdateManager) downloadAsset(ctx context.Context, url, assetName string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -993,7 +1024,16 @@ func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, 
 		return "", fmt.Errorf("下载失败: %s", resp.Status)
 	}
 
-	tmpFile, err := os.CreateTemp("", "mosdns-update-*.zip")
+	pattern := "mosdns-update-*"
+	switch {
+	case strings.HasSuffix(assetName, ".tar.gz"):
+		pattern += ".tar.gz"
+	case strings.HasSuffix(assetName, ".tgz"):
+		pattern += ".tgz"
+	case assetName != "":
+		pattern += filepath.Ext(assetName)
+	}
+	tmpFile, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return "", err
 	}
@@ -1005,6 +1045,72 @@ func (m *UpdateManager) downloadAsset(ctx context.Context, url string) (string, 
 	}
 
 	return tmpFile.Name(), nil
+}
+
+func extractBinaryFromArchive(archivePath, assetName string) (string, os.FileMode, error) {
+	switch {
+	case strings.HasSuffix(assetName, ".tar.gz"), strings.HasSuffix(archivePath, ".tar.gz"), strings.HasSuffix(assetName, ".tgz"), strings.HasSuffix(archivePath, ".tgz"):
+		return extractBinaryFromTarGz(archivePath)
+	default:
+		return extractBinaryFromZip(archivePath)
+	}
+}
+
+func extractBinaryFromTarGz(archivePath string) (string, os.FileMode, error) {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return "", 0, err
+	}
+	defer file.Close()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return "", 0, err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", 0, err
+		}
+		if hdr == nil || hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		base := filepath.Base(hdr.Name)
+		if base != "mosdns" && base != "mosdns.exe" {
+			continue
+		}
+
+		tmpFile, err := os.CreateTemp("", "mosdns-binary-*")
+		if err != nil {
+			return "", 0, err
+		}
+		if _, err := io.Copy(tmpFile, tr); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			return "", 0, err
+		}
+		tmpFile.Close()
+
+		mode := os.FileMode(hdr.Mode)
+		if mode == 0 {
+			mode = 0o755
+		} else {
+			mode |= 0o111
+		}
+		if err := os.Chmod(tmpFile.Name(), mode); err != nil {
+			os.Remove(tmpFile.Name())
+			return "", 0, err
+		}
+		return tmpFile.Name(), mode, nil
+	}
+
+	return "", 0, errors.New("压缩包中未找到 mosdns 可执行文件")
 }
 
 func extractBinaryFromZip(zipPath string) (string, os.FileMode, error) {
