@@ -49,13 +49,19 @@ type UpstreamOverrideConfig struct {
 // GlobalUpstreamOverrides 映射关系: 插件Tag -> 上游配置列表
 type GlobalUpstreamOverrides map[string][]UpstreamOverrideConfig
 
+type upstreamReloader interface {
+	ReloadFromOverrides() error
+}
+
 var (
 	upstreamOverridesLock sync.RWMutex
 	upstreamOverrides     GlobalUpstreamOverrides
+	upstreamAPIHost       *Mosdns
 )
 
 // RegisterUpstreamAPI 注册路由
-func RegisterUpstreamAPI(router *chi.Mux) {
+func RegisterUpstreamAPI(router *chi.Mux, m *Mosdns) {
+	upstreamAPIHost = m
 	router.Route("/api/v1/upstream", func(r chi.Router) {
 		r.Get("/tags", handleGetAliAPITags)
 		r.Get("/config", handleGetUpstreamConfig)
@@ -245,22 +251,38 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	upstreamOverridesLock.Lock()
-	defer upstreamOverridesLock.Unlock()
-
 	if upstreamOverrides == nil {
 		_ = loadUpstreamOverrides()
-		if upstreamOverrides == nil {
-			upstreamOverrides = make(GlobalUpstreamOverrides)
-		}
+	}
+
+	upstreamOverridesLock.Lock()
+	if upstreamOverrides == nil {
+		upstreamOverrides = make(GlobalUpstreamOverrides)
 	}
 
 	upstreamOverrides[payload.PluginTag] = payload.Upstreams
 
 	if err := saveUpstreamOverrides(); err != nil {
+		upstreamOverridesLock.Unlock()
 		mlog.L().Error("[Debug UpstreamAPI] Save failed", zap.Error(err))
 		http.Error(w, `{"error": "Failed to save config file"}`, http.StatusInternalServerError)
 		return
+	}
+	upstreamOverridesLock.Unlock()
+
+	if upstreamAPIHost != nil {
+		if p := upstreamAPIHost.GetPlugin(payload.PluginTag); p != nil {
+			if reloader, ok := p.(upstreamReloader); ok {
+				if err := reloader.ReloadFromOverrides(); err != nil {
+					mlog.L().Error("[Debug UpstreamAPI] Live reload failed",
+						zap.String("plugin_tag", payload.PluginTag),
+						zap.Error(err))
+					http.Error(w, `{"error": "Saved, but live reload failed"}`, http.StatusInternalServerError)
+					return
+				}
+				mlog.L().Info("[Debug UpstreamAPI] Live reload success", zap.String("plugin_tag", payload.PluginTag))
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

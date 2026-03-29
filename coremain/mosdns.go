@@ -45,6 +45,16 @@ import (
 //go:embed www/*
 var content embed.FS
 
+var currentMosdns *Mosdns
+
+func SetCurrentMosdns(m *Mosdns) {
+	currentMosdns = m
+}
+
+func GetCurrentMosdns() *Mosdns {
+	return currentMosdns
+}
+
 type Mosdns struct {
 	logger *zap.Logger // non-nil logger.
 
@@ -81,6 +91,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 		metricsReg: newMetricsReg(),
 		sc:         safe_close.NewSafeClose(),
 	}
+	SetCurrentMosdns(m)
 
 	// <<< START OF MODIFICATIONS >>>
 	// Step 1: Discover original settings from the raw config.
@@ -118,7 +129,8 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	RegisterConfigManagerAPI(m.httpMux)
 	RegisterUpdateAPI(m.httpMux)     // For binary updates
 	RegisterSystemAPI(m.httpMux, m)     // For self-restart
-        RegisterUpstreamAPI(m.httpMux)
+	RegisterUpstreamAPI(m.httpMux, m)
+	RegisterSpecialGroupsAPI(m.httpMux)
 
 	// Start http api server
 	if httpAddr := cfg.API.HTTP; len(httpAddr) > 0 {

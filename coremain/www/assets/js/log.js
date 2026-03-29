@@ -33,7 +33,8 @@ function closeAndUnlock(dialogElement) {
 
 document.addEventListener('DOMContentLoaded', () => {
     const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 60, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 1024, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
-    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [], viewType: 'domain', currentOffset: 0, currentLimit: 100, currentQuery: '', currentConfig: null, hasMore: true, totalCount: 0 }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], specialGroups: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [], viewType: 'domain', currentOffset: 0, currentLimit: 100, currentQuery: '', currentConfig: null, hasMore: true, totalCount: 0 }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } } };
     const elements = {
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'),
         colorSwatches: document.querySelectorAll('.color-swatch'),
@@ -83,6 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ruleMode: document.getElementById('rule-mode'),
         ruleTypeWrapper: document.getElementById('rule-type-wrapper'),
         ruleFilesWrapper: document.getElementById('rule-files-wrapper'),
+        ruleTypeSelect: document.getElementById('rule-type'),
         rulesSubNavLinks: document.querySelectorAll('.sub-nav-link'),
         rulesSubTabContents: document.querySelectorAll('.sub-tab-content'),
         logDetailModal: document.getElementById('log-detail-modal'),
@@ -138,6 +140,16 @@ document.addEventListener('DOMContentLoaded', () => {
         dataViewSearch: document.getElementById('data-view-search'),
         dataViewModalInfo: document.getElementById('data-view-modal-info'),
         dataViewTableContainer: document.getElementById('data-view-table-container'),
+        addSpecialGroupBtn: document.getElementById('add-special-group-btn'),
+        specialGroupsContainer: document.getElementById('special-groups-container'),
+        specialGroupModal: document.getElementById('special-group-modal'),
+        specialGroupModalTitle: document.getElementById('special-group-modal-title'),
+        specialGroupForm: document.getElementById('special-group-form'),
+        specialGroupSlotInput: document.getElementById('special-group-slot'),
+        specialGroupNameInput: document.getElementById('special-group-name'),
+        closeSpecialGroupModalBtn: document.getElementById('close-special-group-modal'),
+        cancelSpecialGroupModalBtn: document.getElementById('cancel-special-group-modal'),
+        saveSpecialGroupBtn: document.getElementById('save-special-group-btn'),
 
         listMgmtNav: document.querySelector('.list-mgmt-nav'),
         listContentLoader: document.getElementById('list-content-loader'),
@@ -186,6 +198,80 @@ document.addEventListener('DOMContentLoaded', () => {
             return ip.substring(7);
         }
         return ip;
+    };
+
+    const BUILTIN_DIVERSION_TYPES = [
+        { value: 'geositecn', label: '中国域名' },
+        { value: 'geositenocn', label: '非中国域名' },
+        { value: 'geoipcn', label: '中国ip' },
+        { value: 'cuscn', label: 'cn@!cn' },
+        { value: 'cusnocn', label: '!cn@cn' },
+        { value: 'nft_add', label: '添加到nft中的代理的ip' }
+    ];
+
+    const isSpecialGroupType = (type) => /^special_\d+$/.test(type || '');
+    const isSpecialUpstreamTag = (tag) => /^special_upstream_\d+$/.test(tag || '');
+    const getSpecialGroupByType = (type) => state.specialGroups.find(g => g.key === type);
+    const getSpecialGroupByUpstreamTag = (tag) => state.specialGroups.find(g => g.upstream_plugin_tag === tag);
+    const getSpecialGroupBySlot = (slot) => state.specialGroups.find(g => g.slot === Number(slot));
+    const parseSpecialRuleSlot = (ruleName) => {
+        const match = String(ruleName || '').match(/^特殊上游(\d+)$/);
+        return match ? parseInt(match[1], 10) : null;
+    };
+    const getSpecialRuleMeta = (ruleName) => {
+        const slot = parseSpecialRuleSlot(ruleName);
+        if (slot === null) return null;
+        const group = getSpecialGroupBySlot(slot);
+        return {
+            slot,
+            group,
+            displayName: group?.name || `mark${slot}`,
+            markLabel: `mark${slot}`
+        };
+    };
+    const getRuleDisplayHTML = (ruleName) => {
+        const meta = getSpecialRuleMeta(ruleName);
+        if (!meta) return escapeHtml(ruleName || '');
+        return `${escapeHtml(meta.displayName)}<small class="rule-tag-mark">${escapeHtml(meta.markLabel)}</small>`;
+    };
+    const getRuleDisplayText = (ruleName) => {
+        const meta = getSpecialRuleMeta(ruleName);
+        if (!meta) return ruleName || '';
+        return `${meta.displayName} ${meta.markLabel}`;
+    };
+    const getDiversionTypeDisplay = (type) => {
+        const special = getSpecialGroupByType(type);
+        if (special) return `${special.name}_mark${special.slot}`;
+        const builtin = BUILTIN_DIVERSION_TYPES.find(item => item.value === type);
+        return builtin ? builtin.label : (type || '—');
+    };
+    const getUpstreamGroupDisplay = (group) => {
+        const special = getSpecialGroupByUpstreamTag(group);
+        if (special) return special.name;
+        return group;
+    };
+    const getUpstreamGroupHint = (group) => {
+        const special = getSpecialGroupByUpstreamTag(group);
+        if (special) return `${special.name} · mark${special.slot}`;
+        return group;
+    };
+    const populateDiversionTypeOptions = (selectedValue = '') => {
+        const select = elements.ruleTypeSelect;
+        if (!select) return;
+        const previousValue = selectedValue || select.value || '';
+        const options = ['<option value="" disabled>请选择类型</option>'];
+        BUILTIN_DIVERSION_TYPES.forEach(item => {
+            options.push(`<option value="${item.value}">${item.label}</option>`);
+        });
+        state.specialGroups.forEach(group => {
+            options.push(`<option value="${group.key}">${group.name}_mark${group.slot}</option>`);
+        });
+        select.innerHTML = options.join('');
+        if (previousValue) {
+            select.value = previousValue;
+        } else {
+            select.selectedIndex = 0;
+        }
     };
 
     const clientnameApi = {
@@ -291,6 +377,9 @@ document.addEventListener('DOMContentLoaded', () => {
             form.reset();
             elements.ruleMode.value = mode;
             const isDiversion = mode === 'diversion';
+            if (isDiversion) {
+                populateDiversionTypeOptions(rule?.type || '');
+            }
             elements.modalTitle.textContent = rule ? `修改${isDiversion ? '分流' : '拦截'}规则` : `添加${isDiversion ? '分流' : '拦截'}规则`;
             elements.ruleTypeWrapper.style.display = isDiversion ? 'block' : 'none';
             elements.ruleFilesWrapper.style.display = isDiversion ? 'block' : 'none';
@@ -1628,7 +1717,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const legend = data.map((item, index) => {
             const percent = ((item.count / total) * 100).toFixed(1);
             const color = chartColors[index % chartColors.length];
-            return `<li class="donut-legend-item"><span class="legend-color-box" style="background-color: ${color};"></span><span class="legend-label truncate-text" title="${item.key}">${item.key}</span><span class="legend-value">${item.count.toLocaleString()} (${percent}%)</span></li>`;
+            return `<li class="donut-legend-item"><span class="legend-color-box" style="background-color: ${color};"></span><span class="legend-label truncate-text" title="${getRuleDisplayText(item.key)}">${getRuleDisplayText(item.key)}</span><span class="legend-value">${item.count.toLocaleString()} (${percent}%)</span></li>`;
         }).join('');
         elements.shuntResultsBody.innerHTML = `<div class="donut-chart-wrapper"><div class="donut-chart"><svg viewBox="0 0 160 160">${paths}</svg><div class="donut-chart-center-text"><div class="total">${total.toLocaleString()}</div><div class="label">总计</div></div></div><ul class="donut-legend">${legend}</ul></div>`;
     };
@@ -1916,7 +2005,7 @@ document.addEventListener('DOMContentLoaded', () => {
         queryInfo['客户端'] = createInteractiveLine(aliasManager.getDisplayName(data.client_ip) + ` (${data.client_ip})`, data.client_ip, data.client_ip, true);
         queryInfo['类型'] = `<span>${data.query_type || 'N/A'}</span>`;
         if (data.query_class) queryInfo['类别'] = `<span>${data.query_class}</span>`;
-        if (data.domain_set) queryInfo['分流规则'] = createInteractiveLine(data.domain_set, data.domain_set, data.domain_set, true);
+        if (data.domain_set) queryInfo['分流规则'] = createInteractiveLine(getRuleDisplayHTML(data.domain_set), getRuleDisplayText(data.domain_set), data.domain_set, true);
         if (data.trace_id) queryInfo['Trace ID'] = createInteractiveLine(data.trace_id, data.trace_id, data.trace_id, true);
 
         responseInfo['耗时'] = `<span>${data.duration_ms.toFixed(2)} ms</span>`;
@@ -1933,7 +2022,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const getContrastingTextColor = (hexColor) => { if (!hexColor || hexColor.length < 4) return '#0f172a'; let r = parseInt(hexColor.substr(1, 2), 16), g = parseInt(hexColor.substr(3, 2), 16), b = parseInt(hexColor.substr(5, 2), 16); const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000; return (yiq >= 128) ? '#0f172a' : '#ffffff'; };
-    function getRuleTagHTML(log) { if (!log || !log.domain_set) return ''; const ruleName = log.domain_set; let bgColor = state.shuntColors[ruleName]; if (!bgColor) { let hash = 0; for (let i = 0; i < ruleName.length; i++) hash = ruleName.charCodeAt(i) + ((hash << 5) - hash); bgColor = `hsl(${Math.abs(hash % 360)}, 70%, 45%)`; } const textColor = '#ffffff'; return `<span class="rule-tag" style="background-color: ${bgColor}; color: ${textColor};" title="分流规则: ${ruleName}">${ruleName}</span>`; }
+    function getRuleTagHTML(log) { if (!log || !log.domain_set) return ''; const ruleName = log.domain_set; let bgColor = state.shuntColors[ruleName]; if (!bgColor) { let hash = 0; for (let i = 0; i < ruleName.length; i++) hash = ruleName.charCodeAt(i) + ((hash << 5) - hash); bgColor = `hsl(${Math.abs(hash % 360)}, 70%, 45%)`; } const textColor = '#ffffff'; return `<span class="rule-tag" style="background-color: ${bgColor}; color: ${textColor};" title="分流规则: ${getRuleDisplayText(ruleName)}">${getRuleDisplayHTML(ruleName)}</span>`; }
     function getResponseTagHTML(log) { if (!log) return ''; const code = log.response_code || 'UNKNOWN'; let tagClass = 'other'; if (code === 'NOERROR') tagClass = 'noerror'; else if (code === 'NXDOMAIN') tagClass = 'nxdomain'; else if (code === 'SERVFAIL') tagClass = 'servfail'; else if (code === 'REFUSED') tagClass = 'refused'; return `<span class="response-tag ${tagClass}">${code}</span>`; }
     function getResponseSummary(log) { if (!log) return ''; if (log.response_code !== 'NOERROR') return getResponseTagHTML(log); if (log.answers?.length > 0) { const firstIp = log.answers.find(a => a.type === 'A' || a.type === 'AAAA'); const firstCname = log.answers.find(a => a.type === 'CNAME'); let mainText = firstIp?.data ?? firstCname?.data ?? log.answers[0].data; if (mainText.length > 25) mainText = mainText.substring(0, 22) + '...'; if (log.answers.length > 1) mainText += ` (+${log.answers.length - 1})`; return `<span class="truncate-text">${mainText}</span>`; } return '<span>(empty)</span>'; }
 
@@ -2007,7 +2096,7 @@ document.addEventListener('DOMContentLoaded', () => {
             queryInfo['客户端'] = createInteractiveLine(aliasManager.getDisplayName(data.client_ip), data.client_ip, data.client_ip, true, true);
             queryInfo['类型'] = `<small>${data.query_type || 'N/A'}</small>`;
             if (data.query_class) queryInfo['类别'] = `<small>${data.query_class}</small>`;
-            if (data.domain_set) queryInfo['规则'] = createInteractiveLine(data.domain_set, data.domain_set, data.domain_set, true, true);
+            if (data.domain_set) queryInfo['规则'] = createInteractiveLine(getRuleDisplayHTML(data.domain_set), getRuleDisplayText(data.domain_set), data.domain_set, true, true);
             responseInfo['耗时'] = `<small>${data.duration_ms.toFixed(2)} ms</small>`;
             responseInfo['状态'] = `<small>${data.response_code || 'N/A'}${data.is_blocked ? ' (Blocked)' : ''}</small>`;
             if (flagItems.length) responseInfo['标志'] = `<small>${flagItems.join(', ')}</small>`;
@@ -2148,7 +2237,7 @@ function renderRuleTable(tbody, rules, mode) {
                                 ${mode === 'diversion' ? `
                                 <div class="mobile-stat-item" style="grid-column: 1 / -1;">
                                     <span class="mobile-stat-label">类型</span>
-                                    <span class="mobile-stat-value"><span class="response-tag other">${rule.type}</span></span>
+                                    <span class="mobile-stat-value"><span class="response-tag other">${getDiversionTypeDisplay(rule.type)}</span></span>
                                 </div>` : ''}
                             </div>
                             <div class="mobile-card-actions">
@@ -2170,13 +2259,13 @@ function renderRuleTable(tbody, rules, mode) {
         }, mode);
     }
 
-    function renderRuleTableRow(rule, mode) { const tr = document.createElement('tr'); const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? new Date(rule.last_updated).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') : '—'; let html = `<td class="text-center"><label class="switch"><input type="checkbox" class="rule-enabled-toggle" ${rule.enabled ? 'checked' : ''}><span class="slider"></span></label></td><td>${rule.name}</td>`; if (mode === 'diversion') { html += `<td><span class="response-tag other">${rule.type}</span></td>`; } html += `<td><span class="truncate-text" title="${rule.url}">${rule.url}</span></td><td class="text-right">${(rule.rule_count || 0).toLocaleString()}</td><td>${lastUpdated}</td><td class="text-center"><div style="display: inline-flex; gap: 0.5rem; white-space: nowrap;">`; if (mode === 'diversion' && rule.url) { html += `<button class="button secondary rule-update-btn" style="padding: 0.4rem 0.8rem;" title="更新此规则"><span>更新</span></button>`; } html += `<button class="button secondary rule-edit-btn" style="padding: 0.4rem 0.8rem;"><span>编辑</span></button><button class="button danger rule-delete-btn" style="padding: 0.4rem 0.8rem;"><span>删除</span></button></div></td>`; tr.innerHTML = html; return tr; }
+    function renderRuleTableRow(rule, mode) { const tr = document.createElement('tr'); const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? new Date(rule.last_updated).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') : '—'; let html = `<td class="text-center"><label class="switch"><input type="checkbox" class="rule-enabled-toggle" ${rule.enabled ? 'checked' : ''}><span class="slider"></span></label></td><td>${rule.name}</td>`; if (mode === 'diversion') { html += `<td><span class="response-tag other">${getDiversionTypeDisplay(rule.type)}</span></td>`; } html += `<td><span class="truncate-text" title="${rule.url}">${rule.url}</span></td><td class="text-right">${(rule.rule_count || 0).toLocaleString()}</td><td>${lastUpdated}</td><td class="text-center"><div style="display: inline-flex; gap: 0.5rem; white-space: nowrap;">`; if (mode === 'diversion' && rule.url) { html += `<button class="button secondary rule-update-btn" style="padding: 0.4rem 0.8rem;" title="更新此规则"><span>更新</span></button>`; } html += `<button class="button secondary rule-edit-btn" style="padding: 0.4rem 0.8rem;"><span>编辑</span></button><button class="button danger rule-delete-btn" style="padding: 0.4rem 0.8rem;"><span>删除</span></button></div></td>`; tr.innerHTML = html; return tr; }
 
     function renderRuleMobileCard(rule, mode) {
         const card = document.createElement('div'); card.className = 'rule-card';
         const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? formatRelativeTime(rule.last_updated) : '从未';
         let metaHtml = `<span class="url" title="${rule.url}">${rule.url}</span>`;
-        if (mode === 'diversion') metaHtml += `<span><span class="response-tag other">${rule.type}</span></span>`;
+        if (mode === 'diversion') metaHtml += `<span><span class="response-tag other">${getDiversionTypeDisplay(rule.type)}</span></span>`;
         metaHtml += `<span><strong>规则数:</strong> ${(rule.rule_count || 0).toLocaleString()}</span><span><strong>更新于:</strong> ${lastUpdated}</span>`;
         let actionsHtml = '';
         if (mode === 'diversion' && rule.url) actionsHtml += `<button class="button secondary rule-update-btn"><span>更新</span></button>`;
@@ -2186,10 +2275,228 @@ function renderRuleTable(tbody, rules, mode) {
     }
 
     async function handleAdguardUpdateCheck() { ui.setLoading(elements.checkAdguardUpdatesBtn, true); ui.showToast('已开始在后台更新所有启用的拦截规则...'); try { await api.fetch('/plugins/adguard/update', { method: 'POST' }); ui.showToast('更新请求已发送，5秒后自动刷新列表...', 'success'); await new Promise(resolve => setTimeout(resolve, 5000)); await adguardManager.load(); ui.showToast('拦截规则列表已刷新！', 'success'); } catch (e) { } finally { ui.setLoading(elements.checkAdguardUpdatesBtn, false); } }
+    async function waitForDiversionRuleReady(ruleName, attempts = 6, intervalMs = 3000) {
+        for (let i = 0; i < attempts; i++) {
+            await diversionManager.load();
+            const rule = state.diversionRules.find(r => r.name === ruleName);
+            if (rule) {
+                const hasCount = (rule.rule_count || 0) > 0;
+                const hasUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01');
+                if (hasCount || hasUpdated) {
+                    return true;
+                }
+            }
+            if (i < attempts - 1) {
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+            }
+        }
+        return false;
+    }
     async function handleRuleTableClick(event, mode) { const target = event.target.closest('button, input.rule-enabled-toggle'); if (!target) return; const itemElement = target.closest('[data-rule-id]'); if (!itemElement) return; const id = itemElement.dataset.ruleId; const rules = mode === 'adguard' ? state.adguardRules : state.diversionRules; const rule = rules.find(r => (mode === 'adguard' ? r.id : r.name) === id); if (!rule) return; if (target.matches('.rule-edit-btn')) ui.openRuleModal(mode, rule); else if (target.matches('.rule-delete-btn')) { if (confirm(`确定要删除规则 "${rule.name}" 吗？此操作不可恢复。`)) { ui.setLoading(target, true); try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'DELETE' }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'DELETE' }); ui.showToast(`规则 "${rule.name}" 已删除`); await (mode === 'adguard' ? adguardManager.load() : diversionManager.load()); } catch (e) { console.error(`Failed to delete rule ${id}:`, e); } finally { ui.setLoading(target, false); } } } else if (target.matches('.rule-update-btn')) { ui.setLoading(target, true); ui.showToast(`正在后台更新规则 "${rule.name}"...`); try { await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/update/${id}`, { method: 'POST' }); ui.showToast('更新请求已发送, 5秒后自动刷新', 'success'); setTimeout(() => diversionManager.load(), 5000); } catch (e) { } finally { ui.setLoading(target, false); } } else if (target.matches('.rule-enabled-toggle')) { const updatedRule = { ...rule, enabled: target.checked }; target.disabled = true; try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); rule.enabled = target.checked; ui.showToast(`规则 "${rule.name}" 已${target.checked ? '启用' : '禁用'}`); } catch (error) { target.checked = !target.checked; } finally { target.disabled = false; } } }
-    async function handleRuleFormSubmit(event) { event.preventDefault(); ui.setLoading(elements.saveRuleBtn, true); const form = elements.ruleForm; const mode = form.elements['mode'].value; const id = form.elements['id'].value; try { if (mode === 'adguard') { const data = { name: form.elements['name'].value, url: form.elements['url'].value, auto_update: form.elements['auto_update'].checked, update_interval_hours: parseInt(form.elements['update_interval_hours'].value, 10) || 24 }; if (id) { const originalRule = state.adguardRules.find(r => r.id === id); await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...originalRule, ...data }) }); } else { await api.fetch('/plugins/adguard/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, enabled: true }) }); } ui.showToast(`广告拦截规则${id ? '更新' : '添加'}成功`); await adguardManager.load(); } else { const data = { name: form.elements['name'].value, url: form.elements['url'].value, type: form.elements['type'].value, files: form.elements['files'].value, auto_update: form.elements['auto_update'].checked, enable_regexp: form.elements['enable_regexp'] ? form.elements['enable_regexp'].checked : false, update_interval_hours: parseInt(form.elements['update_interval_hours'].value, 10) || 24 }; const pluginTag = diversionManager.sdSetInstanceMap[data.type]; if (!pluginTag) throw new Error('无效的分流规则类型'); if (id) { const originalRule = state.diversionRules.find(r => r.name === id); if (data.name !== id) { if (!confirm(`规则名称已从 "${id}" 更改为 "${data.name}"。\n\n这将删除旧规则并创建一个新规则，确定要继续吗？`)) throw new Error('User cancelled name change.'); await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[originalRule.type]}/config/${id}`, { method: 'DELETE' }); await api.fetch(`/plugins/${pluginTag}/config/${data.name}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, enabled: originalRule.enabled }) }); } else { await api.fetch(`/plugins/${pluginTag}/config/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...originalRule, ...data }) }); } } else { await api.fetch(`/plugins/${pluginTag}/config/${data.name}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, enabled: true }) }); } ui.showToast(`分流规则${id ? '更新' : '添加'}成功`); await diversionManager.load(); if (!id || (id && data.name !== id)) { ui.showToast('正在后台获取规则详情...'); setTimeout(() => diversionManager.load(), 5000); } } ui.closeRuleModal(); } catch (err) { console.error(`${mode} form submission failed:`, err); } finally { ui.setLoading(elements.saveRuleBtn, false); } }
+    async function handleRuleFormSubmit(event) {
+        event.preventDefault();
+        ui.setLoading(elements.saveRuleBtn, true);
+        const form = elements.ruleForm;
+        const mode = form.elements['mode'].value;
+        const id = form.elements['id'].value;
+        try {
+            if (mode === 'adguard') {
+                const data = {
+                    name: form.elements['name'].value,
+                    url: form.elements['url'].value,
+                    auto_update: form.elements['auto_update'].checked,
+                    update_interval_hours: parseInt(form.elements['update_interval_hours'].value, 10) || 24
+                };
+                if (id) {
+                    const originalRule = state.adguardRules.find(r => r.id === id);
+                    await api.fetch(`/plugins/adguard/rules/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...originalRule, ...data })
+                    });
+                } else {
+                    await api.fetch('/plugins/adguard/rules', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...data, enabled: true })
+                    });
+                }
+                ui.showToast(`广告拦截规则${id ? '更新' : '添加'}成功`);
+                await adguardManager.load();
+            } else {
+                const data = {
+                    name: form.elements['name'].value,
+                    url: form.elements['url'].value,
+                    type: form.elements['type'].value,
+                    files: form.elements['files'].value,
+                    auto_update: form.elements['auto_update'].checked,
+                    enable_regexp: form.elements['enable_regexp'] ? form.elements['enable_regexp'].checked : false,
+                    update_interval_hours: parseInt(form.elements['update_interval_hours'].value, 10) || 24
+                };
+                const pluginTag = diversionManager.sdSetInstanceMap[data.type];
+                if (!pluginTag) throw new Error('无效的分流规则类型');
+
+                let finalRuleName = data.name;
+                let shouldAutoUpdate = false;
+
+                if (id) {
+                    const originalRule = state.diversionRules.find(r => r.name === id);
+                    if (data.name !== id) {
+                        if (!confirm(`规则名称已从 "${id}" 更改为 "${data.name}"。\n\n这将删除旧规则并创建一个新规则，确定要继续吗？`)) {
+                            throw new Error('User cancelled name change.');
+                        }
+                        await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[originalRule.type]}/config/${id}`, { method: 'DELETE' });
+                        await api.fetch(`/plugins/${pluginTag}/config/${data.name}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...data, enabled: originalRule.enabled })
+                        });
+                        shouldAutoUpdate = !!data.url;
+                    } else {
+                        await api.fetch(`/plugins/${pluginTag}/config/${id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ...originalRule, ...data })
+                        });
+                    }
+                } else {
+                    await api.fetch(`/plugins/${pluginTag}/config/${data.name}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ...data, enabled: true })
+                    });
+                    shouldAutoUpdate = !!data.url;
+                }
+
+                ui.showToast(`分流规则${id ? '更新' : '添加'}成功`);
+
+                if (shouldAutoUpdate) {
+                    ui.showToast(`正在自动下载规则 "${finalRuleName}"...`);
+                    try {
+                        await api.fetch(`/plugins/${pluginTag}/update/${finalRuleName}`, { method: 'POST' });
+                        ui.showToast('已触发自动下载，正在等待规则详情刷新...', 'success');
+                        const ready = await waitForDiversionRuleReady(finalRuleName);
+                        if (!ready) {
+                            ui.showToast('规则已开始下载，详情可能稍后刷新。', 'success');
+                        }
+                    } catch (updateErr) {
+                        console.error(`Auto update failed for ${finalRuleName}:`, updateErr);
+                    }
+                } else {
+                    await diversionManager.load();
+                }
+                if ((!id || (id && data.name !== id)) && !data.url) {
+                    ui.showToast('正在后台获取规则详情...');
+                    setTimeout(() => diversionManager.load(), 5000);
+                }
+            }
+            ui.closeRuleModal();
+        } catch (err) {
+            console.error(`${mode} form submission failed:`, err);
+        } finally {
+            ui.setLoading(elements.saveRuleBtn, false);
+        }
+    }
     const adguardManager = { async load() { try { state.adguardRules = await api.fetch('/plugins/adguard/rules') || []; } catch (error) { state.adguardRules = []; } this.render(); }, render() { renderRuleTable(elements.adguardRulesTbody, state.adguardRules, 'adguard'); }, };
-    const diversionManager = { sdSetInstanceMap: { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn', 'cuscn': 'cuscn', 'cusnocn': 'cusnocn', 'nft_add': 'nft_add'  }, async load() { try { const promises = Object.values(this.sdSetInstanceMap).map(tag => api.fetch(`/plugins/${tag}/config`)); const results = await Promise.allSettled(promises); state.diversionRules = results.filter(r => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap(r => r.value); } catch (e) { state.diversionRules = []; } this.render(); }, render() { renderRuleTable(elements.diversionRulesTbody, state.diversionRules, 'diversion'); }, };
+    const specialGroupManager = {
+        async load() {
+            try {
+                state.specialGroups = await api.fetch('/api/v1/special-groups') || [];
+            } catch (error) {
+                state.specialGroups = [];
+            }
+            this.render();
+            populateDiversionTypeOptions();
+        },
+        render() {
+            const container = elements.specialGroupsContainer;
+            if (!container) return;
+            if (!state.specialGroups.length) {
+                container.innerHTML = '<span class="text-secondary-sm">还没有专属分流组。点击“新增专属分流组”后，系统会自动分配 mark50-mark60 中的一个编号。</span>';
+                return;
+            }
+            container.innerHTML = state.specialGroups.map(group => `
+                <div class="control-item" style="margin:0; gap:0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--color-border); border-radius:var(--border-radius-md);">
+                    <div style="display:flex; flex-direction:column;">
+                        <strong>${group.name}</strong>
+                        <small class="text-secondary-sm">mark${group.slot}</small>
+                    </div>
+                    <button class="button secondary small edit-special-group-btn" data-slot="${group.slot}" style="margin-left:auto;">改名</button>
+                    <button class="button danger small delete-special-group-btn" data-slot="${group.slot}" style="margin-left:auto;">删除</button>
+                </div>
+            `).join('');
+        },
+        openModal(group = null) {
+            if (!elements.specialGroupForm) return;
+            elements.specialGroupForm.reset();
+            elements.specialGroupSlotInput.value = group?.slot || '';
+            elements.specialGroupNameInput.value = group?.name || '';
+            elements.specialGroupModalTitle.textContent = group ? '修改专属分流组' : '新增专属分流组';
+            lockScroll();
+            elements.specialGroupModal.showModal();
+        },
+        async save(formData) {
+            ui.setLoading(elements.saveSpecialGroupBtn, true);
+            try {
+                await api.fetch('/api/v1/special-groups', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        slot: parseInt(formData.get('slot'), 10) || 0,
+                        name: (formData.get('name') || '').trim()
+                    })
+                });
+                ui.showToast('专属分流组已保存', 'success');
+                closeAndUnlock(elements.specialGroupModal);
+                await this.load();
+                await diversionManager.load();
+                await upstreamManager.loadData();
+            } catch (error) {
+                ui.showToast('保存专属分流组失败', 'error');
+            } finally {
+                ui.setLoading(elements.saveSpecialGroupBtn, false);
+            }
+        },
+        async remove(slot) {
+            if (!confirm('删除该专属分流组后，会清空其绑定的上游配置与在线分流配置。确定继续吗？')) return;
+            try {
+                await api.fetch(`/api/v1/special-groups/${slot}`, { method: 'DELETE' });
+                ui.showToast('专属分流组已删除', 'success');
+                await this.load();
+                await diversionManager.load();
+                await upstreamManager.loadData();
+            } catch (error) {
+                ui.showToast('删除专属分流组失败', 'error');
+            }
+        }
+    };
+    const diversionManager = {
+        get sdSetInstanceMap() {
+            const base = { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn', 'cuscn': 'cuscn', 'cusnocn': 'cusnocn', 'nft_add': 'nft_add' };
+            state.specialGroups.forEach(group => {
+                base[group.key] = group.diversion_plugin_tag;
+            });
+            return base;
+        },
+        async load() {
+            try {
+                if (!Array.isArray(state.specialGroups) || state.specialGroups.length === 0) {
+                    try {
+                        state.specialGroups = await api.fetch('/api/v1/special-groups') || [];
+                        specialGroupManager.render();
+                        populateDiversionTypeOptions();
+                    } catch (ignored) {}
+                }
+                const promises = Object.values(this.sdSetInstanceMap).map(tag => api.fetch(`/plugins/${tag}/config`));
+                const results = await Promise.allSettled(promises);
+                state.diversionRules = results.filter(r => r.status === 'fulfilled' && Array.isArray(r.value)).flatMap(r => r.value);
+            } catch (e) {
+                state.diversionRules = [];
+            }
+            this.render();
+        },
+        render() { renderRuleTable(elements.diversionRulesTbody, state.diversionRules, 'diversion'); },
+    };
 
     // 流式计数工具：避免一次性创建超大字符串数组导致主线程卡顿
     async function countLinesStreaming(url, signal) {
@@ -3237,6 +3544,18 @@ renderReplacementsTable() {
         bindEvents() {
             document.getElementById('add-upstream-btn')?.addEventListener('click', () => this.openModal());
             document.getElementById('upstream-restart-btn')?.addEventListener('click', () => this.restartService());
+            elements.addSpecialGroupBtn?.addEventListener('click', () => specialGroupManager.openModal());
+            elements.specialGroupsContainer?.addEventListener('click', (e) => {
+                const editBtn = e.target.closest('.edit-special-group-btn');
+                const btn = e.target.closest('.delete-special-group-btn');
+                if (editBtn) {
+                    const group = state.specialGroups.find(item => item.slot === parseInt(editBtn.dataset.slot, 10));
+                    if (group) specialGroupManager.openModal(group);
+                    return;
+                }
+                if (!btn) return;
+                specialGroupManager.remove(parseInt(btn.dataset.slot, 10));
+            });
             
             // 列表操作委托
             document.getElementById('upstream-dns-tbody')?.addEventListener('click', (e) => {
@@ -3267,6 +3586,8 @@ renderReplacementsTable() {
 
             document.getElementById('close-upstream-modal')?.addEventListener('click', () => closeAndUnlock(modal));
             document.getElementById('cancel-upstream-modal')?.addEventListener('click', () => closeAndUnlock(modal));
+            elements.closeSpecialGroupModalBtn?.addEventListener('click', () => closeAndUnlock(elements.specialGroupModal));
+            elements.cancelSpecialGroupModalBtn?.addEventListener('click', () => closeAndUnlock(elements.specialGroupModal));
             
             protocolSelect?.addEventListener('change', () => this.updateFormFields(protocolSelect.value));
             
@@ -3274,20 +3595,28 @@ renderReplacementsTable() {
                 e.preventDefault();
                 this.handleSave(new FormData(form));
             });
+            elements.specialGroupForm?.addEventListener('submit', (e) => {
+                e.preventDefault();
+                specialGroupManager.save(new FormData(elements.specialGroupForm));
+            });
         },
 
         async loadData() {
             try {
-                const [tagsRes, configRes, metricsRaw] = await Promise.all([
+                const [tagsRes, configRes, metricsRaw, specialGroupsRes] = await Promise.all([
                     api.fetch('/api/v1/upstream/tags'),
                     api.fetch('/api/v1/upstream/config'),
-                    api.getMetrics()
+                    api.getMetrics(),
+                    api.fetch('/api/v1/special-groups')
                 ]);
 
                 // 确保 tagsRes 是数组
                 this.state.tags = Array.isArray(tagsRes) ? tagsRes : [];
                 this.state.config = configRes || {};
+                state.specialGroups = Array.isArray(specialGroupsRes) ? specialGroupsRes : [];
                 this.parseMetrics(metricsRaw);
+                specialGroupManager.render();
+                populateDiversionTypeOptions();
                 this.renderTable();
             } catch (e) {
                 console.error("Upstream data load failed", e);
@@ -3376,7 +3705,7 @@ renderTable() {
                                 <div class="card-header">
                                     <div style="display:flex; flex-direction:column; max-width: 70%;">
                                         <span class="card-title">${u.tag}</span>
-                                        <small style="color:var(--color-text-secondary); margin-top:4px;">${group} · ${u.protocol}</small>
+                                        <small style="color:var(--color-text-secondary); margin-top:4px;">${getUpstreamGroupHint(group)} · ${u.protocol}</small>
                                     </div>
                                     <label class="switch">
                                         <input type="checkbox" class="upstream-enable-toggle" ${u.enabled ? 'checked' : ''}>
@@ -3409,7 +3738,7 @@ renderTable() {
                                 <span class="slider"></span>
                             </label>
                         </td>
-                        <td>${group}</td>
+                        <td>${getUpstreamGroupDisplay(group)}</td>
                         <td>${u.tag}</td>
                         <td>${u.protocol}</td>
                         <td class="text-center">${stats.avgLat}</td>
@@ -3453,14 +3782,14 @@ renderTable() {
             
             // 填充所属组下拉框
             groupSelect.innerHTML = '';
-            const allGroups = new Set();
+            const allGroups = new Map();
             
             // 1. 添加从后端读取到的 aliapi 插件的 Tag
             if (Array.isArray(this.state.tags)) {
                 this.state.tags.forEach(t => {
                     // 过滤非字符串 (防止 JS for-in 遍历数字索引等问题)
-                    if (t && typeof t === 'string' && isNaN(t)) {
-                        allGroups.add(t);
+                    if (t && typeof t === 'string' && isNaN(t) && !isSpecialUpstreamTag(t)) {
+                        allGroups.set(t, t);
                     }
                 });
             }
@@ -3468,15 +3797,18 @@ renderTable() {
             // 2. 添加配置文件中已存在的组名（即便当前未扫描到，也应允许编辑）
             if (this.state.config && typeof this.state.config === 'object') {
                 Object.keys(this.state.config).forEach(k => {
-                    if (k && isNaN(k)) {
-                        allGroups.add(k);
+                    if (k && isNaN(k) && !isSpecialUpstreamTag(k)) {
+                        allGroups.set(k, k);
                     }
                 });
             }
+            state.specialGroups.forEach(group => {
+                allGroups.set(group.upstream_plugin_tag, group.name);
+            });
             // 如果没有找到组，下拉框保持为空，用户点击保存时会提示"请选择所属组"
-            allGroups.forEach(g => {
+            allGroups.forEach((label, value) => {
                 const opt = document.createElement('option');
-                opt.value = g; opt.textContent = g;
+                opt.value = value; opt.textContent = label;
                 groupSelect.appendChild(opt);
             });
 
@@ -4331,6 +4663,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                 <p style="margin-bottom: 0.5rem;"><strong>geoipcn:</strong> 中国大陆 IP 列表。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>cuscn:</strong> 自定义中国大陆域名。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>cusnocn:</strong> 自定义非中国大陆域名。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>special_50-60:</strong> 特殊上游组，命中后会走对应槽位绑定的专属上游与专属缓存。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>nftadd:</strong> 自动添加ip集至nft。</p>
                             </div>
                         </div>
@@ -4352,5 +4685,3 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 });
-
-

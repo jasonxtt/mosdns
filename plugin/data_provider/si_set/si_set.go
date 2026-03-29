@@ -36,6 +36,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -572,8 +573,19 @@ func (p *SiSet) api() *chi.Mux {
 			return
 		}
 
-		// Trigger a reload in the background to apply changes.
-		go p.reloadAllRules()
+		go func(sourceName string, autoFetch bool) {
+			if autoFetch {
+				log.Printf("[%s] auto update triggered for source '%s' after config save.", PluginType, sourceName)
+				updateCtx, cancel := context.WithTimeout(p.ctx, downloadTimeout)
+				defer cancel()
+				if err := p.downloadAndUpdateLocalFile(updateCtx, sourceName); err != nil {
+					log.Printf("[%s] WARN: failed to auto update source '%s' after config save: %v", PluginType, sourceName, err)
+				}
+			}
+			if err := p.reloadAllRules(); err != nil {
+				log.Printf("[%s] WARN: failed to reload rules after config save for '%s': %v", PluginType, sourceName, err)
+			}
+		}(name, strings.TrimSpace(updatedSource.Files) != "" && strings.TrimSpace(updatedSource.URL) != "")
 
 		jsonResponse(w, updatedSource, statusCode)
 	}))

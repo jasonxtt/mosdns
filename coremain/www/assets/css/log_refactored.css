@@ -1340,6 +1340,14 @@ tbody tr[data-rule-id] {
     flex-shrink: 0;
 }
 
+.rule-tag .rule-tag-mark {
+    font-size: 0.68rem;
+    line-height: 1;
+    opacity: 0.82;
+    font-weight: 500;
+    margin-left: 0.08rem;
+}
+
 .interactive-btn-container {
     display: inline-flex;
     gap: 0.5rem;
