@@ -2412,7 +2412,7 @@ function renderRuleTable(tbody, rules, mode) {
             const container = elements.specialGroupsContainer;
             if (!container) return;
             if (!state.specialGroups.length) {
-                container.innerHTML = '<span class="text-secondary-sm">还没有专属分流组。点击“新增专属分流组”后，系统会自动分配 mark50-mark60 中的一个编号。</span>';
+                container.innerHTML = '<span class="text-secondary-sm">还没有专属分流组。点击“新增专属分流组”后，系统会自动分配 mark50-mark59 中的一个编号。</span>';
                 return;
             }
             container.innerHTML = state.specialGroups.map(group => `
@@ -4663,7 +4663,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                 <p style="margin-bottom: 0.5rem;"><strong>geoipcn:</strong> 中国大陆 IP 列表。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>cuscn:</strong> 自定义中国大陆域名。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>cusnocn:</strong> 自定义非中国大陆域名。</p>
-                                <p style="margin-bottom: 0.5rem;"><strong>special_50-60:</strong> 特殊上游组，命中后会走对应槽位绑定的专属上游与专属缓存。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>special_50-59:</strong> 特殊上游组，命中后会走对应槽位绑定的专属上游与专属缓存。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>nftadd:</strong> 自动添加ip集至nft。</p>
                             </div>
                         </div>
