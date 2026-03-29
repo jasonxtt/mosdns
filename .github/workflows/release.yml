@@ -85,7 +85,7 @@ jobs:
           BIN_NAME="mosdns${{ matrix.ext }}"
           go build \
             -trimpath \
-            -ldflags "-s -w -X main.version=${VERSION_TAG}" \
+            -ldflags "-s -w -X main.version=${RELEASE_TAG}" \
             -o "dist/${BIN_NAME}" \
             ./
 
