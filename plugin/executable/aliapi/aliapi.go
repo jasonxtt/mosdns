@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
@@ -93,6 +94,7 @@ type UpstreamConfig struct {
 
 func Init(bp *coremain.BP, args any) (any, error) {
 	a := args.(*Args)
+	baseArgs := cloneArgs(a)
 	
 	// [Debug] Log entry
 	bp.L().Info("[Debug AliAPI] Init plugin instance", zap.String("plugin_tag", bp.Tag()))
@@ -161,10 +163,11 @@ func Init(bp *coremain.BP, args any) (any, error) {
 	}
 
 	// 执行正常初始化
-	f, err := NewAliAPI(a, Opts{Logger: bp.L(), MetricsTag: bp.Tag()})
+	f, err := NewAliAPI(a, Opts{Logger: bp.L(), MetricsTag: bp.Tag(), PluginTag: bp.Tag()})
 	if err != nil {
 		return nil, err
 	}
+	f.baseArgs = *baseArgs
 	if err := f.RegisterMetricsTo(prometheus.WrapRegistererWithPrefix(PluginType+"_", bp.M().GetMetricsReg())); err != nil {
 		_ = f.Close()
 		return nil, err
@@ -178,14 +181,96 @@ func applyUpstreamOverrides(pluginTag string, args *Args, logger *zap.Logger) {
 	// ... 略 (因为 Init 已经处理了)
 }
 
+func cloneArgs(src *Args) *Args {
+	if src == nil {
+		return &Args{}
+	}
+	dst := *src
+	if src.Upstreams != nil {
+		dst.Upstreams = append([]UpstreamConfig(nil), src.Upstreams...)
+	}
+	return &dst
+}
+
+func buildArgsWithOverrides(pluginTag string, base *Args, logger *zap.Logger) *Args {
+	a := cloneArgs(base)
+	if logger != nil {
+		logger.Info("[Debug AliAPI] Rebuilding config from overrides", zap.String("plugin_tag", pluginTag))
+	}
+
+	overrides := coremain.GetUpstreamOverrides(pluginTag)
+	var activeUpstreams []UpstreamConfig
+	enabledCount := 0
+
+	if len(overrides) == 0 {
+		return a
+	}
+
+	for _, o := range overrides {
+		if !o.Enabled {
+			continue
+		}
+		u := UpstreamConfig{
+			Tag:                  o.Tag,
+			Addr:                 o.Addr,
+			DialAddr:             o.DialAddr,
+			IdleTimeout:          o.IdleTimeout,
+			UpstreamQueryTimeout: o.UpstreamQueryTimeout,
+			EnablePipeline:       o.EnablePipeline,
+			EnableHTTP3:          o.EnableHTTP3,
+			InsecureSkipVerify:   o.InsecureSkipVerify,
+			Socks5:               o.Socks5,
+			SoMark:               o.SoMark,
+			BindToDevice:         o.BindToDevice,
+			Bootstrap:            o.Bootstrap,
+			BootstrapVer:         o.BootstrapVer,
+		}
+
+		if o.Protocol == "aliapi" {
+			u.Type = "aliapi"
+			if o.AccountID != "" {
+				a.AccountID = o.AccountID
+				a.AccessKeyID = o.AccessKeyID
+				a.AccessKeySecret = o.AccessKeySecret
+				a.ServerAddr = o.ServerAddr
+				a.EcsClientIP = o.EcsClientIP
+				a.EcsClientMask = o.EcsClientMask
+			}
+		} else {
+			u.Type = "dns"
+		}
+
+		activeUpstreams = append(activeUpstreams, u)
+		enabledCount++
+	}
+
+	if len(activeUpstreams) == 0 {
+		return a
+	}
+
+	a.Upstreams = activeUpstreams
+	conc := enabledCount
+	if conc > maxConcurrentQueries {
+		conc = maxConcurrentQueries
+	}
+	if conc < 1 {
+		conc = 1
+	}
+	a.Concurrent = conc
+	return a
+}
+
 var _ sequence.Executable = (*AliAPI)(nil)
 var _ sequence.QuickConfigurableExec = (*AliAPI)(nil)
 
 // AliAPI represents the aliapi plugin instance.
 type AliAPI struct {
 	args *Args
+	baseArgs Args
+	pluginTag string
 
 	logger       *zap.Logger
+	mu           sync.RWMutex
 	us           []*upstreamWrapper
 	tag2Upstream map[string]*upstreamWrapper
 }
@@ -193,38 +278,51 @@ type AliAPI struct {
 type Opts struct {
 	Logger     *zap.Logger
 	MetricsTag string
+	PluginTag  string
 }
 
 // NewAliAPI inits a AliAPI from given args.
 // args must contain at least one upstream.
 func NewAliAPI(args *Args, opt Opts) (*AliAPI, error) {
-	if len(args.Upstreams) == 0 {
-		return nil, errors.New("no upstream is configured")
-	}
 	if opt.Logger == nil {
 		opt.Logger = zap.NewNop()
 	}
 
-	if args.ServerAddr == "" {
-		args.ServerAddr = defaultAliAPIServer
-	}
-
 	f := &AliAPI{
-		args:         args,
+		args:         cloneArgs(args),
+		baseArgs:     *cloneArgs(args),
+		pluginTag:    opt.PluginTag,
 		logger:       opt.Logger,
 		tag2Upstream: make(map[string]*upstreamWrapper),
 	}
+	if err := f.reloadWithArgs(args, opt); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (f *AliAPI) reloadWithArgs(args *Args, opt Opts) error {
+	if len(args.Upstreams) == 0 {
+		return errors.New("no upstream is configured")
+	}
+	cfg := cloneArgs(args)
+	if cfg.ServerAddr == "" {
+		cfg.ServerAddr = defaultAliAPIServer
+	}
 
 	applyGlobal := func(c *UpstreamConfig) {
-		utils.SetDefaultString(&c.Socks5, args.Socks5)
-		utils.SetDefaultUnsignNum(&c.SoMark, args.SoMark)
-		utils.SetDefaultString(&c.BindToDevice, args.BindToDevice)
-		utils.SetDefaultString(&c.Bootstrap, args.Bootstrap)
-		utils.SetDefaultUnsignNum(&c.BootstrapVer, args.BootstrapVer)
+		utils.SetDefaultString(&c.Socks5, cfg.Socks5)
+		utils.SetDefaultUnsignNum(&c.SoMark, cfg.SoMark)
+		utils.SetDefaultString(&c.BindToDevice, cfg.BindToDevice)
+		utils.SetDefaultString(&c.Bootstrap, cfg.Bootstrap)
+		utils.SetDefaultUnsignNum(&c.BootstrapVer, cfg.BootstrapVer)
 		utils.SetDefaultString(&c.Type, "dns")
 	}
 
-	for i, c := range args.Upstreams {
+	newUs := make([]*upstreamWrapper, 0, len(cfg.Upstreams))
+	newTag2Upstream := make(map[string]*upstreamWrapper)
+
+	for i, c := range cfg.Upstreams {
 		applyGlobal(&c)
 
 		uw := newWrapper(i, c, opt.MetricsTag)
@@ -232,21 +330,21 @@ func NewAliAPI(args *Args, opt Opts) (*AliAPI, error) {
 		var err error
 
 		if c.Type == "aliapi" {
-			if args.AccountID == "" || args.AccessKeyID == "" || args.AccessKeySecret == "" {
-				return nil, fmt.Errorf("aliapi upstream requires account_id, access_key_id, and access_key_secret to be set in plugin args")
+			if cfg.AccountID == "" || cfg.AccessKeyID == "" || cfg.AccessKeySecret == "" {
+				return fmt.Errorf("aliapi upstream requires account_id, access_key_id, and access_key_secret to be set in plugin args")
 			}
 			aliAPIArgs := AliAPIUpstreamArgs{
-				AccountID:       args.AccountID,
-				AccessKeyID:     args.AccessKeyID,
-				AccessKeySecret: args.AccessKeySecret,
-				ServerAddr:      args.ServerAddr,
-				EcsClientIP:     args.EcsClientIP,
-				EcsClientMask:   args.EcsClientMask,
+				AccountID:       cfg.AccountID,
+				AccessKeyID:     cfg.AccessKeyID,
+				AccessKeySecret: cfg.AccessKeySecret,
+				ServerAddr:      cfg.ServerAddr,
+				EcsClientIP:     cfg.EcsClientIP,
+				EcsClientMask:   cfg.EcsClientMask,
 			}
 			u = NewAliAPIUpstream(aliAPIArgs, opt.Logger)
 		} else {
 			if len(c.Addr) == 0 {
-				return nil, fmt.Errorf("#%d upstream invalid args, addr is required for type 'dns'", i)
+				return fmt.Errorf("#%d upstream invalid args, addr is required for type 'dns'", i)
 			}
 			uOpt := upstream.Opt{
 				DialAddr:       c.DialAddr,
@@ -267,28 +365,39 @@ func NewAliAPI(args *Args, opt Opts) (*AliAPI, error) {
 			}
 			u, err = upstream.NewUpstream(c.Addr, uOpt)
 			if err != nil {
-				_ = f.Close()
-				return nil, fmt.Errorf("failed to init upstream #%d: %w", i, err)
+				return fmt.Errorf("failed to init upstream #%d: %w", i, err)
 			}
 		}
 
 		uw.u = u
-		f.us = append(f.us, uw)
+		newUs = append(newUs, uw)
 
 		if len(c.Tag) > 0 {
-			if _, dup := f.tag2Upstream[c.Tag]; dup {
-				_ = f.Close()
-				return nil, fmt.Errorf("duplicated upstream tag %s", c.Tag)
+			if _, dup := newTag2Upstream[c.Tag]; dup {
+				return fmt.Errorf("duplicated upstream tag %s", c.Tag)
 			}
-			f.tag2Upstream[c.Tag] = uw
+			newTag2Upstream[c.Tag] = uw
 		}
 	}
 
-	return f, nil
+	f.mu.Lock()
+	oldUs := f.us
+	f.us = newUs
+	f.tag2Upstream = newTag2Upstream
+	f.args = cfg
+	f.mu.Unlock()
+
+	for _, u := range oldUs {
+		_ = u.Close()
+	}
+	return nil
 }
 
 func (f *AliAPI) RegisterMetricsTo(r prometheus.Registerer) error {
-	for _, wu := range f.us {
+	f.mu.RLock()
+	us := append([]*upstreamWrapper(nil), f.us...)
+	f.mu.RUnlock()
+	for _, wu := range us {
 		if len(wu.cfg.Tag) == 0 {
 			continue
 		}
@@ -300,7 +409,12 @@ func (f *AliAPI) RegisterMetricsTo(r prometheus.Registerer) error {
 }
 
 func (f *AliAPI) Exec(ctx context.Context, qCtx *query_context.Context) (err error) {
-	r, err := f.exchange(ctx, qCtx, f.us)
+	f.mu.RLock()
+	us := append([]*upstreamWrapper(nil), f.us...)
+	concurrent := f.args.Concurrent
+	f.mu.RUnlock()
+
+	r, err := f.exchange(ctx, qCtx, us, concurrent)
 	if err != nil {
 		return err
 	}
@@ -310,19 +424,23 @@ func (f *AliAPI) Exec(ctx context.Context, qCtx *query_context.Context) (err err
 
 func (f *AliAPI) QuickConfigureExec(args string) (any, error) {
 	var us []*upstreamWrapper
+	f.mu.RLock()
 	if len(args) == 0 {
-		us = f.us
+		us = append([]*upstreamWrapper(nil), f.us...)
 	} else {
 		for _, tag := range strings.Fields(args) {
 			u := f.tag2Upstream[tag]
 			if u == nil {
+				f.mu.RUnlock()
 				return nil, fmt.Errorf("cannot find upstream by tag %s", tag)
 			}
 			us = append(us, u)
 		}
 	}
+	concurrent := f.args.Concurrent
+	f.mu.RUnlock()
 	var execFunc sequence.ExecutableFunc = func(ctx context.Context, qCtx *query_context.Context) error {
-		r, err := f.exchange(ctx, qCtx, us)
+		r, err := f.exchange(ctx, qCtx, us, concurrent)
 		if err != nil {
 			return err
 		}
@@ -333,13 +451,28 @@ func (f *AliAPI) QuickConfigureExec(args string) (any, error) {
 }
 
 func (f *AliAPI) Close() error {
-	for _, u := range f.us {
+	f.mu.Lock()
+	us := f.us
+	f.us = nil
+	f.tag2Upstream = nil
+	f.mu.Unlock()
+	for _, u := range us {
 		_ = u.Close()
 	}
 	return nil
 }
 
-func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us []*upstreamWrapper) (*dns.Msg, error) {
+func (f *AliAPI) ReloadFromOverrides() error {
+	base := cloneArgs(&f.baseArgs)
+	args := buildArgsWithOverrides(f.pluginTag, base, f.logger)
+	return f.reloadWithArgs(args, Opts{
+		Logger:     f.logger,
+		MetricsTag: f.pluginTag,
+		PluginTag:  f.pluginTag,
+	})
+}
+
+func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us []*upstreamWrapper, concurrent int) (*dns.Msg, error) {
 	if len(us) == 0 {
 		return nil, errors.New("no upstream to exchange")
 	}
@@ -350,7 +483,6 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 	}
 	defer pool.ReleaseBuf(queryPayload)
 
-	concurrent := f.args.Concurrent
 	if concurrent <= 0 {
 		concurrent = 1
 	}

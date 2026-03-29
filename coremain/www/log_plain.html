@@ -1201,9 +1201,17 @@
                 await diversionApi.updateRule(targetPluginTag, ruleName, data);
                 ui.showToast(`规则 "${ruleName}" 保存成功`);
                 diversionUI.closeModal();
+                if (!form.elements['diversion-rule-name'].readOnly && data.url) {
+                    ui.showToast(`正在自动下载规则 "${ruleName}"...`);
+                    try {
+                        await diversionApi.triggerUpdate(targetPluginTag, ruleName);
+                    } catch (updateErr) {
+                        console.error(`Auto update failed for ${ruleName}:`, updateErr);
+                    }
+                }
                 await loadDiversionRules();
                 if (!form.elements['diversion-rule-name'].readOnly) {
-                    ui.showToast('正在后台获取规则详情...');
+                    ui.showToast(data.url ? '规则已提交更新，5秒后自动刷新详情...' : '正在后台获取规则详情...');
                     setTimeout(() => loadDiversionRules(), 5000);
                 }
             } finally {

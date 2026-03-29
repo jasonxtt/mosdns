@@ -543,7 +543,19 @@ func (p *SdSet) api() *chi.Mux {
 			jsonError(w, "failed to save config", http.StatusInternalServerError)
 			return
 		}
-		go p.reloadAllRules()
+		go func(sourceName string, autoFetch bool) {
+			if autoFetch {
+				log.Printf("[%s] auto update triggered for source '%s' after config save.", PluginType, sourceName)
+				updateCtx, cancel := context.WithTimeout(p.ctx, downloadTimeout)
+				defer cancel()
+				if err := p.downloadAndUpdateLocalFile(updateCtx, sourceName); err != nil {
+					log.Printf("[%s] WARN: failed to auto update source '%s' after config save: %v", PluginType, sourceName, err)
+				}
+			}
+			if err := p.reloadAllRules(); err != nil {
+				log.Printf("[%s] WARN: failed to reload rules after config save for '%s': %v", PluginType, sourceName, err)
+			}
+		}(name, strings.TrimSpace(updatedSource.Files) != "" && strings.TrimSpace(updatedSource.URL) != "")
 		jsonResponse(w, updatedSource, statusCode)
 	}))
 	r.Delete("/config/{name}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,14 @@
             display: none !important;
         }
 
+        .rule-tag .rule-tag-mark {
+            font-size: 0.68rem;
+            line-height: 1;
+            opacity: 0.82;
+            font-weight: 500;
+            margin-left: 0.08rem;
+        }
+
         /* 2. Independent Chart Panel */
         #independent-chart-panel {
             background: var(--color-bg-card);
@@ -745,6 +753,29 @@
                     <div class="footer-actions-right">
                         <button type="button" id="cancel-upstream-modal" class="button secondary">取消</button>
                         <button type="submit" id="save-upstream-btn" class="button primary">保存</button>
+                    </div>
+                </footer>
+            </form>
+        </dialog>
+
+        <dialog id="special-group-modal" class="card">
+            <header class="modal-header">
+                <h2 id="special-group-modal-title">新增专属分流组</h2>
+                <button class="button secondary" id="close-special-group-modal" aria-label="Close" style="min-width:auto; padding:0.3rem 0.5rem;">✕</button>
+            </header>
+            <form id="special-group-form">
+                <div class="modal-body">
+                    <input type="hidden" id="special-group-slot" name="slot">
+                    <div class="form-field">
+                        <label for="special-group-name">组名</label>
+                        <input type="text" id="special-group-name" name="name" placeholder="例如：移动上游 / CMCC" required>
+                        <small class="control-hint">系统会自动分配 mark50-mark60 之间的编号，并在在线分流中作为可选类型出现。</small>
+                    </div>
+                </div>
+                <footer class="modal-footer">
+                    <div class="footer-actions-right">
+                        <button type="button" id="cancel-special-group-modal" class="button secondary">取消</button>
+                        <button type="submit" id="save-special-group-btn" class="button primary"><span>保存</span></button>
                     </div>
                 </footer>
             </form>
@@ -1506,10 +1537,23 @@
                             </svg>
                             上游DNS设置
                         </h3>
-                        <button id="add-upstream-btn" class="button primary small">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                            添加上游DNS
-                        </button>
+                        <div style="display:flex; gap:0.75rem; flex-wrap:wrap; justify-content:flex-end;">
+                            <button id="add-special-group-btn" class="button primary small">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path></svg>
+                                新增专属分流组
+                            </button>
+                            <button id="add-upstream-btn" class="button primary small">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                                添加上游DNS
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="control-item" style="margin-bottom: 1rem; align-items: flex-start;">
+                        <div>
+                            <strong>专属分流组</strong>
+                            <div id="special-groups-container" style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap;"></div>
+                        </div>
                     </div>
 
                     <div class="scrollable-table-container">
@@ -1579,7 +1623,7 @@
         </section>
     </main>
 
-    <script src="assets/js/log.min.js" defer></script>
+    <script src="assets/js/log.js" defer></script>
 </body>
 
 </html>
