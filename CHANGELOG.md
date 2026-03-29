@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- update checking now targets `jasonxtt-lab/mosdns` instead of the upstream repository
+- the built-in updater now matches the fork's Linux `tar.gz` release assets
+- WebUI project links now point to `jasonxtt-lab/mosdns`
+
 ## v0.1.0-preview
 
 Initial preview release for the WebUI-enhanced fork based on `yyysuo/mosdns`.
