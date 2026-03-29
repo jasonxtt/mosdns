@@ -16,6 +16,7 @@ This fork keeps the upstream architecture and core configuration style, while ad
 
 - Create dedicated routing groups from the WebUI
 - Each group is mapped to `mark50-mark60`
+- The current implementation therefore supports up to 11 dedicated routing groups
 - Each group can bind its own:
   - online rule set
   - upstream group
