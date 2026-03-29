@@ -21,31 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: android-arm64
-            goos: android
-            goarch: arm64
-            ext: ''
-          - id: darwin-amd64
-            goos: darwin
-            goarch: amd64
-            ext: ''
-          - id: darwin-arm64
-            goos: darwin
-            goarch: arm64
-            ext: ''
-          - id: windows-amd64
-            goos: windows
-            goarch: amd64
-            ext: '.exe'
-          - id: windows-amd64-v3
-            goos: windows
-            goarch: amd64
-            goamd64: v3
-            ext: '.exe'
-          - id: windows-arm64
-            goos: windows
-            goarch: arm64
-            ext: '.exe'
           - id: linux-amd64
             goos: linux
             goarch: amd64
