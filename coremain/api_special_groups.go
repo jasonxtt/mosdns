@@ -16,7 +16,7 @@ import (
 const (
 	specialGroupsFilename = "special_upstream_groups.json"
 	specialSlotMin        = 50
-	specialSlotMax        = 60
+	specialSlotMax        = 59
 )
 
 type SpecialGroup struct {
@@ -93,12 +93,12 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	if slot == 0 {
 		slot = firstFreeSpecialSlot(specialGroups)
 		if slot == 0 {
-			http.Error(w, `{"error":"no free special upstream slots (50-60)"}`, http.StatusConflict)
+			http.Error(w, `{"error":"no free special upstream slots (50-59)"}`, http.StatusConflict)
 			return
 		}
 	}
 	if slot < specialSlotMin || slot > specialSlotMax {
-		http.Error(w, `{"error":"slot must be between 50 and 60"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"slot must be between 50 and 59"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -143,7 +143,7 @@ func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if slot < specialSlotMin || slot > specialSlotMax {
-		http.Error(w, `{"error":"slot must be between 50 and 60"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"slot must be between 50 and 59"}`, http.StatusBadRequest)
 		return
 	}
 
