@@ -39,56 +39,10 @@ jobs:
             goos: linux
             goarch: arm64
             ext: ''
-          - id: linux-armv5
-            goos: linux
-            goarch: arm
-            goarm: '5'
-            ext: ''
-          - id: linux-armv6
-            goos: linux
-            goarch: arm
-            goarm: '6'
-            ext: ''
           - id: linux-armv7
             goos: linux
             goarch: arm
             goarm: '7'
-            ext: ''
-          - id: linux-mips
-            goos: linux
-            goarch: mips
-            ext: ''
-          - id: linux-mips-softfloat
-            goos: linux
-            goarch: mips
-            gomips: softfloat
-            ext: ''
-          - id: linux-mips64
-            goos: linux
-            goarch: mips64
-            ext: ''
-          - id: linux-mips64-softfloat
-            goos: linux
-            goarch: mips64
-            gomips64: softfloat
-            ext: ''
-          - id: linux-mipsle
-            goos: linux
-            goarch: mipsle
-            ext: ''
-          - id: linux-mipsle-softfloat
-            goos: linux
-            goarch: mipsle
-            gomips: softfloat
-            ext: ''
-          - id: linux-mips64le
-            goos: linux
-            goarch: mips64le
-            ext: ''
-          - id: linux-mips64le-softfloat
-            goos: linux
-            goarch: mips64le
-            gomips64: softfloat
             ext: ''
     steps:
       - uses: actions/checkout@v4
@@ -126,8 +80,6 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOAMD64: ${{ matrix.goamd64 }}
           GOARM: ${{ matrix.goarm }}
-          GOMIPS: ${{ matrix.gomips }}
-          GOMIPS64: ${{ matrix.gomips64 }}
         run: |
           mkdir -p dist
           BIN_NAME="mosdns${{ matrix.ext }}"
