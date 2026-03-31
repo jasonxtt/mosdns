@@ -6,6 +6,25 @@
 
 这个分支的目标不是重写 `mosdns`，而是在保留上游整体结构和配置思路的前提下，补齐更适合长期在线维护 DNS 分流规则的工作流。
 
+## 默认配置
+
+这个 fork 对应的默认配置包放在这里：
+
+- [config_tom.zip](https://github.com/jasonxtt/file/blob/main/mosdns/config_tom.zip)
+
+使用方式：
+
+1. 下载 `config_tom.zip`
+2. 解压
+3. 将解压后的目录改名为 `mosdns`
+4. 放到 `/cus` 目录下
+
+最终配置目录应为：
+
+- `/cus/mosdns`
+
+完成后即可直接使用这套配置启动 `mosdns`。
+
 ## 上游来源
 
 - 上游仓库：`yyysuo/mosdns`
