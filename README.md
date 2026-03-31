@@ -6,6 +6,25 @@ An enhanced fork of `yyysuo/mosdns`, focused on making long-term DNS rule mainte
 
 This fork keeps the upstream architecture and core configuration style, while adding a set of features for rule-driven routing, upstream management, and day-to-day operations.
 
+## Default Config Package
+
+The default config package for this fork is available here:
+
+- [config_tom.zip](https://github.com/jasonxtt/file/blob/main/mosdns/config_tom.zip)
+
+Usage:
+
+1. Download `config_tom.zip`
+2. Extract it
+3. Rename the extracted directory to `mosdns`
+4. Place it under `/cus`
+
+The final runtime config path should be:
+
+- `/cus/mosdns`
+
+After that, `mosdns` can be started directly with this config package.
+
 ## Upstream
 
 - Upstream repository: `yyysuo/mosdns`
