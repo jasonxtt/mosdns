@@ -91,6 +91,7 @@ import (
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence/fallback"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/sleep"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/flow_setter"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/tag_setter"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/ttl"
 

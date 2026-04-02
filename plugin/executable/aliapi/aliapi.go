@@ -413,6 +413,7 @@ func (f *AliAPI) Exec(ctx context.Context, qCtx *query_context.Context) (err err
 	us := append([]*upstreamWrapper(nil), f.us...)
 	concurrent := f.args.Concurrent
 	f.mu.RUnlock()
+	qCtx.StoreValue(query_context.KeyFinalUpstreamTargets, strings.Join(wrapperTargets(us), ","))
 
 	r, err := f.exchange(ctx, qCtx, us, concurrent)
 	if err != nil {
@@ -423,23 +424,39 @@ func (f *AliAPI) Exec(ctx context.Context, qCtx *query_context.Context) (err err
 }
 
 func (f *AliAPI) QuickConfigureExec(args string) (any, error) {
-	var us []*upstreamWrapper
-	f.mu.RLock()
-	if len(args) == 0 {
-		us = append([]*upstreamWrapper(nil), f.us...)
-	} else {
-		for _, tag := range strings.Fields(args) {
-			u := f.tag2Upstream[tag]
-			if u == nil {
+	selectedTags := strings.Fields(args)
+	if len(selectedTags) == 0 {
+		return f, nil
+	}
+	if len(selectedTags) > 0 {
+		f.mu.RLock()
+		for _, tag := range selectedTags {
+			if f.tag2Upstream[tag] == nil {
 				f.mu.RUnlock()
 				return nil, fmt.Errorf("cannot find upstream by tag %s", tag)
 			}
-			us = append(us, u)
 		}
+		f.mu.RUnlock()
 	}
-	concurrent := f.args.Concurrent
-	f.mu.RUnlock()
 	var execFunc sequence.ExecutableFunc = func(ctx context.Context, qCtx *query_context.Context) error {
+		var us []*upstreamWrapper
+		f.mu.RLock()
+		if len(selectedTags) == 0 {
+			us = append([]*upstreamWrapper(nil), f.us...)
+		} else {
+			for _, tag := range selectedTags {
+				u := f.tag2Upstream[tag]
+				if u == nil {
+					f.mu.RUnlock()
+					return fmt.Errorf("cannot find upstream by tag %s", tag)
+				}
+				us = append(us, u)
+			}
+		}
+		concurrent := f.args.Concurrent
+		f.mu.RUnlock()
+		qCtx.StoreValue(query_context.KeyFinalUpstreamTargets, strings.Join(wrapperTargets(us), ","))
+
 		r, err := f.exchange(ctx, qCtx, us, concurrent)
 		if err != nil {
 			return err
@@ -470,6 +487,30 @@ func (f *AliAPI) ReloadFromOverrides() error {
 		MetricsTag: f.pluginTag,
 		PluginTag:  f.pluginTag,
 	})
+}
+
+func (f *AliAPI) CurrentUpstreamTargets() []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	out := make([]string, 0, len(f.us))
+	for _, u := range f.us {
+		if u == nil {
+			continue
+		}
+		out = append(out, u.cfg.Addr)
+	}
+	return out
+}
+
+func wrapperTargets(us []*upstreamWrapper) []string {
+	out := make([]string, 0, len(us))
+	for _, u := range us {
+		if u == nil {
+			continue
+		}
+		out = append(out, u.cfg.Addr)
+	}
+	return out
 }
 
 func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us []*upstreamWrapper, concurrent int) (*dns.Msg, error) {

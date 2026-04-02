@@ -597,25 +597,10 @@ func (c *Cache) Api() *chi.Mux {
 	// 清空缓存 API：执行后打扫卫生
 	r.Get("/flush", coremain.WithAsyncGC(func(w http.ResponseWriter, req *http.Request) {
 		c.logger.Info("flushing cache via api")
-		c.backend.Flush()
-
-		// 清理 L1 分段桶
-		for i := 0; i < shardCount; i++ {
-			c.shards[i].Lock()
-			c.shards[i].items = make(map[key]*l1Item, shardMaxSize)
-			c.shards[i].order = make([]key, shardMaxSize)
-			c.shards[i].pos = 0
-			c.shards[i].ref = make(map[key]bool, shardMaxSize)
-			c.shards[i].Unlock()
+		if err := c.Flush(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-
-		c.updatedKey.Store(0)
-
-		go func() {
-			if err := c.dumpCache(); err != nil {
-				c.logger.Error("failed to dump cache after flushing", zap.Error(err))
-			}
-		}()
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("Cache flushed and a background dump has been triggered.\n"))
@@ -746,6 +731,30 @@ func (c *Cache) Api() *chi.Mux {
 	}))
 
 	return r
+}
+
+func (c *Cache) Flush() error {
+	c.backend.Flush()
+
+	for i := 0; i < shardCount; i++ {
+		c.shards[i].Lock()
+		c.shards[i].items = make(map[key]*l1Item, shardMaxSize)
+		c.shards[i].order = make([]key, shardMaxSize)
+		c.shards[i].pos = 0
+		c.shards[i].ref = make(map[key]bool, shardMaxSize)
+		c.shards[i].Unlock()
+	}
+
+	c.updatedKey.Store(0)
+
+	if len(c.args.DumpFile) == 0 {
+		return nil
+	}
+	if err := c.dumpCache(); err != nil {
+		c.logger.Error("failed to dump cache after flushing", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // keyToString converts internal []byte key to human readable format

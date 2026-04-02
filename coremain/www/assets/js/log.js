@@ -225,23 +225,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             slot,
             group,
-            displayName: group?.name || `mark${slot}`,
-            markLabel: `mark${slot}`
+            displayName: group?.name || `专属分流组 ${slot}`
         };
     };
     const getRuleDisplayHTML = (ruleName) => {
         const meta = getSpecialRuleMeta(ruleName);
         if (!meta) return escapeHtml(ruleName || '');
-        return `${escapeHtml(meta.displayName)}<small class="rule-tag-mark">${escapeHtml(meta.markLabel)}</small>`;
+        return escapeHtml(meta.displayName);
     };
     const getRuleDisplayText = (ruleName) => {
         const meta = getSpecialRuleMeta(ruleName);
         if (!meta) return ruleName || '';
-        return `${meta.displayName} ${meta.markLabel}`;
+        return meta.displayName;
     };
     const getDiversionTypeDisplay = (type) => {
         const special = getSpecialGroupByType(type);
-        if (special) return `${special.name}_mark${special.slot}`;
+        if (special) return special.name;
         const builtin = BUILTIN_DIVERSION_TYPES.find(item => item.value === type);
         return builtin ? builtin.label : (type || '—');
     };
@@ -252,8 +251,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const getUpstreamGroupHint = (group) => {
         const special = getSpecialGroupByUpstreamTag(group);
-        if (special) return `${special.name} · mark${special.slot}`;
+        if (special) return special.name;
         return group;
+    };
+    const getSequenceDisplay = (sequence) => {
+        const match = String(sequence || '').match(/^sequence_special_(\d+)$/);
+        if (!match) return sequence || '—';
+        const special = getSpecialGroupBySlot(parseInt(match[1], 10));
+        return special?.name || sequence;
     };
     const populateDiversionTypeOptions = (selectedValue = '') => {
         const select = elements.ruleTypeSelect;
@@ -264,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
             options.push(`<option value="${item.value}">${item.label}</option>`);
         });
         state.specialGroups.forEach(group => {
-            options.push(`<option value="${group.key}">${group.name}_mark${group.slot}</option>`);
+            options.push(`<option value="${group.key}">${group.name}</option>`);
         });
         select.innerHTML = options.join('');
         if (previousValue) {
@@ -2006,6 +2011,9 @@ document.addEventListener('DOMContentLoaded', () => {
         queryInfo['类型'] = `<span>${data.query_type || 'N/A'}</span>`;
         if (data.query_class) queryInfo['类别'] = `<span>${data.query_class}</span>`;
         if (data.domain_set) queryInfo['分流规则'] = createInteractiveLine(getRuleDisplayHTML(data.domain_set), getRuleDisplayText(data.domain_set), data.domain_set, true);
+        if (data.matched_group) queryInfo['专属分流组'] = `<span>${escapeHtml(getSpecialGroupByType(data.matched_group)?.name || data.matched_group)}</span>`;
+        if (data.final_sequence) queryInfo['最终序列'] = `<span>${escapeHtml(getSequenceDisplay(data.final_sequence))}</span>`;
+        if (data.final_upstream) queryInfo['最终上游'] = `<span>${escapeHtml(getUpstreamGroupDisplay(data.final_upstream))}</span>`;
         if (data.trace_id) queryInfo['Trace ID'] = createInteractiveLine(data.trace_id, data.trace_id, data.trace_id, true);
 
         responseInfo['耗时'] = `<span>${data.duration_ms.toFixed(2)} ms</span>`;
@@ -2412,14 +2420,13 @@ function renderRuleTable(tbody, rules, mode) {
             const container = elements.specialGroupsContainer;
             if (!container) return;
             if (!state.specialGroups.length) {
-                container.innerHTML = '<span class="text-secondary-sm">还没有专属分流组。点击“新增专属分流组”后，系统会自动分配 mark50-mark59 中的一个编号。</span>';
+                container.innerHTML = '<span class="text-secondary-sm">还没有专属分流组。点击“新增专属分流组”后即可在上游设置和在线分流里使用。</span>';
                 return;
             }
             container.innerHTML = state.specialGroups.map(group => `
                 <div class="control-item" style="margin:0; gap:0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--color-border); border-radius:var(--border-radius-md);">
                     <div style="display:flex; flex-direction:column;">
                         <strong>${group.name}</strong>
-                        <small class="text-secondary-sm">mark${group.slot}</small>
                     </div>
                     <button class="button secondary small edit-special-group-btn" data-slot="${group.slot}" style="margin-left:auto;">改名</button>
                     <button class="button danger small delete-special-group-btn" data-slot="${group.slot}" style="margin-left:auto;">删除</button>
@@ -4663,7 +4670,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                 <p style="margin-bottom: 0.5rem;"><strong>geoipcn:</strong> 中国大陆 IP 列表。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>cuscn:</strong> 自定义中国大陆域名。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>cusnocn:</strong> 自定义非中国大陆域名。</p>
-                                <p style="margin-bottom: 0.5rem;"><strong>special_50-59:</strong> 特殊上游组，命中后会走对应槽位绑定的专属上游与专属缓存。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>专属分流组:</strong> 绑定独立上游与独立缓存的自定义分流组，命中后优先走对应专属上游。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>nftadd:</strong> 自动添加ip集至nft。</p>
                             </div>
                         </div>

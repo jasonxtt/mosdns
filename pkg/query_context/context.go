@@ -32,6 +32,10 @@ import (
 const (
 	// KeyDomainSet is the key for storing the matched domain_set name in the context.
 	KeyDomainSet uint32 = iota + 100 // Use a number unlikely to conflict with internal keys.
+	KeyMatchedGroup
+	KeyFinalSequence
+	KeyFinalUpstream
+	KeyFinalUpstreamTargets
 )
 
 const (
@@ -56,8 +60,8 @@ type Context struct {
 	upstreamOpt *dns.OPT // may be nil
 
 	// lazy init.
-	kv    map[uint32]any
-	marks map[uint32]struct{}
+	kv        map[uint32]any
+	marks     map[uint32]struct{}
 	fastFlags uint64
 
 	// Extreme Performance Patch: Cache for fast matching

@@ -233,18 +233,33 @@ func saveSpecialGroupsLocked() error {
 	if dir == "" {
 		dir = "."
 	}
-	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return err
-		}
-	}
 
 	path := filepath.Join(dir, specialGroupsFilename)
 	data, err := json.MarshalIndent(specialGroups, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return writeManagedFile(path, data, func(raw []byte) error {
+		var groups []SpecialGroup
+		if err := json.Unmarshal(raw, &groups); err != nil {
+			return err
+		}
+		seen := make(map[int]struct{}, len(groups))
+		for _, g := range groups {
+			if g.Slot < specialSlotMin || g.Slot > specialSlotMax {
+				return fmt.Errorf("slot must be between %d and %d", specialSlotMin, specialSlotMax)
+			}
+			name := strings.TrimSpace(g.Name)
+			if name == "" {
+				return fmt.Errorf("name is required")
+			}
+			if _, ok := seen[g.Slot]; ok {
+				return fmt.Errorf("duplicate slot %d", g.Slot)
+			}
+			seen[g.Slot] = struct{}{}
+		}
+		return nil
+	}, nil, nil)
 }
 
 func firstFreeSpecialSlot(groups []SpecialGroup) int {

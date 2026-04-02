@@ -16,7 +16,7 @@ Initial preview release for the WebUI-enhanced fork based on `yyysuo/mosdns`.
 ### Added
 
 - dedicated routing groups in WebUI
-- dedicated group APIs backed by `mark50-mark59`
+- dedicated group APIs with support for up to 10 WebUI-managed groups
 - rule-to-upstream binding for dedicated groups
 - automatic `.srs` download after saving online diversion rules
 - hot reload for aliapi upstream groups after WebUI save

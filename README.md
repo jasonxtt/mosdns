@@ -34,8 +34,7 @@ After that, `mosdns` can be started directly with this config package.
 ### Dedicated Routing Groups
 
 - Create dedicated routing groups from the WebUI
-- Each group is mapped to `mark50-mark59`
-- The current implementation therefore supports up to 10 dedicated routing groups
+- The current implementation supports up to 10 dedicated routing groups
 - Each group can bind its own:
   - online rule set
   - upstream group
@@ -59,7 +58,7 @@ After that, `mosdns` can be started directly with this config package.
 ### Better Query Log Display
 
 - Dedicated routing groups are shown with readable names in the query log
-- Stable identifiers such as `mark50` are still preserved for troubleshooting
+- Final sequence and upstream information are available for troubleshooting
 
 ## Typical Use Cases
 

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
@@ -53,6 +55,14 @@ type upstreamReloader interface {
 	ReloadFromOverrides() error
 }
 
+type cacheFlusher interface {
+	Flush() error
+}
+
+type upstreamStateInspector interface {
+	CurrentUpstreamTargets() []string
+}
+
 var (
 	upstreamOverridesLock sync.RWMutex
 	upstreamOverrides     GlobalUpstreamOverrides
@@ -65,6 +75,7 @@ func RegisterUpstreamAPI(router *chi.Mux, m *Mosdns) {
 	router.Route("/api/v1/upstream", func(r chi.Router) {
 		r.Get("/tags", handleGetAliAPITags)
 		r.Get("/config", handleGetUpstreamConfig)
+		r.Get("/runtime/{tag}", handleGetUpstreamRuntimeState)
 		r.Post("/config", handleSetUpstreamConfig)
 	})
 }
@@ -100,9 +111,9 @@ func loadUpstreamOverrides() error {
 	// 获取绝对路径用于 Debug
 	absDir, _ := filepath.Abs(dir)
 	path := filepath.Join(dir, upstreamOverridesFilename)
-	
-	mlog.L().Info("[Debug UpstreamAPI] Loading overrides", 
-		zap.String("MainConfigBaseDir", dir), 
+
+	mlog.L().Info("[Debug UpstreamAPI] Loading overrides",
+		zap.String("MainConfigBaseDir", dir),
 		zap.String("AbsoluteDir", absDir),
 		zap.String("File", path))
 
@@ -122,14 +133,14 @@ func loadUpstreamOverrides() error {
 		mlog.L().Error("[Debug UpstreamAPI] JSON parse error", zap.Error(err))
 		return err
 	}
-	
+
 	// Count items for debug
 	count := 0
 	for _, v := range cfg {
 		count += len(v)
 	}
 	mlog.L().Info("[Debug UpstreamAPI] Loaded success", zap.Int("groups", len(cfg)), zap.Int("total_items", count))
-	
+
 	upstreamOverrides = cfg
 	return nil
 }
@@ -140,14 +151,6 @@ func saveUpstreamOverrides() error {
 	if dir == "" {
 		dir = "."
 	}
-	
-	// 确保配置目录存在
-	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			mlog.L().Error("[Debug UpstreamAPI] Failed to mkdir", zap.String("dir", dir), zap.Error(err))
-			return err
-		}
-	}
 
 	path := filepath.Join(dir, upstreamOverridesFilename)
 	absPath, _ := filepath.Abs(path)
@@ -157,13 +160,16 @@ func saveUpstreamOverrides() error {
 		mlog.L().Error("[Debug UpstreamAPI] JSON marshal failed", zap.Error(err))
 		return err
 	}
-	
-	mlog.L().Info("[Debug UpstreamAPI] Writing to file", 
-		zap.String("path", path), 
+
+	mlog.L().Info("[Debug UpstreamAPI] Writing to file",
+		zap.String("path", path),
 		zap.String("abs_path", absPath),
 		zap.Int("bytes", len(data)))
 
-	err = os.WriteFile(path, data, 0644)
+	err = writeManagedFile(path, data, func(raw []byte) error {
+		var cfg GlobalUpstreamOverrides
+		return json.Unmarshal(raw, &cfg)
+	}, nil, nil)
 	if err != nil {
 		mlog.L().Error("[Debug UpstreamAPI] WriteFile FAILED", zap.Error(err))
 	} else {
@@ -191,13 +197,46 @@ func handleGetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreamOverridesLock.RLock()
 	defer upstreamOverridesLock.RUnlock()
-	
+
 	safeData := upstreamOverrides
 	if safeData == nil {
 		safeData = make(GlobalUpstreamOverrides)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(safeData)
+}
+
+func handleGetUpstreamRuntimeState(w http.ResponseWriter, r *http.Request) {
+	tag := chi.URLParam(r, "tag")
+	if tag == "" {
+		http.Error(w, `{"error": "tag is required"}`, http.StatusBadRequest)
+		return
+	}
+	if upstreamAPIHost == nil {
+		http.Error(w, `{"error": "Upstream runtime is not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	type resp struct {
+		Tag            string                   `json:"tag"`
+		OverrideConfig []UpstreamOverrideConfig `json:"override_config,omitempty"`
+		RuntimeTargets []string                 `json:"runtime_targets,omitempty"`
+	}
+
+	out := resp{Tag: tag}
+	out.OverrideConfig = GetUpstreamOverrides(tag)
+
+	p := upstreamAPIHost.GetPlugin(tag)
+	if p == nil {
+		http.Error(w, `{"error": "Target upstream plugin is not loaded"}`, http.StatusNotFound)
+		return
+	}
+	if inspector, ok := p.(upstreamStateInspector); ok {
+		out.RuntimeTargets = inspector.CurrentUpstreamTargets()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
 }
 
 // handleSetUpstreamConfig 核心保存逻辑
@@ -216,8 +255,8 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// DEBUG: 打印接收到的数据
-	mlog.L().Info("[Debug UpstreamAPI] Payload decoded", 
-		zap.String("plugin_tag", payload.PluginTag), 
+	mlog.L().Info("[Debug UpstreamAPI] Payload decoded",
+		zap.String("plugin_tag", payload.PluginTag),
 		zap.Int("items_count", len(payload.Upstreams)))
 
 	if payload.PluginTag == "" {
@@ -259,32 +298,111 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 	if upstreamOverrides == nil {
 		upstreamOverrides = make(GlobalUpstreamOverrides)
 	}
+	oldState := make(GlobalUpstreamOverrides, len(upstreamOverrides))
+	rawOldState, _ := json.Marshal(upstreamOverrides)
+	_ = json.Unmarshal(rawOldState, &oldState)
 
-	upstreamOverrides[payload.PluginTag] = payload.Upstreams
+	newState := make(GlobalUpstreamOverrides, len(upstreamOverrides))
+	rawNewState, _ := json.Marshal(upstreamOverrides)
+	_ = json.Unmarshal(rawNewState, &newState)
+	newState[payload.PluginTag] = payload.Upstreams
 
-	if err := saveUpstreamOverrides(); err != nil {
+	upstreamOverrides = newState
+	saveErr := saveUpstreamOverrides()
+	upstreamOverridesLock.Unlock()
+	if saveErr != nil {
+		upstreamOverridesLock.Lock()
+		upstreamOverrides = oldState
 		upstreamOverridesLock.Unlock()
-		mlog.L().Error("[Debug UpstreamAPI] Save failed", zap.Error(err))
+		mlog.L().Error("[Debug UpstreamAPI] Save failed", zap.Error(saveErr))
 		http.Error(w, `{"error": "Failed to save config file"}`, http.StatusInternalServerError)
 		return
 	}
-	upstreamOverridesLock.Unlock()
 
-	if upstreamAPIHost != nil {
-		if p := upstreamAPIHost.GetPlugin(payload.PluginTag); p != nil {
-			if reloader, ok := p.(upstreamReloader); ok {
-				if err := reloader.ReloadFromOverrides(); err != nil {
-					mlog.L().Error("[Debug UpstreamAPI] Live reload failed",
-						zap.String("plugin_tag", payload.PluginTag),
-						zap.Error(err))
-					http.Error(w, `{"error": "Saved, but live reload failed"}`, http.StatusInternalServerError)
-					return
-				}
-				mlog.L().Info("[Debug UpstreamAPI] Live reload success", zap.String("plugin_tag", payload.PluginTag))
+	if upstreamAPIHost == nil {
+		http.Error(w, `{"error": "Upstream runtime is not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	p := upstreamAPIHost.GetPlugin(payload.PluginTag)
+	if p == nil {
+		http.Error(w, `{"error": "Target upstream plugin is not loaded"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if reloader, ok := p.(upstreamReloader); ok {
+		if err := reloader.ReloadFromOverrides(); err != nil {
+			upstreamOverridesLock.Lock()
+			upstreamOverrides = oldState
+			rollbackErr := saveUpstreamOverrides()
+			upstreamOverridesLock.Unlock()
+			if rollbackErr == nil {
+				_ = reloader.ReloadFromOverrides()
 			}
+			mlog.L().Error("[Debug UpstreamAPI] Live reload failed",
+				zap.String("plugin_tag", payload.PluginTag),
+				zap.Error(err))
+			http.Error(w, `{"error": "Saved, but live reload failed"}`, http.StatusInternalServerError)
+			return
 		}
+		mlog.L().Info("[Debug UpstreamAPI] Live reload success", zap.String("plugin_tag", payload.PluginTag))
+	}
+	if inspector, ok := p.(upstreamStateInspector); ok {
+		mlog.L().Warn("[Debug UpstreamAPI] Active upstream targets after save",
+			zap.String("plugin_tag", payload.PluginTag),
+			zap.Strings("targets", inspector.CurrentUpstreamTargets()))
+	}
+	if slot, ok := parseSpecialUpstreamSlot(payload.PluginTag); ok {
+		if err := flushDedicatedCaches(slot); err != nil {
+			mlog.L().Error("[Debug UpstreamAPI] Cache flush failed after dedicated upstream update",
+				zap.String("plugin_tag", payload.PluginTag),
+				zap.Int("slot", slot),
+				zap.Error(err))
+			http.Error(w, `{"error": "Saved and reloaded, but cache flush failed"}`, http.StatusInternalServerError)
+			return
+		}
+		mlog.L().Info("[Debug UpstreamAPI] Dedicated caches flushed after upstream update",
+			zap.String("plugin_tag", payload.PluginTag),
+			zap.Int("slot", slot))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, `{"message": "Upstream configuration saved."}`)
+}
+
+func parseSpecialUpstreamSlot(pluginTag string) (int, bool) {
+	const prefix = "special_upstream_"
+	if !strings.HasPrefix(pluginTag, prefix) {
+		return 0, false
+	}
+	slot, err := strconv.Atoi(strings.TrimPrefix(pluginTag, prefix))
+	if err != nil {
+		return 0, false
+	}
+	if slot < 50 || slot > 59 {
+		return 0, false
+	}
+	return slot, true
+}
+
+func flushDedicatedCaches(slot int) error {
+	cacheTags := []string{
+		fmt.Sprintf("cache_special_%d", slot),
+		"cache_all",
+		"cache_all_noleak",
+	}
+	for _, tag := range cacheTags {
+		p := upstreamAPIHost.GetPlugin(tag)
+		if p == nil {
+			continue
+		}
+		flusher, ok := p.(cacheFlusher)
+		if !ok {
+			return fmt.Errorf("plugin %s does not support cache flush", tag)
+		}
+		if err := flusher.Flush(); err != nil {
+			return fmt.Errorf("flush %s: %w", tag, err)
+		}
+	}
+	return nil
 }
