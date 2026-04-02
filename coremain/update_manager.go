@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	githubOwner          = "jasonxtt-lab"
+	githubOwner          = "jasonxtt"
 	githubRepo           = "mosdns"
 	githubReleaseAPI     = "https://api.github.com/repos/%s/%s/releases/tags/%s"
 	githubLatestAPI      = "https://api.github.com/repos/%s/%s/releases/latest"

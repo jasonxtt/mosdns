@@ -4,9 +4,9 @@
 
 ### Changed
 
-- update checking now targets `jasonxtt-lab/mosdns` instead of the upstream repository
+- update checking now targets `jasonxtt/mosdns` instead of the upstream repository
 - the built-in updater now matches the fork's Linux `tar.gz` release assets
-- WebUI project links now point to `jasonxtt-lab/mosdns`
+- WebUI project links now point to `jasonxtt/mosdns`
 - build version injection is now consistent across default builds, preview builds, and tagged releases
 
 ## v0.1.0-preview

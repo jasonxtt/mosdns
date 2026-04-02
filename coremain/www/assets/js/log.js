@@ -3335,7 +3335,7 @@ const res = await fetch(`/plugins/${tag}/show?limit=${this.MAX_LINES}`, {
                     </button>
                 </div>
 
-                <p class="module-desc">配置说明：https://github.com/jasonxtt-lab/mosdns</p>
+                <p class="module-desc">配置说明：https://github.com/jasonxtt/mosdns</p>
                 
                 <div class="scrollable-table-container">
                     <table class="data-table" style="min-width: 650px;">
