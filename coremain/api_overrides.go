@@ -121,7 +121,20 @@ func handleSetOverrides(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.WriteFile(overridesPath, updatedData, 0644); err != nil {
+	if err := writeManagedFile(overridesPath, updatedData, func(raw []byte) error {
+		var parsed GlobalOverrides
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return err
+		}
+		parsed.Prepare()
+		return nil
+	}, func() error {
+		payload.Prepare()
+		if currentMosdns != nil {
+			currentMosdns.globalOverrides = &payload
+		}
+		return nil
+	}, nil); err != nil {
 		http.Error(w, "Failed to write settings file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

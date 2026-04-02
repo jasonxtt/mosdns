@@ -125,6 +125,10 @@ type AuditLog struct {
 	ResponseFlags ResponseFlags  `json:"response_flags"`
 	Answers       []AnswerDetail `json:"answers"`
 	DomainSet     string         `json:"domain_set,omitempty"`
+	MatchedGroup  string         `json:"matched_group,omitempty"`
+	FinalSequence string         `json:"final_sequence,omitempty"`
+	FinalUpstream string         `json:"final_upstream,omitempty"`
+	UpstreamTargets string       `json:"upstream_targets,omitempty"`
 }
 
 type ResponseFlags struct {
@@ -137,7 +141,7 @@ const (
 	defaultAuditCapacity   = 100000
 	maxAuditCapacity       = 400000
 	slowestQueriesCapacity = 300
-	auditChannelCapacity   = 10240 
+	auditChannelCapacity   = 10240
 	auditSettingsFilename  = "audit_settings.json"
 )
 
@@ -180,7 +184,7 @@ type AuditCollector struct {
 
 	// Lazy Sync Control
 	lastSyncTime time.Time
-	
+
 	// Global Statistics for monitoring without mutex pressure
 	totalQueryCountGlobal    atomic.Uint64
 	totalQueryDurationGlobal atomic.Uint64 // Stored in microseconds
@@ -241,13 +245,13 @@ func (c *AuditCollector) StopWorker() {
 
 func (c *AuditCollector) worker() {
 	defer close(c.workerDone)
-	
+
 	// Batch processing slice to reduce lock contention frequency
 	batch := make([]*auditContext, 0, 256)
 
 	for {
 		batch = batch[:0]
-		
+
 		wrappedCtx, ok := <-c.ctxChan
 		if !ok {
 			return
@@ -255,7 +259,7 @@ func (c *AuditCollector) worker() {
 		batch = append(batch, wrappedCtx)
 
 		// Non-blocking drain to fill the batch
-		drainLoop:
+	drainLoop:
 		for len(batch) < cap(batch) {
 			select {
 			case nextItem, ok := <-c.ctxChan:
@@ -269,7 +273,7 @@ func (c *AuditCollector) worker() {
 		}
 
 		c.processBatch(batch)
-		
+
 		for _, item := range batch {
 			auditCtxPool.Put(item)
 		}
@@ -323,6 +327,26 @@ func (c *AuditCollector) processBatch(batch []*auditContext) {
 		if val, ok := qCtx.GetValue(query_context.KeyDomainSet); ok {
 			if name, isString := val.(string); isString {
 				log.DomainSet = name
+			}
+		}
+		if val, ok := qCtx.GetValue(query_context.KeyMatchedGroup); ok {
+			if name, isString := val.(string); isString {
+				log.MatchedGroup = name
+			}
+		}
+		if val, ok := qCtx.GetValue(query_context.KeyFinalSequence); ok {
+			if name, isString := val.(string); isString {
+				log.FinalSequence = name
+			}
+		}
+		if val, ok := qCtx.GetValue(query_context.KeyFinalUpstream); ok {
+			if name, isString := val.(string); isString {
+				log.FinalUpstream = name
+			}
+		}
+		if val, ok := qCtx.GetValue(query_context.KeyFinalUpstreamTargets); ok {
+			if name, isString := val.(string); isString {
+				log.UpstreamTargets = name
 			}
 		}
 
@@ -414,7 +438,7 @@ func (c *AuditCollector) syncStatsLocked() {
 		c.domainSetCounts[l.DomainSet]++
 		c.totalQueryDuration += l.DurationMs
 	}
-	
+
 	c.lastSyncTime = now
 }
 
@@ -422,9 +446,9 @@ func (c *AuditCollector) Collect(qCtx *query_context.Context) {
 	if !c.IsCapturing() {
 		return
 	}
-	
+
 	duration := time.Since(qCtx.StartTime())
-	
+
 	// Retrieve object from pool to reduce heap pressure
 	wrappedCtx := auditCtxPool.Get().(*auditContext)
 	wrappedCtx.Ctx = qCtx
@@ -583,8 +607,9 @@ func (c *AuditCollector) CalculateV2Stats() V2StatsResponse {
 }
 
 type rankHeap []V2RankItem
+
 func (h rankHeap) Len() int           { return len(h) }
-func (h rankHeap) Less(i, j int) bool { return h[i].Count < h[j].Count } 
+func (h rankHeap) Less(i, j int) bool { return h[i].Count < h[j].Count }
 func (h rankHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h *rankHeap) Push(x any)        { *h = append(*h, x.(V2RankItem)) }
 func (h *rankHeap) Pop() any {
@@ -698,7 +723,7 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 	if params.Limit <= 0 {
 		params.Limit = 50
 	}
-	
+
 	searchTerm := params.Q
 	if params.Q != "" && !params.Exact {
 		searchTerm = strings.ToLower(searchTerm)
@@ -723,42 +748,62 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 
 			// 1. Check QueryName
 			haystack := log.QueryName
-			if !params.Exact { haystack = strings.ToLower(haystack) }
-			if matchFunc(haystack, searchTerm) { foundInQ = true }
+			if !params.Exact {
+				haystack = strings.ToLower(haystack)
+			}
+			if matchFunc(haystack, searchTerm) {
+				foundInQ = true
+			}
 
 			// 2. Check ClientIP
 			if !foundInQ {
 				haystack = log.ClientIP
-				if !params.Exact { haystack = strings.ToLower(haystack) }
-				if matchFunc(haystack, searchTerm) { foundInQ = true }
+				if !params.Exact {
+					haystack = strings.ToLower(haystack)
+				}
+				if matchFunc(haystack, searchTerm) {
+					foundInQ = true
+				}
 			}
 
 			// 3. Check TraceID
 			if !foundInQ {
 				haystack = log.TraceID
-				if !params.Exact { haystack = strings.ToLower(haystack) }
-				if matchFunc(haystack, searchTerm) { foundInQ = true }
+				if !params.Exact {
+					haystack = strings.ToLower(haystack)
+				}
+				if matchFunc(haystack, searchTerm) {
+					foundInQ = true
+				}
 			}
-			
+
 			// 4. Check DomainSet
 			if !foundInQ && log.DomainSet != "" {
 				haystack = log.DomainSet
-				if !params.Exact { haystack = strings.ToLower(haystack) }
-				if matchFunc(haystack, searchTerm) { foundInQ = true }
+				if !params.Exact {
+					haystack = strings.ToLower(haystack)
+				}
+				if matchFunc(haystack, searchTerm) {
+					foundInQ = true
+				}
 			}
 
 			// 5. Check Answers
 			if !foundInQ {
 				for _, answer := range log.Answers {
 					haystack = answer.Data
-					if !params.Exact { haystack = strings.ToLower(haystack) }
+					if !params.Exact {
+						haystack = strings.ToLower(haystack)
+					}
 					if matchFunc(haystack, searchTerm) {
 						foundInQ = true
 						break
 					}
 				}
 			}
-			if !foundInQ { isMatched = false }
+			if !foundInQ {
+				isMatched = false
+			}
 		}
 
 		if isMatched && params.ClientIP != "" && log.ClientIP != params.ClientIP {
@@ -775,7 +820,9 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 					break
 				}
 			}
-			if !found { isMatched = false }
+			if !found {
+				isMatched = false
+			}
 		}
 		if isMatched && params.AnswerCNAME != "" {
 			found := false
@@ -785,7 +832,9 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 					break
 				}
 			}
-			if !found { isMatched = false }
+			if !found {
+				isMatched = false
+			}
 		}
 
 		if isMatched {
