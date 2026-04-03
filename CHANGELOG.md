@@ -2,7 +2,19 @@
 
 ## Unreleased
 
+## v0.1.6
+
 ### Changed
+
+- removed nft-related integrations from the binary and WebUI
+- removed legacy repo cruft that was not part of the maintained product surface
+- full config packages were refreshed to match the nft-free runtime
+
+### Upgrade Notes
+
+- old configs that still reference `nft_add` are not compatible with this version
+- for existing WebUI fork users, the only required config change is `sub_config/rule_set.yaml`
+- the incremental package `mosdns/config/config_up.zip` updates only `sub_config/rule_set.yaml` and does not reset user-maintained override files
 
 - update checking now targets `jasonxtt/mosdns` instead of the upstream repository
 - the built-in updater now matches the fork's Linux `tar.gz` release assets
