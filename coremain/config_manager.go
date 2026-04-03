@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -260,14 +261,21 @@ func extractAndOverwrite(zipData []byte, targetDir string) (int, error) {
 		return 0, fmt.Errorf("invalid zip data: %w", err)
 	}
 
+	stripPrefix := detectSingleRootPrefix(zipReader.File)
 	count := 0
 	for _, f := range zipReader.File {
 		if f.FileInfo().IsDir() {
 			continue
 		}
 
+		zipName := strings.TrimPrefix(normalizeZipPath(f.Name), stripPrefix)
+		zipName = strings.TrimPrefix(zipName, "/")
+		if zipName == "" {
+			continue
+		}
+
 		// 构造绝对路径
-		fullPath := filepath.Join(targetDir, f.Name)
+		fullPath := filepath.Join(targetDir, filepath.FromSlash(zipName))
 
 		// 安全检查：防止 zip slip (../../)
 		if !strings.HasPrefix(fullPath, filepath.Clean(targetDir)+string(os.PathSeparator)) {
@@ -301,6 +309,42 @@ func extractAndOverwrite(zipData []byte, targetDir string) (int, error) {
 		count++
 	}
 	return count, nil
+}
+
+func normalizeZipPath(name string) string {
+	cleaned := path.Clean(strings.ReplaceAll(name, "\\", "/"))
+	if cleaned == "." {
+		return ""
+	}
+	return strings.TrimPrefix(cleaned, "./")
+}
+
+func detectSingleRootPrefix(files []*zip.File) string {
+	var root string
+	for _, f := range files {
+		name := normalizeZipPath(f.Name)
+		if name == "" {
+			continue
+		}
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		parts := strings.Split(name, "/")
+		if len(parts) <= 1 {
+			return ""
+		}
+		if root == "" {
+			root = parts[0]
+			continue
+		}
+		if parts[0] != root {
+			return ""
+		}
+	}
+	if root == "" {
+		return ""
+	}
+	return root + "/"
 }
 
 // triggerRestart 尝试重启服务，逻辑对齐 update_manager.go

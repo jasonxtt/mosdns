@@ -205,8 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { value: 'geositenocn', label: '非中国域名' },
         { value: 'geoipcn', label: '中国ip' },
         { value: 'cuscn', label: 'cn@!cn' },
-        { value: 'cusnocn', label: '!cn@cn' },
-        { value: 'nft_add', label: '添加到nft中的代理的ip' }
+        { value: 'cusnocn', label: '!cn@cn' }
     ];
 
     const isSpecialGroupType = (type) => /^special_\d+$/.test(type || '');
@@ -2479,7 +2478,7 @@ function renderRuleTable(tbody, rules, mode) {
     };
     const diversionManager = {
         get sdSetInstanceMap() {
-            const base = { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn', 'cuscn': 'cuscn', 'cusnocn': 'cusnocn', 'nft_add': 'nft_add' };
+            const base = { 'geositecn': 'geosite_cn', 'geositenocn': 'geosite_no_cn', 'geoipcn': 'geoip_cn', 'cuscn': 'cuscn', 'cusnocn': 'cusnocn' };
             state.specialGroups.forEach(group => {
                 base[group.key] = group.diversion_plugin_tag;
             });
@@ -4671,7 +4670,6 @@ document.addEventListener('DOMContentLoaded', function () {
                                 <p style="margin-bottom: 0.5rem;"><strong>cuscn:</strong> 自定义中国大陆域名。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>cusnocn:</strong> 自定义非中国大陆域名。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>专属分流组:</strong> 绑定独立上游与独立缓存的自定义分流组，命中后优先走对应专属上游。</p>
-                                <p style="margin-bottom: 0.5rem;"><strong>nftadd:</strong> 自动添加ip集至nft。</p>
                             </div>
                         </div>
                         <footer class="modal-footer" style="padding: 1rem 1.5rem; border-top: 1px solid var(--color-border); text-align: right;">
