@@ -74,6 +74,7 @@ type SdSetLight struct {
 var _ data_provider.DomainMatcherProvider = (*SdSetLight)(nil)
 var _ io.Closer = (*SdSetLight)(nil)
 var _ data_provider.RuleExporter = (*SdSetLight)(nil)
+var _ data_provider.DetailedRuleExporter = (*SdSetLight)(nil)
 
 // 接口定义，用于解耦
 type RuleReceiver interface {
@@ -87,6 +88,25 @@ type ruleCollector struct {
 
 func (c *ruleCollector) Add(s string, _ struct{}) error {
 	c.rules = append(c.rules, s)
+	return nil
+}
+
+type ruleEntryCollector struct {
+	entries    []data_provider.RuleEntry
+	sourceName string
+	sourceType string
+	sourceFile string
+	sourceURL  string
+}
+
+func (c *ruleEntryCollector) Add(s string, _ struct{}) error {
+	c.entries = append(c.entries, data_provider.RuleEntry{
+		Rule:       s,
+		SourceName: c.sourceName,
+		SourceType: c.sourceType,
+		SourceFile: c.sourceFile,
+		SourceURL:  c.sourceURL,
+	})
 	return nil
 }
 
@@ -136,6 +156,53 @@ func (p *SdSetLight) GetRules() ([]string, error) {
 		f.Close()
 	}
 	return collector.rules, nil
+}
+
+func (p *SdSetLight) GetRuleEntries() ([]data_provider.RuleEntry, error) {
+	p.mu.RLock()
+	type srcInfo struct {
+		name   string
+		kind   string
+		path   string
+		url    string
+		regexp bool
+		count  int
+	}
+	var tasks []srcInfo
+	totalExpected := 0
+	for _, src := range p.sources {
+		if src.Enabled && src.Files != "" {
+			tasks = append(tasks, srcInfo{
+				name:   src.Name,
+				kind:   src.Type,
+				path:   src.Files,
+				url:    src.URL,
+				regexp: src.EnableRegexp,
+				count:  src.RuleCount,
+			})
+			totalExpected += src.RuleCount
+		}
+	}
+	p.mu.RUnlock()
+
+	entries := make([]data_provider.RuleEntry, 0, totalExpected)
+	for _, task := range tasks {
+		f, err := os.Open(task.path)
+		if err != nil {
+			continue
+		}
+		collector := &ruleEntryCollector{
+			entries:    make([]data_provider.RuleEntry, 0, task.count),
+			sourceName: task.name,
+			sourceType: task.kind,
+			sourceFile: task.path,
+			sourceURL:  task.url,
+		}
+		tryLoadSRS(f, collector, task.regexp)
+		f.Close()
+		entries = append(entries, collector.entries...)
+	}
+	return entries, nil
 }
 
 func (p *SdSetLight) notifySubscribers() {

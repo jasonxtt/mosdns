@@ -40,9 +40,10 @@ type Args struct {
 }
 
 type MatchResult struct {
-	FastMarks  []uint8
-	CtxMarks   []uint32
-	JoinedTags string
+	FastMarks     []uint8
+	CtxMarks      []uint32
+	JoinedTags    string
+	JoinedSources string
 }
 
 type DomainMapper struct {
@@ -107,6 +108,7 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		fastMarkMap := make(map[string]uint64)
 		ctxMarkMap := make(map[string]map[uint32]struct{})
 		tagMap := make(map[string]string)
+		sourceMap := make(map[string]string)
 		totalRules := 0
 
 		for _, ruleCfg := range dm.ruleConfigs {
@@ -114,7 +116,7 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 			if !ok {
 				continue
 			}
-			rules, err := provider.GetRules()
+			ruleEntries, err := getRuleEntriesFromProvider(ruleCfg, provider)
 			if err != nil {
 				continue
 			}
@@ -124,7 +126,9 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 				targetTag = ruleCfg.Tag
 			}
 
-			for _, ruleStr := range rules {
+			for _, ruleEntry := range ruleEntries {
+				ruleStr := ruleEntry.Rule
+				sourceName := firstNonEmpty(ruleEntry.SourceName, ruleCfg.Tag)
 				if ruleCfg.Mark > 0 && ruleCfg.Mark <= 63 {
 					fastMarkMap[ruleStr] |= (1 << (ruleCfg.Mark - 1))
 				}
@@ -134,17 +138,13 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 					}
 					ctxMarkMap[ruleStr][ruleCfg.CtxMark] = struct{}{}
 				}
-				oldTags := tagMap[ruleStr]
-				if oldTags == "" {
-					tagMap[ruleStr] = targetTag
-				} else if !strings.Contains(oldTags, targetTag) {
-					tagMap[ruleStr] = oldTags + "|" + targetTag
-				}
+				tagMap[ruleStr] = appendJoinedValue(tagMap[ruleStr], targetTag)
+				sourceMap[ruleStr] = appendJoinedValue(sourceMap[ruleStr], sourceName)
 			}
-			totalRules += len(rules)
+			totalRules += len(ruleEntries)
 		}
 
-		for _, ruleStr := range collectRuleKeys(fastMarkMap, ctxMarkMap, tagMap) {
+		for _, ruleStr := range collectRuleKeys(fastMarkMap, ctxMarkMap, tagMap, sourceMap) {
 			dotPos := strings.Index(ruleStr, ":")
 			if dotPos == -1 {
 				continue
@@ -167,12 +167,11 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 				}
 				aTags := tagMap[ancestorKey]
 				if aTags != "" {
-					cTags := tagMap[ruleStr]
-					if cTags == "" {
-						tagMap[ruleStr] = aTags
-					} else if !strings.Contains(cTags, aTags) {
-						tagMap[ruleStr] = cTags + "|" + aTags
-					}
+					tagMap[ruleStr] = appendJoinedValue(tagMap[ruleStr], aTags)
+				}
+				aSources := sourceMap[ancestorKey]
+				if aSources != "" {
+					sourceMap[ruleStr] = appendJoinedValue(sourceMap[ruleStr], aSources)
 				}
 			}
 
@@ -197,12 +196,11 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 				}
 				aTags := tagMap[ancestorKey]
 				if aTags != "" {
-					cTags := tagMap[ruleStr]
-					if cTags == "" {
-						tagMap[ruleStr] = aTags
-					} else if !strings.Contains(cTags, aTags) {
-						tagMap[ruleStr] = cTags + "|" + aTags
-					}
+					tagMap[ruleStr] = appendJoinedValue(tagMap[ruleStr], aTags)
+				}
+				aSources := sourceMap[ancestorKey]
+				if aSources != "" {
+					sourceMap[ruleStr] = appendJoinedValue(sourceMap[ruleStr], aSources)
 				}
 			}
 		}
@@ -216,16 +214,18 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		}
 		var hotEntries []hotEntry
 
-		for _, ruleStr := range collectRuleKeys(fastMarkMap, ctxMarkMap, tagMap) {
+		for _, ruleStr := range collectRuleKeys(fastMarkMap, ctxMarkMap, tagMap, sourceMap) {
 			fastMask := fastMarkMap[ruleStr]
 			tagsStr := tagMap[ruleStr]
+			sourcesStr := sourceMap[ruleStr]
 			ctxMarks := ctxMarkMap[ruleStr]
-			sig := fmt.Sprintf("%d-%v-%s", fastMask, sortedCtxMarks(ctxMarks), tagsStr)
+			sig := fmt.Sprintf("%d-%v-%s-%s", fastMask, sortedCtxMarks(ctxMarks), tagsStr, sourcesStr)
 
 			res, exists := pool[sig]
 			if !exists {
 				res = &MatchResult{
-					JoinedTags: tagsStr,
+					JoinedTags:    tagsStr,
+					JoinedSources: sourcesStr,
 				}
 				for i := uint8(0); i < 64; i++ {
 					if fastMask&(1<<i) != 0 {
@@ -266,6 +266,7 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		fastMarkMap = nil
 		ctxMarkMap = nil
 		tagMap = nil
+		sourceMap = nil
 		pool = nil
 		hotEntries = nil
 
@@ -314,8 +315,66 @@ func sortedCtxMarks(m map[uint32]struct{}) []uint32 {
 	return out
 }
 
-func collectRuleKeys(fastMarkMap map[string]uint64, ctxMarkMap map[string]map[uint32]struct{}, tagMap map[string]string) []string {
-	keys := make(map[string]struct{}, len(fastMarkMap)+len(ctxMarkMap)+len(tagMap))
+func getRuleEntriesFromProvider(ruleCfg RuleConfig, provider data_provider.RuleExporter) ([]data_provider.RuleEntry, error) {
+	if detailedProvider, ok := provider.(data_provider.DetailedRuleExporter); ok {
+		return detailedProvider.GetRuleEntries()
+	}
+
+	rules, err := provider.GetRules()
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]data_provider.RuleEntry, 0, len(rules))
+	for _, rule := range rules {
+		entries = append(entries, data_provider.RuleEntry{
+			Rule:       rule,
+			SourceName: ruleCfg.Tag,
+		})
+	}
+	return entries, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func appendJoinedValue(joined, value string) string {
+	for _, part := range strings.Split(value, "|") {
+		part = strings.TrimSpace(part)
+		if part == "" || hasJoinedValue(joined, part) {
+			continue
+		}
+		if joined == "" {
+			joined = part
+		} else {
+			joined += "|" + part
+		}
+	}
+	return joined
+}
+
+func hasJoinedValue(joined, target string) bool {
+	for _, part := range strings.Split(joined, "|") {
+		if strings.TrimSpace(part) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func collectRuleKeys(
+	fastMarkMap map[string]uint64,
+	ctxMarkMap map[string]map[uint32]struct{},
+	tagMap map[string]string,
+	sourceMap map[string]string,
+) []string {
+	keys := make(map[string]struct{}, len(fastMarkMap)+len(ctxMarkMap)+len(tagMap)+len(sourceMap))
 	for rule := range fastMarkMap {
 		keys[rule] = struct{}{}
 	}
@@ -323,6 +382,9 @@ func collectRuleKeys(fastMarkMap map[string]uint64, ctxMarkMap map[string]map[ui
 		keys[rule] = struct{}{}
 	}
 	for rule := range tagMap {
+		keys[rule] = struct{}{}
+	}
+	for rule := range sourceMap {
 		keys[rule] = struct{}{}
 	}
 	out := make([]string, 0, len(keys))
@@ -344,6 +406,7 @@ func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags st
 			newMarks := make([]uint8, len(marks))
 			copy(newMarks, marks)
 			newTags := joinedTags
+			var newSources string
 
 			matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
 			if res, matchOk := matcher.Match(key); matchOk && res != nil {
@@ -360,14 +423,15 @@ func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags st
 					}
 				}
 				if res.JoinedTags != "" {
-					if newTags == "" {
-						newTags = res.JoinedTags
-					} else if !strings.Contains(newTags, res.JoinedTags) {
-						newTags = newTags + "|" + res.JoinedTags
-					}
+					newTags = appendJoinedValue(newTags, res.JoinedTags)
 				}
+				newSources = appendJoinedValue(newSources, res.JoinedSources)
 			}
-			actual, loaded := dm.hotMap.LoadOrStore(key, &MatchResult{FastMarks: newMarks, JoinedTags: newTags})
+			actual, loaded := dm.hotMap.LoadOrStore(key, &MatchResult{
+				FastMarks:     newMarks,
+				JoinedTags:    newTags,
+				JoinedSources: newSources,
+			})
 			if !loaded {
 				return
 			}
@@ -392,17 +456,14 @@ func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags st
 
 		newTags := oldRes.JoinedTags
 		if joinedTags != "" {
-			if newTags == "" {
-				newTags = joinedTags
-			} else if !strings.Contains(newTags, joinedTags) {
-				newTags = newTags + "|" + joinedTags
-			}
+			newTags = appendJoinedValue(newTags, joinedTags)
 		}
 
 		newRes := &MatchResult{
-			FastMarks:  newMarks,
-			CtxMarks:   oldRes.CtxMarks,
-			JoinedTags: newTags,
+			FastMarks:     newMarks,
+			CtxMarks:      oldRes.CtxMarks,
+			JoinedTags:    newTags,
+			JoinedSources: oldRes.JoinedSources,
 		}
 
 		if dm.hotMap.CompareAndSwap(key, val, newRes) {
@@ -428,6 +489,21 @@ func (dm *DomainMapper) GetRunBit() uint8 {
 	return dm.runBit
 }
 
+func applyMatchResult(qCtx *query_context.Context, res *MatchResult) {
+	for _, mark := range res.FastMarks {
+		qCtx.SetFastFlag(mark)
+	}
+	for _, mark := range res.CtxMarks {
+		qCtx.SetMark(mark)
+	}
+	if res.JoinedTags != "" {
+		qCtx.StoreValue(query_context.KeyDomainSet, res.JoinedTags)
+	}
+	if res.JoinedSources != "" {
+		qCtx.StoreValue(query_context.KeyMatchedRuleSource, res.JoinedSources)
+	}
+}
+
 func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) error {
 	if qCtx.HasFastFlag(dm.runBit) {
 		return nil
@@ -440,16 +516,7 @@ func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) e
 
 	name := q.Question[0].Name
 	if val, ok := dm.hotMap.Load(name); ok {
-		res := val.(*MatchResult)
-		for _, mark := range res.FastMarks {
-			qCtx.SetFastFlag(mark)
-		}
-		for _, mark := range res.CtxMarks {
-			qCtx.SetMark(mark)
-		}
-		if res.JoinedTags != "" {
-			qCtx.StoreValue(query_context.KeyDomainSet, res.JoinedTags)
-		}
+		applyMatchResult(qCtx, val.(*MatchResult))
 		return nil
 	}
 
@@ -457,15 +524,7 @@ func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) e
 
 	result, ok := matcher.Match(name)
 	if ok && result != nil {
-		for _, mark := range result.FastMarks {
-			qCtx.SetFastFlag(mark)
-		}
-		for _, mark := range result.CtxMarks {
-			qCtx.SetMark(mark)
-		}
-		if result.JoinedTags != "" {
-			qCtx.StoreValue(query_context.KeyDomainSet, result.JoinedTags)
-		}
+		applyMatchResult(qCtx, result)
 	} else {
 		if dm.defaultMark != 0 {
 			qCtx.SetFastFlag(dm.defaultMark)
@@ -497,31 +556,14 @@ func (dm *DomainMapper) GetFastExec() func(ctx context.Context, qCtx *query_cont
 
 		name := q.Question[0].Name
 		if val, ok := dm.hotMap.Load(name); ok {
-			res := val.(*MatchResult)
-			for _, mark := range res.FastMarks {
-				qCtx.SetFastFlag(mark)
-			}
-			for _, mark := range res.CtxMarks {
-				qCtx.SetMark(mark)
-			}
-			if res.JoinedTags != "" {
-				qCtx.StoreValue(query_context.KeyDomainSet, res.JoinedTags)
-			}
+			applyMatchResult(qCtx, val.(*MatchResult))
 			return nil
 		}
 
 		matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
 		result, ok := matcher.Match(name)
 		if ok && result != nil {
-			for _, mark := range result.FastMarks {
-				qCtx.SetFastFlag(mark)
-			}
-			for _, mark := range result.CtxMarks {
-				qCtx.SetMark(mark)
-			}
-			if result.JoinedTags != "" {
-				qCtx.StoreValue(query_context.KeyDomainSet, result.JoinedTags)
-			}
+			applyMatchResult(qCtx, result)
 		} else {
 			if defMark != 0 {
 				qCtx.SetFastFlag(defMark)

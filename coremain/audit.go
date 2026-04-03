@@ -114,21 +114,23 @@ type AnswerDetail struct {
 }
 
 type AuditLog struct {
-	ClientIP      string         `json:"client_ip"`
-	QueryType     string         `json:"query_type"`
-	QueryName     string         `json:"query_name"`
-	QueryClass    string         `json:"query_class"`
-	QueryTime     time.Time      `json:"query_time"`
-	DurationMs    float64        `json:"duration_ms"`
-	TraceID       string         `json:"trace_id"`
-	ResponseCode  string         `json:"response_code"`
-	ResponseFlags ResponseFlags  `json:"response_flags"`
-	Answers       []AnswerDetail `json:"answers"`
-	DomainSet     string         `json:"domain_set,omitempty"`
-	MatchedGroup  string         `json:"matched_group,omitempty"`
-	FinalSequence string         `json:"final_sequence,omitempty"`
-	FinalUpstream string         `json:"final_upstream,omitempty"`
-	UpstreamTargets string       `json:"upstream_targets,omitempty"`
+	ClientIP          string         `json:"client_ip"`
+	QueryType         string         `json:"query_type"`
+	QueryName         string         `json:"query_name"`
+	QueryClass        string         `json:"query_class"`
+	QueryTime         time.Time      `json:"query_time"`
+	DurationMs        float64        `json:"duration_ms"`
+	TraceID           string         `json:"trace_id"`
+	ResponseCode      string         `json:"response_code"`
+	ResponseFlags     ResponseFlags  `json:"response_flags"`
+	Answers           []AnswerDetail `json:"answers"`
+	DomainSet         string         `json:"domain_set,omitempty"`
+	MatchedGroup      string         `json:"matched_group,omitempty"`
+	FinalSequence     string         `json:"final_sequence,omitempty"`
+	FinalUpstream     string         `json:"final_upstream,omitempty"`
+	UpstreamTargets   string         `json:"upstream_targets,omitempty"`
+	SelectedUpstream  string         `json:"selected_upstream,omitempty"`
+	MatchedRuleSource string         `json:"matched_rule_source,omitempty"`
 }
 
 type ResponseFlags struct {
@@ -347,6 +349,16 @@ func (c *AuditCollector) processBatch(batch []*auditContext) {
 		if val, ok := qCtx.GetValue(query_context.KeyFinalUpstreamTargets); ok {
 			if name, isString := val.(string); isString {
 				log.UpstreamTargets = name
+			}
+		}
+		if val, ok := qCtx.GetValue(query_context.KeySelectedUpstream); ok {
+			if name, isString := val.(string); isString {
+				log.SelectedUpstream = name
+			}
+		}
+		if val, ok := qCtx.GetValue(query_context.KeyMatchedRuleSource); ok {
+			if name, isString := val.(string); isString {
+				log.MatchedRuleSource = name
 			}
 		}
 
@@ -788,7 +800,29 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 				}
 			}
 
-			// 5. Check Answers
+			// 5. Check MatchedRuleSource
+			if !foundInQ && log.MatchedRuleSource != "" {
+				haystack = log.MatchedRuleSource
+				if !params.Exact {
+					haystack = strings.ToLower(haystack)
+				}
+				if matchFunc(haystack, searchTerm) {
+					foundInQ = true
+				}
+			}
+
+			// 6. Check SelectedUpstream
+			if !foundInQ && log.SelectedUpstream != "" {
+				haystack = log.SelectedUpstream
+				if !params.Exact {
+					haystack = strings.ToLower(haystack)
+				}
+				if matchFunc(haystack, searchTerm) {
+					foundInQ = true
+				}
+			}
+
+			// 7. Check Answers
 			if !foundInQ {
 				for _, answer := range log.Answers {
 					haystack = answer.Data
