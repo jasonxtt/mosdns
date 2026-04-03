@@ -36,6 +36,8 @@ const (
 	KeyFinalSequence
 	KeyFinalUpstream
 	KeyFinalUpstreamTargets
+	KeySelectedUpstream
+	KeyMatchedRuleSource
 )
 
 const (

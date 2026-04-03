@@ -74,8 +74,10 @@ type SdSet struct {
 
 var _ data_provider.DomainMatcherProvider = (*SdSet)(nil)
 var _ io.Closer = (*SdSet)(nil)
+
 // 确保实现了 RuleExporter 接口
 var _ data_provider.RuleExporter = (*SdSet)(nil)
+var _ data_provider.DetailedRuleExporter = (*SdSet)(nil)
 
 // RuleReceiver 接口用于解耦 SRS 解析和具体的 Matcher
 type RuleReceiver interface {
@@ -89,6 +91,25 @@ type ruleCollector struct {
 
 func (c *ruleCollector) Add(s string, _ struct{}) error {
 	c.rules = append(c.rules, s)
+	return nil
+}
+
+type ruleEntryCollector struct {
+	entries    []data_provider.RuleEntry
+	sourceName string
+	sourceType string
+	sourceFile string
+	sourceURL  string
+}
+
+func (c *ruleEntryCollector) Add(s string, _ struct{}) error {
+	c.entries = append(c.entries, data_provider.RuleEntry{
+		Rule:       s,
+		SourceName: c.sourceName,
+		SourceType: c.sourceType,
+		SourceFile: c.sourceFile,
+		SourceURL:  c.sourceURL,
+	})
 	return nil
 }
 
@@ -127,6 +148,39 @@ func (p *SdSet) GetRules() ([]string, error) {
 		tryLoadSRS(b, collector, src.EnableRegexp)
 	}
 	return collector.rules, nil
+}
+
+func (p *SdSet) GetRuleEntries() ([]data_provider.RuleEntry, error) {
+	p.mu.RLock()
+	sourcesSnapshot := make([]*RuleSource, 0, len(p.sources))
+	for _, src := range p.sources {
+		if src.Enabled {
+			sourcesSnapshot = append(sourcesSnapshot, src)
+		}
+	}
+	p.mu.RUnlock()
+
+	entries := make([]data_provider.RuleEntry, 0)
+	for _, src := range sourcesSnapshot {
+		if src.Files == "" {
+			continue
+		}
+		b, err := os.ReadFile(src.Files)
+		if err != nil {
+			log.Printf("[%s] GetRuleEntries: WARN: cannot read file %s: %v", PluginType, src.Files, err)
+			continue
+		}
+		collector := &ruleEntryCollector{
+			entries:    make([]data_provider.RuleEntry, 0, src.RuleCount),
+			sourceName: src.Name,
+			sourceType: src.Type,
+			sourceFile: src.Files,
+			sourceURL:  src.URL,
+		}
+		tryLoadSRS(b, collector, src.EnableRegexp)
+		entries = append(entries, collector.entries...)
+	}
+	return entries, nil
 }
 
 func (p *SdSet) notifySubscribers() {
@@ -338,7 +392,7 @@ func (p *SdSet) reloadAllRules() error {
 
 	p.matcher.Store(newMatcher)
 	log.Printf("[%s] finished reloading. Total active rules: %d", PluginType, totalRules)
-        newMatcher = nil 
+	newMatcher = nil
 
 	if rulesCountUpdated {
 		log.Printf("[%s] Rule counts have changed, saving configuration...", PluginType)
@@ -349,7 +403,7 @@ func (p *SdSet) reloadAllRules() error {
 
 	// 规则更新完毕（无论是手动、API还是定时器），通知订阅者
 	p.notifySubscribers()
-        coremain.ManualGC() 
+	coremain.ManualGC()
 	return nil
 }
 
@@ -396,7 +450,7 @@ func (p *SdSet) downloadAndUpdateLocalFile(ctx context.Context, sourceName strin
 	tempMatcher := domain.NewDomainMixMatcher()
 	// Modified: pass enableRegexp to validation
 	ok, count, _ := tryLoadSRS(srsData, tempMatcher, enableRegexp)
-        tempMatcher = nil 
+	tempMatcher = nil
 	if !ok {
 		return fmt.Errorf("downloaded file for '%s' is not a valid SRS file or is corrupted", sourceName)
 	}
@@ -419,7 +473,7 @@ func (p *SdSet) downloadAndUpdateLocalFile(ctx context.Context, sourceName strin
 	if err := p.saveConfig(); err != nil {
 		log.Printf("[%s] ERROR: failed to save config after updating '%s': %v", PluginType, sourceName, err)
 	}
-        srsData = nil
+	srsData = nil
 	return nil
 }
 
@@ -463,7 +517,7 @@ func (p *SdSet) backgroundUpdater() {
 			wg.Wait()
 			log.Printf("[%s] auto-update: downloads finished, triggering reload.", PluginType)
 			p.reloadAllRules()
-                        coremain.ManualGC()
+			coremain.ManualGC()
 		case <-p.ctx.Done():
 			log.Printf("[%s] background updater is shutting down.", PluginType)
 			return

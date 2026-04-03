@@ -32,6 +32,14 @@ type IPMatcherProvider interface {
 	GetIPMatcher() netlist.Matcher
 }
 
+type RuleEntry struct {
+	Rule       string
+	SourceName string
+	SourceType string
+	SourceFile string
+	SourceURL  string
+}
+
 // RuleExporter 是新增加的接口，允许插件导出其内部的文本规则列表，并支持变更通知。
 // 这允许 domain_mapper 插件聚合其他插件的规则。
 type RuleExporter interface {
@@ -39,4 +47,10 @@ type RuleExporter interface {
 	GetRules() ([]string, error)
 	// Subscribe 注册一个回调函数，当规则集发生变化（文件更新、API上传等）时调用
 	Subscribe(callback func())
+}
+
+// DetailedRuleExporter 是可选增强接口。
+// 它在导出规则文本的同时，保留规则来源元数据，便于 query log 展示“匹配来源”。
+type DetailedRuleExporter interface {
+	GetRuleEntries() ([]RuleEntry, error)
 }

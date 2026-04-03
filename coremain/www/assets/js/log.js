@@ -160,7 +160,6 @@ document.addEventListener('DOMContentLoaded', () => {
 	listMgmtCnFakeipFilterHint: document.getElementById('list-mgmt-cnfakeipfilter-hint'),
         listMgmtClientIpHint: document.getElementById('list-mgmt-client-ip-hint'),
         listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
-        listMgmtNFTIpHint: document.getElementById('list-mgmt-nft-ip-hint'),
         listMgmtRewriteHint: document.getElementById('list-mgmt-rewrite-hint'),
 
         featureSwitchesModule: document.getElementById('feature-switches-module'),
@@ -2010,9 +2009,10 @@ document.addEventListener('DOMContentLoaded', () => {
         queryInfo['类型'] = `<span>${data.query_type || 'N/A'}</span>`;
         if (data.query_class) queryInfo['类别'] = `<span>${data.query_class}</span>`;
         if (data.domain_set) queryInfo['分流规则'] = createInteractiveLine(getRuleDisplayHTML(data.domain_set), getRuleDisplayText(data.domain_set), data.domain_set, true);
+        if (data.matched_rule_source) queryInfo['匹配来源'] = createInteractiveLine(escapeHtml(data.matched_rule_source), data.matched_rule_source, data.matched_rule_source, false);
         if (data.matched_group) queryInfo['专属分流组'] = `<span>${escapeHtml(getSpecialGroupByType(data.matched_group)?.name || data.matched_group)}</span>`;
-        if (data.final_sequence) queryInfo['最终序列'] = `<span>${escapeHtml(getSequenceDisplay(data.final_sequence))}</span>`;
-        if (data.final_upstream) queryInfo['最终上游'] = `<span>${escapeHtml(getUpstreamGroupDisplay(data.final_upstream))}</span>`;
+        if (data.final_upstream) queryInfo['最终上游组'] = `<span>${escapeHtml(getUpstreamGroupDisplay(data.final_upstream))}</span>`;
+        if (data.selected_upstream) queryInfo['最终上游'] = createInteractiveLine(escapeHtml(data.selected_upstream), data.selected_upstream, data.selected_upstream, false);
         if (data.trace_id) queryInfo['Trace ID'] = createInteractiveLine(data.trace_id, data.trace_id, data.trace_id, true);
 
         responseInfo['耗时'] = `<span>${data.duration_ms.toFixed(2)} ms</span>`;
@@ -2414,6 +2414,9 @@ function renderRuleTable(tbody, rules, mode) {
             }
             this.render();
             populateDiversionTypeOptions();
+            if (state.listManagerInitialized) {
+                listManager.refreshProfiles();
+            }
         },
         render() {
             const container = elements.specialGroupsContainer;
@@ -2948,7 +2951,7 @@ const cacheManager = {
     const listManager = {
         MAX_LINES: 10000,
         currentTag: null,
-        profiles: [
+        fixedProfiles: [
             { tag: 'whitelist', name: '白名单' },
             { tag: 'blocklist', name: '黑名单' },
             { tag: 'greylist', name: '灰名单' },
@@ -2957,24 +2960,85 @@ const cacheManager = {
             { tag: 'ddnslist', name: 'DDNS 域名' },
             { tag: 'client_ip', name: '客户端 IP' },
             { tag: 'direct_ip', name: '直连 IP' },
-            { tag: 'nft_ip', name: 'NFT IP' },
             { tag: 'rewrite', name: '重定向' }
         ],
 
-        init() {
-            if (state.listManagerInitialized) return;
-            elements.listMgmtNav.addEventListener('click', e => {
-                e.preventDefault();
-                const link = e.target.closest('.list-mgmt-link');
-                if (link && !link.classList.contains('active')) {
-                    this.loadList(link.dataset.listTag);
+        getProfiles() {
+            const specialProfiles = (state.specialGroups || [])
+                .slice()
+                .sort((a, b) => a.slot - b.slot)
+                .map(group => ({
+                    tag: group.manual_plugin_tag || `special_manual_${group.slot}`,
+                    name: group.name,
+                    slot: group.slot,
+                    isSpecial: true
+                }));
+            return [...this.fixedProfiles, ...specialProfiles];
+        },
+
+        getProfileByTag(tag) {
+            return this.getProfiles().find(profile => profile.tag === tag) || null;
+        },
+
+        getDisplayName(tag) {
+            return this.getProfileByTag(tag)?.name || tag;
+        },
+
+        renderNav() {
+            if (!elements.listMgmtNav) return;
+            elements.listMgmtNav.innerHTML = this.getProfiles().map(profile => `
+                <a href="#" class="list-mgmt-link${profile.tag === this.currentTag ? ' active' : ''}" data-list-tag="${escapeHtml(profile.tag)}">${escapeHtml(profile.name)}</a>
+            `).join('');
+        },
+
+        refreshProfiles() {
+            this.renderNav();
+            if (!state.listManagerInitialized) return;
+
+            const fallbackTag = this.getProfiles()[0]?.tag || null;
+            if (!this.currentTag || !this.getProfileByTag(this.currentTag)) {
+                if (fallbackTag) {
+                    this.loadList(fallbackTag);
                 }
+                return;
+            }
+
+            elements.listMgmtNav.querySelectorAll('.list-mgmt-link').forEach(link => {
+                link.classList.toggle('active', link.dataset.listTag === this.currentTag);
             });
-            elements.listSaveBtn.addEventListener('click', () => this.saveList());
-            // 首屏不立即加载巨大列表，交给空闲时机/用户点击触发，避免刷新时卡顿
-            if ('requestIdleCallback' in window) requestIdleCallback(() => this.loadList('whitelist'), { timeout: 2000 });
-            else setTimeout(() => this.loadList('whitelist'), 1200);
-            state.listManagerInitialized = true;
+        },
+
+        async ensureSpecialGroupsLoaded() {
+            if (Array.isArray(state.specialGroups) && state.specialGroups.length > 0) return;
+            try {
+                state.specialGroups = await api.fetch('/api/v1/special-groups') || [];
+            } catch (_) {
+                state.specialGroups = [];
+            }
+        },
+
+        async init() {
+            if (state.listManagerInitialized || this._initializing) return;
+            this._initializing = true;
+            try {
+                elements.listMgmtNav.addEventListener('click', e => {
+                    e.preventDefault();
+                    const link = e.target.closest('.list-mgmt-link');
+                    if (link && !link.classList.contains('active')) {
+                        this.loadList(link.dataset.listTag);
+                    }
+                });
+                elements.listSaveBtn.addEventListener('click', () => this.saveList());
+                await this.ensureSpecialGroupsLoaded();
+                this.renderNav();
+                const initialTag = this.getProfiles()[0]?.tag || 'whitelist';
+                // 首屏不立即加载巨大列表，交给空闲时机/用户点击触发，避免刷新时卡顿
+                if ('requestIdleCallback' in window) requestIdleCallback(() => this.loadList(initialTag), { timeout: 2000 });
+                else setTimeout(() => this.loadList(initialTag), 1200);
+                state.listManagerInitialized = true;
+            } finally {
+                this._initializing = false;
+            }
         },
 
         async loadList(tag) {
@@ -2990,9 +3054,6 @@ const cacheManager = {
             elements.listMgmtClientIpHint.style.display = (tag === 'client_ip') ? 'block' : 'none';
             if (elements.listMgmtDirectIpHint) {
                 elements.listMgmtDirectIpHint.style.display = (tag === 'direct_ip') ? 'block' : 'none';
-            }
-            if (elements.listMgmtNFTIpHint) {
-                elements.listMgmtNFTIpHint.style.display = (tag === 'nft_ip') ? 'block' : 'none';
             }
             if (elements.listMgmtRewriteHint) {
                 elements.listMgmtRewriteHint.style.display = (tag === 'rewrite') ? 'block' : 'none';
@@ -3011,10 +3072,10 @@ const cacheManager = {
 
             try {
                 // 流式读取，最多加载 MAX_LINES 行，避免一次性 split 大字符串拖慢主线程
-// 这里的 this.MAX_LINES 是 10000
-const res = await fetch(`/plugins/${tag}/show?limit=${this.MAX_LINES}`, { 
-    signal: this._abortController.signal 
-});
+                // 这里的 this.MAX_LINES 是 10000
+                const res = await fetch(`/plugins/${tag}/show?limit=${this.MAX_LINES}`, {
+                    signal: this._abortController.signal
+                });
 
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const reader = res.body?.getReader();
@@ -3069,9 +3130,9 @@ const res = await fetch(`/plugins/${tag}/show?limit=${this.MAX_LINES}`, {
                     // 用户快速切换导致的中断，不提示错误
                     elements.listContentInfo.textContent = '已取消';
                 } else {
-                    elements.listContentTextArea.value = `加载列表“${tag}”失败。`;
+                    elements.listContentTextArea.value = `加载列表“${this.getDisplayName(tag)}”失败。`;
                     elements.listContentInfo.textContent = '加载失败';
-                    ui.showToast(`加载列表“${tag}”失败`, 'error');
+                    ui.showToast(`加载列表“${this.getDisplayName(tag)}”失败`, 'error');
                 }
             } finally {
                 elements.listContentLoader.style.display = 'none';
@@ -3091,10 +3152,10 @@ const res = await fetch(`/plugins/${tag}/show?limit=${this.MAX_LINES}`, {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ values })
                 });
-                ui.showToast(`列表“${this.currentTag}”已保存`, 'success');
+                ui.showToast(`列表“${this.getDisplayName(this.currentTag)}”已保存`, 'success');
                 elements.listContentInfo.textContent = `保存成功！共 ${values.length} 行。`;
             } catch (error) {
-                ui.showToast(`保存列表“${this.currentTag}”失败`, 'error');
+                ui.showToast(`保存列表“${this.getDisplayName(this.currentTag)}”失败`, 'error');
             } finally {
                 ui.setLoading(elements.listSaveBtn, false);
             }

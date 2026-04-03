@@ -30,7 +30,9 @@ type SpecialGroupView struct {
 	Key                string `json:"key"`
 	UpstreamPluginTag  string `json:"upstream_plugin_tag"`
 	DiversionPluginTag string `json:"diversion_plugin_tag"`
+	ManualPluginTag    string `json:"manual_plugin_tag"`
 	LocalConfig        string `json:"local_config"`
+	ManualRulePath     string `json:"manual_rule_path"`
 }
 
 var (
@@ -282,7 +284,9 @@ func buildSpecialGroupView(g SpecialGroup) SpecialGroupView {
 		Key:                specialGroupKey(g.Slot),
 		UpstreamPluginTag:  specialUpstreamPluginTag(g.Slot),
 		DiversionPluginTag: specialDiversionPluginTag(g.Slot),
+		ManualPluginTag:    specialManualPluginTag(g.Slot),
 		LocalConfig:        fmt.Sprintf("srs/special_%d.json", g.Slot),
+		ManualRulePath:     specialManualRulePath(g.Slot),
 	}
 }
 
@@ -296,6 +300,14 @@ func specialUpstreamPluginTag(slot int) string {
 
 func specialDiversionPluginTag(slot int) string {
 	return fmt.Sprintf("special_route_%d", slot)
+}
+
+func specialManualPluginTag(slot int) string {
+	return fmt.Sprintf("special_manual_%d", slot)
+}
+
+func specialManualRulePath(slot int) string {
+	return filepath.Join("rule", fmt.Sprintf("special_%d.txt", slot))
 }
 
 func clearSpecialGroupArtifacts(slot int) error {
@@ -316,6 +328,11 @@ func clearSpecialGroupArtifacts(slot int) error {
 
 	localConfigPath := filepath.Join(dir, "srs", fmt.Sprintf("special_%d.json", slot))
 	if err := os.Remove(localConfigPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	manualRulePath := filepath.Join(dir, specialManualRulePath(slot))
+	if err := os.Remove(manualRulePath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

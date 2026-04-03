@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.1.7
+
+### Added
+
+- special groups now support manual domain lists in WebUI list management, alongside the existing online `srs` sources
+- special group metadata now exposes the manual list plugin tag and manual rule file path for the WebUI
+
+### Changed
+
+- query-log details now show `matched_rule_source` for online diversion matches
+- query-log details now distinguish `最终上游组` and the actual winning `最终上游`
+- the `最终序列` field is no longer shown in the WebUI query-log detail panel
+- list management now renders special groups dynamically after they are created in advanced settings
+- removed the legacy `NFT IP` item from list management
+- special-group deletion now also removes the corresponding manual rule file under `rule/special_<slot>.txt`
+
+### Upgrade Notes
+
+- for existing WebUI fork users, the incremental package `mosdns/config/config_up.zip` now updates `sub_config/special_groups.yaml`
+- no pre-created `rule/special_<slot>.txt` files are required; they will be created when the user saves manual rules in WebUI
+
 ## v0.1.6
 
 ### Changed

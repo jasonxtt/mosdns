@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */ 
+ */
 
 package fastforward
 
@@ -261,6 +261,7 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 	type res struct {
 		r   *dns.Msg
 		err error
+		u   *upstreamWrapper
 	}
 
 	resChan := make(chan res)
@@ -270,9 +271,17 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 	// --- MODIFICATION START ---
 	// Variables to store the best available "fallback" results according to priority.
 	var lastSuccessOrNXRes *dns.Msg // Priority 2: Stores NOERROR or NXDOMAIN responses.
-	var lastOtherRes *dns.Msg       // Priority 3: Stores other responses like SERVFAIL.
-	var lastError error              // Priority 4: Stores the first encountered network error.
+	var lastSuccessOrNXUpstream *upstreamWrapper
+	var lastOtherRes *dns.Msg // Priority 3: Stores other responses like SERVFAIL.
+	var lastOtherUpstream *upstreamWrapper
+	var lastError error // Priority 4: Stores the first encountered network error.
 	// --- MODIFICATION END ---
+
+	storeSelectedUpstream := func(u *upstreamWrapper) {
+		if u != nil {
+			qCtx.StoreValue(query_context.KeySelectedUpstream, u.name())
+		}
+	}
 
 	r := rand.Intn(len(us))
 	for i := 0; i < concurrent; i++ {
@@ -302,7 +311,7 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 				}
 			}
 			select {
-			case resChan <- res{r: r, err: err}:
+			case resChan <- res{r: r, err: err, u: u}:
 			case <-done:
 			}
 		}(qCtx.Id(), qCtx.QQuestion())
@@ -311,7 +320,7 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 	for i := 0; i < concurrent; i++ {
 		select {
 		case res := <-resChan:
-			r, err := res.r, res.err
+			r, err, u := res.r, res.err, res.u
 
 			// --- MODIFICATION START ---
 			if err != nil {
@@ -325,9 +334,11 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 			if len(r.Answer) > 0 {
 				for _, ans := range r.Answer {
 					if a, ok := ans.(*dns.A); ok && len(a.A) > 0 {
+						storeSelectedUpstream(u)
 						return r, nil
 					}
 					if aaaa, ok := ans.(*dns.AAAA); ok && len(aaaa.AAAA) > 0 {
+						storeSelectedUpstream(u)
 						return r, nil
 					}
 				}
@@ -338,10 +349,12 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 			if r.Rcode == dns.RcodeSuccess || r.Rcode == dns.RcodeNameError {
 				if lastSuccessOrNXRes == nil {
 					lastSuccessOrNXRes = r
+					lastSuccessOrNXUpstream = u
 				}
 			} else { // Priority 3: Other responses like SERVFAIL, REFUSED, etc.
 				if lastOtherRes == nil {
 					lastOtherRes = r
+					lastOtherUpstream = u
 				}
 			}
 			// --- MODIFICATION END ---
@@ -354,9 +367,11 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 	// --- MODIFICATION START ---
 	// After all concurrent queries are done, return the best result we found based on priority.
 	if lastSuccessOrNXRes != nil {
+		storeSelectedUpstream(lastSuccessOrNXUpstream)
 		return lastSuccessOrNXRes, nil
 	}
 	if lastOtherRes != nil {
+		storeSelectedUpstream(lastOtherUpstream)
 		return lastOtherRes, nil
 	}
 	if lastError != nil {
@@ -372,7 +387,6 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 // ===============================================================================
 // ===== ^^^^ The only modified function is `exchange` above. ^^^^ =====
 // ===============================================================================
-
 
 func quickSetup(bq sequence.BQ, s string) (any, error) {
 	args := new(Args)

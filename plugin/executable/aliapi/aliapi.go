@@ -49,7 +49,7 @@ const (
 
 // Args defines the configuration for the aliapi plugin.
 type Args struct {
-	Upstreams []UpstreamConfig `yaml:"upstreams"`
+	Upstreams  []UpstreamConfig `yaml:"upstreams"`
 	Concurrent int              `yaml:"concurrent"`
 
 	// AliDNS API specific options, global to this plugin instance.
@@ -95,13 +95,13 @@ type UpstreamConfig struct {
 func Init(bp *coremain.BP, args any) (any, error) {
 	a := args.(*Args)
 	baseArgs := cloneArgs(a)
-	
+
 	// [Debug] Log entry
 	bp.L().Info("[Debug AliAPI] Init plugin instance", zap.String("plugin_tag", bp.Tag()))
 
 	// 从 api_upstream.go 获取覆盖配置
 	overrides := coremain.GetUpstreamOverrides(bp.Tag())
-	
+
 	var activeUpstreams []UpstreamConfig
 	enabledCount := 0
 
@@ -112,7 +112,7 @@ func Init(bp *coremain.BP, args any) (any, error) {
 			if !o.Enabled {
 				continue
 			}
-			
+
 			u := UpstreamConfig{
 				Tag: o.Tag, Addr: o.Addr, DialAddr: o.DialAddr,
 				IdleTimeout: o.IdleTimeout, UpstreamQueryTimeout: o.UpstreamQueryTimeout,
@@ -144,14 +144,18 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		// 需求：只有当覆盖配置中有至少一个启用条目时，才替换原始配置
 		if len(activeUpstreams) > 0 {
 			a.Upstreams = activeUpstreams
-			
+
 			// 需求：自动设置 concurrent 数量（1-3）
 			conc := enabledCount
-			if conc > maxConcurrentQueries { conc = maxConcurrentQueries }
-			if conc < 1 { conc = 1 }
+			if conc > maxConcurrentQueries {
+				conc = maxConcurrentQueries
+			}
+			if conc < 1 {
+				conc = 1
+			}
 			a.Concurrent = conc
-			
-			bp.L().Info("[Debug AliAPI] Configuration REPLACED by overrides", 
+
+			bp.L().Info("[Debug AliAPI] Configuration REPLACED by overrides",
 				zap.String("tag", bp.Tag()),
 				zap.Int("active_upstreams", enabledCount),
 				zap.Int("new_concurrent", a.Concurrent))
@@ -265,8 +269,8 @@ var _ sequence.QuickConfigurableExec = (*AliAPI)(nil)
 
 // AliAPI represents the aliapi plugin instance.
 type AliAPI struct {
-	args *Args
-	baseArgs Args
+	args      *Args
+	baseArgs  Args
 	pluginTag string
 
 	logger       *zap.Logger
@@ -518,6 +522,12 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 		return nil, errors.New("no upstream to exchange")
 	}
 
+	storeSelectedUpstream := func(u *upstreamWrapper) {
+		if u != nil {
+			qCtx.StoreValue(query_context.KeySelectedUpstream, u.name())
+		}
+	}
+
 	queryPayload, err := pool.PackBuffer(qCtx.Q())
 	if err != nil {
 		return nil, err
@@ -571,7 +581,7 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 
 			var r *dns.Msg
 			respPayload, err := currentUpstream.ExchangeContext(upstreamCtx, *qc)
-			
+
 			if err != nil {
 				if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
 					!strings.Contains(err.Error(), "connection refused") &&
@@ -590,7 +600,7 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 
 			select {
 			case resChan <- res{r: r, err: err, u: currentUpstream}:
-			case <-upstreamCtx.Done(): 
+			case <-upstreamCtx.Done():
 			}
 		}(qCtx.Id(), qCtx.QQuestion(), u)
 	}
@@ -610,10 +620,12 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 				for _, ans := range r.Answer {
 					if a, ok := ans.(*dns.A); ok && len(a.A) > 0 {
 						u.mWinnerTotal.Inc()
+						storeSelectedUpstream(u)
 						return r, nil
 					}
 					if aaaa, ok := ans.(*dns.AAAA); ok && len(aaaa.AAAA) > 0 {
 						u.mWinnerTotal.Inc()
+						storeSelectedUpstream(u)
 						return r, nil
 					}
 				}
@@ -634,10 +646,12 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 		case <-ctx.Done():
 			if lastSuccessOrNXRes != nil {
 				lastSuccessOrNXResUpstream.mWinnerTotal.Inc()
+				storeSelectedUpstream(lastSuccessOrNXResUpstream)
 				return lastSuccessOrNXRes, nil
 			}
 			if lastOtherRes != nil {
 				lastOtherResUpstream.mWinnerTotal.Inc()
+				storeSelectedUpstream(lastOtherResUpstream)
 				return lastOtherRes, nil
 			}
 			if lastError != nil {
@@ -649,10 +663,12 @@ func (f *AliAPI) exchange(ctx context.Context, qCtx *query_context.Context, us [
 
 	if lastSuccessOrNXRes != nil {
 		lastSuccessOrNXResUpstream.mWinnerTotal.Inc()
+		storeSelectedUpstream(lastSuccessOrNXResUpstream)
 		return lastSuccessOrNXRes, nil
 	}
 	if lastOtherRes != nil {
 		lastOtherResUpstream.mWinnerTotal.Inc()
+		storeSelectedUpstream(lastOtherResUpstream)
 		return lastOtherRes, nil
 	}
 	if lastError != nil {
@@ -674,11 +690,11 @@ func quickSetup(bq sequence.BQ, s string) (any, error) {
 // DNSEntity represents the structure of the JSON response from AliDNS API
 type DNSEntity struct {
 	Status int      `json:"status"`
-	TC     bool     `json:"TC"`       // Truncated
-	RD     bool     `json:"RD"`       // Recursion Desired
-	RA     bool     `json:"RA"`       // Recursion Available
-	AD     bool     `json:"AD"`       // Authenticated Data
-	CD     bool     `json:"CD"`       // Checking Disabled
+	TC     bool     `json:"TC"` // Truncated
+	RD     bool     `json:"RD"` // Recursion Desired
+	RA     bool     `json:"RA"` // Recursion Available
+	AD     bool     `json:"AD"` // Authenticated Data
+	CD     bool     `json:"CD"` // Checking Disabled
 	Answer []Answer `json:"answer"`
 	Remark string   `json:"remark"`
 }
@@ -900,7 +916,7 @@ func (a *AliAPIUpstream) ExchangeContext(ctx context.Context, req []byte) (resp 
 
 	// Directly use the Rcode from the API's "Status" field.
 	responseMsg.SetRcode(dnsMsg, aliDNSResult.Status)
- 	responseMsg.Truncated = aliDNSResult.TC
+	responseMsg.Truncated = aliDNSResult.TC
 	responseMsg.RecursionAvailable = aliDNSResult.RA
 	responseMsg.AuthenticatedData = aliDNSResult.AD
 	responseMsg.CheckingDisabled = aliDNSResult.CD
@@ -910,8 +926,8 @@ func (a *AliAPIUpstream) ExchangeContext(ctx context.Context, req []byte) (resp 
 		for _, ans := range aliDNSResult.Answer {
 			// Keeping the original logic to only add records matching the question name.
 			// if ans.Name == qName {
-				record := getDNSRecord(ans)
-				responseMsg.Answer = append(responseMsg.Answer, record)
+			record := getDNSRecord(ans)
+			responseMsg.Answer = append(responseMsg.Answer, record)
 			// }
 		}
 	} else {
@@ -952,13 +968,13 @@ type upstreamWrapper struct {
 	cfg        UpstreamConfig
 	metricsTag string
 
-	mQueryTotal prometheus.Counter
-	mErrorTotal prometheus.Counter
-        mWinnerTotal     prometheus.Counter
-	mInflight   prometheus.Gauge
-        mResponseLatency prometheus.Histogram
-        mConnOpened prometheus.Counter
-        mConnClosed prometheus.Counter
+	mQueryTotal      prometheus.Counter
+	mErrorTotal      prometheus.Counter
+	mWinnerTotal     prometheus.Counter
+	mInflight        prometheus.Gauge
+	mResponseLatency prometheus.Histogram
+	mConnOpened      prometheus.Counter
+	mConnClosed      prometheus.Counter
 }
 
 func (w *upstreamWrapper) OnEvent(e upstream.Event) {
@@ -1020,24 +1036,24 @@ func newWrapper(idx int, c UpstreamConfig, metricsTag string) *upstreamWrapper {
 				"metrics_tag": metricsTag,
 			},
 		}),
-                mConnOpened: prometheus.NewCounter(prometheus.CounterOpts{
-                    Name: "conn_opened_total",
-                    Help: "Total number of connections opened.",
-                    ConstLabels: prometheus.Labels{
-                        "tag":         c.Tag,
-                        "addr":        c.Addr,
-                        "metrics_tag": metricsTag,
-                    },
-                }),
-                mConnClosed: prometheus.NewCounter(prometheus.CounterOpts{
-                    Name: "conn_closed_total",
-                    Help: "Total number of connections closed.",
-                    ConstLabels: prometheus.Labels{
-                        "tag":         c.Tag,
-                        "addr":        c.Addr,
-                        "metrics_tag": metricsTag,
-                    },
-                }),
+		mConnOpened: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "conn_opened_total",
+			Help: "Total number of connections opened.",
+			ConstLabels: prometheus.Labels{
+				"tag":         c.Tag,
+				"addr":        c.Addr,
+				"metrics_tag": metricsTag,
+			},
+		}),
+		mConnClosed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "conn_closed_total",
+			Help: "Total number of connections closed.",
+			ConstLabels: prometheus.Labels{
+				"tag":         c.Tag,
+				"addr":        c.Addr,
+				"metrics_tag": metricsTag,
+			},
+		}),
 	}
 }
 
@@ -1048,7 +1064,7 @@ func (w *upstreamWrapper) ExchangeContext(ctx context.Context, req []byte) (*[]b
 	w.mQueryTotal.Inc()
 	w.mInflight.Inc()
 
-	start := time.Now() 
+	start := time.Now()
 
 	resp, err := w.u.ExchangeContext(ctx, req) // Call the wrapped upstream's method
 
@@ -1083,9 +1099,20 @@ func (w *upstreamWrapper) registerMetricsTo(r prometheus.Registerer) error {
 	if err := r.Register(w.mResponseLatency); err != nil {
 		return err
 	}
-            if err := r.Register(w.mConnOpened); err != nil { return err }
-            if err := r.Register(w.mConnClosed); err != nil { return err }
+	if err := r.Register(w.mConnOpened); err != nil {
+		return err
+	}
+	if err := r.Register(w.mConnClosed); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (w *upstreamWrapper) name() string {
+	if t := w.cfg.Tag; len(t) > 0 {
+		return t
+	}
+	return w.cfg.Addr
 }
 
 func copyPayload(p *[]byte) *[]byte {
