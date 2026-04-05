@@ -106,6 +106,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Compute release tag
         shell: bash
         run: |
@@ -119,6 +123,12 @@ jobs:
             *) RELEASE_TAG="v${RELEASE_TAG}" ;;
           esac
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          BODY_PATH="docs/releases/${RELEASE_TAG}.md"
+          if [ -f "${BODY_PATH}" ]; then
+            echo "RELEASE_BODY_PATH=${BODY_PATH}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_BODY_PATH=" >> "$GITHUB_ENV"
+          fi
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -126,7 +136,19 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
-      - name: Publish release
+      - name: Publish release from docs
+        if: ${{ env.RELEASE_BODY_PATH != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: release-artifacts/*.tar.gz
+          prerelease: false
+          body_path: ${{ env.RELEASE_BODY_PATH }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release with generated notes
+        if: ${{ env.RELEASE_BODY_PATH == '' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}

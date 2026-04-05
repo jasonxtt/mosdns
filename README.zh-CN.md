@@ -6,24 +6,23 @@
 
 这个分支的目标不是重写 `mosdns`，而是在保留上游整体结构和配置思路的前提下，补齐更适合长期在线维护 DNS 分流规则的工作流。
 
-## 默认配置
+## 配置包
 
-这个 fork 对应的默认配置包放在这里：
+这个 fork 维护中的配置包放在：
 
-- [config_tom.zip](https://github.com/jasonxtt/file/blob/main/mosdns/config_tom.zip)
+- [`mosdns/config/config_all.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip)
+- [`mosdns/config/config_up.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip)
 
-使用方式：
+其中：
 
-1. 下载 `config_tom.zip`
-2. 解压
-3. 将解压后的目录改名为 `mosdns`
-4. 放到 `/cus` 目录下
+- `config_all.zip` 用于新部署或整套模板替换
+- `config_up.zip` 用于现有部署的增量配置更新
 
-最终配置目录应为：
+旧的 `config_tom.zip` 模板已经下线。
+
+完整配置包解压后的运行目录应为：
 
 - `/cus/mosdns`
-
-完成后即可直接使用这套配置启动 `mosdns`。
 
 ## 上游来源
 
@@ -58,7 +57,7 @@
 ### 查询日志显示优化
 
 - 日志中按当前组名显示专属分流组
-- 同时补充最终序列和最终上游，便于排查
+- 同时补充匹配来源、最终上游组和最终上游，便于排查
 
 ## 适用场景
 
@@ -80,18 +79,13 @@
 
 - [相对上游的改动说明](docs/fork_diff_summary_zh.md)
 
-## 发布定位
+## 发布状态
 
-建议首版按预览版发布，例如：
+当前正式发布版本为：
 
-- `v0.1.0-preview`
+- `v0.1.8`
 
-因为当前功能已经形成完整链路，但仍然属于场景化增强 fork，后续还适合继续整理：
-
-- 使用说明
-- 示例配置
-- 兼容性说明
-- 截图和发布页文案
+这个 fork 现在已经按持续维护的 WebUI 增强分支在发布，不再是早期预览版定位。
 
 ## 文档
 
