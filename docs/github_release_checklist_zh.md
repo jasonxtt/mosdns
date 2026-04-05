@@ -28,14 +28,7 @@
 - `docs/fork_diff_summary_zh.md`
 - `docs/github_release_checklist_zh.md`
 
-## 四、首版发布说明建议
-
-建议首版按“增强版预览”思路发，不要上来就宣称稳定版。
-
-建议标题：
-
-- `v0.1.0-preview`
-- `v0.1.0-webui-enhanced`
+## 四、发布说明建议
 
 建议说明重点：
 
@@ -65,7 +58,7 @@
 1. 清理不想公开的本地调试内容
 2. 再检查一次 `git diff`
 3. 写一版正式 `README.md`
-4. 写首版 `CHANGELOG.md`
+4. 写当前版本对应的 `CHANGELOG.md`
 5. 确认是否要保留中文为主，还是中英双语
 6. 再决定是直接 push 到 fork，还是先建新仓库再导入
 
@@ -80,4 +73,3 @@
 7. 配置说明
 8. 已知问题
 9. 致谢
-

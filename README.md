@@ -6,24 +6,22 @@ An enhanced fork of `yyysuo/mosdns`, focused on making long-term DNS rule mainte
 
 This fork keeps the upstream architecture and core configuration style, while adding a set of features for rule-driven routing, upstream management, and day-to-day operations.
 
-## Default Config Package
+## Config Packages
 
-The default config package for this fork is available here:
+The maintained config packages for this fork are published in:
 
-- [config_tom.zip](https://github.com/jasonxtt/file/blob/main/mosdns/config_tom.zip)
+- [`mosdns/config/config_all.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip)
+- [`mosdns/config/config_up.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip)
 
-Usage:
+Use `config_all.zip` for a fresh deployment or a full template replacement.
 
-1. Download `config_tom.zip`
-2. Extract it
-3. Rename the extracted directory to `mosdns`
-4. Place it under `/cus`
+Use `config_up.zip` only for incremental config updates on an existing deployment.
 
-The final runtime config path should be:
+The old `config_tom.zip` template has been retired.
+
+After extracting the full package, the runtime path should be:
 
 - `/cus/mosdns`
-
-After that, `mosdns` can be started directly with this config package.
 
 ## Upstream
 
@@ -58,7 +56,7 @@ After that, `mosdns` can be started directly with this config package.
 ### Better Query Log Display
 
 - Dedicated routing groups are shown with readable names in the query log
-- Final sequence and upstream information are available for troubleshooting
+- Matched rule source, final upstream group, and final upstream are available for troubleshooting
 
 ## Typical Use Cases
 
@@ -80,13 +78,13 @@ A detailed summary is available here:
 
 - [Fork Diff Summary (Chinese)](docs/fork_diff_summary_zh.md)
 
-## Release Positioning
+## Release Status
 
-The current state is suitable for a first preview release, for example:
+The current released version is:
 
-- `v0.1.0-preview`
+- `v0.1.8`
 
-The implementation is already usable end-to-end, but this is still a scenario-driven enhancement fork rather than a generic upstream replacement.
+This fork is already used as a maintained WebUI-enhanced branch, not just a one-off preview build.
 
 ## Documentation
 

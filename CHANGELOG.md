@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.1.8
+
+### Added
+
+- added a new merged dashboard UI at `/` with top-level sections for 概览, 查询日志, 规则管理, 上游, and 系统
+- old root UI is still available at `/legacy` during the transition
+
+### Changed
+
+- merged the old `:9099` log-capture and analysis workflow into the new dashboard's 查询日志 section
+- promoted upstream management to a top-level navigation area instead of keeping it buried under system settings
+- reorganized system-facing controls so query, rule, upstream, and system functions are separated more clearly
+- updated README and release-facing docs to use `mosdns/config/config_all.zip` as the full template package
+- retired the legacy `config_tom.zip` template reference from the source repo documentation
+
+### Upgrade Notes
+
+- this release does not require a config change for existing users
+- the maintained full template package is now `mosdns/config/config_all.zip`
+- the maintained incremental package remains `mosdns/config/config_up.zip`
+
 ## v0.1.7
 
 ### Added
