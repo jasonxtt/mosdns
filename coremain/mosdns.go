@@ -122,13 +122,13 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	m.initHttpMux()
 
 	// Register our new APIs.
-	RegisterCaptureAPI(m.httpMux)    // For process logs
-	RegisterAuditAPI(m.httpMux)      // For audit logs v1
-	RegisterAuditAPIV2(m.httpMux)    // For audit logs v2
+	RegisterCaptureAPI(m.httpMux)      // For process logs
+	RegisterAuditAPI(m.httpMux)        // For audit logs v1
+	RegisterAuditAPIV2(m.httpMux)      // For audit logs v2
 	RegisterOverridesAPI(m.httpMux, m) // <<< MODIFIED: Pass 'm'
 	RegisterConfigManagerAPI(m.httpMux)
-	RegisterUpdateAPI(m.httpMux)     // For binary updates
-	RegisterSystemAPI(m.httpMux, m)     // For self-restart
+	RegisterUpdateAPI(m.httpMux)    // For binary updates
+	RegisterSystemAPI(m.httpMux, m) // For self-restart
 	RegisterUpstreamAPI(m.httpMux, m)
 	RegisterSpecialGroupsAPI(m.httpMux)
 
@@ -173,7 +173,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 				}
 			}
 			m.logger.Info("all plugins were closed")
-            GlobalAuditCollector.StopWorker()
+			GlobalAuditCollector.StopWorker()
 		}()
 	})
 
@@ -276,9 +276,22 @@ func (m *Mosdns) initHttpMux() {
 
 	// [修改] 将原来的公共handler拆分为两个独立的handler
 
-	// [新增] 根路由 ("/") 的 handler，指向 mosdnsp.html
+	// 根路由 ("/") 使用新的 dashboard 页面
 	rootHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/mosdnsp.html") // 读取新文件
+		data, err := content.ReadFile("www/dashboard.html")
+		if err != nil {
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/dashboard.html"), zap.Error(err))
+			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := w.Write(data); err != nil {
+			m.logger.Error("Error writing response", zap.Error(err))
+		}
+	}
+
+	legacyHandler := func(w http.ResponseWriter, r *http.Request) {
+		data, err := content.ReadFile("www/mosdnsp.html")
 		if err != nil {
 			m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdnsp.html"), zap.Error(err))
 			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
@@ -369,6 +382,7 @@ func (m *Mosdns) initHttpMux() {
 
 	// [修改] 为每个路由注册对应的 handler
 	m.httpMux.Get("/", rootHandler)
+	m.httpMux.Get("/legacy", legacyHandler)
 	m.httpMux.Get("/graphic", graphicHandler)
 	m.httpMux.Get("/log", logHandler)
 	m.httpMux.Get("/plog", plainLogHandler)
