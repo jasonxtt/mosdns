@@ -32,9 +32,9 @@ function closeAndUnlock(dialogElement) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-    const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 60, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 1024, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250, UPDATE_AUTO_MINUTES_DEFAULT: 1440 };
+    const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 60, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 1024, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250 };
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], specialGroups: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [], viewType: 'domain', currentOffset: 0, currentLimit: 100, currentQuery: '', currentConfig: null, hasMore: true, totalCount: 0 }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false, auto: { enabled: true, intervalMinutes: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT, timerId: null } }, diagnostic: { logs: [], showFalse: false } };
+    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], specialGroups: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [], viewType: 'domain', currentOffset: 0, currentLimit: 100, currentQuery: '', currentConfig: null, hasMore: true, totalCount: 0 }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false }, diagnostic: { logs: [], showFalse: false } };
     const elements = {
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'),
         colorSwatches: document.querySelectorAll('.color-swatch'),
@@ -52,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sparklineTotal: document.getElementById('sparkline-total'), sparklineAvg: document.getElementById('sparkline-avg'),
         auditStatus: document.getElementById('audit-status'), toggleAuditBtn: document.getElementById('toggle-audit-btn'), clearAuditBtn: document.getElementById('clear-audit-btn'),
         auditCapacity: document.getElementById('audit-capacity'), capacityForm: document.getElementById('capacity-form'), newCapacityInput: document.getElementById('new-capacity'),
+        clearAllCachesBtn: document.getElementById('clear-all-caches-btn'),
         cacheStatsTbody: document.getElementById('cache-stats-tbody'),
         topDomainsBody: document.getElementById('top-domains-body'), topClientsBody: document.getElementById('top-clients-body'), slowestQueriesBody: document.getElementById('slowest-queries-body'),
         shuntResultsBody: document.getElementById('shunt-results-body'),
@@ -126,9 +127,6 @@ document.addEventListener('DOMContentLoaded', () => {
         updateForceBtn: document.getElementById('update-force-btn'),
         updateV3Callout: document.getElementById('update-v3-callout'),
         updateV3Btn: document.getElementById('update-v3-btn'),
-        updateAutoToggle: document.getElementById('update-auto-toggle'),
-        updateIntervalInput: document.getElementById('update-interval-input'),
-        updateHintText: document.getElementById('update-hint-text'),
 
         fakeipDomainCount: document.getElementById('fakeip-domain-count'),
         realipDomainCount: document.getElementById('realip-domain-count'),
@@ -173,9 +171,12 @@ document.addEventListener('DOMContentLoaded', () => {
         coreModeSwitchGroup: document.getElementById('core-mode-switch-group'),
         secondarySwitchesContainer: document.getElementById('secondary-switches-container'),
         systemInfoContainer: document.getElementById('system-info-container'),
-        queryToolsGrid: document.getElementById('query-tools-grid'),
-        rulesOpsGrid: document.getElementById('rules-ops-grid'),
+        dataManagementGrid: document.getElementById('data-management-grid'),
         upstreamControlGrid: document.getElementById('upstream-control-grid'),
+        systemTopGrid: document.getElementById('system-top-grid'),
+        systemSecondaryGrid: document.getElementById('system-secondary-grid'),
+        systemFeatureGrid: document.getElementById('system-feature-grid'),
+        systemBottomGrid: document.getElementById('system-bottom-grid'),
     };
     let toastTimeout;
 
@@ -477,23 +478,44 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        if (elements.queryToolsGrid) {
-            moveModule(elements.toggleAuditBtn?.closest('.control-module'), elements.queryToolsGrid);
-            moveModule(elements.capacityForm?.closest('.control-module'), elements.queryToolsGrid);
-        }
-
-        if (elements.rulesOpsGrid) {
-            moveModule('#feature-switches-module', elements.rulesOpsGrid);
-            moveModule('#domain-stats-module', elements.rulesOpsGrid);
-            moveModule('#requery-module', elements.rulesOpsGrid);
-            if (elements.featureSwitchesModule) elements.featureSwitchesModule.style.display = '';
+        if (elements.dataManagementGrid) {
+            moveModule(elements.cacheStatsTbody?.closest('.control-module'), elements.dataManagementGrid);
+            moveModule('#domain-stats-module', elements.dataManagementGrid);
+            moveModule('#requery-module', elements.dataManagementGrid);
             if (elements.requeryModule) elements.requeryModule.style.display = '';
         }
 
         if (elements.upstreamControlGrid) {
             moveModule('#upstream-dns-module', elements.upstreamControlGrid);
-            moveModule('#overrides-module', elements.upstreamControlGrid);
+        }
+
+        if (elements.systemTopGrid) {
+            moveModule('#system-info-module', elements.systemTopGrid);
+            moveModule('#update-module', elements.systemTopGrid);
+            moveModule('#config-manager-card', elements.systemTopGrid);
+            moveModule('#service-actions-module', elements.systemTopGrid);
+        }
+
+        if (elements.systemSecondaryGrid) {
+            moveModule(elements.toggleAuditBtn?.closest('.control-module'), elements.systemSecondaryGrid);
+            moveModule(elements.capacityForm?.closest('.control-module'), elements.systemSecondaryGrid);
+            moveModule('#auto-refresh-module', elements.systemSecondaryGrid);
+            moveModule('#appearance-module', elements.systemSecondaryGrid);
+        }
+
+        if (elements.systemFeatureGrid) {
+            moveModule('#feature-switches-module', elements.systemFeatureGrid);
+            if (elements.featureSwitchesModule) elements.featureSwitchesModule.style.display = '';
+        }
+
+        const overridesHost = document.getElementById('service-overrides-host');
+        if (overridesHost) {
+            moveModule('#overrides-module', overridesHost);
             if (elements.overridesModule) elements.overridesModule.style.display = '';
+        }
+
+        if (elements.systemBottomGrid) {
+            moveModule('#replacements-card', elements.systemBottomGrid);
         }
     }
 
@@ -974,7 +996,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const switchManager = {
         profiles: [
-            { tag: 'switch3', name: '核心运行模式', tip: '切换后将执行一次“全新任务”刷新分流缓存。兼容模式性能更高，安全模式防泄露和劫持能力更强。', modes: { 'A': { name: '兼容模式', icon: 'fa-globe-americas' }, 'B': { name: '安全模式', icon: 'fa-shield-alt' } } },
+            { tag: 'switch3', name: '核心运行模式', tip: '切换后将执行一次“全新任务”刷新分流缓存，并按新模式重建已生成的分流域名。兼容模式性能更高，安全模式防泄露和劫持能力更强。', modes: { 'A': { name: '兼容模式', icon: 'fa-globe-americas' }, 'B': { name: '安全模式', icon: 'fa-shield-alt' } } },
             { tag: 'switch1', name: '请求屏蔽', desc: '对无解析结果的请求进行屏蔽', tip: '建议开启，避免无ipv4及ipv6结果的非必要DNS解析。', valueForOn: 'A' },
             { tag: 'switch5', name: '类型屏蔽', desc: '屏蔽 SOA、PTR、HTTPS 等请求', tip: '建议开启，可减少不必要的网络请求，提高效率。', valueForOn: 'A' },
             { tag: 'switch4', name: '过期缓存1', desc: '启用国内缓存、国外缓存 (兼容)、国外缓存 (安全)、国内域名fakeip缓存', tip: '建议开启，可以提升重复查询的响应速度，即使缓存已过期。', valueForOn: 'A' },
@@ -992,8 +1014,10 @@ document.addEventListener('DOMContentLoaded', () => {
         ],
 
         init() {
+            coreModeConfirmManager.init();
+
             elements.coreModeSwitchGroup.addEventListener('click', e => {
-                const btn = e.target.closest('button');
+                const btn = e.target.closest('button[data-mode]');
                 if (btn && !btn.classList.contains('active')) {
                     this.handleCoreSwitch(btn);
                 }
@@ -1066,6 +1090,16 @@ document.addEventListener('DOMContentLoaded', () => {
         async handleCoreSwitch(button) {
             const tag = 'switch3';
             const valueToPost = button.dataset.mode;
+            const currentValue = state.featureSwitches[tag];
+            const modeNameMap = { A: '兼容模式', B: '安全模式' };
+            const currentModeName = modeNameMap[currentValue] || '当前模式';
+            const targetModeName = modeNameMap[valueToPost] || '目标模式';
+            const confirmed = await coreModeConfirmManager.open(button, currentModeName, targetModeName);
+            if (!confirmed) {
+                this.render();
+                return;
+            }
+
             ui.setLoading(button, true);
             button.parentElement.querySelectorAll('button').forEach(b => b.disabled = true);
 
@@ -1123,89 +1157,127 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    const coreModeConfirmManager = {
+        host: null,
+        popover: null,
+        pendingResolve: null,
+
+        init() {
+            this.host = elements.coreModeSwitchGroup?.closest('.control-item');
+            if (!this.host) return;
+            this.host.classList.add('core-mode-confirm-host');
+            this.ensurePopover();
+
+            document.addEventListener('click', (event) => {
+                if (!this.isOpen()) return;
+                if (this.host.contains(event.target)) return;
+                this.close(false);
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && this.isOpen()) {
+                    this.close(false);
+                }
+            });
+        },
+
+        ensurePopover() {
+            if (this.popover || !this.host) return;
+            const popover = document.createElement('div');
+            popover.className = 'core-mode-confirm-popover';
+            popover.setAttribute('role', 'dialog');
+            popover.setAttribute('aria-modal', 'false');
+            popover.hidden = true;
+            popover.innerHTML = `
+                <h4 class="core-mode-confirm-title" id="core-mode-confirm-title">切换核心模式</h4>
+                <p class="core-mode-confirm-text" id="core-mode-confirm-text"></p>
+                <div class="core-mode-confirm-actions">
+                    <button type="button" class="button secondary small" data-action="cancel">取消</button>
+                    <button type="button" class="button primary small" data-action="confirm">继续切换</button>
+                </div>
+            `;
+
+            popover.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const action = event.target.closest('button')?.dataset.action;
+                if (action === 'cancel') this.close(false);
+                if (action === 'confirm') this.close(true);
+            });
+
+            this.host.appendChild(popover);
+            this.popover = popover;
+        },
+
+        isOpen() {
+            return Boolean(this.popover && this.popover.classList.contains('is-visible'));
+        },
+
+        async open(button, currentModeName, targetModeName) {
+            this.ensurePopover();
+            if (!this.popover) return false;
+
+            this.close(false);
+
+            const text = this.popover.querySelector('#core-mode-confirm-text');
+            if (text) {
+                text.textContent = `将从“${currentModeName}”切换到“${targetModeName}”。切换后会执行一次全新任务来刷新分流缓存，并按新模式重建已生成的分流域名。`;
+            }
+
+            this.popover.hidden = false;
+            this.positionNearButton(button);
+            requestAnimationFrame(() => this.popover?.classList.add('is-visible'));
+
+            return new Promise(resolve => {
+                this.pendingResolve = resolve;
+            });
+        },
+
+        positionNearButton(button) {
+            if (!this.popover || !this.host || !button || window.innerWidth <= CONSTANTS.MOBILE_BREAKPOINT) {
+                this.popover?.style.removeProperty('left');
+                this.popover?.style.removeProperty('--confirm-arrow-left');
+                return;
+            }
+
+            const hostRect = this.host.getBoundingClientRect();
+            const buttonRect = button.getBoundingClientRect();
+            const popoverWidth = this.popover.offsetWidth || 320;
+            const hostWidth = hostRect.width || popoverWidth;
+            const buttonCenter = buttonRect.left - hostRect.left + buttonRect.width / 2;
+            const minLeft = 0;
+            const maxLeft = Math.max(hostWidth - popoverWidth, 0);
+            const left = Math.min(Math.max(buttonCenter - popoverWidth / 2, minLeft), maxLeft);
+            const arrowLeft = Math.min(Math.max(buttonCenter - left - 8, 18), popoverWidth - 34);
+
+            this.popover.style.left = `${left}px`;
+            this.popover.style.setProperty('--confirm-arrow-left', `${arrowLeft}px`);
+        },
+
+        close(confirmed) {
+            if (!this.popover) return;
+            this.popover.classList.remove('is-visible');
+            this.popover.hidden = true;
+
+            if (this.pendingResolve) {
+                const resolve = this.pendingResolve;
+                this.pendingResolve = null;
+                resolve(confirmed);
+            }
+        }
+    };
+
     const updateManager = {
         init() {
             if (!elements.updateModule) return;
-            const autoCfg = this.loadAutoConfig();
-            state.update.auto.enabled = autoCfg.enabled;
-            state.update.auto.intervalMinutes = autoCfg.interval;
-            elements.updateAutoToggle.checked = autoCfg.enabled;
-            elements.updateIntervalInput.value = autoCfg.interval;
-            elements.updateAutoToggle.addEventListener('change', () => {
-                state.update.auto.enabled = elements.updateAutoToggle.checked;
-                this.persistAutoConfig();
-                this.applyAutoSchedule(true);
-            });
-            elements.updateIntervalInput.addEventListener('change', () => {
-                const val = parseInt(elements.updateIntervalInput.value, 10);
-                if (!Number.isFinite(val) || val < 5) {
-                    elements.updateIntervalInput.value = state.update.auto.intervalMinutes;
-                    ui.showToast('自动检查间隔至少为 5 分钟', 'error');
-                    return;
-                }
-                state.update.auto.intervalMinutes = Math.min(val, 720);
-                this.persistAutoConfig();
-                this.applyAutoSchedule(true);
-            });
-            elements.updateCheckBtn?.addEventListener('click', () => this.forceCheck());
+            if (elements.updateCurrentVersion) elements.updateCurrentVersion.textContent = '点击检查';
+            if (elements.updateLatestVersion) elements.updateLatestVersion.textContent = '--';
+            if (elements.updateStatusText) elements.updateStatusText.textContent = '点击“检查更新”后开始检测';
+            if (elements.updateLastChecked) elements.updateLastChecked.textContent = '--';
+            if (elements.updateTargetInfo) elements.updateTargetInfo.textContent = '--';
+            elements.updateCheckBtn?.addEventListener('click', () => this.checkUpdates());
             elements.updateApplyBtn?.addEventListener('click', () => this.applyUpdate());
-            this.applyAutoSchedule(false);
-            // 延迟到用户进入“系统控制”页或后台定时器触发时再检查更新，避免首屏加载转圈变慢
             elements.updateForceBtn?.addEventListener('click', () => this.applyUpdate(true, elements.updateForceBtn));
             elements.updateV3Btn?.addEventListener('click', () => this.applyUpdate(true, elements.updateV3Btn, true));
-        },
-
-        loadAutoConfig() {
-            try {
-                const raw = localStorage.getItem('mosdns-update-auto');
-                if (!raw) throw new Error('empty');
-                const parsed = JSON.parse(raw);
-                return {
-                    enabled: Boolean(parsed.enabled),
-                    interval: Number.isFinite(parsed.interval) ? parsed.interval : CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT,
-                };
-            } catch (e) {
-                return { enabled: true, interval: CONSTANTS.UPDATE_AUTO_MINUTES_DEFAULT };
-            }
-        },
-
-        persistAutoConfig() {
-            const payload = {
-                enabled: state.update.auto.enabled,
-                interval: state.update.auto.intervalMinutes,
-            };
-            try {
-                localStorage.setItem('mosdns-update-auto', JSON.stringify(payload));
-            } catch (e) {
-                console.warn('无法保存自动更新配置:', e);
-            }
-        },
-
-        applyAutoSchedule(resetTimer) {
-            if (resetTimer && state.update.auto.timerId) {
-                clearInterval(state.update.auto.timerId);
-                state.update.auto.timerId = null;
-            }
-            if (elements.updateIntervalInput) {
-                elements.updateIntervalInput.disabled = !state.update.auto.enabled;
-            }
-            if (!state.update.auto.enabled) {
-                this.setHint('自动检查已关闭。您可以随时手动检查更新。');
-                return;
-            }
-            const intervalMs = Math.max(state.update.auto.intervalMinutes, 5) * 60 * 1000;
-            this.setHint(`自动检查已启用，每 ${state.update.auto.intervalMinutes} 分钟检查一次。`);
-            if (!state.update.auto.timerId) {
-                state.update.auto.timerId = setInterval(() => {
-                    this.refreshStatus();
-                }, intervalMs);
-            }
-        },
-
-        setHint(text) {
-            if (elements.updateHintText) {
-                elements.updateHintText.textContent = text;
-            }
         },
 
         // 监听自重启完成：服务可用且版本变化 / 不再 pending_restart 即视为成功
@@ -1313,13 +1385,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (elements.updateCheckBtn) {
                 const span = elements.updateCheckBtn.querySelector('span');
-                if (span) { span.textContent = '强制检查'; elements.updateCheckBtn.dataset.defaultText = '强制检查'; }
+                if (span) { span.textContent = '检查更新'; elements.updateCheckBtn.dataset.defaultText = '检查更新'; }
             }
             if (status.pending_restart) {
                 const isWindows = (status.architecture || '').startsWith('windows/');
                 const msg = isWindows ? '更新已安装，等待手动重启生效。' : '更新已安装，正在自重启…';
                 elements.updateStatusText.textContent = msg;
-                this.setHint(msg);
             } else if (!effectiveUpdate) {
                 // 已是最新：在“最新版本”行右侧显示小徽标，隐藏“立即更新”按钮与冗余横幅
                 if (elements.updateInlineBadge) {
@@ -1352,18 +1423,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
 
-        async refreshStatus(force = false) {
-            if (!elements.updateModule) return;
-            try {
-                const status = force ? await updateApi.forceCheck() : await updateApi.getStatus();
-                this.updateStatusUI(status);
-            } catch (error) {
-                console.error('检查更新失败:', error);
-                ui.showToast('检查更新失败，请稍后重试', 'error');
-            }
-        },
-
-        async forceCheck() {
+        async checkUpdates() {
             if (state.update.loading) return;
             this.setUpdateLoading(true, elements.updateCheckBtn);
             try {
@@ -1371,11 +1431,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ui.showToast('已刷新最新版本信息', 'success');
                 this.updateStatusUI(status);
             } catch (error) {
-                console.error('强制检查更新失败:', error);
-                ui.showToast('强制检查失败', 'error');
+                console.error('检查更新失败:', error);
+                ui.showToast('检查更新失败', 'error');
             } finally {
                 this.setUpdateLoading(false, elements.updateCheckBtn);
-                this.applyAutoSchedule(true);
             }
         },
 
@@ -1402,7 +1461,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 ui.showToast('更新失败，请检查日志', 'error');
             } finally {
                 this.setUpdateLoading(false, button || elements.updateApplyBtn);
-                this.applyAutoSchedule(true);
                 // 若不存在可更新，确保隐藏“立即更新”按钮的显示残留
                 const st = state.update.status;
                 if (elements.updateApplyBtn && st && !st.update_available) {
@@ -2017,7 +2075,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (forceAll) {
                     sysPromises.push(cacheManager.updateStats(signal));
                     sysPromises.push(systemInfoManager.load(signal));
-                    sysPromises.push(updateManager.refreshStatus(false));
                 }
                 if (sysPromises.length > 0) await Promise.allSettled(sysPromises);
             }
@@ -2664,16 +2721,16 @@ function renderRuleTable(tbody, rules, mode) {
             const container = elements.specialGroupsContainer;
             if (!container) return;
             if (!state.specialGroups.length) {
-                container.innerHTML = '<span class="text-secondary-sm">还没有专属分流组。点击“新增专属分流组”后即可在上游设置和在线分流里使用。</span>';
+                container.innerHTML = '<span class="text-secondary-sm">还没有专属分流组。点击左侧“新增专属分流组”后即可在上游设置和在线分流里使用。</span>';
                 return;
             }
             container.innerHTML = state.specialGroups.map(group => `
-                <div class="control-item" style="margin:0; gap:0.6rem; padding:0.5rem 0.75rem; border:1px solid var(--color-border); border-radius:var(--border-radius-md);">
-                    <div style="display:flex; flex-direction:column;">
-                        <strong>${group.name}</strong>
+                <div class="special-group-row">
+                    <span class="special-group-name">${escapeHtml(group.name)}</span>
+                    <div class="special-group-actions">
+                        <button class="button secondary small edit-special-group-btn" data-slot="${group.slot}" style="padding: 0.18rem 0.45rem; font-size: 0.74rem;">改名</button>
+                        <button class="button danger small delete-special-group-btn" data-slot="${group.slot}" style="padding: 0.18rem 0.45rem; font-size: 0.74rem;">删除</button>
                     </div>
-                    <button class="button secondary small edit-special-group-btn" data-slot="${group.slot}" style="margin-left:auto;">改名</button>
-                    <button class="button danger small delete-special-group-btn" data-slot="${group.slot}" style="margin-left:auto;">删除</button>
                 </div>
             `).join('');
         },
@@ -3077,7 +3134,7 @@ function renderRuleTable(tbody, rules, mode) {
     }
 
 const cacheManager = {
-        config: [
+        baseConfig: [
             { key: 'cache_all', name: '全部缓存 (兼容)', tag: 'cache_all' },
             { key: 'cache_cn', name: '国内缓存', tag: 'cache_cn' },
             { key: 'cache_node', name: '节点缓存', tag: 'cache_node' },
@@ -3086,6 +3143,18 @@ const cacheManager = {
             { key: 'cache_google_node', name: '国外缓存 (安全)', tag: 'cache_google_node' },
             { key: 'cache_cnmihomo', name: '国内域名fakeip', tag: 'cache_cnmihomo' }
         ],
+
+        getConfig() {
+            const specialProfiles = (state.specialGroups || [])
+                .slice()
+                .sort((a, b) => a.slot - b.slot)
+                .map(group => ({
+                    key: `cache_special_${group.slot}`,
+                    name: `${group.name} 缓存`,
+                    tag: `cache_special_${group.slot}`
+                }));
+            return [...this.baseConfig, ...specialProfiles];
+        },
 
         parseMetrics(metricsText, cacheTag) {
             const lines = metricsText.split('\n');
@@ -3107,7 +3176,7 @@ const cacheManager = {
             try {
                 const metricsRes = await api.getMetrics(signal);
                 if (metricsRes) {
-                    this.config.forEach(cache => {
+                    this.getConfig().forEach(cache => {
                         state.cacheStats[cache.key] = this.parseMetrics(metricsRes, cache.tag);
                     });
                 }
@@ -3144,7 +3213,7 @@ const cacheManager = {
                 return;
             }
 
-            this.config.forEach(cache => {
+            this.getConfig().forEach(cache => {
                 const tr = document.createElement('tr');
                 const stats = state.cacheStats[cache.key] || { query_total: 0, hit_total: 0, lazy_hit_total: 0, size_current: 0 };
                 const hitRate = stats.query_total > 0 ? (stats.hit_total / stats.query_total * 100).toFixed(2) + '%' : '0.00%';
@@ -3187,6 +3256,29 @@ const cacheManager = {
                 }
                 tbody.appendChild(tr);
             });
+        },
+
+        async clearAll(btn) {
+            const config = this.getConfig();
+            if (config.length === 0) {
+                ui.showToast('没有可清空的缓存', 'error');
+                return;
+            }
+            if (!confirm(`确定要清空全部缓存吗？\n\n将依次清空 ${config.length} 个缓存实例。`)) return;
+
+            ui.setLoading(btn, true);
+            try {
+                const results = await Promise.allSettled(config.map(cache => api.clearCache(cache.tag)));
+                const failed = results.filter(item => item.status === 'rejected').length;
+                await this.updateStats();
+                if (failed > 0) {
+                    ui.showToast(`全部缓存已执行清空，失败 ${failed} 个`, 'error');
+                } else {
+                    ui.showToast('全部缓存已清空', 'success');
+                }
+            } finally {
+                ui.setLoading(btn, false);
+            }
         }
     };
 
@@ -3420,7 +3512,6 @@ const cacheManager = {
             const card = document.createElement('div');
             card.id = 'config-manager-card';
             card.className = 'control-module';
-            card.style.gridColumn = '1 / -1';
 
             // 填充内容，使用与其他 control-module 一致的结构
             card.innerHTML = `
@@ -3456,6 +3547,7 @@ const cacheManager = {
 
             // 插入 DOM (插入到 updateModule 之后)
             updateModule.parentNode.insertBefore(card, updateModule.nextSibling);
+            reorganizeDashboardLayout();
         },
 
         loadSettings() {
@@ -3595,11 +3687,7 @@ const cacheManager = {
             const els = this.getElements();
             if (!els.socks5) return;
 
-            // 1. 隐藏旧按钮
-            if (els.oldSaveBtn) els.oldSaveBtn.style.display = 'none';
-            if (els.oldLoadBtn) els.oldLoadBtn.style.display = 'none';
-
-            // 2. 注入新板块
+            // 1. 注入高级替换设置板块
             this.injectNewCard();
 
             try {
@@ -3623,8 +3711,7 @@ const cacheManager = {
 
             const els = this.getElements();
             if (!els.module || !els.module.parentNode) return;
-            const systemGrid = document.querySelector('#system-control-tab .control-panel-grid');
-            const serviceActionsModule = document.getElementById('service-actions-module');
+            const bottomGrid = document.getElementById('system-bottom-grid');
 
             // 创建新卡片，使用 control-module 类以保持一致性
             const newCard = document.createElement('div');
@@ -3639,7 +3726,7 @@ const cacheManager = {
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M7.5 5.6L5 7 6.4 4.5 5 2 7.5 3.4 10 2 8.6 4.5 10 7 7.5 5.6zm12 9.8L22 17l-2.5 1.4L18.1 22l-1.4-2.5L14.2 18l2.5-1.4L18.1 14l1.4 2.5zM11 10c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6zm-8 8c0-3.31 2.69-6 6-6s6 2.69 6 6-2.69 6-6 6-6-2.69-6-6z"/>
                         </svg>
-                        其它设置
+                        高级替换设置
                     </h3>
                     <button class="button secondary small" id="rep-add-btn">
                         <span>+ 添加规则</span>
@@ -3664,20 +3751,16 @@ const cacheManager = {
                 </div>
 
                 <div class="button-group" style="margin-top: 1rem; justify-content: flex-end;">
-                    <span style="color: var(--color-text-secondary); font-size: 0.85em; margin-right: auto;">保存应用SOCKS5/ECS IP/上游DNS设置</span>
+                    <span style="color: var(--color-text-secondary); font-size: 0.85em; margin-right: auto;">保存后重启并应用高级替换设置</span>
                     <button class="button primary" id="rep-save-btn">
                         <span>保存并重启</span>
                     </button>
                 </div>
             `;
 
-            // 固定插入到系统页最下方，不跟随上游设置卡片
-            if (systemGrid) {
-                if (serviceActionsModule && serviceActionsModule.parentNode === systemGrid) {
-                    systemGrid.insertBefore(newCard, serviceActionsModule.nextSibling);
-                } else {
-                    systemGrid.appendChild(newCard);
-                }
+            // 固定插入到系统设置最下方
+            if (bottomGrid) {
+                bottomGrid.appendChild(newCard);
             } else {
                 els.module.parentNode.insertBefore(newCard, els.module.nextSibling);
             }
@@ -4596,6 +4679,10 @@ const handleInteractiveClick = (e) => {
             });
         });
 
+        if (elements.clearAllCachesBtn) {
+            elements.clearAllCachesBtn.addEventListener('click', () => cacheManager.clearAll(elements.clearAllCachesBtn));
+        }
+
 
         document.body.addEventListener('click', (e) => {
             const domainListLink = e.target.closest('a.control-item-link[data-list-type]');
@@ -4717,7 +4804,6 @@ const handleInteractiveClick = (e) => {
 
         const watch = (selector, fn) => { const el = document.querySelector(selector); if (!el) return; map.set(el, fn); io.observe(el); };
         watch('#system-info-module', () => systemInfoManager.load());
-        watch('#update-module', () => updateManager.refreshStatus(false));
         watch('#feature-switches-module', () => switchManager.loadStatus());
         watch('#domain-stats-module', () => updateDomainListStats());
         watch('#requery-module', () => requeryManager.updateStatus());
@@ -4773,8 +4859,7 @@ const handleInteractiveClick = (e) => {
                 // 预加载系统控制页的关键模块
                 Promise.allSettled([
                     switchManager.loadStatus(),
-                    overridesManager.load(true),
-                    updateManager.refreshStatus(false)
+                    overridesManager.load(true)
                 ]).catch(() => { });
             }, 500);
         }
