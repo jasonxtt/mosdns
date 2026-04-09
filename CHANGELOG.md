@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.1.9
+
+### Added
+
+- added a dedicated `数据管理` section to the merged dashboard for cache and generated-domain maintenance
+- added a one-click `清空所有缓存` action in cache management
+- added an inline confirmation popover when switching the core mode between `兼容模式` and `安全模式`
+
+### Changed
+
+- refined the merged dashboard information architecture and moved upstream management into a cleaner `上游设置` area
+- updated the upstream page so the top strip is lighter and the upstream table remains the primary focus
+- simplified special-group management in the upstream header and improved its visual hierarchy
+- moved `重启 MosDNS` into the system information module
+- moved `SOCKS5 / ECS IP` into the system settings area
+- removed automatic background update checks from the dashboard; update checks are now user-triggered only
+- renamed the update action from `强制检查` to `检查更新`
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.1.8
 
 ### Added

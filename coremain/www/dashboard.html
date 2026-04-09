@@ -465,34 +465,228 @@
             gap: 1rem;
         }
 
+        .system-layout-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .system-grid-quad {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        #system-staging-grid {
+            display: none;
+        }
+
+        .cache-module-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .cache-module-header h3 {
+            margin: 0;
+        }
+
         .upstream-toolbar {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
-            gap: 1rem;
+            align-items: center;
+            gap: 0.85rem;
             flex-wrap: wrap;
-            margin-bottom: 1rem;
+            margin-bottom: 0.85rem;
+            padding-bottom: 0.85rem;
+            border-bottom: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent 22%);
         }
 
         .upstream-toolbar-left {
             display: flex;
-            gap: 0.75rem;
+            flex-direction: row;
             flex-wrap: wrap;
+            gap: 0.75rem;
             align-items: center;
         }
 
         .upstream-toolbar-right {
-            min-width: min(420px, 100%);
+            flex: 1;
+            min-width: min(320px, 100%);
             margin-left: auto;
         }
 
-        .upstream-toolbar-right strong {
-            display: block;
-            margin-bottom: 0.6rem;
+        .upstream-special-groups-strip {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            min-width: 0;
+        }
+
+        .special-groups-title-inline {
+            display: inline-flex;
+            align-items: center;
+            white-space: nowrap;
+            color: var(--color-accent-primary);
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .special-groups-list {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+
+        .special-group-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.28rem 0.45rem;
+            border: 1px solid color-mix(in srgb, var(--color-border) 86%, transparent 14%);
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--color-bg-card) 88%, var(--color-bg-body) 12%);
+        }
+
+        .special-group-name {
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 0.16rem 0.55rem;
+            border-radius: 999px;
+            border: 1px solid color-mix(in srgb, #22c55e 32%, var(--color-border) 68%);
+            background: color-mix(in srgb, #22c55e 10%, transparent 90%);
+            color: #15803d;
+            font-size: 0.96rem;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        .special-group-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            flex-shrink: 0;
+        }
+
+        .other-settings-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .nested-settings-panel {
+            border: 1px solid var(--color-border);
+            border-radius: var(--border-radius-md);
+            padding: 1rem;
+            background: color-mix(in srgb, var(--color-bg-card) 88%, var(--color-bg-body) 12%);
+        }
+
+        .nested-settings-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.9rem;
+        }
+
+        .nested-settings-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 0.9rem;
+        }
+
+        .core-mode-confirm-host {
+            position: relative;
+        }
+
+        .core-mode-confirm-popover {
+            position: absolute;
+            top: calc(100% + 0.7rem);
+            left: 0;
+            z-index: 40;
+            width: min(320px, calc(100vw - 2rem));
+            padding: 0.9rem 1rem;
+            border-radius: 16px;
+            border: 1px solid color-mix(in srgb, var(--color-accent-primary) 20%, var(--color-border) 80%);
+            background: color-mix(in srgb, var(--color-bg-card) 94%, var(--color-bg-body) 6%);
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+            backdrop-filter: blur(14px);
+            opacity: 0;
+            transform: translateY(-8px) scale(0.98);
+            pointer-events: none;
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }
+
+        .core-mode-confirm-popover.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+
+        .core-mode-confirm-popover::before {
+            content: "";
+            position: absolute;
+            top: -8px;
+            left: var(--confirm-arrow-left, 34px);
+            width: 16px;
+            height: 16px;
+            background: inherit;
+            border-top: 1px solid color-mix(in srgb, var(--color-accent-primary) 20%, var(--color-border) 80%);
+            border-left: 1px solid color-mix(in srgb, var(--color-accent-primary) 20%, var(--color-border) 80%);
+            transform: rotate(45deg);
+            border-top-left-radius: 5px;
+        }
+
+        .core-mode-confirm-title {
+            margin: 0 0 0.35rem 0;
+            font-size: 0.96rem;
+            font-weight: 700;
+            color: var(--color-text-primary);
+        }
+
+        .core-mode-confirm-text {
+            margin: 0;
+            color: var(--color-text-secondary);
+            font-size: 0.84rem;
+            line-height: 1.55;
+        }
+
+        .core-mode-confirm-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+            margin-top: 0.85rem;
+        }
+
+        #service-actions-module #overrides-module {
+            display: block !important;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            box-shadow: none;
+            background: transparent;
+            min-height: auto;
+        }
+
+        #service-actions-module #overrides-module h3 {
+            margin: 0 0 0.9rem 0;
+            font-size: 1rem;
+        }
+
+        #service-actions-module #overrides-module .overrides-wrapper {
+            padding: 0;
         }
 
         @media (max-width: 1024px) {
             .query-tools-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .system-grid-quad {
                 grid-template-columns: 1fr;
             }
 
@@ -504,6 +698,34 @@
                 width: 100%;
                 min-width: 0;
                 margin-left: 0;
+            }
+
+            .upstream-special-groups-strip {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .special-groups-list {
+                justify-content: flex-start;
+            }
+
+            .nested-settings-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .cache-module-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .core-mode-confirm-popover {
+                left: 0;
+                width: auto;
+            }
+
+            .core-mode-confirm-popover::before {
+                left: 24px;
+                right: auto;
             }
         }
 
@@ -716,8 +938,9 @@
                             <span>查询日志</span>
                         </a>
                         <a href="#rules" class="tab-link" data-tab="rules" role="tab">规则管理</a>
-                        <a href="#upstream" class="tab-link" data-tab="upstream" role="tab">上游</a>
-                        <a href="#system-control" class="tab-link" data-tab="system-control" role="tab">系统</a>
+                        <a href="#data-management" class="tab-link" data-tab="data-management" role="tab">数据管理</a>
+                        <a href="#upstream" class="tab-link" data-tab="upstream" role="tab">上游设置</a>
+                        <a href="#system-control" class="tab-link" data-tab="system-control" role="tab">系统设置</a>
                     </nav>
                 </div>
                 <span id="last-updated" class="last-updated"></span>
@@ -1204,11 +1427,6 @@
 
         <section id="log-query-tab" class="tab-content">
             <div class="log-query-layout">
-                <div class="query-tools-grid" id="query-tools-grid">
-                    <div id="audit-tools-anchor"></div>
-                    <div id="capacity-tools-anchor"></div>
-                </div>
-
                 <div class="card">
                     <div class="card-body">
                         <nav class="query-sub-nav" aria-label="查询日志子导航">
@@ -1414,7 +1632,10 @@
                     </div>
                 </div>
             </div>
-            <div class="control-panel-grid" id="rules-ops-grid" style="margin-top: 1.25rem;"></div>
+        </section>
+
+        <section id="data-management-tab" class="tab-content">
+            <div class="control-panel-grid" id="data-management-grid"></div>
         </section>
 
         <section id="upstream-tab" class="tab-content">
@@ -1422,7 +1643,12 @@
         </section>
 
         <section id="system-control-tab" class="tab-content">
-            <div class="control-panel-grid">
+            <div class="system-layout-stack">
+                <div class="control-panel-grid system-grid-quad" id="system-top-grid"></div>
+                <div class="control-panel-grid system-grid-quad" id="system-secondary-grid"></div>
+                <div class="control-panel-grid" id="system-feature-grid"></div>
+                <div class="control-panel-grid" id="system-bottom-grid"></div>
+                <div class="control-panel-grid" id="system-staging-grid">
                 <!-- Row 1 -->
                 <div class="control-module control-module--mini">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -1541,11 +1767,16 @@
 
                 <!-- Row 2 -->
                 <div class="control-module">
-                    <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                            <path
-                                d="M4 3h16c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2zm0 2v4h7V5H4zm9 0v4h7V5h-7zm-9 6v4h7v-4H4zm9 0v4h7v-4h-7zm-9 6v2h7v-2H4zm9 0v2h7v-2h-7z">
-                            </path>
-                        </svg>缓存管理</h3>
+                    <div class="cache-module-header">
+                        <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M4 3h16c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2zm0 2v4h7V5H4zm9 0v4h7V5h-7zm-9 6v4h7v-4H4zm9 0v4h7v-4h-7zm-9 6v2h7v-2H4zm9 0v2h7v-2h-7z">
+                                </path>
+                            </svg>缓存管理</h3>
+                        <button id="clear-all-caches-btn" class="button danger small" data-default-text="清空所有缓存">
+                            <span>清空所有缓存</span>
+                        </button>
+                    </div>
                     <div class="scrollable-table-container" style="max-height: none; overflow-y: visible;">
                         <table id="cache-stats-table" class="mobile-card-layout">
                             <thead>
@@ -1706,6 +1937,9 @@
                     <div id="system-info-container" class="info-grid">
                         <!-- System info will be injected by JS -->
                     </div>
+                    <div class="button-group" style="justify-content: flex-end; margin-top: 1rem;">
+                        <button id="upstream-restart-btn" class="button primary" style="width: auto;">重启 MosDNS</button>
+                    </div>
                 </div>
                 <div class="control-module" id="update-module">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -1725,7 +1959,7 @@
                         </div>
                         <div class="button-group update-actions">
                             <button id="update-check-btn" class="button secondary"
-                                data-default-text="强制检查"><span>强制检查</span></button>
+                                data-default-text="检查更新"><span>检查更新</span></button>
                             <button id="update-apply-btn" class="button primary" data-default-text="立即更新"
                                 disabled><span>立即更新</span></button>
                             <button id="update-force-btn" class="button danger"
@@ -1756,31 +1990,44 @@
                         <div class="control-item"><strong>匹配构建</strong> <code id="update-target-info">--</code>
                         </div>
                     </div>
-
-                    <!-- 自动检查设置 -->
-                    <div class="update-auto">
-                        <div class="control-item">
-                            <strong>自动检查</strong>
-                            <label class="switch" style="margin-left:auto;">
-                                <input type="checkbox" id="update-auto-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="update-auto-grid">
-                            <label for="update-interval-input" class="field-label">间隔 (分钟)</label>
-                            <input type="number" id="update-interval-input" min="5" max="1440" value="1440"
-                                style="max-width: 140px;">
-                        </div>
-                        <p class="control-hint" id="update-hint-text"></p>
-                    </div>
                 </div>
 
                 <div class="control-module" id="service-actions-module">
                     <h3><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.42A7 7 0 1 1 7.59 6.6L6.17 5.17a9 9 0 1 0 11.66 0z"></path>
-                        </svg>服务操作</h3>
-                    <div class="button-group" style="justify-content: flex-end;">
-                        <button id="upstream-restart-btn" class="button primary" style="width: auto;">重启 MosDNS</button>
+                        </svg>其他设置</h3>
+                    <div class="other-settings-stack">
+                        <div class="nested-settings-panel" id="service-overrides-host">
+                            <div id="overrides-module" style="display: none;">
+                                <h3>
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20"
+                                        height="20">
+                                        <path d="M3 17v2h6v-2H3zm0-7v2h12V10H3zm0-7v2h18V3H3zm0 14h18v-2H3v2z" />
+                                    </svg>
+                                    SOCKS5/ECS IP
+                                </h3>
+                                <div class="overrides-wrapper">
+                                    <div class="overrides-inputs nested-settings-grid">
+                                        <div class="control-item" style="margin-bottom: 0;">
+                                            <label for="override-socks5-log" class="field-label">socks5 代理</label>
+                                            <input type="text" id="override-socks5-log" placeholder="host:port">
+                                            <small class="control-hint">用于版本更新、远程配置下载、上游国外DNS代理。</small>
+                                        </div>
+                                        <div class="control-item" style="margin-bottom: 0;">
+                                            <label for="override-ecs-log" class="field-label">ECS IP</label>
+                                            <input type="text" id="override-ecs-log" placeholder="IPv4 / IPv6">
+                                            <small class="control-hint">传递至上游国外DNS，以返回对此IP最友好的DNS结果，填写 ipw.cn 显示的 IPv6 地址或者本城市任意 IPv6 地址。</small>
+                                        </div>
+                                    </div>
+                                    <div class="nested-settings-actions">
+                                        <div class="button-group">
+                                            <button id="overrides-load-btn-log" class="button secondary small"><span>读取当前</span></button>
+                                            <button id="overrides-save-btn-log" class="button primary small"><span>保存</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1832,18 +2079,20 @@
 
                     <div class="upstream-toolbar">
                         <div class="upstream-toolbar-left">
-                            <button id="add-special-group-btn" class="button primary small">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path></svg>
-                                新增专属分流组
-                            </button>
                             <button id="add-upstream-btn" class="button primary small">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                                 添加上游DNS
                             </button>
+                            <button id="add-special-group-btn" class="button secondary small">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z"></path></svg>
+                                新增专属分流组
+                            </button>
                         </div>
                         <div class="upstream-toolbar-right">
-                            <strong>专属分流组</strong>
-                            <div id="special-groups-container" style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap;"></div>
+                            <div class="upstream-special-groups-strip">
+                                <span class="special-groups-title-inline">专属分流组</span>
+                                <div id="special-groups-container" class="special-groups-list"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -1870,39 +2119,6 @@
                         </table>
                     </div>
                 </div>
-
-                <!-- 覆盖配置 -->
-                <div class="control-module" id="overrides-module" style="display: none;">
-                    <h3>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20"
-                            height="20">
-                            <path d="M3 17v2h6v-2H3zm0-7v2h12V10H3zm0-7v2h18V3H3zm0 14h18v-2H3v2z" />
-                        </svg>
-                        SOCKS5/ECS IP
-                    </h3>
-                    <div class="overrides-wrapper">
-                        <div class="overrides-inputs"
-                            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
-                            <div class="control-item" style="margin-bottom: 0;">
-                                <label for="override-socks5-log" class="field-label">socks5 代理</label>
-                                <input type="text" id="override-socks5-log" placeholder="host:port">
-                                <small class="control-hint">用于版本更新、远程配置下载、上游国外DNS代理。</small>
-                            </div>
-                            <div class="control-item" style="margin-bottom: 0;">
-                                <label for="override-ecs-log" class="field-label">ECS IP</label>
-                                <input type="text" id="override-ecs-log" placeholder="IPv4 / IPv6">
-                                <small
-                                    class="control-hint">传递至上游国外DNS，以返回对此IP最友好的DNS结果，填写ipw.cn显示的ipv6地址或者本城市任意ipv6地址。</small>
-                            </div>
-                        </div>
-                        <div class="overrides-actions" style="margin-top: 15px;">
-                            <div class="button-group">
-                                <button id="overrides-load-btn-log" class="button secondary"><span>读取当前</span></button>
-                                <button id="overrides-save-btn-log" class="button primary"><span>保存</span></button>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- 保存后自动重启，无需提示 -->
                 </div>
             </div>
         </section>
