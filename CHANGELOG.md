@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v0.1.10
+
+### Changed
+
+- removed the `fastCache` FNV-1a input truncation so long DNS questions no longer hash on only the first 128 bytes
+- normalized `ClientAddr` with `Unmap()` before the UDP fast path runs, reducing IPv4-mapped IPv6 ambiguity in the fast path
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.1.9
 
 ### Added

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/maphash"
-//	"log"
+	//	"log"
 	"net"
 	"net/netip"
 	"sync"
@@ -74,7 +74,7 @@ type eBpfCacheVal struct {
 
 type fastCacheItem struct {
 	expire    int64
-	resp[]byte
+	resp      []byte
 	updating  uint32
 	domainSet string
 }
@@ -108,13 +108,10 @@ func (fc *fastCache) getEbpfMap() *ebpf.Map {
 	return fc.ebpfMap
 }
 
-func calcFNV1a(data[]byte) uint32 {
+func calcFNV1a(data []byte) uint32 {
 	h := uint32(0x811c9dc5)
 	n := len(data)
 	for i, b := range data {
-		if i >= 128 {
-			break
-		}
 		if i < n-4 && b >= 'A' && b <= 'Z' {
 			b += 32
 		}
@@ -215,6 +212,7 @@ type fastHandler struct {
 }
 
 func (h *fastHandler) Handle(ctx context.Context, q *dns.Msg, meta server.QueryMeta, pack func(*dns.Msg) (*[]byte, error)) *[]byte {
+	meta.ClientAddr = meta.ClientAddr.Unmap()
 	payload := h.next.Handle(ctx, q, meta, pack)
 
 	if (meta.PreFastFlags & asyncRefreshMark) != 0 {
@@ -280,7 +278,7 @@ func startRingbufListener(bp *coremain.BP, h *fastHandler, rd *ringbuf.Reader) {
 			return &b, err
 		}
 
-//		log.Printf("[Go-Ringbuf] Triggering async refresh for Stale Cache.")
+		//		log.Printf("[Go-Ringbuf] Triggering async refresh for Stale Cache.")
 		h.Handle(context.Background(), msg, meta, packFunc)
 	}
 }
@@ -315,7 +313,7 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 	}
 
 	var wrappedHandler server.Handler = dh
-	var fastBypass func(int,[]byte, netip.AddrPort) (int, int, uint64, string)
+	var fastBypass func(int, []byte, netip.AddrPort) (int, int, uint64, string)
 
 	if isEbpfPort {
 		var dm DomainMapperPlugin
@@ -369,13 +367,13 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 	return &UdpServer{args: args, c: c}, nil
 }
 
-func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int,[]byte, netip.AddrPort) (int, int, uint64, string) {
+func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int, []byte, netip.AddrPort) (int, int, uint64, string) {
 	var once sync.Once
 	var sw15 SwitchPlugin
 	var dm DomainMapperPlugin
 	var ipSet IPSetPlugin
 
-	return func(reqLen int, buf[]byte, remoteAddr netip.AddrPort) (int, int, uint64, string) {
+	return func(reqLen int, buf []byte, remoteAddr netip.AddrPort) (int, int, uint64, string) {
 		once.Do(func() {
 			if p := bp.M().GetPlugin("switch15"); p != nil {
 				sw15, _ = p.(SwitchPlugin)
@@ -472,10 +470,10 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int
 			if (marks & (1 << 1)) != 0 {
 				return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 3), 0, ""
 			}
-			if (marks & (1 << 2)) != 0 && qtype == 1 {
+			if (marks&(1<<2)) != 0 && qtype == 1 {
 				return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, ""
 			}
-			if (marks & (1 << 3)) != 0 && qtype == 28 {
+			if (marks&(1<<3)) != 0 && qtype == 28 {
 				return server.FastActionReply, makeReject(reqLen, buf, qtypeOff+4, 0), 0, ""
 			}
 		}
@@ -500,7 +498,7 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int
 			marks |= (1 << 30)
 		}
 
-		if (marks & (1 << 6)) != 0 || (marks & (1 << 30)) != 0 {
+		if (marks&(1<<6)) != 0 || (marks&(1<<30)) != 0 {
 			return server.FastActionContinue, 0, marks, dset
 		}
 
@@ -542,7 +540,7 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int
 
 						_, _ = conn.WriteToUDPAddrPort(bakedStale, remoteAddr)
 
-						return server.FastActionContinue, 0, marks|asyncRefreshMark, dset
+						return server.FastActionContinue, 0, marks | asyncRefreshMark, dset
 					}
 				}
 			}
@@ -556,7 +554,7 @@ func buildFastBypass(bp *coremain.BP, fc *fastCache, conn *net.UDPConn) func(int
 	}
 }
 
-func makeReject(reqLen int, buf[]byte, offset int, rcode byte) int {
+func makeReject(reqLen int, buf []byte, offset int, rcode byte) int {
 	if offset > reqLen {
 		offset = reqLen
 	}
@@ -569,7 +567,7 @@ func makeReject(reqLen int, buf[]byte, offset int, rcode byte) int {
 	return offset
 }
 
-func findTTLOffsets(msg[]byte)[]int {
+func findTTLOffsets(msg []byte) []int {
 	if len(msg) < 12 {
 		return nil
 	}
@@ -594,7 +592,7 @@ func findTTLOffsets(msg[]byte)[]int {
 		}
 		offset += 4
 	}
-	var offsets[]int
+	var offsets []int
 	for i := 0; i < int(ancount); i++ {
 		for offset < len(msg) {
 			l := int(msg[offset])
