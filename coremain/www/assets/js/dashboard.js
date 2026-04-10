@@ -34,7 +34,7 @@ function closeAndUnlock(dialogElement) {
 document.addEventListener('DOMContentLoaded', () => {
     const CONSTANTS = { API_BASE_URL: '', LOGS_PER_PAGE: 50, HISTORY_LENGTH: 60, DEFAULT_AUTO_REFRESH_INTERVAL: 15, ANIMATION_DURATION: 1000, MOBILE_BREAKPOINT: 1024, TOAST_DURATION: 3000, SKELETON_ROWS: 10, TOOLTIP_SHOW_DELAY: 200, TOOLTIP_HIDE_DELAY: 250 };
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], specialGroups: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [], viewType: 'domain', currentOffset: 0, currentLimit: 100, currentQuery: '', currentConfig: null, hasMore: true, totalCount: 0 }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false }, diagnostic: { logs: [], showFalse: false } };
+    let state = { isUpdating: false, isCapturing: false, isMobile: false, isTouchDevice: false, currentLogPage: 1, isLogLoading: false, logPaginationInfo: null, displayedLogs: [], currentLogSearchTerm: '', clientAliases: {}, topDomains: [], topClients: [], slowestQueries: [], domainSetRank: [], shuntColors: {}, logSort: { key: 'query_time', order: 'desc' }, ruleSort: { adguard: { key: null, order: 'desc' }, diversion: { key: null, order: 'desc' } }, upstreamSort: { key: null, order: 'desc' }, hideDisabledUpstreams: false, autoRefresh: { enabled: false, intervalId: null, intervalSeconds: CONSTANTS.DEFAULT_AUTO_REFRESH_INTERVAL }, data: { totalQueries: { current: null, previous: null }, avgDuration: { current: null, previous: null } }, history: { totalQueries: [], avgDuration: [], timestamps: [] }, lastUpdateTime: null, adguardRules: [], diversionRules: [], specialGroups: [], requery: { status: null, config: null, pollId: null }, dataView: { rawEntries: [], filteredEntries: [], viewType: 'domain', currentOffset: 0, currentLimit: 100, currentQuery: '', currentConfig: null, hasMore: true, totalCount: 0 }, coreMode: 'A', cacheStats: {}, listManagerInitialized: false, featureSwitches: {}, systemInfo: {}, update: { status: null, loading: false }, diagnostic: { logs: [], showFalse: false } };
     const elements = {
         html: document.documentElement, body: document.body, container: document.querySelector('.container'), initialLoader: document.getElementById('initial-loader'),
         colorSwatches: document.querySelectorAll('.color-swatch'),
@@ -86,6 +86,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ruleTypeWrapper: document.getElementById('rule-type-wrapper'),
         ruleFilesWrapper: document.getElementById('rule-files-wrapper'),
         ruleTypeSelect: document.getElementById('rule-type'),
+        ruleNameInput: document.getElementById('rule-name'),
+        ruleFilesInput: document.getElementById('rule-files'),
+        ruleUrlInput: document.getElementById('rule-url'),
+        ruleAutofillActions: document.getElementById('rule-autofill-actions'),
+        ruleAutofillBtn: document.getElementById('rule-autofill-btn'),
         rulesSubNavLinks: document.querySelectorAll('.sub-nav-link'),
         rulesSubTabContents: document.querySelectorAll('.sub-tab-content'),
         logDetailModal: document.getElementById('log-detail-modal'),
@@ -145,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dataViewSearch: document.getElementById('data-view-search'),
         dataViewModalInfo: document.getElementById('data-view-modal-info'),
         dataViewTableContainer: document.getElementById('data-view-table-container'),
+        toggleDisabledUpstreamsBtn: document.getElementById('toggle-disabled-upstreams-btn'),
         addSpecialGroupBtn: document.getElementById('add-special-group-btn'),
         specialGroupsContainer: document.getElementById('special-groups-container'),
         specialGroupModal: document.getElementById('special-group-modal'),
@@ -161,8 +167,9 @@ document.addEventListener('DOMContentLoaded', () => {
         listContentTextArea: document.getElementById('list-content-textarea'),
         listContentInfo: document.getElementById('list-content-info'),
         listSaveBtn: document.getElementById('list-save-btn'),
-	listMgmtRealIPHint: document.getElementById('list-mgmt-realip-hint'),
+        listMgmtRealIPHint: document.getElementById('list-mgmt-realip-hint'),
 	listMgmtCnFakeipFilterHint: document.getElementById('list-mgmt-cnfakeipfilter-hint'),
+        listMgmtGenericHint: document.getElementById('list-mgmt-generic-hint'),
         listMgmtClientIpHint: document.getElementById('list-mgmt-client-ip-hint'),
         listMgmtDirectIpHint: document.getElementById('list-mgmt-direct-ip-hint'),
         listMgmtRewriteHint: document.getElementById('list-mgmt-rewrite-hint'),
@@ -433,6 +440,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isDiversion) form.elements['type'].value = "";
             }
 
+            ruleAutofillManager.reset({ isDiversion, isEditing: Boolean(rule) });
+
             // -- [修改] -- 采用新的滚动锁定机制
             lockScroll();
             elements.ruleModal.showModal();
@@ -568,6 +577,108 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.pendingResolve = null;
                 resolve(confirmed);
             }
+        }
+    };
+
+    const ruleAutofillManager = {
+        isApplying: false,
+        nameDirty: false,
+        filesDirty: false,
+
+        init() {
+            elements.ruleNameInput?.addEventListener('input', () => {
+                if (!this.isApplying) this.nameDirty = true;
+            });
+            elements.ruleFilesInput?.addEventListener('input', () => {
+                if (!this.isApplying) this.filesDirty = true;
+            });
+            elements.ruleUrlInput?.addEventListener('input', () => {
+                this.syncFromForm();
+            });
+            elements.ruleTypeSelect?.addEventListener('change', () => {
+                this.syncFromForm();
+            });
+            elements.ruleAutofillBtn?.addEventListener('click', () => {
+                const applied = this.syncFromForm({ force: true });
+                if (!applied) {
+                    ui.showToast('无法从当前 URL 识别名称和本地文件路径', 'error');
+                    return;
+                }
+                ui.showToast('已按当前 URL 自动识别', 'success');
+            });
+        },
+
+        reset({ isDiversion = false, isEditing = false } = {}) {
+            this.isApplying = false;
+            this.nameDirty = false;
+            this.filesDirty = false;
+
+            if (elements.ruleAutofillActions) {
+                elements.ruleAutofillActions.style.display = isDiversion ? 'block' : 'none';
+            }
+            if (elements.ruleAutofillBtn) {
+                elements.ruleAutofillBtn.disabled = !isDiversion;
+            }
+
+            if (isDiversion && !isEditing) {
+                this.syncFromForm();
+            }
+        },
+
+        syncFromForm({ force = false } = {}) {
+            const form = elements.ruleForm;
+            if (!form) return false;
+
+            const isDiversion = form.elements['mode']?.value === 'diversion';
+            const isEditing = Boolean(form.elements['id']?.value);
+            if (!isDiversion || isEditing) return false;
+
+            const url = form.elements['url']?.value?.trim() || '';
+            const inferred = this.inferFromUrl(url);
+            if (!inferred) return false;
+
+            this.isApplying = true;
+            try {
+                if (elements.ruleNameInput && (force || !this.nameDirty || !elements.ruleNameInput.value.trim())) {
+                    elements.ruleNameInput.value = inferred.name;
+                    if (force) this.nameDirty = false;
+                }
+                if (elements.ruleFilesInput && (force || !this.filesDirty || !elements.ruleFilesInput.value.trim())) {
+                    elements.ruleFilesInput.value = inferred.filePath;
+                    if (force) this.filesDirty = false;
+                }
+            } finally {
+                this.isApplying = false;
+            }
+            return true;
+        },
+
+        inferFromUrl(url) {
+            if (!url) return null;
+
+            let fileName = '';
+            try {
+                const parsed = new URL(url);
+                fileName = (parsed.pathname || '').split('/').pop() || '';
+            } catch (_) {
+                fileName = url.split('#')[0].split('?')[0].split('/').pop() || '';
+            }
+
+            if (!fileName) return null;
+
+            try {
+                fileName = decodeURIComponent(fileName);
+            } catch (_) {
+            }
+
+            fileName = fileName.trim();
+            if (!fileName) return null;
+
+            const baseName = fileName.replace(/\.[^.]+$/, '') || fileName;
+            return {
+                name: baseName,
+                filePath: `srs/${fileName}`
+            };
         }
     };
 
@@ -2304,6 +2415,200 @@ document.addEventListener('DOMContentLoaded', () => {
         updateHeaders() { document.querySelectorAll('#log-table-head th[data-sortable]').forEach(th => { th.classList.remove('sorted'); const indicator = th.querySelector('.sort-indicator'); if (indicator) { if (th.dataset.sortKey === state.logSort.key) { th.classList.add('sorted'); indicator.textContent = state.logSort.order === 'asc' ? '▲' : '▼'; } else { indicator.textContent = ' '; } } }); }
     };
 
+    const ruleTableSorter = {
+        init() {
+            const adguardHead = document.querySelector('#adguard-rules-table thead');
+            const diversionHead = document.querySelector('#diversion-rules-table thead');
+            adguardHead?.addEventListener('click', (event) => this.handleSort(event, 'adguard'));
+            diversionHead?.addEventListener('click', (event) => this.handleSort(event, 'diversion'));
+            this.updateHeaders('adguard');
+            this.updateHeaders('diversion');
+        },
+        handleSort(event, mode) {
+            const th = event.target.closest('th[data-sortable]');
+            if (!th) return;
+            const key = th.dataset.sortKey;
+            const current = state.ruleSort[mode];
+            if (!current) return;
+            if (current.key === key) {
+                current.order = current.order === 'asc' ? 'desc' : 'asc';
+            } else {
+                current.key = key;
+                current.order = 'asc';
+            }
+            if (mode === 'adguard') {
+                adguardManager.render();
+            } else {
+                diversionManager.render();
+            }
+        },
+        sortRules(rules, mode) {
+            const current = state.ruleSort[mode];
+            const items = [...rules].map((rule, index) => ({ rule, index }));
+            if (!current?.key) {
+                return items.reverse().map(item => item.rule);
+            }
+            const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+            const getTimestamp = (value) => {
+                if (!value || value.startsWith('0001-01-01')) return 0;
+                const ts = Date.parse(value);
+                return Number.isNaN(ts) ? 0 : ts;
+            };
+            const getValue = (rule) => {
+                switch (current.key) {
+                    case 'enabled':
+                        return rule.enabled ? 1 : 0;
+                    case 'name':
+                        return String(rule.name || '');
+                    case 'type':
+                        return mode === 'diversion' ? getDiversionTypeDisplay(rule.type || '') : '';
+                    case 'rule_count':
+                        return Number(rule.rule_count || 0);
+                    case 'last_updated':
+                        return getTimestamp(rule.last_updated || '');
+                    default:
+                        return '';
+                }
+            };
+            items.sort((a, b) => {
+                const valA = getValue(a.rule);
+                const valB = getValue(b.rule);
+                let result = 0;
+                if (typeof valA === 'string' || typeof valB === 'string') {
+                    result = collator.compare(String(valA || ''), String(valB || ''));
+                } else {
+                    result = valA < valB ? -1 : (valA > valB ? 1 : 0);
+                }
+                if (result === 0) {
+                    result = a.index - b.index;
+                }
+                return current.order === 'asc' ? result : -result;
+            });
+            return items.map(item => item.rule);
+        },
+        updateHeaders(mode) {
+            const current = state.ruleSort[mode];
+            document.querySelectorAll(`#${mode}-rules-table th[data-sortable]`).forEach(th => {
+                th.classList.remove('sorted');
+                th.removeAttribute('aria-sort');
+                const indicator = th.querySelector('.sort-indicator');
+                if (!indicator) return;
+                if (current?.key === th.dataset.sortKey) {
+                    th.classList.add('sorted');
+                    th.setAttribute('aria-sort', current.order === 'asc' ? 'ascending' : 'descending');
+                    indicator.textContent = current.order === 'asc' ? '▲' : '▼';
+                } else {
+                    indicator.textContent = ' ';
+                }
+            });
+        }
+    };
+
+    const upstreamTableSorter = {
+        init() {
+            const upstreamHead = document.querySelector('#upstream-dns-table thead');
+            upstreamHead?.addEventListener('click', (event) => this.handleSort(event));
+            this.updateHeaders();
+        },
+        handleSort(event) {
+            const th = event.target.closest('th[data-sortable]');
+            if (!th) return;
+            const key = th.dataset.sortKey;
+            if (state.upstreamSort.key === key) {
+                state.upstreamSort.order = state.upstreamSort.order === 'asc' ? 'desc' : 'asc';
+            } else {
+                state.upstreamSort.key = key;
+                state.upstreamSort.order = 'asc';
+            }
+            upstreamManager.renderTable();
+        },
+        sortUpstreams(items) {
+            const current = state.upstreamSort;
+            if (!current?.key) {
+                return [...items].reverse();
+            }
+            const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+            const getValue = (item) => {
+                switch (current.key) {
+                    case 'enabled':
+                        return item.u.enabled ? 1 : 0;
+                    case 'group':
+                        return getUpstreamGroupDisplay(item.group);
+                    case 'tag':
+                        return String(item.u.tag || '');
+                    case 'protocol':
+                        return String(item.u.protocol || '');
+                    case 'avg_latency':
+                        return item.stats.avgLatencyNumber;
+                    case 'query':
+                        return item.stats.queryNumber;
+                    case 'winner':
+                        return item.stats.winnerNumber;
+                    case 'win_rate':
+                        return item.stats.winRateNumber;
+                    case 'error':
+                        return item.stats.errorNumber;
+                    case 'error_rate':
+                        return item.stats.errorRateNumber;
+                    default:
+                        return '';
+                }
+            };
+            return [...items].sort((a, b) => {
+                const valA = getValue(a);
+                const valB = getValue(b);
+                let result = 0;
+                if (typeof valA === 'string' || typeof valB === 'string') {
+                    result = collator.compare(String(valA || ''), String(valB || ''));
+                } else {
+                    result = valA < valB ? -1 : (valA > valB ? 1 : 0);
+                }
+                if (result === 0) {
+                    result = a.originalOrder - b.originalOrder;
+                }
+                return current.order === 'asc' ? result : -result;
+            });
+        },
+        updateHeaders() {
+            document.querySelectorAll('#upstream-dns-table th[data-sortable]').forEach(th => {
+                th.classList.remove('sorted');
+                th.removeAttribute('aria-sort');
+                const indicator = th.querySelector('.sort-indicator');
+                if (!indicator) return;
+                if (state.upstreamSort.key === th.dataset.sortKey) {
+                    th.classList.add('sorted');
+                    th.setAttribute('aria-sort', state.upstreamSort.order === 'asc' ? 'ascending' : 'descending');
+                    indicator.textContent = state.upstreamSort.order === 'asc' ? '▲' : '▼';
+                } else {
+                    indicator.textContent = ' ';
+                }
+            });
+        }
+    };
+
+    const upstreamFilterManager = {
+        storageKey: 'mosdnsHideDisabledUpstreams',
+        init() {
+            const saved = localStorage.getItem(this.storageKey);
+            state.hideDisabledUpstreams = saved === '1';
+            this.updateButton();
+            elements.toggleDisabledUpstreamsBtn?.addEventListener('click', () => {
+                state.hideDisabledUpstreams = !state.hideDisabledUpstreams;
+                localStorage.setItem(this.storageKey, state.hideDisabledUpstreams ? '1' : '0');
+                this.updateButton();
+                upstreamManager.renderTable();
+            });
+        },
+        updateButton() {
+            const btn = elements.toggleDisabledUpstreamsBtn;
+            if (!btn) return;
+            const label = state.hideDisabledUpstreams ? '显示全部上游' : '隐藏未启用上游';
+            btn.innerHTML = `<span>${label}</span>`;
+            btn.classList.toggle('primary', state.hideDisabledUpstreams);
+            btn.classList.toggle('secondary', !state.hideDisabledUpstreams);
+        }
+    };
+
     function applyLogFilterAndRender() {
         if (!elements.logSearch) return;
         const rawSearchTerm = elements.logSearch.value.trim();
@@ -2648,8 +2953,8 @@ document.addEventListener('DOMContentLoaded', () => {
 function renderRuleTable(tbody, rules, mode) {
         // [修复] 移除旧的 mobile-rule-card-layout 类，使用新的 mobile-card-view
         tbody.closest('table').classList.toggle('mobile-card-view', state.isMobile);
-        
-        const sortedRules = [...rules].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+        const sortedRules = ruleTableSorter.sortRules(rules, mode);
         renderTable(tbody, sortedRules, (rule, index) => {
             // [修复] 如果是移动端，强制使用新的卡片渲染逻辑
             if (state.isMobile) {
@@ -2705,6 +3010,7 @@ function renderRuleTable(tbody, rules, mode) {
                 return item;
             }
         }, mode);
+        ruleTableSorter.updateHeaders(mode);
     }
 
     function renderRuleTableRow(rule, mode) { const tr = document.createElement('tr'); const lastUpdated = rule.last_updated && !rule.last_updated.startsWith('0001-01-01') ? new Date(rule.last_updated).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-') : '—'; let html = `<td class="text-center"><label class="switch"><input type="checkbox" class="rule-enabled-toggle" ${rule.enabled ? 'checked' : ''}><span class="slider"></span></label></td><td>${rule.name}</td>`; if (mode === 'diversion') { html += `<td><span class="response-tag other">${getDiversionTypeDisplay(rule.type)}</span></td>`; } html += `<td><span class="truncate-text" title="${rule.url}">${rule.url}</span></td><td class="text-right">${(rule.rule_count || 0).toLocaleString()}</td><td>${lastUpdated}</td><td class="text-center"><div style="display: inline-flex; gap: 0.5rem; white-space: nowrap;">`; if (mode === 'diversion' && rule.url) { html += `<button class="button secondary rule-update-btn" style="padding: 0.4rem 0.8rem;" title="更新此规则"><span>更新</span></button>`; } html += `<button class="button secondary rule-edit-btn" style="padding: 0.4rem 0.8rem;"><span>编辑</span></button><button class="button danger rule-delete-btn" style="padding: 0.4rem 0.8rem;"><span>删除</span></button></div></td>`; tr.innerHTML = html; return tr; }
@@ -2852,6 +3158,7 @@ function renderRuleTable(tbody, rules, mode) {
                     });
                 }
                 ui.showToast(`广告拦截规则${id ? '更新' : '添加'}成功`);
+                ui.closeRuleModal();
                 await adguardManager.load();
             } else {
                 const data = {
@@ -2906,28 +3213,33 @@ function renderRuleTable(tbody, rules, mode) {
                 }
 
                 ui.showToast(`分流规则${id ? '更新' : '添加'}成功`);
+                ui.closeRuleModal();
+                ui.setLoading(elements.saveRuleBtn, false);
 
-                if (shouldAutoUpdate) {
-                    ui.showToast(`正在自动下载规则 "${finalRuleName}"...`);
-                    try {
-                        await api.fetch(`/plugins/${pluginTag}/update/${finalRuleName}`, { method: 'POST' });
-                        ui.showToast('已触发自动下载，正在等待规则详情刷新...', 'success');
-                        const ready = await waitForDiversionRuleReady(finalRuleName);
-                        if (!ready) {
-                            ui.showToast('规则已开始下载，详情可能稍后刷新。', 'success');
+                (async () => {
+                    if (shouldAutoUpdate) {
+                        ui.showToast(`正在后台自动下载规则 "${finalRuleName}"...`);
+                        try {
+                            await api.fetch(`/plugins/${pluginTag}/update/${finalRuleName}`, { method: 'POST' });
+                            ui.showToast('已触发自动下载，正在后台刷新规则详情...', 'success');
+                            const ready = await waitForDiversionRuleReady(finalRuleName);
+                            if (!ready) {
+                                ui.showToast('规则已开始下载，详情可能稍后刷新。', 'success');
+                            }
+                        } catch (updateErr) {
+                            console.error(`Auto update failed for ${finalRuleName}:`, updateErr);
                         }
-                    } catch (updateErr) {
-                        console.error(`Auto update failed for ${finalRuleName}:`, updateErr);
+                    } else {
+                        await diversionManager.load();
                     }
-                } else {
-                    await diversionManager.load();
-                }
-                if ((!id || (id && data.name !== id)) && !data.url) {
-                    ui.showToast('正在后台获取规则详情...');
-                    setTimeout(() => diversionManager.load(), 5000);
-                }
+
+                    if ((!id || (id && data.name !== id)) && !data.url) {
+                        ui.showToast('正在后台获取规则详情...');
+                        setTimeout(() => diversionManager.load(), 5000);
+                    }
+                })();
+                return;
             }
-            ui.closeRuleModal();
         } catch (err) {
             console.error(`${mode} form submission failed:`, err);
         } finally {
@@ -3577,6 +3889,27 @@ const cacheManager = {
             return this.getProfileByTag(tag)?.name || tag;
         },
 
+        getHintText(tag) {
+            const supportsRuleSyntax = '支持 full:, domain:, keyword:, regexp: 等规则格式。';
+            switch (tag) {
+                case 'whitelist':
+                    return `此列表中的域名会优先命中白名单规则，通过国内DNS解析。${supportsRuleSyntax}`;
+                case 'blocklist':
+                    return `此列表中的域名会优先命中黑名单规则并被屏蔽。${supportsRuleSyntax}`;
+                case 'greylist':
+                    return `此列表中的域名会优先命中灰名单规则，通过国外DNS（fakeip）解析。${supportsRuleSyntax}`;
+                case 'ddnslist':
+                    return `此列表中的域名会按 DDNS 域名处理，适合动态域名解析场景。${supportsRuleSyntax}`;
+                default: {
+                    const profile = this.getProfileByTag(tag);
+                    if (profile?.isSpecial) {
+                        return `此列表中的域名会直接归入“${profile.name}”专属分流组，并使用该组绑定的专属上游与缓存。${supportsRuleSyntax}`;
+                    }
+                    return '';
+                }
+            }
+        },
+
         renderNav() {
             if (!elements.listMgmtNav) return;
             elements.listMgmtNav.innerHTML = this.getProfiles().map(profile => `
@@ -3656,6 +3989,11 @@ const cacheManager = {
             }
             if (elements.listMgmtCnFakeipFilterHint) {
                 elements.listMgmtCnFakeipFilterHint.style.display = (tag === 'cnfakeipfilter') ? 'block' : 'none';
+            }
+            if (elements.listMgmtGenericHint) {
+                const hintText = this.getHintText(tag);
+                elements.listMgmtGenericHint.textContent = hintText;
+                elements.listMgmtGenericHint.style.display = hintText ? 'block' : 'none';
             }
 
             elements.listContentLoader.style.display = 'flex';
@@ -4331,32 +4669,30 @@ renderTable() {
             tbody.innerHTML = '';
 
             const allUpstreams = [];
+            let originalOrder = 0;
             for (const [group, upstreams] of Object.entries(this.state.config)) {
                 if (!upstreams || !Array.isArray(upstreams)) continue;
                 upstreams.forEach((u, idx) => {
-                    allUpstreams.push({ u: u, group: group, originalIndex: idx });
+                    if (state.hideDisabledUpstreams && !u.enabled) return;
+                    const key = `${group}|${u.tag}`;
+                    const stats = u.enabled ? this.getStats(key) : { avgLat: '-', avgLatencyNumber: 0, query: '-', queryNumber: 0, error: '-', errorNumber: 0, rate: '-', errorRateNumber: 0, winner: '-', winnerNumber: 0, winRate: '-', winRateNumber: 0 };
+                    allUpstreams.push({ u: u, group: group, originalIndex: idx, originalOrder: originalOrder++, stats });
                 });
             }
 
             if (allUpstreams.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding:2rem;">暂无上游配置，请点击添加。</td></tr>';
+                const emptyText = state.hideDisabledUpstreams ? '当前没有已启用的上游配置' : '暂无上游配置，请点击添加。';
+                tbody.innerHTML = `<tr><td colspan="11" class="text-center" style="padding:2rem;">${emptyText}</td></tr>`;
                 return;
             }
 
-            allUpstreams.sort((a, b) => {
-                const enabledDiff = (b.u.enabled ? 1 : 0) - (a.u.enabled ? 1 : 0);
-                if (enabledDiff !== 0) return enabledDiff;
-                const groupDiff = a.group.localeCompare(b.group);
-                if (groupDiff !== 0) return groupDiff;
-                return (a.u.tag || '').localeCompare(b.u.tag || '');
-            });
+            const sortedUpstreams = upstreamTableSorter.sortUpstreams(allUpstreams);
 
-            allUpstreams.forEach((item) => {
+            sortedUpstreams.forEach((item) => {
                 const u = item.u;
                 const group = item.group;
                 const index = item.originalIndex;
-                const key = `${group}|${u.tag}`;
-                const stats = u.enabled ? this.getStats(key) : { avgLat: '-', query: '-', error: '-', rate: '-', winner: '-', winRate: '-' };
+                const stats = item.stats;
                 
                 const tr = document.createElement('tr');
                 tr.dataset.group = group; 
@@ -4424,6 +4760,7 @@ renderTable() {
                 }
                 tbody.appendChild(tr);
             });
+            upstreamTableSorter.updateHeaders();
         },
 
         getStats(key) {
@@ -4433,10 +4770,13 @@ renderTable() {
             const w = m.winnerTotal[key] || 0;
             const lSum = m.latSum[key] || 0;
             const lCount = m.latCount[key] || 0;
-            const avg = lCount > 0 ? (lSum / lCount).toFixed(2) + ' ms' : '0 ms';
-            const rate = q > 0 ? ((e / q) * 100).toFixed(2) + '%' : '0.00%';
-            const winRate = q > 0 ? ((w / q) * 100).toFixed(2) + '%' : '0.00%';
-            return { avgLat: avg, query: q, error: e, rate: rate, winner: w, winRate: winRate };
+            const avgLatencyNumber = lCount > 0 ? (lSum / lCount) : 0;
+            const errorRateNumber = q > 0 ? ((e / q) * 100) : 0;
+            const winRateNumber = q > 0 ? ((w / q) * 100) : 0;
+            const avg = avgLatencyNumber.toFixed(2) + ' ms';
+            const rate = errorRateNumber.toFixed(2) + '%';
+            const winRate = winRateNumber.toFixed(2) + '%';
+            return { avgLat: avg, avgLatencyNumber, query: q, queryNumber: q, error: e, errorNumber: e, rate: rate, errorRateNumber, winner: w, winnerNumber: w, winRate: winRate, winRateNumber };
         },
 
         openModal(group = null, index = null) {
@@ -4708,8 +5048,9 @@ async handleSave(formData) {
         document.querySelectorAll('dialog').forEach(dialog => {
             // 1. 点击遮罩层时关闭
             dialog.addEventListener('click', (event) => {
-                // [修改点] 增加判断：如果当前弹窗是 upstream-modal，则不响应遮罩层点击
-                if (event.target === dialog && dialog.id !== 'upstream-modal') {
+                // 避免重要表单在误触遮罩层时直接关闭，导致输入内容丢失。
+                const disableBackdropClose = dialog.id === 'upstream-modal' || dialog.id === 'rule-modal';
+                if (event.target === dialog && !disableBackdropClose) {
                     closeAndUnlock(dialog);
                 }
             });
@@ -5117,6 +5458,7 @@ const handleInteractiveClick = (e) => {
         state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         themeManager.init();
         inlineConfirmManager.init();
+        ruleAutofillManager.init();
         reorganizeDashboardLayout();
         setupQuerySubTabs();
         // 根据进入页签决定是否首屏加载别名（仅日志/概览需要）。避免 system-control 首屏的额外请求。
@@ -5140,6 +5482,9 @@ const handleInteractiveClick = (e) => {
         historyManager.load();
         autoRefreshManager.loadSettings();
         tableSorter.init();
+        ruleTableSorter.init();
+        upstreamTableSorter.init();
+        upstreamFilterManager.init();
         switchManager.init();
         // 绑定 info-icon 提示（例如日志容量的说明图标）
         bindInfoIconTooltips();
