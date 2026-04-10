@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v0.1.11
+
+### Changed
+
+- unified confirmation interactions in the merged dashboard so destructive and important actions now use the same inline popover style instead of mixed native dialogs
+- updated the `SOCKS5 / ECS IP` action buttons for clearer contrast and aligned the `保存` button with the main primary-button styling
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.1.10
 
 ### Changed

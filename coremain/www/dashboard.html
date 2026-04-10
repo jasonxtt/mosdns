@@ -662,6 +662,74 @@
             margin-top: 0.85rem;
         }
 
+        .inline-confirm-popover {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 80;
+            width: min(320px, calc(100vw - 2rem));
+            padding: 0.9rem 1rem;
+            border-radius: 16px;
+            border: 1px solid color-mix(in srgb, var(--color-accent-primary) 18%, var(--color-border) 82%);
+            background: color-mix(in srgb, var(--color-bg-card) 95%, var(--color-bg-body) 5%);
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.2);
+            backdrop-filter: blur(14px);
+            opacity: 0;
+            transform: translateY(-8px) scale(0.98);
+            pointer-events: none;
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }
+
+        .inline-confirm-popover.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+
+        .inline-confirm-popover::before {
+            content: "";
+            position: absolute;
+            top: -8px;
+            left: var(--confirm-arrow-left, 34px);
+            width: 16px;
+            height: 16px;
+            background: inherit;
+            border-top: 1px solid color-mix(in srgb, var(--color-accent-primary) 18%, var(--color-border) 82%);
+            border-left: 1px solid color-mix(in srgb, var(--color-accent-primary) 18%, var(--color-border) 82%);
+            transform: rotate(45deg);
+            border-top-left-radius: 5px;
+        }
+
+        .inline-confirm-title {
+            margin: 0 0 0.35rem 0;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--color-text-primary);
+        }
+
+        .inline-confirm-text {
+            margin: 0;
+            color: var(--color-text-secondary);
+            font-size: 0.84rem;
+            line-height: 1.55;
+        }
+
+        .inline-confirm-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+            margin-top: 0.85rem;
+        }
+
+        .inline-confirm-popover[data-tone="danger"] {
+            border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
+        }
+
+        .inline-confirm-popover[data-tone="danger"]::before {
+            border-top-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
+            border-left-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
+        }
+
         #service-actions-module #overrides-module {
             display: block !important;
             margin: 0;
@@ -679,6 +747,39 @@
 
         #service-actions-module #overrides-module .overrides-wrapper {
             padding: 0;
+        }
+
+        #service-actions-module #overrides-module .button-group {
+            gap: 0.7rem;
+        }
+
+        #overrides-load-btn-log,
+        #overrides-save-btn-log {
+            min-width: 92px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        #overrides-load-btn-log {
+            color: color-mix(in srgb, var(--color-accent-primary) 92%, white 8%);
+            border-color: color-mix(in srgb, var(--color-accent-primary) 30%, var(--color-border) 70%);
+            background: color-mix(in srgb, var(--color-accent-primary) 12%, var(--color-bg-card) 88%);
+        }
+
+        #overrides-save-btn-log {
+            color: var(--color-accent-text) !important;
+            background-color: var(--color-accent-primary) !important;
+            border-color: var(--color-accent-primary) !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.22);
+        }
+
+        [data-theme="dark"] #overrides-save-btn-log,
+        #overrides-save-btn-log span {
+            color: #fff !important;
+        }
+
+        #overrides-load-btn-log span {
+            color: color-mix(in srgb, var(--color-accent-primary) 92%, white 8%) !important;
         }
 
         @media (max-width: 1024px) {
@@ -726,6 +827,14 @@
             .core-mode-confirm-popover::before {
                 left: 24px;
                 right: auto;
+            }
+
+            .inline-confirm-popover {
+                width: min(320px, calc(100vw - 1.5rem));
+            }
+
+            .inline-confirm-popover::before {
+                left: 24px;
             }
         }
 
