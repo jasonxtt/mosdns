@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.1.12
+
+### Added
+
+- added sortable headers for subscription-rule and ad-block rule lists in the merged dashboard
+- added sortable headers for the upstream table and a quick toggle to hide disabled upstreams
+
+### Changed
+
+- default rule-list ordering now shows newly added items first until the user chooses a different sort key
+- default upstream ordering now shows newly added upstreams first until the user chooses a different sort key
+- local rule tabs are now labeled `本地规则 / 订阅规则 / 广告拦截` with clearer inline guidance for whitelist, greylist, DDNS, and special-group lists
+- the diversion-rule creation dialog now auto-fills the rule name and local `srs/...` file path from the URL
+- saving a diversion subscription now closes the dialog immediately while background download and refresh continue
+- refreshed README wording to reflect the WebUI module refactor and the current released version
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.1.11
 
 ### Changed

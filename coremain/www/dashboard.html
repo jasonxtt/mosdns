@@ -1141,17 +1141,23 @@
                         </select>
                     </div>
                     <div class="form-field">
+                        <label for="rule-url">清单网址 (URL)</label>
+                        <input type="url" id="rule-url" name="url" placeholder="https://example.com/rules.txt" required>
+                    </div>
+                    <div class="form-field" id="rule-autofill-actions" style="display: none;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; flex-wrap:wrap;">
+                            <small class="control-hint" style="margin:0;">输入 URL 后会自动识别名称和本地文件路径，也可以手动点击“自动识别”。</small>
+                            <button type="button" id="rule-autofill-btn" class="button secondary small"><span>自动识别</span></button>
+                        </div>
+                    </div>
+                    <div class="form-field">
                         <label for="rule-name">名称</label>
                         <input type="text" id="rule-name" name="name" placeholder="例如：My Custom Rules" required>
                     </div>
                     <div class="form-field" id="rule-files-wrapper" style="display: none;">
                         <label for="rule-files">本地文件路径</label>
-                        <input type="text" id="rule-files" name="files" placeholder="例如: /mosdns/geosite-cn.srs"
+                        <input type="text" id="rule-files" name="files" placeholder="例如: srs/geosite-cn.srs"
                             required>
-                    </div>
-                    <div class="form-field">
-                        <label for="rule-url">清单网址 (URL)</label>
-                        <input type="url" id="rule-url" name="url" placeholder="https://example.com/rules.txt" required>
                     </div>
                     <div class="form-field control-item" style="justify-content: space-between;">
                         <strong>自动更新</strong>
@@ -1616,9 +1622,9 @@
             <div class="card rules-card">
                 <div class="card-body no-padding">
                     <nav class="sub-nav">
-                        <a class="sub-nav-link active" data-sub-tab="list-mgmt">名单管理</a>
+                        <a class="sub-nav-link active" data-sub-tab="list-mgmt">本地规则</a>
+                        <a class="sub-nav-link" data-sub-tab="diversion">订阅规则</a>
                         <a class="sub-nav-link" data-sub-tab="adguard">广告拦截</a>
-                        <a class="sub-nav-link" data-sub-tab="diversion">在线分流</a>
                     </nav>
                     <div id="list-mgmt-sub-tab" class="sub-tab-content active" style="padding: 1.25rem;">
                         <div class="list-mgmt-grid">
@@ -1643,6 +1649,9 @@
                                     <span id="list-content-info"></span>
                                     <button id="list-save-btn" class="button primary"><span>保存</span></button>
                                 </div>
+                                <p id="list-mgmt-generic-hint"
+                                    style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
+                                </p>
                                 <p id="list-mgmt-client-ip-hint"
                                     style="display: none; font-size: 0.85rem; color: var(--color-text-secondary); margin-top: 1rem;">
                                     打开此开关：系统-功能开关-指定 Client fakeip/指定 Client
@@ -1688,11 +1697,11 @@
                             <table id="adguard-rules-table">
                                 <thead>
                                     <tr>
-                                        <th class="text-center hide-on-mobile" style="width: 6rem;">启用</th>
-                                        <th class="hide-on-mobile">名称</th>
+                                        <th class="text-center hide-on-mobile" data-sortable data-sort-key="enabled" style="width: 6rem;">启用 <span class="sort-indicator"></span></th>
+                                        <th class="hide-on-mobile" data-sortable data-sort-key="name">名称 <span class="sort-indicator"></span></th>
                                         <th class="hide-on-mobile">清单网址</th>
-                                        <th class="text-right hide-on-mobile" style="width: 7rem;">规则数</th>
-                                        <th class="hide-on-mobile" style="width: 12rem;">上次更新</th>
+                                        <th class="text-right hide-on-mobile" data-sortable data-sort-key="rule_count" style="width: 7rem;">规则数 <span class="sort-indicator"></span></th>
+                                        <th class="hide-on-mobile" data-sortable data-sort-key="last_updated" style="width: 12rem;">上次更新 <span class="sort-indicator"></span></th>
                                         <th class="text-center hide-on-mobile" style="width: 12rem;">操作</th>
                                     </tr>
                                 </thead>
@@ -1726,12 +1735,12 @@
                             <table id="diversion-rules-table">
                                 <thead>
                                     <tr>
-                                        <th class="text-center hide-on-mobile" style="width: 6rem;">启用</th>
-                                        <th class="hide-on-mobile">名称</th>
-                                        <th class="hide-on-mobile">类型</th>
+                                        <th class="text-center hide-on-mobile" data-sortable data-sort-key="enabled" style="width: 6rem;">启用 <span class="sort-indicator"></span></th>
+                                        <th class="hide-on-mobile" data-sortable data-sort-key="name">名称 <span class="sort-indicator"></span></th>
+                                        <th class="hide-on-mobile" data-sortable data-sort-key="type">类型 <span class="sort-indicator"></span></th>
                                         <th class="hide-on-mobile">清单网址</th>
-                                        <th class="text-right hide-on-mobile" style="width: 7rem;">规则数</th>
-                                        <th class="hide-on-mobile" style="width: 12rem;">上次更新</th>
+                                        <th class="text-right hide-on-mobile" data-sortable data-sort-key="rule_count" style="width: 7rem;">规则数 <span class="sort-indicator"></span></th>
+                                        <th class="hide-on-mobile" data-sortable data-sort-key="last_updated" style="width: 12rem;">上次更新 <span class="sort-indicator"></span></th>
                                         <th class="text-center hide-on-mobile" style="width: 16rem;">操作</th>
                                     </tr>
                                 </thead>
@@ -2209,17 +2218,23 @@
                         <table class="data-table" id="upstream-dns-table" style="min-width: 1000px;">
                             <thead>
                                 <tr>
-                                    <th style="width: 80px; white-space: nowrap;">启用</th>
-                                    <th style="min-width: 120px;">所属组</th>
-                                    <th style="min-width: 100px;">名称</th>
-                                    <th style="min-width: 60px; white-space: nowrap;">类型</th>
-                                    <th class="text-center" style="min-width: 100px; white-space: nowrap;">平均响应</th>
-                                    <th class="text-center">请求数</th>
-                                    <th class="text-center">采纳数</th>
-                                    <th class="text-center">采纳率</th>
-                                    <th class="text-center">错误数</th>
-                                    <th class="text-center">出错率</th>
-                                    <th class="text-center" style="width: 140px;">操作</th>
+                                    <th data-sortable data-sort-key="enabled" style="width: 80px; white-space: nowrap;">启用 <span class="sort-indicator"></span></th>
+                                    <th data-sortable data-sort-key="group" style="min-width: 120px;">所属组 <span class="sort-indicator"></span></th>
+                                    <th data-sortable data-sort-key="tag" style="min-width: 100px;">名称 <span class="sort-indicator"></span></th>
+                                    <th data-sortable data-sort-key="protocol" style="min-width: 60px; white-space: nowrap;">类型 <span class="sort-indicator"></span></th>
+                                    <th class="text-center" data-sortable data-sort-key="avg_latency" style="min-width: 100px; white-space: nowrap;">平均响应 <span class="sort-indicator"></span></th>
+                                    <th class="text-center" data-sortable data-sort-key="query">请求数 <span class="sort-indicator"></span></th>
+                                    <th class="text-center" data-sortable data-sort-key="winner">采纳数 <span class="sort-indicator"></span></th>
+                                    <th class="text-center" data-sortable data-sort-key="win_rate">采纳率 <span class="sort-indicator"></span></th>
+                                    <th class="text-center" data-sortable data-sort-key="error">错误数 <span class="sort-indicator"></span></th>
+                                    <th class="text-center" data-sortable data-sort-key="error_rate">出错率 <span class="sort-indicator"></span></th>
+                                    <th class="text-center" style="width: 168px;">
+                                        <div style="display:inline-flex; align-items:center; justify-content:center; gap:0.45rem; white-space:nowrap;">
+                                            <button id="toggle-disabled-upstreams-btn" class="button secondary small" style="padding:0.22rem 0.55rem; font-size:0.76rem; min-height:auto;">
+                                                <span>隐藏未启用</span>
+                                            </button>
+                                        </div>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody id="upstream-dns-tbody">
