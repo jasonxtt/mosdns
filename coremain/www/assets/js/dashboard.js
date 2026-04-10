@@ -320,6 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const ui = {
         showToast(message, type = 'success') { if (!elements.toast) return; clearTimeout(toastTimeout); const icon = type === 'success' ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"></path></svg>` : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"></path></svg>`; elements.toast.innerHTML = `${icon}<span>${message}</span>`; elements.toast.className = `show ${type}`; const hideToast = () => { elements.toast.className = elements.toast.className.replace('show', ''); }; elements.toast.onmouseenter = () => clearTimeout(toastTimeout); elements.toast.onmouseleave = () => toastTimeout = setTimeout(hideToast, CONSTANTS.TOAST_DURATION); toastTimeout = setTimeout(hideToast, CONSTANTS.TOAST_DURATION); },
         setLoading(button, isLoading) { if (!button) return; const textSpan = button.querySelector('span'); button.disabled = isLoading; button.setAttribute('aria-busy', String(isLoading)); if (textSpan) { if (isLoading) { if (!button.dataset.defaultText) { button.dataset.defaultText = textSpan.textContent; } textSpan.textContent = '处理中...'; } else { if (button.dataset.defaultText) { textSpan.textContent = button.dataset.defaultText; } } } },
+        confirmAction(options = {}) { return inlineConfirmManager.open(options); },
         updateStatus(isCapturing) { if (!elements.toggleAuditBtn || !elements.auditStatus) return; this.setLoading(elements.toggleAuditBtn, false); const statusIndicator = elements.systemControlTabIndicator; if (statusIndicator) statusIndicator.className = 'status-indicator'; if (typeof isCapturing === 'boolean') { state.isCapturing = isCapturing; elements.auditStatus.textContent = isCapturing ? '运行中' : '已停止'; elements.auditStatus.style.color = isCapturing ? 'var(--color-success)' : 'var(--color-danger)'; const actionText = isCapturing ? '关闭审计' : '开启审计'; elements.toggleAuditBtn.querySelector('span').textContent = actionText; elements.toggleAuditBtn.dataset.defaultText = actionText; elements.toggleAuditBtn.className = `button ${isCapturing ? 'danger' : 'primary'}`; if (statusIndicator) statusIndicator.classList.add(isCapturing ? 'running' : 'stopped'); } else { elements.auditStatus.textContent = '未知'; elements.auditStatus.style.color = 'var(--color-text-secondary)'; elements.toggleAuditBtn.querySelector('span').textContent = '刷新状态'; elements.toggleAuditBtn.dataset.defaultText = '刷新状态'; } },
         updateCapacity(capacity) { if (elements.auditCapacity) elements.auditCapacity.textContent = capacity != null ? `${capacity.toLocaleString()} 条` : '查询失败'; },
         updateOverviewStats() {
@@ -439,6 +440,134 @@ document.addEventListener('DOMContentLoaded', () => {
         closeRuleModal() {
             // -- [修改] -- 使用新的统一关闭函数
             closeAndUnlock(elements.ruleModal);
+        }
+    };
+
+    const inlineConfirmManager = {
+        popover: null,
+        pendingResolve: null,
+        anchorButton: null,
+
+        init() {
+            this.ensurePopover();
+
+            document.addEventListener('click', (event) => {
+                if (!this.isOpen()) return;
+                if (this.popover?.contains(event.target)) return;
+                if (this.anchorButton?.contains(event.target)) return;
+                this.close(false);
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && this.isOpen()) {
+                    this.close(false);
+                }
+            });
+
+            window.addEventListener('resize', debounce(() => {
+                if (this.isOpen()) this.positionNearButton(this.anchorButton);
+            }, 80));
+        },
+
+        ensurePopover() {
+            if (this.popover) return;
+            const popover = document.createElement('div');
+            popover.className = 'inline-confirm-popover';
+            popover.setAttribute('role', 'dialog');
+            popover.setAttribute('aria-modal', 'false');
+            popover.hidden = true;
+            popover.innerHTML = `
+                <h4 class="inline-confirm-title" id="inline-confirm-title">确认操作</h4>
+                <p class="inline-confirm-text" id="inline-confirm-text"></p>
+                <div class="inline-confirm-actions">
+                    <button type="button" class="button secondary small" data-action="cancel">取消</button>
+                    <button type="button" class="button danger small" data-action="confirm">继续</button>
+                </div>
+            `;
+
+            popover.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const action = event.target.closest('button')?.dataset.action;
+                if (action === 'cancel') this.close(false);
+                if (action === 'confirm') this.close(true);
+            });
+
+            document.body.appendChild(popover);
+            this.popover = popover;
+        },
+
+        isOpen() {
+            return Boolean(this.popover && this.popover.classList.contains('is-visible'));
+        },
+
+        async open({
+            button,
+            title = '确认操作',
+            text = '',
+            confirmText = '继续',
+            tone = 'danger'
+        } = {}) {
+            this.ensurePopover();
+            if (!this.popover || !button) return false;
+
+            this.close(false);
+            this.anchorButton = button;
+
+            this.popover.dataset.tone = tone;
+            const titleEl = this.popover.querySelector('#inline-confirm-title');
+            const textEl = this.popover.querySelector('#inline-confirm-text');
+            const confirmBtn = this.popover.querySelector('[data-action="confirm"]');
+
+            if (titleEl) titleEl.textContent = title;
+            if (textEl) textEl.textContent = text;
+            if (confirmBtn) {
+                const btnClass = tone === 'primary' ? 'button primary small' : 'button danger small';
+                confirmBtn.className = btnClass;
+                confirmBtn.textContent = confirmText;
+            }
+
+            this.popover.hidden = false;
+            this.positionNearButton(button);
+            requestAnimationFrame(() => this.popover?.classList.add('is-visible'));
+
+            return new Promise(resolve => {
+                this.pendingResolve = resolve;
+            });
+        },
+
+        positionNearButton(button) {
+            if (!this.popover || !button) return;
+
+            const popoverWidth = this.popover.offsetWidth || 320;
+            if (window.innerWidth <= CONSTANTS.MOBILE_BREAKPOINT) {
+                const width = Math.min(popoverWidth, window.innerWidth - 24);
+                const left = Math.max((window.innerWidth - width) / 2, 12);
+                const top = Math.min(button.getBoundingClientRect().bottom + 12, window.innerHeight - this.popover.offsetHeight - 12);
+                this.popover.style.left = `${left}px`;
+                this.popover.style.top = `${Math.max(top, 12)}px`;
+                this.popover.style.setProperty('--confirm-arrow-left', `${Math.min(Math.max(button.getBoundingClientRect().left + button.offsetWidth / 2 - left - 8, 18), width - 34)}px`);
+                return;
+            }
+
+            const rect = button.getBoundingClientRect();
+            const viewportWidth = window.innerWidth;
+            const left = Math.min(Math.max(rect.left + rect.width / 2 - popoverWidth / 2, 12), viewportWidth - popoverWidth - 12);
+            const arrowLeft = Math.min(Math.max(rect.left + rect.width / 2 - left - 8, 18), popoverWidth - 34);
+            this.popover.style.left = `${left}px`;
+            this.popover.style.top = `${rect.bottom + 12}px`;
+            this.popover.style.setProperty('--confirm-arrow-left', `${arrowLeft}px`);
+        },
+
+        close(confirmed) {
+            if (!this.popover) return;
+            this.popover.classList.remove('is-visible');
+            this.popover.hidden = true;
+
+            if (this.pendingResolve) {
+                const resolve = this.pendingResolve;
+                this.pendingResolve = null;
+                resolve(confirmed);
+            }
         }
     };
 
@@ -833,35 +962,48 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         async handleTrigger(e, silent = false) {
-            const confirmed = silent ? true : confirm('确定要开始一个全新的刷新任务吗？\n这将完整执行所有步骤，可能需要一些时间。');
-            if (confirmed) {
-                const btn = e ? e.currentTarget : elements.requeryTriggerBtn;
-                ui.setLoading(btn, true);
-                try {
-                    await requeryApi.trigger();
-                    ui.showToast('刷新任务已开始', 'success');
-                    await this.updateStatus();
-                } catch (error) {
-                    // Error toast is already shown by api.fetch
-                } finally {
-                    ui.setLoading(btn, false);
-                }
+            const btn = e ? e.currentTarget : elements.requeryTriggerBtn;
+            const confirmed = silent ? true : await ui.confirmAction({
+                button: btn,
+                title: '开始刷新任务',
+                text: '将启动一次全新刷新任务，并完整执行所有步骤，可能需要一些时间。',
+                confirmText: '开始刷新',
+                tone: 'primary'
+            });
+            if (!confirmed) return;
+
+            ui.setLoading(btn, true);
+            try {
+                await requeryApi.trigger();
+                ui.showToast('刷新任务已开始', 'success');
+                await this.updateStatus();
+            } catch (error) {
+                // Error toast is already shown by api.fetch
+            } finally {
+                ui.setLoading(btn, false);
             }
         },
 
         async handleCancel(e) {
-            if (confirm('确定要取消当前正在执行的任务吗？')) {
-                const btn = e.currentTarget;
-                ui.setLoading(btn, true);
-                try {
-                    await requeryApi.cancel();
-                    ui.showToast('已发送取消请求', 'success');
-                    elements.requeryCancelBtn.hidden = true;
-                    elements.requeryTriggerBtn.hidden = false;
-                } catch (error) { }
-                finally {
-                    ui.setLoading(btn, false);
-                }
+            const btn = e.currentTarget;
+            const confirmed = await ui.confirmAction({
+                button: btn,
+                title: '取消刷新任务',
+                text: '确定要取消当前正在执行的刷新任务吗？',
+                confirmText: '确认取消',
+                tone: 'danger'
+            });
+            if (!confirmed) return;
+
+            ui.setLoading(btn, true);
+            try {
+                await requeryApi.cancel();
+                ui.showToast('已发送取消请求', 'success');
+                elements.requeryCancelBtn.hidden = true;
+                elements.requeryTriggerBtn.hidden = false;
+            } catch (error) { }
+            finally {
+                ui.setLoading(btn, false);
             }
         },
 
@@ -2598,7 +2740,89 @@ function renderRuleTable(tbody, rules, mode) {
         }
         return false;
     }
-    async function handleRuleTableClick(event, mode) { const target = event.target.closest('button, input.rule-enabled-toggle'); if (!target) return; const itemElement = target.closest('[data-rule-id]'); if (!itemElement) return; const id = itemElement.dataset.ruleId; const rules = mode === 'adguard' ? state.adguardRules : state.diversionRules; const rule = rules.find(r => (mode === 'adguard' ? r.id : r.name) === id); if (!rule) return; if (target.matches('.rule-edit-btn')) ui.openRuleModal(mode, rule); else if (target.matches('.rule-delete-btn')) { if (confirm(`确定要删除规则 "${rule.name}" 吗？此操作不可恢复。`)) { ui.setLoading(target, true); try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'DELETE' }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'DELETE' }); ui.showToast(`规则 "${rule.name}" 已删除`); await (mode === 'adguard' ? adguardManager.load() : diversionManager.load()); } catch (e) { console.error(`Failed to delete rule ${id}:`, e); } finally { ui.setLoading(target, false); } } } else if (target.matches('.rule-update-btn')) { ui.setLoading(target, true); ui.showToast(`正在后台更新规则 "${rule.name}"...`); try { await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/update/${id}`, { method: 'POST' }); ui.showToast('更新请求已发送, 5秒后自动刷新', 'success'); setTimeout(() => diversionManager.load(), 5000); } catch (e) { } finally { ui.setLoading(target, false); } } else if (target.matches('.rule-enabled-toggle')) { const updatedRule = { ...rule, enabled: target.checked }; target.disabled = true; try { if (mode === 'adguard') await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); else await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updatedRule) }); rule.enabled = target.checked; ui.showToast(`规则 "${rule.name}" 已${target.checked ? '启用' : '禁用'}`); } catch (error) { target.checked = !target.checked; } finally { target.disabled = false; } } }
+    async function handleRuleTableClick(event, mode) {
+        const target = event.target.closest('button, input.rule-enabled-toggle');
+        if (!target) return;
+        const itemElement = target.closest('[data-rule-id]');
+        if (!itemElement) return;
+
+        const id = itemElement.dataset.ruleId;
+        const rules = mode === 'adguard' ? state.adguardRules : state.diversionRules;
+        const rule = rules.find(r => (mode === 'adguard' ? r.id : r.name) === id);
+        if (!rule) return;
+
+        if (target.matches('.rule-edit-btn')) {
+            ui.openRuleModal(mode, rule);
+            return;
+        }
+
+        if (target.matches('.rule-delete-btn')) {
+            const confirmed = await ui.confirmAction({
+                button: target,
+                title: '删除规则',
+                text: `确定要删除规则“${rule.name}”吗？此操作不可恢复。`,
+                confirmText: '确认删除',
+                tone: 'danger'
+            });
+            if (!confirmed) return;
+
+            ui.setLoading(target, true);
+            try {
+                if (mode === 'adguard') {
+                    await api.fetch(`/plugins/adguard/rules/${id}`, { method: 'DELETE' });
+                } else {
+                    await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, { method: 'DELETE' });
+                }
+                ui.showToast(`规则 "${rule.name}" 已删除`);
+                await (mode === 'adguard' ? adguardManager.load() : diversionManager.load());
+            } catch (e) {
+                console.error(`Failed to delete rule ${id}:`, e);
+            } finally {
+                ui.setLoading(target, false);
+            }
+            return;
+        }
+
+        if (target.matches('.rule-update-btn')) {
+            ui.setLoading(target, true);
+            ui.showToast(`正在后台更新规则 "${rule.name}"...`);
+            try {
+                await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/update/${id}`, { method: 'POST' });
+                ui.showToast('更新请求已发送, 5秒后自动刷新', 'success');
+                setTimeout(() => diversionManager.load(), 5000);
+            } catch (e) {
+            } finally {
+                ui.setLoading(target, false);
+            }
+            return;
+        }
+
+        if (target.matches('.rule-enabled-toggle')) {
+            const updatedRule = { ...rule, enabled: target.checked };
+            target.disabled = true;
+            try {
+                if (mode === 'adguard') {
+                    await api.fetch(`/plugins/adguard/rules/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updatedRule)
+                    });
+                } else {
+                    await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[rule.type]}/config/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updatedRule)
+                    });
+                }
+                rule.enabled = target.checked;
+                ui.showToast(`规则 "${rule.name}" 已${target.checked ? '启用' : '禁用'}`);
+            } catch (error) {
+                target.checked = !target.checked;
+            } finally {
+                target.disabled = false;
+            }
+        }
+    }
     async function handleRuleFormSubmit(event) {
         event.preventDefault();
         ui.setLoading(elements.saveRuleBtn, true);
@@ -2648,8 +2872,15 @@ function renderRuleTable(tbody, rules, mode) {
                 if (id) {
                     const originalRule = state.diversionRules.find(r => r.name === id);
                     if (data.name !== id) {
-                        if (!confirm(`规则名称已从 "${id}" 更改为 "${data.name}"。\n\n这将删除旧规则并创建一个新规则，确定要继续吗？`)) {
-                            throw new Error('User cancelled name change.');
+                        const confirmed = await ui.confirmAction({
+                            button: elements.saveRuleBtn,
+                            title: '规则名称变更',
+                            text: `规则名称将从“${id}”改为“${data.name}”，这会删除旧规则并创建一个新规则。`,
+                            confirmText: '确认继续',
+                            tone: 'danger'
+                        });
+                        if (!confirmed) {
+                            return;
                         }
                         await api.fetch(`/plugins/${diversionManager.sdSetInstanceMap[originalRule.type]}/config/${id}`, { method: 'DELETE' });
                         await api.fetch(`/plugins/${pluginTag}/config/${data.name}`, {
@@ -2765,8 +2996,15 @@ function renderRuleTable(tbody, rules, mode) {
                 ui.setLoading(elements.saveSpecialGroupBtn, false);
             }
         },
-        async remove(slot) {
-            if (!confirm('删除该专属分流组后，会清空其绑定的上游配置与在线分流配置。确定继续吗？')) return;
+        async remove(slot, button) {
+            const confirmed = await ui.confirmAction({
+                button,
+                title: '删除专属分流组',
+                text: '删除后会清空该组绑定的上游配置与在线分流配置。',
+                confirmText: '确认删除',
+                tone: 'danger'
+            });
+            if (!confirmed) return;
             try {
                 await api.fetch(`/api/v1/special-groups/${slot}`, { method: 'DELETE' });
                 ui.showToast('专属分流组已删除', 'success');
@@ -3096,7 +3334,14 @@ function renderRuleTable(tbody, rules, mode) {
     }
 
     async function saveAllShuntRules() {
-        if (!confirm('确定要保存所有分流规则吗?')) return;
+        const confirmed = await ui.confirmAction({
+            button: elements.saveShuntRulesBtn,
+            title: '保存分流规则',
+            text: '确定要保存所有分流规则吗？',
+            confirmText: '确认保存',
+            tone: 'primary'
+        });
+        if (!confirmed) return;
         ui.setLoading(elements.saveShuntRulesBtn, true);
         ui.showToast('正在后台保存所有分流规则...');
         try {
@@ -3118,7 +3363,14 @@ function renderRuleTable(tbody, rules, mode) {
     }
 
     async function clearAllShuntRules() {
-        if (!confirm('【重要操作】确定要清空所有动态生成的分流规则吗？此操作不可撤销。')) return;
+        const confirmed = await ui.confirmAction({
+            button: elements.clearShuntRulesBtn,
+            title: '清空分流规则',
+            text: '确定要清空所有动态生成的分流规则吗？此操作不可撤销。',
+            confirmText: '确认清空',
+            tone: 'danger'
+        });
+        if (!confirmed) return;
         ui.setLoading(elements.clearShuntRulesBtn, true);
         ui.showToast('正在后台清空所有分流规则...');
         try {
@@ -3264,7 +3516,14 @@ const cacheManager = {
                 ui.showToast('没有可清空的缓存', 'error');
                 return;
             }
-            if (!confirm(`确定要清空全部缓存吗？\n\n将依次清空 ${config.length} 个缓存实例。`)) return;
+            const confirmed = await ui.confirmAction({
+                button: btn,
+                title: '清空所有缓存',
+                text: `将依次清空 ${config.length} 个缓存实例，此操作不可恢复。`,
+                confirmText: '确认清空',
+                tone: 'danger'
+            });
+            if (!confirmed) return;
 
             ui.setLoading(btn, true);
             try {
@@ -3639,7 +3898,14 @@ const cacheManager = {
                 return;
             }
 
-            if (!confirm('确定要从远程 URL 更新配置吗？\n\n1. 当前配置将备份到 backup 子目录。\n2. 新配置将覆盖现有文件。\n3. MosDNS 将自动重启。\n\n此操作存在风险，请确保 URL 可信。')) {
+            const confirmed = await ui.confirmAction({
+                button: btn,
+                title: '远程更新配置',
+                text: '当前配置会先备份到 backup 子目录，新配置将覆盖现有文件，并在完成后自动重启 MosDNS。',
+                confirmText: '确认更新',
+                tone: 'danger'
+            });
+            if (!confirmed) {
                 return;
             }
 
@@ -3944,7 +4210,7 @@ renderReplacementsTable() {
 
         bindEvents() {
             document.getElementById('add-upstream-btn')?.addEventListener('click', () => this.openModal());
-            document.getElementById('upstream-restart-btn')?.addEventListener('click', () => this.restartService());
+            document.getElementById('upstream-restart-btn')?.addEventListener('click', (e) => this.restartService(e.currentTarget));
             elements.addSpecialGroupBtn?.addEventListener('click', () => specialGroupManager.openModal());
             elements.specialGroupsContainer?.addEventListener('click', (e) => {
                 const editBtn = e.target.closest('.edit-special-group-btn');
@@ -3955,7 +4221,7 @@ renderReplacementsTable() {
                     return;
                 }
                 if (!btn) return;
-                specialGroupManager.remove(parseInt(btn.dataset.slot, 10));
+                specialGroupManager.remove(parseInt(btn.dataset.slot, 10), btn);
             });
             
             // 列表操作委托
@@ -3969,7 +4235,7 @@ renderReplacementsTable() {
                 if (btn.classList.contains('edit-btn')) {
                     this.openModal(group, index);
                 } else if (btn.classList.contains('delete-btn')) {
-                    this.deleteUpstream(group, index);
+                    this.deleteUpstream(group, index, btn);
                 }
             });
 
@@ -4393,8 +4659,15 @@ async handleSave(formData) {
             }
         },
 
-        async deleteUpstream(group, index) {
-            if (!confirm('确定要删除此上游吗？')) return;
+        async deleteUpstream(group, index, button) {
+            const confirmed = await ui.confirmAction({
+                button,
+                title: '删除上游',
+                text: '确定要删除这个上游配置吗？',
+                confirmText: '确认删除',
+                tone: 'danger'
+            });
+            if (!confirmed) return;
             const list = this.state.config[group];
             list.splice(index, 1);
             try {
@@ -4410,8 +4683,15 @@ async handleSave(formData) {
             }
         },
 
-        async restartService() {
-            if(!confirm('重启 MosDNS 以应用更改？')) return;
+        async restartService(button = document.getElementById('upstream-restart-btn')) {
+            const confirmed = await ui.confirmAction({
+                button,
+                title: '重启 MosDNS',
+                text: '确定要重启 MosDNS 以应用当前更改吗？',
+                confirmText: '确认重启',
+                tone: 'primary'
+            });
+            if (!confirmed) return;
             try {
                 await api.fetch('/api/v1/system/restart', { method: 'POST', body: JSON.stringify({ delay_ms: 500 }) });
                 ui.showToast('正在重启...', 'success');
@@ -4467,19 +4747,26 @@ async handleSave(formData) {
         });
 
         elements.clearAuditBtn?.addEventListener('click', async (e) => {
-            if (confirm('确定要清空所有内存审计日志吗？此操作不可恢复。')) {
-                const btn = e.currentTarget;
-                ui.setLoading(btn, true);
-                try {
-                    await api.clear();
-                    ui.showToast('日志已清空', 'success');
-                    if (elements.logSearch) elements.logSearch.value = '';
-                    await updatePageData(true);
-                } catch (error) {
-                    ui.showToast('清空日志失败', 'error');
-                } finally {
-                    ui.setLoading(btn, false);
-                }
+            const btn = e.currentTarget;
+            const confirmed = await ui.confirmAction({
+                button: btn,
+                title: '清空查询日志',
+                text: '将删除当前所有内存审计日志，此操作不可恢复。',
+                confirmText: '确认清空',
+                tone: 'danger'
+            });
+            if (!confirmed) return;
+
+            ui.setLoading(btn, true);
+            try {
+                await api.clear();
+                ui.showToast('日志已清空', 'success');
+                if (elements.logSearch) elements.logSearch.value = '';
+                await updatePageData(true);
+            } catch (error) {
+                ui.showToast('清空日志失败', 'error');
+            } finally {
+                ui.setLoading(btn, false);
             }
         });
 
@@ -4490,20 +4777,27 @@ async handleSave(formData) {
                 ui.showToast('请输入1到400000之间的有效容量', 'error');
                 return;
             }
-            if (confirm(`确定要将容量设置为 ${newCapacity.toLocaleString()} 吗？\n\n注意：这将清空当前所有日志。`)) {
-                const btn = e.currentTarget.querySelector('button');
-                ui.setLoading(btn, true);
-                try {
-                    await api.setCapacity(newCapacity);
-                    ui.showToast(`容量已成功设置为 ${newCapacity.toLocaleString()}`, 'success');
-                    elements.newCapacityInput.value = '';
-                    if (elements.logSearch) elements.logSearch.value = '';
-                    await updatePageData(true);
-                } catch (error) {
-                    console.error("Set capacity failed:", error);
-                } finally {
-                    ui.setLoading(btn, false);
-                }
+            const btn = e.currentTarget.querySelector('button');
+            const confirmed = await ui.confirmAction({
+                button: btn,
+                title: '调整日志容量',
+                text: `将容量设置为 ${newCapacity.toLocaleString()}，并清空当前所有日志。`,
+                confirmText: '确认设置',
+                tone: 'danger'
+            });
+            if (!confirmed) return;
+
+            ui.setLoading(btn, true);
+            try {
+                await api.setCapacity(newCapacity);
+                ui.showToast(`容量已成功设置为 ${newCapacity.toLocaleString()}`, 'success');
+                elements.newCapacityInput.value = '';
+                if (elements.logSearch) elements.logSearch.value = '';
+                await updatePageData(true);
+            } catch (error) {
+                console.error("Set capacity failed:", error);
+            } finally {
+                ui.setLoading(btn, false);
             }
         });
 
@@ -4704,7 +4998,14 @@ const handleInteractiveClick = (e) => {
             } else if (clearCacheBtn) {
                 e.preventDefault();
                 const cacheTag = clearCacheBtn.dataset.cacheTag;
-                if (confirm(`确定要清空缓存 "${cacheTag}" 吗？`)) {
+                ui.confirmAction({
+                    button: clearCacheBtn,
+                    title: '清空缓存',
+                    text: `确定要清空缓存“${cacheTag}”吗？`,
+                    confirmText: '确认清空',
+                    tone: 'danger'
+                }).then((confirmed) => {
+                    if (!confirmed) return;
                     ui.setLoading(clearCacheBtn, true);
                     api.clearCache(cacheTag)
                         .then(() => {
@@ -4717,7 +5018,7 @@ const handleInteractiveClick = (e) => {
                         .finally(() => {
                             // The button is part of a re-rendered table, so no need to setLoading(false)
                         });
-                }
+                });
             }
         });
 
@@ -4815,6 +5116,7 @@ const handleInteractiveClick = (e) => {
     async function init() {
         state.isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         themeManager.init();
+        inlineConfirmManager.init();
         reorganizeDashboardLayout();
         setupQuerySubTabs();
         // 根据进入页签决定是否首屏加载别名（仅日志/概览需要）。避免 system-control 首屏的额外请求。
