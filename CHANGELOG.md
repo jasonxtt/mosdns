@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v0.1.13
+
+### Changed
+
+- fixed diversion type labels in WebUI so `cuscn` is displayed as `!cn@cn` and `cusnocn` is displayed as `cn@!cn`, matching the actual routing behavior
+- updated diversion-rule help text to avoid confusion between label wording and backend rule semantics
+- improved inline confirmation popover placement near viewport edges; when the trigger is near the bottom of the screen, the popover now flips upward and remains clickable
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.1.12
 
 ### Added
