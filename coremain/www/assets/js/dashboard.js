@@ -226,8 +226,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { value: 'geositecn', label: '中国域名' },
         { value: 'geositenocn', label: '非中国域名' },
         { value: 'geoipcn', label: '中国ip' },
-        { value: 'cuscn', label: 'cn@!cn' },
-        { value: 'cusnocn', label: '!cn@cn' }
+        { value: 'cuscn', label: '!cn@cn' },
+        { value: 'cusnocn', label: 'cn@!cn' }
     ];
 
     const isSpecialGroupType = (type) => /^special_\d+$/.test(type || '');
@@ -548,22 +548,39 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!this.popover || !button) return;
 
             const popoverWidth = this.popover.offsetWidth || 320;
+            const popoverHeight = this.popover.offsetHeight || 180;
+            const gap = 12;
+            const minEdge = 12;
             if (window.innerWidth <= CONSTANTS.MOBILE_BREAKPOINT) {
                 const width = Math.min(popoverWidth, window.innerWidth - 24);
                 const left = Math.max((window.innerWidth - width) / 2, 12);
-                const top = Math.min(button.getBoundingClientRect().bottom + 12, window.innerHeight - this.popover.offsetHeight - 12);
+                const rect = button.getBoundingClientRect();
+                const maxTop = window.innerHeight - popoverHeight - minEdge;
+                const preferBottom = rect.bottom + gap;
+                const preferTop = rect.top - popoverHeight - gap;
+                const placeTop = preferBottom > maxTop && preferTop >= minEdge;
+                const top = placeTop ? preferTop : Math.min(preferBottom, maxTop);
                 this.popover.style.left = `${left}px`;
                 this.popover.style.top = `${Math.max(top, 12)}px`;
+                this.popover.dataset.placement = placeTop ? 'top' : 'bottom';
                 this.popover.style.setProperty('--confirm-arrow-left', `${Math.min(Math.max(button.getBoundingClientRect().left + button.offsetWidth / 2 - left - 8, 18), width - 34)}px`);
                 return;
             }
 
             const rect = button.getBoundingClientRect();
             const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
             const left = Math.min(Math.max(rect.left + rect.width / 2 - popoverWidth / 2, 12), viewportWidth - popoverWidth - 12);
             const arrowLeft = Math.min(Math.max(rect.left + rect.width / 2 - left - 8, 18), popoverWidth - 34);
+            const maxTop = viewportHeight - popoverHeight - minEdge;
+            const preferBottom = rect.bottom + gap;
+            const preferTop = rect.top - popoverHeight - gap;
+            const placeTop = preferBottom > maxTop && preferTop >= minEdge;
+            const top = placeTop ? preferTop : Math.min(preferBottom, maxTop);
+
             this.popover.style.left = `${left}px`;
-            this.popover.style.top = `${rect.bottom + 12}px`;
+            this.popover.style.top = `${Math.max(top, minEdge)}px`;
+            this.popover.dataset.placement = placeTop ? 'top' : 'bottom';
             this.popover.style.setProperty('--confirm-arrow-left', `${arrowLeft}px`);
         },
 
@@ -5711,8 +5728,8 @@ document.addEventListener('DOMContentLoaded', function () {
                                 <p style="margin-bottom: 0.5rem;"><strong>geositecn:</strong> 中国大陆域名列表，用于直连。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>geositenocn:</strong> 非中国大陆域名列表，用于代理。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>geoipcn:</strong> 中国大陆 IP 列表。</p>
-                                <p style="margin-bottom: 0.5rem;"><strong>cuscn:</strong> 自定义中国大陆域名。</p>
-                                <p style="margin-bottom: 0.5rem;"><strong>cusnocn:</strong> 自定义非中国大陆域名。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>cuscn:</strong> 对应 !cn@cn（直连补充）。</p>
+                                <p style="margin-bottom: 0.5rem;"><strong>cusnocn:</strong> 对应 cn@!cn（代理补充）。</p>
                                 <p style="margin-bottom: 0.5rem;"><strong>专属分流组:</strong> 绑定独立上游与独立缓存的自定义分流组，命中后优先走对应专属上游。</p>
                             </div>
                         </div>

@@ -700,6 +700,15 @@
             border-top-left-radius: 5px;
         }
 
+        .inline-confirm-popover[data-placement="top"]::before {
+            top: auto;
+            bottom: -8px;
+            border-top: 0;
+            border-left: 0;
+            border-right: 1px solid color-mix(in srgb, var(--color-accent-primary) 18%, var(--color-border) 82%);
+            border-bottom: 1px solid color-mix(in srgb, var(--color-accent-primary) 18%, var(--color-border) 82%);
+        }
+
         .inline-confirm-title {
             margin: 0 0 0.35rem 0;
             font-size: 0.95rem;
@@ -728,6 +737,11 @@
         .inline-confirm-popover[data-tone="danger"]::before {
             border-top-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
             border-left-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
+        }
+
+        .inline-confirm-popover[data-tone="danger"][data-placement="top"]::before {
+            border-right-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
+            border-bottom-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border) 70%);
         }
 
         #service-actions-module #overrides-module {
@@ -1136,8 +1150,8 @@
                             <option value="geositecn">中国域名</option>
                             <option value="geositenocn">非中国域名</option>
                             <option value="geoipcn">中国ip</option>
-                            <option value="cuscn">cn@!cn</option>
-                            <option value="cusnocn">!cn@cn</option>
+                            <option value="cuscn">!cn@cn</option>
+                            <option value="cusnocn">cn@!cn</option>
                         </select>
                     </div>
                     <div class="form-field">
