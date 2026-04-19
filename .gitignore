@@ -20,9 +20,12 @@ release/
 # ide
 .vscode/
 .idea/
+node_modules/
+webui-log/node_modules/
 
 # test utils
 testutils/
 demo/
 /.playwright-mcp/
 /.spec-workflow/
+/mosdns
