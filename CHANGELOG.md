@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## v0.2.0
+
+### Added
+
+- introduced a Vue 3 WebUI implementation under `/log` with modular pages for overview, query logs, rules, upstreams, data management, and system settings
+- added modal-based detail and edit flows across the new UI (query detail, top-domain detail, slow-query detail, rule edit, upstream edit, adblock/subscription edit)
+- added donut-chart visualization and percentage display for domain-set hit ranking in overview
+
+### Changed
+
+- aligned `/log` information architecture, first-level navigation, and major interaction patterns with the legacy dashboard behavior
+- switched overview ranking tables (`Top 域名`, `Top 客户端`, `最慢查询`, `分流命中排行`) to adaptive table layouts to avoid horizontal drag on typical widths
+- unified page refresh behavior with a global refresh action and removed redundant per-module refresh controls in migrated modules
+- refined system settings layout and mode descriptions:
+  - `兼容模式`: 表外域名优先国内dns解析，保证速度
+  - `安全模式`: 表外域名仅用国外dns解析，阻止dns泄漏
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.1.13
 
 ### Changed
