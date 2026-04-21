@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.3.0
+
+### Added
+
+- added a Vue-based main dashboard experience and promoted it to the root path `/`
+- added a `经典绿` color preset in the Vue UI appearance settings to match the preferred legacy green palette
+
+### Changed
+
+- swapped WebUI entry routes:
+  - `/` now serves the Vue UI
+  - `/log` now serves the previous legacy dashboard
+- expanded and stabilized Vue UI behavior across overview, query logs, rules, data management, upstream management, and system settings modules
+- refined overview presentation:
+  - top summary cards now focus on `总查询数` and `平均耗时`
+  - detail modal stacking behavior fixed so nested detail dialogs always appear on top
+  - module-internal scrollbars are thinner and visually lighter
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.2.0
 
 ### Added

@@ -276,11 +276,11 @@ func (m *Mosdns) initHttpMux() {
 
 	// [修改] 将原来的公共handler拆分为两个独立的handler
 
-	// 根路由 ("/") 使用新的 dashboard 页面
+	// 根路由 ("/") 使用 Vue 页面
 	rootHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/dashboard.html")
+		data, err := content.ReadFile("www/log.html")
 		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/dashboard.html"), zap.Error(err))
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/log.html"), zap.Error(err))
 			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
 			return
 		}
@@ -303,25 +303,11 @@ func (m *Mosdns) initHttpMux() {
 		}
 	}
 
-	// [新增] graphic 路由 ("/graphic") 的 handler，保持指向 mosdns.html
-	graphicHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/mosdns.html") // 读取原文件
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdns.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
-	// [新增] log 路由 ("/log") 的 handler, 指向 /www/log.html
+	// /log 路由使用原 dashboard 页面
 	logHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/log.html") // 读取 /www/log.html
+		data, err := content.ReadFile("www/dashboard.html")
 		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/log.html"), zap.Error(err))
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/dashboard.html"), zap.Error(err))
 			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
 			return
 		}
@@ -331,10 +317,10 @@ func (m *Mosdns) initHttpMux() {
 		}
 	}
 
-	plainLogHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/log_plain.html")
+	blogHandler := func(w http.ResponseWriter, r *http.Request) {
+		data, err := content.ReadFile("www/blog.html")
 		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/log_plain.html"), zap.Error(err))
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/blog.html"), zap.Error(err))
 			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
 			return
 		}
@@ -342,10 +328,6 @@ func (m *Mosdns) initHttpMux() {
 		if _, err := w.Write(data); err != nil {
 			m.logger.Error("Error writing response", zap.Error(err))
 		}
-	}
-
-	redirectToLog := func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/log", http.StatusFound)
 	}
 
 	staticAssetHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -383,10 +365,8 @@ func (m *Mosdns) initHttpMux() {
 	// [修改] 为每个路由注册对应的 handler
 	m.httpMux.Get("/", rootHandler)
 	m.httpMux.Get("/legacy", legacyHandler)
-	m.httpMux.Get("/graphic", graphicHandler)
 	m.httpMux.Get("/log", logHandler)
-	m.httpMux.Get("/plog", plainLogHandler)
-	m.httpMux.Get("/rlog", redirectToLog)
+	m.httpMux.Get("/blog", blogHandler)
 	m.httpMux.Get("/assets/*", staticAssetHandler)
 
 	// [新增逻辑] 自动扫描配置目录下 ui 目录的子文件夹并挂载为前端版本
@@ -395,7 +375,7 @@ func (m *Mosdns) initHttpMux() {
 	if info, err := os.Stat(uiBaseDir); err == nil && info.IsDir() {
 		// 定义保留的路由名称，防止外部文件夹覆盖核心功能
 		reservedPaths := map[string]bool{
-			"graphic": true, "log": true, "plog": true, "rlog": true, "assets": true,
+			"log": true, "blog": true, "assets": true,
 			"debug": true, "metrics": true, "plugins": true, "api": true, "": true,
 		}
 

@@ -576,8 +576,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel">
-    <div class="upstream-toolbar">
+  <section class="panel upstream-page">
+    <div class="upstream-toolbar upstream-toolbar-card">
       <div class="upstream-toolbar-left">
         <button class="btn primary" type="button" @click="beginAdd">添加上游DNS</button>
         <button class="btn secondary" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
@@ -601,7 +601,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="toolbar">
+    <div class="toolbar upstream-filter-card">
       <label for="group-filter">过滤分组</label>
       <select id="group-filter" v-model="filterGroup">
         <option value="all">全部</option>
@@ -613,8 +613,8 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
-    <div class="table-wrap adaptive-table-wrap upstream-adaptive-wrap">
-      <table class="upstream-adaptive-table">
+    <div class="table-wrap upstream-table-card">
+      <table>
         <thead>
           <tr>
             <th class="sortable" @click="onSort('enabled')">启用 <span class="sort-indicator">{{ sortIndicator('enabled') }}</span></th>
@@ -639,14 +639,13 @@ onBeforeUnmount(() => {
           </tr>
           <tr v-for="row in rows" :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`" :class="{ disabled: !row.data?.enabled }">
             <td>
-              <label class="switch switch-table">
-                <input type="checkbox" :checked="Boolean(row.data?.enabled)" @change="toggleEnable(row)" />
-                <span class="slider"></span>
-              </label>
+              <button class="btn tiny status-toggle-btn" :class="row.data?.enabled ? 'status-on' : 'status-off'" @click="toggleEnable(row)">
+                {{ row.data?.enabled ? 'ON' : 'OFF' }}
+              </button>
             </td>
-            <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
-            <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
-            <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
+            <td>{{ groupDisplayName(row.group) }}</td>
+            <td>{{ row.data?.tag || '-' }}</td>
+            <td>{{ row.data?.protocol || '-' }}</td>
             <td class="text-center">{{ row.stats.avgLatency }}</td>
             <td class="text-center">{{ row.stats.query }}</td>
             <td class="text-center">{{ row.stats.winner }}</td>

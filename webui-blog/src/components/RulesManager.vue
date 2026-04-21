@@ -718,17 +718,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel">
+  <section class="panel rules-page">
     <p v-if="msg.error" class="msg error">{{ msg.error }}</p>
     <p v-if="msg.success" class="msg success">{{ msg.success }}</p>
 
-    <nav v-if="showInnerTabs" class="tab-bar inner">
+    <nav v-if="showInnerTabs" class="tab-bar inner rules-segmented">
       <button class="tab-btn" :class="{ active: activeTab === 'special' }" @click="activeTab = 'special'">专属分流组</button>
       <button class="tab-btn" :class="{ active: activeTab === 'adguard' }" @click="activeTab = 'adguard'">AdGuard</button>
       <button class="tab-btn" :class="{ active: activeTab === 'diversion' }" @click="activeTab = 'diversion'">在线分流</button>
     </nav>
 
-    <section v-if="shouldShowTab('special')" class="sub-panel">
+    <section v-if="shouldShowTab('special')" class="sub-panel rules-section-card">
       <div class="actions">
         <button class="btn primary" @click="openCreateSpecial">新增专属分流组</button>
       </div>
@@ -765,13 +765,13 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="shouldShowTab('adguard')" class="sub-panel">
+    <section v-if="shouldShowTab('adguard')" class="sub-panel rules-section-card">
       <div class="actions">
         <button class="btn warning" @click="updateAdguardAll">更新全部</button>
         <button class="btn primary" @click="openCreateAdguard">新增规则</button>
       </div>
-      <div class="table-wrap adaptive-table-wrap rules-adguard-wrap">
-        <table class="rules-adaptive-table rules-adguard-table">
+      <div class="table-wrap rules-table-wrap adguard-table-wrap">
+        <table>
           <thead>
             <tr>
               <th>启用</th>
@@ -790,16 +790,11 @@ onBeforeUnmount(() => {
               <td colspan="6" class="empty">暂无 AdGuard 规则</td>
             </tr>
             <tr v-for="rule in adguardRules" :key="rule.id" :class="{ disabled: !rule.enabled }">
-              <td>
-                <label class="switch switch-table">
-                  <input type="checkbox" :checked="Boolean(rule.enabled)" @change="toggleAdguard(rule)" />
-                  <span class="slider"></span>
-                </label>
-              </td>
-              <td :title="rule.name">{{ rule.name }}</td>
-              <td class="mono" :title="rule.url">{{ rule.url }}</td>
-              <td class="text-right">{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
-              <td class="mono" :title="formatTime(rule.last_updated)">{{ formatTime(rule.last_updated) }}</td>
+              <td><button class="btn tiny status-toggle-btn" :class="rule.enabled ? 'status-on' : 'status-off'" @click="toggleAdguard(rule)">{{ rule.enabled ? 'ON' : 'OFF' }}</button></td>
+              <td class="rules-name-cell">{{ rule.name }}</td>
+              <td class="mono rules-url-cell" :title="rule.url">{{ rule.url }}</td>
+              <td>{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
+              <td>{{ formatTime(rule.last_updated) }}</td>
               <td class="row-actions">
                 <button class="btn tiny secondary" @click="openEditAdguard(rule)">编辑</button>
                 <button class="btn tiny danger" @click="deleteAdguard(rule)">删除</button>
@@ -810,12 +805,12 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="shouldShowTab('diversion')" class="sub-panel">
+    <section v-if="shouldShowTab('diversion')" class="sub-panel rules-section-card">
       <div class="actions">
         <button class="btn primary" @click="openCreateDiversion">新增分流规则</button>
       </div>
-      <div class="table-wrap adaptive-table-wrap rules-diversion-wrap">
-        <table class="rules-adaptive-table rules-diversion-table">
+      <div class="table-wrap rules-table-wrap diversion-table-wrap">
+        <table>
           <thead>
             <tr>
               <th>启用</th>
@@ -836,18 +831,13 @@ onBeforeUnmount(() => {
               <td colspan="8" class="empty">暂无在线分流规则</td>
             </tr>
             <tr v-for="rule in diversionRules" :key="`${rule.type}:${rule.name}`" :class="{ disabled: !rule.enabled }">
-              <td>
-                <label class="switch switch-table">
-                  <input type="checkbox" :checked="Boolean(rule.enabled)" @change="toggleDiversion(rule)" />
-                  <span class="slider"></span>
-                </label>
-              </td>
-              <td :title="rule.__typeLabel">{{ rule.__typeLabel }}</td>
-              <td :title="rule.name">{{ rule.name }}</td>
-              <td class="mono" :title="rule.files">{{ rule.files }}</td>
-              <td class="mono" :title="rule.url">{{ rule.url }}</td>
-              <td class="text-right">{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
-              <td class="mono" :title="formatTime(rule.last_updated)">{{ formatTime(rule.last_updated) }}</td>
+              <td><button class="btn tiny status-toggle-btn" :class="rule.enabled ? 'status-on' : 'status-off'" @click="toggleDiversion(rule)">{{ rule.enabled ? 'ON' : 'OFF' }}</button></td>
+              <td>{{ rule.__typeLabel }}</td>
+              <td class="rules-name-cell">{{ rule.name }}</td>
+              <td class="mono rules-file-cell" :title="rule.files">{{ rule.files }}</td>
+              <td class="mono rules-url-cell" :title="rule.url">{{ rule.url }}</td>
+              <td>{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
+              <td>{{ formatTime(rule.last_updated) }}</td>
               <td class="row-actions">
                 <button class="btn tiny warning" @click="updateDiversion(rule)">更新</button>
                 <button class="btn tiny secondary" @click="openEditDiversion(rule)">编辑</button>

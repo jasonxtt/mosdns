@@ -63,16 +63,10 @@ let restartProbeTimerId = 0
 
 const themeOptions = [
   { value: 'light', label: '明亮' },
-  { value: 'dark', label: '黑暗' },
-  { value: 'sakura', label: '夜樱' },
-  { value: 'evergreen', label: '常青' },
-  { value: 'starlight', label: '星光' },
-  { value: 'dusk', label: '黄昏' },
-  { value: 'terra', label: '赤土' }
+  { value: 'dark', label: '黑暗' }
 ]
 
 const colorOptions = [
-  { value: 'classic', label: '经典绿', color: '#0f766e' },
   { value: 'indigo', label: '靛蓝', color: '#4f46e5' },
   { value: 'pink', label: '粉色', color: '#ec4899' },
   { value: 'teal', label: '青色', color: '#14b8a6' },
@@ -578,10 +572,12 @@ async function applyUpdate(force = false, preferV3 = false) {
 }
 
 function applyTheme(theme, save = true) {
-  appearance.theme = theme
-  document.documentElement.setAttribute('data-theme', theme)
+  const nextTheme = theme === 'light' ? 'light' : 'dark'
+  appearance.theme = nextTheme
+  document.documentElement.setAttribute('data-theme', nextTheme)
+  window.dispatchEvent(new CustomEvent('mosdns-theme-update', { detail: { theme: nextTheme } }))
   if (save) {
-    localStorage.setItem('mosdns-theme', theme)
+    localStorage.setItem('mosdns-theme', nextTheme)
   }
 }
 
@@ -610,8 +606,8 @@ function applyChartMode(mode, save = true) {
 }
 
 function initializeAppearance() {
-  applyTheme(localStorage.getItem('mosdns-theme') || 'light', false)
-  applyColor(localStorage.getItem('mosdns-color') || 'classic', false)
+  applyTheme(localStorage.getItem('mosdns-theme') || 'dark', false)
+  applyColor(localStorage.getItem('mosdns-color') || 'indigo', false)
   applyLayout(localStorage.getItem('mosdns-layout') || 'comfortable', false)
   applyChartMode(localStorage.getItem('mosdns-chart-mode') || 'integrated', false)
 }
@@ -765,7 +761,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel system-panel">
+  <section class="panel system-panel system-bento-page">
     <header class="panel-header">
       <div class="actions">
         <button class="btn warning" :disabled="restarting" @click="restartMosdns">{{ restarting ? '处理中...' : '重启 MosDNS' }}</button>
@@ -775,9 +771,9 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
-    <div class="system-layout-stack">
-      <div class="control-panel-grid system-grid-quad">
-        <section class="panel control-module control-module--mini">
+    <div class="system-layout-stack system-bento-layout">
+      <div class="control-panel-grid system-grid-quad system-grid-top">
+        <section class="panel control-module control-module--mini system-card system-card-info">
           <h3>系统信息</h3>
           <div class="module-kv-list">
             <div class="control-line"><strong>启动时间</strong><span>{{ systemInfo.startTime ? new Date(systemInfo.startTime * 1000).toLocaleString('zh-CN', { hour12: false }) : 'N/A' }}</span></div>
@@ -788,7 +784,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="panel control-module control-module--mini">
+        <section class="panel control-module control-module--mini system-card system-card-update">
           <h3>版本与更新</h3>
           <div class="module-kv-list">
             <div class="control-line"><strong>当前版本</strong><span>{{ update.status?.current_version || '未知' }}</span></div>
@@ -804,7 +800,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="panel control-module control-module--mini">
+        <section class="panel control-module control-module--mini system-card system-card-config">
           <h3>配置管理</h3>
           <div class="module-form-stack">
             <label class="mini-field">
@@ -826,7 +822,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="panel control-module control-module--mini">
+        <section class="panel control-module control-module--mini system-card system-card-overrides">
           <h3>SOCKS5 / ECS 覆盖</h3>
           <div class="module-form-stack">
             <label class="mini-field">
@@ -848,7 +844,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="control-panel-grid">
-        <section class="panel control-module control-module-wide">
+        <section class="panel control-module control-module-wide system-card system-card-mode">
           <header class="module-head">
             <div>
               <h3>核心运行模式</h3>
@@ -866,7 +862,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="control-panel-grid">
-        <section class="panel control-module control-module-wide">
+        <section class="panel control-module control-module-wide system-card system-card-switches">
           <header class="module-head">
             <div>
               <h3>功能开关</h3>
@@ -894,7 +890,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="control-panel-grid">
-        <section class="panel control-module control-module-wide">
+        <section class="panel control-module control-module-wide system-card system-card-replacements">
           <header class="module-head">
             <div>
               <h3>高级替换规则</h3>
@@ -937,8 +933,8 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <div class="control-panel-grid system-grid-quad">
-        <section class="panel control-module control-module--mini">
+      <div class="control-panel-grid system-grid-quad system-grid-bottom">
+        <section class="panel control-module control-module--mini system-card system-card-audit">
           <h3>审计控制</h3>
           <div class="control-line">
             <strong>运行状态</strong>
@@ -950,7 +946,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="panel control-module control-module--mini">
+        <section class="panel control-module control-module--mini system-card system-card-capacity">
           <h3>日志容量</h3>
           <div class="control-line">
             <strong>当前容量</strong>
@@ -963,7 +959,7 @@ onBeforeUnmount(() => {
           <p class="muted">设置新容量将清空日志。</p>
         </section>
 
-        <section class="panel control-module control-module--mini">
+        <section class="panel control-module control-module--mini system-card system-card-refresh">
           <h3>自动刷新</h3>
           <div class="control-line">
             <strong>启用状态</strong>
@@ -981,7 +977,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="panel control-module control-module--mini">
+        <section class="panel control-module control-module--mini system-card system-card-theme">
           <h3>主题与外观</h3>
           <div class="control-line"><strong>界面风格</strong><select v-model="appearance.theme" @change="applyTheme(appearance.theme)"><option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option></select></div>
           <div class="control-line"><strong>界面密度</strong><select v-model="appearance.layout" @change="applyLayout(appearance.layout)"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></div>

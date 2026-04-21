@@ -712,6 +712,11 @@ async function updateSchedulerConfig() {
   }
 }
 
+function toggleSchedulerEnabled() {
+  schedulerForm.enabled = !schedulerForm.enabled
+  updateSchedulerConfig()
+}
+
 function scheduleSchedulerConfigUpdate() {
   if (schedulerTimerId) {
     window.clearTimeout(schedulerTimerId)
@@ -753,6 +758,7 @@ async function clearAllShuntRules() {
       flushRulePaths.map((path) => requestResponse(`/plugins/${path}`))
     )
     await refreshListStats()
+    await refreshSourceFileCounts()
     setSuccess('所有分流规则已清空')
   } catch (error) {
     setError(`清空分流规则失败: ${error.message}`)
@@ -771,6 +777,9 @@ async function reloadAll() {
       refreshRequeryStatusAndConfig(),
       refreshListStats()
     ])
+    if (requeryAvailable.value) {
+      await refreshSourceFileCounts()
+    }
   } finally {
     loading.value = false
   }
@@ -799,11 +808,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel data-panel">
+  <section class="panel data-panel data-page">
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
-    <section class="panel sub-panel data-module">
+    <section class="panel sub-panel data-module data-module-card">
       <header class="panel-header">
         <div>
           <h3>缓存管理</h3>
@@ -815,8 +824,8 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div class="table-wrap adaptive-table-wrap cache-table-wrap">
-        <table class="cache-adaptive-table">
+      <div class="table-wrap">
+        <table>
           <thead>
             <tr>
               <th>缓存名称</th>
@@ -860,8 +869,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <div class="data-inline-row">
-    <section class="panel sub-panel data-module data-inline-module domain-stats-module">
+    <section class="panel sub-panel data-module data-module-card">
       <header class="panel-header">
         <div>
           <h3>域名列表统计</h3>
@@ -869,8 +877,8 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div class="table-wrap adaptive-table-wrap domain-stats-table-wrap">
-        <table class="domain-stats-table">
+      <div class="table-wrap">
+        <table>
           <thead>
             <tr>
               <th>列表名称</th>
@@ -890,18 +898,22 @@ onBeforeUnmount(() => {
             </tr>
             <tr>
               <td><strong>刷新域名</strong></td>
-              <td><strong class="mono">{{ lastRunDomainCountText }}</strong></td>
+              <td>
+                <button class="btn-link mono" type="button" @click="openDataViewForList(listStats.find((item) => item.key === 'total'))">
+                  <strong>{{ lastRunDomainCountText }}</strong>
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <section class="panel sub-panel data-module data-inline-module requery-module">
+    <section class="panel sub-panel data-module data-module-card">
       <header class="panel-header">
         <div>
           <h3>刷新分流缓存</h3>
-          <p class="muted">任务状态、进度与定时配置。</p>
+          <p class="muted">任务状态、进度、定时配置、来源文件统计。</p>
         </div>
       </header>
 
@@ -948,11 +960,15 @@ onBeforeUnmount(() => {
 
         <div class="requery-scheduler">
           <div class="scheduler-row">
-            <span>启用定时任务</span>
-            <label class="switch">
-              <input v-model="schedulerForm.enabled" type="checkbox" @change="updateSchedulerConfig" />
-              <span class="slider"></span>
-            </label>
+            <button
+              class="btn tiny status-toggle-btn"
+              :class="schedulerForm.enabled ? 'status-on' : 'status-off'"
+              type="button"
+              :disabled="schedulerSaving"
+              @click="toggleSchedulerEnabled"
+            >
+              {{ schedulerForm.enabled ? '定时任务 ON' : '定时任务 OFF' }}
+            </button>
           </div>
           <div class="scheduler-grid">
             <label>首次执行时间</label>
@@ -995,9 +1011,34 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>来源列表</th>
+                <th>条目数</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="sourceFileCountsError">
+                <td colspan="2" class="mono">{{ sourceFileCountsError }}</td>
+              </tr>
+              <tr v-else-if="sourceFileCounts.length === 0">
+                <td colspan="2" class="empty">暂无来源文件统计</td>
+              </tr>
+              <tr v-for="(item, index) in sourceFileCounts" :key="`source-${index}-${item.alias}`">
+                <td>{{ item.alias }}</td>
+                <td>{{ Number(item.count || 0).toLocaleString() }}</td>
+              </tr>
+              <tr>
+                <td><strong>全部域名 (上次刷新)</strong></td>
+                <td><strong>{{ lastRunDomainCountText }}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </template>
     </section>
-    </div>
 
     <div v-if="dataView.open" class="modal-mask" @click.self="closeDataView">
       <section class="panel data-view-modal">

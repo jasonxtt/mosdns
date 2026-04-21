@@ -1,6 +1,6 @@
 # mosdns API 参考文档
 
-> 本文档为 AI Agent 与 mosdns v0.2.0 交互的完整接口规范。
+> 本文档为 AI Agent 与 mosdns v0.3.0 交互的完整接口规范。
 
 ## 基础信息
 
@@ -496,12 +496,9 @@ POST /api/v1/config/update_from_url
 
 | 路径 | 说明 |
 |------|------|
-| `/` | 主界面 (mosdns.html) |
-| `/graphic` | 图形化界面 |
+| `/` | 主界面 (dashboard.html) |
+| `/legacy` | 旧版界面 (mosdnsp.html) |
 | `/log` | 日志页面 |
-| `/plog` | 纯文本日志 |
-| `/rlog` | 重定向到 /log |
-| `/dashboard` | 仪表盘 |
 
 ---
 

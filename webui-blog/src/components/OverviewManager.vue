@@ -11,10 +11,13 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const chartMode = ref('integrated')
 const lastUpdatedText = ref('--')
+const TOP_LIMIT = 5
 
 const stats = reactive({
   totalQueries: 0,
-  averageDurationMs: 0
+  averageDurationMs: 0,
+  capturing: null,
+  capacity: null
 })
 
 const history = reactive({
@@ -35,6 +38,10 @@ const topDomainDetailOpen = ref(false)
 const selectedTopDomain = ref('')
 const topDomainDetailLoading = ref(false)
 const topDomainDetailLogs = ref([])
+const showAllTopDomains = ref(false)
+const showAllTopClients = ref(false)
+const showAllSlowest = ref(false)
+const showAllDomainSet = ref(false)
 
 const DONUT_COLORS = ['#6d9dff', '#f778ba', '#2dd4bf', '#fb923c', '#a78bfa', '#fde047', '#ff8c8c', '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#64748b']
 const DONUT_RADIUS = 48
@@ -43,9 +50,13 @@ const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS
 const sparklineTotal = computed(() => generateSparklineSVG(history.totalQueries, false, 300, 60, 'spark-total'))
 const sparklineAvg = computed(() => generateSparklineSVG(history.avgDuration, true, 300, 60, 'spark-avg'))
 const mergedSparkline = computed(() => generateDualSparklineSVG(history.totalQueries, history.avgDuration, history.timestamps))
+const visibleTopDomains = computed(() => (showAllTopDomains.value ? topDomains.value : topDomains.value.slice(0, TOP_LIMIT)))
+const visibleTopClients = computed(() => (showAllTopClients.value ? topClients.value : topClients.value.slice(0, TOP_LIMIT)))
+const visibleSlowestQueries = computed(() => (showAllSlowest.value ? slowestQueries.value : slowestQueries.value.slice(0, TOP_LIMIT)))
 const domainSetRows = computed(() => {
-  const total = domainSetRank.value.reduce((sum, item) => sum + Number(item?.count || 0), 0)
-  return domainSetRank.value.map((item, index) => {
+  const sorted = [...domainSetRank.value].sort((a, b) => Number(b?.count || 0) - Number(a?.count || 0))
+  const total = sorted.reduce((sum, item) => sum + Number(item?.count || 0), 0)
+  return sorted.map((item, index) => {
     const count = Number(item?.count || 0)
     const percent = total > 0 ? (count / total) * 100 : 0
     return {
@@ -56,17 +67,43 @@ const domainSetRows = computed(() => {
     }
   })
 })
+const visibleDomainSetRows = computed(() => (showAllDomainSet.value ? domainSetRows.value : domainSetRows.value.slice(0, TOP_LIMIT)))
 const domainSetTotal = computed(() => domainSetRows.value.reduce((sum, item) => sum + item.count, 0))
+const domainSetDonutRows = computed(() => {
+  const rows = domainSetRows.value.filter((item) => item.count > 0)
+  const topRows = rows.slice(0, TOP_LIMIT).map((item) => ({
+    ...item,
+    label: getRuleLabel(item.key)
+  }))
+  const otherRows = rows.slice(TOP_LIMIT)
+  if (otherRows.length > 0) {
+    const otherCount = otherRows.reduce((sum, item) => sum + item.count, 0)
+    const otherPercent = domainSetTotal.value > 0 ? (otherCount / domainSetTotal.value) * 100 : 0
+    topRows.push({
+      key: '__others__',
+      label: '其他',
+      count: otherCount,
+      percent: otherPercent,
+      color: DONUT_COLORS[TOP_LIMIT % DONUT_COLORS.length]
+    })
+  }
+  return topRows
+})
+const domainSetDonutTotal = computed(() => domainSetDonutRows.value.reduce((sum, item) => sum + item.count, 0))
 const domainSetSegments = computed(() => {
-  const total = domainSetTotal.value
+  const total = domainSetDonutTotal.value
   let offset = 0
-  return domainSetRows.value
-    .filter((item) => item.count > 0)
+  return domainSetDonutRows.value
     .map((item) => {
       const ratio = total > 0 ? item.count / total : 0
       const segment = {
         key: item.key,
+        label: item.label || getRuleLabel(item.key),
+        count: item.count,
+        percent: item.percent,
         color: item.color,
+        ratio,
+        startRatio: offset,
         dasharray: `${(ratio * DONUT_CIRCUMFERENCE).toFixed(2)} ${(DONUT_CIRCUMFERENCE - ratio * DONUT_CIRCUMFERENCE).toFixed(2)}`,
         dashoffset: (-offset * DONUT_CIRCUMFERENCE).toFixed(2)
       }
@@ -74,6 +111,25 @@ const domainSetSegments = computed(() => {
       return segment
     })
 })
+const donutCallouts = computed(() => domainSetSegments.value.map((segment) => {
+  const angle = (-90 + (segment.startRatio + segment.ratio / 2) * 360) * Math.PI / 180
+  const startX = 60 + Math.cos(angle) * (DONUT_RADIUS + 1)
+  const startY = 60 + Math.sin(angle) * (DONUT_RADIUS + 1)
+  const midX = 60 + Math.cos(angle) * (DONUT_RADIUS + 11)
+  const midY = 60 + Math.sin(angle) * (DONUT_RADIUS + 11)
+  const rightSide = Math.cos(angle) >= 0
+  const endX = rightSide ? 124 : -4
+  const endY = midY
+  return {
+    key: segment.key,
+    color: segment.color,
+    text: `${truncateLabel(segment.label)} ${formatPercent(segment.percent)}`,
+    anchor: rightSide ? 'start' : 'end',
+    textX: rightSide ? endX + 2 : endX - 2,
+    textY: endY + 3,
+    points: `${startX.toFixed(2)},${startY.toFixed(2)} ${midX.toFixed(2)},${midY.toFixed(2)} ${endX.toFixed(2)},${endY.toFixed(2)}`
+  }
+}))
 
 function clearMessages() {
   errorMessage.value = ''
@@ -163,7 +219,18 @@ function getDetailRuleLabel(value) {
   return getRuleLabel(value)
 }
 
+function truncateLabel(value, maxLen = 10) {
+  const text = String(value || '')
+  if (text.length <= maxLen) {
+    return text
+  }
+  return `${text.slice(0, maxLen)}...`
+}
+
 function openSlowDetail(item) {
+  if (topDomainDetailOpen.value) {
+    closeTopDomainDetail()
+  }
   selectedSlowQuery.value = item || null
   slowDetailOpen.value = Boolean(item)
 }
@@ -207,6 +274,22 @@ function closeTopDomainDetail() {
   topDomainDetailOpen.value = false
   selectedTopDomain.value = ''
   topDomainDetailLogs.value = []
+}
+
+function toggleTopDomains() {
+  showAllTopDomains.value = !showAllTopDomains.value
+}
+
+function toggleTopClients() {
+  showAllTopClients.value = !showAllTopClients.value
+}
+
+function toggleSlowest() {
+  showAllSlowest.value = !showAllSlowest.value
+}
+
+function toggleDomainSet() {
+  showAllDomainSet.value = !showAllDomainSet.value
 }
 
 function loadHistory() {
@@ -350,6 +433,8 @@ async function reloadOverview(showMessage = false) {
       topClientsRes,
       slowestRes,
       domainSetRes,
+      statusRes,
+      capacityRes,
       specialGroupsRes,
       aliasesRes
     ] = await Promise.all([
@@ -357,13 +442,17 @@ async function reloadOverview(showMessage = false) {
       getJSON('/api/v2/audit/rank/domain?limit=20'),
       getJSON('/api/v2/audit/rank/client?limit=20'),
       getJSON('/api/v2/audit/rank/slowest?limit=20'),
-      getJSON('/api/v2/audit/rank/effective?limit=20').catch(() => getJSON('/api/v2/audit/rank/domain_set?limit=20')),
+      getJSON('/api/v2/audit/rank/domain_set?limit=20'),
+      getJSON('/api/v1/audit/status'),
+      getJSON('/api/v1/audit/capacity'),
       getJSON('/api/v1/special-groups'),
       getJSON('/plugins/clientname').catch(() => ({}))
     ])
 
     stats.totalQueries = Number(statsRes?.total_queries || 0)
     stats.averageDurationMs = Number(statsRes?.average_duration_ms || 0)
+    stats.capturing = Boolean(statusRes?.capturing)
+    stats.capacity = Number(capacityRes?.capacity || 0)
     addHistoryPoint(stats.totalQueries, stats.averageDurationMs)
 
     topDomains.value = Array.isArray(topDomainsRes) ? topDomainsRes : []
@@ -410,37 +499,56 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel">
+  <section class="panel overview-page">
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
-    <div class="overview-cards" :class="{ 'independent-mode': chartMode === 'independent' }">
-      <article class="overview-card">
-        <h3>总查询数</h3>
-        <p class="overview-value">{{ stats.totalQueries.toLocaleString() }}</p>
-        <div class="sparkline-mini" v-html="sparklineTotal"></div>
-      </article>
-      <article class="overview-card">
+    <header class="panel-header overview-page-header">
+      <div>
+        <h2>概览</h2>
+        <p class="muted">统计、排行和趋势统一收纳在 Bento 仪表盘中。</p>
+      </div>
+      <div class="overview-meta-chip">
+        <span>上次更新</span>
+        <strong>{{ lastUpdatedText }}</strong>
+      </div>
+    </header>
+
+    <div class="overview-bento-grid" :class="{ 'independent-mode': chartMode === 'independent' }">
+      <article class="overview-card overview-card-avg">
         <h3>平均耗时</h3>
         <p class="overview-value">{{ formatDuration(stats.averageDurationMs) }}</p>
         <div class="sparkline-mini" v-html="sparklineAvg"></div>
       </article>
-    </div>
+      <article class="overview-card overview-card-total">
+        <h3>总查询数</h3>
+        <p class="overview-value">{{ stats.totalQueries.toLocaleString() }}</p>
+        <div class="sparkline-mini" v-html="sparklineTotal"></div>
+      </article>
 
-    <section v-if="chartMode === 'independent'" class="panel sub-panel overview-big-chart-panel">
-      <header class="panel-header">
-        <div>
-          <h3>查询趋势图 (独立模式)</h3>
-          <p class="muted">蓝线为总查询数，橙线为平均耗时。</p>
-        </div>
-      </header>
-      <div class="overview-big-chart" v-html="mergedSparkline"></div>
-    </section>
+      <section v-if="chartMode === 'independent'" class="overview-module overview-module-trend">
+        <header class="panel-header">
+          <div>
+            <h3>查询趋势图</h3>
+            <p class="muted">双轴图同时显示总查询数与平均耗时。</p>
+          </div>
+        </header>
+        <div class="overview-big-chart" v-html="mergedSparkline"></div>
+      </section>
 
-    <div class="overview-grid">
-      <section class="panel sub-panel overview-metric-module">
-        <h3>Top 域名</h3>
-        <div class="table-wrap overview-table-fit top-domains-fit module-scroll-list">
+      <section class="overview-module overview-module-domains">
+        <header class="overview-module-head">
+          <h3>Top 域名</h3>
+          <button
+            v-if="topDomains.length > TOP_LIMIT"
+            class="btn tiny secondary"
+            type="button"
+            @click="toggleTopDomains"
+          >
+            {{ showAllTopDomains ? '收起' : '显示全部' }}
+          </button>
+        </header>
+        <div class="table-wrap overview-table-fit top-domains-fit">
           <table>
             <thead>
               <tr>
@@ -453,7 +561,7 @@ onBeforeUnmount(() => {
                 <td colspan="2" class="empty">暂无数据</td>
               </tr>
               <tr
-                v-for="item in topDomains"
+                v-for="item in visibleTopDomains"
                 :key="`domain-${item.key}`"
                 class="overview-click-row"
                 @click="openTopDomainDetail(item)"
@@ -466,9 +574,19 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="panel sub-panel overview-metric-module">
-        <h3>Top 客户端</h3>
-        <div class="table-wrap overview-table-fit top-clients-fit module-scroll-list">
+      <section class="overview-module overview-module-clients">
+        <header class="overview-module-head">
+          <h3>Top 客户端</h3>
+          <button
+            v-if="topClients.length > TOP_LIMIT"
+            class="btn tiny secondary"
+            type="button"
+            @click="toggleTopClients"
+          >
+            {{ showAllTopClients ? '收起' : '显示全部' }}
+          </button>
+        </header>
+        <div class="table-wrap overview-table-fit top-clients-fit">
           <table>
             <thead>
               <tr>
@@ -480,7 +598,7 @@ onBeforeUnmount(() => {
               <tr v-if="topClients.length === 0">
                 <td colspan="2" class="empty">暂无数据</td>
               </tr>
-              <tr v-for="item in topClients" :key="`client-${item.key}`">
+              <tr v-for="item in visibleTopClients" :key="`client-${item.key}`">
                 <td>
                   <div>{{ getClientDisplay(item.key) }}</div>
                   <small v-if="hasAlias(item.key)" class="muted mono">{{ normalizeIP(item.key) }}</small>
@@ -492,65 +610,133 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="panel sub-panel overview-metric-module">
-        <h3>最慢查询</h3>
-        <div class="table-wrap overview-table-fit slowest-fit module-scroll-list">
+      <section class="overview-module overview-module-slowest">
+        <header class="overview-module-head">
+          <h3>最慢查询</h3>
+          <button
+            v-if="slowestQueries.length > TOP_LIMIT"
+            class="btn tiny secondary"
+            type="button"
+            @click="toggleSlowest"
+          >
+            {{ showAllSlowest ? '收起' : '显示全部' }}
+          </button>
+        </header>
+        <div class="table-wrap overview-table-fit slowest-fit">
           <table>
             <thead>
               <tr>
                 <th>域名</th>
+                <th>客户端</th>
                 <th class="text-right">耗时</th>
+                <th>时间</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="slowestQueries.length === 0">
-                <td colspan="2" class="empty">暂无数据</td>
+                <td colspan="4" class="empty">暂无数据</td>
               </tr>
               <tr
-                v-for="(item, index) in slowestQueries"
+                v-for="(item, index) in visibleSlowestQueries"
                 :key="`slow-${index}-${item.trace_id || item.query_time}`"
                 class="overview-click-row"
                 @click="openSlowDetail(item)"
               >
                 <td>{{ item.query_name }}</td>
+                <td>{{ getClientDisplay(item.client_ip) }}</td>
                 <td class="text-right">{{ formatDuration(item.duration_ms) }}</td>
+                <td>{{ formatTime(item.query_time) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="panel sub-panel overview-metric-module">
-        <h3>分流统计</h3>
-        <div class="table-wrap overview-table-fit domain-set-fit module-scroll-list">
-          <table>
-            <thead>
-              <tr>
-                <th>规则</th>
-                <th class="text-right">次数</th>
-                <th class="text-right">占比</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="domainSetRows.length === 0">
-                <td colspan="3" class="empty">暂无数据</td>
-              </tr>
-              <tr v-for="item in domainSetRows" :key="`set-${item.key}`">
-                <td>
-                  <span class="domain-set-rule">
-                    <span class="domain-set-name">{{ getRuleLabel(item.key) }}</span>
-                  </span>
-                </td>
-                <td class="text-right">{{ item.count.toLocaleString() }}</td>
-                <td class="text-right">{{ formatPercent(item.percent) }}</td>
-              </tr>
-            </tbody>
-          </table>
+      <section class="overview-module overview-module-domainset">
+        <div class="overview-module-head">
+          <h3>分流命中排行</h3>
+          <button
+            v-if="domainSetRows.length > TOP_LIMIT"
+            class="btn tiny secondary"
+            type="button"
+            @click="toggleDomainSet"
+          >
+            {{ showAllDomainSet ? '收起' : '显示全部' }}
+          </button>
+        </div>
+        <div class="domain-set-layout">
+          <div v-if="domainSetRows.length > 0" class="domain-set-chart">
+            <div class="domain-set-donut-wrap">
+              <svg viewBox="-24 -24 168 168" class="domain-set-donut-svg" aria-hidden="true">
+                <circle cx="60" cy="60" :r="DONUT_RADIUS" class="domain-set-donut-track" />
+                <circle
+                  v-for="segment in domainSetSegments"
+                  :key="`seg-${segment.key}`"
+                  cx="60"
+                  cy="60"
+                  :r="DONUT_RADIUS"
+                  class="domain-set-donut-segment"
+                  :stroke="segment.color"
+                  :stroke-dasharray="segment.dasharray"
+                  :stroke-dashoffset="segment.dashoffset"
+                />
+                <polyline
+                  v-for="item in donutCallouts"
+                  :key="`callout-line-${item.key}`"
+                  class="domain-set-callout-line"
+                  :points="item.points"
+                  :stroke="item.color"
+                />
+                <text
+                  v-for="item in donutCallouts"
+                  :key="`callout-text-${item.key}`"
+                  class="domain-set-callout-text"
+                  :x="item.textX"
+                  :y="item.textY"
+                  :text-anchor="item.anchor"
+                >
+                  {{ item.text }}
+                </text>
+              </svg>
+              <div class="domain-set-donut-center">
+                <strong>{{ domainSetDonutTotal.toLocaleString() }}</strong>
+                <span>TOP5 + 其他</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty domain-set-empty">暂无数据</div>
+
+          <div class="table-wrap overview-table-fit domain-set-fit">
+            <table>
+              <thead>
+                <tr>
+                  <th>规则</th>
+                  <th class="text-right">次数</th>
+                  <th class="text-right">占比</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="domainSetRows.length === 0">
+                  <td colspan="3" class="empty">暂无数据</td>
+                </tr>
+                <tr v-for="item in visibleDomainSetRows" :key="`set-${item.key}`" class="overview-click-row">
+                  <td>
+                    <span class="domain-set-rule">
+                      <span class="domain-set-dot" :style="{ backgroundColor: item.color }"></span>
+                      <span class="domain-set-name">{{ getRuleLabel(item.key) }}</span>
+                    </span>
+                  </td>
+                  <td class="text-right">{{ item.count.toLocaleString() }}</td>
+                  <td class="text-right">{{ formatPercent(item.percent) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </div>
 
-    <div v-if="slowDetailOpen && selectedSlowQuery" class="modal-mask modal-mask-top" @click.self="closeSlowDetail">
+    <div v-if="slowDetailOpen && selectedSlowQuery" class="modal-mask" @click.self="closeSlowDetail">
       <section class="panel data-view-modal overview-slow-detail-modal">
         <header class="panel-header">
           <div>
@@ -567,7 +753,7 @@ onBeforeUnmount(() => {
           <div><strong>类型:</strong> {{ selectedSlowQuery.query_type || '-' }}</div>
           <div><strong>类别:</strong> {{ selectedSlowQuery.query_class || '-' }}</div>
           <div><strong>Trace ID:</strong> <span class="mono">{{ selectedSlowQuery.trace_id || '-' }}</span></div>
-          <div><strong>生效标签:</strong> {{ getDetailRuleLabel(selectedSlowQuery.effective_tag || selectedSlowQuery.domain_set) }}</div>
+          <div><strong>分流规则:</strong> {{ getDetailRuleLabel(selectedSlowQuery.domain_set) }}</div>
           <div><strong>上游组:</strong> {{ selectedSlowQuery.final_upstream || selectedSlowQuery.upstream_group || '-' }}</div>
           <div><strong>最终上游:</strong> {{ selectedSlowQuery.selected_upstream || '-' }}</div>
           <div><strong>响应码:</strong> {{ selectedSlowQuery.response_code || '-' }}</div>

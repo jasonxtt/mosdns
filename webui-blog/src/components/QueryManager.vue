@@ -201,6 +201,23 @@ function getMatchedGroupDisplay(value) {
     return '-'
   }
   const hit = specialGroups.value.find((item) => String(item?.key || '') === key)
+  if (hit?.name) {
+    return hit.name
+  }
+  const slotMatch = key.match(/(\d+)/)
+  if (slotMatch) {
+    const slot = Number(slotMatch[1])
+    const bySlot = specialGroups.value.find((item) => Number(item?.slot) === slot)
+    if (bySlot?.name) {
+      return bySlot.name
+    }
+  }
+  if (/^特殊上游\d+$/i.test(key)) {
+    return key
+  }
+  if (/^special[\-_]?group[\-_]?\d+$/i.test(key)) {
+    return key
+  }
   return hit?.name || key
 }
 
@@ -657,8 +674,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="sub-panel">
-    <div v-if="isLiveMode" class="panel">
+  <section class="sub-panel query-page">
+    <div v-if="isLiveMode" class="panel query-live-shell">
       <header class="panel-header">
         <div>
           <h3>实时查询</h3>
@@ -672,7 +689,7 @@ onBeforeUnmount(() => {
       <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
       <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
-      <form class="query-search" @submit.prevent="refreshLogs">
+      <form class="query-search query-search-card" @submit.prevent="refreshLogs">
         <input v-model="searchInput" placeholder="全局搜索，使用 &quot;引号&quot; 精确匹配" />
         <button class="btn primary" type="submit" :disabled="loading">搜索</button>
         <button class="btn secondary" type="button" :disabled="loading" @click="searchInput = ''; refreshLogs()">清空</button>
@@ -683,12 +700,13 @@ onBeforeUnmount(() => {
         共 {{ Number(pagination.total_items || 0).toLocaleString() }} 条
       </p>
 
-      <div class="table-wrap">
+      <div class="table-wrap query-results-table">
         <table>
           <thead>
             <tr>
               <th>时间</th>
               <th>域名 / 响应</th>
+              <th>分流规则</th>
               <th>类型</th>
               <th>耗时(ms)</th>
               <th>客户端</th>
@@ -696,10 +714,10 @@ onBeforeUnmount(() => {
           </thead>
           <tbody>
             <tr v-if="loading && logs.length === 0">
-              <td colspan="5" class="empty">加载中...</td>
+              <td colspan="6" class="empty">加载中...</td>
             </tr>
             <tr v-else-if="logs.length === 0">
-              <td colspan="5" class="empty">暂无日志</td>
+              <td colspan="6" class="empty">暂无日志</td>
             </tr>
             <tr
               v-for="(item, index) in logs"
@@ -713,6 +731,7 @@ onBeforeUnmount(() => {
                 <div><strong>{{ item.query_name }}</strong></div>
                 <div class="muted">{{ responseSummary(item) }}</div>
               </td>
+              <td>{{ getMatchedGroupDisplay(item.domain_set) }}</td>
               <td>{{ item.query_type || '-' }}</td>
               <td>{{ Number(item.duration_ms || 0).toFixed(2) }}</td>
               <td>
@@ -735,7 +754,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-else class="panel">
+    <div v-else class="panel query-diagnostic-shell">
       <header class="panel-header">
         <div>
           <h3>诊断抓取</h3>
@@ -745,7 +764,7 @@ onBeforeUnmount(() => {
       <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
       <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
-      <div class="diagnostic-toolbar">
+      <div class="diagnostic-toolbar query-search-card">
         <label>抓取时长(秒)</label>
         <input v-model.number="captureDuration" type="number" min="1" max="600" />
         <button class="btn secondary" :disabled="loading" @click="startCapture">{{ loading ? '处理中...' : '日志抓取' }}</button>
@@ -869,8 +888,7 @@ onBeforeUnmount(() => {
           <div><strong>类型:</strong> {{ selectedLog.query_type || '-' }}</div>
           <div><strong>类别:</strong> {{ selectedLog.query_class || '-' }}</div>
           <div><strong>Trace ID:</strong> <span class="mono">{{ selectedLog.trace_id || '-' }}</span></div>
-          <div><strong>生效标签:</strong> {{ selectedLog.effective_tag || selectedLog.domain_set || '-' }}</div>
-          <div><strong>命中标签:</strong> {{ selectedLog.domain_set || '-' }}</div>
+          <div><strong>分流规则:</strong> {{ selectedLog.domain_set || '-' }}</div>
           <div><strong>匹配来源:</strong> {{ selectedLog.matched_rule_source || '-' }}</div>
           <div><strong>专属分流组:</strong> {{ getMatchedGroupDisplay(selectedLog.matched_group) }}</div>
           <div><strong>最终序列:</strong> {{ selectedLog.final_sequence || '-' }}</div>
