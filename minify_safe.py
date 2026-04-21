@@ -56,7 +56,6 @@ for rel_path in css_files:
 
 # 2. Compress JS
 js_files = [
-    r"coremain/www/assets/js/log.js"
 ]
 
 for rel_path in js_files:

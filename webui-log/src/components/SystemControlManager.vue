@@ -72,6 +72,7 @@ const themeOptions = [
 ]
 
 const colorOptions = [
+  { value: 'classic', label: '经典绿', color: '#0f766e' },
   { value: 'indigo', label: '靛蓝', color: '#4f46e5' },
   { value: 'pink', label: '粉色', color: '#ec4899' },
   { value: 'teal', label: '青色', color: '#14b8a6' },
@@ -609,8 +610,8 @@ function applyChartMode(mode, save = true) {
 }
 
 function initializeAppearance() {
-  applyTheme(localStorage.getItem('mosdns-theme') || 'dark', false)
-  applyColor(localStorage.getItem('mosdns-color') || 'indigo', false)
+  applyTheme(localStorage.getItem('mosdns-theme') || 'light', false)
+  applyColor(localStorage.getItem('mosdns-color') || 'classic', false)
   applyLayout(localStorage.getItem('mosdns-layout') || 'comfortable', false)
   applyChartMode(localStorage.getItem('mosdns-chart-mode') || 'integrated', false)
 }

@@ -40,6 +40,13 @@ const autoRefreshState = ref({
 
 let autoRefreshTimerId = 0
 
+function initializeAppearance() {
+  const root = document.documentElement
+  root.setAttribute('data-theme', localStorage.getItem('mosdns-theme') || 'light')
+  root.setAttribute('data-color-scheme', localStorage.getItem('mosdns-color') || 'classic')
+  root.setAttribute('data-layout', localStorage.getItem('mosdns-layout') || 'comfortable')
+}
+
 function stopAutoRefresh() {
   if (autoRefreshTimerId) {
     window.clearInterval(autoRefreshTimerId)
@@ -88,6 +95,7 @@ function triggerGlobalRefresh() {
 }
 
 onMounted(() => {
+  initializeAppearance()
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   document.addEventListener('visibilitychange', handleVisibilityChange)

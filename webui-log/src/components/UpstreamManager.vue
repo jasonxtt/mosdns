@@ -613,8 +613,8 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
-    <div class="table-wrap">
-      <table>
+    <div class="table-wrap adaptive-table-wrap upstream-adaptive-wrap">
+      <table class="upstream-adaptive-table">
         <thead>
           <tr>
             <th class="sortable" @click="onSort('enabled')">启用 <span class="sort-indicator">{{ sortIndicator('enabled') }}</span></th>
@@ -639,13 +639,14 @@ onBeforeUnmount(() => {
           </tr>
           <tr v-for="row in rows" :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`" :class="{ disabled: !row.data?.enabled }">
             <td>
-              <button class="btn tiny" @click="toggleEnable(row)">
-                {{ row.data?.enabled ? 'ON' : 'OFF' }}
-              </button>
+              <label class="switch switch-table">
+                <input type="checkbox" :checked="Boolean(row.data?.enabled)" @change="toggleEnable(row)" />
+                <span class="slider"></span>
+              </label>
             </td>
-            <td>{{ groupDisplayName(row.group) }}</td>
-            <td>{{ row.data?.tag || '-' }}</td>
-            <td>{{ row.data?.protocol || '-' }}</td>
+            <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
+            <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
+            <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
             <td class="text-center">{{ row.stats.avgLatency }}</td>
             <td class="text-center">{{ row.stats.query }}</td>
             <td class="text-center">{{ row.stats.winner }}</td>

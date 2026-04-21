@@ -125,6 +125,7 @@ type AuditLog struct {
 	ResponseFlags     ResponseFlags  `json:"response_flags"`
 	Answers           []AnswerDetail `json:"answers"`
 	DomainSet         string         `json:"domain_set,omitempty"`
+	EffectiveTag      string         `json:"effective_tag,omitempty"`
 	MatchedGroup      string         `json:"matched_group,omitempty"`
 	FinalSequence     string         `json:"final_sequence,omitempty"`
 	FinalUpstream     string         `json:"final_upstream,omitempty"`
@@ -179,6 +180,7 @@ type AuditCollector struct {
 	domainCounts       map[string]int
 	clientCounts       map[string]int
 	domainSetCounts    map[string]int
+	effectiveTagCounts map[string]int
 	totalQueryCount    uint64
 	totalQueryDuration float64
 	ctxChan            chan *auditContext
@@ -227,6 +229,7 @@ func NewAuditCollector(capacity int) *AuditCollector {
 		domainCounts:       make(map[string]int),
 		clientCounts:       make(map[string]int),
 		domainSetCounts:    make(map[string]int),
+		effectiveTagCounts: make(map[string]int),
 		totalQueryCount:    0,
 		totalQueryDuration: 0.0,
 		ctxChan:            make(chan *auditContext, auditChannelCapacity),
@@ -365,6 +368,7 @@ func (c *AuditCollector) processBatch(batch []*auditContext) {
 		if log.DomainSet == "" {
 			log.DomainSet = "unmatched_rule"
 		}
+		log.EffectiveTag = internString(computeEffectiveTag(log.DomainSet, log.FinalUpstream, log.MatchedGroup))
 
 		if resp := qCtx.R(); resp != nil {
 			log.ResponseCode = internString(dns.RcodeToString[resp.Rcode])
@@ -425,6 +429,218 @@ func (c *AuditCollector) processBatch(batch []*auditContext) {
 	}
 }
 
+func splitDomainTags(value string) []string {
+	raw := strings.Split(value, "|")
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		tag := strings.TrimSpace(item)
+		if tag == "" {
+			continue
+		}
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		out = append(out, tag)
+	}
+	return out
+}
+
+func joinDomainTags(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	seen := make(map[string]struct{}, len(tags))
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		v := strings.TrimSpace(tag)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return strings.Join(out, "|")
+}
+
+func hasDomainTag(tags []string, target string) bool {
+	for _, tag := range tags {
+		if tag == target {
+			return true
+		}
+	}
+	return false
+}
+
+func firstMatchTag(tags []string, candidates []string) string {
+	for _, candidate := range candidates {
+		if hasDomainTag(tags, candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func firstMatchTagInOrder(tags []string, allowed map[string]struct{}) string {
+	for _, tag := range tags {
+		if _, ok := allowed[tag]; ok {
+			return tag
+		}
+	}
+	return ""
+}
+
+func normalizeSpecialTagFromGroup(matchedGroup string) string {
+	if !strings.HasPrefix(matchedGroup, "special_") {
+		return ""
+	}
+	slot := strings.TrimPrefix(matchedGroup, "special_")
+	if slot == "" {
+		return ""
+	}
+	for _, r := range slot {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return "特殊上游" + slot
+}
+
+func normalizeSpecialTagFromUpstream(finalUpstream string) string {
+	if !strings.HasPrefix(finalUpstream, "special_upstream_") {
+		return ""
+	}
+	slot := strings.TrimPrefix(finalUpstream, "special_upstream_")
+	if slot == "" {
+		return ""
+	}
+	for _, r := range slot {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return "特殊上游" + slot
+}
+
+func classifyRouteKind(finalUpstream string) string {
+	switch strings.TrimSpace(finalUpstream) {
+	case "domestic", "cnfake":
+		return "direct"
+	case "foreign", "foreignecs", "nocnfake":
+		return "proxy"
+	default:
+		return ""
+	}
+}
+
+func computeEffectiveTag(domainSet, finalUpstream, matchedGroup string) string {
+	domainSet = strings.TrimSpace(domainSet)
+	if domainSet == "" || domainSet == "unmatched_rule" {
+		return "unmatched_rule"
+	}
+
+	if special := normalizeSpecialTagFromGroup(strings.TrimSpace(matchedGroup)); special != "" {
+		return special
+	}
+	if special := normalizeSpecialTagFromUpstream(strings.TrimSpace(finalUpstream)); special != "" {
+		return special
+	}
+
+	tags := splitDomainTags(domainSet)
+	if len(tags) == 0 {
+		return "unmatched_rule"
+	}
+
+	for _, tag := range tags {
+		if strings.HasPrefix(tag, "特殊上游") {
+			return tag
+		}
+	}
+
+	singleDecisionPriority := []string{
+		"重定向", "指定客户端直连",
+		"黑名单", "广告屏蔽",
+		"BANAAAA", "BANSOA", "BANPTR", "BANHTTPS",
+		"DDNS域名",
+		"stash国内", "stash国外",
+		"clashmi国内", "clashmi国外",
+		"sing-box国内", "sing-box国外",
+	}
+	if one := firstMatchTag(tags, singleDecisionPriority); one != "" {
+		return one
+	}
+
+	noVTags := make([]string, 0, 2)
+	if hasDomainTag(tags, "记忆无V4") {
+		noVTags = append(noVTags, "记忆无V4")
+	}
+	if hasDomainTag(tags, "记忆无V6") {
+		noVTags = append(noVTags, "记忆无V6")
+	}
+
+	hasMemoryDirect := hasDomainTag(tags, "记忆直连")
+	hasMemoryProxy := hasDomainTag(tags, "记忆代理")
+	routeKind := classifyRouteKind(strings.TrimSpace(finalUpstream))
+
+	if hasMemoryDirect || hasMemoryProxy {
+		out := make([]string, 0, len(noVTags)+1)
+		out = append(out, noVTags...)
+		switch {
+		case hasMemoryDirect && hasMemoryProxy:
+			if routeKind == "proxy" {
+				out = append(out, "记忆代理")
+			} else {
+				out = append(out, "记忆直连")
+			}
+		case hasMemoryDirect:
+			out = append(out, "记忆直连")
+		case hasMemoryProxy:
+			out = append(out, "记忆代理")
+		}
+		if joined := joinDomainTags(out); joined != "" {
+			return joined
+		}
+	}
+
+	directCandidates := []string{"白名单", "订阅直连补充", "订阅直连", "CN fakeip filter", "!CN fakeip filter"}
+	proxyCandidates := []string{"灰名单", "订阅代理补充", "订阅代理"}
+
+	if routeKind == "direct" {
+		if core := firstMatchTag(tags, directCandidates); core != "" {
+			out := append(append([]string{}, noVTags...), core)
+			if joined := joinDomainTags(out); joined != "" {
+				return joined
+			}
+		}
+	}
+	if routeKind == "proxy" {
+		if core := firstMatchTag(tags, proxyCandidates); core != "" {
+			out := append(append([]string{}, noVTags...), core)
+			if joined := joinDomainTags(out); joined != "" {
+				return joined
+			}
+		}
+	}
+
+	allowed := map[string]struct{}{
+		"白名单": {}, "订阅直连补充": {}, "订阅直连": {},
+		"灰名单": {}, "订阅代理补充": {}, "订阅代理": {},
+		"CN fakeip filter": {}, "!CN fakeip filter": {},
+	}
+	if core := firstMatchTagInOrder(tags, allowed); core != "" {
+		out := append(append([]string{}, noVTags...), core)
+		if joined := joinDomainTags(out); joined != "" {
+			return joined
+		}
+	}
+
+	return domainSet
+}
+
 // syncStatsLocked updates statistical maps when API requests are made.
 func (c *AuditCollector) syncStatsLocked() {
 	if c.capacity == 0 || len(c.logs) == 0 {
@@ -441,6 +657,7 @@ func (c *AuditCollector) syncStatsLocked() {
 	c.domainCounts = make(map[string]int, 1024)
 	c.clientCounts = make(map[string]int, 64)
 	c.domainSetCounts = make(map[string]int, 16)
+	c.effectiveTagCounts = make(map[string]int, 16)
 	c.totalQueryCount = uint64(len(c.logs))
 	c.totalQueryDuration = 0.0
 
@@ -448,6 +665,11 @@ func (c *AuditCollector) syncStatsLocked() {
 		c.domainCounts[l.QueryName]++
 		c.clientCounts[l.ClientIP]++
 		c.domainSetCounts[l.DomainSet]++
+		effectiveTag := l.EffectiveTag
+		if effectiveTag == "" {
+			effectiveTag = l.DomainSet
+		}
+		c.effectiveTagCounts[effectiveTag]++
 		c.totalQueryDuration += l.DurationMs
 	}
 
@@ -516,6 +738,7 @@ func (c *AuditCollector) ClearLogs() {
 	c.domainCounts = make(map[string]int)
 	c.clientCounts = make(map[string]int)
 	c.domainSetCounts = make(map[string]int)
+	c.effectiveTagCounts = make(map[string]int)
 	c.totalQueryCount = 0
 	c.totalQueryDuration = 0.0
 }
@@ -547,6 +770,7 @@ func (c *AuditCollector) SetCapacity(newCapacity int, configBaseDir string) {
 	c.domainCounts = make(map[string]int)
 	c.clientCounts = make(map[string]int)
 	c.domainSetCounts = make(map[string]int)
+	c.effectiveTagCounts = make(map[string]int)
 	c.totalQueryCount = 0
 	c.totalQueryDuration = 0.0
 }
@@ -674,6 +898,7 @@ const (
 	RankByDomain    RankType = "domain"
 	RankByClient    RankType = "client"
 	RankByDomainSet RankType = "domain_set"
+	RankByEffective RankType = "effective_tag"
 )
 
 func (c *AuditCollector) CalculateRank(rankType RankType, limit int) []V2RankItem {
@@ -691,6 +916,8 @@ func (c *AuditCollector) CalculateRank(rankType RankType, limit int) []V2RankIte
 		return c.getRankFromMap(c.clientCounts, limit)
 	case RankByDomainSet:
 		return c.getRankFromMap(c.domainSetCounts, limit)
+	case RankByEffective:
+		return c.getRankFromMap(c.effectiveTagCounts, limit)
 	default:
 		return []V2RankItem{}
 	}
@@ -800,7 +1027,18 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 				}
 			}
 
-			// 5. Check MatchedRuleSource
+			// 5. Check EffectiveTag
+			if !foundInQ && log.EffectiveTag != "" {
+				haystack = log.EffectiveTag
+				if !params.Exact {
+					haystack = strings.ToLower(haystack)
+				}
+				if matchFunc(haystack, searchTerm) {
+					foundInQ = true
+				}
+			}
+
+			// 6. Check MatchedRuleSource
 			if !foundInQ && log.MatchedRuleSource != "" {
 				haystack = log.MatchedRuleSource
 				if !params.Exact {
@@ -811,7 +1049,7 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 				}
 			}
 
-			// 6. Check SelectedUpstream
+			// 7. Check SelectedUpstream
 			if !foundInQ && log.SelectedUpstream != "" {
 				haystack = log.SelectedUpstream
 				if !params.Exact {
@@ -822,7 +1060,7 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 				}
 			}
 
-			// 7. Check Answers
+			// 8. Check Answers
 			if !foundInQ {
 				for _, answer := range log.Answers {
 					haystack = answer.Data

@@ -14,9 +14,7 @@ const lastUpdatedText = ref('--')
 
 const stats = reactive({
   totalQueries: 0,
-  averageDurationMs: 0,
-  capturing: null,
-  capacity: null
+  averageDurationMs: 0
 })
 
 const history = reactive({
@@ -352,8 +350,6 @@ async function reloadOverview(showMessage = false) {
       topClientsRes,
       slowestRes,
       domainSetRes,
-      statusRes,
-      capacityRes,
       specialGroupsRes,
       aliasesRes
     ] = await Promise.all([
@@ -361,17 +357,13 @@ async function reloadOverview(showMessage = false) {
       getJSON('/api/v2/audit/rank/domain?limit=20'),
       getJSON('/api/v2/audit/rank/client?limit=20'),
       getJSON('/api/v2/audit/rank/slowest?limit=20'),
-      getJSON('/api/v2/audit/rank/domain_set?limit=20'),
-      getJSON('/api/v1/audit/status'),
-      getJSON('/api/v1/audit/capacity'),
+      getJSON('/api/v2/audit/rank/effective?limit=20').catch(() => getJSON('/api/v2/audit/rank/domain_set?limit=20')),
       getJSON('/api/v1/special-groups'),
       getJSON('/plugins/clientname').catch(() => ({}))
     ])
 
     stats.totalQueries = Number(statsRes?.total_queries || 0)
     stats.averageDurationMs = Number(statsRes?.average_duration_ms || 0)
-    stats.capturing = Boolean(statusRes?.capturing)
-    stats.capacity = Number(capacityRes?.capacity || 0)
     addHistoryPoint(stats.totalQueries, stats.averageDurationMs)
 
     topDomains.value = Array.isArray(topDomainsRes) ? topDomainsRes : []
@@ -433,14 +425,6 @@ onBeforeUnmount(() => {
         <p class="overview-value">{{ formatDuration(stats.averageDurationMs) }}</p>
         <div class="sparkline-mini" v-html="sparklineAvg"></div>
       </article>
-      <article class="overview-card">
-        <h3>审计状态</h3>
-        <p class="overview-value">{{ stats.capturing === null ? '-' : (stats.capturing ? '运行中' : '已停止') }}</p>
-      </article>
-      <article class="overview-card">
-        <h3>审计容量</h3>
-        <p class="overview-value">{{ stats.capacity === null ? '-' : stats.capacity.toLocaleString() }}</p>
-      </article>
     </div>
 
     <section v-if="chartMode === 'independent'" class="panel sub-panel overview-big-chart-panel">
@@ -454,9 +438,9 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="overview-grid">
-      <section class="panel sub-panel">
+      <section class="panel sub-panel overview-metric-module">
         <h3>Top 域名</h3>
-        <div class="table-wrap overview-table-fit top-domains-fit">
+        <div class="table-wrap overview-table-fit top-domains-fit module-scroll-list">
           <table>
             <thead>
               <tr>
@@ -482,9 +466,9 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="panel sub-panel">
+      <section class="panel sub-panel overview-metric-module">
         <h3>Top 客户端</h3>
-        <div class="table-wrap overview-table-fit top-clients-fit">
+        <div class="table-wrap overview-table-fit top-clients-fit module-scroll-list">
           <table>
             <thead>
               <tr>
@@ -508,21 +492,19 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="panel sub-panel">
+      <section class="panel sub-panel overview-metric-module">
         <h3>最慢查询</h3>
-        <div class="table-wrap overview-table-fit slowest-fit">
+        <div class="table-wrap overview-table-fit slowest-fit module-scroll-list">
           <table>
             <thead>
               <tr>
                 <th>域名</th>
-                <th>客户端</th>
                 <th class="text-right">耗时</th>
-                <th>时间</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="slowestQueries.length === 0">
-                <td colspan="4" class="empty">暂无数据</td>
+                <td colspan="2" class="empty">暂无数据</td>
               </tr>
               <tr
                 v-for="(item, index) in slowestQueries"
@@ -531,41 +513,16 @@ onBeforeUnmount(() => {
                 @click="openSlowDetail(item)"
               >
                 <td>{{ item.query_name }}</td>
-                <td>{{ getClientDisplay(item.client_ip) }}</td>
                 <td class="text-right">{{ formatDuration(item.duration_ms) }}</td>
-                <td>{{ formatTime(item.query_time) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="panel sub-panel">
-        <h3>分流命中排行</h3>
-        <div v-if="domainSetRows.length > 0" class="domain-set-chart">
-          <div class="domain-set-donut-wrap">
-            <svg viewBox="0 0 120 120" class="domain-set-donut-svg" aria-hidden="true">
-              <circle cx="60" cy="60" :r="DONUT_RADIUS" class="domain-set-donut-track" />
-              <circle
-                v-for="segment in domainSetSegments"
-                :key="`seg-${segment.key}`"
-                cx="60"
-                cy="60"
-                :r="DONUT_RADIUS"
-                class="domain-set-donut-segment"
-                :stroke="segment.color"
-                :stroke-dasharray="segment.dasharray"
-                :stroke-dashoffset="segment.dashoffset"
-              />
-            </svg>
-            <div class="domain-set-donut-center">
-              <strong>{{ domainSetTotal.toLocaleString() }}</strong>
-              <span>总计</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="table-wrap overview-table-fit domain-set-fit">
+      <section class="panel sub-panel overview-metric-module">
+        <h3>分流统计</h3>
+        <div class="table-wrap overview-table-fit domain-set-fit module-scroll-list">
           <table>
             <thead>
               <tr>
@@ -581,7 +538,6 @@ onBeforeUnmount(() => {
               <tr v-for="item in domainSetRows" :key="`set-${item.key}`">
                 <td>
                   <span class="domain-set-rule">
-                    <span class="domain-set-dot" :style="{ backgroundColor: item.color }"></span>
                     <span class="domain-set-name">{{ getRuleLabel(item.key) }}</span>
                   </span>
                 </td>
@@ -594,7 +550,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="slowDetailOpen && selectedSlowQuery" class="modal-mask" @click.self="closeSlowDetail">
+    <div v-if="slowDetailOpen && selectedSlowQuery" class="modal-mask modal-mask-top" @click.self="closeSlowDetail">
       <section class="panel data-view-modal overview-slow-detail-modal">
         <header class="panel-header">
           <div>
@@ -611,7 +567,7 @@ onBeforeUnmount(() => {
           <div><strong>类型:</strong> {{ selectedSlowQuery.query_type || '-' }}</div>
           <div><strong>类别:</strong> {{ selectedSlowQuery.query_class || '-' }}</div>
           <div><strong>Trace ID:</strong> <span class="mono">{{ selectedSlowQuery.trace_id || '-' }}</span></div>
-          <div><strong>分流规则:</strong> {{ getDetailRuleLabel(selectedSlowQuery.domain_set) }}</div>
+          <div><strong>生效标签:</strong> {{ getDetailRuleLabel(selectedSlowQuery.effective_tag || selectedSlowQuery.domain_set) }}</div>
           <div><strong>上游组:</strong> {{ selectedSlowQuery.final_upstream || selectedSlowQuery.upstream_group || '-' }}</div>
           <div><strong>最终上游:</strong> {{ selectedSlowQuery.selected_upstream || '-' }}</div>
           <div><strong>响应码:</strong> {{ selectedSlowQuery.response_code || '-' }}</div>

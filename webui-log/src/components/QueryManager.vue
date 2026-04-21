@@ -869,7 +869,8 @@ onBeforeUnmount(() => {
           <div><strong>类型:</strong> {{ selectedLog.query_type || '-' }}</div>
           <div><strong>类别:</strong> {{ selectedLog.query_class || '-' }}</div>
           <div><strong>Trace ID:</strong> <span class="mono">{{ selectedLog.trace_id || '-' }}</span></div>
-          <div><strong>分流规则:</strong> {{ selectedLog.domain_set || '-' }}</div>
+          <div><strong>生效标签:</strong> {{ selectedLog.effective_tag || selectedLog.domain_set || '-' }}</div>
+          <div><strong>命中标签:</strong> {{ selectedLog.domain_set || '-' }}</div>
           <div><strong>匹配来源:</strong> {{ selectedLog.matched_rule_source || '-' }}</div>
           <div><strong>专属分流组:</strong> {{ getMatchedGroupDisplay(selectedLog.matched_group) }}</div>
           <div><strong>最终序列:</strong> {{ selectedLog.final_sequence || '-' }}</div>

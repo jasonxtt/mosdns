@@ -42,12 +42,13 @@ type V2PaginationInfo struct {
 func RegisterAuditAPIV2(router *chi.Mux) {
 	router.Route("/api/v2/audit", func(r chi.Router) {
 		// 为所有高频/重数据接口套上 WithAsyncGC
-		r.Get("/stats", WithAsyncGC(handleV2GetStats))           // 概览页调用
-		r.Get("/rank/domain", WithAsyncGC(handleV2GetDomainRank))   // 概览页调用
-		r.Get("/rank/client", WithAsyncGC(handleV2GetClientRank))   // 概览页调用
+		r.Get("/stats", WithAsyncGC(handleV2GetStats))                   // 概览页调用
+		r.Get("/rank/domain", WithAsyncGC(handleV2GetDomainRank))        // 概览页调用
+		r.Get("/rank/client", WithAsyncGC(handleV2GetClientRank))        // 概览页调用
 		r.Get("/rank/domain_set", WithAsyncGC(handleV2GetDomainSetRank)) // 概览页调用
+		r.Get("/rank/effective", WithAsyncGC(handleV2GetEffectiveRank))  // 概览页调用（最终生效标签）
 		r.Get("/rank/slowest", WithAsyncGC(handleV2GetSlowestQueries))   // 概览页调用
-		
+
 		r.Get("/logs", WithAsyncGC(handleV2GetLogs)) // 已有的
 	})
 }
@@ -95,8 +96,17 @@ func handleV2GetDomainSetRank(w http.ResponseWriter, r *http.Request) {
 		mlog.L().Error("failed to encode v2 domain_set rank", zap.Error(err))
 	}
 }
-// --- ADDED END ---
 
+func handleV2GetEffectiveRank(w http.ResponseWriter, r *http.Request) {
+	limit := parseQueryInt(r, "limit", 20) // Default to top 20
+	rank := GlobalAuditCollector.CalculateRank(RankByEffective, limit)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(rank); err != nil {
+		mlog.L().Error("failed to encode v2 effective rank", zap.Error(err))
+	}
+}
+
+// --- ADDED END ---
 
 // 5. Handler for: Get slowest queries
 func handleV2GetSlowestQueries(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +121,7 @@ func handleV2GetSlowestQueries(w http.ResponseWriter, r *http.Request) {
 // 6. Handler for: Get logs with advanced filtering and pagination
 func handleV2GetLogs(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	
+
 	exactSearch, _ := strconv.ParseBool(query.Get("exact"))
 
 	params := V2GetLogsParams{
