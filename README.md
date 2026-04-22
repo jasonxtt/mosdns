@@ -2,9 +2,14 @@
 
 [简体中文文档](README.zh-CN.md)
 
-An enhanced fork of `yyysuo/mosdns`, focused on making long-term DNS rule maintenance practical through a stronger WebUI workflow.
+An enhanced fork of `yyysuo/mosdns`, focused on making long-term DNS rule maintenance practical through a stronger WebUI workflow, dedicated routing groups, and a Vue-based dashboard.
 
 This fork keeps the upstream architecture and core configuration style, while adding a set of features for rule-driven routing, upstream management, and day-to-day operations.
+
+The current UI entry points are:
+
+- `/` for the maintained Vue UI
+- `/log` for the previous legacy dashboard kept for compatibility and comparison
 
 ## Config Packages
 
@@ -70,6 +75,7 @@ After extracting the full package, the runtime path should be:
 This fork currently adds:
 
 - dedicated routing group APIs and WebUI flows
+- a Vue-based main dashboard at `/`, with the previous UI retained at `/log`
 - upstream hot reload for aliapi groups
 - automatic online rule download after save
 - friendlier dedicated-group display in query logs
