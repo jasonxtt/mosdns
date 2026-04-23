@@ -411,6 +411,23 @@ async function updateAdguardAll() {
   }
 }
 
+async function updateAdguard(rule) {
+  const id = String(rule?.id || '')
+  if (!id) {
+    setError('无法定位 AdGuard 规则 ID')
+    return
+  }
+  try {
+    await postJSON(`/plugins/adguard/update/${id}`, {})
+    setSuccess(`已触发拦截规则“${rule.name}”更新，5 秒后自动刷新列表`)
+    setTimeout(() => {
+      loadAdguardRules()
+    }, 5000)
+  } catch (error) {
+    setError(`触发拦截规则更新失败: ${error.message}`)
+  }
+}
+
 function openCreateDiversion() {
   clearMessage()
   diversionRaw.value = null
@@ -703,6 +720,46 @@ async function updateDiversion(rule) {
   }
 }
 
+async function updateDiversionAll() {
+  const targetsMap = new Map()
+  diversionRules.value.forEach((rule) => {
+    const pluginTag = diversionPluginMap.value[rule.type] || rule.__pluginTag
+    if (!pluginTag || !rule?.name) {
+      return
+    }
+    const key = `${pluginTag}:${rule.name}`
+    targetsMap.set(key, { pluginTag, name: rule.name })
+  })
+
+  const targets = Array.from(targetsMap.values())
+  if (targets.length === 0) {
+    setError('暂无可更新的分流规则')
+    return
+  }
+
+  try {
+    const settled = await Promise.allSettled(
+      targets.map((target) => postJSON(`/plugins/${target.pluginTag}/update/${target.name}`, {}))
+    )
+    const okCount = settled.filter((item) => item.status === 'fulfilled').length
+    const failCount = settled.length - okCount
+    if (okCount === 0) {
+      setError(`触发分流全量更新失败，共 ${failCount} 条`)
+      return
+    }
+    if (failCount > 0) {
+      setError(`已触发 ${okCount} 条分流规则更新，${failCount} 条触发失败`)
+    } else {
+      setSuccess(`已触发全部 ${okCount} 条分流规则更新，5 秒后自动刷新列表`)
+    }
+    setTimeout(() => {
+      loadDiversionRules()
+    }, 5000)
+  } catch (error) {
+    setError(`触发分流全量更新失败: ${error.message}`)
+  }
+}
+
 function handleGlobalRefresh() {
   reloadCurrentView()
 }
@@ -767,8 +824,8 @@ onBeforeUnmount(() => {
 
     <section v-if="shouldShowTab('adguard')" class="sub-panel">
       <div class="actions">
-        <button class="btn warning" @click="updateAdguardAll">更新全部</button>
-        <button class="btn primary" @click="openCreateAdguard">新增规则</button>
+        <button class="btn primary" @click="openCreateAdguard">新增拦截规则</button>
+        <button class="btn warning" @click="updateAdguardAll">更新全部规则</button>
       </div>
       <div class="table-wrap adaptive-table-wrap rules-adguard-wrap">
         <table class="rules-adaptive-table rules-adguard-table">
@@ -801,6 +858,7 @@ onBeforeUnmount(() => {
               <td class="text-right">{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
               <td class="mono" :title="formatTime(rule.last_updated)">{{ formatTime(rule.last_updated) }}</td>
               <td class="row-actions">
+                <button class="btn tiny warning" @click="updateAdguard(rule)">更新</button>
                 <button class="btn tiny secondary" @click="openEditAdguard(rule)">编辑</button>
                 <button class="btn tiny danger" @click="deleteAdguard(rule)">删除</button>
               </td>
@@ -813,6 +871,7 @@ onBeforeUnmount(() => {
     <section v-if="shouldShowTab('diversion')" class="sub-panel">
       <div class="actions">
         <button class="btn primary" @click="openCreateDiversion">新增分流规则</button>
+        <button class="btn warning" @click="updateDiversionAll">更新全部规则</button>
       </div>
       <div class="table-wrap adaptive-table-wrap rules-diversion-wrap">
         <table class="rules-adaptive-table rules-diversion-table">

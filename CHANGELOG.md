@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v0.3.4
+
+### Changed
+
+- optimized remote config apply (`/api/v1/config/update_from_url`) backup behavior:
+  - backup now only includes files that will be overwritten by the incoming ZIP
+  - avoids full-directory backup inode pressure on large runtime trees
+- refined rules WebUI operations:
+  - subscription rules now support `更新全部规则`
+  - adguard module buttons renamed to `新增拦截规则` and `更新全部规则`
+  - adguard list now supports per-rule `更新`
+- updated the subscription `更新全部规则` button style to the same warning/red tone used by update actions in adguard
+
+### Added
+
+- added adguard single-rule update API:
+  - `POST /plugins/adguard/update/{id}`
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.3
 
 ### Changed

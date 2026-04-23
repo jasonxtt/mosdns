@@ -997,7 +997,7 @@ tr.disabled {
 
 .rules-adguard-table th:nth-child(6),
 .rules-adguard-table td:nth-child(6) {
-  width: 128px;
+  width: 198px;
 }
 
 .rules-diversion-table th:nth-child(1),
@@ -1591,7 +1591,7 @@ tr.disabled {
 
 .scheduler-grid {
   display: grid;
-  grid-template-columns: 160px 1fr;
+  grid-template-columns: 160px minmax(0, 1fr);
   gap: 8px 10px;
   align-items: center;
 }
@@ -1605,6 +1605,11 @@ tr.disabled {
   width: 100%;
   max-width: 220px;
   min-width: 0;
+}
+
+.scheduler-field[type="datetime-local"] {
+  width: 220px;
+  max-width: 100%;
 }
 
 .requery-important {
