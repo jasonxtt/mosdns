@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v0.3.3
+
+### Changed
+
+- refined mobile layout behavior to avoid module-level overflow:
+  - top-level menu (including refresh button) now stays in one row without horizontal scrolling
+  - reduced mobile menu button spacing and font size to fit one-line layout
+- improved small-screen table behavior with a “compress first, scroll only when needed” approach:
+  - cache-management table spacing and font size are compacted on mobile
+  - `高级替换规则` and cache/stat tables scroll within table area when width is insufficient
+  - prevented panel/module containers from exceeding viewport width
+- adjusted inline module width handling:
+  - `域名列表统计` and `刷新分流缓存` modules now stay within screen width like other panels
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.2
 
 ### Changed
