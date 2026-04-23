@@ -345,7 +345,6 @@ body {
 
 .diagnostic-pane {
   min-width: 0;
-  overflow-x: auto;
 }
 
 .diagnostic-request-list {
@@ -499,6 +498,7 @@ body {
   border-radius: 14px;
   padding: 16px;
   box-shadow: 0 10px 18px rgba(18, 28, 40, 0.06);
+  min-width: 0;
 }
 
 .panel-header {
@@ -1109,10 +1109,11 @@ tr.disabled {
 .data-scroll-wrap {
   overflow-x: auto;
   overflow-y: hidden;
+  max-width: 100%;
 }
 
 .replacements-table {
-  min-width: 980px;
+  min-width: 860px;
 }
 
 .replacements-table td input {
@@ -1120,11 +1121,11 @@ tr.disabled {
 }
 
 .cache-table-wrap table {
-  min-width: 980px;
+  min-width: 760px;
 }
 
 .domain-stats-table-wrap table {
-  min-width: 560px;
+  min-width: 0;
 }
 
 .mono {
@@ -1627,6 +1628,7 @@ tr.disabled {
 
 .data-inline-row > .data-inline-module {
   height: 100%;
+  min-width: 0;
 }
 
 .domain-stats-module .table-wrap {
@@ -1654,6 +1656,10 @@ tr.disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.control-panel-grid > .panel {
+  min-width: 0;
 }
 
 .system-grid-quad {
@@ -2228,25 +2234,28 @@ tr.disabled {
   .legacy-main-nav.compact {
     flex-wrap: nowrap;
     align-items: center;
-    gap: 6px;
+    gap: 3px;
     padding: 6px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
+    overflow: hidden;
   }
 
   .legacy-main-btn {
-    flex: 0 0 auto;
+    flex: 1 1 0;
+    min-width: 0;
     white-space: nowrap;
-    padding: 8px 10px;
-    font-size: 0.82rem;
+    padding: 7px 4px;
+    font-size: 0.74rem;
+    border-radius: 8px;
+    text-align: center;
   }
 
   .legacy-main-btn.refresh-inline-btn {
     margin-left: 0;
-    min-width: 36px;
-    width: 36px;
-    padding: 8px 0;
+    flex: 0 0 30px;
+    min-width: 30px;
+    width: 30px;
+    padding: 7px 0;
+    font-size: 1rem;
   }
 
   .main-refresh-btn {
@@ -2294,10 +2303,21 @@ tr.disabled {
     grid-template-columns: 1fr;
   }
 
-  .diagnostic-pane .diagnostic-request-list,
-  .diagnostic-pane .structured-flow,
-  .diagnostic-pane .table-wrap {
-    min-width: 540px;
+  .cache-table-wrap th,
+  .cache-table-wrap td {
+    padding: 6px 5px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .cache-table-wrap table {
+    min-width: 680px;
+  }
+
+  .domain-stats-table-wrap th,
+  .domain-stats-table-wrap td {
+    padding: 7px 6px;
+    font-size: 0.8rem;
   }
 
   .form-grid {
@@ -2346,6 +2366,11 @@ tr.disabled {
 
   .data-inline-row {
     grid-template-columns: 1fr;
+  }
+
+  .data-inline-row > .data-inline-module {
+    width: 100%;
+    max-width: 100%;
   }
 
   .system-grid-quad {
