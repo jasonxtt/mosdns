@@ -11,6 +11,8 @@ const selectedTag = ref('')
 const content = ref('')
 const statusText = ref('未加载')
 const specialGroups = ref([])
+const lastLoadedContent = ref('')
+const dirty = ref(false)
 
 const fixedProfiles = [
   { tag: 'whitelist', name: '白名单' },
@@ -92,6 +94,10 @@ function lineCount(text) {
   return trimmed.split('\n').map((line) => line.trim()).filter(Boolean).length
 }
 
+function updateStatus(extra = '') {
+  statusText.value = `共 ${lineCount(content.value)} 行${extra}`
+}
+
 async function loadProfiles() {
   resetMessage()
   try {
@@ -103,8 +109,13 @@ async function loadProfiles() {
   }
 }
 
-async function loadList(tag) {
+async function loadList(tag, options = {}) {
   if (!tag) {
+    return
+  }
+  const preserveEditing = Boolean(options?.preserveEditing)
+  if (preserveEditing && selectedTag.value === tag && dirty.value) {
+    updateStatus('（检测到未保存编辑，已暂停自动刷新）')
     return
   }
   selectedTag.value = tag
@@ -115,7 +126,9 @@ async function loadList(tag) {
   try {
     const text = await getText(`/plugins/${tag}/show?limit=10000`)
     content.value = text || ''
-    statusText.value = `共 ${lineCount(content.value)} 行`
+    lastLoadedContent.value = content.value
+    dirty.value = false
+    updateStatus()
   } catch (error) {
     errorMessage.value = `加载列表失败: ${error.message}`
     statusText.value = '加载失败'
@@ -137,6 +150,9 @@ async function saveList() {
       .map((item) => item.trim())
       .filter(Boolean)
     await postJSON(`/plugins/${selectedTag.value}/post`, { values })
+    content.value = values.join('\n')
+    lastLoadedContent.value = content.value
+    dirty.value = false
     successMessage.value = `列表“${getProfileName(selectedTag.value)}”已保存`
     statusText.value = `共 ${values.length} 行`
   } catch (error) {
@@ -144,6 +160,11 @@ async function saveList() {
   } finally {
     saving.value = false
   }
+}
+
+function onEditorInput() {
+  dirty.value = content.value !== lastLoadedContent.value
+  updateStatus(dirty.value ? '（未保存）' : '')
 }
 
 async function init() {
@@ -156,7 +177,7 @@ async function init() {
 async function handleGlobalRefresh() {
   await loadProfiles()
   if (selectedTag.value) {
-    await loadList(selectedTag.value)
+    await loadList(selectedTag.value, { preserveEditing: true })
   }
 }
 
@@ -178,7 +199,7 @@ onBeforeUnmount(() => {
         <p class="muted">管理固定名单和专属分流组绑定名单。当前仓库功能范围与现有后端插件保持一致。</p>
       </div>
       <div class="actions">
-        <button class="btn primary" :disabled="saving || loading" @click="saveList">
+        <button class="btn secondary save-list-btn" :disabled="saving || loading" @click="saveList">
           {{ saving ? '保存中...' : '保存列表' }}
         </button>
       </div>
@@ -211,6 +232,7 @@ onBeforeUnmount(() => {
           class="list-editor"
           spellcheck="false"
           :disabled="loading"
+          @input="onEditorInput"
           placeholder="每行一个条目"
         />
       </main>

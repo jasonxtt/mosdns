@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
+import { getDefaultPanelBackgroundSettings, normalizePanelBackgroundSettings, previewPanelBackground, transparencyToOpacity } from '../utils/panelBackground'
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -54,21 +55,28 @@ const autoRefresh = reactive({
 
 const appearance = reactive({
   theme: 'dark',
-  color: 'indigo',
-  layout: 'comfortable',
-  chartMode: 'integrated'
+  color: 'indigo'
+})
+
+const panelBackgroundDefaults = getDefaultPanelBackgroundSettings()
+const panelBackgroundMaxUpload = 20 * 1024 * 1024
+const panelBackgroundPicker = ref(null)
+const panelBackground = reactive({
+  mode: panelBackgroundDefaults.mode,
+  url: '',
+  imageUrl: '',
+  transparency: panelBackgroundDefaults.transparency,
+  opacity: panelBackgroundDefaults.opacity,
+  blur: panelBackgroundDefaults.blur,
+  applying: false,
+  uploading: false
 })
 
 let restartProbeTimerId = 0
 
 const themeOptions = [
   { value: 'light', label: '明亮' },
-  { value: 'dark', label: '黑暗' },
-  { value: 'sakura', label: '夜樱' },
-  { value: 'evergreen', label: '常青' },
-  { value: 'starlight', label: '星光' },
-  { value: 'dusk', label: '黄昏' },
-  { value: 'terra', label: '赤土' }
+  { value: 'dark', label: '黑暗' }
 ]
 
 const colorOptions = [
@@ -578,10 +586,11 @@ async function applyUpdate(force = false, preferV3 = false) {
 }
 
 function applyTheme(theme, save = true) {
-  appearance.theme = theme
-  document.documentElement.setAttribute('data-theme', theme)
+  const nextTheme = ['light', 'dark'].includes(String(theme)) ? String(theme) : 'light'
+  appearance.theme = nextTheme
+  document.documentElement.setAttribute('data-theme', nextTheme)
   if (save) {
-    localStorage.setItem('mosdns-theme', theme)
+    localStorage.setItem('mosdns-theme', nextTheme)
   }
 }
 
@@ -593,27 +602,157 @@ function applyColor(color, save = true) {
   }
 }
 
-function applyLayout(layout, save = true) {
-  appearance.layout = layout
-  document.documentElement.setAttribute('data-layout', layout)
-  if (save) {
-    localStorage.setItem('mosdns-layout', layout)
-  }
-}
-
-function applyChartMode(mode, save = true) {
-  appearance.chartMode = mode
-  if (save) {
-    localStorage.setItem('mosdns-chart-mode', mode)
-  }
-  window.dispatchEvent(new CustomEvent('mosdns-chart-mode-update', { detail: { mode } }))
-}
-
 function initializeAppearance() {
   applyTheme(localStorage.getItem('mosdns-theme') || 'light', false)
   applyColor(localStorage.getItem('mosdns-color') || 'classic', false)
-  applyLayout(localStorage.getItem('mosdns-layout') || 'comfortable', false)
-  applyChartMode(localStorage.getItem('mosdns-chart-mode') || 'integrated', false)
+}
+
+function applyPanelBackgroundDraft(raw) {
+  const normalized = normalizePanelBackgroundSettings(raw || {})
+  panelBackground.mode = normalized.mode
+  panelBackground.url = normalized.url
+  panelBackground.imageUrl = normalized.imageUrl
+  panelBackground.transparency = normalized.transparency
+  panelBackground.opacity = normalized.opacity
+  panelBackground.blur = normalized.blur
+}
+
+function getPanelBackgroundDraftForPreview() {
+  return {
+    mode: panelBackground.mode,
+    url: panelBackground.url,
+    image_url: panelBackground.imageUrl,
+    opacity: transparencyToOpacity(panelBackground.transparency),
+    blur: panelBackground.blur
+  }
+}
+
+async function syncPanelBackgroundPreview(showError = false) {
+  const result = await previewPanelBackground(getPanelBackgroundDraftForPreview(), {
+    onError: (error) => {
+      if (showError) {
+        setError(`背景加载失败，已回退默认背景: ${error.message}`)
+      }
+    }
+  })
+  return result.ok
+}
+
+function buildPanelBackgroundPayload() {
+  const normalized = normalizePanelBackgroundSettings(getPanelBackgroundDraftForPreview())
+  return {
+    mode: normalized.mode,
+    url: normalized.mode === 'url' ? normalized.url : '',
+    opacity: normalized.opacity,
+    blur: normalized.blur
+  }
+}
+
+async function loadPanelBackgroundSettings() {
+  if (panelBackground.applying || panelBackground.uploading) {
+    return
+  }
+  try {
+    const settings = await getJSON('/api/v1/appearance/panel-background')
+    applyPanelBackgroundDraft(settings)
+    await syncPanelBackgroundPreview(false)
+  } catch (error) {
+    setError(`加载面板背景设置失败: ${error.message}`)
+  }
+}
+
+async function applyPanelBackgroundSettings() {
+  clearMessage()
+  panelBackground.applying = true
+  try {
+    if (panelBackground.mode !== 'upload') {
+      panelBackground.mode = panelBackground.url.trim() ? 'url' : 'none'
+    }
+    const payload = buildPanelBackgroundPayload()
+    if ((payload.mode === 'url' || payload.mode === 'upload') && !(await syncPanelBackgroundPreview(true))) {
+      return
+    }
+    const saved = await postJSON('/api/v1/appearance/panel-background', payload)
+    applyPanelBackgroundDraft(saved)
+    await syncPanelBackgroundPreview(false)
+    setSuccess('面板背景已应用')
+  } catch (error) {
+    setError(`应用面板背景失败: ${error.message}`)
+  } finally {
+    panelBackground.applying = false
+  }
+}
+
+async function resetPanelBackgroundSettings() {
+  clearMessage()
+  panelBackground.mode = 'none'
+  panelBackground.url = ''
+  panelBackground.imageUrl = ''
+  panelBackground.transparency = panelBackgroundDefaults.transparency
+  panelBackground.opacity = panelBackgroundDefaults.opacity
+  panelBackground.blur = panelBackgroundDefaults.blur
+  await applyPanelBackgroundSettings()
+  if (!errorMessage.value) {
+    setSuccess('面板背景已重置')
+  }
+}
+
+async function onPanelBackgroundUrlEnter() {
+  panelBackground.mode = 'url'
+  await applyPanelBackgroundSettings()
+}
+
+function onPanelBackgroundSliderInput() {
+  panelBackground.opacity = transparencyToOpacity(panelBackground.transparency)
+  void syncPanelBackgroundPreview(false)
+}
+
+function openPanelBackgroundPicker() {
+  panelBackgroundPicker.value?.click()
+}
+
+async function onPanelBackgroundFileChange(event) {
+  const input = event?.target
+  const file = input?.files?.[0]
+  if (input) {
+    input.value = ''
+  }
+  if (!file) {
+    return
+  }
+  if (Number(file.size || 0) > panelBackgroundMaxUpload) {
+    setError('图片大小不能超过 20MB')
+    return
+  }
+
+  clearMessage()
+  panelBackground.uploading = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch('/api/v1/appearance/panel-background/upload', {
+      method: 'POST',
+      body: formData
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`)
+    }
+    const data = await response.json()
+    panelBackground.mode = 'upload'
+    panelBackground.imageUrl = String(data?.image_url || '')
+    if (!(await syncPanelBackgroundPreview(true))) {
+      return
+    }
+    await applyPanelBackgroundSettings()
+    if (!errorMessage.value) {
+      setSuccess('图片已上传并应用')
+    }
+  } catch (error) {
+    setError(`上传背景图片失败: ${error.message}`)
+  } finally {
+    panelBackground.uploading = false
+  }
 }
 
 function loadAutoRefreshSettings() {
@@ -719,8 +858,16 @@ function emitAutoRefreshSettings(showToast = false) {
   }
 }
 
-function onAutoRefreshToggle() {
+function setAutoRefreshEnabled(enabled) {
+  if (autoRefresh.enabled === enabled) {
+    return
+  }
+  autoRefresh.enabled = enabled
   emitAutoRefreshSettings(true)
+}
+
+function onAutoRefreshToggle(event) {
+  setAutoRefreshEnabled(Boolean(event?.target?.checked))
 }
 
 function onAutoRefreshIntervalChange() {
@@ -754,6 +901,7 @@ onMounted(() => {
   loadAutoRefreshSettings()
   loadConfigManagerSettings()
   emitAutoRefreshSettings(false)
+  loadPanelBackgroundSettings()
   reloadAll()
   window.addEventListener('mosdns-log-refresh', refreshOnGlobalEvent)
 })
@@ -768,7 +916,7 @@ onBeforeUnmount(() => {
   <section class="panel system-panel">
     <header class="panel-header">
       <div class="actions">
-        <button class="btn warning" :disabled="restarting" @click="restartMosdns">{{ restarting ? '处理中...' : '重启 MosDNS' }}</button>
+        <button class="btn tiny secondary restart-mosdns-btn" :disabled="restarting" @click="restartMosdns">{{ restarting ? '处理中...' : '重启 MosDNS' }}</button>
       </div>
     </header>
 
@@ -854,8 +1002,8 @@ onBeforeUnmount(() => {
               <h3>核心运行模式</h3>
             </div>
             <div class="actions">
-              <button class="btn tiny" :class="coreMode === 'A' ? 'primary' : 'secondary'" :disabled="switchLoading.switch3" @click="setCoreMode('A')">兼容模式</button>
-              <button class="btn tiny" :class="coreMode === 'B' ? 'primary' : 'secondary'" :disabled="switchLoading.switch3" @click="setCoreMode('B')">安全模式</button>
+              <button class="btn tiny core-mode-btn" :class="coreMode === 'A' ? 'primary is-active' : 'secondary'" :disabled="switchLoading.switch3" @click="setCoreMode('A')">兼容模式</button>
+              <button class="btn tiny core-mode-btn" :class="coreMode === 'B' ? 'primary is-active' : 'secondary'" :disabled="switchLoading.switch3" @click="setCoreMode('B')">安全模式</button>
             </div>
           </header>
           <div class="core-mode-hints">
@@ -967,9 +1115,9 @@ onBeforeUnmount(() => {
           <h3>自动刷新</h3>
           <div class="control-line">
             <strong>启用状态</strong>
-            <label class="switch-inline">
-              <input v-model="autoRefresh.enabled" type="checkbox" @change="onAutoRefreshToggle" />
-              <span>{{ autoRefresh.enabled ? '开启' : '关闭' }}</span>
+            <label class="switch switch-table">
+              <input type="checkbox" :checked="autoRefresh.enabled" @change="onAutoRefreshToggle" />
+              <span class="slider"></span>
             </label>
           </div>
           <div class="control-line">
@@ -984,8 +1132,46 @@ onBeforeUnmount(() => {
         <section class="panel control-module control-module--mini">
           <h3>主题与外观</h3>
           <div class="control-line"><strong>界面风格</strong><select v-model="appearance.theme" @change="applyTheme(appearance.theme)"><option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option></select></div>
-          <div class="control-line"><strong>界面密度</strong><select v-model="appearance.layout" @change="applyLayout(appearance.layout)"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></div>
-          <div class="control-line"><strong>图表模式</strong><label class="switch-inline"><input :checked="appearance.chartMode === 'independent'" type="checkbox" @change="applyChartMode(($event.target.checked ? 'independent' : 'integrated'))" /><span>{{ appearance.chartMode === 'independent' ? '独立' : '集成' }}</span></label></div>
+          <div class="control-line panel-bg-line">
+            <strong>面板背景</strong>
+            <div class="panel-bg-input-wrap">
+              <input
+                v-model="panelBackground.url"
+                placeholder="输入图片 URL，回车直接应用"
+                @keydown.enter.prevent="onPanelBackgroundUrlEnter"
+              />
+              <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying" @click="openPanelBackgroundPicker">
+                {{ panelBackground.uploading ? '上传中...' : '上传' }}
+              </button>
+              <input
+                ref="panelBackgroundPicker"
+                class="panel-bg-file-input"
+                type="file"
+                accept="image/*"
+                @change="onPanelBackgroundFileChange"
+              />
+            </div>
+          </div>
+          <div class="control-line">
+            <strong>透明度</strong>
+            <div class="panel-bg-range-wrap">
+              <input v-model.number="panelBackground.transparency" type="range" min="0" max="100" step="1" @input="onPanelBackgroundSliderInput" />
+              <span>{{ Number(panelBackground.transparency || 0) }}%</span>
+            </div>
+          </div>
+          <div class="control-line">
+            <strong>毛玻璃强度</strong>
+            <div class="panel-bg-range-wrap">
+              <input v-model.number="panelBackground.blur" type="range" min="0" max="40" step="1" @input="onPanelBackgroundSliderInput" />
+              <span>{{ Number(panelBackground.blur || 0) }}px</span>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn tiny primary" type="button" :disabled="panelBackground.applying || panelBackground.uploading" @click="applyPanelBackgroundSettings">
+              {{ panelBackground.applying ? '应用中...' : '应用' }}
+            </button>
+            <button class="btn tiny secondary" type="button" :disabled="panelBackground.applying || panelBackground.uploading" @click="resetPanelBackgroundSettings">重置</button>
+          </div>
           <div class="color-palette-vue">
             <button
               v-for="opt in colorOptions"
