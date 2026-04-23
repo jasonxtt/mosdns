@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v0.3.1
+
+### Added
+
+- introduced a dynamic, real-time `查询趋势` module in the Vue dashboard overview:
+  - live polling update with sliding time window
+  - synchronized `总查询数 / 平均处理时间 / 当前请求数 / 当前处理时间`
+  - interactive series toggles for `请求数` and `平均处理时间`
+
+### Changed
+
+- refined the overview trend card layout and responsive behavior for narrow screens
+- aligned latency number styling and module interactions for consistent monitoring UX
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.0
 
 ### Added
