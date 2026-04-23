@@ -60,7 +60,7 @@ func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		
+
 		// 排除 backup 文件夹自身，避免递归备份或下载无用数据
 		if info.IsDir() && info.Name() == "backup" {
 			return filepath.SkipDir
@@ -80,13 +80,13 @@ func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		
+
 		fsFile, err := os.Open(path)
 		if err != nil {
 			return err
 		}
 		defer fsFile.Close()
-		
+
 		_, err = io.Copy(zipFile, fsFile)
 		return err
 	})
@@ -118,9 +118,16 @@ func handleConfigUpdateFromURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// --- 2. 执行备份 (先清空后备份，失败则熔断) ---
+	// --- 2. 执行备份 (仅备份 ZIP 将覆盖的文件，失败则熔断) ---
+	filesToBackup, err := listZipRelativeFiles(zipData)
+	if err != nil {
+		lg.Error("parse zip file list failed", zap.Error(err))
+		http.Error(w, "Parse zip failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	backupDir := filepath.Join(req.Dir, "backup")
-	if err := performLocalBackup(req.Dir, backupDir); err != nil {
+	if err := performLocalBackupForFiles(req.Dir, backupDir, filesToBackup); err != nil {
 		lg.Error("local backup failed, aborting update", zap.Error(err))
 		http.Error(w, "Backup failed (update aborted): "+err.Error(), http.StatusInternalServerError)
 		return
@@ -136,7 +143,7 @@ func handleConfigUpdateFromURL(w http.ResponseWriter, r *http.Request) {
 
 	// --- 4. 成功响应并触发重启 ---
 	lg.Info("config update successful", zap.Int("files_updated", updatedCount))
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"message": "Update successful. %d files updated. Restarting...", "status": "success"}`, updatedCount)
 
@@ -204,7 +211,7 @@ func doDownload(url, proxyAddr string) ([]byte, error) {
 }
 
 // performLocalBackup 将 source 目录备份到 dest，备份前先清空 dest
-func performLocalBackup(source, dest string) error {
+func performLocalBackupForFiles(source, dest string, relFiles []string) error {
 	// 1. 清空旧备份
 	if err := os.RemoveAll(dest); err != nil {
 		return fmt.Errorf("clean backup dir failed: %w", err)
@@ -214,44 +221,103 @@ func performLocalBackup(source, dest string) error {
 		return fmt.Errorf("create backup dir failed: %w", err)
 	}
 
-	// 3. 递归复制
-	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	sourceRoot := filepath.Clean(source)
+	seen := make(map[string]struct{}, len(relFiles))
+
+	// 3. 仅复制本次 ZIP 对应的文件
+	for _, rel := range relFiles {
+		rel = strings.TrimPrefix(strings.ReplaceAll(rel, "\\", "/"), "/")
+		if rel == "" {
+			continue
 		}
-		
-		// 跳过备份目录本身
-		if path == dest || strings.HasPrefix(path, dest+string(os.PathSeparator)) {
-			return nil
+		if _, ok := seen[rel]; ok {
+			continue
+		}
+		seen[rel] = struct{}{}
+
+		srcPath := filepath.Clean(filepath.Join(sourceRoot, filepath.FromSlash(rel)))
+		if srcPath != sourceRoot && !strings.HasPrefix(srcPath, sourceRoot+string(os.PathSeparator)) {
+			continue
 		}
 
-		// 计算相对路径
-		relPath, err := filepath.Rel(source, path)
+		info, err := os.Stat(srcPath)
 		if err != nil {
-			return err
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("stat source file %s failed: %w", rel, err)
 		}
-		targetPath := filepath.Join(dest, relPath)
-
 		if info.IsDir() {
-			return os.MkdirAll(targetPath, info.Mode())
+			continue
 		}
 
-		// 复制文件内容
-		srcFile, err := os.Open(path)
-		if err != nil {
-			return err
+		targetPath := filepath.Join(dest, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return fmt.Errorf("create backup parent dir failed for %s: %w", rel, err)
 		}
-		defer srcFile.Close()
+
+		srcFile, err := os.Open(srcPath)
+		if err != nil {
+			return fmt.Errorf("open source file %s failed: %w", rel, err)
+		}
 
 		dstFile, err := os.Create(targetPath)
 		if err != nil {
-			return err
+			srcFile.Close()
+			return fmt.Errorf("create backup file %s failed: %w", rel, err)
 		}
-		defer dstFile.Close()
 
-		_, err = io.Copy(dstFile, srcFile)
-		return err
-	})
+		_, copyErr := io.Copy(dstFile, srcFile)
+		closeDstErr := dstFile.Close()
+		closeSrcErr := srcFile.Close()
+		if copyErr != nil {
+			return fmt.Errorf("copy file %s failed: %w", rel, copyErr)
+		}
+		if closeDstErr != nil {
+			return fmt.Errorf("close backup file %s failed: %w", rel, closeDstErr)
+		}
+		if closeSrcErr != nil {
+			return fmt.Errorf("close source file %s failed: %w", rel, closeSrcErr)
+		}
+	}
+
+	return nil
+}
+
+func listZipRelativeFiles(zipData []byte) ([]string, error) {
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return nil, fmt.Errorf("invalid zip data: %w", err)
+	}
+
+	stripPrefix := detectSingleRootPrefix(zipReader.File)
+	seen := make(map[string]struct{}, len(zipReader.File))
+	relFiles := make([]string, 0, len(zipReader.File))
+
+	for _, f := range zipReader.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		zipName := strings.TrimPrefix(normalizeZipPath(f.Name), stripPrefix)
+		zipName = strings.TrimPrefix(zipName, "/")
+		if zipName == "" {
+			continue
+		}
+
+		// 统一清理为相对路径，避免 path traversal 影响备份路径计算
+		cleanRel := strings.TrimPrefix(path.Clean("/"+zipName), "/")
+		if cleanRel == "" || cleanRel == "." {
+			continue
+		}
+
+		if _, ok := seen[cleanRel]; ok {
+			continue
+		}
+		seen[cleanRel] = struct{}{}
+		relFiles = append(relFiles, cleanRel)
+	}
+
+	return relFiles, nil
 }
 
 // extractAndOverwrite 解压 ZIP 并覆盖本地文件
@@ -292,7 +358,7 @@ func extractAndOverwrite(zipData []byte, targetDir string) (int, error) {
 		if err != nil {
 			return count, err
 		}
-		
+
 		dst, err := os.Create(fullPath)
 		if err != nil {
 			rc.Close()
@@ -302,7 +368,7 @@ func extractAndOverwrite(zipData []byte, targetDir string) (int, error) {
 		_, err = io.Copy(dst, rc)
 		dst.Close()
 		rc.Close()
-		
+
 		if err != nil {
 			return count, fmt.Errorf("write file %s failed: %w", f.Name, err)
 		}
@@ -350,7 +416,7 @@ func detectSingleRootPrefix(files []*zip.File) string {
 // triggerRestart 尝试重启服务，逻辑对齐 update_manager.go
 func triggerRestart() {
 	lg := mlog.L()
-	
+
 	// 1. 尝试使用 HTTP API 重启 (优先读取环境变量)
 	endpoint := strings.TrimSpace(os.Getenv("MOSDNS_RESTART_ENDPOINT"))
 	if endpoint == "" {
@@ -362,7 +428,7 @@ func triggerRestart() {
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(`{"delay_ms":500}`))
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// 针对 localhost/127.0.0.1 强制设置 Host，避免代理干扰
 	// (update_manager.go 中有类似的逻辑)
 	if u, err := req.URL.Parse(endpoint); err == nil {
@@ -373,7 +439,7 @@ func triggerRestart() {
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
-	
+
 	if err == nil {
 		defer resp.Body.Close()
 		io.Copy(io.Discard, resp.Body)

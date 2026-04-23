@@ -98,7 +98,7 @@ type AdguardRule struct {
 }
 
 // 确保实现了必要的接口
-var _ data_provider.RuleExporter = (*AdguardRule)(nil)        // 新增接口
+var _ data_provider.RuleExporter = (*AdguardRule)(nil)          // 新增接口
 var _ data_provider.DomainMatcherProvider = (*AdguardRule)(nil) // 原有接口
 
 // RuleReceiver 接口用于解耦解析和存储逻辑，使 parseRules 既能用于构建 Matcher 也能用于导出
@@ -172,13 +172,13 @@ func (p *AdguardRule) notifySubscribers() {
 		go cb()
 	}
 
-    // 新增：给订阅者一点时间完成它们的重载工作，然后统一回收
-    if len(subs) > 0 {
-        time.AfterFunc(time.Second*5, func() {
-            log.Println("[adguard_rule] post-notification GC triggered")
-            coremain.ManualGC()
-        })
-    }
+	// 新增：给订阅者一点时间完成它们的重载工作，然后统一回收
+	if len(subs) > 0 {
+		time.AfterFunc(time.Second*5, func() {
+			log.Println("[adguard_rule] post-notification GC triggered")
+			coremain.ManualGC()
+		})
+	}
 }
 
 // newAdguardRule 是插件的初始化函数
@@ -418,19 +418,20 @@ func (p *AdguardRule) reloadAllRules(ctx context.Context, initialLoad bool) {
 	p.mu.Unlock()
 
 	log.Printf("[adguard_rule] finished reloading. Total active rules from enabled lists: %d", totalRuleCount)
-	
-        newAllowMatcher = nil
-        newDenyMatcher = nil
+
+	newAllowMatcher = nil
+	newDenyMatcher = nil
 
 	// [关键]: 更新完成后，通知所有订阅者 (如 domain_mapper)
 	// 因为 Add/Delete/Enable/Disable/Update 最终都会走到这里，所以都能触发通知
 	p.notifySubscribers()
-        coremain.ManualGC()
+	coremain.ManualGC()
 }
 
 type counterCollector struct {
 	count int
 }
+
 func (c *counterCollector) Add(_ string, _ struct{}) error {
 	c.count++
 	return nil
@@ -451,12 +452,12 @@ func (p *AdguardRule) updateAllRuleCounts() {
 			}
 			continue
 		}
-		
+
 		// --- 关键修改开始 ---
 		// 使用计数器代替真实的 Matcher。
 		// 这样 parseRules 在运行过程中不会构建复杂的 Trie 树和正则对象
 		counter := &counterCollector{}
-		count, _ := parseRules(file, counter, counter) 
+		count, _ := parseRules(file, counter, counter)
 		file.Close()
 		// --- 关键修改结束 ---
 
@@ -874,11 +875,42 @@ func (p *AdguardRule) api() *chi.Mux {
 			log.Println("[adguard_rule] Manual update process finished.")
 			// 更新完成触发 reload (进而触发 notify)
 			p.triggerReload(p.ctx)
-			coremain.ManualGC() 
+			coremain.ManualGC()
 		}()
 
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprintln(w, "Update process for enabled rules has been started in the background.")
+	}))
+
+	r.Post("/update/{id}", coremain.WithAsyncGC(func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		p.mu.RLock()
+		rule, ok := p.onlineRules[id]
+		ruleName := ""
+		if ok && rule != nil {
+			ruleName = rule.Name
+		}
+		p.mu.RUnlock()
+		if !ok {
+			jsonError(w, "Rule not found", http.StatusNotFound)
+			return
+		}
+
+		go func(ruleID, name string) {
+			log.Printf("[adguard_rule] Manual update triggered for rule '%s' (%s).", name, ruleID)
+			downloadCtx, cancel := context.WithTimeout(p.ctx, downloadTimeout)
+			defer cancel()
+			if err := p.downloadRule(downloadCtx, ruleID); err != nil {
+				log.Printf("[adguard_rule] ERROR: failed to manually update rule '%s' (%s): %v", name, ruleID, err)
+				return
+			}
+			log.Printf("[adguard_rule] Manual update for rule '%s' (%s) finished, triggering reload.", name, ruleID)
+			p.triggerReload(p.ctx)
+			coremain.ManualGC()
+		}(id, ruleName)
+
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprintln(w, "Update process for rule has been started in the background.")
 	}))
 
 	return r
