@@ -1,5 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { getJSON } from './api/http'
 import ConfirmBubbleHost from './components/ConfirmBubbleHost.vue'
 import DataManagementManager from './components/DataManagementManager.vue'
 import ListManager from './components/ListManager.vue'
@@ -8,6 +9,7 @@ import QueryManager from './components/QueryManager.vue'
 import RulesManager from './components/RulesManager.vue'
 import SystemControlManager from './components/SystemControlManager.vue'
 import UpstreamManager from './components/UpstreamManager.vue'
+import { previewPanelBackground } from './utils/panelBackground'
 
 const activeMainTab = ref('overview')
 const activeQuerySubTab = ref('live')
@@ -44,7 +46,6 @@ function initializeAppearance() {
   const root = document.documentElement
   root.setAttribute('data-theme', localStorage.getItem('mosdns-theme') || 'light')
   root.setAttribute('data-color-scheme', localStorage.getItem('mosdns-color') || 'classic')
-  root.setAttribute('data-layout', localStorage.getItem('mosdns-layout') || 'comfortable')
 }
 
 function stopAutoRefresh() {
@@ -94,8 +95,18 @@ function triggerGlobalRefresh() {
   window.dispatchEvent(new CustomEvent('mosdns-log-refresh'))
 }
 
+async function initializePanelBackground() {
+  try {
+    const settings = await getJSON('/api/v1/appearance/panel-background')
+    await previewPanelBackground(settings)
+  } catch {
+    // ignore non-critical appearance errors
+  }
+}
+
 onMounted(() => {
   initializeAppearance()
+  initializePanelBackground()
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   document.addEventListener('visibilitychange', handleVisibilityChange)

@@ -787,7 +787,7 @@ onBeforeUnmount(() => {
 
     <section v-if="shouldShowTab('special')" class="sub-panel">
       <div class="actions">
-        <button class="btn primary" @click="openCreateSpecial">新增专属分流组</button>
+        <button class="btn primary entry-action-btn" @click="openCreateSpecial">新增专属分流组</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -824,7 +824,7 @@ onBeforeUnmount(() => {
 
     <section v-if="shouldShowTab('adguard')" class="sub-panel">
       <div class="actions">
-        <button class="btn primary" @click="openCreateAdguard">新增拦截规则</button>
+        <button class="btn primary entry-action-btn" @click="openCreateAdguard">新增拦截规则</button>
         <button class="btn warning" @click="updateAdguardAll">更新全部规则</button>
       </div>
       <div class="table-wrap adaptive-table-wrap rules-adguard-wrap">
@@ -870,7 +870,7 @@ onBeforeUnmount(() => {
 
     <section v-if="shouldShowTab('diversion')" class="sub-panel">
       <div class="actions">
-        <button class="btn primary" @click="openCreateDiversion">新增分流规则</button>
+        <button class="btn primary entry-action-btn" @click="openCreateDiversion">新增分流规则</button>
         <button class="btn warning" @click="updateDiversionAll">更新全部规则</button>
       </div>
       <div class="table-wrap adaptive-table-wrap rules-diversion-wrap">
@@ -918,7 +918,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <div v-if="specialEditor.open" class="modal-mask" @click.self="closeSpecialEditor">
+    <div v-if="specialEditor.open" class="modal-mask">
       <section class="panel form-modal-card">
         <header class="panel-header">
           <h3>{{ specialEditor.slot ? '修改专属分流组' : '新增专属分流组' }}</h3>
@@ -937,7 +937,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="adguardEditor.open" class="modal-mask" @click.self="closeAdguardEditor">
+    <div v-if="adguardEditor.open" class="modal-mask">
       <section class="panel form-modal-card">
         <header class="panel-header">
           <h3>{{ adguardEditor.id ? '编辑 AdGuard 规则' : '新增 AdGuard 规则' }}</h3>
@@ -962,7 +962,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="diversionEditor.open" class="modal-mask" @click.self="closeDiversionEditor">
+    <div v-if="diversionEditor.open" class="modal-mask">
       <section class="panel form-modal-card">
         <header class="panel-header">
           <h3>{{ diversionEditor.oldName ? '编辑分流规则' : '新增分流规则' }}</h3>
@@ -978,12 +978,12 @@ onBeforeUnmount(() => {
             <small class="muted">输入 URL 后会自动识别名称和本地文件路径，也可以手动点击“自动识别”。</small>
             <button class="btn tiny secondary" type="button" @click="applyDiversionAutofill">自动识别</button>
           </div>
+          <label>URL</label>
+          <input v-model="diversionEditor.url" @input="onDiversionUrlInput" />
           <label>名称</label>
           <input v-model="diversionEditor.name" @input="onDiversionNameInput" />
           <label>本地文件</label>
           <input v-model="diversionEditor.files" placeholder="例如 /cus/mosdns/srs/geo/cn.json" @input="onDiversionFilesInput" />
-          <label>URL</label>
-          <input v-model="diversionEditor.url" @input="onDiversionUrlInput" />
           <label>更新间隔 (小时)</label>
           <input v-model.number="diversionEditor.update_interval_hours" type="number" min="1" />
           <label>启用</label>

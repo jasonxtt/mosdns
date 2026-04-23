@@ -579,8 +579,8 @@ onBeforeUnmount(() => {
   <section class="panel">
     <div class="upstream-toolbar">
       <div class="upstream-toolbar-left">
-        <button class="btn primary" type="button" @click="beginAdd">添加上游DNS</button>
-        <button class="btn secondary" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
+        <button class="btn primary entry-action-btn" type="button" @click="beginAdd">添加上游DNS</button>
+        <button class="btn secondary entry-action-btn" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
       </div>
       <div class="upstream-toolbar-right">
         <div class="upstream-special-groups-strip">
@@ -601,7 +601,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="toolbar">
+    <div class="toolbar upstream-filter-toolbar">
       <label for="group-filter">过滤分组</label>
       <select id="group-filter" v-model="filterGroup">
         <option value="all">全部</option>
@@ -662,7 +662,7 @@ onBeforeUnmount(() => {
       </table>
     </div>
 
-    <div v-if="showEditor" class="modal-mask" @click.self="closeEditor">
+    <div v-if="showEditor" class="modal-mask">
       <section class="panel form-modal-card upstream-editor-modal-card">
         <header class="panel-header">
           <h3>{{ editingCtx.index >= 0 ? '编辑上游' : '新增上游' }}</h3>
@@ -767,7 +767,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="specialModalOpen" class="modal-mask" @click.self="closeSpecialGroupModal">
+    <div v-if="specialModalOpen" class="modal-mask">
       <section class="panel special-group-modal-card">
         <header class="panel-header special-group-modal-header">
           <h3>{{ specialEditor.slot ? '修改专属分流组' : '新增专属分流组' }}</h3>

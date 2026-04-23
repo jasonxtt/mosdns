@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.3.5
+
+### Added
+
+- introduced a dynamic real-time `查询趋势` monitoring workflow in the Vue dashboard:
+  - live polling with a sliding time window for `请求数 / 平均处理时间`
+  - synchronized KPI updates for `总查询数 / 平均处理时间 / 当前请求数 / 当前处理时间`
+  - interactive series toggles and smoother live trend behavior
+
+### Changed
+
+- refined Vue WebUI interaction and visual behavior around:
+  - list/rules/upstream/system operation controls
+  - mobile compact layout and overflow handling
+  - panel background, transparency, and glass-effect appearance controls
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.4
 
 ### Changed

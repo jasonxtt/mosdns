@@ -5,12 +5,10 @@ import DnsOverviewCard from './dashboard/DnsOverviewCard.vue'
 
 const HISTORY_KEY = 'mosdnsHistory'
 const HISTORY_LENGTH = 60
-const CHART_MODE_KEY = 'mosdns-chart-mode'
 
 const loading = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
-const chartMode = ref('integrated')
 const lastUpdatedText = ref('--')
 
 const stats = reactive({
@@ -330,14 +328,6 @@ function generateDualSparklineSVG(totalValues, avgValues, timestamps) {
     </svg>`
 }
 
-function applyChartMode(mode) {
-  chartMode.value = mode === 'independent' ? 'independent' : 'integrated'
-}
-
-function syncChartModeFromStorage() {
-  applyChartMode(localStorage.getItem(CHART_MODE_KEY) || 'integrated')
-}
-
 async function reloadOverview(showMessage = false) {
   loading.value = true
   errorMessage.value = ''
@@ -389,24 +379,14 @@ function handleGlobalRefresh() {
   reloadOverview(false)
 }
 
-function handleChartModeUpdate(event) {
-  const mode = String(event?.detail?.mode || localStorage.getItem(CHART_MODE_KEY) || 'integrated')
-  applyChartMode(mode)
-}
-
 onMounted(() => {
   loadHistory()
-  syncChartModeFromStorage()
   reloadOverview(false)
   window.addEventListener('mosdns-log-refresh', handleGlobalRefresh)
-  window.addEventListener('mosdns-chart-mode-update', handleChartModeUpdate)
-  window.addEventListener('storage', syncChartModeFromStorage)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('mosdns-log-refresh', handleGlobalRefresh)
-  window.removeEventListener('mosdns-chart-mode-update', handleChartModeUpdate)
-  window.removeEventListener('storage', syncChartModeFromStorage)
 })
 </script>
 
