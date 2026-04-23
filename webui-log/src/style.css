@@ -343,6 +343,11 @@ body {
   margin-top: 12px;
 }
 
+.diagnostic-pane {
+  min-width: 0;
+  overflow-x: auto;
+}
+
 .diagnostic-request-list {
   max-height: 640px;
   overflow: auto;
@@ -402,6 +407,8 @@ body {
 .timeline-header h5 {
   margin: 0;
   font-size: 0.95rem;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .structured-log-list {
@@ -1098,6 +1105,28 @@ tr.disabled {
   width: 120px;
 }
 
+.replacements-table-wrap,
+.data-scroll-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.replacements-table {
+  min-width: 980px;
+}
+
+.replacements-table td input {
+  min-width: 180px;
+}
+
+.cache-table-wrap table {
+  min-width: 980px;
+}
+
+.domain-stats-table-wrap table {
+  min-width: 560px;
+}
+
 .mono {
   font-family: "JetBrains Mono", monospace;
   font-size: 0.83rem;
@@ -1322,6 +1351,13 @@ tr.disabled {
   margin-bottom: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.list-hint {
+  margin: 0 0 8px;
+  color: var(--ink-1);
+  font-size: 0.84rem;
+  line-height: 1.45;
 }
 
 .list-editor {
@@ -1562,6 +1598,12 @@ tr.disabled {
 .scheduler-grid label {
   color: var(--ink-1);
   font-weight: 600;
+}
+
+.scheduler-field {
+  width: 100%;
+  max-width: 220px;
+  min-width: 0;
 }
 
 .requery-important {
@@ -2183,6 +2225,30 @@ tr.disabled {
     min-width: 0;
   }
 
+  .legacy-main-nav.compact {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .legacy-main-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 8px 10px;
+    font-size: 0.82rem;
+  }
+
+  .legacy-main-btn.refresh-inline-btn {
+    margin-left: 0;
+    min-width: 36px;
+    width: 36px;
+    padding: 8px 0;
+  }
+
   .main-refresh-btn {
     width: 100%;
     height: 38px;
@@ -2228,6 +2294,12 @@ tr.disabled {
     grid-template-columns: 1fr;
   }
 
+  .diagnostic-pane .diagnostic-request-list,
+  .diagnostic-pane .structured-flow,
+  .diagnostic-pane .table-wrap {
+    min-width: 540px;
+  }
+
   .form-grid {
     grid-template-columns: 1fr;
   }
@@ -2250,6 +2322,10 @@ tr.disabled {
 
   .scheduler-grid {
     grid-template-columns: 1fr;
+  }
+
+  .scheduler-field {
+    max-width: 100%;
   }
 
   .alias-manual-row {

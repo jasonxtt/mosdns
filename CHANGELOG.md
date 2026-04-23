@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v0.3.2
+
+### Changed
+
+- improved mobile UI usability across the Vue dashboard:
+  - top-level navigation now stays on one line with the refresh button and supports horizontal scrolling
+  - diagnostic capture modules (`请求列表` / `分析结果`) now support horizontal scrolling on narrow screens
+  - system `高级替换规则` table now uses a horizontal scroll layout on small screens
+  - data management cache/stat tables now use horizontal scrolling to avoid clipped column headers
+  - `刷新分流缓存` scheduler inputs are aligned to consistent field width on mobile
+- restored list-management hint copy from legacy `/log`:
+  - brought back descriptions for 白名单/黑名单/灰名单/DDNS/客户端IP/直连IP/重定向/RealIP 相关名单
+  - list status now shows `共 X 行` consistently
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.1
 
 ### Added

@@ -753,7 +753,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="diagnostic-layout">
-        <section class="panel sub-panel">
+        <section class="panel sub-panel diagnostic-pane">
           <h4>请求列表</h4>
           <div class="diagnostic-request-list">
             <button
@@ -778,7 +778,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="panel sub-panel">
+        <section class="panel sub-panel diagnostic-pane">
           <h4>分析结果</h4>
 
           <div v-if="selectedDiagnosticKey === '__raw__'" class="table-wrap">
