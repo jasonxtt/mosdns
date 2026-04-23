@@ -909,8 +909,8 @@ onBeforeUnmount(() => {
             </div>
           </header>
 
-          <div class="table-wrap">
-            <table>
+          <div class="table-wrap replacements-table-wrap">
+            <table class="replacements-table">
               <thead>
                 <tr>
                   <th>状态</th>

@@ -815,7 +815,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div class="table-wrap adaptive-table-wrap cache-table-wrap">
+      <div class="table-wrap cache-table-wrap data-scroll-wrap">
         <table class="cache-adaptive-table">
           <thead>
             <tr>
@@ -869,7 +869,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div class="table-wrap adaptive-table-wrap domain-stats-table-wrap">
+      <div class="table-wrap domain-stats-table-wrap data-scroll-wrap">
         <table class="domain-stats-table">
           <thead>
             <tr>
@@ -957,6 +957,7 @@ onBeforeUnmount(() => {
           <div class="scheduler-grid">
             <label>首次执行时间</label>
             <input
+              class="scheduler-field"
               v-model="schedulerForm.startDatetimeLocal"
               type="datetime-local"
               :disabled="!schedulerForm.enabled"
@@ -965,6 +966,7 @@ onBeforeUnmount(() => {
 
             <label>间隔 (分钟)</label>
             <input
+              class="scheduler-field"
               v-model.number="schedulerForm.intervalMinutes"
               type="number"
               min="1"
@@ -974,6 +976,7 @@ onBeforeUnmount(() => {
 
             <label>域名刷新天数</label>
             <input
+              class="scheduler-field"
               v-model.number="schedulerForm.dateRangeDays"
               type="number"
               min="1"
