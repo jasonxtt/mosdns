@@ -1912,7 +1912,8 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .sys-card,
 :root[data-panel-bg-enabled='1'] .list-sidebar,
 :root[data-panel-bg-enabled='1'] .list-main,
-:root[data-panel-bg-enabled='1'] .table-wrap {
+:root[data-panel-bg-enabled='1'] .table-wrap,
+:root[data-panel-bg-enabled='1'] .trend-card {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
   backdrop-filter: blur(var(--panel-glass-blur));
   -webkit-backdrop-filter: blur(var(--panel-glass-blur));
@@ -1967,11 +1968,13 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .sys-info-item,
 :root[data-panel-bg-enabled='1'] .switch-value-chip,
 :root[data-panel-bg-enabled='1'] .update-banner,
+:root[data-panel-bg-enabled='1'] .trend-card,
 #app.custom-background .switch-row,
 #app.custom-background .mode-info-item,
 #app.custom-background .sys-info-item,
 #app.custom-background .switch-value-chip,
-#app.custom-background .update-banner {
+#app.custom-background .update-banner,
+#app.custom-background .trend-card {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
   border-color: rgba(var(--panel-glass-border-rgb), 0.46) !important;
 }
