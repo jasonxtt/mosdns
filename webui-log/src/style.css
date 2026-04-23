@@ -166,6 +166,20 @@ body {
   background: var(--surface-active);
 }
 
+.legacy-main-btn.refresh-inline-btn {
+  min-width: 42px;
+  width: 42px;
+  padding: 10px 0;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--brand-2);
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .legacy-sub-nav {
   display: flex;
   gap: 8px;

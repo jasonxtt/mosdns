@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON } from '../api/http'
+import DnsOverviewCard from './dashboard/DnsOverviewCard.vue'
 
 const HISTORY_KEY = 'mosdnsHistory'
 const HISTORY_LENGTH = 60
@@ -414,28 +415,7 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
-    <div class="overview-cards" :class="{ 'independent-mode': chartMode === 'independent' }">
-      <article class="overview-card">
-        <h3>总查询数</h3>
-        <p class="overview-value">{{ stats.totalQueries.toLocaleString() }}</p>
-        <div class="sparkline-mini" v-html="sparklineTotal"></div>
-      </article>
-      <article class="overview-card">
-        <h3>平均耗时</h3>
-        <p class="overview-value">{{ formatDuration(stats.averageDurationMs) }}</p>
-        <div class="sparkline-mini" v-html="sparklineAvg"></div>
-      </article>
-    </div>
-
-    <section v-if="chartMode === 'independent'" class="panel sub-panel overview-big-chart-panel">
-      <header class="panel-header">
-        <div>
-          <h3>查询趋势图 (独立模式)</h3>
-          <p class="muted">蓝线为总查询数，橙线为平均耗时。</p>
-        </div>
-      </header>
-      <div class="overview-big-chart" v-html="mergedSparkline"></div>
-    </section>
+    <DnsOverviewCard />
 
     <div class="overview-grid">
       <section class="panel sub-panel overview-metric-module">

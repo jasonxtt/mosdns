@@ -125,10 +125,15 @@ onBeforeUnmount(() => {
         >
           {{ tab.label }}
         </button>
+        <button
+          class="legacy-main-btn refresh-inline-btn"
+          type="button"
+          title="刷新当前页面数据"
+          @click="triggerGlobalRefresh"
+        >
+          ⟳
+        </button>
       </nav>
-      <button class="main-refresh-btn" type="button" title="刷新当前页面数据" @click="triggerGlobalRefresh">
-        ⟳
-      </button>
     </div>
 
     <main class="main-body">
