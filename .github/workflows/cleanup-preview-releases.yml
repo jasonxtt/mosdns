@@ -1,0 +1,79 @@
+name: Cleanup Preview Releases
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete preview releases and tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          stable_rounds=0
+          for round in $(seq 1 20); do
+            echo "cleanup round ${round}"
+
+            release_ids="$(curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/releases?per_page=100" \
+              | jq -r '.[] | select(.prerelease == true or (.tag_name | startswith("preview-"))) | .id')"
+
+            preview_tags="$(curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/tags?per_page=100" \
+              | jq -r '.[] | select(.name | startswith("preview-")) | .name')"
+
+            changed=0
+
+            if [ -n "${release_ids}" ]; then
+              while IFS= read -r rid; do
+                [ -z "${rid}" ] && continue
+                echo "delete release id=${rid}"
+                curl -fsSL -X DELETE \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${REPO}/releases/${rid}" >/dev/null
+                changed=1
+              done <<< "${release_ids}"
+            fi
+
+            if [ -n "${preview_tags}" ]; then
+              while IFS= read -r tag; do
+                [ -z "${tag}" ] && continue
+                echo "delete tag=${tag}"
+                encoded_tag="${tag//\//%2F}"
+                curl -fsSL -X DELETE \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${REPO}/git/refs/tags/${encoded_tag}" >/dev/null || true
+                changed=1
+              done <<< "${preview_tags}"
+            fi
+
+            if [ "${changed}" -eq 0 ]; then
+              stable_rounds=$((stable_rounds + 1))
+              echo "no preview releases/tags found in round ${round}"
+            else
+              stable_rounds=0
+            fi
+
+            if [ "${stable_rounds}" -ge 2 ]; then
+              echo "cleanup finished"
+              exit 0
+            fi
+
+            sleep 15
+          done
+
+          echo "cleanup loop finished"
