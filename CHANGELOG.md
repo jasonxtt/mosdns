@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v0.3.6
+
+### Changed
+
+- fixed Vue overview `查询趋势` panel background so transparency/glass settings now apply consistently to the trend card container
+- bumped embedded dashboard asset query version to refresh browser cache for updated panel styles
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.5
 
 ### Added
