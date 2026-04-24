@@ -418,10 +418,7 @@ func triggerRestart() {
 	lg := mlog.L()
 
 	// 1. 尝试使用 HTTP API 重启 (优先读取环境变量)
-	endpoint := strings.TrimSpace(os.Getenv("MOSDNS_RESTART_ENDPOINT"))
-	if endpoint == "" {
-		endpoint = "http://127.0.0.1:9099/api/v1/system/restart"
-	}
+	endpoint := resolveLocalRestartEndpoint()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

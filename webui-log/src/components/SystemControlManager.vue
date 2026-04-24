@@ -48,6 +48,14 @@ const configManaging = reactive({
   updating: false
 })
 
+const webuiPort = reactive({
+  loading: false,
+  saving: false,
+  input: '',
+  activePort: 0,
+  activeAddr: ''
+})
+
 const overrides = reactive({
   socks5: '',
   ecs: '',
@@ -521,6 +529,60 @@ async function restartMosdns() {
     setError(`重启失败: ${error.message}`)
   } finally {
     restarting.value = false
+  }
+}
+
+function buildWebUIRootUrl(port) {
+  try {
+    const url = new URL(window.location.href)
+    url.port = String(port)
+    url.pathname = '/'
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return `${window.location.protocol}//${window.location.hostname}:${port}/`
+  }
+}
+
+async function loadWebUIPortSettings() {
+  webuiPort.loading = true
+  try {
+    const payload = await getJSON('/api/v1/system/webui-port')
+    const port = Number(payload?.port || 0)
+    webuiPort.activePort = Number(payload?.active_port || 0)
+    webuiPort.activeAddr = String(payload?.active_addr || '')
+    webuiPort.input = port > 0 ? String(port) : ''
+  } finally {
+    webuiPort.loading = false
+  }
+}
+
+async function applyWebUIPortAndRestart() {
+  const port = Number.parseInt(String(webuiPort.input || '').trim(), 10)
+  if (!Number.isFinite(port) || port < 1 || port > 65535) {
+    setError('请输入 1-65535 之间的端口')
+    return
+  }
+  if (!(await openConfirm(`将 WebUI 端口改为 ${port} 并重启 MosDNS，确认继续？`, { tone: 'danger' }))) {
+    return
+  }
+
+  clearMessage()
+  webuiPort.saving = true
+  try {
+    await postJSON('/api/v1/system/webui-port', { port })
+    await postJSON('/api/v1/system/restart', { delay_ms: 800 })
+    const target = buildWebUIRootUrl(port)
+    setSuccess(`端口已更新为 ${port}，MosDNS 正在重启，稍后将跳转到新地址。`)
+    setTimeout(() => {
+      window.location.href = target
+    }, 4500)
+  } catch (error) {
+    setError(`设置 WebUI 端口失败: ${error.message}`)
+    await loadWebUIPortSettings()
+  } finally {
+    webuiPort.saving = false
   }
 }
 
@@ -1121,7 +1183,8 @@ async function reloadAll() {
       loadFeatureSwitches(),
       loadOverrides(),
       loadSystemInfo(),
-      loadUpdateStatus()
+      loadUpdateStatus(),
+      loadWebUIPortSettings()
     ])
   } catch (error) {
     setError(`加载系统设置失败: ${error.message}`)
@@ -1159,12 +1222,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="panel system-panel">
-    <header class="panel-header">
-      <div class="actions">
-        <button class="btn tiny secondary restart-mosdns-btn" :disabled="restarting" @click="restartMosdns">{{ restarting ? '处理中...' : '重启 MosDNS' }}</button>
-      </div>
-    </header>
-
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
@@ -1178,6 +1235,11 @@ onBeforeUnmount(() => {
             <div class="control-line"><strong>常驻内存 (RSS)</strong><span>{{ (Number(systemInfo.residentMemory || 0) / 1024 / 1024).toFixed(2) }} MB</span></div>
             <div class="control-line"><strong>待用堆内存 (Idle)</strong><span>{{ (Number(systemInfo.heapIdleMemory || 0) / 1024 / 1024).toFixed(2) }} MB</span></div>
             <div class="control-line"><strong>Go 版本</strong><span>{{ systemInfo.goVersion }}</span></div>
+          </div>
+          <div class="actions">
+            <button class="btn secondary restart-mosdns-btn" :disabled="restarting" @click="restartMosdns">
+              {{ restarting ? '处理中...' : '重启 MosDNS' }}
+            </button>
           </div>
         </section>
 
@@ -1240,8 +1302,8 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
-      <div class="control-panel-grid">
-        <section class="panel control-module control-module-wide">
+      <div class="control-panel-grid system-grid-dual">
+        <section class="panel control-module system-grid-dual-item">
           <header class="module-head">
             <div>
               <h3>核心运行模式</h3>
@@ -1254,6 +1316,29 @@ onBeforeUnmount(() => {
           <div class="core-mode-hints">
             <p class="muted">兼容模式：表外域名优先国内dns解析，保证速度。</p>
             <p class="muted">安全模式：表外域名仅用国外dns解析，阻止dns泄漏。</p>
+          </div>
+        </section>
+
+        <section class="panel control-module webui-port-module system-grid-dual-item">
+          <h3>WebUI 端口</h3>
+          <div class="webui-port-inline-row">
+            <label class="webui-port-inline-field">
+              <span>当前端口</span>
+              <input
+                :value="webuiPort.loading ? '读取中...' : String(webuiPort.activePort || '--')"
+                type="text"
+                readonly
+              />
+            </label>
+            <label class="webui-port-inline-field">
+              <span>目标端口</span>
+              <input v-model="webuiPort.input" type="number" min="1" max="65535" placeholder="例如 9099" />
+            </label>
+          </div>
+          <div class="actions webui-port-actions">
+            <button class="btn tiny primary" :disabled="webuiPort.saving || webuiPort.loading" @click="applyWebUIPortAndRestart">
+              {{ webuiPort.saving ? '处理中...' : '确认并重启 MosDNS' }}
+            </button>
           </div>
         </section>
       </div>

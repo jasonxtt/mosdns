@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## v0.3.9
+
+### Added
+
+- added end-to-end WebUI port management:
+  - new system APIs: `GET /api/v1/system/webui-port` and `POST /api/v1/system/webui-port`
+  - persistent settings file: `webui_port_settings.json`
+  - system-settings UI module for current/target port with confirm-and-restart flow
+
+### Changed
+
+- replaced hardcoded local restart endpoint usage with dynamic endpoint resolution from active WebUI listen address
+- updated update-manager and config-manager post-save/post-upgrade restart hooks to follow configured WebUI port
+- updated requery URL action calls to normalize local loopback targets to the configured WebUI port instead of fixed `9099`
+- improved requery diagnostics in UI:
+  - added `last_error` in task status
+  - data-management panel now shows latest failure reason
+  - sub-second completion now renders as `耗时 <1秒`
+- refined menu/switch theme behavior:
+  - dark mode switch ON knob uses white for better contrast
+  - first-level and second-level menu colors now fully invert with light/dark theme
+  - removed the extra selected-outline effect on second-level menu buttons
+- normalized page top-subnav panel structure and fixed scrollbar-gutter behavior to reduce visible horizontal layout jitter when switching main tabs
+
+### Upgrade Notes
+
+- this release can generate and use `webui_port_settings.json` under runtime config directory when WebUI port is saved
+- no manual `config_up.zip` update is required for this source release
+
 ## v0.3.8
 
 ### Added

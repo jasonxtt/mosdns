@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -144,6 +147,7 @@ type Status struct {
 	LastRunStartTime   time.Time `json:"last_run_start_time,omitempty"`
 	LastRunEndTime     time.Time `json:"last_run_end_time,omitempty"`
 	LastRunDomainCount int       `json:"last_run_domain_count"`
+	LastError          string    `json:"last_error,omitempty"`
 	Progress           Progress  `json:"progress"`
 }
 
@@ -165,6 +169,7 @@ func (p *Requery) startTaskLocked() error {
 	p.config.Status.LastRunStartTime = time.Now().UTC()
 	p.config.Status.LastRunEndTime = time.Time{}
 	p.config.Status.LastRunDomainCount = 0
+	p.config.Status.LastError = ""
 	p.config.Status.Progress.Processed = 0
 	p.config.Status.Progress.Total = 0
 	if err := p.saveConfigUnlocked(); err != nil {
@@ -755,21 +760,25 @@ func (p *Requery) setupScheduler() error {
 
 func (p *Requery) callURLs(ctx context.Context, urls []string) error {
 	delay := time.Duration(p.config.ExecutionSettings.URLCallDelayMS) * time.Millisecond
+	localPort := resolveLocalWebUIPort()
+
 	for i, url := range urls {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		effectiveURL := normalizeLocalActionURL(url, localPort)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", effectiveURL, nil)
 		if err != nil {
-			return fmt.Errorf("failed to create request for %s: %w", url, err)
+			return fmt.Errorf("failed to create request for %s: %w", effectiveURL, err)
 		}
 
 		resp, err := p.httpClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to call URL %s: %w", url, err)
+			return fmt.Errorf("failed to call URL %s: %w", effectiveURL, err)
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("bad response from URL %s: status %d, body: %s", url, resp.StatusCode, string(body))
+			return fmt.Errorf("bad response from URL %s: status %d, body: %s", effectiveURL, resp.StatusCode, string(body))
 		}
 
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -789,14 +798,70 @@ func (p *Requery) setFailedState(format string, args ...any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.config.Status.TaskState = "failed"
-	log.Printf("[requery] ERROR: Task failed: "+format, args...)
+	p.config.Status.LastError = fmt.Sprintf(format, args...)
+	log.Printf("[requery] ERROR: Task failed: %s", p.config.Status.LastError)
 }
 
 func (p *Requery) setCancelledState(reason string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.config.Status.TaskState = "cancelled"
+	p.config.Status.LastError = reason
 	log.Println("[requery] INFO: Task cancelled:", reason)
+}
+
+func resolveLocalWebUIPort() int {
+	const defaultPort = 9099
+	baseDir := strings.TrimSpace(coremain.MainConfigBaseDir)
+	settingsPath := "webui_port_settings.json"
+	if baseDir != "" {
+		settingsPath = filepath.Join(baseDir, settingsPath)
+	}
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return defaultPort
+	}
+	var payload struct {
+		Port int `json:"port"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return defaultPort
+	}
+	if payload.Port < 1 || payload.Port > 65535 {
+		return defaultPort
+	}
+	return payload.Port
+}
+
+func normalizeLocalActionURL(rawURL string, port int) string {
+	targetPort := strconv.Itoa(port)
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed == nil {
+		return rawURL
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return rawURL
+	}
+
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return rawURL
+	}
+	switch strings.ToLower(host) {
+	case "127.0.0.1", "localhost", "0.0.0.0", "::", "::1":
+	default:
+		return rawURL
+	}
+
+	if parsed.Port() == targetPort {
+		return rawURL
+	}
+
+	if host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	parsed.Host = net.JoinHostPort(host, targetPort)
+	return parsed.String()
 }
 
 func (p *Requery) jsonResponse(w http.ResponseWriter, data any, code int) {

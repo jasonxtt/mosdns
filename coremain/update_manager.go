@@ -41,8 +41,6 @@ const (
 	httpTimeout          = 120 * time.Second
 	userAgent            = "mosdns-update-client"
 	stateFileName        = ".mosdns-update-state.json"
-	// 默认的重启端点；可由环境变量 MOSDNS_RESTART_ENDPOINT 覆盖。
-	postUpgradeEndpoint = "http://127.0.0.1:9099/api/v1/system/restart"
 )
 
 var (
@@ -496,8 +494,9 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 	action.Status = status
 
 	m.recordInstalled(status.AssetSignature)
+	endpoint := resolveLocalRestartEndpoint()
 	if err := m.triggerPostUpgradeHook(ctx); err != nil {
-		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", postUpgradeEndpoint))
+		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", endpoint))
 		action.Notes = "更新已安装，请手动重启。"
 		status.Message = action.Notes
 	} else {
@@ -520,10 +519,7 @@ func (m *UpdateManager) recordInstalled(signature string) {
 }
 
 func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
-	endpoint := strings.TrimSpace(os.Getenv("MOSDNS_RESTART_ENDPOINT"))
-	if endpoint == "" {
-		endpoint = postUpgradeEndpoint
-	}
+	endpoint := resolveLocalRestartEndpoint()
 
 	if endpoint != "" {
 		if ctx == nil {
