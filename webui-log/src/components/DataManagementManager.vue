@@ -149,13 +149,21 @@ const lastRunText = computed(() => {
     const startTime = new Date(status.last_run_start_time).getTime()
     const endTime = new Date(status.last_run_end_time).getTime()
     const durationMs = Number.isFinite(startTime) && Number.isFinite(endTime) ? Math.max(0, endTime - startTime) : 0
-    if (durationMs > 0 && durationMs < 1000) {
+    if (durationMs < 1000) {
       return `完成于 ${formatRelativeTime(status.last_run_end_time)} (耗时 <1秒)`
     }
-    const durationSeconds = Math.max(0, Math.round(durationMs / 1000))
+    const durationSeconds = Math.max(1, Math.round(durationMs / 1000))
     return `完成于 ${formatRelativeTime(status.last_run_end_time)} (耗时 ${durationSeconds}秒)`
   }
   return `开始于 ${formatRelativeTime(status.last_run_start_time)}`
+})
+
+const lastRunErrorText = computed(() => {
+  const status = requeryStatus.value
+  if (!status || String(status.task_state || '') !== 'failed') {
+    return ''
+  }
+  return String(status.last_error || '').trim()
 })
 
 const lastRunDomainCountText = computed(() => {
@@ -992,6 +1000,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <p v-if="lastRunErrorText" class="msg error">最近失败原因：{{ lastRunErrorText }}</p>
 
         <div v-if="isRequeryRunning" class="requery-progress-wrap">
           <div class="requery-progress-bar">

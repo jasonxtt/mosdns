@@ -65,6 +65,7 @@ type Mosdns struct {
 	metricsReg      *prometheus.Registry
 	sc              *safe_close.SafeClose
 	globalOverrides *GlobalOverrides // <<< ADDED
+	apiHTTPAddr     string
 }
 
 // NewMosdns initializes a mosdns instance and its plugins.
@@ -85,11 +86,12 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	GlobalAuditCollector.StartWorker()
 
 	m := &Mosdns{
-		logger:     lg,
-		plugins:    make(map[string]any),
-		httpMux:    chi.NewRouter(),
-		metricsReg: newMetricsReg(),
-		sc:         safe_close.NewSafeClose(),
+		logger:      lg,
+		plugins:     make(map[string]any),
+		httpMux:     chi.NewRouter(),
+		metricsReg:  newMetricsReg(),
+		sc:          safe_close.NewSafeClose(),
+		apiHTTPAddr: strings.TrimSpace(cfg.API.HTTP),
 	}
 	SetCurrentMosdns(m)
 
@@ -134,7 +136,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	RegisterSpecialGroupsAPI(m.httpMux)
 
 	// Start http api server
-	if httpAddr := cfg.API.HTTP; len(httpAddr) > 0 {
+	if httpAddr := m.apiHTTPAddr; len(httpAddr) > 0 {
 		httpServer := &http.Server{
 			Addr:    httpAddr,
 			Handler: m.httpMux,
