@@ -154,7 +154,7 @@ const statusClass = computed(() => (isRunning.value ? 'running' : 'stopped'))
 }
 
 .dns-overview-status.running {
-  color: var(--ok);
+  color: var(--ink-0);
 }
 
 .dns-overview-status.running .status-dot {
@@ -203,7 +203,7 @@ const statusClass = computed(() => (isRunning.value ? 'running' : 'stopped'))
 }
 
 .trend-icon {
-  color: var(--brand);
+  color: var(--ink-0);
   font-size: 0.86rem;
 }
 
@@ -234,7 +234,7 @@ const statusClass = computed(() => (isRunning.value ? 'running' : 'stopped'))
 }
 
 .kpi-value.accent {
-  color: var(--brand);
+  color: var(--ink-0);
 }
 
 .kpi-label {
@@ -274,7 +274,7 @@ const statusClass = computed(() => (isRunning.value ? 'running' : 'stopped'))
 }
 
 .side-value.accent {
-  color: var(--brand);
+  color: var(--ink-0);
 }
 
 .series-toggle-row {
