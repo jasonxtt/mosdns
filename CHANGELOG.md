@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## v0.3.8
+
+### Added
+
+- added a panel-background history workflow in Vue system settings:
+  - list previously uploaded background images
+  - re-apply a historical image as current panel background
+  - delete single history entries or clear all history entries
+- added per-theme text color customization support:
+  - light/dark theme text colors are stored independently
+  - color changes apply and save immediately from the picker
+  - optional eyedropper entry is available on supported browsers
+
+### Changed
+
+- improved second-level tab selected-state visibility by adding a clearer selected border for:
+  - `实时查询 / 诊断抓取`
+  - `本地规则 / 订阅规则 / 拦截规则`
+- upgraded appearance reset behavior to reset the whole theme/appearance stack with confirmation:
+  - theme -> `明亮`
+  - panel background -> cleared
+  - transparency -> `100%`
+  - blur -> `0px`
+  - text color -> default
+- removed remaining hardcoded green text/button text colors in multiple UI surfaces so text color follows the active theme text color more consistently
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.7
 
 ### Changed
