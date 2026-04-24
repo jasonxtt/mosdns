@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v0.3.7
+
+### Changed
+
+- hardened `刷新分流缓存` task start/status behavior to avoid occasional immediate `0秒完成` false display:
+  - backend `requery` trigger/scheduler now persist `running` state atomically before goroutine execution
+  - frontend `数据管理` requery panel adds trigger-pending state and adaptive polling (`1s` pending / `5s` running)
+  - status text now renders sub-second completion as `耗时 <1秒` instead of misleading `0秒`
+- aligned panel-background transparency behavior for additional scheduler/requery card surfaces and button text contrast in dark-theme custom background usage
+
+### Upgrade Notes
+
+- this release does **not** require a config change for existing users
+- no `config_up.zip` update is required for this source release
+
 ## v0.3.6
 
 ### Changed

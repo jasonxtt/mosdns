@@ -100,7 +100,11 @@ const baseCacheConfig = [
 
 let schedulerTimerId = 0
 let requeryPollTimerId = 0
+let requeryPollIntervalMs = 0
+let requeryPendingTimerId = 0
 let dataViewSearchTimerId = 0
+const requeryTriggerPending = ref(false)
+const requeryTriggerRequestedAt = ref(0)
 
 const cacheConfig = computed(() => {
   const dynamic = [...specialGroups.value]
@@ -144,7 +148,11 @@ const lastRunText = computed(() => {
   if (status.last_run_end_time && !isZeroTime(status.last_run_end_time)) {
     const startTime = new Date(status.last_run_start_time).getTime()
     const endTime = new Date(status.last_run_end_time).getTime()
-    const durationSeconds = Number.isFinite(startTime) && Number.isFinite(endTime) ? Math.max(0, Math.round((endTime - startTime) / 1000)) : 0
+    const durationMs = Number.isFinite(startTime) && Number.isFinite(endTime) ? Math.max(0, endTime - startTime) : 0
+    if (durationMs > 0 && durationMs < 1000) {
+      return `完成于 ${formatRelativeTime(status.last_run_end_time)} (耗时 <1秒)`
+    }
+    const durationSeconds = Math.max(0, Math.round(durationMs / 1000))
     return `完成于 ${formatRelativeTime(status.last_run_end_time)} (耗时 ${durationSeconds}秒)`
   }
   return `开始于 ${formatRelativeTime(status.last_run_start_time)}`
@@ -570,20 +578,49 @@ function applyRequeryConfigToForm() {
   schedulerForm.startDatetimeLocal = formatDateForInputLocal(scheduler.start_datetime)
 }
 
+function setRequeryTriggerPending(active) {
+  requeryTriggerPending.value = Boolean(active)
+  if (!active) {
+    requeryTriggerRequestedAt.value = 0
+    if (requeryPendingTimerId) {
+      window.clearTimeout(requeryPendingTimerId)
+      requeryPendingTimerId = 0
+    }
+    ensureRequeryPolling()
+    return
+  }
+  if (requeryPendingTimerId) {
+    window.clearTimeout(requeryPendingTimerId)
+  }
+  requeryPendingTimerId = window.setTimeout(() => {
+    requeryTriggerPending.value = false
+    requeryPendingTimerId = 0
+    ensureRequeryPolling()
+  }, 15000)
+  ensureRequeryPolling()
+}
+
 function ensureRequeryPolling() {
-  if (isRequeryRunning.value) {
-    if (requeryPollTimerId) {
+  const shouldPoll = isRequeryRunning.value || requeryTriggerPending.value
+  const intervalMs = requeryTriggerPending.value ? 1000 : 5000
+  if (shouldPoll) {
+    if (requeryPollTimerId && requeryPollIntervalMs === intervalMs) {
       return
     }
+    if (requeryPollTimerId) {
+      window.clearInterval(requeryPollTimerId)
+    }
+    requeryPollIntervalMs = intervalMs
     requeryPollTimerId = window.setInterval(() => {
       refreshRequeryStatusAndConfig(false)
-    }, 5000)
+    }, intervalMs)
     return
   }
   if (requeryPollTimerId) {
     window.clearInterval(requeryPollTimerId)
     requeryPollTimerId = 0
   }
+  requeryPollIntervalMs = 0
 }
 
 async function refreshRequeryStatusAndConfig(showMessage = false) {
@@ -597,6 +634,17 @@ async function refreshRequeryStatusAndConfig(showMessage = false) {
     requeryAvailable.value = true
     requeryStatus.value = status
     requeryConfig.value = config
+    const state = String(status?.task_state || '')
+    const lastStartMs = new Date(status?.last_run_start_time || '').getTime()
+    if (state === 'running') {
+      setRequeryTriggerPending(false)
+    } else if (
+      requeryTriggerPending.value &&
+      Number.isFinite(lastStartMs) &&
+      lastStartMs >= requeryTriggerRequestedAt.value - 1000
+    ) {
+      setRequeryTriggerPending(false)
+    }
     applyRequeryConfigToForm()
     ensureRequeryPolling()
     if (showMessage) {
@@ -611,6 +659,7 @@ async function refreshRequeryStatusAndConfig(showMessage = false) {
       sourceFileCounts.value = []
       sourceFileCountsError.value = ''
       requeryLoadError.value = '未检测到 requery 插件，已跳过该模块。'
+      setRequeryTriggerPending(false)
       ensureRequeryPolling()
       return
     }
@@ -653,9 +702,12 @@ async function triggerRequery() {
   requeryAction.value = 'trigger'
   try {
     await postEmpty('/plugins/requery/trigger')
+    requeryTriggerRequestedAt.value = Date.now()
+    setRequeryTriggerPending(true)
     await refreshRequeryStatusAndConfig()
     setSuccess('刷新任务已开始')
   } catch (error) {
+    setRequeryTriggerPending(false)
     setError(`开始任务失败: ${error.message}`)
   } finally {
     requeryAction.value = ''
@@ -790,6 +842,10 @@ onBeforeUnmount(() => {
   if (requeryPollTimerId) {
     window.clearInterval(requeryPollTimerId)
     requeryPollTimerId = 0
+  }
+  if (requeryPendingTimerId) {
+    window.clearTimeout(requeryPendingTimerId)
+    requeryPendingTimerId = 0
   }
   if (dataViewSearchTimerId) {
     window.clearTimeout(dataViewSearchTimerId)

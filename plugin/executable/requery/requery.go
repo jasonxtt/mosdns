@@ -72,18 +72,17 @@ func newRequery(bp *coremain.BP, args any) (any, error) {
 	}
 	p.mu.Unlock()
 
-
 	// Start the scheduler's goroutine once. It will run forever.
 	p.scheduler.Start()
 	log.Println("[requery] Scheduler started.")
-	
+
 	// Now, add the initial job based on the loaded config.
 	if err := p.setupScheduler(); err != nil {
 		log.Printf("[requery] WARN: Failed to setup initial scheduler job, it will be disabled: %v", err)
 	}
-	
+
 	bp.RegAPI(p.api())
-	
+
 	log.Printf("[requery] plugin instance created for config file: %s", p.filePath)
 	return p, nil
 }
@@ -105,16 +104,16 @@ type Requery struct {
 
 // Config maps directly to the requeryconfig.json file structure.
 type Config struct {
-	DomainProcessing  DomainProcessing   `json:"domain_processing"`
-	URLActions        URLActions         `json:"url_actions"`
-	Scheduler         SchedulerConfig    `json:"scheduler"`
-	ExecutionSettings ExecutionSettings  `json:"execution_settings"`
-	Status            Status             `json:"status"`
+	DomainProcessing  DomainProcessing  `json:"domain_processing"`
+	URLActions        URLActions        `json:"url_actions"`
+	Scheduler         SchedulerConfig   `json:"scheduler"`
+	ExecutionSettings ExecutionSettings `json:"execution_settings"`
+	Status            Status            `json:"status"`
 }
 
 type DomainProcessing struct {
 	SourceFiles []SourceFile `json:"source_files"`
-    // OutputFile 已删除
+	// OutputFile 已删除
 }
 
 type SourceFile struct {
@@ -141,11 +140,11 @@ type ExecutionSettings struct {
 }
 
 type Status struct {
-	TaskState           string    `json:"task_state"` // "idle", "running", "failed", "cancelled"
-	LastRunStartTime    time.Time `json:"last_run_start_time,omitempty"`
-	LastRunEndTime      time.Time `json:"last_run_end_time,omitempty"`
-	LastRunDomainCount  int       `json:"last_run_domain_count"`
-	Progress            Progress  `json:"progress"`
+	TaskState          string    `json:"task_state"` // "idle", "running", "failed", "cancelled"
+	LastRunStartTime   time.Time `json:"last_run_start_time,omitempty"`
+	LastRunEndTime     time.Time `json:"last_run_end_time,omitempty"`
+	LastRunDomainCount int       `json:"last_run_domain_count"`
+	Progress           Progress  `json:"progress"`
 }
 
 type Progress struct {
@@ -153,6 +152,31 @@ type Progress struct {
 	Total     int64 `json:"total"`
 }
 
+func (p *Requery) startTaskLocked() error {
+	if p.config.Status.TaskState == "running" {
+		return errors.New("a task is already running")
+	}
+
+	taskCtx, taskCancel := context.WithCancel(context.Background())
+	p.taskCtx = taskCtx
+	p.taskCancel = taskCancel
+
+	p.config.Status.TaskState = "running"
+	p.config.Status.LastRunStartTime = time.Now().UTC()
+	p.config.Status.LastRunEndTime = time.Time{}
+	p.config.Status.LastRunDomainCount = 0
+	p.config.Status.Progress.Processed = 0
+	p.config.Status.Progress.Total = 0
+	if err := p.saveConfigUnlocked(); err != nil {
+		p.taskCtx = nil
+		p.taskCancel = nil
+		p.config.Status.TaskState = "idle"
+		return fmt.Errorf("failed to persist running state: %w", err)
+	}
+
+	go p.runTask(taskCtx)
+	return nil
+}
 
 // ----------------------------------------------------------------------------
 // 3. Core Task Workflow
@@ -160,21 +184,6 @@ type Progress struct {
 
 // runTask executes the entire requery workflow. It's designed to be run in a goroutine.
 func (p *Requery) runTask(ctx context.Context) {
-	p.mu.Lock()
-	if p.config.Status.TaskState == "running" {
-		log.Println("[requery] Task trigger ignored: a task is already running.")
-		p.mu.Unlock()
-		return
-	}
-	
-	p.config.Status.TaskState = "running"
-	p.config.Status.LastRunStartTime = time.Now().UTC()
-	p.config.Status.LastRunEndTime = time.Time{} // Clear end time
-	p.config.Status.Progress.Processed = 0
-	p.config.Status.Progress.Total = 0
-	_ = p.saveConfigUnlocked()
-	p.mu.Unlock()
-
 	// Defer block to ensure state is cleaned up on any exit path (success, failure, cancellation).
 	defer func() {
 		p.mu.Lock()
@@ -187,17 +196,17 @@ func (p *Requery) runTask(ctx context.Context) {
 			log.Printf("[requery] FATAL: Task panicked: %v", r)
 			p.config.Status.TaskState = "failed"
 		}
-		
+
 		p.config.Status.LastRunEndTime = time.Now().UTC()
 		_ = p.saveConfigUnlocked()
 
 		p.taskCancel = nil
-                p.mu.Unlock()
+		p.mu.Unlock()
 		// [修改点] 调用核心包的通用内存清理函数
 		// 因为 ManualGC 内部是异步(go func)的，所以这里调用不会阻塞锁，非常安全
 		log.Println("[requery] Task finished, triggering background memory release...")
 		coremain.ManualGC()
-	} ()
+	}()
 
 	log.Println("[requery] Starting a new task.")
 
@@ -219,7 +228,7 @@ func (p *Requery) runTask(ctx context.Context) {
 		log.Println("[requery] No domains found to process. Task finished.")
 		return
 	}
-	
+
 	// Step 4: Flush old rules
 	log.Println("[requery] Step 4: Flushing old rules...")
 	if err := p.callURLs(ctx, p.config.URLActions.FlushRules); err != nil {
@@ -257,7 +266,7 @@ func (p *Requery) runTask(ctx context.Context) {
 func (p *Requery) mergeAndFilterDomains(ctx context.Context) ([]string, error) {
 	// 初始化域名集合，用于去重
 	domainSet := make(map[string]struct{})
-	
+
 	// 准备正则：匹配 full: 开头
 	domainPattern := regexp.MustCompile(`^full:(.+)`)
 
@@ -271,11 +280,11 @@ func (p *Requery) mergeAndFilterDomains(ctx context.Context) ([]string, error) {
 
 	for _, sourceFile := range p.config.DomainProcessing.SourceFiles {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-		
+
 		file, err := os.Open(sourceFile.Path)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -332,7 +341,7 @@ func (p *Requery) mergeAndFilterDomains(ctx context.Context) ([]string, error) {
 			return nil, fmt.Errorf("error reading source file %s: %w", sourceFile.Path, err)
 		}
 	}
-	
+
 	log.Printf("[requery] Processed source files. Total unique domains loaded (within %d days): %d.", limitDays, len(domainSet))
 
 	if len(domainSet) == 0 {
@@ -343,9 +352,9 @@ func (p *Requery) mergeAndFilterDomains(ctx context.Context) ([]string, error) {
 	for domain := range domainSet {
 		domains = append(domains, domain)
 	}
-        domainSet = nil 
+	domainSet = nil
 	// 此时不再写入 output_file (requery_backup.txt)
-	
+
 	return domains, nil
 }
 
@@ -359,14 +368,14 @@ func (p *Requery) resendDNSQueries(ctx context.Context, domains []string) error 
 	}
 	ticker := time.NewTicker(time.Second / time.Duration(qps))
 	defer ticker.Stop()
-	
+
 	dnsClient := new(dns.Client)
 	// 设置超时，防止请求挂起
-	dnsClient.Timeout = 2 * time.Second 
+	dnsClient.Timeout = 2 * time.Second
 
 	for i := 0; i < len(domains); i++ {
 		rawDomainStr := domains[i] // 这里的字符串可能带后缀，也可能不带
-		
+
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
@@ -379,7 +388,7 @@ func (p *Requery) resendDNSQueries(ctx context.Context, domains []string) error 
 		// 1. 分割字符串
 		parts := strings.Split(rawDomainStr, "|")
 		realDomain := parts[0] // 始终是域名部分
-		
+
 		// 2. 解析 Flags
 		var useAD, useCD, useDO bool
 		if len(parts) > 1 {
@@ -399,28 +408,28 @@ func (p *Requery) resendDNSQueries(ctx context.Context, domains []string) error 
 		createMsg := func(qtype uint16) *dns.Msg {
 			m := new(dns.Msg)
 			m.SetQuestion(dns.Fqdn(realDomain), qtype)
-			
+
 			// 还原原始请求的 Flags
 			m.AuthenticatedData = useAD
 			m.CheckingDisabled = useCD
 			if useDO {
-				m.SetEdns0(4096, true) 
+				m.SetEdns0(4096, true)
 			}
 			// 建议开启递归查询，模拟普通客户端行为
-			m.RecursionDesired = true 
+			m.RecursionDesired = true
 			return m
 		}
 		// ----------------------------------
 
 		wg.Add(2)
-		
+
 		// 发送 A 记录
 		go func() {
 			defer wg.Done()
 			msg := createMsg(dns.TypeA)
 			_, _, _ = dnsClient.ExchangeContext(ctx, msg, p.config.ExecutionSettings.ResolverAddress)
 		}()
-		
+
 		// 发送 AAAA 记录
 		go func() {
 			defer wg.Done()
@@ -472,14 +481,16 @@ func (p *Requery) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 func (p *Requery) handleTriggerTask(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	if p.config.Status.TaskState == "running" {
 		p.jsonError(w, "A task is already running.", http.StatusConflict)
 		return
 	}
 
-	p.taskCtx, p.taskCancel = context.WithCancel(context.Background())
-	go p.runTask(p.taskCtx)
+	if err := p.startTaskLocked(); err != nil {
+		p.jsonError(w, "Failed to start task: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	p.jsonResponse(w, map[string]string{"status": "success", "message": "A new task has been started."}, http.StatusOK)
 }
@@ -492,18 +503,18 @@ func (p *Requery) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		p.jsonError(w, "No running task to cancel.", http.StatusNotFound)
 		return
 	}
-	
+
 	p.taskCancel()
 	log.Println("[requery] Task cancellation requested via API.")
-	
+
 	p.jsonResponse(w, map[string]string{"status": "success", "message": "Task cancellation initiated."}, http.StatusOK)
 }
 
 func (p *Requery) handleUpdateScheduler(w http.ResponseWriter, r *http.Request) {
 	// [修改] 定义一个扩展的结构体来接收包含 date_range_days 的 JSON
 	type SchedulerUpdatePayload struct {
-		SchedulerConfig       // 嵌入原有的 SchedulerConfig 字段 (Enabled, StartDatetime, IntervalMinutes)
-		DateRangeDays   int   `json:"date_range_days"` // 新增字段
+		SchedulerConfig     // 嵌入原有的 SchedulerConfig 字段 (Enabled, StartDatetime, IntervalMinutes)
+		DateRangeDays   int `json:"date_range_days"` // 新增字段
 	}
 
 	var payload SchedulerUpdatePayload
@@ -517,7 +528,7 @@ func (p *Requery) handleUpdateScheduler(w http.ResponseWriter, r *http.Request) 
 
 	// [修改] 分别更新 Scheduler 和 ExecutionSettings
 	p.config.Scheduler = payload.SchedulerConfig
-	
+
 	// 只有当传入了有效天数时才更新 (防止意外归零)
 	if payload.DateRangeDays > 0 {
 		p.config.ExecutionSettings.DateRangeDays = payload.DateRangeDays
@@ -574,7 +585,7 @@ func (p *Requery) handleGetSourceFileCounts(w http.ResponseWriter, r *http.Reque
 		}
 		counts = append(counts, fileCount{Alias: sourceFile.Alias, Count: count})
 	}
-	
+
 	p.jsonResponse(w, map[string]any{"status": "success", "data": counts}, http.StatusOK)
 }
 
@@ -597,7 +608,7 @@ func (p *Requery) loadConfig() error {
 		}
 		return err
 	}
-	
+
 	var cfg Config
 	if err := json.Unmarshal(dataBytes, &cfg); err != nil {
 		return fmt.Errorf("failed to parse json from config file %s: %w", p.filePath, err)
@@ -695,8 +706,9 @@ func (p *Requery) setupScheduler() error {
 			return
 		}
 
-		p.taskCtx, p.taskCancel = context.WithCancel(context.Background())
-		go p.runTask(p.taskCtx)
+		if err := p.startTaskLocked(); err != nil {
+			log.Printf("[requery] Scheduler failed to start task: %v", err)
+		}
 	}
 
 	// 5. [Core Modification] Calculate the next precise execution time point.
@@ -722,8 +734,8 @@ func (p *Requery) setupScheduler() error {
 
 	if delay > 0 {
 		log.Printf("[requery] Next scheduled run will be at %v (in %v).", nextRunTime.Local(), delay.Round(time.Second))
-		
-		// When the timer fires, it will execute the job and then immediately call rescheduleTasks 
+
+		// When the timer fires, it will execute the job and then immediately call rescheduleTasks
 		// to schedule the subsequent job, creating a chain.
 		time.AfterFunc(delay, func() {
 			jobFunc()
@@ -748,7 +760,7 @@ func (p *Requery) callURLs(ctx context.Context, urls []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create request for %s: %w", url, err)
 		}
-		
+
 		resp, err := p.httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed to call URL %s: %w", url, err)
@@ -759,7 +771,7 @@ func (p *Requery) callURLs(ctx context.Context, urls []string) error {
 			body, _ := io.ReadAll(resp.Body)
 			return fmt.Errorf("bad response from URL %s: status %d, body: %s", url, resp.StatusCode, string(body))
 		}
-		
+
 		_, _ = io.Copy(io.Discard, resp.Body)
 
 		if i < len(urls)-1 {

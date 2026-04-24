@@ -38,6 +38,7 @@
   --panel-switch-knob-alpha: 0.9;
   --panel-glass-rgb: 255, 255, 255;
   --panel-glass-border-rgb: 148, 163, 184;
+  --panel-btn-text: #111827;
 }
 
 * {
@@ -1913,7 +1914,8 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .list-sidebar,
 :root[data-panel-bg-enabled='1'] .list-main,
 :root[data-panel-bg-enabled='1'] .table-wrap,
-:root[data-panel-bg-enabled='1'] .trend-card {
+:root[data-panel-bg-enabled='1'] .trend-card,
+:root[data-panel-bg-enabled='1'] .requery-scheduler {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
   backdrop-filter: blur(var(--panel-glass-blur));
   -webkit-backdrop-filter: blur(var(--panel-glass-blur));
@@ -1969,12 +1971,14 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .switch-value-chip,
 :root[data-panel-bg-enabled='1'] .update-banner,
 :root[data-panel-bg-enabled='1'] .trend-card,
+:root[data-panel-bg-enabled='1'] .requery-scheduler,
 #app.custom-background .switch-row,
 #app.custom-background .mode-info-item,
 #app.custom-background .sys-info-item,
 #app.custom-background .switch-value-chip,
 #app.custom-background .update-banner,
-#app.custom-background .trend-card {
+#app.custom-background .trend-card,
+#app.custom-background .requery-scheduler {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
   border-color: rgba(var(--panel-glass-border-rgb), 0.46) !important;
 }
@@ -2027,7 +2031,7 @@ tr.disabled {
 #app.custom-background .btn.danger,
 #app.custom-background .msg.error,
 #app.custom-background .upstream-shell .special-group-name {
-  color: #111827 !important;
+  color: var(--panel-btn-text) !important;
 }
 
 #app.custom-background .legacy-main-nav.compact .legacy-main-btn,
@@ -2052,7 +2056,7 @@ tr.disabled {
 #app.custom-background .list-btn.active {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
   border-color: rgba(var(--panel-glass-border-rgb), 0.46) !important;
-  color: #111827 !important;
+  color: var(--panel-btn-text) !important;
 }
 
 #app.custom-background .list-sidebar .list-btn.active,
@@ -2065,13 +2069,13 @@ tr.disabled {
 #app.custom-background .btn.primary {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
   border-color: rgba(var(--panel-glass-border-rgb), 0.46) !important;
-  color: #111827 !important;
+  color: var(--panel-btn-text) !important;
 }
 
 #app.custom-background .btn.primary:hover:not(:disabled) {
   background: rgba(var(--panel-glass-rgb), var(--panel-primary-hover-alpha)) !important;
   border-color: rgba(var(--panel-glass-border-rgb), 0.46) !important;
-  color: #111827 !important;
+  color: var(--panel-btn-text) !important;
 }
 
 #app.custom-background .btn.no-frame-btn,
@@ -2565,6 +2569,7 @@ tr.disabled {
 :root[data-theme='terra'] {
   --panel-glass-rgb: 17, 24, 39;
   --panel-glass-border-rgb: 148, 163, 184;
+  --panel-btn-text: #f8fafc;
 }
 
 :root[data-color-scheme='classic'] {
