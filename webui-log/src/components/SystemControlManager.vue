@@ -3,6 +3,15 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 import { getDefaultPanelBackgroundSettings, normalizePanelBackgroundSettings, previewPanelBackground, transparencyToOpacity } from '../utils/panelBackground'
+import {
+  applyTextColorForTheme,
+  getDefaultTextColorSettings,
+  getEffectiveTextColor,
+  loadTextColorSettingsFromStorage,
+  normalizeTextColorSettings,
+  normalizeUserHexColor,
+  saveTextColorSettingsToStorage
+} from '../utils/appearanceTextColor'
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -54,9 +63,14 @@ const autoRefresh = reactive({
 })
 
 const appearance = reactive({
-  theme: 'dark',
-  color: 'indigo'
+  theme: 'dark'
 })
+
+const defaultTextColorSettings = getDefaultTextColorSettings()
+const textColorSettings = reactive(getDefaultTextColorSettings())
+const textColorDraft = ref(defaultTextColorSettings.light.color)
+const textColorSaving = ref(false)
+const eyeDropperSupported = ref(false)
 
 const panelBackgroundDefaults = getDefaultPanelBackgroundSettings()
 const panelBackgroundMaxUpload = 20 * 1024 * 1024
@@ -65,28 +79,25 @@ const panelBackground = reactive({
   mode: panelBackgroundDefaults.mode,
   url: '',
   imageUrl: '',
+  uploadId: '',
   transparency: panelBackgroundDefaults.transparency,
   opacity: panelBackgroundDefaults.opacity,
   blur: panelBackgroundDefaults.blur,
   applying: false,
   uploading: false
 })
+const panelBackgroundHistory = ref([])
+const panelBackgroundHistoryOpen = ref(false)
+const panelBackgroundHistoryLoading = ref(false)
+const panelBackgroundHistoryBusy = ref('')
 
 let restartProbeTimerId = 0
+let textColorSaveTimerId = 0
+let textColorSaveQueued = false
 
 const themeOptions = [
   { value: 'light', label: '明亮' },
   { value: 'dark', label: '黑暗' }
-]
-
-const colorOptions = [
-  { value: 'classic', label: '经典绿', color: '#0f766e' },
-  { value: 'indigo', label: '靛蓝', color: '#4f46e5' },
-  { value: 'pink', label: '粉色', color: '#ec4899' },
-  { value: 'teal', label: '青色', color: '#14b8a6' },
-  { value: 'orange', label: '橙色', color: '#f97316' },
-  { value: 'green', label: '绿色', color: '#22c55e' },
-  { value: 'violet', label: '紫色', color: '#8b5cf6' }
 ]
 
 const switchProfiles = [
@@ -589,22 +600,137 @@ function applyTheme(theme, save = true) {
   const nextTheme = ['light', 'dark'].includes(String(theme)) ? String(theme) : 'light'
   appearance.theme = nextTheme
   document.documentElement.setAttribute('data-theme', nextTheme)
+  applyTextColorForTheme(nextTheme, textColorSettings)
+  syncTextColorDraft(nextTheme)
   if (save) {
     localStorage.setItem('mosdns-theme', nextTheme)
   }
 }
 
-function applyColor(color, save = true) {
-  appearance.color = color
-  document.documentElement.setAttribute('data-color-scheme', color)
-  if (save) {
-    localStorage.setItem('mosdns-color', color)
-  }
+function overwriteTextColorSettings(nextSettings) {
+  const normalized = normalizeTextColorSettings(nextSettings || {})
+  textColorSettings.light.mode = normalized.light.mode
+  textColorSettings.light.color = normalized.light.color
+  textColorSettings.dark.mode = normalized.dark.mode
+  textColorSettings.dark.color = normalized.dark.color
+}
+
+function activeThemeKey() {
+  return appearance.theme === 'dark' ? 'dark' : 'light'
+}
+
+function syncTextColorDraft(theme = activeThemeKey()) {
+  const effective = getEffectiveTextColor(theme, textColorSettings)
+  textColorDraft.value = effective
+}
+
+function setCustomTextColorForActiveTheme(rawColor) {
+  const theme = activeThemeKey()
+  const fallback = defaultTextColorSettings[theme].color
+  const normalized = normalizeUserHexColor(rawColor, fallback)
+  textColorDraft.value = normalized
+  textColorSettings[theme].mode = 'custom'
+  textColorSettings[theme].color = normalized
+  applyTextColorForTheme(theme, textColorSettings)
 }
 
 function initializeAppearance() {
   applyTheme(localStorage.getItem('mosdns-theme') || 'light', false)
-  applyColor(localStorage.getItem('mosdns-color') || 'classic', false)
+  const cached = loadTextColorSettingsFromStorage()
+  overwriteTextColorSettings(cached)
+  applyTextColorForTheme(activeThemeKey(), textColorSettings)
+  syncTextColorDraft(activeThemeKey())
+}
+
+function textColorPayload() {
+  return normalizeTextColorSettings(textColorSettings)
+}
+
+async function loadTextColorSettings() {
+  try {
+    const settings = await getJSON('/api/v1/appearance/text-color')
+    const normalized = normalizeTextColorSettings(settings || {})
+    overwriteTextColorSettings(normalized)
+    saveTextColorSettingsToStorage(normalized)
+  } catch {
+    // fallback to cached settings without interrupting UI
+  }
+  applyTextColorForTheme(activeThemeKey(), textColorSettings)
+  syncTextColorDraft(activeThemeKey())
+}
+
+async function saveTextColorSettings(showMessage = true) {
+  if (textColorSaving.value) {
+    textColorSaveQueued = true
+    return
+  }
+  textColorSaving.value = true
+  try {
+    const saved = await postJSON('/api/v1/appearance/text-color', textColorPayload())
+    const normalized = normalizeTextColorSettings(saved || {})
+    overwriteTextColorSettings(normalized)
+    saveTextColorSettingsToStorage(normalized)
+    applyTextColorForTheme(activeThemeKey(), textColorSettings)
+    syncTextColorDraft(activeThemeKey())
+    if (showMessage) {
+      setSuccess('字体颜色已保存')
+    }
+  } catch (error) {
+    setError(`保存字体颜色失败: ${error.message}`)
+  } finally {
+    textColorSaving.value = false
+    if (textColorSaveQueued) {
+      textColorSaveQueued = false
+      void saveTextColorSettings(false)
+    }
+  }
+}
+
+function queueTextColorSave() {
+  if (textColorSaveTimerId) {
+    window.clearTimeout(textColorSaveTimerId)
+    textColorSaveTimerId = 0
+  }
+  textColorSaveTimerId = window.setTimeout(() => {
+    textColorSaveTimerId = 0
+    void saveTextColorSettings(false)
+  }, 180)
+}
+
+function onTextColorPickerInput(event) {
+  setCustomTextColorForActiveTheme(event?.target?.value || textColorDraft.value)
+  queueTextColorSave()
+}
+
+async function onTextColorPickerChange(event) {
+  setCustomTextColorForActiveTheme(event?.target?.value || textColorDraft.value)
+  await saveTextColorSettings(false)
+}
+
+async function pickTextColorFromScreen() {
+  if (!eyeDropperSupported.value) {
+    return
+  }
+  try {
+    const dropper = new window.EyeDropper()
+    const result = await dropper.open()
+    if (!result?.sRGBHex) {
+      return
+    }
+    setCustomTextColorForActiveTheme(result.sRGBHex)
+    await saveTextColorSettings(false)
+  } catch {
+    // user cancelled or unsupported runtime state
+  }
+}
+
+async function resetThemeTextColor() {
+  const theme = activeThemeKey()
+  textColorSettings[theme].mode = 'default'
+  textColorSettings[theme].color = defaultTextColorSettings[theme].color
+  textColorDraft.value = defaultTextColorSettings[theme].color
+  applyTextColorForTheme(theme, textColorSettings)
+  await saveTextColorSettings()
 }
 
 function applyPanelBackgroundDraft(raw) {
@@ -612,6 +738,7 @@ function applyPanelBackgroundDraft(raw) {
   panelBackground.mode = normalized.mode
   panelBackground.url = normalized.url
   panelBackground.imageUrl = normalized.imageUrl
+  panelBackground.uploadId = normalized.uploadId
   panelBackground.transparency = normalized.transparency
   panelBackground.opacity = normalized.opacity
   panelBackground.blur = normalized.blur
@@ -622,6 +749,7 @@ function getPanelBackgroundDraftForPreview() {
     mode: panelBackground.mode,
     url: panelBackground.url,
     image_url: panelBackground.imageUrl,
+    upload_id: panelBackground.uploadId,
     opacity: transparencyToOpacity(panelBackground.transparency),
     blur: panelBackground.blur
   }
@@ -643,6 +771,7 @@ function buildPanelBackgroundPayload() {
   return {
     mode: normalized.mode,
     url: normalized.mode === 'url' ? normalized.url : '',
+    upload_id: normalized.mode === 'upload' ? normalized.uploadId : '',
     opacity: normalized.opacity,
     blur: normalized.blur
   }
@@ -658,6 +787,90 @@ async function loadPanelBackgroundSettings() {
     await syncPanelBackgroundPreview(false)
   } catch (error) {
     setError(`加载面板背景设置失败: ${error.message}`)
+  }
+}
+
+async function loadPanelBackgroundHistory() {
+  panelBackgroundHistoryLoading.value = true
+  try {
+    const payload = await getJSON('/api/v1/appearance/panel-background/history')
+    const items = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : [])
+    panelBackgroundHistory.value = items
+  } catch (error) {
+    setError(`加载背景历史失败: ${error.message}`)
+  } finally {
+    panelBackgroundHistoryLoading.value = false
+  }
+}
+
+async function togglePanelBackgroundHistory() {
+  panelBackgroundHistoryOpen.value = !panelBackgroundHistoryOpen.value
+  if (panelBackgroundHistoryOpen.value) {
+    await loadPanelBackgroundHistory()
+  }
+}
+
+async function usePanelBackgroundHistory(item) {
+  const uploadId = String(item?.id || '').trim()
+  const imageUrl = String(item?.image_url || '').trim()
+  if (!uploadId || !imageUrl) {
+    return
+  }
+  panelBackground.mode = 'upload'
+  panelBackground.uploadId = uploadId
+  panelBackground.imageUrl = imageUrl
+  if (!(await syncPanelBackgroundPreview(true))) {
+    return
+  }
+  await applyPanelBackgroundSettings()
+}
+
+async function deletePanelBackgroundHistory(item) {
+  const uploadId = String(item?.id || '').trim()
+  if (!uploadId) {
+    return
+  }
+  if (!(await openConfirm('确认删除这张历史背景图片吗？', { tone: 'danger' }))) {
+    return
+  }
+  panelBackgroundHistoryBusy.value = uploadId
+  try {
+    const response = await fetch(`/api/v1/appearance/panel-background/history/${encodeURIComponent(uploadId)}`, {
+      method: 'DELETE'
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`)
+    }
+    await Promise.all([loadPanelBackgroundHistory(), loadPanelBackgroundSettings()])
+    setSuccess('历史背景已删除')
+  } catch (error) {
+    setError(`删除历史背景失败: ${error.message}`)
+  } finally {
+    panelBackgroundHistoryBusy.value = ''
+  }
+}
+
+async function clearPanelBackgroundHistory() {
+  if (!(await openConfirm('确认清空所有历史背景图片吗？', { tone: 'danger' }))) {
+    return
+  }
+  panelBackgroundHistoryBusy.value = 'clear-all'
+  try {
+    const response = await fetch('/api/v1/appearance/panel-background/history', {
+      method: 'DELETE'
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(text || `HTTP ${response.status} ${response.statusText}`)
+    }
+    await Promise.all([loadPanelBackgroundHistory(), loadPanelBackgroundSettings()])
+    await syncPanelBackgroundPreview(false)
+    setSuccess('历史背景已清空')
+  } catch (error) {
+    setError(`清空历史背景失败: ${error.message}`)
+  } finally {
+    panelBackgroundHistoryBusy.value = ''
   }
 }
 
@@ -683,17 +896,41 @@ async function applyPanelBackgroundSettings() {
   }
 }
 
-async function resetPanelBackgroundSettings() {
+async function resetAppearanceSettings() {
+  const confirmed = await openConfirm(
+    '所有主题相关设置将重置为初始值：主题改为明亮、背景清空、透明度 100%、毛玻璃 0px、字体恢复默认。确认继续吗？',
+    { tone: 'danger' }
+  )
+  if (!confirmed) {
+    return
+  }
+
   clearMessage()
+
+  overwriteTextColorSettings(defaultTextColorSettings)
+  saveTextColorSettingsToStorage(defaultTextColorSettings)
+  applyTheme('light')
+  applyTextColorForTheme('light', textColorSettings)
+  syncTextColorDraft('light')
+
   panelBackground.mode = 'none'
   panelBackground.url = ''
   panelBackground.imageUrl = ''
-  panelBackground.transparency = panelBackgroundDefaults.transparency
-  panelBackground.opacity = panelBackgroundDefaults.opacity
-  panelBackground.blur = panelBackgroundDefaults.blur
-  await applyPanelBackgroundSettings()
-  if (!errorMessage.value) {
-    setSuccess('面板背景已重置')
+  panelBackground.uploadId = ''
+  panelBackground.transparency = 100
+  panelBackground.opacity = 1
+  panelBackground.blur = 0
+  panelBackgroundHistoryOpen.value = false
+  await syncPanelBackgroundPreview(false)
+
+  try {
+    await Promise.all([
+      postJSON('/api/v1/appearance/text-color', normalizeTextColorSettings(defaultTextColorSettings)),
+      postJSON('/api/v1/appearance/panel-background', { mode: 'none', url: '', opacity: 1, blur: 0 })
+    ])
+    setSuccess('主题与外观已重置为初始值')
+  } catch (error) {
+    setError(`重置主题与外观失败: ${error.message}`)
   }
 }
 
@@ -740,11 +977,12 @@ async function onPanelBackgroundFileChange(event) {
     }
     const data = await response.json()
     panelBackground.mode = 'upload'
+    panelBackground.uploadId = String(data?.upload_id || '')
     panelBackground.imageUrl = String(data?.image_url || '')
     if (!(await syncPanelBackgroundPreview(true))) {
       return
     }
-    await applyPanelBackgroundSettings()
+    await Promise.all([applyPanelBackgroundSettings(), loadPanelBackgroundHistory()])
     if (!errorMessage.value) {
       setSuccess('图片已上传并应用')
     }
@@ -897,11 +1135,14 @@ async function refreshOnGlobalEvent() {
 }
 
 onMounted(() => {
+  eyeDropperSupported.value = typeof window !== 'undefined' && 'EyeDropper' in window
   initializeAppearance()
+  loadTextColorSettings()
   loadAutoRefreshSettings()
   loadConfigManagerSettings()
   emitAutoRefreshSettings(false)
   loadPanelBackgroundSettings()
+  loadPanelBackgroundHistory()
   reloadAll()
   window.addEventListener('mosdns-log-refresh', refreshOnGlobalEvent)
 })
@@ -909,6 +1150,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('mosdns-log-refresh', refreshOnGlobalEvent)
   stopRestartWatch()
+  if (textColorSaveTimerId) {
+    window.clearTimeout(textColorSaveTimerId)
+    textColorSaveTimerId = 0
+  }
 })
 </script>
 
@@ -1133,6 +1378,22 @@ onBeforeUnmount(() => {
           <h3>主题与外观</h3>
           <div class="control-line"><strong>界面风格</strong><select v-model="appearance.theme" @change="applyTheme(appearance.theme)"><option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option></select></div>
           <div class="control-line panel-bg-line">
+            <strong>字体颜色</strong>
+            <div class="panel-text-color-wrap">
+              <input
+                :value="textColorDraft"
+                type="color"
+                :disabled="textColorSaving"
+                @input="onTextColorPickerInput"
+                @change="onTextColorPickerChange"
+              />
+              <button v-if="eyeDropperSupported" class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="pickTextColorFromScreen">
+                取色
+              </button>
+              <button class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="resetThemeTextColor">默认</button>
+            </div>
+          </div>
+          <div class="control-line panel-bg-line">
             <strong>面板背景</strong>
             <div class="panel-bg-input-wrap">
               <input
@@ -1143,6 +1404,9 @@ onBeforeUnmount(() => {
               <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying" @click="openPanelBackgroundPicker">
                 {{ panelBackground.uploading ? '上传中...' : '上传' }}
               </button>
+              <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying || panelBackgroundHistoryLoading" @click="togglePanelBackgroundHistory">
+                {{ panelBackgroundHistoryOpen ? '收起历史' : '历史' }}
+              </button>
               <input
                 ref="panelBackgroundPicker"
                 class="panel-bg-file-input"
@@ -1150,6 +1414,31 @@ onBeforeUnmount(() => {
                 accept="image/*"
                 @change="onPanelBackgroundFileChange"
               />
+            </div>
+          </div>
+          <div v-if="panelBackgroundHistoryOpen" class="panel-bg-history">
+            <div class="panel-bg-history-head">
+              <strong>历史图片</strong>
+              <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === 'clear-all'" @click="clearPanelBackgroundHistory">
+                {{ panelBackgroundHistoryBusy === 'clear-all' ? '清空中...' : '清空历史' }}
+              </button>
+            </div>
+            <p v-if="panelBackgroundHistoryLoading" class="muted">历史加载中...</p>
+            <p v-else-if="panelBackgroundHistory.length === 0" class="muted">暂无历史图片</p>
+            <div v-else class="panel-bg-history-list">
+              <div v-for="item in panelBackgroundHistory" :key="item.id" class="panel-bg-history-item">
+                <img class="panel-bg-history-thumb" :src="item.image_url" alt="history background" />
+                <div class="panel-bg-history-meta">
+                  <div class="mono">{{ item.id }}</div>
+                  <div class="muted">{{ formatRelativeTime(item.modified_at) }}</div>
+                </div>
+                <div class="panel-bg-history-actions">
+                  <button class="btn tiny secondary" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="usePanelBackgroundHistory(item)">选用</button>
+                  <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="deletePanelBackgroundHistory(item)">
+                    {{ panelBackgroundHistoryBusy === item.id ? '删除中...' : '删除' }}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div class="control-line">
@@ -1170,18 +1459,7 @@ onBeforeUnmount(() => {
             <button class="btn tiny primary" type="button" :disabled="panelBackground.applying || panelBackground.uploading" @click="applyPanelBackgroundSettings">
               {{ panelBackground.applying ? '应用中...' : '应用' }}
             </button>
-            <button class="btn tiny secondary" type="button" :disabled="panelBackground.applying || panelBackground.uploading" @click="resetPanelBackgroundSettings">重置</button>
-          </div>
-          <div class="color-palette-vue">
-            <button
-              v-for="opt in colorOptions"
-              :key="opt.value"
-              class="color-swatch-vue"
-              :class="{ active: appearance.color === opt.value }"
-              :style="{ backgroundColor: opt.color }"
-              :title="opt.label"
-              @click="applyColor(opt.value)"
-            />
+            <button class="btn tiny secondary" type="button" :disabled="panelBackground.applying || panelBackground.uploading || textColorSaving" @click="resetAppearanceSettings">重置</button>
           </div>
         </section>
       </div>

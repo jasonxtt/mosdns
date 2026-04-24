@@ -2,6 +2,7 @@ const DEFAULT_SETTINGS = {
   mode: 'none',
   url: '',
   imageUrl: '',
+  uploadId: '',
   opacity: 0.9,
   blur: 10
 }
@@ -109,6 +110,7 @@ export function normalizePanelBackgroundSettings(raw = {}) {
   const mode = ['none', 'url', 'upload'].includes(modeRaw) ? modeRaw : DEFAULT_SETTINGS.mode
   const url = String(raw.url || '').trim()
   const imageUrl = String(raw.image_url || raw.imageUrl || '').trim()
+  const uploadId = String(raw.upload_id || raw.uploadId || '').trim()
   const rawTransparency = Number(raw.transparency)
   const opacityFallback = Number.isFinite(rawTransparency) ? transparencyToOpacity(rawTransparency) : DEFAULT_SETTINGS.opacity
   const opacity = clamp(raw.opacity, 0, 1, opacityFallback)
@@ -119,6 +121,7 @@ export function normalizePanelBackgroundSettings(raw = {}) {
     mode,
     url,
     imageUrl,
+    uploadId,
     activeImageUrl,
     opacity,
     transparency: opacityToTransparency(opacity),

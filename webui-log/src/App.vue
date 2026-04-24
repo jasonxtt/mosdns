@@ -10,6 +10,7 @@ import RulesManager from './components/RulesManager.vue'
 import SystemControlManager from './components/SystemControlManager.vue'
 import UpstreamManager from './components/UpstreamManager.vue'
 import { previewPanelBackground } from './utils/panelBackground'
+import { applyTextColorForTheme, loadTextColorSettingsFromStorage, normalizeTextColorSettings, saveTextColorSettingsToStorage } from './utils/appearanceTextColor'
 
 const activeMainTab = ref('overview')
 const activeQuerySubTab = ref('live')
@@ -44,8 +45,10 @@ let autoRefreshTimerId = 0
 
 function initializeAppearance() {
   const root = document.documentElement
-  root.setAttribute('data-theme', localStorage.getItem('mosdns-theme') || 'light')
-  root.setAttribute('data-color-scheme', localStorage.getItem('mosdns-color') || 'classic')
+  const theme = ['light', 'dark'].includes(String(localStorage.getItem('mosdns-theme'))) ? String(localStorage.getItem('mosdns-theme')) : 'light'
+  root.setAttribute('data-theme', theme)
+  const cachedTextColors = loadTextColorSettingsFromStorage()
+  applyTextColorForTheme(theme, cachedTextColors)
 }
 
 function stopAutoRefresh() {
@@ -104,9 +107,22 @@ async function initializePanelBackground() {
   }
 }
 
+async function initializeTextColors() {
+  try {
+    const settings = await getJSON('/api/v1/appearance/text-color')
+    const normalized = normalizeTextColorSettings(settings || {})
+    saveTextColorSettingsToStorage(normalized)
+    const theme = document.documentElement.getAttribute('data-theme') || 'light'
+    applyTextColorForTheme(theme, normalized)
+  } catch {
+    // ignore non-critical appearance errors
+  }
+}
+
 onMounted(() => {
   initializeAppearance()
   initializePanelBackground()
+  initializeTextColors()
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   document.addEventListener('visibilitychange', handleVisibilityChange)
