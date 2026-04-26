@@ -165,79 +165,55 @@ onBeforeUnmount(() => {
 
     <main class="main-body">
       <section v-if="activeMainTab === 'overview'" class="page-shell">
-        <section class="panel page-subnav-panel page-subnav-panel--title-only">
-          <div class="page-subnav-head">
-            <strong class="page-subnav-title">概览</strong>
-          </div>
-        </section>
         <OverviewManager />
       </section>
 
       <section v-else-if="activeMainTab === 'log-query'" class="page-shell">
-        <section class="panel page-subnav-panel">
-          <div class="page-subnav-head">
-            <nav class="legacy-sub-nav page-subnav-nav">
-              <button
-                v-for="tab in querySubTabs"
-                :key="tab.id"
-                class="legacy-sub-btn"
-                :class="{ active: activeQuerySubTab === tab.id }"
-                @click="activeQuerySubTab = tab.id"
-              >
-                {{ tab.label }}
-              </button>
-            </nav>
-          </div>
-        </section>
+        <div class="page-subnav-strip">
+          <nav class="legacy-sub-nav page-subnav-nav">
+            <button
+              v-for="tab in querySubTabs"
+              :key="tab.id"
+              class="legacy-sub-btn"
+              :class="{ active: activeQuerySubTab === tab.id }"
+              @click="activeQuerySubTab = tab.id"
+            >
+              {{ tab.label }}
+            </button>
+          </nav>
+        </div>
         <QueryManager v-if="activeQuerySubTab === 'live'" mode="live" />
         <QueryManager v-else mode="diagnostic" />
       </section>
 
       <section v-else-if="activeMainTab === 'rules'" class="page-shell">
-        <section class="panel page-subnav-panel">
-          <div class="page-subnav-head">
-            <nav class="legacy-sub-nav page-subnav-nav">
-              <button
-                v-for="tab in rulesSubTabs"
-                :key="tab.id"
-                class="legacy-sub-btn"
-                :class="{ active: activeRulesSubTab === tab.id }"
-                @click="activeRulesSubTab = tab.id"
-              >
-                {{ tab.label }}
-              </button>
-            </nav>
-          </div>
-        </section>
+        <div class="page-subnav-strip">
+          <nav class="legacy-sub-nav page-subnav-nav">
+            <button
+              v-for="tab in rulesSubTabs"
+              :key="tab.id"
+              class="legacy-sub-btn"
+              :class="{ active: activeRulesSubTab === tab.id }"
+              @click="activeRulesSubTab = tab.id"
+            >
+              {{ tab.label }}
+            </button>
+          </nav>
+        </div>
         <ListManager v-if="activeRulesSubTab === 'list-mgmt'" />
         <RulesManager v-else-if="activeRulesSubTab === 'diversion'" mode="diversion" />
         <RulesManager v-else mode="adguard" />
       </section>
 
       <section v-else-if="activeMainTab === 'data-management'" class="page-shell">
-        <section class="panel page-subnav-panel page-subnav-panel--title-only">
-          <div class="page-subnav-head">
-            <strong class="page-subnav-title">数据管理</strong>
-          </div>
-        </section>
         <DataManagementManager />
       </section>
 
       <section v-else-if="activeMainTab === 'upstream'" class="page-shell">
-        <section class="panel page-subnav-panel page-subnav-panel--title-only">
-          <div class="page-subnav-head">
-            <strong class="page-subnav-title">上游设置</strong>
-          </div>
-        </section>
         <UpstreamManager />
       </section>
 
       <section v-else class="page-shell">
-        <section class="panel page-subnav-panel page-subnav-panel--title-only">
-          <div class="page-subnav-head">
-            <strong class="page-subnav-title">系统设置</strong>
-          </div>
-        </section>
         <SystemControlManager />
       </section>
     </main>

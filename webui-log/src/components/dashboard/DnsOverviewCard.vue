@@ -6,7 +6,6 @@ import RealtimeTrendChart from './RealtimeTrendChart.vue'
 
 const {
   metrics,
-  isRunning,
   initialized,
   warningMessage,
   lastUpdatedText
@@ -31,20 +30,10 @@ const totalQueriesText = computed(() => formatCount(metrics.totalQueries))
 const averageLatencyText = computed(() => formatLatencyMs(metrics.averageLatency))
 const currentQueriesText = computed(() => formatCount(metrics.currentQueries))
 const currentLatencyText = computed(() => formatLatencyMs(metrics.currentLatency))
-const statusText = computed(() => (isRunning.value ? '运行中' : '已停止'))
-const statusClass = computed(() => (isRunning.value ? 'running' : 'stopped'))
 </script>
 
 <template>
   <section class="dns-overview-shell">
-    <header class="dns-overview-header">
-      <h2>DNS 概述</h2>
-      <p class="dns-overview-status" :class="statusClass">
-        <span class="status-dot"></span>
-        <span>{{ statusText }}</span>
-      </p>
-    </header>
-
     <article class="trend-card">
       <header class="trend-card-header">
         <div class="trend-title">
@@ -119,56 +108,9 @@ const statusClass = computed(() => (isRunning.value ? 'running' : 'stopped'))
 .dns-overview-shell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   width: 100%;
   margin: 0;
-}
-
-.dns-overview-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.dns-overview-header h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  color: var(--ink-0);
-}
-
-.dns-overview-status {
-  margin: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.dns-overview-status .status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  display: inline-block;
-}
-
-.dns-overview-status.running {
-  color: var(--ink-0);
-}
-
-.dns-overview-status.running .status-dot {
-  background: var(--ok);
-  box-shadow: 0 0 0 3px rgba(2, 122, 72, 0.14);
-}
-
-.dns-overview-status.stopped {
-  color: var(--danger);
-}
-
-.dns-overview-status.stopped .status-dot {
-  background: var(--danger);
-  box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.14);
 }
 
 .trend-card {

@@ -86,6 +86,8 @@ const panelBackgroundPicker = ref(null)
 const panelBackground = reactive({
   mode: panelBackgroundDefaults.mode,
   url: '',
+  lightColor: panelBackgroundDefaults.lightColor,
+  darkColor: panelBackgroundDefaults.darkColor,
   imageUrl: '',
   uploadId: '',
   transparency: panelBackgroundDefaults.transparency,
@@ -664,6 +666,7 @@ function applyTheme(theme, save = true) {
   document.documentElement.setAttribute('data-theme', nextTheme)
   applyTextColorForTheme(nextTheme, textColorSettings)
   syncTextColorDraft(nextTheme)
+  void syncPanelBackgroundPreview(false)
   if (save) {
     localStorage.setItem('mosdns-theme', nextTheme)
   }
@@ -796,9 +799,11 @@ async function resetThemeTextColor() {
 }
 
 function applyPanelBackgroundDraft(raw) {
-  const normalized = normalizePanelBackgroundSettings(raw || {})
+  const normalized = normalizePanelBackgroundSettings({ ...(raw || {}), theme_key: activeThemeKey() })
   panelBackground.mode = normalized.mode
   panelBackground.url = normalized.url
+  panelBackground.lightColor = normalized.lightColor
+  panelBackground.darkColor = normalized.darkColor
   panelBackground.imageUrl = normalized.imageUrl
   panelBackground.uploadId = normalized.uploadId
   panelBackground.transparency = normalized.transparency
@@ -810,6 +815,10 @@ function getPanelBackgroundDraftForPreview() {
   return {
     mode: panelBackground.mode,
     url: panelBackground.url,
+    color: activeThemeKey() === 'dark' ? panelBackground.darkColor : panelBackground.lightColor,
+    light_color: panelBackground.lightColor,
+    dark_color: panelBackground.darkColor,
+    theme_key: activeThemeKey(),
     image_url: panelBackground.imageUrl,
     upload_id: panelBackground.uploadId,
     opacity: transparencyToOpacity(panelBackground.transparency),
@@ -833,6 +842,9 @@ function buildPanelBackgroundPayload() {
   return {
     mode: normalized.mode,
     url: normalized.mode === 'url' ? normalized.url : '',
+    color: normalized.mode === 'color' ? normalized.color : '',
+    light_color: normalized.lightColor,
+    dark_color: normalized.darkColor,
     upload_id: normalized.mode === 'upload' ? normalized.uploadId : '',
     opacity: normalized.opacity,
     blur: normalized.blur
@@ -941,7 +953,11 @@ async function applyPanelBackgroundSettings() {
   panelBackground.applying = true
   try {
     if (panelBackground.mode !== 'upload') {
-      panelBackground.mode = panelBackground.url.trim() ? 'url' : 'none'
+      if (panelBackground.url.trim()) {
+        panelBackground.mode = 'url'
+      } else if (panelBackground.mode !== 'color') {
+        panelBackground.mode = 'none'
+      }
     }
     const payload = buildPanelBackgroundPayload()
     if ((payload.mode === 'url' || payload.mode === 'upload') && !(await syncPanelBackgroundPreview(true))) {
@@ -950,7 +966,6 @@ async function applyPanelBackgroundSettings() {
     const saved = await postJSON('/api/v1/appearance/panel-background', payload)
     applyPanelBackgroundDraft(saved)
     await syncPanelBackgroundPreview(false)
-    setSuccess('面板背景已应用')
   } catch (error) {
     setError(`应用面板背景失败: ${error.message}`)
   } finally {
@@ -977,6 +992,8 @@ async function resetAppearanceSettings() {
 
   panelBackground.mode = 'none'
   panelBackground.url = ''
+  panelBackground.lightColor = panelBackgroundDefaults.lightColor
+  panelBackground.darkColor = panelBackgroundDefaults.darkColor
   panelBackground.imageUrl = ''
   panelBackground.uploadId = ''
   panelBackground.transparency = 100
@@ -999,6 +1016,18 @@ async function resetAppearanceSettings() {
 async function onPanelBackgroundUrlEnter() {
   panelBackground.mode = 'url'
   await applyPanelBackgroundSettings()
+}
+
+function onPanelBackgroundColorInput(event) {
+  const next = event?.target?.value || ''
+  if (activeThemeKey() === 'dark') {
+    panelBackground.darkColor = next
+  } else {
+    panelBackground.lightColor = next
+  }
+  panelBackground.mode = 'color'
+  panelBackground.url = ''
+  void syncPanelBackgroundPreview(false)
 }
 
 function onPanelBackgroundSliderInput() {
@@ -1045,9 +1074,6 @@ async function onPanelBackgroundFileChange(event) {
       return
     }
     await Promise.all([applyPanelBackgroundSettings(), loadPanelBackgroundHistory()])
-    if (!errorMessage.value) {
-      setSuccess('图片已上传并应用')
-    }
   } catch (error) {
     setError(`上传背景图片失败: ${error.message}`)
   } finally {
@@ -1221,7 +1247,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel system-panel">
+  <section class="system-panel">
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
@@ -1481,6 +1507,14 @@ onBeforeUnmount(() => {
           <div class="control-line panel-bg-line">
             <strong>面板背景</strong>
             <div class="panel-bg-input-wrap">
+              <input
+                class="panel-bg-color-inline"
+                :value="appearance.theme === 'dark' ? panelBackground.darkColor : panelBackground.lightColor"
+                type="color"
+                :disabled="panelBackground.uploading || panelBackground.applying"
+                title="纯色"
+                @input="onPanelBackgroundColorInput"
+              />
               <input
                 v-model="panelBackground.url"
                 placeholder="输入图片 URL，回车直接应用"

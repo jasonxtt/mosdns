@@ -576,7 +576,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel">
+  <section class="panel upstream-page">
     <div class="upstream-toolbar">
       <div class="upstream-toolbar-left">
         <button class="btn primary entry-action-btn" type="button" @click="beginAdd">添加上游DNS</button>
