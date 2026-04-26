@@ -391,7 +391,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel">
+  <section class="overview-page">
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 

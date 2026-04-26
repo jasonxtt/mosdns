@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## v0.3.10
+
+### Added
+
+- added panel-background solid-color picker support directly in the `面板背景` row:
+  - the picker is now inline (left of `上传`) instead of a separate control block
+  - solid-color background can be applied with the same appearance workflow as image backgrounds
+- added theme-isolated panel solid-color storage:
+  - `明亮` and `黑暗` now keep independent panel solid-color values
+  - backend appearance payload now carries `light_color` and `dark_color` while keeping legacy `color` compatibility
+
+### Changed
+
+- refactored top-level and second-level page chrome to reduce redundant stacked panels:
+  - removed extra top title-wrapper panels for overview/data/upstream/system pages
+  - query/rules subnavigation now uses a clean strip + divider layout
+- refined list/data/system module structure to reduce duplicate background layers and tighten action alignment
+- updated appearance handling:
+  - panel background preview now follows theme switching immediately
+  - removed low-value success toasts for panel-background apply/upload flows
+- strengthened mobile safety styling:
+  - enabled `-webkit-text-size-adjust: 100%`
+  - removed fixed-height pressure points in dual system cards
+  - simplified narrow-screen WebUI-port row layout to prevent overlap on iOS Safari
+- bumped embedded Vue asset query version in `log.html` to force cache refresh for the updated frontend bundle
+
+### Upgrade Notes
+
+- this release does **not** require manual `config_up.zip` updates
+- existing panel background `color` settings remain compatible; on next save they will be normalized into theme-isolated fields
+
 ## v0.3.9
 
 ### Added

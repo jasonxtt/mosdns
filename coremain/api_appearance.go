@@ -31,20 +31,26 @@ var hexColorRegexp = regexp.MustCompile(`^#?([0-9a-fA-F]{6})$`)
 var panelBackgroundUploadIDRegexp = regexp.MustCompile(`^[a-zA-Z0-9_-]{6,64}$`)
 
 type panelBackgroundSettings struct {
-	Mode     string  `json:"mode"`
-	URL      string  `json:"url,omitempty"`
-	UploadID string  `json:"upload_id,omitempty"`
-	Opacity  float64 `json:"opacity"`
-	Blur     int     `json:"blur"`
+	Mode       string  `json:"mode"`
+	URL        string  `json:"url,omitempty"`
+	Color      string  `json:"color,omitempty"` // backward compatible legacy field
+	LightColor string  `json:"light_color,omitempty"`
+	DarkColor  string  `json:"dark_color,omitempty"`
+	UploadID   string  `json:"upload_id,omitempty"`
+	Opacity    float64 `json:"opacity"`
+	Blur       int     `json:"blur"`
 }
 
 type panelBackgroundResponse struct {
-	Mode     string  `json:"mode"`
-	URL      string  `json:"url,omitempty"`
-	UploadID string  `json:"upload_id,omitempty"`
-	ImageURL string  `json:"image_url,omitempty"`
-	Opacity  float64 `json:"opacity"`
-	Blur     int     `json:"blur"`
+	Mode       string  `json:"mode"`
+	URL        string  `json:"url,omitempty"`
+	Color      string  `json:"color,omitempty"` // backward compatible legacy field
+	LightColor string  `json:"light_color,omitempty"`
+	DarkColor  string  `json:"dark_color,omitempty"`
+	UploadID   string  `json:"upload_id,omitempty"`
+	ImageURL   string  `json:"image_url,omitempty"`
+	Opacity    float64 `json:"opacity"`
+	Blur       int     `json:"blur"`
 }
 
 type panelBackgroundHistoryItem struct {
@@ -122,6 +128,10 @@ func handleSetPanelBackground(w http.ResponseWriter, r *http.Request) {
 	settings := normalizePanelBackgroundSettings(payload)
 	if settings.Mode == "url" && strings.TrimSpace(settings.URL) == "" {
 		writeError(w, http.StatusBadRequest, errors.New("url 不能为空"))
+		return
+	}
+	if settings.Mode == "color" && strings.TrimSpace(settings.Color) == "" {
+		writeError(w, http.StatusBadRequest, errors.New("纯色背景不能为空"))
 		return
 	}
 	if settings.Mode == "upload" {
@@ -357,11 +367,14 @@ func handleClearPanelBackgroundHistory(w http.ResponseWriter, r *http.Request) {
 
 func defaultPanelBackgroundSettings() panelBackgroundSettings {
 	return panelBackgroundSettings{
-		Mode:     "none",
-		URL:      "",
-		UploadID: "",
-		Opacity:  0.9,
-		Blur:     10,
+		Mode:       "none",
+		URL:        "",
+		Color:      "",
+		LightColor: "#f8fafc",
+		DarkColor:  "#0f172a",
+		UploadID:   "",
+		Opacity:    0.9,
+		Blur:       10,
 	}
 }
 
@@ -380,10 +393,24 @@ func normalizePanelBackgroundSettings(raw panelBackgroundSettings) panelBackgrou
 		out.Mode = "url"
 	case "upload":
 		out.Mode = "upload"
+	case "color":
+		out.Mode = "color"
 	default:
 		out.Mode = "none"
 	}
 	out.URL = strings.TrimSpace(raw.URL)
+	out.Color = normalizeHexColor(raw.Color, "")
+	out.LightColor = normalizeHexColor(raw.LightColor, "")
+	out.DarkColor = normalizeHexColor(raw.DarkColor, "")
+	if out.LightColor == "" {
+		out.LightColor = normalizeHexColor(out.Color, "#f8fafc")
+	}
+	if out.DarkColor == "" {
+		out.DarkColor = normalizeHexColor(out.Color, "#0f172a")
+	}
+	if out.Mode == "color" && out.Color == "" {
+		out.Color = out.DarkColor
+	}
 	out.UploadID = normalizePanelBackgroundUploadID(raw.UploadID)
 	if raw.Opacity >= 0 && raw.Opacity <= 1 {
 		out.Opacity = raw.Opacity
@@ -404,11 +431,14 @@ func normalizePanelBackgroundSettings(raw panelBackgroundSettings) panelBackgrou
 
 func panelBackgroundToResponse(settings panelBackgroundSettings) panelBackgroundResponse {
 	resp := panelBackgroundResponse{
-		Mode:     settings.Mode,
-		URL:      settings.URL,
-		UploadID: settings.UploadID,
-		Opacity:  settings.Opacity,
-		Blur:     settings.Blur,
+		Mode:       settings.Mode,
+		URL:        settings.URL,
+		Color:      normalizeHexColor(settings.LightColor, settings.Color),
+		LightColor: normalizeHexColor(settings.LightColor, "#f8fafc"),
+		DarkColor:  normalizeHexColor(settings.DarkColor, "#0f172a"),
+		UploadID:   settings.UploadID,
+		Opacity:    settings.Opacity,
+		Blur:       settings.Blur,
 	}
 	switch settings.Mode {
 	case "url":

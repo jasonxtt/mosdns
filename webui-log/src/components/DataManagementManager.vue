@@ -863,17 +863,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel data-panel">
+  <section class="data-panel">
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
-    <section class="panel sub-panel data-module">
-      <header class="panel-header">
+    <section class="panel sub-panel data-module cache-module">
+      <header class="panel-header cache-module-head">
         <div>
           <h3>缓存管理</h3>
         </div>
         <div class="actions">
-          <button class="btn danger" :disabled="cacheClearingAll" @click="clearAllCaches">
+          <button class="btn danger cache-clear-btn" :disabled="cacheClearingAll" @click="clearAllCaches">
             {{ cacheClearingAll ? '清空中...' : '清空所有缓存' }}
           </button>
         </div>

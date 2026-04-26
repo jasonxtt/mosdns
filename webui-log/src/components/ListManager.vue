@@ -192,19 +192,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel">
-    <header class="panel-header">
-      <div>
-        <h2>名单管理</h2>
-        <p class="muted">管理固定名单和专属分流组绑定名单。当前仓库功能范围与现有后端插件保持一致。</p>
-      </div>
-      <div class="actions">
-        <button class="btn secondary save-list-btn" :disabled="saving || loading" @click="saveList">
-          {{ saving ? '保存中...' : '保存列表' }}
-        </button>
-      </div>
-    </header>
-
+  <section class="list-page">
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
@@ -222,11 +210,6 @@ onBeforeUnmount(() => {
       </aside>
 
       <main class="list-main">
-        <header class="list-main-header">
-          <strong>{{ selectedTag ? getProfileName(selectedTag) : '未选择' }}</strong>
-          <span class="muted">{{ statusText }}</span>
-        </header>
-        <p v-if="selectedHintText" class="list-hint">{{ selectedHintText }}</p>
         <textarea
           v-model="content"
           class="list-editor"
@@ -235,6 +218,15 @@ onBeforeUnmount(() => {
           @input="onEditorInput"
           placeholder="每行一个条目"
         />
+        <div class="list-footer-row">
+          <div class="list-footer-meta">
+            <span v-if="selectedHintText" class="list-hint-inline">{{ selectedHintText }}</span>
+            <span class="muted list-status-inline">{{ statusText }}</span>
+          </div>
+          <button class="btn secondary save-list-btn" :disabled="saving || loading" @click="saveList">
+            {{ saving ? '保存中...' : '保存列表' }}
+          </button>
+        </div>
       </main>
     </div>
   </section>
