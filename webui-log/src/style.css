@@ -1881,7 +1881,7 @@ tr.disabled {
 }
 
 .data-inline-row > .data-inline-module {
-  height: 100%;
+  height: auto;
   min-width: 0;
 }
 
@@ -1891,7 +1891,8 @@ tr.disabled {
 }
 
 .requery-module {
-  min-height: 100%;
+  min-height: 0;
+  height: auto;
 }
 
 .system-panel {
@@ -2322,8 +2323,31 @@ tr.disabled {
 #app.custom-background .btn.warning,
 #app.custom-background .btn.danger,
 #app.custom-background .msg.error,
-#app.custom-background .upstream-shell .special-group-name {
+#app.custom-background .msg.success,
+#app.custom-background .result-badge.fail,
+#app.custom-background .special-group-name,
+:root[data-panel-bg-enabled='1'] .btn.warning,
+:root[data-panel-bg-enabled='1'] .btn.danger,
+:root[data-panel-bg-enabled='1'] .msg.error,
+:root[data-panel-bg-enabled='1'] .msg.success,
+:root[data-panel-bg-enabled='1'] .result-badge.fail,
+:root[data-panel-bg-enabled='1'] .special-group-name {
   color: var(--ink-0) !important;
+}
+
+#app.custom-background .requery-status-chip.idle,
+:root[data-panel-bg-enabled='1'] .requery-status-chip.idle {
+  color: var(--ink-0) !important;
+}
+
+#app.custom-background .requery-status-chip.running,
+:root[data-panel-bg-enabled='1'] .requery-status-chip.running {
+  color: #fbbf24 !important;
+}
+
+#app.custom-background .requery-status-chip.failed,
+:root[data-panel-bg-enabled='1'] .requery-status-chip.failed {
+  color: #fca5a5 !important;
 }
 
 #app.custom-background .legacy-main-nav.compact .legacy-main-btn,
@@ -3062,6 +3086,25 @@ tr.disabled {
 
   .scheduler-field {
     max-width: 100%;
+  }
+
+  .requery-status-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .requery-status-head .actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .scheduler-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
   }
 
   .alias-manual-row {
