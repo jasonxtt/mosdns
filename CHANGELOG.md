@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## v0.3.11
+
+### Changed
+
+- fixed dark-theme readability regressions in custom-background/panel-background mode:
+  - restored visible text color for `专属分流组` name chips
+  - fixed contrast for `msg.success` / `result-badge.fail` / requery status chips under glass background
+- fixed mobile overlap risk in data-management `刷新分流缓存` module:
+  - removed rigid fill-height constraints in inline modules
+  - made requery status/actions/scheduler rows wrap safely on narrow screens
+- bumped embedded Vue asset query version in `log.html` to force cache refresh for updated CSS
+
+### Upgrade Notes
+
+- this release does **not** require manual `config_up.zip` updates
+- if client-side cache is stale, refresh once to load `v20260427-v052` frontend assets
+
 ## v0.3.10
 
 ### Added
