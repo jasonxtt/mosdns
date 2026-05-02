@@ -142,6 +142,51 @@ const responseFlagText = computed(() => {
   return items.length ? items.join(', ') : '-'
 })
 
+const detailActionFields = computed(() => {
+  const log = selectedLog.value
+  if (!log) {
+    return {}
+  }
+  return {
+    client_ip: {
+      key: 'client_ip',
+      label: '客户端',
+      value: getClientLabel(log.client_ip),
+      copyValue: normalizeIP(log.client_ip),
+      filterValue: normalizeIP(log.client_ip),
+      exact: true,
+      mono: false
+    },
+    query_name: {
+      key: 'query_name',
+      label: '域名',
+      value: log.query_name || '-',
+      copyValue: String(log.query_name || '').trim(),
+      filterValue: String(log.query_name || '').trim(),
+      exact: false,
+      mono: false
+    },
+    domain_set: {
+      key: 'domain_set',
+      label: '分流规则',
+      value: log.domain_set || '-',
+      copyValue: String(log.domain_set || '').trim(),
+      filterValue: String(log.domain_set || '').trim(),
+      exact: true,
+      mono: false
+    },
+    trace_id: {
+      key: 'trace_id',
+      label: 'Trace ID',
+      value: log.trace_id || '-',
+      copyValue: String(log.trace_id || '').trim(),
+      filterValue: String(log.trace_id || '').trim(),
+      exact: true,
+      mono: true
+    }
+  }
+})
+
 function normalizeIP(ip) {
   return String(ip || '').replace(/^::ffff:/, '').trim()
 }
@@ -289,6 +334,48 @@ function openLogDetail(item) {
 
 function closeLogDetail() {
   detailModalOpen.value = false
+}
+
+async function copyText(value) {
+  const text = String(value || '').trim()
+  if (!text) {
+    errorMessage.value = '没有可复制的内容'
+    return
+  }
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textArea = document.createElement('textarea')
+      textArea.value = text
+      textArea.setAttribute('readonly', 'readonly')
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px'
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+    }
+    successMessage.value = '已复制到剪贴板'
+    errorMessage.value = ''
+  } catch (error) {
+    errorMessage.value = `复制失败: ${error.message}`
+  }
+}
+
+function applyQuickFilter(value, exact = false) {
+  const text = String(value || '').trim()
+  if (!text) {
+    errorMessage.value = '没有可筛选的内容'
+    return
+  }
+  searchInput.value = exact ? `"${text}"` : text
+  closeLogDetail()
+  refreshLogs()
+}
+
+function getDetailActionField(key) {
+  return detailActionFields.value?.[key] || null
 }
 
 function parseMatchResult(value) {
@@ -864,14 +951,46 @@ onBeforeUnmount(() => {
         </header>
         <div class="detail-grid">
           <div><strong>时间:</strong> {{ formatTime(selectedLog.query_time) }}</div>
-          <div><strong>客户端:</strong> {{ getClientLabel(selectedLog.client_ip) }}</div>
-          <div><strong>域名:</strong> {{ selectedLog.query_name || '-' }}</div>
+          <div>
+            <strong>客户端:</strong>
+            <span :class="{ mono: getDetailActionField('client_ip')?.mono }">{{ getDetailActionField('client_ip')?.value || '-' }}</span>
+            <span class="detail-inline-actions">
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('client_ip')?.copyValue" @click="copyText(getDetailActionField('client_ip')?.copyValue)">复制</button>
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('client_ip')?.filterValue" @click="applyQuickFilter(getDetailActionField('client_ip')?.filterValue, getDetailActionField('client_ip')?.exact)">筛选</button>
+            </span>
+          </div>
+          <div>
+            <strong>域名:</strong>
+            <span :class="{ mono: getDetailActionField('query_name')?.mono }">{{ getDetailActionField('query_name')?.value || '-' }}</span>
+            <span class="detail-inline-actions">
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('query_name')?.copyValue" @click="copyText(getDetailActionField('query_name')?.copyValue)">复制</button>
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('query_name')?.filterValue" @click="applyQuickFilter(getDetailActionField('query_name')?.filterValue, getDetailActionField('query_name')?.exact)">筛选</button>
+            </span>
+          </div>
           <div><strong>类型:</strong> {{ selectedLog.query_type || '-' }}</div>
           <div><strong>类别:</strong> {{ selectedLog.query_class || '-' }}</div>
-          <div><strong>Trace ID:</strong> <span class="mono">{{ selectedLog.trace_id || '-' }}</span></div>
+          <div>
+            <strong>Trace ID:</strong>
+            <span class="mono">{{ getDetailActionField('trace_id')?.value || '-' }}</span>
+            <span class="detail-inline-actions">
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('trace_id')?.copyValue" @click="copyText(getDetailActionField('trace_id')?.copyValue)">复制</button>
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('trace_id')?.filterValue" @click="applyQuickFilter(getDetailActionField('trace_id')?.filterValue, getDetailActionField('trace_id')?.exact)">筛选</button>
+            </span>
+          </div>
           <div><strong>生效标签:</strong> {{ selectedLog.effective_tag || selectedLog.domain_set || '-' }}</div>
           <div><strong>命中标签:</strong> {{ selectedLog.domain_set || '-' }}</div>
-          <div><strong>匹配来源:</strong> {{ selectedLog.matched_rule_source || '-' }}</div>
+          <div>
+            <strong>匹配来源:</strong>
+            <span>{{ selectedLog.matched_rule_source || '-' }}</span>
+          </div>
+          <div>
+            <strong>分流规则:</strong>
+            <span>{{ getDetailActionField('domain_set')?.value || '-' }}</span>
+            <span class="detail-inline-actions">
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('domain_set')?.copyValue" @click="copyText(getDetailActionField('domain_set')?.copyValue)">复制</button>
+              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('domain_set')?.filterValue" @click="applyQuickFilter(getDetailActionField('domain_set')?.filterValue, getDetailActionField('domain_set')?.exact)">筛选</button>
+            </span>
+          </div>
           <div><strong>专属分流组:</strong> {{ getMatchedGroupDisplay(selectedLog.matched_group) }}</div>
           <div><strong>最终序列:</strong> {{ selectedLog.final_sequence || '-' }}</div>
           <div><strong>最终上游组:</strong> {{ selectedLog.final_upstream || '-' }}</div>

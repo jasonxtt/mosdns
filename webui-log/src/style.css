@@ -458,6 +458,19 @@ body::after {
   gap: 8px 12px;
 }
 
+.detail-grid > div {
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.detail-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .diagnostic-toolbar {
   display: flex;
   gap: 8px;
