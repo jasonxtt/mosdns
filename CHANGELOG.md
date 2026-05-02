@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## v0.3.12
+
+### Added
+
+- added legacy-style quick actions in the Vue query-log detail modal:
+  - `客户端` / `域名` / `分流规则` / `Trace ID` now provide inline `复制` and `筛选` buttons
+  - quick filter reuses the live-query search box so operators can jump straight from a detail view to narrowed logs
+
+### Changed
+
+- refined audit effective-tag display so the UI emphasizes the final routing result more accurately:
+  - first-hit direct candidates that finally enter `sequence_fakeip_addlist` now show `生效标签=直连候选转代理`
+  - learned-memory reversals are labeled explicitly as `记忆直连转代理` / `记忆代理转直连`
+  - stable learned-proxy results continue to show `记忆代理`
+
+### Upgrade Notes
+
+- this release does **not** require manual `config_up.zip` updates
+- no YAML config migration is required for existing deployments
+
 ## v0.3.11
 
 ### Changed

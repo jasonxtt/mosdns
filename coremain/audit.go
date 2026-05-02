@@ -368,7 +368,7 @@ func (c *AuditCollector) processBatch(batch []*auditContext) {
 		if log.DomainSet == "" {
 			log.DomainSet = "unmatched_rule"
 		}
-		log.EffectiveTag = internString(computeEffectiveTag(log.DomainSet, log.FinalUpstream, log.MatchedGroup))
+		log.EffectiveTag = internString(computeEffectiveTag(log.DomainSet, log.FinalUpstream, log.MatchedGroup, log.FinalSequence))
 
 		if resp := qCtx.R(); resp != nil {
 			log.ResponseCode = internString(dns.RcodeToString[resp.Rcode])
@@ -537,7 +537,16 @@ func classifyRouteKind(finalUpstream string) string {
 	}
 }
 
-func computeEffectiveTag(domainSet, finalUpstream, matchedGroup string) string {
+func joinEffectiveTag(noVTags []string, core string) string {
+	out := make([]string, 0, len(noVTags)+1)
+	out = append(out, noVTags...)
+	if core != "" {
+		out = append(out, core)
+	}
+	return joinDomainTags(out)
+}
+
+func computeEffectiveTag(domainSet, finalUpstream, matchedGroup, finalSequence string) string {
 	domainSet = strings.TrimSpace(domainSet)
 	if domainSet == "" || domainSet == "unmatched_rule" {
 		return "unmatched_rule"
@@ -587,40 +596,54 @@ func computeEffectiveTag(domainSet, finalUpstream, matchedGroup string) string {
 	routeKind := classifyRouteKind(strings.TrimSpace(finalUpstream))
 
 	if hasMemoryDirect || hasMemoryProxy {
-		out := make([]string, 0, len(noVTags)+1)
-		out = append(out, noVTags...)
+		memoryLabel := ""
 		switch {
 		case hasMemoryDirect && hasMemoryProxy:
 			if routeKind == "proxy" {
-				out = append(out, "记忆代理")
+				memoryLabel = "记忆代理"
 			} else {
-				out = append(out, "记忆直连")
+				memoryLabel = "记忆直连"
 			}
 		case hasMemoryDirect:
-			out = append(out, "记忆直连")
+			if routeKind == "proxy" {
+				memoryLabel = "记忆直连转代理"
+			} else {
+				memoryLabel = "记忆直连"
+			}
 		case hasMemoryProxy:
-			out = append(out, "记忆代理")
+			if routeKind == "direct" {
+				memoryLabel = "记忆代理转直连"
+			} else {
+				memoryLabel = "记忆代理"
+			}
 		}
-		if joined := joinDomainTags(out); joined != "" {
+		if joined := joinEffectiveTag(noVTags, memoryLabel); joined != "" {
 			return joined
 		}
 	}
 
 	directCandidates := []string{"白名单", "订阅直连补充", "订阅直连", "CN fakeip filter", "!CN fakeip filter"}
 	proxyCandidates := []string{"灰名单", "订阅代理补充", "订阅代理"}
+	directPromotionCandidates := []string{"白名单", "订阅直连补充", "订阅直连", "CN fakeip filter"}
+
+	if routeKind == "proxy" && strings.TrimSpace(finalSequence) == "sequence_fakeip_addlist" {
+		if core := firstMatchTag(tags, directPromotionCandidates); core != "" {
+			if joined := joinEffectiveTag(noVTags, "直连候选转代理"); joined != "" {
+				return joined
+			}
+		}
+	}
 
 	if routeKind == "direct" {
 		if core := firstMatchTag(tags, directCandidates); core != "" {
-			out := append(append([]string{}, noVTags...), core)
-			if joined := joinDomainTags(out); joined != "" {
+			if joined := joinEffectiveTag(noVTags, core); joined != "" {
 				return joined
 			}
 		}
 	}
 	if routeKind == "proxy" {
 		if core := firstMatchTag(tags, proxyCandidates); core != "" {
-			out := append(append([]string{}, noVTags...), core)
-			if joined := joinDomainTags(out); joined != "" {
+			if joined := joinEffectiveTag(noVTags, core); joined != "" {
 				return joined
 			}
 		}
@@ -632,8 +655,7 @@ func computeEffectiveTag(domainSet, finalUpstream, matchedGroup string) string {
 		"CN fakeip filter": {}, "!CN fakeip filter": {},
 	}
 	if core := firstMatchTagInOrder(tags, allowed); core != "" {
-		out := append(append([]string{}, noVTags...), core)
-		if joined := joinDomainTags(out); joined != "" {
+		if joined := joinEffectiveTag(noVTags, core); joined != "" {
 			return joined
 		}
 	}
