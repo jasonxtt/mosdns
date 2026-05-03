@@ -3,12 +3,23 @@ import type {
   AuditStatusResponse,
   DashboardAuditLog,
   DashboardAuditLogsResponse,
-  DashboardStatsResponse
+  DashboardStatsResponse,
+  DashboardWindowStatsResponse
 } from '../types/dashboard'
 
 export interface DashboardStats {
   totalQueries: number
   averageLatency: number
+}
+
+export interface DashboardWindowStat {
+  key: string
+  label: string
+  windowSeconds: number
+  requestCount: number
+  averageLatency: number
+  complete: boolean
+  coverageStart: string
 }
 
 async function requestJSON<T>(url: string): Promise<T> {
@@ -46,6 +57,23 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
 export async function fetchAuditStatus(): Promise<boolean> {
   const payload = await requestJSON<AuditStatusResponse>('/api/v1/audit/status')
   return Boolean(payload?.capturing)
+}
+
+export async function fetchDashboardWindowStats(): Promise<{ generatedAt: string, items: DashboardWindowStat[] }> {
+  const payload = await requestJSON<DashboardWindowStatsResponse>('/api/v2/audit/stats/windows')
+  const items = Array.isArray(payload?.items) ? payload.items : []
+  return {
+    generatedAt: String(payload?.generated_at || ''),
+    items: items.map((item) => ({
+      key: String(item?.key || ''),
+      label: String(item?.label || ''),
+      windowSeconds: Number(item?.window_seconds || 0),
+      requestCount: Number(item?.request_count || 0),
+      averageLatency: Number(item?.average_duration_ms || 0),
+      complete: Boolean(item?.complete),
+      coverageStart: String(item?.coverage_start || '')
+    }))
+  }
 }
 
 export async function fetchAuditCapacity(): Promise<number> {

@@ -864,6 +864,73 @@ func (c *AuditCollector) CalculateV2Stats() V2StatsResponse {
 	}
 }
 
+func (c *AuditCollector) CalculateV2WindowStats() V2WindowStatsResponse {
+	items := make([]V2WindowStatItem, 0, len(defaultAuditStatWindows))
+	for _, def := range defaultAuditStatWindows {
+		items = append(items, V2WindowStatItem{
+			Key:           def.key,
+			Label:         def.label,
+			WindowSeconds: int64(def.duration / time.Second),
+		})
+	}
+
+	snapshot := c.getLogsSnapshot()
+	if len(snapshot) == 0 {
+		return V2WindowStatsResponse{
+			GeneratedAt: time.Now().Format(time.RFC3339),
+			Items:       items,
+		}
+	}
+
+	now := time.Now()
+	cutoffs := make([]time.Time, 0, len(defaultAuditStatWindows))
+	oldestRelevantCutoff := now
+	for _, def := range defaultAuditStatWindows {
+		cutoff := now.Add(-def.duration)
+		cutoffs = append(cutoffs, cutoff)
+		if cutoff.Before(oldestRelevantCutoff) {
+			oldestRelevantCutoff = cutoff
+		}
+	}
+
+	oldestTime := snapshot[len(snapshot)-1].QueryTime
+	if !oldestTime.IsZero() {
+		coverageStart := oldestTime.Format(time.RFC3339)
+		for i := range items {
+			items[i].CoverageStart = coverageStart
+			items[i].Complete = !oldestTime.After(cutoffs[i])
+		}
+	}
+
+	durationSums := make([]float64, len(items))
+	for _, log := range snapshot {
+		queryTime := log.QueryTime
+		if queryTime.IsZero() {
+			continue
+		}
+		if queryTime.Before(oldestRelevantCutoff) {
+			break
+		}
+		for i, cutoff := range cutoffs {
+			if !queryTime.Before(cutoff) {
+				items[i].RequestCount++
+				durationSums[i] += log.DurationMs
+			}
+		}
+	}
+
+	for i := range items {
+		if items[i].RequestCount > 0 {
+			items[i].AverageDurationMs = durationSums[i] / float64(items[i].RequestCount)
+		}
+	}
+
+	return V2WindowStatsResponse{
+		GeneratedAt: now.Format(time.RFC3339),
+		Items:       items,
+	}
+}
+
 type rankHeap []V2RankItem
 
 func (h rankHeap) Len() int           { return len(h) }

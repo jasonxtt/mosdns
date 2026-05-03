@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/go-chi/chi/v5"
@@ -16,6 +17,33 @@ import (
 type V2StatsResponse struct {
 	TotalQueries      uint64  `json:"total_queries"` // MODIFIED: Changed from int to uint64
 	AverageDurationMs float64 `json:"average_duration_ms"`
+}
+
+type V2WindowStatItem struct {
+	Key               string  `json:"key"`
+	Label             string  `json:"label"`
+	WindowSeconds     int64   `json:"window_seconds"`
+	RequestCount      uint64  `json:"request_count"`
+	AverageDurationMs float64 `json:"average_duration_ms"`
+	Complete          bool    `json:"complete"`
+	CoverageStart     string  `json:"coverage_start,omitempty"`
+}
+
+type V2WindowStatsResponse struct {
+	GeneratedAt string             `json:"generated_at"`
+	Items       []V2WindowStatItem `json:"items"`
+}
+
+var defaultAuditStatWindows = []struct {
+	key      string
+	label    string
+	duration time.Duration
+}{
+	{key: "1h", label: "1小时内", duration: time.Hour},
+	{key: "6h", label: "最近6小时", duration: 6 * time.Hour},
+	{key: "24h", label: "24小时内", duration: 24 * time.Hour},
+	{key: "3d", label: "最近3天", duration: 3 * 24 * time.Hour},
+	{key: "7d", label: "最近7天", duration: 7 * 24 * time.Hour},
 }
 
 // V2RankItem for ranking APIs
@@ -43,6 +71,7 @@ func RegisterAuditAPIV2(router *chi.Mux) {
 	router.Route("/api/v2/audit", func(r chi.Router) {
 		// 为所有高频/重数据接口套上 WithAsyncGC
 		r.Get("/stats", WithAsyncGC(handleV2GetStats))                   // 概览页调用
+		r.Get("/stats/windows", WithAsyncGC(handleV2GetWindowStats))     // 概览页时间窗统计
 		r.Get("/rank/domain", WithAsyncGC(handleV2GetDomainRank))        // 概览页调用
 		r.Get("/rank/client", WithAsyncGC(handleV2GetClientRank))        // 概览页调用
 		r.Get("/rank/domain_set", WithAsyncGC(handleV2GetDomainSetRank)) // 概览页调用
@@ -61,6 +90,14 @@ func handleV2GetStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		mlog.L().Error("failed to encode v2 stats", zap.Error(err))
+	}
+}
+
+func handleV2GetWindowStats(w http.ResponseWriter, r *http.Request) {
+	stats := GlobalAuditCollector.CalculateV2WindowStats()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		mlog.L().Error("failed to encode v2 window stats", zap.Error(err))
 	}
 }
 

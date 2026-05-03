@@ -358,20 +358,20 @@ async function clearAuditLogs() {
 async function submitCapacity() {
   const capacity = Number(audit.newCapacity || 0)
   if (!Number.isFinite(capacity) || capacity <= 0 || capacity > 400000) {
-    setError('请输入 1 到 400000 之间的有效容量')
+    setError('请输入 1 到 400000 之间的有效热日志上限')
     return
   }
-  if (!(await openConfirm(`将容量设置为 ${capacity.toLocaleString()}，并清空当前所有日志。`, { tone: 'danger' }))) {
+  if (!(await openConfirm(`将详细日志热数据上限设置为 ${capacity.toLocaleString()}，并清空当前所有日志。`, { tone: 'danger' }))) {
     return
   }
   clearMessage()
   try {
     await postJSON('/api/v1/audit/capacity', { capacity })
     audit.newCapacity = ''
-    setSuccess(`容量已设置为 ${capacity.toLocaleString()}`)
+    setSuccess(`详细日志热数据上限已设置为 ${capacity.toLocaleString()}`)
     await loadAuditStatusAndCapacity()
   } catch (error) {
-    setError(`设置容量失败: ${error.message}`)
+    setError(`设置详细日志热数据上限失败: ${error.message}`)
   }
 }
 
@@ -1455,16 +1455,16 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="panel control-module control-module--mini">
-          <h3>日志容量</h3>
+          <h3>详细日志热数据上限</h3>
           <div class="control-line">
-            <strong>当前容量</strong>
+            <strong>当前上限</strong>
             <span>{{ audit.capacity === null ? '读取中...' : Number(audit.capacity).toLocaleString() }}</span>
           </div>
           <form class="capacity-form" @submit.prevent="submitCapacity">
-            <input v-model="audit.newCapacity" type="number" min="1" max="400000" placeholder="输入新容量" />
+            <input v-model="audit.newCapacity" type="number" min="1" max="400000" placeholder="输入热日志上限" />
             <button class="btn tiny primary" type="submit">设置</button>
           </form>
-          <p class="muted">设置新容量将清空日志。</p>
+          <p class="muted">仅影响近期详细日志热数据保留条数；1小时到7天统计按时间窗单独汇总，设置新上限会清空当前详细日志。</p>
         </section>
 
         <section class="panel control-module control-module--mini">
