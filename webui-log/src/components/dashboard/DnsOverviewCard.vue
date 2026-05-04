@@ -8,8 +8,7 @@ import RealtimeTrendChart from './RealtimeTrendChart.vue'
 const {
   metrics,
   initialized,
-  warningMessage,
-  lastUpdatedText
+  warningMessage
 } = useRealtimeMetrics({
   pollIntervalMs: 3000,
   windowSize: 40,
@@ -326,7 +325,6 @@ onBeforeUnmount(() => {
 
       <footer class="trend-foot">
         <span v-if="!initialized" class="muted-text">正在加载实时指标...</span>
-        <span v-else class="muted-text">最近更新：{{ lastUpdatedText }}</span>
         <span v-if="warningMessage" class="warn-text">{{ warningMessage }}</span>
       </footer>
     </article>
@@ -556,6 +554,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  padding-left: 22px;
 }
 
 .series-toggle-btn {
@@ -607,7 +606,7 @@ onBeforeUnmount(() => {
 .trend-foot {
   margin-top: 4px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   align-items: center;
   min-height: 16px;
@@ -808,6 +807,10 @@ onBeforeUnmount(() => {
   .kpi-side {
     justify-self: end;
   }
+
+  .series-toggle-row {
+    padding-left: 18px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -844,6 +847,10 @@ onBeforeUnmount(() => {
   .trend-popover-panel {
     width: min(326px, calc(100vw - 20px));
     padding: 6px;
+  }
+
+  .series-toggle-row {
+    padding-left: 12px;
   }
 
   .trend-popover-grid {

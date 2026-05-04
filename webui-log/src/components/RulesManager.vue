@@ -781,8 +781,12 @@ onBeforeUnmount(() => {
 
     <nav v-if="showInnerTabs" class="tab-bar inner">
       <button class="tab-btn" :class="{ active: activeTab === 'special' }" @click="activeTab = 'special'">专属分流组</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'adguard' }" @click="activeTab = 'adguard'">AdGuard</button>
-      <button class="tab-btn" :class="{ active: activeTab === 'diversion' }" @click="activeTab = 'diversion'">在线分流</button>
+      <button class="tab-btn" :class="{ active: activeTab === 'adguard' }" @click="activeTab = 'adguard'">
+        AdGuard<span v-if="adguardRules.length > 0" class="mini-badge">{{ adguardRules.length }}</span>
+      </button>
+      <button class="tab-btn" :class="{ active: activeTab === 'diversion' }" @click="activeTab = 'diversion'">
+        在线分流<span v-if="diversionRules.length > 0" class="mini-badge">{{ diversionRules.length }}</span>
+      </button>
     </nav>
 
     <section v-if="shouldShowTab('special')" class="sub-panel">

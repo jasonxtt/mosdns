@@ -318,6 +318,23 @@ function sortIndicator(key) {
   return sortState.order === 'asc' ? '▲' : '▼'
 }
 
+function getAvgLatencyStyle(row) {
+  if (!row?.data?.enabled) {
+    return null
+  }
+  const value = Number(row?.stats?.avgLatencyNumber || 0)
+  if (!Number.isFinite(value)) {
+    return null
+  }
+  if (value > 100) {
+    return { color: 'var(--danger)' }
+  }
+  if (value > 50) {
+    return { color: 'var(--warn)' }
+  }
+  return { color: 'var(--ok)' }
+}
+
 function toggleHideDisabled() {
   hideDisabled.value = !hideDisabled.value
   localStorage.setItem(HIDE_DISABLED_KEY, hideDisabled.value ? '1' : '0')
@@ -647,7 +664,7 @@ onBeforeUnmount(() => {
             <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
             <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
             <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
-            <td class="text-center">{{ row.stats.avgLatency }}</td>
+            <td class="text-center" :style="getAvgLatencyStyle(row)">{{ row.stats.avgLatency }}</td>
             <td class="text-center">{{ row.stats.query }}</td>
             <td class="text-center">{{ row.stats.winner }}</td>
             <td class="text-center">{{ row.stats.winRate }}</td>

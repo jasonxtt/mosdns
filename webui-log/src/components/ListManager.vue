@@ -205,7 +205,7 @@ onBeforeUnmount(() => {
           :class="{ active: selectedTag === profile.tag }"
           @click="loadList(profile.tag)"
         >
-          {{ profile.name }}
+          {{ profile.name }}<span v-if="selectedTag === profile.tag && dirty" class="unsaved-dot"></span>
         </button>
       </aside>
 

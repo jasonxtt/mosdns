@@ -21,6 +21,7 @@ package dual_selector
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -77,7 +78,7 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 
 	qName := key(q.Question[0].Name)
 	if qtype == s.prefer {
-		err := next.ExecNext(ctx, qCtx)
+		err := execNextOnCopy(ctx, qCtx, next)
 		if err != nil {
 			return err
 		}
@@ -113,7 +114,7 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 		qCtx := qCtxPreferred
 		ctx, cancel := context.WithDeadline(context.Background(), ddl)
 		defer cancel()
-		err := next.ExecNext(ctx, qCtx)
+		err := execNextOnCopy(ctx, qCtx, next)
 		if err != nil {
 			s.L().Warn("reference query routine err", qCtx.InfoField(), zap.Error(err))
 			close(shouldPass)
@@ -135,7 +136,7 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 		qCtx := qCtxOrg
 		ctx, cancel := context.WithDeadline(context.Background(), ddl)
 		defer cancel()
-		doneChan <- next.ExecNext(ctx, qCtx)
+		doneChan <- execNextOnCopy(ctx, qCtx, next)
 	}()
 
 	select {
@@ -165,6 +166,18 @@ func (s *Selector) Exec(ctx context.Context, qCtx *query_context.Context, next s
 			return err
 		}
 	}
+}
+
+func normalizeExecErr(err error, qCtx *query_context.Context) error {
+	if err != nil && errors.Is(err, sequence.ErrExit) && qCtx.R() != nil {
+		return nil
+	}
+	return err
+}
+
+func execNextOnCopy(ctx context.Context, qCtx *query_context.Context, next sequence.ChainWalker) error {
+	w := next
+	return normalizeExecErr(w.ExecNext(ctx, qCtx), qCtx)
 }
 
 func (s *Selector) Close() error {

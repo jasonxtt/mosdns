@@ -797,7 +797,10 @@ onBeforeUnmount(() => {
             >
               <td>{{ formatRelativeTime(item.query_time) }}</td>
               <td>
-                <div><strong>{{ item.query_name }}</strong></div>
+                <div>
+                  <span class="status-dot" :class="!item.response_code || item.response_code === 'NOERROR' ? 'ok' : 'fail'"></span>
+                  <strong>{{ item.query_name }}</strong>
+                </div>
                 <div class="muted">{{ responseSummary(item) }}</div>
               </td>
               <td>{{ item.query_type || '-' }}</td>

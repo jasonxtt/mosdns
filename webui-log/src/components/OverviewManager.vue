@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON } from '../api/http'
 import DnsOverviewCard from './dashboard/DnsOverviewCard.vue'
 
@@ -34,6 +34,15 @@ const topDomainDetailOpen = ref(false)
 const selectedTopDomain = ref('')
 const topDomainDetailLoading = ref(false)
 const topDomainDetailLogs = ref([])
+const overviewGridRef = ref(null)
+const visibleOverviewRows = ref(7)
+
+const OVERVIEW_MIN_ROWS = 5
+const OVERVIEW_MAX_ROWS = 15
+const OVERVIEW_CARD_CHROME = 44
+const OVERVIEW_TABLE_HEAD = 42
+const OVERVIEW_TABLE_ROW = 42
+const OVERVIEW_VIEWPORT_BOTTOM_GAP = 28
 
 const DONUT_COLORS = ['#6d9dff', '#f778ba', '#2dd4bf', '#fb923c', '#a78bfa', '#fde047', '#ff8c8c', '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef', '#f43f5e', '#64748b']
 const DONUT_RADIUS = 48
@@ -73,6 +82,36 @@ const domainSetSegments = computed(() => {
       return segment
     })
 })
+const overviewLayoutVars = computed(() => {
+  const rows = visibleOverviewRows.value
+  const listHeight = OVERVIEW_TABLE_HEAD + rows * OVERVIEW_TABLE_ROW
+  const cardHeight = OVERVIEW_CARD_CHROME + listHeight
+  return {
+    '--overview-visible-rows': String(rows),
+    '--overview-list-max-height': `${listHeight}px`,
+    '--overview-card-min-height': `${cardHeight}px`
+  }
+})
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function updateOverviewRows() {
+  const grid = overviewGridRef.value
+  if (!grid || typeof window === 'undefined') {
+    return
+  }
+  if (window.innerWidth <= 1100) {
+    visibleOverviewRows.value = OVERVIEW_MIN_ROWS
+    return
+  }
+
+  const gridRect = grid.getBoundingClientRect()
+  const availableHeight = window.innerHeight - gridRect.top - OVERVIEW_VIEWPORT_BOTTOM_GAP
+  const computedRows = Math.floor((availableHeight - OVERVIEW_CARD_CHROME - OVERVIEW_TABLE_HEAD) / OVERVIEW_TABLE_ROW)
+  visibleOverviewRows.value = clamp(computedRows, OVERVIEW_MIN_ROWS, OVERVIEW_MAX_ROWS)
+}
 
 function clearMessages() {
   errorMessage.value = ''
@@ -372,6 +411,9 @@ async function reloadOverview(showMessage = false) {
     errorMessage.value = `加载概览失败: ${error.message}`
   } finally {
     loading.value = false
+    nextTick(() => {
+      updateOverviewRows()
+    })
   }
 }
 
@@ -382,22 +424,27 @@ function handleGlobalRefresh() {
 onMounted(() => {
   loadHistory()
   reloadOverview(false)
+  nextTick(() => {
+    updateOverviewRows()
+  })
   window.addEventListener('mosdns-log-refresh', handleGlobalRefresh)
+  window.addEventListener('resize', updateOverviewRows)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('mosdns-log-refresh', handleGlobalRefresh)
+  window.removeEventListener('resize', updateOverviewRows)
 })
 </script>
 
 <template>
-  <section class="overview-page">
+  <section class="overview-page" :style="overviewLayoutVars">
     <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
     <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
 
     <DnsOverviewCard />
 
-    <div class="overview-grid">
+    <div ref="overviewGridRef" class="overview-grid">
       <section class="panel sub-panel overview-metric-module">
         <h3>Top 域名</h3>
         <div class="table-wrap overview-table-fit top-domains-fit module-scroll-list">
