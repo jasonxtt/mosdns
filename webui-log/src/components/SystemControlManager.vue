@@ -126,6 +126,7 @@ const switchProfiles = [
   { tag: 'switch15', name: '极限加速', desc: '启用极限缓存与加速路径', tip: '按需开启。', valueForOn: 'A' },
   { tag: 'switch2', name: '指定 Client fakeip', desc: '仅指定客户端可科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
   { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
+  { tag: 'switch8', name: 'IPv4优先', desc: '存在 A 记录时抑制 AAAA 请求', tip: '适合希望优先走 IPv4，但仍保留纯 IPv6 域名可解析的场景。', valueForOn: 'A' },
   { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽 AAAA 请求', tip: '无 IPV6 场景建议开启。', valueForOn: 'A' }
 ]
 
@@ -429,15 +430,28 @@ async function toggleSecondarySwitch(profile, checked) {
     return
   }
   clearMessage()
-  const next = checked ? profile.valueForOn : (profile.valueForOn === 'A' ? 'B' : 'A')
+  const next = checked ? profile.valueForOn : getSwitchOffValue(profile)
   try {
-    await setSwitchValue(profile.tag, next, `“${profile.name}” 已${checked ? '启用' : '禁用'}`)
+    let autoDisabledProfile = null
+    if (checked) {
+      const conflictProfile = getMutuallyExclusiveProfile(profile.tag)
+      if (conflictProfile && isSwitchChecked(conflictProfile)) {
+        await setSwitchValue(conflictProfile.tag, getSwitchOffValue(conflictProfile))
+        autoDisabledProfile = conflictProfile
+      }
+    }
+    await setSwitchValue(profile.tag, next)
     if (profile.tag === 'switch9') {
       await Promise.allSettled([
         requestResponse('/plugins/cache_all/flush'),
         requestResponse('/plugins/cache_all_noleak/flush')
       ])
     }
+    if (autoDisabledProfile) {
+      setSuccess(`已自动关闭“${autoDisabledProfile.name}”，因为它与“${profile.name}”互斥`)
+      return
+    }
+    setSuccess(`“${profile.name}” 已${checked ? '启用' : '禁用'}`)
   } catch (error) {
     setError(`切换“${profile.name}”失败: ${error.message}`)
     await loadFeatureSwitches()
@@ -449,6 +463,23 @@ function isSwitchChecked(profile) {
     return false
   }
   return switchStates[profile.tag] === profile.valueForOn
+}
+
+function getSwitchOffValue(profile) {
+  if (!profile?.valueForOn) {
+    return 'B'
+  }
+  return profile.valueForOn === 'A' ? 'B' : 'A'
+}
+
+function getMutuallyExclusiveProfile(tag) {
+  if (tag === 'switch6') {
+    return switchProfiles.find((profile) => profile.tag === 'switch8') || null
+  }
+  if (tag === 'switch8') {
+    return switchProfiles.find((profile) => profile.tag === 'switch6') || null
+  }
+  return null
 }
 
 async function loadOverrides() {
