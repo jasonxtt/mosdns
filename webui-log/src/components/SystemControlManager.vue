@@ -12,6 +12,15 @@ import {
   normalizeUserHexColor,
   saveTextColorSettingsToStorage
 } from '../utils/appearanceTextColor'
+import {
+  applyButtonColorForTheme,
+  getDefaultButtonColorSettings,
+  getEffectiveButtonColor,
+  loadButtonColorSettingsFromStorage,
+  normalizeButtonColorSettings,
+  normalizeUserHexButtonColor,
+  saveButtonColorSettingsToStorage
+} from '../utils/appearanceButtonColor'
 
 const loading = ref(false)
 const errorMessage = ref('')
@@ -78,6 +87,10 @@ const defaultTextColorSettings = getDefaultTextColorSettings()
 const textColorSettings = reactive(getDefaultTextColorSettings())
 const textColorDraft = ref(defaultTextColorSettings.light.color)
 const textColorSaving = ref(false)
+const defaultButtonColorSettings = getDefaultButtonColorSettings()
+const buttonColorSettings = reactive(getDefaultButtonColorSettings())
+const buttonColorDraft = ref(defaultButtonColorSettings.light.color)
+const buttonColorSaving = ref(false)
 const eyeDropperSupported = ref(false)
 
 const panelBackgroundDefaults = getDefaultPanelBackgroundSettings()
@@ -104,6 +117,8 @@ const panelBackgroundHistoryBusy = ref('')
 let restartProbeTimerId = 0
 let textColorSaveTimerId = 0
 let textColorSaveQueued = false
+let buttonColorSaveTimerId = 0
+let buttonColorSaveQueued = false
 
 const themeOptions = [
   { value: 'light', label: '明亮' },
@@ -696,7 +711,9 @@ function applyTheme(theme, save = true) {
   appearance.theme = nextTheme
   document.documentElement.setAttribute('data-theme', nextTheme)
   applyTextColorForTheme(nextTheme, textColorSettings)
+  applyButtonColorForTheme(nextTheme, buttonColorSettings)
   syncTextColorDraft(nextTheme)
+  syncButtonColorDraft(nextTheme)
   void syncPanelBackgroundPreview(false)
   if (save) {
     localStorage.setItem('mosdns-theme', nextTheme)
@@ -720,6 +737,19 @@ function syncTextColorDraft(theme = activeThemeKey()) {
   textColorDraft.value = effective
 }
 
+function overwriteButtonColorSettings(nextSettings) {
+  const normalized = normalizeButtonColorSettings(nextSettings || {})
+  buttonColorSettings.light.mode = normalized.light.mode
+  buttonColorSettings.light.color = normalized.light.color
+  buttonColorSettings.dark.mode = normalized.dark.mode
+  buttonColorSettings.dark.color = normalized.dark.color
+}
+
+function syncButtonColorDraft(theme = activeThemeKey()) {
+  const effective = getEffectiveButtonColor(theme, buttonColorSettings)
+  buttonColorDraft.value = effective
+}
+
 function setCustomTextColorForActiveTheme(rawColor) {
   const theme = activeThemeKey()
   const fallback = defaultTextColorSettings[theme].color
@@ -733,9 +763,13 @@ function setCustomTextColorForActiveTheme(rawColor) {
 function initializeAppearance() {
   applyTheme(localStorage.getItem('mosdns-theme') || 'light', false)
   const cached = loadTextColorSettingsFromStorage()
+  const cachedButtonColors = loadButtonColorSettingsFromStorage()
   overwriteTextColorSettings(cached)
+  overwriteButtonColorSettings(cachedButtonColors)
   applyTextColorForTheme(activeThemeKey(), textColorSettings)
+  applyButtonColorForTheme(activeThemeKey(), buttonColorSettings)
   syncTextColorDraft(activeThemeKey())
+  syncButtonColorDraft(activeThemeKey())
 }
 
 function textColorPayload() {
@@ -753,6 +787,23 @@ async function loadTextColorSettings() {
   }
   applyTextColorForTheme(activeThemeKey(), textColorSettings)
   syncTextColorDraft(activeThemeKey())
+}
+
+function buttonColorPayload() {
+  return normalizeButtonColorSettings(buttonColorSettings)
+}
+
+async function loadButtonColorSettings() {
+  try {
+    const settings = await getJSON('/api/v1/appearance/button-color')
+    const normalized = normalizeButtonColorSettings(settings || {})
+    overwriteButtonColorSettings(normalized)
+    saveButtonColorSettingsToStorage(normalized)
+  } catch {
+    // fallback to cached settings without interrupting UI
+  }
+  applyButtonColorForTheme(activeThemeKey(), buttonColorSettings)
+  syncButtonColorDraft(activeThemeKey())
 }
 
 async function saveTextColorSettings(showMessage = true) {
@@ -782,6 +833,33 @@ async function saveTextColorSettings(showMessage = true) {
   }
 }
 
+async function saveButtonColorSettings(showMessage = true) {
+  if (buttonColorSaving.value) {
+    buttonColorSaveQueued = true
+    return
+  }
+  buttonColorSaving.value = true
+  try {
+    const saved = await postJSON('/api/v1/appearance/button-color', buttonColorPayload())
+    const normalized = normalizeButtonColorSettings(saved || {})
+    overwriteButtonColorSettings(normalized)
+    saveButtonColorSettingsToStorage(normalized)
+    applyButtonColorForTheme(activeThemeKey(), buttonColorSettings)
+    syncButtonColorDraft(activeThemeKey())
+    if (showMessage) {
+      setSuccess('按钮颜色已保存')
+    }
+  } catch (error) {
+    setError(`保存按钮颜色失败: ${error.message}`)
+  } finally {
+    buttonColorSaving.value = false
+    if (buttonColorSaveQueued) {
+      buttonColorSaveQueued = false
+      void saveButtonColorSettings(false)
+    }
+  }
+}
+
 function queueTextColorSave() {
   if (textColorSaveTimerId) {
     window.clearTimeout(textColorSaveTimerId)
@@ -790,6 +868,17 @@ function queueTextColorSave() {
   textColorSaveTimerId = window.setTimeout(() => {
     textColorSaveTimerId = 0
     void saveTextColorSettings(false)
+  }, 180)
+}
+
+function queueButtonColorSave() {
+  if (buttonColorSaveTimerId) {
+    window.clearTimeout(buttonColorSaveTimerId)
+    buttonColorSaveTimerId = 0
+  }
+  buttonColorSaveTimerId = window.setTimeout(() => {
+    buttonColorSaveTimerId = 0
+    void saveButtonColorSettings(false)
   }, 180)
 }
 
@@ -820,6 +909,43 @@ async function pickTextColorFromScreen() {
   }
 }
 
+function setCustomButtonColorForActiveTheme(rawColor) {
+  const theme = activeThemeKey()
+  const fallback = defaultButtonColorSettings[theme].color
+  const normalized = normalizeUserHexButtonColor(rawColor, fallback)
+  buttonColorDraft.value = normalized
+  buttonColorSettings[theme].mode = 'custom'
+  buttonColorSettings[theme].color = normalized
+  applyButtonColorForTheme(theme, buttonColorSettings)
+}
+
+function onButtonColorPickerInput(event) {
+  setCustomButtonColorForActiveTheme(event?.target?.value || buttonColorDraft.value)
+  queueButtonColorSave()
+}
+
+async function onButtonColorPickerChange(event) {
+  setCustomButtonColorForActiveTheme(event?.target?.value || buttonColorDraft.value)
+  await saveButtonColorSettings(false)
+}
+
+async function pickButtonColorFromScreen() {
+  if (!eyeDropperSupported.value) {
+    return
+  }
+  try {
+    const dropper = new window.EyeDropper()
+    const result = await dropper.open()
+    if (!result?.sRGBHex) {
+      return
+    }
+    setCustomButtonColorForActiveTheme(result.sRGBHex)
+    await saveButtonColorSettings(false)
+  } catch {
+    // user cancelled or unsupported runtime state
+  }
+}
+
 async function resetThemeTextColor() {
   const theme = activeThemeKey()
   textColorSettings[theme].mode = 'default'
@@ -827,6 +953,15 @@ async function resetThemeTextColor() {
   textColorDraft.value = defaultTextColorSettings[theme].color
   applyTextColorForTheme(theme, textColorSettings)
   await saveTextColorSettings()
+}
+
+async function resetThemeButtonColor() {
+  const theme = activeThemeKey()
+  buttonColorSettings[theme].mode = 'default'
+  buttonColorSettings[theme].color = defaultButtonColorSettings[theme].color
+  buttonColorDraft.value = defaultButtonColorSettings[theme].color
+  applyButtonColorForTheme(theme, buttonColorSettings)
+  await saveButtonColorSettings()
 }
 
 function applyPanelBackgroundDraft(raw) {
@@ -1006,7 +1141,7 @@ async function applyPanelBackgroundSettings() {
 
 async function resetAppearanceSettings() {
   const confirmed = await openConfirm(
-    '所有主题相关设置将重置为初始值：主题改为明亮、背景清空、透明度 100%、毛玻璃 0px、字体恢复默认。确认继续吗？',
+    '所有主题相关设置将重置为初始值：主题改为明亮、背景清空、透明度 100%、毛玻璃 0px、字体和按钮颜色恢复默认。确认继续吗？',
     { tone: 'danger' }
   )
   if (!confirmed) {
@@ -1017,9 +1152,13 @@ async function resetAppearanceSettings() {
 
   overwriteTextColorSettings(defaultTextColorSettings)
   saveTextColorSettingsToStorage(defaultTextColorSettings)
+  overwriteButtonColorSettings(defaultButtonColorSettings)
+  saveButtonColorSettingsToStorage(defaultButtonColorSettings)
   applyTheme('light')
   applyTextColorForTheme('light', textColorSettings)
+  applyButtonColorForTheme('light', buttonColorSettings)
   syncTextColorDraft('light')
+  syncButtonColorDraft('light')
 
   panelBackground.mode = 'none'
   panelBackground.url = ''
@@ -1036,6 +1175,7 @@ async function resetAppearanceSettings() {
   try {
     await Promise.all([
       postJSON('/api/v1/appearance/text-color', normalizeTextColorSettings(defaultTextColorSettings)),
+      postJSON('/api/v1/appearance/button-color', normalizeButtonColorSettings(defaultButtonColorSettings)),
       postJSON('/api/v1/appearance/panel-background', { mode: 'none', url: '', opacity: 1, blur: 0 })
     ])
     setSuccess('主题与外观已重置为初始值')
@@ -1258,6 +1398,7 @@ onMounted(() => {
   eyeDropperSupported.value = typeof window !== 'undefined' && 'EyeDropper' in window
   initializeAppearance()
   loadTextColorSettings()
+  loadButtonColorSettings()
   loadAutoRefreshSettings()
   loadConfigManagerSettings()
   emitAutoRefreshSettings(false)
@@ -1273,6 +1414,10 @@ onBeforeUnmount(() => {
   if (textColorSaveTimerId) {
     window.clearTimeout(textColorSaveTimerId)
     textColorSaveTimerId = 0
+  }
+  if (buttonColorSaveTimerId) {
+    window.clearTimeout(buttonColorSaveTimerId)
+    buttonColorSaveTimerId = 0
   }
 })
 </script>
@@ -1516,100 +1661,152 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="panel control-module control-module--mini">
+        <section class="panel control-module control-module--mini appearance-compact-module">
           <h3>主题与外观</h3>
-          <div class="control-line"><strong>界面风格</strong><select v-model="appearance.theme" @change="applyTheme(appearance.theme)"><option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option></select></div>
-          <div class="control-line panel-bg-line">
-            <strong>字体颜色</strong>
-            <div class="panel-text-color-wrap">
-              <input
-                :value="textColorDraft"
-                type="color"
-                :disabled="textColorSaving"
-                @input="onTextColorPickerInput"
-                @change="onTextColorPickerChange"
-              />
-              <button v-if="eyeDropperSupported" class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="pickTextColorFromScreen">
-                取色
-              </button>
-              <button class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="resetThemeTextColor">默认</button>
+          <div class="appearance-compact-stack">
+            <div class="appearance-compact-row appearance-compact-row-theme">
+              <strong class="appearance-compact-label">界面风格</strong>
+              <div class="appearance-compact-control appearance-compact-control-end">
+                <select v-model="appearance.theme" @change="applyTheme(appearance.theme)">
+                  <option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+              </div>
             </div>
-          </div>
-          <div class="control-line panel-bg-line">
-            <strong>面板背景</strong>
-            <div class="panel-bg-input-wrap">
-              <input
-                class="panel-bg-color-inline"
-                :value="appearance.theme === 'dark' ? panelBackground.darkColor : panelBackground.lightColor"
-                type="color"
-                :disabled="panelBackground.uploading || panelBackground.applying"
-                title="纯色"
-                @input="onPanelBackgroundColorInput"
-              />
-              <input
-                v-model="panelBackground.url"
-                placeholder="输入图片 URL，回车直接应用"
-                @keydown.enter.prevent="onPanelBackgroundUrlEnter"
-              />
-              <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying" @click="openPanelBackgroundPicker">
-                {{ panelBackground.uploading ? '上传中...' : '上传' }}
-              </button>
-              <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying || panelBackgroundHistoryLoading" @click="togglePanelBackgroundHistory">
-                {{ panelBackgroundHistoryOpen ? '收起历史' : '历史' }}
-              </button>
-              <input
-                ref="panelBackgroundPicker"
-                class="panel-bg-file-input"
-                type="file"
-                accept="image/*"
-                @change="onPanelBackgroundFileChange"
-              />
-            </div>
-          </div>
-          <div v-if="panelBackgroundHistoryOpen" class="panel-bg-history">
-            <div class="panel-bg-history-head">
-              <strong>历史图片</strong>
-              <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === 'clear-all'" @click="clearPanelBackgroundHistory">
-                {{ panelBackgroundHistoryBusy === 'clear-all' ? '清空中...' : '清空历史' }}
-              </button>
-            </div>
-            <p v-if="panelBackgroundHistoryLoading" class="muted">历史加载中...</p>
-            <p v-else-if="panelBackgroundHistory.length === 0" class="muted">暂无历史图片</p>
-            <div v-else class="panel-bg-history-list">
-              <div v-for="item in panelBackgroundHistory" :key="item.id" class="panel-bg-history-item">
-                <img class="panel-bg-history-thumb" :src="item.image_url" alt="history background" />
-                <div class="panel-bg-history-meta">
-                  <div class="mono">{{ item.id }}</div>
-                  <div class="muted">{{ formatRelativeTime(item.modified_at) }}</div>
+
+            <div class="appearance-color-pair-row">
+              <div class="appearance-color-pair">
+                <span class="appearance-color-mini-label">字体</span>
+                <div class="panel-text-color-wrap appearance-compact-tools">
+                  <input
+                    :value="textColorDraft"
+                    type="color"
+                    :disabled="textColorSaving"
+                    @input="onTextColorPickerInput"
+                    @change="onTextColorPickerChange"
+                  />
+                  <div class="appearance-compact-inline-actions">
+                    <button v-if="eyeDropperSupported" class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="pickTextColorFromScreen">
+                      取色
+                    </button>
+                    <button class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="resetThemeTextColor">默认</button>
+                  </div>
                 </div>
-                <div class="panel-bg-history-actions">
-                  <button class="btn tiny secondary" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="usePanelBackgroundHistory(item)">选用</button>
-                  <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="deletePanelBackgroundHistory(item)">
-                    {{ panelBackgroundHistoryBusy === item.id ? '删除中...' : '删除' }}
-                  </button>
+              </div>
+
+              <div class="appearance-color-pair">
+                <span class="appearance-color-mini-label">按钮</span>
+                <div class="panel-text-color-wrap appearance-compact-tools">
+                  <input
+                    :value="buttonColorDraft"
+                    type="color"
+                    :disabled="buttonColorSaving"
+                    @input="onButtonColorPickerInput"
+                    @change="onButtonColorPickerChange"
+                  />
+                  <div class="appearance-compact-inline-actions">
+                    <button v-if="eyeDropperSupported" class="btn tiny secondary" type="button" :disabled="buttonColorSaving" @click="pickButtonColorFromScreen">
+                      取色
+                    </button>
+                    <button class="btn tiny secondary" type="button" :disabled="buttonColorSaving" @click="resetThemeButtonColor">默认</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="appearance-compact-row appearance-compact-row-top appearance-compact-row-bg">
+              <strong class="appearance-compact-label appearance-compact-label-stack">
+                <span>面板</span>
+                <span>背景</span>
+              </strong>
+              <div class="appearance-compact-control">
+                <div class="appearance-bg-rows">
+                  <div class="appearance-compact-bg-layout">
+                    <input
+                      class="panel-bg-color-inline appearance-compact-bg-swatch"
+                      :value="appearance.theme === 'dark' ? panelBackground.darkColor : panelBackground.lightColor"
+                      type="color"
+                      :disabled="panelBackground.uploading || panelBackground.applying"
+                      title="纯色"
+                      @input="onPanelBackgroundColorInput"
+                    />
+                    <input
+                      v-model="panelBackground.url"
+                      class="appearance-compact-bg-url"
+                      placeholder="输入图片URL链接"
+                      @keydown.enter.prevent="onPanelBackgroundUrlEnter"
+                    />
+                    <div class="appearance-compact-bg-actions-row">
+                      <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying" @click="openPanelBackgroundPicker">
+                        {{ panelBackground.uploading ? '上传中' : '上传' }}
+                      </button>
+                      <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying || panelBackgroundHistoryLoading" @click="togglePanelBackgroundHistory">
+                        {{ panelBackgroundHistoryOpen ? '收起' : '记录' }}
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    ref="panelBackgroundPicker"
+                    class="panel-bg-file-input"
+                    type="file"
+                    accept="image/*"
+                    @change="onPanelBackgroundFileChange"
+                  />
+                </div>
+
+                <div v-if="panelBackgroundHistoryOpen" class="panel-bg-history appearance-compact-history">
+                  <div class="panel-bg-history-head">
+                    <strong>历史图片</strong>
+                    <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === 'clear-all'" @click="clearPanelBackgroundHistory">
+                      {{ panelBackgroundHistoryBusy === 'clear-all' ? '清空中...' : '清空历史' }}
+                    </button>
+                  </div>
+                  <p v-if="panelBackgroundHistoryLoading" class="muted">历史加载中...</p>
+                  <p v-else-if="panelBackgroundHistory.length === 0" class="muted">暂无历史图片</p>
+                  <div v-else class="panel-bg-history-list">
+                    <div v-for="item in panelBackgroundHistory" :key="item.id" class="panel-bg-history-item">
+                      <img class="panel-bg-history-thumb" :src="item.image_url" alt="history background" />
+                      <div class="panel-bg-history-meta">
+                        <div class="mono">{{ item.id }}</div>
+                        <div class="muted">{{ formatRelativeTime(item.modified_at) }}</div>
+                      </div>
+                      <div class="panel-bg-history-actions">
+                        <button class="btn tiny secondary" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="usePanelBackgroundHistory(item)">选用</button>
+                        <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="deletePanelBackgroundHistory(item)">
+                          {{ panelBackgroundHistoryBusy === item.id ? '删除中...' : '删除' }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="appearance-compact-row">
+              <strong class="appearance-compact-label">透明度</strong>
+              <div class="appearance-compact-control">
+                <div class="panel-bg-range-wrap appearance-compact-range">
+                  <input v-model.number="panelBackground.transparency" type="range" min="0" max="100" step="1" @input="onPanelBackgroundSliderInput" />
+                  <span>{{ Number(panelBackground.transparency || 0) }}%</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="appearance-compact-row">
+              <strong class="appearance-compact-label">毛玻璃</strong>
+              <div class="appearance-compact-control">
+                <div class="panel-bg-range-wrap appearance-compact-range">
+                  <input v-model.number="panelBackground.blur" type="range" min="0" max="40" step="1" @input="onPanelBackgroundSliderInput" />
+                  <span>{{ Number(panelBackground.blur || 0) }}px</span>
                 </div>
               </div>
             </div>
           </div>
-          <div class="control-line">
-            <strong>透明度</strong>
-            <div class="panel-bg-range-wrap">
-              <input v-model.number="panelBackground.transparency" type="range" min="0" max="100" step="1" @input="onPanelBackgroundSliderInput" />
-              <span>{{ Number(panelBackground.transparency || 0) }}%</span>
-            </div>
-          </div>
-          <div class="control-line">
-            <strong>毛玻璃强度</strong>
-            <div class="panel-bg-range-wrap">
-              <input v-model.number="panelBackground.blur" type="range" min="0" max="40" step="1" @input="onPanelBackgroundSliderInput" />
-              <span>{{ Number(panelBackground.blur || 0) }}px</span>
-            </div>
-          </div>
-          <div class="actions">
+
+          <div class="actions appearance-compact-actions">
             <button class="btn tiny primary" type="button" :disabled="panelBackground.applying || panelBackground.uploading" @click="applyPanelBackgroundSettings">
               {{ panelBackground.applying ? '应用中...' : '应用' }}
             </button>
-            <button class="btn tiny secondary" type="button" :disabled="panelBackground.applying || panelBackground.uploading || textColorSaving" @click="resetAppearanceSettings">重置</button>
+            <button class="btn tiny secondary" type="button" :disabled="panelBackground.applying || panelBackground.uploading || textColorSaving || buttonColorSaving" @click="resetAppearanceSettings">重置</button>
           </div>
         </section>
       </div>

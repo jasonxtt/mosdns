@@ -114,26 +114,31 @@ function updatePopoverPosition() {
   const panelRect = panel.getBoundingClientRect()
   const viewportWidth = window.innerWidth
   const viewportHeight = window.innerHeight
+  const mobilePopover = viewportWidth <= 760
   const viewportPadding = 12
   const gap = 5
-  const canPlaceRight = averageLatencyRect.right + gap + panelRect.width <= viewportWidth - viewportPadding
-  const canPlaceLeft = averageLatencyRect.left - gap - panelRect.width >= viewportPadding
+  const panelWidth = panelRect.width || panel.offsetWidth || 0
+  const canPlaceRight = averageLatencyRect.right + gap + panelWidth <= viewportWidth - viewportPadding
+  const canPlaceLeft = averageLatencyRect.left - gap - panelWidth >= viewportPadding
   const placement = canPlaceRight || !canPlaceLeft ? 'right' : 'left'
   const rawLeft = placement === 'right'
     ? averageLatencyRect.right + gap
-    : averageLatencyRect.left - gap - panelRect.width
+    : averageLatencyRect.left - gap - panelWidth
 
   const minLeft = cardRect ? Math.max(viewportPadding, cardRect.left + 10) : viewportPadding
   const maxLeft = cardRect
-    ? Math.min(viewportWidth - viewportPadding - panelRect.width, cardRect.right - panelRect.width - 10)
-    : viewportWidth - viewportPadding - panelRect.width
+    ? Math.min(viewportWidth - viewportPadding - panelWidth, cardRect.right - panelWidth - 10)
+    : viewportWidth - viewportPadding - panelWidth
   const left = clamp(rawLeft, minLeft, Math.max(minLeft, maxLeft))
 
-  const targetHeight = Math.max(62, totalLabelRect.bottom - titleRect.top)
+  const desktopHeight = Math.max(62, totalLabelRect.bottom - titleRect.top)
+  const mobileHeight = Math.max(136, panel.scrollHeight || panelRect.height || desktopHeight)
+  const maxHeight = Math.max(62, viewportHeight - viewportPadding * 2)
+  const targetHeight = clamp(mobilePopover ? mobileHeight : desktopHeight, 62, maxHeight)
   const top = clamp(titleRect.top, viewportPadding, Math.max(viewportPadding, viewportHeight - viewportPadding - targetHeight))
   const arrowAnchor = averageLatencyRect.top + averageLatencyRect.height * 0.5
   const arrowTop = clamp(arrowAnchor - top, 14, targetHeight - 14)
-  const scale = clamp(targetHeight / 60, 1, 1.18)
+  const scale = mobilePopover ? 1 : clamp(targetHeight / 60, 1, 1.18)
 
   popoverPosition.top = Math.round(top)
   popoverPosition.left = Math.round(left)
@@ -626,6 +631,7 @@ onBeforeUnmount(() => {
   position: fixed;
   z-index: 1200;
   width: min(402px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
   border-radius: 11px;
   border: 1px solid var(--trend-popover-border);
   background: var(--trend-popover-bg);
@@ -633,7 +639,9 @@ onBeforeUnmount(() => {
   box-shadow: var(--trend-popover-shadow);
   backdrop-filter: var(--trend-popover-backdrop-filter, blur(13px) saturate(145%));
   -webkit-backdrop-filter: var(--trend-popover-backdrop-filter, blur(13px) saturate(145%));
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: calc(4px * var(--trend-popover-scale, 1)) calc(5px * var(--trend-popover-scale, 1));
 }
 
@@ -845,7 +853,7 @@ onBeforeUnmount(() => {
   }
 
   .trend-popover-panel {
-    width: min(326px, calc(100vw - 20px));
+    width: min(304px, calc(100vw - 18px));
     padding: 6px;
   }
 
@@ -855,24 +863,25 @@ onBeforeUnmount(() => {
 
   .trend-popover-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    height: auto;
   }
 
   .trend-window-card {
     padding: 7px 9px 8px;
-    border-right: none;
-    border-bottom: 1px solid var(--trend-popover-divider);
+    border: 1px solid var(--trend-popover-divider);
+    border-radius: 8px;
+    background: var(--trend-popover-window-bg);
+  }
+}
+
+@media (max-width: 420px) {
+  .trend-popover-panel {
+    width: min(276px, calc(100vw - 16px));
   }
 
-  .trend-window-card:nth-child(odd) {
-    border-right: 1px solid var(--trend-popover-divider);
-  }
-
-  .trend-window-card:nth-last-child(-n + 2) {
-    border-bottom: none;
-  }
-
-  .trend-window-card:last-child:nth-child(odd) {
-    grid-column: 1 / -1;
+  .trend-popover-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

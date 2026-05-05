@@ -11,6 +11,7 @@ import SystemControlManager from './components/SystemControlManager.vue'
 import UpstreamManager from './components/UpstreamManager.vue'
 import { previewPanelBackground } from './utils/panelBackground'
 import { applyTextColorForTheme, loadTextColorSettingsFromStorage, normalizeTextColorSettings, saveTextColorSettingsToStorage } from './utils/appearanceTextColor'
+import { applyButtonColorForTheme, loadButtonColorSettingsFromStorage, normalizeButtonColorSettings, saveButtonColorSettingsToStorage } from './utils/appearanceButtonColor'
 
 const activeMainTab = ref('overview')
 const activeQuerySubTab = ref('live')
@@ -48,7 +49,9 @@ function initializeAppearance() {
   const theme = ['light', 'dark'].includes(String(localStorage.getItem('mosdns-theme'))) ? String(localStorage.getItem('mosdns-theme')) : 'light'
   root.setAttribute('data-theme', theme)
   const cachedTextColors = loadTextColorSettingsFromStorage()
+  const cachedButtonColors = loadButtonColorSettingsFromStorage()
   applyTextColorForTheme(theme, cachedTextColors)
+  applyButtonColorForTheme(theme, cachedButtonColors)
 }
 
 function stopAutoRefresh() {
@@ -119,10 +122,23 @@ async function initializeTextColors() {
   }
 }
 
+async function initializeButtonColors() {
+  try {
+    const settings = await getJSON('/api/v1/appearance/button-color')
+    const normalized = normalizeButtonColorSettings(settings || {})
+    saveButtonColorSettingsToStorage(normalized)
+    const theme = document.documentElement.getAttribute('data-theme') || 'light'
+    applyButtonColorForTheme(theme, normalized)
+  } catch {
+    // ignore non-critical appearance errors
+  }
+}
+
 onMounted(() => {
   initializeAppearance()
   initializePanelBackground()
   initializeTextColors()
+  initializeButtonColors()
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   document.addEventListener('visibilitychange', handleVisibilityChange)

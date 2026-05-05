@@ -20,11 +20,12 @@ import (
 )
 
 const (
-	appearanceSettingsFilename = "appearance_settings.json"
-	appearanceTextSettingsFile = "appearance_text_settings.json"
-	panelBackgroundImageRel    = "webinfo/panel_background.bin"
-	panelBackgroundHistoryRel  = "webinfo/panel_background_history"
-	panelBackgroundMaxUpload   = 20 * 1024 * 1024
+	appearanceSettingsFilename   = "appearance_settings.json"
+	appearanceTextSettingsFile   = "appearance_text_settings.json"
+	appearanceButtonSettingsFile = "appearance_button_settings.json"
+	panelBackgroundImageRel      = "webinfo/panel_background.bin"
+	panelBackgroundHistoryRel    = "webinfo/panel_background_history"
+	panelBackgroundMaxUpload     = 20 * 1024 * 1024
 )
 
 var hexColorRegexp = regexp.MustCompile(`^#?([0-9a-fA-F]{6})$`)
@@ -70,6 +71,11 @@ type textColorSettings struct {
 	Dark  textColorSetting `json:"dark"`
 }
 
+type buttonColorSettings struct {
+	Light textColorSetting `json:"light"`
+	Dark  textColorSetting `json:"dark"`
+}
+
 func RegisterAppearanceAPI(router *chi.Mux) {
 	router.Route("/api/v1/appearance", func(r chi.Router) {
 		r.Get("/panel-background", handleGetPanelBackground)
@@ -82,6 +88,8 @@ func RegisterAppearanceAPI(router *chi.Mux) {
 		r.Delete("/panel-background/history/{id}", handleDeletePanelBackgroundHistory)
 		r.Get("/text-color", handleGetTextColor)
 		r.Post("/text-color", handleSetTextColor)
+		r.Get("/button-color", handleGetButtonColor)
+		r.Post("/button-color", handleSetButtonColor)
 	})
 }
 
@@ -104,6 +112,30 @@ func handleSetTextColor(w http.ResponseWriter, r *http.Request) {
 	settings := normalizeTextColorSettings(payload)
 	if err := saveTextColorSettings(settings); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("save text color settings failed: %w", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func handleGetButtonColor(w http.ResponseWriter, r *http.Request) {
+	settings, err := loadButtonColorSettings()
+	if err != nil {
+		mlog.L().Warn("load button color settings failed, fallback to defaults", zap.Error(err))
+		settings = defaultButtonColorSettings()
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func handleSetButtonColor(w http.ResponseWriter, r *http.Request) {
+	var payload buttonColorSettings
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		return
+	}
+
+	settings := normalizeButtonColorSettings(payload)
+	if err := saveButtonColorSettings(settings); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("save button color settings failed: %w", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
@@ -464,6 +496,13 @@ func defaultTextColorSettings() textColorSettings {
 	}
 }
 
+func defaultButtonColorSettings() buttonColorSettings {
+	return buttonColorSettings{
+		Light: textColorSetting{Mode: "default", Color: "#40d889"},
+		Dark:  textColorSetting{Mode: "default", Color: "#40d889"},
+	}
+}
+
 func normalizeHexColor(raw string, fallback string) string {
 	v := strings.TrimSpace(raw)
 	if v == "" {
@@ -502,6 +541,35 @@ func normalizeTextColorSettings(raw textColorSettings) textColorSettings {
 	return textColorSettings{
 		Light: normalizeTextColorSetting(raw.Light, "light"),
 		Dark:  normalizeTextColorSetting(raw.Dark, "dark"),
+	}
+}
+
+func normalizeButtonColorSetting(raw textColorSetting, theme string) textColorSetting {
+	defaults := defaultButtonColorSettings()
+	base := defaults.Light
+	if theme == "dark" {
+		base = defaults.Dark
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(raw.Mode))
+	switch mode {
+	case "custom":
+		return textColorSetting{
+			Mode:  "custom",
+			Color: normalizeHexColor(raw.Color, base.Color),
+		}
+	default:
+		return textColorSetting{
+			Mode:  "default",
+			Color: base.Color,
+		}
+	}
+}
+
+func normalizeButtonColorSettings(raw buttonColorSettings) buttonColorSettings {
+	return buttonColorSettings{
+		Light: normalizeButtonColorSetting(raw.Light, "light"),
+		Dark:  normalizeButtonColorSetting(raw.Dark, "dark"),
 	}
 }
 
@@ -609,6 +677,14 @@ func textColorSettingsPath() string {
 		base = "."
 	}
 	return filepath.Join(base, appearanceTextSettingsFile)
+}
+
+func buttonColorSettingsPath() string {
+	base := MainConfigBaseDir
+	if strings.TrimSpace(base) == "" {
+		base = "."
+	}
+	return filepath.Join(base, appearanceButtonSettingsFile)
 }
 
 func resolveUploadedPanelBackgroundURL() string {
@@ -721,6 +797,38 @@ func saveTextColorSettings(settings textColorSettings) error {
 			return err
 		}
 		_ = normalizeTextColorSettings(parsed)
+		return nil
+	}, nil, nil)
+}
+
+func loadButtonColorSettings() (buttonColorSettings, error) {
+	path := buttonColorSettingsPath()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return defaultButtonColorSettings(), nil
+		}
+		return defaultButtonColorSettings(), err
+	}
+	var parsed buttonColorSettings
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return defaultButtonColorSettings(), err
+	}
+	return normalizeButtonColorSettings(parsed), nil
+}
+
+func saveButtonColorSettings(settings buttonColorSettings) error {
+	normalized := normalizeButtonColorSettings(settings)
+	data, err := json.MarshalIndent(normalized, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeManagedFile(buttonColorSettingsPath(), data, func(raw []byte) error {
+		var parsed buttonColorSettings
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return err
+		}
+		_ = normalizeButtonColorSettings(parsed)
 		return nil
 	}, nil, nil)
 }
