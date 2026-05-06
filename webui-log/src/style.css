@@ -1117,6 +1117,27 @@ th.sortable:hover {
   text-overflow: clip;
 }
 
+.top-domains-fit th:nth-child(1),
+.top-domains-fit td:nth-child(1),
+.top-clients-fit th:nth-child(1),
+.top-clients-fit td:nth-child(1),
+.slowest-fit th:nth-child(1),
+.slowest-fit td:nth-child(1) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.top-clients-fit td:nth-child(1) > div,
+.top-clients-fit td:nth-child(1) > small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .domain-set-fit th:nth-child(1),
 .domain-set-fit td:nth-child(1) {
   width: 54%;
@@ -1197,10 +1218,15 @@ th.sortable:hover {
   align-items: center;
   gap: 0;
   min-width: 0;
+  max-width: 100%;
 }
 
 .domain-set-name {
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .switch-table {
@@ -3369,6 +3395,13 @@ tr.disabled {
 
   .overview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .slowest-fit th:nth-child(2),
+  .slowest-fit td:nth-child(2) {
+    width: 88px;
+    min-width: 88px;
+    font-size: 0.82rem;
   }
 
   .query-search {
