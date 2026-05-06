@@ -25,6 +25,19 @@ Published package references in the README:
 
 The deployment package contains the runtime files the operator actually uses. Some generated files and local JSON state exist in deployment/runtime form and are not all represented in this repository one-to-one.
 
+Important distinction:
+
+- not every persisted UI state is a YAML rule/config entry
+- some operator-facing UI settings are stored as managed runtime JSON files instead
+
+Current examples include appearance-related state such as:
+
+- panel background settings and history
+- text color settings
+- button color settings
+
+Those still matter operationally even though they do not belong in the generated routing YAML.
+
 ## Dedicated routing groups
 
 The most important custom config concept is `special_groups`.
@@ -75,6 +88,12 @@ That means UI and diagnostics should prefer showing:
 
 Showing every intermediate tag as if all of them were effective is misleading.
 
+This matters especially for:
+
+- remembered direct / proxy labels
+- subscription-hit labels versus final effective labels
+- UI wording such as “命中标签” versus “生效标签”
+
 ## Current Type65 / HTTPS note
 
 Current behavior can block `HTTPS` (`Type65`) records entirely.
@@ -96,5 +115,12 @@ Usual expectation:
 - build locally
 - verify on the test machine first
 - only then promote to production
+
+For binaries that embed the maintained Vue UI, the practical build workflow is:
+
+- rebuild `webui-log/` first so embedded assets are up to date
+- then run `go build`
+
+Do not assume parallel frontend/backend builds are safe for release artifacts in this fork.
 
 Do not commit private credentials or passwords into repo docs. Keep only non-secret operator workflow notes here.

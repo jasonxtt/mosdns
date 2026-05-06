@@ -89,6 +89,21 @@ Goals of the rewrite:
 
 The old dashboard still exists at `/log` as fallback and comparison target.
 
+### 5. Maintained system settings and overview workflow
+
+The maintained `/` UI is no longer just a basic dashboard shell. Recent work made it a real operator workflow surface for:
+
+- overview trend and ranking diagnostics
+- mobile-aware overview-card presentation
+- system appearance management
+- IP version preference toggles
+
+Important currently-shipped examples:
+
+- `IPv4优先` and `IPV6屏蔽` both exist in the maintained UI and are intentionally treated as mutually exclusive operator modes
+- the overview page includes custom ranking-card layout behavior and a trend-detail popover, so small CSS edits there can change real interaction behavior
+- appearance settings now persist server-side, including panel background, text color, and button color state
+
 ## Naming history and common confusion
 
 - `special_groups` is the real feature name.
@@ -112,12 +127,17 @@ Current released version in repo docs:
 
 - frontend behavior and modal flows:
   - `webui-log/src/components/`
+  - `webui-log/src/style.css`
+  - `webui-log/src/utils/appearanceTextColor.js`
+  - `webui-log/src/utils/appearanceButtonColor.js`
 - embedded static pages and legacy dashboard:
   - `coremain/www/`
 - audit / query APIs:
   - `coremain/api_audit.go`
   - `coremain/api_audit_v2.go`
   - `coremain/audit.go`
+- appearance persistence APIs:
+  - `coremain/api_appearance.go`
 - routing and response processing:
   - `plugin/executable/`
 - DNS query context and response objects:

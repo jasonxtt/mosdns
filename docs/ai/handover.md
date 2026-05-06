@@ -2,7 +2,7 @@
 
 ## Current state
 
-As of `2026-04-22`, the fork is in a stable maintained state with these major outcomes already landed:
+As of `2026-05-06`, the fork is in a stable maintained state with these major outcomes already landed:
 
 - Vue UI is the default UI at `/`
 - legacy UI is retained at `/log`
@@ -10,6 +10,9 @@ As of `2026-04-22`, the fork is in a stable maintained state with these major ou
 - upstream group binding is implemented in the WebUI workflow
 - subscription-rule save flow supports backend download behavior
 - major dashboard pages were migrated to the Vue workflow
+- the maintained `/` UI includes mutually exclusive `IPv4优先` / `IPV6屏蔽` controls with corresponding runtime flow support
+- the maintained `/` UI includes persisted appearance controls such as panel background, text color, and button color
+- recent overview-card and mobile compatibility fixes have been validated on real deployment hosts
 
 ## Important active realities
 
@@ -38,6 +41,31 @@ Use `special_groups`, not `route_group`.
 ### 3. Public docs vs operator notes
 
 This repository can store process notes, but not secrets. Keep passwords and private tokens out of committed files.
+
+### 4. Frontend build order for embedded assets
+
+If a release binary should carry updated Vue assets, build order matters:
+
+- run the `webui-log/` production build first
+- then run `go build`
+
+Running them in parallel can produce a binary with mismatched embedded `app.js` / `app.css`.
+
+### 5. Mobile overview-table compatibility
+
+The `/` overview page has real mobile/browser compatibility sensitivity.
+
+Confirmed pitfalls include:
+
+- `table-layout: fixed` plus `calc(...)` widths on narrow metric tables
+- broad `overflow-wrap: anywhere` rules interacting with fixed or semi-fixed mobile columns
+
+Visible failure modes included:
+
+- `最慢查询` domains collapsing into character-by-character wrapping
+- some mobile browsers collapsing the left domain column almost completely while still showing the `耗时` column
+
+When this kind of issue reproduces only on some phones, treat it as a CSS/browser compatibility bug first.
 
 ## Pending / plausible next work
 
