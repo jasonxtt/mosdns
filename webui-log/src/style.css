@@ -1074,6 +1074,10 @@ th.sortable:hover {
   table-layout: fixed;
 }
 
+.table-wrap.overview-table-fit.slowest-fit table {
+  table-layout: auto;
+}
+
 .table-wrap.overview-table-fit th,
 .table-wrap.overview-table-fit td {
   white-space: normal;
@@ -1105,7 +1109,7 @@ th.sortable:hover {
 
 .slowest-fit th:nth-child(1),
 .slowest-fit td:nth-child(1) {
-  width: calc(100% - 102px);
+  width: auto;
 }
 
 .slowest-fit th:nth-child(2),
