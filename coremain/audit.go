@@ -7,7 +7,6 @@ import (
 	"math"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -198,7 +197,7 @@ var GlobalAuditCollector = NewAuditCollector(defaultAuditCapacity)
 
 func InitializeAuditCollector(configBaseDir string) {
 	initialCapacity := defaultAuditCapacity
-	settingsPath := filepath.Join(configBaseDir, auditSettingsFilename)
+	settingsPath := auditSettingsPath(configBaseDir)
 	settings := &AuditSettings{}
 	data, err := os.ReadFile(settingsPath)
 
@@ -218,6 +217,10 @@ func InitializeAuditCollector(configBaseDir string) {
 	if initialCapacity != defaultAuditCapacity {
 		GlobalAuditCollector = NewAuditCollector(initialCapacity)
 	}
+}
+
+func auditSettingsPath(configBaseDir string) string {
+	return managedStateFilePathInDir(configBaseDir, auditSettingsFilename)
 }
 
 func NewAuditCollector(capacity int) *AuditCollector {
@@ -804,8 +807,11 @@ func (c *AuditCollector) saveSettings(capacityToSave int, configBaseDir string) 
 		mlog.L().Error("failed to marshal audit settings", zap.Error(err))
 		return
 	}
-	settingsPath := filepath.Join(configBaseDir, auditSettingsFilename)
-	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+	settingsPath := auditSettingsPath(configBaseDir)
+	if err := writeManagedFile(settingsPath, data, func(raw []byte) error {
+		var parsed AuditSettings
+		return json.Unmarshal(raw, &parsed)
+	}, nil, nil); err != nil {
 		mlog.L().Error("failed to write audit settings file", zap.String("path", settingsPath), zap.Error(err))
 	} else {
 		mlog.L().Info("successfully saved audit settings", zap.String("path", settingsPath), zap.Int("capacity", capacityToSave))

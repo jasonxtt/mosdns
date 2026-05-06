@@ -47,6 +47,7 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 - The newer custom routing path was intentionally kept out of global cache for now.
 - The maintained `/` UI now exposes both `IPv4优先` and `IPV6屏蔽`, and they are intentionally treated as mutually exclusive operator modes in the UI and generated runtime flow.
 - The maintained `/` UI now persists more operator appearance state server-side, including panel background, text color, and button color settings.
+- Small runtime JSON state files are stored under `/cus/mosdns/state` and are auto-migrated there from the runtime root by the binary. Do not move config override JSON files into `state/`.
 - For `HTTPS` (`Type65`) handling, the fork can block the whole record today, but selective stripping of `ipv4hint`, `ipv6hint`, or `ECH` is not implemented yet. That feature is feasible as a response-rewrite plugin if requested.
 
 ## Frontend compatibility notes

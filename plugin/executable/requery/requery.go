@@ -812,25 +812,7 @@ func (p *Requery) setCancelledState(reason string) {
 
 func resolveLocalWebUIPort() int {
 	const defaultPort = 9099
-	baseDir := strings.TrimSpace(coremain.MainConfigBaseDir)
-	settingsPath := "webui_port_settings.json"
-	if baseDir != "" {
-		settingsPath = filepath.Join(baseDir, settingsPath)
-	}
-	raw, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return defaultPort
-	}
-	var payload struct {
-		Port int `json:"port"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return defaultPort
-	}
-	if payload.Port < 1 || payload.Port > 65535 {
-		return defaultPort
-	}
-	return payload.Port
+	return coremain.ResolveWebUIPortOverride(defaultPort)
 }
 
 func normalizeLocalActionURL(rawURL string, port int) string {

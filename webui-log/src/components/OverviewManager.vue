@@ -156,6 +156,17 @@ function formatDuration(value) {
   return `${num.toFixed(2)} ms`
 }
 
+function formatCompactDuration(value) {
+  const num = Number(value || 0)
+  if (num >= 100) {
+    return String(Math.round(num))
+  }
+  if (num >= 10) {
+    return num.toFixed(1)
+  }
+  return num.toFixed(2)
+}
+
 function formatTime(value) {
   if (!value || String(value).startsWith('0001-01-01')) {
     return '-'
@@ -520,7 +531,12 @@ onBeforeUnmount(() => {
                 @click="openSlowDetail(item)"
               >
                 <td>{{ item.query_name }}</td>
-                <td class="text-right">{{ formatDuration(item.duration_ms) }}</td>
+                <td class="text-right" :title="formatDuration(item.duration_ms)">
+                  <span class="duration-compact">
+                    <span class="duration-value">{{ formatCompactDuration(item.duration_ms) }}</span>
+                    <span class="duration-unit">ms</span>
+                  </span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -616,7 +632,7 @@ onBeforeUnmount(() => {
             <button class="btn secondary" type="button" @click="closeTopDomainDetail">关闭</button>
           </div>
         </header>
-        <div class="table-wrap overview-table-fit top-domain-detail-fit">
+        <div class="table-wrap top-domain-detail-fit">
           <table>
             <thead>
               <tr>

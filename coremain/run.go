@@ -150,6 +150,10 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 	}
 	mlog.L().Info("main config base directory set", zap.String("path", MainConfigBaseDir))
 
+	// Migrate small runtime state JSON files out of the config root before any
+	// module reads them, keeping config files and program state separated.
+	InitializeManagedStateFiles()
+
 	// 应用 WebUI 端口覆盖设置（若存在），确保启动监听端口与系统设置一致。
 	applyWebUIPortOverride(cfg)
 

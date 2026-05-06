@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -24,10 +23,7 @@ type webUIPortSettings struct {
 }
 
 func webUIPortSettingsPath() string {
-	if strings.TrimSpace(MainConfigBaseDir) == "" {
-		return webUIPortSettingsFilename
-	}
-	return filepath.Join(MainConfigBaseDir, webUIPortSettingsFilename)
+	return managedStateFilePath(webUIPortSettingsFilename)
 }
 
 func normalizeWebUIPort(port int) (int, error) {
@@ -86,6 +82,14 @@ func loadWebUIPortSettings() (webUIPortSettings, error) {
 		}
 	}
 	return settings, nil
+}
+
+func ResolveWebUIPortOverride(defaultPort int) int {
+	settings, err := loadWebUIPortSettings()
+	if err != nil || settings.Port == 0 {
+		return defaultPort
+	}
+	return settings.Port
 }
 
 func saveWebUIPortSettings(port int) error {

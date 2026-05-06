@@ -574,11 +574,7 @@ func normalizeButtonColorSettings(raw buttonColorSettings) buttonColorSettings {
 }
 
 func panelBackgroundSettingsPath() string {
-	base := MainConfigBaseDir
-	if strings.TrimSpace(base) == "" {
-		base = "."
-	}
-	return filepath.Join(base, appearanceSettingsFilename)
+	return managedStateFilePath(appearanceSettingsFilename)
 }
 
 func panelBackgroundImagePath() string {
@@ -672,19 +668,11 @@ func resolvePanelBackgroundHistoryImageURL(uploadID string, info os.FileInfo) st
 }
 
 func textColorSettingsPath() string {
-	base := MainConfigBaseDir
-	if strings.TrimSpace(base) == "" {
-		base = "."
-	}
-	return filepath.Join(base, appearanceTextSettingsFile)
+	return managedStateFilePath(appearanceTextSettingsFile)
 }
 
 func buttonColorSettingsPath() string {
-	base := MainConfigBaseDir
-	if strings.TrimSpace(base) == "" {
-		base = "."
-	}
-	return filepath.Join(base, appearanceButtonSettingsFile)
+	return managedStateFilePath(appearanceButtonSettingsFile)
 }
 
 func resolveUploadedPanelBackgroundURL() string {

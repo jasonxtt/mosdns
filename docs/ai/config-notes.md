@@ -38,6 +38,20 @@ Current examples include appearance-related state such as:
 
 Those still matter operationally even though they do not belong in the generated routing YAML.
 
+Small root-level runtime JSON state files are now managed under:
+
+- `/cus/mosdns/state`
+
+The binary auto-creates this directory and migrates these root files there on startup:
+
+- `appearance_settings.json`
+- `appearance_text_settings.json`
+- `appearance_button_settings.json`
+- `audit_settings.json`
+- `webui_port_settings.json`
+
+Do not migrate config override files such as `config_overrides.json`, `upstream_overrides.json`, or `special_upstream_groups.json` into `state/`; those remain config-workflow files in the runtime root.
+
 ## Dedicated routing groups
 
 The most important custom config concept is `special_groups`.
