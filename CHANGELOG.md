@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## v0.3.20
+
+### Changed
+
+- refined the maintained Vue UI overview header spacing so the total-query and average-latency values keep a stable gap as query counts grow
+- standardized secondary-menu and ordinary-button hover behavior to use color-only feedback without vertical movement
+- kept clickable UI controls on the normal cursor style for a consistent operator experience across desktop browsers
+- updated the WebUI frontend build to stamp cache-busting asset query versions in both the embedded app HTML and root `/` HTML entry
+
+### Fixed
+
+- fixed the local-rules editor scrollbar visual edge so the thumb no longer breaks the editor's top-right rounded corner when scrolled to the top
+- improved the local-rules editor note/status area with a compact glass-style hint chip while keeping the editor itself as the primary rounded input surface
+
+### Upgrade Notes
+
+- this release does **not** require a YAML config change
+- existing deployments can update only the binary
+- if the browser keeps old UI assets, refresh once to load the new embedded frontend asset version
+
 ## v0.3.12
 
 ### Added
