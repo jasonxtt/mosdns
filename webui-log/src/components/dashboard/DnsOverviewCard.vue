@@ -484,22 +484,25 @@ onBeforeUnmount(() => {
 }
 
 .kpi-main {
-  display: flex;
+  display: inline-flex;
   align-items: flex-start;
-  gap: 3px;
+  gap: clamp(10px, 1.4vw, 22px);
   padding-left: 34px;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .kpi-item {
-  min-width: auto;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .kpi-item.total-queries {
-  min-width: 104px;
+  min-width: fit-content;
 }
 
 .kpi-item.average-latency {
-  min-width: 126px;
+  min-width: fit-content;
 }
 
 .kpi-value {
@@ -796,7 +799,7 @@ onBeforeUnmount(() => {
     display: flex;
     flex-wrap: nowrap;
     justify-content: flex-start;
-    gap: 6px;
+    gap: clamp(8px, 1.8vw, 16px);
     padding-left: 20px;
   }
 
@@ -805,11 +808,11 @@ onBeforeUnmount(() => {
   }
 
   .kpi-item.total-queries {
-    min-width: 94px;
+    min-width: fit-content;
   }
 
   .kpi-item.average-latency {
-    min-width: 118px;
+    min-width: fit-content;
   }
 
   .kpi-side {

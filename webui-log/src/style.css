@@ -1746,11 +1746,45 @@ tr.disabled {
 
 .list-editor {
   min-height: 460px;
+  border-radius: 16px;
+  padding: 12px 14px;
+  border-color: rgba(var(--panel-glass-border-rgb), 0.34);
+  background-clip: padding-box;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  overflow: auto;
+  clip-path: inset(0 round 16px);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(128, 145, 168, 0.5) transparent;
+}
+
+.list-editor::-webkit-scrollbar {
+  width: 10px;
+}
+
+.list-editor::-webkit-scrollbar-track {
+  margin: 12px 6px 12px 0;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.list-editor::-webkit-scrollbar-button:vertical:start:decrement,
+.list-editor::-webkit-scrollbar-button:vertical:end:increment {
+  display: block;
+  height: 10px;
+  background: transparent;
+}
+
+.list-editor::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(128, 145, 168, 0.48);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .list-footer-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 10px;
   flex-wrap: nowrap;
@@ -1759,12 +1793,24 @@ tr.disabled {
 .list-footer-meta {
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 12px;
   flex-wrap: nowrap;
 }
 
 .list-hint-inline {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid rgba(var(--panel-glass-border-rgb), 0.42);
+  border-radius: 14px;
+  background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity));
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(var(--panel-glass-blur));
+  -webkit-backdrop-filter: blur(var(--panel-glass-blur));
   color: var(--ink-1);
   font-size: 0.84rem;
   line-height: 1.35;
@@ -2645,7 +2691,6 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .overview-card,
 :root[data-panel-bg-enabled='1'] .sys-card,
 :root[data-panel-bg-enabled='1'] .list-sidebar,
-:root[data-panel-bg-enabled='1'] .list-main,
 :root[data-panel-bg-enabled='1'] .table-wrap,
 :root[data-panel-bg-enabled='1'] .trend-card,
 :root[data-panel-bg-enabled='1'] .requery-scheduler {
@@ -2666,7 +2711,6 @@ tr.disabled {
 #app.custom-background .control-module,
 #app.custom-background .rules-sidebar,
 #app.custom-background .data-panel,
-#app.custom-background .list-main,
 #app.custom-background .cache-entry,
 #app.custom-background .cache-entry summary,
 #app.custom-background .requery-scheduler,
@@ -2690,6 +2734,15 @@ tr.disabled {
 #app.custom-background .main-body > .panel,
 #app.custom-background .rules-shell > .panel,
 #app.custom-background .upstream-shell > .panel {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+:root[data-panel-bg-enabled='1'] .list-main,
+#app.custom-background .list-main {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -2869,6 +2922,103 @@ tr.disabled {
   color: var(--ink-0) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+.legacy-sub-btn:hover:not(:disabled):not(.active),
+.legacy-main-nav.compact .legacy-main-btn:hover:not(:disabled):not(.active),
+.btn.primary:hover:not(:disabled),
+.btn.secondary:hover:not(:disabled),
+.btn.warning:hover:not(:disabled),
+.btn.danger:hover:not(:disabled),
+:root[data-panel-bg-enabled='1'] .legacy-sub-btn:hover:not(:disabled):not(.active),
+:root[data-panel-bg-enabled='1'] .legacy-main-nav.compact .legacy-main-btn:hover:not(:disabled):not(.active),
+:root[data-panel-bg-enabled='1'] .btn.primary:hover:not(:disabled),
+:root[data-panel-bg-enabled='1'] .btn.secondary:hover:not(:disabled),
+:root[data-panel-bg-enabled='1'] .btn.warning:hover:not(:disabled),
+:root[data-panel-bg-enabled='1'] .btn.danger:hover:not(:disabled),
+#app.custom-background .legacy-sub-btn:hover:not(:disabled):not(.active),
+#app.custom-background .legacy-main-nav.compact .legacy-main-btn:hover:not(:disabled):not(.active),
+#app.custom-background .btn.primary:hover:not(:disabled),
+#app.custom-background .btn.secondary:hover:not(:disabled),
+#app.custom-background .btn.warning:hover:not(:disabled),
+#app.custom-background .btn.danger:hover:not(:disabled) {
+  background: var(--menu-hover-bg) !important;
+  border-color: var(--menu-border) !important;
+  color: var(--menu-text) !important;
+}
+
+.legacy-main-nav.compact .legacy-main-btn:hover:not(:disabled):not(.active) {
+  transform: translateY(-1px);
+}
+
+button:not(:disabled),
+button:not(:disabled) *,
+.btn:not(:disabled),
+.btn:not(:disabled) *,
+.legacy-main-btn:not(:disabled),
+.legacy-main-btn:not(:disabled) *,
+.legacy-sub-btn:not(:disabled),
+.legacy-sub-btn:not(:disabled) *,
+.tab-btn:not(:disabled),
+.tab-btn:not(:disabled) *,
+.btn-link:not(:disabled),
+.btn-link:not(:disabled) *,
+.list-btn,
+.list-btn *,
+.overview-click-row,
+.overview-click-row *,
+.log-row,
+.log-row *,
+.diagnostic-request-item:not(:disabled),
+.diagnostic-request-item:not(:disabled) *,
+.series-toggle-btn:not(:disabled),
+.series-toggle-btn:not(:disabled) *,
+.trend-title-trigger:not(:disabled),
+.trend-title-trigger:not(:disabled) *,
+th.sortable,
+th.sortable * {
+  cursor: default !important;
+}
+
+button,
+button *,
+.btn,
+.btn *,
+.legacy-main-btn,
+.legacy-main-btn *,
+.legacy-sub-btn,
+.legacy-sub-btn *,
+.tab-btn,
+.tab-btn *,
+.btn-link,
+.btn-link *,
+.list-btn,
+.list-btn *,
+.overview-click-row,
+.overview-click-row *,
+.log-row,
+.log-row *,
+.diagnostic-request-item,
+.diagnostic-request-item *,
+.series-toggle-btn,
+.series-toggle-btn *,
+.trend-title-trigger,
+.trend-title-trigger *,
+.cache-entry summary,
+.cache-entry summary *,
+th.sortable,
+th.sortable *,
+label.switch-row,
+label.switch-row *,
+label.switch-inline,
+label.switch-inline *,
+label.switch-table,
+label.switch-table *,
+.switch,
+.switch *,
+.slider,
+.slider * {
+  cursor: default !important;
 }
 
 #app.custom-background .core-mode-btn.is-active {
@@ -3584,11 +3734,14 @@ tr.disabled {
 
   .list-footer-meta {
     width: 100%;
+    align-items: flex-start;
     flex-wrap: wrap;
     gap: 6px;
   }
 
   .list-hint-inline {
+    width: 100%;
+    min-height: 0;
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
