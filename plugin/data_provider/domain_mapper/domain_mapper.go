@@ -3,6 +3,8 @@ package domain_mapper
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,6 +48,17 @@ type MatchResult struct {
 	JoinedSources string
 }
 
+type overlapRule struct {
+	keyword string
+	regex   *regexp.Regexp
+	res     *MatchResult
+}
+
+type compiledMatcher struct {
+	domainRules  *domain.MixMatcher[*MatchResult]
+	overlapRules []overlapRule
+}
+
 type DomainMapper struct {
 	logger         *zap.Logger
 	matcher        atomic.Value
@@ -84,7 +97,7 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		providers:      make(map[string]data_provider.RuleExporter),
 		runBit:         uint8(nextRunBit.Add(^uint32(0))),
 	}
-	dm.matcher.Store(domain.NewMixMatcher[*MatchResult]())
+	dm.matcher.Store(&compiledMatcher{domainRules: domain.NewMixMatcher[*MatchResult]()})
 
 	for _, r := range cfg.Rules {
 		if _, loaded := dm.providers[r.Tag]; loaded {
@@ -206,7 +219,8 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 		}
 
 		pool := make(map[string]*MatchResult)
-		newMatcher := domain.NewMixMatcher[*MatchResult]()
+		domainRules := domain.NewMixMatcher[*MatchResult]()
+		overlapRules := make([]overlapRule, 0, 64)
 
 		type hotEntry struct {
 			name string
@@ -236,18 +250,46 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 				pool[sig] = res
 			}
 
-			if strings.HasPrefix(ruleStr, "full:") {
+			switch {
+			case strings.HasPrefix(ruleStr, "full:"):
 				name := strings.TrimPrefix(ruleStr, "full:")
 				if !strings.HasSuffix(name, ".") {
 					name += "."
 				}
 				hotEntries = append(hotEntries, hotEntry{name: name, res: res})
-			} else {
-				newMatcher.Add(ruleStr, res)
+			case strings.HasPrefix(ruleStr, "keyword:"):
+				overlapRules = append(overlapRules, overlapRule{
+					keyword: domain.NormalizeDomain(strings.TrimPrefix(ruleStr, "keyword:")),
+					res:     res,
+				})
+			case strings.HasPrefix(ruleStr, "regexp:"):
+				pattern := strings.TrimPrefix(ruleStr, "regexp:")
+				compiled, err := regexp.Compile(pattern)
+				if err != nil {
+					dm.logger.Warn("skip invalid regexp rule",
+						zap.String("rule", ruleStr),
+						zap.Error(err),
+					)
+					continue
+				}
+				overlapRules = append(overlapRules, overlapRule{
+					regex: compiled,
+					res:   res,
+				})
+			default:
+				if err := domainRules.Add(ruleStr, res); err != nil {
+					dm.logger.Warn("skip invalid domain rule",
+						zap.String("rule", ruleStr),
+						zap.Error(err),
+					)
+				}
 			}
 		}
 
-		dm.matcher.Store(newMatcher)
+		dm.matcher.Store(&compiledMatcher{
+			domainRules:  domainRules,
+			overlapRules: overlapRules,
+		})
 		dm.hotMap.Range(func(key, value any) bool {
 			dm.hotMap.Delete(key)
 			return true
@@ -394,6 +436,89 @@ func collectRuleKeys(
 	return out
 }
 
+func cloneMatchResult(res *MatchResult) *MatchResult {
+	if res == nil {
+		return nil
+	}
+	cloned := &MatchResult{
+		JoinedTags:    res.JoinedTags,
+		JoinedSources: res.JoinedSources,
+	}
+	if len(res.FastMarks) > 0 {
+		cloned.FastMarks = append(cloned.FastMarks, res.FastMarks...)
+	}
+	if len(res.CtxMarks) > 0 {
+		cloned.CtxMarks = append(cloned.CtxMarks, res.CtxMarks...)
+	}
+	return cloned
+}
+
+func mergeMatchResult(dst, src *MatchResult) *MatchResult {
+	if src == nil {
+		return dst
+	}
+	if dst == nil {
+		return cloneMatchResult(src)
+	}
+	for _, mark := range src.FastMarks {
+		if !slices.Contains(dst.FastMarks, mark) {
+			dst.FastMarks = append(dst.FastMarks, mark)
+		}
+	}
+	for _, mark := range src.CtxMarks {
+		if !slices.Contains(dst.CtxMarks, mark) {
+			dst.CtxMarks = append(dst.CtxMarks, mark)
+		}
+	}
+	dst.JoinedTags = appendJoinedValue(dst.JoinedTags, src.JoinedTags)
+	dst.JoinedSources = appendJoinedValue(dst.JoinedSources, src.JoinedSources)
+	return dst
+}
+
+func (cm *compiledMatcher) match(name string) (*MatchResult, bool) {
+	if cm == nil {
+		return nil, false
+	}
+
+	var merged *MatchResult
+	if cm.domainRules != nil {
+		if res, ok := cm.domainRules.Match(name); ok && res != nil {
+			merged = cloneMatchResult(res)
+		}
+	}
+
+	if len(cm.overlapRules) == 0 {
+		return merged, merged != nil
+	}
+
+	normalizedName := domain.NormalizeDomain(name)
+	for _, rule := range cm.overlapRules {
+		switch {
+		case rule.keyword != "":
+			if strings.Contains(normalizedName, rule.keyword) {
+				merged = mergeMatchResult(merged, rule.res)
+			}
+		case rule.regex != nil:
+			if rule.regex.MatchString(normalizedName) {
+				merged = mergeMatchResult(merged, rule.res)
+			}
+		}
+	}
+	return merged, merged != nil
+}
+
+func (dm *DomainMapper) lookupMatchResult(name string) (*MatchResult, bool) {
+	matcher := dm.matcher.Load().(*compiledMatcher)
+	var merged *MatchResult
+	if val, ok := dm.hotMap.Load(name); ok {
+		merged = cloneMatchResult(val.(*MatchResult))
+	}
+	if res, ok := matcher.match(name); ok {
+		merged = mergeMatchResult(merged, res)
+	}
+	return merged, merged != nil
+}
+
 func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags string) {
 	key := domainName
 	if !strings.HasSuffix(key, ".") {
@@ -408,8 +533,7 @@ func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags st
 			newTags := joinedTags
 			var newSources string
 
-			matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
-			if res, matchOk := matcher.Match(key); matchOk && res != nil {
+			if res, matchOk := dm.lookupMatchResult(key); matchOk && res != nil {
 				for _, m := range res.FastMarks {
 					found := false
 					for _, existingM := range newMarks {
@@ -473,14 +597,8 @@ func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags st
 }
 
 func (dm *DomainMapper) FastMatch(qname string) ([]uint8, string, bool) {
-	if val, ok := dm.hotMap.Load(qname); ok {
-		res := val.(*MatchResult)
+	if res, ok := dm.lookupMatchResult(qname); ok && res != nil {
 		return res.FastMarks, res.JoinedTags, true
-	}
-	matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
-	result, ok := matcher.Match(qname)
-	if ok && result != nil {
-		return result.FastMarks, result.JoinedTags, true
 	}
 	return nil, "", false
 }
@@ -515,14 +633,7 @@ func (dm *DomainMapper) Exec(ctx context.Context, qCtx *query_context.Context) e
 	}
 
 	name := q.Question[0].Name
-	if val, ok := dm.hotMap.Load(name); ok {
-		applyMatchResult(qCtx, val.(*MatchResult))
-		return nil
-	}
-
-	matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
-
-	result, ok := matcher.Match(name)
+	result, ok := dm.lookupMatchResult(name)
 	if ok && result != nil {
 		applyMatchResult(qCtx, result)
 	} else {
@@ -555,13 +666,7 @@ func (dm *DomainMapper) GetFastExec() func(ctx context.Context, qCtx *query_cont
 		}
 
 		name := q.Question[0].Name
-		if val, ok := dm.hotMap.Load(name); ok {
-			applyMatchResult(qCtx, val.(*MatchResult))
-			return nil
-		}
-
-		matcher := dm.matcher.Load().(*domain.MixMatcher[*MatchResult])
-		result, ok := matcher.Match(name)
+		result, ok := dm.lookupMatchResult(name)
 		if ok && result != nil {
 			applyMatchResult(qCtx, result)
 		} else {

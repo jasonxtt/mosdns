@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v0.3.21
+
+### Fixed
+
+- fixed `domain_mapper` overlap handling so `full:` / `domain:` hits now keep merging matching `keyword:` and `regexp:` rules instead of stopping at the first domain-style result
+- restored config-order-consistent routing behavior for overlapping domain sets such as white/black/grey lists, dedicated upstream domains, redirects, ddns domains, and client/domain policy combinations
+
+### Upgrade Notes
+
+- this release does **not** require a YAML config change
+- existing deployments can update only the binary
+- if a domain was already learned into generated direct/proxy cache files, clear the stale generated lists once after upgrade so new matches can be rebuilt under the fixed logic
+
 ## v0.3.20
 
 ### Changed
