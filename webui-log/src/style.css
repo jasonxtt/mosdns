@@ -1961,165 +1961,6 @@ tr.disabled {
   font-size: 1.02rem;
 }
 
-.requery-status-head {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.requery-status-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--ink-1);
-}
-
-.requery-status-chip {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 0.82rem;
-  font-weight: 700;
-  border: 1px solid var(--line);
-  background: #f8fafc;
-  color: var(--tone-on-light);
-}
-
-.requery-status-chip.idle {
-  color: var(--tone-on-light);
-  border-color: #abefc6;
-  background: #ecfdf3;
-}
-
-.requery-status-chip.running {
-  color: var(--tone-on-light-warn);
-  border-color: #fbd3a5;
-  background: #fff7ed;
-}
-
-.requery-status-chip.failed {
-  color: var(--tone-on-light-danger);
-  border-color: #fecdca;
-  background: #fef3f2;
-}
-
-.requery-status-chip.cancelled {
-  color: var(--tone-on-light-muted);
-}
-
-.requery-progress-wrap {
-  margin: 8px 0 10px;
-}
-
-.requery-progress-bar {
-  position: relative;
-  height: 26px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--surface-soft);
-  overflow: hidden;
-}
-
-.requery-progress-bar-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  background: linear-gradient(90deg, #0f766e, #0b8f84);
-  transition: width 0.2s ease;
-}
-
-.requery-progress-text {
-  position: absolute;
-  inset: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: #f8fffe;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-}
-
-.requery-scheduler {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-soft);
-  padding: 12px;
-  margin-bottom: 10px;
-}
-
-.scheduler-row {
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-weight: 600;
-}
-
-.scheduler-grid {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  gap: 8px 10px;
-  align-items: center;
-}
-
-.scheduler-grid label {
-  color: var(--ink-1);
-  font-weight: 600;
-}
-
-.scheduler-field {
-  width: 100%;
-  max-width: 220px;
-  min-width: 0;
-}
-
-.scheduler-field[type="datetime-local"] {
-  width: 220px;
-  max-width: 100%;
-}
-
-.requery-important {
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  padding: 10px;
-  margin-bottom: 10px;
-}
-
-.requery-important strong {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.data-inline-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  align-items: stretch;
-}
-
-.data-inline-row > .data-inline-module {
-  height: auto;
-  min-width: 0;
-}
-
-.domain-stats-module .table-wrap {
-  flex: 1;
-  min-height: 0;
-}
-
-.requery-module {
-  min-height: 0;
-  height: auto;
-}
-
 .system-panel {
   display: flex;
   flex-direction: column;
@@ -2692,8 +2533,7 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .sys-card,
 :root[data-panel-bg-enabled='1'] .list-sidebar,
 :root[data-panel-bg-enabled='1'] .table-wrap,
-:root[data-panel-bg-enabled='1'] .trend-card,
-:root[data-panel-bg-enabled='1'] .requery-scheduler {
+:root[data-panel-bg-enabled='1'] .trend-card {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
   backdrop-filter: blur(var(--panel-glass-blur));
   -webkit-backdrop-filter: blur(var(--panel-glass-blur));
@@ -2713,14 +2553,12 @@ tr.disabled {
 #app.custom-background .data-panel,
 #app.custom-background .cache-entry,
 #app.custom-background .cache-entry summary,
-#app.custom-background .requery-scheduler,
 #app.custom-background .confirm-pop-bubble,
 #app.custom-background .confirm-pop-bubble::before,
 #app.custom-background .trend-card,
 #app.custom-background .btn,
 #app.custom-background .msg,
 #app.custom-background .special-group-row,
-#app.custom-background .requery-status-chip,
 #app.custom-background .switch-row,
 #app.custom-background .mode-info-item,
 #app.custom-background .sys-info-item,
@@ -2756,7 +2594,6 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .switch-value-chip,
 :root[data-panel-bg-enabled='1'] .update-banner,
 :root[data-panel-bg-enabled='1'] .trend-card,
-:root[data-panel-bg-enabled='1'] .requery-scheduler,
 :root[data-panel-bg-enabled='1'] .series-toggle-btn,
 :root[data-panel-bg-enabled='1'] .diagnostic-request-list,
 :root[data-panel-bg-enabled='1'] .diagnostic-request-item,
@@ -2768,7 +2605,6 @@ tr.disabled {
 #app.custom-background .switch-value-chip,
 #app.custom-background .update-banner,
 #app.custom-background .trend-card,
-#app.custom-background .requery-scheduler,
 #app.custom-background .series-toggle-btn,
 #app.custom-background .diagnostic-request-list,
 #app.custom-background .diagnostic-request-item,
@@ -2827,10 +2663,7 @@ tr.disabled {
 #app.custom-background .msg.error,
 #app.custom-background .msg.success,
 #app.custom-background .result-badge.fail,
-#app.custom-background .special-group-name,
-#app.custom-background .requery-status-chip.idle,
-#app.custom-background .requery-status-chip.running,
-#app.custom-background .requery-status-chip.failed {
+#app.custom-background .special-group-name.idle.running.failed {
   background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)) !important;
 }
 
@@ -2847,21 +2680,6 @@ tr.disabled {
 :root[data-panel-bg-enabled='1'] .result-badge.fail,
 :root[data-panel-bg-enabled='1'] .special-group-name {
   color: var(--ink-0) !important;
-}
-
-#app.custom-background .requery-status-chip.idle,
-:root[data-panel-bg-enabled='1'] .requery-status-chip.idle {
-  color: var(--ink-0) !important;
-}
-
-#app.custom-background .requery-status-chip.running,
-:root[data-panel-bg-enabled='1'] .requery-status-chip.running {
-  color: #fbbf24 !important;
-}
-
-#app.custom-background .requery-status-chip.failed,
-:root[data-panel-bg-enabled='1'] .requery-status-chip.failed {
-  color: #fca5a5 !important;
 }
 
 #app.custom-background .legacy-main-nav.compact .legacy-main-btn,
@@ -3766,19 +3584,6 @@ label.switch-table *,
 
   .scheduler-field {
     max-width: 100%;
-  }
-
-  .requery-status-head {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .requery-status-head .actions {
-    width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    gap: 8px;
   }
 
   .scheduler-row {

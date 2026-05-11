@@ -45,7 +45,6 @@ const form = reactive({
   socks5: '',
   bootstrap: '',
   bootstrap_version: 0,
-  enable_pipeline: false,
   enable_http3: false,
   insecure_skip_verify: false,
   idle_timeout: 0,
@@ -78,7 +77,6 @@ function isSpecialUpstreamTag(tag) {
 
 const protocolValue = computed(() => String(form.protocol || '').trim().toLowerCase())
 const isAliapi = computed(() => protocolValue.value === 'aliapi')
-const showPipeline = computed(() => ['tcp', 'dot', 'tls'].includes(protocolValue.value))
 const showHttp3 = computed(() => ['https', 'doh', 'quic', 'doq'].includes(protocolValue.value))
 const showSocks5 = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
 const showTlsVerify = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
@@ -282,7 +280,6 @@ function resetForm() {
   form.socks5 = ''
   form.bootstrap = ''
   form.bootstrap_version = 0
-  form.enable_pipeline = false
   form.enable_http3 = false
   form.insecure_skip_verify = false
   form.idle_timeout = 0
@@ -387,7 +384,6 @@ function beginEdit(row) {
   form.socks5 = String(item.socks5 || '')
   form.bootstrap = String(item.bootstrap || '')
   form.bootstrap_version = toInt(item.bootstrap_version, 0)
-  form.enable_pipeline = Boolean(item.enable_pipeline)
   form.enable_http3 = Boolean(item.enable_http3)
   form.insecure_skip_verify = Boolean(item.insecure_skip_verify)
   form.idle_timeout = toInt(item.idle_timeout, 0)
@@ -476,7 +472,6 @@ function buildUpstreamObject(enabledWhenSave = true) {
     upstream_query_timeout: protocol !== 'aliapi' ? toInt(form.upstream_query_timeout, 0) : 0,
     bind_to_device: protocol !== 'aliapi' ? String(form.bind_to_device || '').trim() : '',
     so_mark: protocol !== 'aliapi' ? toInt(form.so_mark, 0) : 0,
-    enable_pipeline: protocol !== 'aliapi' ? Boolean(form.enable_pipeline) : false,
     enable_http3: protocol !== 'aliapi' ? Boolean(form.enable_http3) : false,
     insecure_skip_verify: protocol !== 'aliapi' ? Boolean(form.insecure_skip_verify) : false,
     socks5: protocol !== 'aliapi' ? String(form.socks5 || '').trim() : '',
@@ -712,12 +707,6 @@ onBeforeUnmount(() => {
 
             <label v-if="showSocks5">Socks5 代理</label>
             <input v-if="showSocks5" v-model="form.socks5" placeholder="host:port" />
-
-            <label v-if="showPipeline">Enable Pipeline</label>
-            <label v-if="showPipeline" class="switch-inline">
-              <input v-model="form.enable_pipeline" type="checkbox" />
-              <span>{{ form.enable_pipeline ? '开启' : '关闭' }}</span>
-            </label>
 
             <label v-if="showHttp3">Enable HTTP/3</label>
             <label v-if="showHttp3" class="switch-inline">

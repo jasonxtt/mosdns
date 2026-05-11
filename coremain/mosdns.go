@@ -293,33 +293,6 @@ func (m *Mosdns) initHttpMux() {
 		}
 	}
 
-	legacyHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/mosdnsp.html")
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdnsp.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
-	// /log 路由使用原 dashboard 页面
-	logHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/dashboard.html")
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/dashboard.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
 	blogHandler := func(w http.ResponseWriter, r *http.Request) {
 		data, err := content.ReadFile("www/blog.html")
 		if err != nil {
@@ -367,8 +340,8 @@ func (m *Mosdns) initHttpMux() {
 
 	// [修改] 为每个路由注册对应的 handler
 	m.httpMux.Get("/", rootHandler)
-	m.httpMux.Get("/legacy", legacyHandler)
-	m.httpMux.Get("/log", logHandler)
+	m.httpMux.Get("/legacy", rootHandler)
+	m.httpMux.Get("/log", rootHandler)
 	m.httpMux.Get("/blog", blogHandler)
 	m.httpMux.Get("/assets/*", staticAssetHandler)
 
