@@ -26,9 +26,6 @@ The fork keeps upstream structure where practical and extends the management lay
 - `webui-log/`
   - current maintained Vue frontend workspace
   - despite the folder name, this is the main UI source used for the default dashboard workflow
-- `webui-blog/`
-  - experimental Bento-style UI workspace
-  - paused, not the active production UI
 - `docs/`
   - fork notes and release docs
 - `docs/ai/`

@@ -108,14 +108,15 @@ func loadUpstreamOverrides() error {
 	if dir == "" {
 		dir = "."
 	}
-	// 获取绝对路径用于 Debug
+	path := managedStateFilePathInDir(dir, upstreamOverridesFilename)
 	absDir, _ := filepath.Abs(dir)
-	path := filepath.Join(dir, upstreamOverridesFilename)
+	absPath, _ := filepath.Abs(path)
 
 	mlog.L().Info("[Debug UpstreamAPI] Loading overrides",
 		zap.String("MainConfigBaseDir", dir),
 		zap.String("AbsoluteDir", absDir),
-		zap.String("File", path))
+		zap.String("File", path),
+		zap.String("AbsoluteFile", absPath))
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -152,7 +153,7 @@ func saveUpstreamOverrides() error {
 		dir = "."
 	}
 
-	path := filepath.Join(dir, upstreamOverridesFilename)
+	path := managedStateFilePathInDir(dir, upstreamOverridesFilename)
 	absPath, _ := filepath.Abs(path)
 
 	data, err := json.MarshalIndent(upstreamOverrides, "", "  ")
@@ -379,7 +380,7 @@ func parseSpecialUpstreamSlot(pluginTag string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if slot < 50 || slot > 59 {
+	if slot < specialSlotMin {
 		return 0, false
 	}
 	return slot, true

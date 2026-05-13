@@ -158,7 +158,7 @@ func handleConfigUpdateFromURL(w http.ResponseWriter, r *http.Request) {
 func downloadWithFallback(url string) ([]byte, error) {
 	// 1. 尝试获取代理配置
 	var proxyAddr string
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	overridesPath := overridesPath()
 	data, err := os.ReadFile(overridesPath)
 	if err == nil {
 		var temp struct {

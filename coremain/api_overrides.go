@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/go-chi/chi/v5"
@@ -77,7 +76,7 @@ func handleGetOverrides(w http.ResponseWriter, r *http.Request, m *Mosdns) {
 		populateReplacements(m.globalOverrides, true)
 	} else {
 		// Not in memory, try file
-		overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+		overridesPath := overridesPath()
 		data, err := os.ReadFile(overridesPath)
 		var fileObj GlobalOverrides
 		fileLoaded := false
@@ -112,7 +111,7 @@ func handleSetOverrides(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	overridesPath := overridesPath()
 
 	// We only save original/new/comment for replacements (via json tags in struct)
 	updatedData, err := json.MarshalIndent(payload, "", "  ")

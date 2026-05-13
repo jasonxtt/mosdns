@@ -101,7 +101,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	DiscoverAndCacheSettings(cfg)
 
 	// Step 2: Load overrides from file.
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	overridesPath := overridesPath()
 	data, err := os.ReadFile(overridesPath)
 	if err == nil {
 		var overrides GlobalOverrides
@@ -293,19 +293,6 @@ func (m *Mosdns) initHttpMux() {
 		}
 	}
 
-	blogHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/blog.html")
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/blog.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
 	staticAssetHandler := func(w http.ResponseWriter, r *http.Request) {
 		relativePath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if !strings.HasPrefix(relativePath, "assets/") {
@@ -342,47 +329,7 @@ func (m *Mosdns) initHttpMux() {
 	m.httpMux.Get("/", rootHandler)
 	m.httpMux.Get("/legacy", rootHandler)
 	m.httpMux.Get("/log", rootHandler)
-	m.httpMux.Get("/blog", blogHandler)
 	m.httpMux.Get("/assets/*", staticAssetHandler)
-
-	// [新增逻辑] 自动扫描配置目录下 ui 目录的子文件夹并挂载为前端版本
-	uiBaseDir := filepath.Join(MainConfigBaseDir, "ui")
-	// 检查 ui 目录是否存在
-	if info, err := os.Stat(uiBaseDir); err == nil && info.IsDir() {
-		// 定义保留的路由名称，防止外部文件夹覆盖核心功能
-		reservedPaths := map[string]bool{
-			"log": true, "blog": true, "assets": true,
-			"debug": true, "metrics": true, "plugins": true, "api": true, "": true,
-		}
-
-		// 读取子目录
-		entries, err := os.ReadDir(uiBaseDir)
-		if err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() {
-					dirName := entry.Name()
-
-					// 检查是否与保留名称冲突
-					if reservedPaths[dirName] {
-						m.logger.Warn("skipping external ui directory due to naming conflict with reserved route",
-							zap.String("name", dirName))
-						continue
-					}
-
-					// 挂载目录
-					routePath := "/" + dirName
-					fsPath := filepath.Join(uiBaseDir, dirName)
-
-					// 使用 http.StripPrefix 确保访问子路径时(如 /v1/index.html)能映射到正确的文件
-					m.httpMux.Mount(routePath, http.StripPrefix(routePath, http.FileServer(http.Dir(fsPath))))
-
-					m.logger.Info("auto-mounted external ui version",
-						zap.String("route", routePath),
-						zap.String("path", fsPath))
-				}
-			}
-		}
-	}
 
 	// Register pprof.
 	m.httpMux.Route("/debug/pprof", func(r chi.Router) {

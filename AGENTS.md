@@ -16,7 +16,6 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 - The default UI at `/` is the maintained Vue UI.
 - The legacy UI is kept at `/log` for compatibility and comparison.
 - `webui-log/` is the current main Vue frontend workspace even though the directory name still says `log`.
-- `webui-blog/` is an experimental Bento-style UI workspace. It is paused and not the active production UI.
 - The canonical backend feature name is `special_groups`. Do not reintroduce the old placeholder name `route_group`.
 - This fork intentionally does not follow the `nft` or `eBPF` direction from upstream.
 - Upstream changes on or before `2026-04-18` were already reviewed in prior work. Skip re-reviewing them unless the user explicitly asks.
@@ -47,7 +46,7 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 - The newer custom routing path was intentionally kept out of global cache for now.
 - The maintained `/` UI now exposes both `IPv4优先` and `IPV6屏蔽`, and they are intentionally treated as mutually exclusive operator modes in the UI and generated runtime flow.
 - The maintained `/` UI now persists more operator appearance state server-side, including panel background, text color, and button color settings.
-- Small runtime JSON state files are stored under `/cus/mosdns/state` and are auto-migrated there from the runtime root by the binary. Do not move config override JSON files into `state/`.
+- Small runtime JSON state files are stored under `/cus/mosdns/webinfo`. Do not move config override JSON files into that directory.
 - For `HTTPS` (`Type65`) handling, the fork can block the whole record today, but selective stripping of `ipv4hint`, `ipv6hint`, or `ECH` is not implemented yet. That feature is feasible as a response-rewrite plugin if requested.
 
 ## Frontend compatibility notes

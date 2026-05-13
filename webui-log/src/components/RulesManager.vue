@@ -929,11 +929,10 @@ onBeforeUnmount(() => {
           <button class="btn tiny secondary" type="button" @click="closeSpecialEditor">✕</button>
         </header>
         <div class="form-grid">
-          <label>槽位 (50-59)</label>
-          <input v-model.number="specialEditor.slot" type="number" min="0" max="59" />
           <label>名称</label>
           <input v-model="specialEditor.name" placeholder="例如 移动上游" />
         </div>
+        <p class="muted">新建时后端会自动分配最小可用槽位；改名不会改变现有槽位。</p>
         <div class="actions">
           <button class="btn secondary" @click="closeSpecialEditor">取消</button>
           <button class="btn primary" @click="saveSpecial">保存</button>

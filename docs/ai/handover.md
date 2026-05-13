@@ -16,8 +16,7 @@ As of `2026-05-06`, the fork is in a stable maintained state with these major ou
 
 ## Important active realities
 
-- `webui-blog/` exists, but it is an experimental Bento-style branch and is currently paused
-- the main ongoing UI target is `/`, not `/blog`
+- the main ongoing UI target is `/`
 - the legacy UI is kept mainly as fallback, comparison target, and compatibility reference
 
 ## Things already decided
@@ -100,4 +99,4 @@ If the user opens a fresh task, do this first:
 3. Read `docs/ai/config-notes.md`
 4. Read `docs/ai/handover.md`
 5. Confirm actual route mapping in `coremain/www/` before editing frontend behavior
-6. Confirm whether the task targets the maintained `/` UI, the legacy `/log` UI, or the paused `webui-blog/` experiment
+6. Confirm whether the task targets the maintained `/` UI or the legacy `/log` compatibility route

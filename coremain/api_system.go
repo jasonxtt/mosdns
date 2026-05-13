@@ -109,80 +109,95 @@ func handleSelfRestart(m *Mosdns) http.HandlerFunc {
 			body.DelayMs = 300
 		}
 
-		if isWindows() {
-			// 复用 api_update.go 中的 writeJSON
-			writeJSON(w, http.StatusNotImplemented, map[string]any{
-				"error": "self-restart is not supported on Windows",
+		if err := scheduleSelfRestart(m, body.DelayMs); err != nil {
+			status := http.StatusInternalServerError
+			if isWindows() {
+				status = http.StatusNotImplemented
+			}
+			writeJSON(w, status, map[string]any{
+				"error": err.Error(),
 			})
 			return
 		}
 
 		// 1. 立即响应
 		writeJSON(w, http.StatusOK, map[string]any{"status": "scheduled", "delay_ms": body.DelayMs})
+	}
+}
 
-		go func(delay int) {
-			logger := m.Logger()
+func scheduleSelfRestart(m *Mosdns, delayMs int) error {
+	if isWindows() {
+		return errors.New("self-restart is not supported on Windows")
+	}
+	if m == nil {
+		return errors.New("self-restart is unavailable: mosdns instance is nil")
+	}
+	if delayMs <= 0 {
+		delayMs = 300
+	}
 
-			// 2. 等待延迟
-			time.Sleep(time.Duration(delay) * time.Millisecond)
+	go func(delay int) {
+		logger := m.Logger()
 
-			exe, err := os.Executable()
-			if err != nil {
-				logger.Error("self-restart failed: cannot get executable path", zap.Error(err))
-				return
+		// 2. 等待延迟
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+
+		exe, err := os.Executable()
+		if err != nil {
+			logger.Error("self-restart failed: cannot get executable path", zap.Error(err))
+			return
+		}
+
+		// 3. [核心逻辑] 定向关闭需要保存数据的缓存插件
+		logger.Info("saving data for targeted plugins...")
+
+		for tag, p := range m.plugins {
+			// 【新增防御与排查】：拦截 nil 插件并打印日志
+			if p == nil {
+				// 打印出是哪个 tag 的插件变成了 nil
+				logger.Warn("⚠️ 发现未初始化的插件 (nil plugin)", zap.String("tag", tag))
+				continue
 			}
+			// 获取类型名称
+			typeName := reflect.TypeOf(p).String()
 
-			// 3. [核心逻辑] 定向关闭需要保存数据的插件
-			logger.Info("saving data for targeted plugins...")
+			// 只匹配 cache
+			isCache := strings.Contains(typeName, "cache.Cache")
 
-			for tag, p := range m.plugins {
-				// 【新增防御与排查】：拦截 nil 插件并打印日志
-				if p == nil {
-					// 打印出是哪个 tag 的插件变成了 nil
-					logger.Warn("⚠️ 发现未初始化的插件 (nil plugin)", zap.String("tag", tag))
-					continue
-				}
-				// 获取类型名称
-				typeName := reflect.TypeOf(p).String()
+			if isCache {
+				if closer, ok := p.(io.Closer); ok {
+					logger.Info("closing plugin to save data",
+						zap.String("tag", tag),
+						zap.String("type", typeName))
 
-				// 只匹配 cache 和 domain_output
-				isCache := strings.Contains(typeName, "cache.Cache")
-				isDomainOutput := strings.Contains(typeName, "domain_output")
-
-				if isCache || isDomainOutput {
-					if closer, ok := p.(io.Closer); ok {
-						logger.Info("closing plugin to save data",
-							zap.String("tag", tag),
-							zap.String("type", typeName))
-
-						// 这里会阻塞，直到文件写入操作完成 (Go bufio -> OS Cache)
-						if err := closer.Close(); err != nil {
-							logger.Warn("failed to close plugin", zap.String("tag", tag), zap.Error(err))
-						}
+					// 这里会阻塞，直到文件写入操作完成 (Go bufio -> OS Cache)
+					if err := closer.Close(); err != nil {
+						logger.Warn("failed to close plugin", zap.String("tag", tag), zap.Error(err))
 					}
 				}
 			}
-			logger.Info("targeted data save completed")
+		}
+		logger.Info("targeted data save completed")
 
-			// 4. [已移除] syscall.Sync()
-			// 既然只是进程重启而非系统关机，Close() 将数据写入 OS Cache 已经足够安全且高效。
-			// 移除后也解决了 Windows 编译报错问题。
+		// 4. [已移除] syscall.Sync()
+		// 既然只是进程重启而非系统关机，Close() 将数据写入 OS Cache 已经足够安全且高效。
+		// 移除后也解决了 Windows 编译报错问题。
 
-			// 5. 执行重启 (进程替换)
-			logger.Info("executing syscall.Exec", zap.String("exe", exe))
-			_ = logger.Sync()
+		// 5. 执行重启 (进程替换)
+		logger.Info("executing syscall.Exec", zap.String("exe", exe))
+		_ = logger.Sync()
 
-			rawArgs := append([]string{exe}, os.Args[1:]...)
-			env := os.Environ()
+		rawArgs := append([]string{exe}, os.Args[1:]...)
+		env := os.Environ()
 
-			err = syscall.Exec(exe, rawArgs, env)
+		err = syscall.Exec(exe, rawArgs, env)
 
-			if err != nil {
-				fmt.Printf("[FATAL] syscall.Exec failed: %v\n", err)
-				os.Exit(1)
-			}
-		}(body.DelayMs)
-	}
+		if err != nil {
+			fmt.Printf("[FATAL] syscall.Exec failed: %v\n", err)
+			os.Exit(1)
+		}
+	}(delayMs)
+	return nil
 }
 
 func isWindows() bool {

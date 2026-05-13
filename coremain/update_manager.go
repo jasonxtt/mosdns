@@ -160,7 +160,7 @@ func (m *UpdateManager) getHttpClientForUpdate() (client *http.Client, isProxy b
 		return m.httpClient, false, nil
 	}
 
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	overridesPath := overridesPath()
 	data, err := os.ReadFile(overridesPath)
 	if err != nil {
 		if os.IsNotExist(err) {

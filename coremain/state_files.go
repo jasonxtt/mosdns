@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const managedStateDirName = "state"
+const managedStateDirName = "webinfo"
 
 var managedStateFileMu sync.Mutex
 
@@ -20,6 +20,9 @@ func InitializeManagedStateFiles() {
 		appearanceTextSettingsFile,
 		appearanceButtonSettingsFile,
 		auditSettingsFilename,
+		overridesFilename,
+		specialGroupsFilename,
+		upstreamOverridesFilename,
 		webUIPortSettingsFilename,
 	} {
 		_ = managedStateFilePath(filename)
@@ -71,62 +74,28 @@ func managedStateFilePathInDir(baseDir, filename string) string {
 		return legacyPath
 	}
 
-	info, err := os.Stat(legacyPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			mlog.L().Warn("failed to inspect legacy state file",
-				zap.String("path", legacyPath),
+	if info, err := os.Stat(legacyPath); err == nil {
+		if info.IsDir() {
+			mlog.L().Warn("legacy state file path is a directory, using legacy state file path",
+				zap.String("legacy_path", legacyPath),
+				zap.String("managed_path", statePath))
+			return legacyPath
+		}
+		if err := os.Rename(legacyPath, statePath); err != nil {
+			mlog.L().Warn("failed to migrate legacy state file, using legacy state file path",
+				zap.String("legacy_path", legacyPath),
+				zap.String("managed_path", statePath),
 				zap.Error(err))
+			return legacyPath
 		}
 		return statePath
-	}
-	if info.IsDir() {
-		mlog.L().Warn("legacy state file path is a directory, using managed state file path",
+	} else if err != nil && !os.IsNotExist(err) {
+		mlog.L().Warn("failed to inspect legacy state file, using legacy state file path",
 			zap.String("legacy_path", legacyPath),
-			zap.String("state_path", statePath))
-		return statePath
-	}
-
-	if err := os.Rename(legacyPath, statePath); err == nil {
-		mlog.L().Info("migrated managed state file",
-			zap.String("from", legacyPath),
-			zap.String("to", statePath))
-		return statePath
-	} else {
-		mlog.L().Warn("failed to move legacy state file, trying copy fallback",
-			zap.String("from", legacyPath),
-			zap.String("to", statePath),
-			zap.Error(err))
-	}
-
-	if err := copyStateFile(legacyPath, statePath, info.Mode().Perm()); err != nil {
-		mlog.L().Warn("failed to copy legacy state file, using legacy state file path",
-			zap.String("from", legacyPath),
-			zap.String("to", statePath),
+			zap.String("managed_path", statePath),
 			zap.Error(err))
 		return legacyPath
 	}
 
-	if err := os.Remove(legacyPath); err != nil {
-		mlog.L().Warn("copied legacy state file but failed to remove old file",
-			zap.String("legacy_path", legacyPath),
-			zap.String("state_path", statePath),
-			zap.Error(err))
-	} else {
-		mlog.L().Info("copied and removed legacy state file",
-			zap.String("from", legacyPath),
-			zap.String("to", statePath))
-	}
 	return statePath
-}
-
-func copyStateFile(from, to string, mode os.FileMode) error {
-	data, err := os.ReadFile(from)
-	if err != nil {
-		return err
-	}
-	if mode == 0 {
-		mode = 0o644
-	}
-	return os.WriteFile(to, data, mode)
 }

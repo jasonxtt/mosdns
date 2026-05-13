@@ -37,7 +37,7 @@ POST /api/v1/system/restart
 
 **说明**
 - 立即返回，重启异步执行
-- 重启前会优雅关闭 cache 和 domain_output 插件（保存数据）
+- 重启前会优雅关闭 cache 插件（保存数据）
 - Windows 不支持此接口
 
 ---
@@ -253,7 +253,7 @@ POST /api/v1/special-groups
   "name": "香港节点"
 }
 ```
-- `slot`: 50-59，不传则自动分配最小可用
+- `slot`: 可选；若不传或传 `0`，后端会自动分配从 `50` 开始的最小可用槽位
 - `name`: 组名称（必填）
 
 **响应 (200)**

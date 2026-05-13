@@ -7,16 +7,19 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	specialGroupsFilename = "special_upstream_groups.json"
-	specialSlotMin        = 50
-	specialSlotMax        = 59
+	specialGroupsFilename           = "special_upstream_groups.json"
+	specialGroupsConfigRelativePath = "sub_config/special_groups.yaml"
+	specialSlotMin                  = 50
+	specialGroupRestartDelayMs      = 1500
 )
 
 type SpecialGroup struct {
@@ -91,16 +94,15 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	specialGroupsLock.Lock()
 	defer specialGroupsLock.Unlock()
 
+	oldState := cloneSpecialGroups(specialGroups)
 	slot := payload.Slot
+	created := false
+
 	if slot == 0 {
 		slot = firstFreeSpecialSlot(specialGroups)
-		if slot == 0 {
-			http.Error(w, `{"error":"no free special upstream slots (50-59)"}`, http.StatusConflict)
-			return
-		}
 	}
-	if slot < specialSlotMin || slot > specialSlotMax {
-		http.Error(w, `{"error":"slot must be between 50 and 59"}`, http.StatusBadRequest)
+	if !isValidSpecialSlot(slot) {
+		http.Error(w, fmt.Sprintf(`{"error":"slot must be >= %d"}`, specialSlotMin), http.StatusBadRequest)
 		return
 	}
 
@@ -121,12 +123,23 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	if !updated {
 		specialGroups = append(specialGroups, SpecialGroup{Slot: slot, Name: payload.Name})
+		created = true
 	}
 	sort.Slice(specialGroups, func(i, j int) bool { return specialGroups[i].Slot < specialGroups[j].Slot })
 
 	if err := saveSpecialGroupsLocked(); err != nil {
+		specialGroups = oldState
 		http.Error(w, `{"error":"failed to save special groups"}`, http.StatusInternalServerError)
 		return
+	}
+
+	if created {
+		if err := syncSpecialGroupsConfigLocked(); err != nil {
+			rollbackSpecialGroupsLocked(oldState)
+			http.Error(w, `{"error":"failed to update special groups config"}`, http.StatusInternalServerError)
+			return
+		}
+		_ = scheduleSelfRestart(GetCurrentMosdns(), specialGroupRestartDelayMs)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -144,14 +157,15 @@ func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid slot"}`, http.StatusBadRequest)
 		return
 	}
-	if slot < specialSlotMin || slot > specialSlotMax {
-		http.Error(w, `{"error":"slot must be between 50 and 59"}`, http.StatusBadRequest)
+	if !isValidSpecialSlot(slot) {
+		http.Error(w, fmt.Sprintf(`{"error":"slot must be >= %d"}`, specialSlotMin), http.StatusBadRequest)
 		return
 	}
 
 	specialGroupsLock.Lock()
 	defer specialGroupsLock.Unlock()
 
+	oldState := cloneSpecialGroups(specialGroups)
 	next := make([]SpecialGroup, 0, len(specialGroups))
 	found := false
 	for _, g := range specialGroups {
@@ -165,13 +179,21 @@ func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"special group not found"}`, http.StatusNotFound)
 		return
 	}
+
 	specialGroups = next
 	if err := saveSpecialGroupsLocked(); err != nil {
+		specialGroups = oldState
 		http.Error(w, `{"error":"failed to save special groups"}`, http.StatusInternalServerError)
+		return
+	}
+	if err := syncSpecialGroupsConfigLocked(); err != nil {
+		rollbackSpecialGroupsLocked(oldState)
+		http.Error(w, `{"error":"failed to update special groups config"}`, http.StatusInternalServerError)
 		return
 	}
 
 	_ = clearSpecialGroupArtifacts(slot)
+	_ = scheduleSelfRestart(GetCurrentMosdns(), specialGroupRestartDelayMs)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -189,34 +211,44 @@ func loadSpecialGroups() error {
 	specialGroupsLock.Lock()
 	defer specialGroupsLock.Unlock()
 
-	dir := MainConfigBaseDir
+	groups, err := loadSpecialGroupsFromDir(mainConfigDir())
+	if err != nil {
+		return err
+	}
+	specialGroups = groups
+	return nil
+}
+
+func loadSpecialGroupsFromDir(dir string) ([]SpecialGroup, error) {
 	if dir == "" {
 		dir = "."
 	}
-	path := filepath.Join(dir, specialGroupsFilename)
+
+	path := managedStateFilePathInDir(dir, specialGroupsFilename)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			specialGroups = make([]SpecialGroup, 0)
-			return nil
+			return make([]SpecialGroup, 0), nil
 		}
-		return err
+		return nil, err
 	}
 	if len(data) == 0 {
-		specialGroups = make([]SpecialGroup, 0)
-		return nil
+		return make([]SpecialGroup, 0), nil
 	}
 
 	var groups []SpecialGroup
 	if err := json.Unmarshal(data, &groups); err != nil {
-		return err
+		return nil, err
 	}
+	return normalizeSpecialGroups(groups), nil
+}
 
+func normalizeSpecialGroups(groups []SpecialGroup) []SpecialGroup {
 	filtered := make([]SpecialGroup, 0, len(groups))
-	seen := make(map[int]struct{})
+	seen := make(map[int]struct{}, len(groups))
 	for _, g := range groups {
 		g.Name = strings.TrimSpace(g.Name)
-		if g.Slot < specialSlotMin || g.Slot > specialSlotMax || g.Name == "" {
+		if !isValidSpecialSlot(g.Slot) || g.Name == "" {
 			continue
 		}
 		if _, ok := seen[g.Slot]; ok {
@@ -226,17 +258,11 @@ func loadSpecialGroups() error {
 		filtered = append(filtered, g)
 	}
 	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Slot < filtered[j].Slot })
-	specialGroups = filtered
-	return nil
+	return filtered
 }
 
 func saveSpecialGroupsLocked() error {
-	dir := MainConfigBaseDir
-	if dir == "" {
-		dir = "."
-	}
-
-	path := filepath.Join(dir, specialGroupsFilename)
+	path := managedStateFilePathInDir(mainConfigDir(), specialGroupsFilename)
 	data, err := json.MarshalIndent(specialGroups, "", "  ")
 	if err != nil {
 		return err
@@ -248,8 +274,8 @@ func saveSpecialGroupsLocked() error {
 		}
 		seen := make(map[int]struct{}, len(groups))
 		for _, g := range groups {
-			if g.Slot < specialSlotMin || g.Slot > specialSlotMax {
-				return fmt.Errorf("slot must be between %d and %d", specialSlotMin, specialSlotMax)
+			if !isValidSpecialSlot(g.Slot) {
+				return fmt.Errorf("slot must be >= %d", specialSlotMin)
 			}
 			name := strings.TrimSpace(g.Name)
 			if name == "" {
@@ -264,17 +290,28 @@ func saveSpecialGroupsLocked() error {
 	}, nil, nil)
 }
 
+func cloneSpecialGroups(groups []SpecialGroup) []SpecialGroup {
+	cloned := make([]SpecialGroup, len(groups))
+	copy(cloned, groups)
+	return cloned
+}
+
+func rollbackSpecialGroupsLocked(oldState []SpecialGroup) {
+	specialGroups = cloneSpecialGroups(oldState)
+	_ = saveSpecialGroupsLocked()
+	_ = syncSpecialGroupsConfigLocked()
+}
+
 func firstFreeSpecialSlot(groups []SpecialGroup) int {
 	used := make(map[int]struct{}, len(groups))
 	for _, g := range groups {
 		used[g.Slot] = struct{}{}
 	}
-	for slot := specialSlotMin; slot <= specialSlotMax; slot++ {
+	for slot := specialSlotMin; ; slot++ {
 		if _, ok := used[slot]; !ok {
 			return slot
 		}
 	}
-	return 0
 }
 
 func buildSpecialGroupView(g SpecialGroup) SpecialGroupView {
@@ -310,11 +347,132 @@ func specialManualRulePath(slot int) string {
 	return filepath.Join("rule", fmt.Sprintf("special_%d.txt", slot))
 }
 
-func clearSpecialGroupArtifacts(slot int) error {
+func isValidSpecialSlot(slot int) bool {
+	return slot >= specialSlotMin
+}
+
+func mainConfigDir() string {
 	dir := MainConfigBaseDir
 	if dir == "" {
 		dir = "."
 	}
+	return dir
+}
+
+func syncSpecialGroupsConfigLocked() error {
+	return writeSpecialGroupsConfig(mainConfigDir(), specialGroups)
+}
+
+func SyncSpecialGroupsConfig(baseDir string) error {
+	groups, err := loadSpecialGroupsFromDir(baseDir)
+	if err != nil {
+		return err
+	}
+	if err := cleanupOrphanSpecialCacheDumps(baseDir, groups); err != nil {
+		return err
+	}
+	return writeSpecialGroupsConfig(baseDir, groups)
+}
+
+func writeSpecialGroupsConfig(baseDir string, groups []SpecialGroup) error {
+	if baseDir == "" {
+		baseDir = "."
+	}
+	path := filepath.Join(baseDir, specialGroupsConfigRelativePath)
+	data := renderSpecialGroupsConfig(groups)
+	return writeManagedFile(path, data, validateSpecialGroupsConfig, nil, nil)
+}
+
+func validateSpecialGroupsConfig(raw []byte) error {
+	var cfg Config
+	return yaml.Unmarshal(raw, &cfg)
+}
+
+func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
+	var b strings.Builder
+
+	b.WriteString("plugins:\n")
+	b.WriteString("# 由 special_groups API 自动生成。不要手动编辑。\n")
+	for _, g := range groups {
+		slot := g.Slot
+		b.WriteString(fmt.Sprintf("  - tag: special_route_%d\n", slot))
+		b.WriteString("    type: sd_set_light\n")
+		b.WriteString("    args:\n")
+		b.WriteString("      socks5: \"\"\n")
+		b.WriteString(fmt.Sprintf("      local_config: \"srs/special_%d.json\"\n\n", slot))
+
+		b.WriteString(fmt.Sprintf("  - tag: special_manual_%d\n", slot))
+		b.WriteString("    type: domain_set_light\n")
+		b.WriteString("    args:\n")
+		b.WriteString("      files:\n")
+		b.WriteString(fmt.Sprintf("        - \"rule/special_%d.txt\"\n\n", slot))
+
+		b.WriteString(fmt.Sprintf("  - tag: cache_special_%d\n", slot))
+		b.WriteString("    type: cache\n")
+		b.WriteString("    args:\n")
+		b.WriteString("      size: 20000000\n")
+		b.WriteString("      lazy_cache_ttl: 259200000\n")
+		b.WriteString(fmt.Sprintf("      dump_file: cache/cache_special_%d.dump\n", slot))
+		b.WriteString("      dump_interval: 36000\n\n")
+
+		b.WriteString(fmt.Sprintf("  - tag: special_upstream_%d\n", slot))
+		b.WriteString("    type: aliapi\n")
+		b.WriteString("    args:\n")
+		b.WriteString("      concurrent: 2\n")
+		b.WriteString("      upstreams:\n")
+		b.WriteString("        - addr: \"223.5.5.5\"\n\n")
+
+		b.WriteString(fmt.Sprintf("  - tag: sequence_special_%d\n", slot))
+		b.WriteString("    type: sequence\n")
+		b.WriteString("    args:\n")
+		b.WriteString("      - matches: switch4 'A'\n")
+		b.WriteString(fmt.Sprintf("        exec: $cache_special_%d\n", slot))
+		b.WriteString(fmt.Sprintf("      - exec: flow_setter group=special_%d sequence=sequence_special_%d upstream=special_upstream_%d\n", slot, slot, slot))
+		b.WriteString(fmt.Sprintf("      - exec: $special_upstream_%d\n", slot))
+		b.WriteString("      - exec: cname_remover\n\n")
+	}
+
+	b.WriteString("  - tag: special_upstream_matcher\n")
+	b.WriteString("    type: domain_mapper\n")
+	b.WriteString("    args:\n")
+	b.WriteString("      default_mark: 0\n")
+	b.WriteString("      default_tag: \"\"\n")
+	if len(groups) == 0 {
+		b.WriteString("      rules: []\n\n")
+	} else {
+		b.WriteString("      rules:\n")
+		for _, g := range groups {
+			slot := g.Slot
+			b.WriteString(fmt.Sprintf("        - tag: special_route_%d\n", slot))
+			b.WriteString(fmt.Sprintf("          ctx_mark: %d\n", slot))
+			b.WriteString(fmt.Sprintf("          output_tag: \"特殊上游%d\"\n", slot))
+			b.WriteString(fmt.Sprintf("        - tag: special_manual_%d\n", slot))
+			b.WriteString(fmt.Sprintf("          ctx_mark: %d\n", slot))
+			b.WriteString(fmt.Sprintf("          output_tag: \"特殊上游%d\"\n", slot))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("  - tag: sequence_special_all\n")
+	b.WriteString("    type: sequence\n")
+	if len(groups) == 0 {
+		b.WriteString("    args: []\n")
+	} else {
+		b.WriteString("    args:\n")
+		for _, g := range groups {
+			slot := g.Slot
+			b.WriteString(fmt.Sprintf("      - matches: mark %d\n", slot))
+			b.WriteString(fmt.Sprintf("        exec: $sequence_special_%d\n", slot))
+			b.WriteString(fmt.Sprintf("      - matches: mark %d\n", slot))
+			b.WriteString("        exec: exit\n")
+		}
+	}
+
+	return []byte(b.String())
+}
+
+func clearSpecialGroupArtifacts(slot int) error {
+	dir := mainConfigDir()
 
 	if err := loadUpstreamOverrides(); err == nil {
 		upstreamOverridesLock.Lock()
@@ -326,14 +484,49 @@ func clearSpecialGroupArtifacts(slot int) error {
 		}
 	}
 
-	localConfigPath := filepath.Join(dir, "srs", fmt.Sprintf("special_%d.json", slot))
-	if err := os.Remove(localConfigPath); err != nil && !os.IsNotExist(err) {
+	paths := []string{
+		filepath.Join(dir, "srs", fmt.Sprintf("special_%d.json", slot)),
+		filepath.Join(dir, specialManualRulePath(slot)),
+		filepath.Join(dir, "cache", fmt.Sprintf("cache_special_%d.dump", slot)),
+	}
+	for _, p := range paths {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanupOrphanSpecialCacheDumps(baseDir string, groups []SpecialGroup) error {
+	if baseDir == "" {
+		baseDir = "."
+	}
+
+	activeSlots := make(map[int]struct{}, len(groups))
+	for _, g := range groups {
+		activeSlots[g.Slot] = struct{}{}
+	}
+
+	pattern := filepath.Join(baseDir, "cache", "cache_special_*.dump")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
 		return err
 	}
 
-	manualRulePath := filepath.Join(dir, specialManualRulePath(slot))
-	if err := os.Remove(manualRulePath); err != nil && !os.IsNotExist(err) {
-		return err
+	for _, path := range matches {
+		name := filepath.Base(path)
+		slotText := strings.TrimSuffix(strings.TrimPrefix(name, "cache_special_"), ".dump")
+		slot, err := strconv.Atoi(slotText)
+		if err != nil || !isValidSpecialSlot(slot) {
+			continue
+		}
+		if _, ok := activeSlots[slot]; ok {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
+
 	return nil
 }
