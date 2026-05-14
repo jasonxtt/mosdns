@@ -4,8 +4,6 @@ import { getJSON, getText, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 
 const loading = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
 
 const specialGroups = ref([])
 const cacheRows = ref([])
@@ -174,14 +172,26 @@ const lastRunDomainCountText = computed(() => {
   return '--'
 })
 
+function showTopNotice(message, tone = 'success') {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent('mosdns-top-notice', {
+      detail: {
+        message: String(message || ''),
+        tone
+      }
+    })
+  )
+}
+
 function setError(message) {
-  successMessage.value = ''
-  errorMessage.value = message
+  showTopNotice(message, 'error')
 }
 
 function setSuccess(message) {
-  errorMessage.value = ''
-  successMessage.value = message
+  showTopNotice(message, 'success')
 }
 
 function isZeroTime(value) {
@@ -823,8 +833,7 @@ async function clearAllShuntRules() {
 
 async function reloadAll() {
   loading.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
+  showTopNotice('', 'success')
   try {
     await Promise.all([
       refreshCacheStats(),
@@ -864,9 +873,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="data-panel">
-    <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-    <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
-
     <section class="panel sub-panel data-module cache-module">
       <header class="panel-header cache-module-head">
         <div>
@@ -969,7 +975,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <p v-if="requeryLoadError" class="msg error">{{ requeryLoadError }}</p>
+      <p v-if="requeryLoadError" class="muted">{{ requeryLoadError }}</p>
 
       <template v-if="requeryAvailable">
         <div class="requery-status-head">
@@ -1000,7 +1006,7 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <p v-if="lastRunErrorText" class="msg error">最近失败原因：{{ lastRunErrorText }}</p>
+        <p v-if="lastRunErrorText" class="muted">最近失败原因：{{ lastRunErrorText }}</p>
 
         <div v-if="isRequeryRunning" class="requery-progress-wrap">
           <div class="requery-progress-bar">
@@ -1090,7 +1096,7 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <p v-if="dataView.error" class="msg error">{{ dataView.error }}</p>
+        <p v-if="dataView.error" class="muted">{{ dataView.error }}</p>
 
         <div v-if="dataView.mode === 'domain'" class="table-wrap">
           <table>

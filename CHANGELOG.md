@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## v0.3.22
+
+### Added
+
+- added local-rules multi-list draft workflow in the maintained Vue UI:
+  - edits now remain in memory while switching between list tabs inside the local-rules page
+  - one-click `保存全部改动` now persists all changed local lists in a single action
+- added backend fallback behavior for `foreign` upstream group socks proxy:
+  - when an upstream item in `foreign` has empty `socks5`, runtime now falls back to global `/api/v1/overrides` socks5
+  - per-upstream socks5 still takes precedence when explicitly configured
+- added upstream fallback regression tests in `coremain/api_upstream_test.go`
+
+### Changed
+
+- unified full-page success/error messages into the top-right compact notice area in the maintained Vue UI
+- refined top notice width and placement so it no longer spans large horizontal area or blocks header title region
+- updated upstream editor hint text to explicitly show foreign-group socks5 fallback behavior when applicable
+
+### Fixed
+
+- fixed local-rules workflow where unsaved edits could be lost when switching list tabs before save
+- removed remaining legacy inline `msg` banner usage in maintained Vue pages to avoid layout push-down behavior
+
+### Upgrade Notes
+
+- this release does **not** require YAML config migration
+- existing deployments can update only the binary
+- if browser cache is stale, refresh once to load the latest embedded frontend assets
+
 ## v0.3.21
 
 ### Fixed

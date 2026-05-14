@@ -10,8 +10,6 @@ const saving = ref(false)
 const filterGroup = ref('all')
 const showEditor = ref(false)
 const hideDisabled = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
 
 const sortState = reactive({
   key: '',
@@ -21,6 +19,7 @@ const sortState = reactive({
 const upstreamTags = ref([])
 const upstreamConfig = ref({})
 const specialGroups = ref([])
+const globalSocks5 = ref('')
 const specialModalOpen = ref(false)
 const specialSaving = ref(false)
 const specialEditor = reactive({
@@ -82,6 +81,18 @@ const showPipeline = computed(() => ['tcp', 'dot', 'tls'].includes(protocolValue
 const showHttp3 = computed(() => ['https', 'doh', 'quic', 'doq'].includes(protocolValue.value))
 const showSocks5 = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
 const showTlsVerify = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
+const showForeignSocksFallbackHint = computed(() => {
+  if (!showSocks5.value) {
+    return false
+  }
+  if (String(form.group || '').trim() !== 'foreign') {
+    return false
+  }
+  if (String(form.socks5 || '').trim()) {
+    return false
+  }
+  return Boolean(String(globalSocks5.value || '').trim())
+})
 
 const groupOptions = computed(() => {
   const options = new Set()
@@ -268,9 +279,30 @@ function rowAddress(item) {
   return item.addr || '-'
 }
 
+function showTopNotice(message, tone = 'success') {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent('mosdns-top-notice', {
+      detail: {
+        message: String(message || ''),
+        tone
+      }
+    })
+  )
+}
+
+function setError(message) {
+  showTopNotice(message, 'error')
+}
+
+function setSuccess(message) {
+  showTopNotice(message, 'success')
+}
+
 function resetMessage() {
-  errorMessage.value = ''
-  successMessage.value = ''
+  showTopNotice('', 'success')
 }
 
 function resetForm() {
@@ -344,22 +376,26 @@ async function loadData() {
   loading.value = true
   resetMessage()
   try {
-    const [tagsRes, configRes, groupsRes, metricsRes] = await Promise.allSettled([
+    const [tagsRes, configRes, groupsRes, metricsRes, overridesRes] = await Promise.allSettled([
       getJSON('/api/v1/upstream/tags'),
       getJSON('/api/v1/upstream/config'),
       getJSON('/api/v1/special-groups'),
-      getText('/metrics')
+      getText('/metrics'),
+      getJSON('/api/v1/overrides')
     ])
     upstreamTags.value = tagsRes.status === 'fulfilled' && Array.isArray(tagsRes.value) ? tagsRes.value : []
     upstreamConfig.value = configRes.status === 'fulfilled' && configRes.value ? configRes.value : {}
     specialGroups.value = groupsRes.status === 'fulfilled' && Array.isArray(groupsRes.value) ? groupsRes.value : []
     parseAllMetrics(metricsRes.status === 'fulfilled' ? metricsRes.value : '')
+    globalSocks5.value = overridesRes.status === 'fulfilled'
+      ? String(overridesRes.value?.socks5 || '').trim()
+      : ''
 
-    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || groupsRes.status === 'rejected' || metricsRes.status === 'rejected') {
-      errorMessage.value = '部分数据加载失败，已使用可用数据渲染页面。'
+    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || groupsRes.status === 'rejected' || metricsRes.status === 'rejected' || overridesRes.status === 'rejected') {
+      setError('部分数据加载失败，已使用可用数据渲染页面。')
     }
   } catch (error) {
-    errorMessage.value = `加载上游配置失败: ${error.message}`
+    setError(`加载上游配置失败: ${error.message}`)
   } finally {
     loading.value = false
   }
@@ -428,7 +464,7 @@ function closeSpecialGroupModal() {
 async function saveSpecialGroup() {
   const name = String(specialEditor.name || '').trim()
   if (!name) {
-    errorMessage.value = '专属分流组名称不能为空'
+    setError('专属分流组名称不能为空')
     return
   }
 
@@ -439,11 +475,11 @@ async function saveSpecialGroup() {
       slot: Number(specialEditor.slot) || 0,
       name
     })
-    successMessage.value = '专属分流组已保存'
+    setSuccess('专属分流组已保存')
     closeSpecialGroupModal()
     await loadData()
   } catch (error) {
-    errorMessage.value = `保存专属分流组失败: ${error.message}`
+    setError(`保存专属分流组失败: ${error.message}`)
   } finally {
     specialSaving.value = false
   }
@@ -458,10 +494,10 @@ async function deleteSpecialGroup(group) {
   resetMessage()
   try {
     await deleteRequest(`/api/v1/special-groups/${group.slot}`)
-    successMessage.value = '专属分流组已删除'
+    setSuccess('专属分流组已删除')
     await loadData()
   } catch (error) {
-    errorMessage.value = `删除专属分流组失败: ${error.message}`
+    setError(`删除专属分流组失败: ${error.message}`)
   }
 }
 
@@ -498,15 +534,15 @@ async function saveUpstream() {
   const protocol = protocolValue.value
 
   if (!group) {
-    errorMessage.value = '请选择所属组'
+    setError('请选择所属组')
     return
   }
   if (!tag) {
-    errorMessage.value = '上游标识不能为空'
+    setError('上游标识不能为空')
     return
   }
   if (!protocol) {
-    errorMessage.value = '协议不能为空'
+    setError('协议不能为空')
     return
   }
 
@@ -526,11 +562,11 @@ async function saveUpstream() {
       plugin_tag: group,
       upstreams: list
     })
-    successMessage.value = '上游配置已保存'
+    setSuccess('上游配置已保存')
     showEditor.value = false
     await loadData()
   } catch (error) {
-    errorMessage.value = `保存失败: ${error.message}`
+    setError(`保存失败: ${error.message}`)
   } finally {
     saving.value = false
   }
@@ -549,10 +585,10 @@ async function removeRow(row) {
       plugin_tag: row.group,
       upstreams: list
     })
-    successMessage.value = '上游已删除'
+    setSuccess('上游已删除')
     await loadData()
   } catch (error) {
-    errorMessage.value = `删除失败: ${error.message}`
+    setError(`删除失败: ${error.message}`)
   }
 }
 
@@ -573,7 +609,7 @@ async function toggleEnable(row) {
     })
     await loadData()
   } catch (error) {
-    errorMessage.value = `切换失败: ${error.message}`
+    setError(`切换失败: ${error.message}`)
   }
 }
 
@@ -626,9 +662,6 @@ onBeforeUnmount(() => {
       </select>
       <button class="btn secondary" type="button" @click="toggleHideDisabled">{{ hideDisabledLabel }}</button>
     </div>
-
-    <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-    <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
     <div class="table-wrap adaptive-table-wrap upstream-adaptive-wrap">
       <table class="upstream-adaptive-table">
@@ -711,7 +744,12 @@ onBeforeUnmount(() => {
             <input v-model="form.dial_addr" placeholder="可选，填 IP 可免域名解析" />
 
             <label v-if="showSocks5">Socks5 代理</label>
-            <input v-if="showSocks5" v-model="form.socks5" placeholder="host:port" />
+            <div v-if="showSocks5">
+              <input v-model="form.socks5" placeholder="host:port" />
+              <small v-if="showForeignSocksFallbackHint" class="muted">
+                当前为空时会自动继承系统设置中的 SOCKS5：{{ globalSocks5 }}
+              </small>
+            </div>
 
             <label v-if="showPipeline">Enable Pipeline</label>
             <label v-if="showPipeline" class="switch-inline">

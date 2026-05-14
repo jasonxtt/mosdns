@@ -23,8 +23,6 @@ import {
 } from '../utils/appearanceButtonColor'
 
 const loading = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
 
 const audit = reactive({
   capturing: null,
@@ -222,18 +220,29 @@ const updateLatestBadge = computed(() => {
 })
 
 function setError(message) {
-  successMessage.value = ''
-  errorMessage.value = message
+  showTopNotice(message, 'error')
 }
 
 function setSuccess(message) {
-  errorMessage.value = ''
-  successMessage.value = message
+  showTopNotice(message, 'success')
 }
 
 function clearMessage() {
-  errorMessage.value = ''
-  successMessage.value = ''
+  showTopNotice('', 'success')
+}
+
+function showTopNotice(message, tone = 'success') {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent('mosdns-top-notice', {
+      detail: {
+        message: String(message || ''),
+        tone
+      }
+    })
+  )
 }
 
 function normalizeVersion(value) {
@@ -1424,9 +1433,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="system-panel">
-    <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-    <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
-
     <div class="system-layout-stack">
       <div class="control-panel-grid system-grid-quad">
         <section class="panel control-module control-module--mini">

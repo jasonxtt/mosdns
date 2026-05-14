@@ -96,7 +96,33 @@ func GetUpstreamOverrides(pluginTag string) []UpstreamOverrideConfig {
 	if !ok || len(entries) == 0 {
 		return nil
 	}
-	return entries
+
+	copied := make([]UpstreamOverrideConfig, len(entries))
+	copy(copied, entries)
+	if pluginTag == "foreign" {
+		fallback := resolveGlobalSocks5Override()
+		if fallback != "" {
+			for i := range copied {
+				if strings.TrimSpace(copied[i].Socks5) == "" {
+					copied[i].Socks5 = fallback
+				}
+			}
+		}
+	}
+	return copied
+}
+
+func resolveGlobalSocks5Override() string {
+	path := filepath.Join(MainConfigBaseDir, overridesFilename)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var cfg GlobalOverrides
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Socks5)
 }
 
 // loadUpstreamOverrides 内部加载函数
