@@ -7,8 +7,6 @@ const HISTORY_KEY = 'mosdnsHistory'
 const HISTORY_LENGTH = 60
 
 const loading = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
 const lastUpdatedText = ref('--')
 
 const stats = reactive({
@@ -114,8 +112,29 @@ function updateOverviewRows() {
 }
 
 function clearMessages() {
-  errorMessage.value = ''
-  successMessage.value = ''
+  showTopNotice('', 'success')
+}
+
+function showTopNotice(message, tone = 'success') {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent('mosdns-top-notice', {
+      detail: {
+        message: String(message || ''),
+        tone
+      }
+    })
+  )
+}
+
+function setError(message) {
+  showTopNotice(message, 'error')
+}
+
+function setSuccess(message) {
+  showTopNotice(message, 'success')
 }
 
 function normalizeIP(ip) {
@@ -235,7 +254,7 @@ async function loadTopDomainDetail(domain) {
     topDomainDetailLogs.value = Array.isArray(data?.logs) ? data.logs : []
   } catch (error) {
     topDomainDetailLogs.value = []
-    errorMessage.value = `加载域名详情失败: ${error.message}`
+    setError(`加载域名详情失败: ${error.message}`)
   } finally {
     topDomainDetailLoading.value = false
   }
@@ -380,9 +399,9 @@ function generateDualSparklineSVG(totalValues, avgValues, timestamps) {
 
 async function reloadOverview(showMessage = false) {
   loading.value = true
-  errorMessage.value = ''
+  showTopNotice('', 'success')
   if (showMessage) {
-    successMessage.value = ''
+    showTopNotice('', 'success')
   }
   try {
     const [
@@ -416,10 +435,10 @@ async function reloadOverview(showMessage = false) {
     lastUpdatedText.value = new Date().toLocaleString('zh-CN', { hour12: false })
 
     if (showMessage) {
-      successMessage.value = '概览数据已刷新'
+      setSuccess('概览数据已刷新')
     }
   } catch (error) {
-    errorMessage.value = `加载概览失败: ${error.message}`
+    setError(`加载概览失败: ${error.message}`)
   } finally {
     loading.value = false
     nextTick(() => {
@@ -450,9 +469,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="overview-page" :style="overviewLayoutVars">
-    <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-    <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
-
     <DnsOverviewCard />
 
     <div ref="overviewGridRef" class="overview-grid">

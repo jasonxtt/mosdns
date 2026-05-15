@@ -10,8 +10,6 @@ const props = defineProps({
 })
 
 const loading = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
 
 const searchInput = ref('')
 const logs = ref([])
@@ -249,9 +247,30 @@ function getMatchedGroupDisplay(value) {
   return hit?.name || key
 }
 
+function showTopNotice(message, tone = 'success') {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent('mosdns-top-notice', {
+      detail: {
+        message: String(message || ''),
+        tone
+      }
+    })
+  )
+}
+
+function setError(message) {
+  showTopNotice(message, 'error')
+}
+
+function setSuccess(message) {
+  showTopNotice(message, 'success')
+}
+
 function resetMessages() {
-  errorMessage.value = ''
-  successMessage.value = ''
+  showTopNotice('', 'success')
 }
 
 function parseSearchKeyword(raw) {
@@ -339,7 +358,7 @@ function closeLogDetail() {
 async function copyText(value) {
   const text = String(value || '').trim()
   if (!text) {
-    errorMessage.value = '没有可复制的内容'
+    setError('没有可复制的内容')
     return
   }
   try {
@@ -356,17 +375,16 @@ async function copyText(value) {
       document.execCommand('copy')
       document.body.removeChild(textArea)
     }
-    successMessage.value = '已复制到剪贴板'
-    errorMessage.value = ''
+    setSuccess('已复制到剪贴板')
   } catch (error) {
-    errorMessage.value = `复制失败: ${error.message}`
+    setError(`复制失败: ${error.message}`)
   }
 }
 
 function applyQuickFilter(value, exact = false) {
   const text = String(value || '').trim()
   if (!text) {
-    errorMessage.value = '没有可筛选的内容'
+    setError('没有可筛选的内容')
     return
   }
   searchInput.value = exact ? `"${text}"` : text
@@ -532,10 +550,10 @@ async function saveAliasesFromRows(showMessage = true) {
     clientAliases.value = normalizeAliasMap(nextMap)
     syncAliasRowsFromMap(clientAliases.value, aliasRows.value.map((row) => row.ip))
     if (showMessage) {
-      successMessage.value = '客户端别名已保存'
+      setSuccess('客户端别名已保存')
     }
   } catch (error) {
-    errorMessage.value = `保存别名失败: ${error.message}`
+    setError(`保存别名失败: ${error.message}`)
   } finally {
     aliasSaving.value = false
   }
@@ -545,7 +563,7 @@ function addManualAlias() {
   const ip = normalizeIP(manualAliasIp.value)
   const alias = String(manualAliasName.value || '').trim()
   if (!ip || !alias) {
-    errorMessage.value = '请填写完整的 IP 与别名'
+    setError('请填写完整的 IP 与别名')
     return
   }
   const existing = aliasRows.value.find((row) => normalizeIP(row.ip) === ip)
@@ -557,7 +575,7 @@ function addManualAlias() {
   }
   manualAliasIp.value = ''
   manualAliasName.value = ''
-  successMessage.value = `已加入待保存项: ${ip}`
+  setSuccess(`已加入待保存项: ${ip}`)
 }
 
 function triggerImportAliases() {
@@ -598,9 +616,9 @@ async function onImportAliases(event) {
     await putJSON('/plugins/clientname', merged)
     clientAliases.value = normalizeAliasMap(merged)
     syncAliasRowsFromMap(clientAliases.value, aliasRows.value.map((row) => row.ip))
-    successMessage.value = `已导入 ${Object.keys(imported).length} 条别名`
+    setSuccess(`已导入 ${Object.keys(imported).length} 条别名`)
   } catch (error) {
-    errorMessage.value = `导入别名失败: ${error.message}`
+    setError(`导入别名失败: ${error.message}`)
   } finally {
     event.target.value = ''
   }
@@ -620,7 +638,7 @@ async function exportAliases() {
     document.body.removeChild(anchor)
     window.URL.revokeObjectURL(url)
   } catch (error) {
-    errorMessage.value = `导出别名失败: ${error.message}`
+    setError(`导出别名失败: ${error.message}`)
   }
 }
 
@@ -653,7 +671,7 @@ async function loadLogs(page = 1, append = false) {
       detailModalOpen.value = false
     }
   } catch (error) {
-    errorMessage.value = `加载查询日志失败: ${error.message}`
+    setError(`加载查询日志失败: ${error.message}`)
   } finally {
     loading.value = false
   }
@@ -678,9 +696,9 @@ async function startCapture() {
   resetMessages()
   try {
     await postJSON('/api/v1/capture/start', { duration_seconds: seconds })
-    successMessage.value = `已开始抓取，时长 ${seconds} 秒`
+    setSuccess(`已开始抓取，时长 ${seconds} 秒`)
   } catch (error) {
-    errorMessage.value = `启动抓取失败: ${error.message}`
+    setError(`启动抓取失败: ${error.message}`)
   } finally {
     loading.value = false
   }
@@ -694,12 +712,12 @@ async function fetchCaptureLogs() {
     const list = Array.isArray(data) ? data : Array.isArray(data?.logs) ? data.logs : Array.isArray(data?.items) ? data.items : []
     processDiagnosticLogs(list)
     if (captureLogs.value.length === 0) {
-      errorMessage.value = '没有采集到任何 Debug 日志'
+      setError('没有采集到任何 Debug 日志')
       return
     }
-    successMessage.value = `成功获取 ${captureLogs.value.length} 条日志`
+    setSuccess(`成功获取 ${captureLogs.value.length} 条日志`)
   } catch (error) {
-    errorMessage.value = `获取抓取日志失败: ${error.message}`
+    setError(`获取抓取日志失败: ${error.message}`)
   } finally {
     loading.value = false
   }
@@ -755,9 +773,6 @@ onBeforeUnmount(() => {
           <button class="btn secondary" @click="openAliasManager">客户端别名</button>
         </div>
       </header>
-
-      <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-      <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
       <form class="query-search" @submit.prevent="refreshLogs">
         <input v-model="searchInput" placeholder="全局搜索，使用 &quot;引号&quot; 精确匹配" />
@@ -831,9 +846,6 @@ onBeforeUnmount(() => {
           <h3>诊断抓取</h3>
         </div>
       </header>
-
-      <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-      <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
 
       <div class="diagnostic-toolbar">
         <label>抓取时长(秒)</label>

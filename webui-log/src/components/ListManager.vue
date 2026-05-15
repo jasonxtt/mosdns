@@ -9,8 +9,7 @@ const selectedTag = ref('')
 const content = ref('')
 const statusText = ref('未加载')
 const specialGroups = ref([])
-const lastLoadedContent = ref('')
-const dirty = ref(false)
+const listDrafts = ref({})
 
 const fixedProfiles = [
   { tag: 'whitelist', name: '白名单' },
@@ -107,8 +106,38 @@ function lineCount(text) {
   return trimmed.split('\n').map((line) => line.trim()).filter(Boolean).length
 }
 
-function updateStatus(extra = '') {
-  statusText.value = `共 ${lineCount(content.value)} 行${extra}`
+function getDraft(tag) {
+  if (!tag) {
+    return null
+  }
+  return listDrafts.value[tag] || null
+}
+
+function ensureDraft(tag, initialContent = '') {
+  if (!tag) {
+    return null
+  }
+  if (!listDrafts.value[tag]) {
+    listDrafts.value[tag] = {
+      original: String(initialContent || ''),
+      content: String(initialContent || '')
+    }
+  }
+  return listDrafts.value[tag]
+}
+
+function isDraftDirty(tag) {
+  const draft = getDraft(tag)
+  if (!draft) {
+    return false
+  }
+  return String(draft.content || '') !== String(draft.original || '')
+}
+
+function updateStatus(extra = '', tag = selectedTag.value) {
+  const draft = getDraft(tag)
+  const base = draft ? String(draft.content || '') : String(content.value || '')
+  statusText.value = `共 ${lineCount(base)} 行${extra}`
 }
 
 async function loadProfiles() {
@@ -127,21 +156,33 @@ async function loadList(tag, options = {}) {
     return
   }
   const preserveEditing = Boolean(options?.preserveEditing)
-  if (preserveEditing && selectedTag.value === tag && dirty.value) {
+  if (preserveEditing && isDraftDirty(tag)) {
     updateStatus('（检测到未保存编辑，已暂停自动刷新）')
     return
   }
+
   selectedTag.value = tag
-  loading.value = true
   resetMessage()
-  content.value = ''
+  const cached = getDraft(tag)
+  if (cached && !options?.forceReload) {
+    content.value = String(cached.content || '')
+    updateStatus(isDraftDirty(tag) ? '（未保存）' : '', tag)
+    return
+  }
+
+  loading.value = true
+  content.value = cached ? String(cached.content || '') : ''
   statusText.value = '加载中...'
   try {
     const text = await getText(`/plugins/${tag}/show?limit=10000`)
-    content.value = text || ''
-    lastLoadedContent.value = content.value
-    dirty.value = false
-    updateStatus()
+    const normalized = String(text || '')
+    const draft = ensureDraft(tag, normalized)
+    draft.original = normalized
+    draft.content = normalized
+    if (selectedTag.value === tag) {
+      content.value = normalized
+      updateStatus('', tag)
+    }
   } catch (error) {
     setError(`加载列表失败: ${error.message}`)
     statusText.value = '加载失败'
@@ -155,29 +196,65 @@ async function saveList() {
     setError('请先选择列表')
     return
   }
+
+  const pending = Object.entries(listDrafts.value)
+    .filter(([_, draft]) => String(draft?.content || '') !== String(draft?.original || ''))
+    .map(([tag, draft]) => ({ tag, draft }))
+
+  if (pending.length === 0) {
+    setSuccess('没有需要保存的改动')
+    return
+  }
+
   saving.value = true
   resetMessage()
+  let successCount = 0
+  const failed = []
   try {
-    const values = content.value
-      .split('\n')
-      .map((item) => item.trim())
-      .filter(Boolean)
-    await postJSON(`/plugins/${selectedTag.value}/post`, { values })
-    content.value = values.join('\n')
-    lastLoadedContent.value = content.value
-    dirty.value = false
-    setSuccess(`列表“${getProfileName(selectedTag.value)}”已保存`)
-    statusText.value = `共 ${values.length} 行`
-  } catch (error) {
-    setError(`保存失败: ${error.message}`)
+    for (const item of pending) {
+      const values = String(item.draft?.content || '')
+        .split('\n')
+        .map((value) => value.trim())
+        .filter(Boolean)
+      try {
+        await postJSON(`/plugins/${item.tag}/post`, { values })
+        const normalized = values.join('\n')
+        item.draft.content = normalized
+        item.draft.original = normalized
+        successCount += 1
+      } catch (error) {
+        failed.push({
+          tag: item.tag,
+          message: String(error?.message || '未知错误')
+        })
+      }
+    }
+
+    const activeDraft = getDraft(selectedTag.value)
+    if (activeDraft) {
+      content.value = String(activeDraft.content || '')
+      updateStatus('', selectedTag.value)
+    }
+
+    if (failed.length === 0) {
+      setSuccess(`已保存 ${successCount} 个列表改动`)
+      return
+    }
+    const sample = failed.slice(0, 2).map((item) => `${getProfileName(item.tag)}: ${item.message}`).join('；')
+    setError(`已保存 ${successCount} 个列表，失败 ${failed.length} 个。${sample}`)
   } finally {
     saving.value = false
   }
 }
 
 function onEditorInput() {
-  dirty.value = content.value !== lastLoadedContent.value
-  updateStatus(dirty.value ? '（未保存）' : '')
+  const tag = selectedTag.value
+  if (!tag) {
+    return
+  }
+  const draft = ensureDraft(tag, content.value)
+  draft.content = String(content.value || '')
+  updateStatus(isDraftDirty(tag) ? '（未保存）' : '', tag)
 }
 
 async function init() {
@@ -215,7 +292,7 @@ onBeforeUnmount(() => {
           :class="{ active: selectedTag === profile.tag }"
           @click="loadList(profile.tag)"
         >
-          {{ profile.name }}<span v-if="selectedTag === profile.tag && dirty" class="unsaved-dot"></span>
+          {{ profile.name }}<span v-if="isDraftDirty(profile.tag)" class="unsaved-dot"></span>
         </button>
       </aside>
 
@@ -234,7 +311,7 @@ onBeforeUnmount(() => {
             <span class="muted list-status-inline">{{ statusText }}</span>
           </div>
           <button class="btn secondary save-list-btn" :disabled="saving || loading" @click="saveList">
-            {{ saving ? '保存中...' : '保存列表' }}
+            {{ saving ? '保存中...' : '保存全部改动' }}
           </button>
         </div>
       </main>
