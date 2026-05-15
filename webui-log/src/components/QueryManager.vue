@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, postJSON, putJSON } from '../api/http'
 
 const props = defineProps({
@@ -37,6 +37,14 @@ const captureLogs = ref([])
 const diagnosticRequests = ref([])
 const selectedDiagnosticKey = ref('__raw__')
 const showFalseLogs = ref(false)
+const captureStatus = reactive({
+  open: false,
+  done: false,
+  remainingSeconds: 0
+})
+
+let captureCountdownTimerId = 0
+const captureRuntimeKey = '__mosdnsCaptureRuntime'
 
 const isLiveMode = computed(() => props.mode === 'live')
 
@@ -690,13 +698,104 @@ function loadMoreLogs() {
   return loadLogs(page + 1, true)
 }
 
+function stopCaptureCountdown() {
+  if (captureCountdownTimerId) {
+    window.clearInterval(captureCountdownTimerId)
+    captureCountdownTimerId = 0
+  }
+}
+
+function readCaptureRuntime() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  return window[captureRuntimeKey] || null
+}
+
+function writeCaptureRuntime(runtime) {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window[captureRuntimeKey] = runtime
+}
+
+function runCaptureCountdown(endAtMs) {
+  stopCaptureCountdown()
+  const tick = () => {
+    const remaining = Math.max(0, Math.ceil((Number(endAtMs) - Date.now()) / 1000))
+    captureStatus.open = true
+    captureStatus.remainingSeconds = remaining
+    if (remaining <= 0) {
+      captureStatus.done = true
+      writeCaptureRuntime({
+        open: true,
+        done: true,
+        remainingSeconds: 0,
+        endAtMs: Number(endAtMs) || Date.now()
+      })
+      stopCaptureCountdown()
+      return
+    }
+    captureStatus.done = false
+    writeCaptureRuntime({
+      open: true,
+      done: false,
+      remainingSeconds: remaining,
+      endAtMs: Number(endAtMs) || Date.now()
+    })
+  }
+  tick()
+  captureCountdownTimerId = window.setInterval(tick, 500)
+}
+
+function startCaptureCountdown(seconds) {
+  const duration = Math.max(1, Number(seconds || 1))
+  const endAtMs = Date.now() + duration * 1000
+  captureStatus.open = true
+  captureStatus.done = false
+  captureStatus.remainingSeconds = duration
+  writeCaptureRuntime({
+    open: true,
+    done: false,
+    remainingSeconds: duration,
+    endAtMs
+  })
+  runCaptureCountdown(endAtMs)
+}
+
+function restoreCaptureCountdown() {
+  const runtime = readCaptureRuntime()
+  if (!runtime || !runtime.open) {
+    return
+  }
+  captureStatus.open = true
+  if (runtime.done) {
+    captureStatus.done = true
+    captureStatus.remainingSeconds = 0
+    return
+  }
+  const endAtMs = Number(runtime.endAtMs || 0)
+  if (!Number.isFinite(endAtMs) || endAtMs <= Date.now()) {
+    captureStatus.done = true
+    captureStatus.remainingSeconds = 0
+    writeCaptureRuntime({
+      open: true,
+      done: true,
+      remainingSeconds: 0,
+      endAtMs: Date.now()
+    })
+    return
+  }
+  runCaptureCountdown(endAtMs)
+}
+
 async function startCapture() {
   const seconds = Math.max(1, Math.min(600, Number(captureDuration.value || 15)))
   loading.value = true
   resetMessages()
   try {
     await postJSON('/api/v1/capture/start', { duration_seconds: seconds })
-    setSuccess(`已开始抓取，时长 ${seconds} 秒`)
+    startCaptureCountdown(seconds)
   } catch (error) {
     setError(`启动抓取失败: ${error.message}`)
   } finally {
@@ -746,6 +845,7 @@ function handleGlobalRefresh() {
 }
 
 onMounted(async () => {
+  restoreCaptureCountdown()
   await Promise.all([
     loadAliases(),
     loadSpecialGroups()
@@ -758,6 +858,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('mosdns-log-refresh', handleGlobalRefresh)
+  stopCaptureCountdown()
 })
 </script>
 
@@ -841,18 +942,21 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="panel">
-      <header class="panel-header">
+      <header class="panel-header diagnostic-header">
         <div>
           <h3>诊断抓取</h3>
         </div>
+        <div class="diagnostic-toolbar diagnostic-toolbar-inline">
+          <label>抓取时长(秒)</label>
+          <input v-model.number="captureDuration" type="number" min="1" max="600" />
+          <button class="btn secondary" :disabled="loading" @click="startCapture">{{ loading ? '处理中...' : '日志抓取' }}</button>
+          <button class="btn primary" :disabled="loading" @click="fetchCaptureLogs">{{ loading ? '处理中...' : '获取日志' }}</button>
+          <div v-if="captureStatus.open" class="capture-status-pop" role="status" aria-live="polite">
+            <span v-if="captureStatus.done">抓取完成</span>
+            <span v-else>抓取中，剩余 {{ captureStatus.remainingSeconds }} 秒</span>
+          </div>
+        </div>
       </header>
-
-      <div class="diagnostic-toolbar">
-        <label>抓取时长(秒)</label>
-        <input v-model.number="captureDuration" type="number" min="1" max="600" />
-        <button class="btn secondary" :disabled="loading" @click="startCapture">{{ loading ? '处理中...' : '日志抓取' }}</button>
-        <button class="btn primary" :disabled="loading" @click="fetchCaptureLogs">{{ loading ? '处理中...' : '获取日志' }}</button>
-      </div>
 
       <div class="diagnostic-layout">
         <section class="panel sub-panel diagnostic-pane">

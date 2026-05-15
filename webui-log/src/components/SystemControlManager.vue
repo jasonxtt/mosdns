@@ -133,7 +133,7 @@ const switchProfiles = [
   { tag: 'switch5', name: '类型屏蔽', desc: '屏蔽 SOA / PTR / HTTPS 等请求', tip: '建议开启。', valueForOn: 'A' },
   { tag: 'switch4', name: '过期缓存1', desc: '启用多组过期缓存', tip: '建议开启。', valueForOn: 'A' },
   { tag: 'switch13', name: '过期缓存2', desc: '启用全量缓存与 fakeip 缓存', tip: '建议开启。', valueForOn: 'A' },
-  { tag: 'switch7', name: '广告屏蔽', desc: '启用 AdGuard 在线规则支持', tip: '按需开启。', valueForOn: 'A' },
+  { tag: 'switch9', name: '国外解析DDNS', desc: '优先使用国外上游解析DDNS域名', tip: '按需开启。', valueForOn: 'A' },
   { tag: 'switch2', name: '指定 Client fakeip', desc: '仅指定客户端可科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
   { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
   { tag: 'switch8', name: 'IPv4优先', desc: '存在 A 记录时抑制 AAAA 请求', tip: '适合希望优先走 IPv4，但仍保留纯 IPv6 域名可解析的场景。', valueForOn: 'A' },

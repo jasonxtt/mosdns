@@ -551,6 +551,17 @@ body::after {
   flex-wrap: wrap;
 }
 
+.diagnostic-header {
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.diagnostic-toolbar-inline {
+  margin-left: 3em;
+  flex-wrap: nowrap;
+  row-gap: 6px;
+}
+
 .diagnostic-toolbar label {
   color: var(--ink-1);
   font-weight: 600;
@@ -558,6 +569,21 @@ body::after {
 
 .diagnostic-toolbar input {
   width: 110px;
+}
+
+.capture-status-pop {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid #abefc6;
+  background: #ecfdf3;
+  color: var(--tone-on-light);
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .diagnostic-layout {
@@ -3603,14 +3629,13 @@ label.switch-table *,
   }
 
   .top-inline-notice {
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: -46px;
+    position: static;
     width: auto;
     max-width: 100%;
-    transform: none;
+    transform: none !important;
+    margin: 6px 0 0;
     font-size: 0.82rem;
+    pointer-events: auto;
   }
 
   .top-inline-notice-fade-enter-from,
@@ -3658,6 +3683,21 @@ label.switch-table *,
 
   .page-shell {
     gap: 10px;
+  }
+
+  .diagnostic-header {
+    align-items: flex-start;
+  }
+
+  .diagnostic-toolbar-inline {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .capture-status-pop {
+    width: 100%;
+    justify-content: center;
   }
 
   .upstream-adaptive-table th:nth-child(1),

@@ -1,0 +1,89 @@
+name: Lite Build Artifacts
+
+on:
+  push:
+    branches:
+      - lite
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lite-artifacts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-amd64
+            goos: linux
+            goarch: amd64
+            ext: ''
+          - id: linux-amd64-v3
+            goos: linux
+            goarch: amd64
+            goamd64: v3
+            ext: ''
+          - id: linux-arm64
+            goos: linux
+            goarch: arm64
+            ext: ''
+          - id: linux-armv7
+            goos: linux
+            goarch: arm
+            goarm: '7'
+            ext: ''
+    env:
+      LITE_VERSION: 0.0.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Compute artifact name
+        shell: bash
+        run: |
+          echo "ARCHIVE_NAME=mosdns-lite-${LITE_VERSION}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Build binary
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOAMD64: ${{ matrix.goamd64 }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          mkdir -p dist
+          BIN_NAME="mosdns${{ matrix.ext }}"
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${LITE_VERSION}" \
+            -o "dist/${BIN_NAME}" \
+            ./
+
+      - name: Package tar.gz
+        shell: bash
+        run: |
+          BIN_NAME="mosdns${{ matrix.ext }}"
+          tar -C dist -czf "${ARCHIVE_NAME}" "${BIN_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE_NAME }}
+          path: ${{ env.ARCHIVE_NAME }}
+          retention-days: 30
+          if-no-files-found: error

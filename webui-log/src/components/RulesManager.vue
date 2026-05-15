@@ -833,7 +833,7 @@ onBeforeUnmount(() => {
     <section v-if="shouldShowTab('adguard')" class="sub-panel">
       <div class="actions">
         <button class="btn primary entry-action-btn" @click="openCreateAdguard">新增拦截规则</button>
-        <button class="btn warning" @click="updateAdguardAll">更新全部规则</button>
+        <button class="btn warning entry-action-btn" @click="updateAdguardAll">更新全部规则</button>
       </div>
       <div class="table-wrap adaptive-table-wrap rules-adguard-wrap">
         <table class="rules-adaptive-table rules-adguard-table">
@@ -879,7 +879,7 @@ onBeforeUnmount(() => {
     <section v-if="shouldShowTab('diversion')" class="sub-panel">
       <div class="actions">
         <button class="btn primary entry-action-btn" @click="openCreateDiversion">新增分流规则</button>
-        <button class="btn warning" @click="updateDiversionAll">更新全部规则</button>
+        <button class="btn warning entry-action-btn" @click="updateDiversionAll">更新全部规则</button>
       </div>
       <div class="table-wrap adaptive-table-wrap rules-diversion-wrap">
         <table class="rules-adaptive-table rules-diversion-table">
