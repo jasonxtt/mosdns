@@ -30,6 +30,20 @@ func TestComputeEffectiveTagMemoryProxyWinsAfterLearning(t *testing.T) {
 	}
 }
 
+func TestComputeEffectiveTagDirectCandidatePromotedToProxyExitVariant(t *testing.T) {
+	got := computeEffectiveTag("订阅直连", "nocnfake", "", "sequence_fakeip_addlist_exit")
+	if got != "直连候选转代理" {
+		t.Fatalf("expected direct-candidate correction label for exit variant, got %q", got)
+	}
+}
+
+func TestComputeEffectiveTagMemoryCorrectionExitVariant(t *testing.T) {
+	got := computeEffectiveTag("记忆直连", "nocnfake", "", "sequence_fakeip_addlist_exit")
+	if got != "记忆直连转代理" {
+		t.Fatalf("expected memory correction label for exit variant, got %q", got)
+	}
+}
+
 func TestComputeEffectiveTagKeepsForeignRealIPFilterLabel(t *testing.T) {
 	got := computeEffectiveTag("!CN fakeip filter", "foreign", "", "sequence_google")
 	if got != "!CN fakeip filter" {

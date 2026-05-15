@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## v0.3.23
+
+### Fixed
+
+- fixed audit effective-tag correction so `_exit` flow variants are handled the same as base sequence names
+- `computeEffectiveTag` now treats both `sequence_fakeip_addlist` and `sequence_fakeip_addlist_exit` as direct-candidate promotion paths when final route is proxy
+- this prevents mismatched labels in logs where runtime flow uses `_exit` sequence names
+
+### Tests
+
+- added coverage for `_exit` variants in `coremain/audit_test.go`:
+  - `TestComputeEffectiveTagDirectCandidatePromotedToProxyExitVariant`
+  - `TestComputeEffectiveTagMemoryCorrectionExitVariant`
+
+### Upgrade Notes
+
+- this release does **not** require YAML config migration
+- existing deployments can update only the binary
+
 ## v0.3.22
 
 ### Added

@@ -549,6 +549,15 @@ func joinEffectiveTag(noVTags []string, core string) string {
 	return joinDomainTags(out)
 }
 
+func isFakeipAddlistSequence(finalSequence string) bool {
+	switch strings.TrimSpace(finalSequence) {
+	case "sequence_fakeip_addlist", "sequence_fakeip_addlist_exit":
+		return true
+	default:
+		return false
+	}
+}
+
 func computeEffectiveTag(domainSet, finalUpstream, matchedGroup, finalSequence string) string {
 	domainSet = strings.TrimSpace(domainSet)
 	if domainSet == "" || domainSet == "unmatched_rule" {
@@ -629,7 +638,7 @@ func computeEffectiveTag(domainSet, finalUpstream, matchedGroup, finalSequence s
 	proxyCandidates := []string{"灰名单", "订阅代理补充", "订阅代理"}
 	directPromotionCandidates := []string{"白名单", "订阅直连补充", "订阅直连", "CN fakeip filter"}
 
-	if routeKind == "proxy" && strings.TrimSpace(finalSequence) == "sequence_fakeip_addlist" {
+	if routeKind == "proxy" && isFakeipAddlistSequence(finalSequence) {
 		if core := firstMatchTag(tags, directPromotionCandidates); core != "" {
 			if joined := joinEffectiveTag(noVTags, "直连候选转代理"); joined != "" {
 				return joined
