@@ -76,7 +76,6 @@ import (
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher12"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher13"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher14"
-	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher15"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher16"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher2"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/switcher3"

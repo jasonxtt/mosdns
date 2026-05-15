@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON } from './api/http'
 import ConfirmBubbleHost from './components/ConfirmBubbleHost.vue'
 import DataManagementManager from './components/DataManagementManager.vue'
@@ -41,8 +41,14 @@ const autoRefreshState = ref({
   enabled: false,
   intervalSeconds: 15
 })
+const topNotice = reactive({
+  open: false,
+  tone: 'success',
+  message: ''
+})
 
 let autoRefreshTimerId = 0
+let topNoticeTimerId = 0
 
 function initializeAppearance() {
   const root = document.documentElement
@@ -101,6 +107,40 @@ function triggerGlobalRefresh() {
   window.dispatchEvent(new CustomEvent('mosdns-log-refresh'))
 }
 
+function clearTopNotice() {
+  if (topNoticeTimerId) {
+    window.clearTimeout(topNoticeTimerId)
+    topNoticeTimerId = 0
+  }
+  topNotice.open = false
+  topNotice.message = ''
+}
+
+function showTopNotice(payload = {}) {
+  const message = String(payload?.message || '').trim()
+  if (!message) {
+    clearTopNotice()
+    return
+  }
+  const tone = String(payload?.tone || '').toLowerCase() === 'error' ? 'error' : 'success'
+  const durationMsRaw = Number(payload?.durationMs || 2400)
+  const durationMs = Number.isFinite(durationMsRaw) ? Math.min(8000, Math.max(1200, durationMsRaw)) : 2400
+  topNotice.tone = tone
+  topNotice.message = message
+  topNotice.open = true
+  if (topNoticeTimerId) {
+    window.clearTimeout(topNoticeTimerId)
+  }
+  topNoticeTimerId = window.setTimeout(() => {
+    topNoticeTimerId = 0
+    topNotice.open = false
+  }, durationMs)
+}
+
+function handleTopNoticeEvent(event) {
+  showTopNotice(event?.detail || {})
+}
+
 async function initializePanelBackground() {
   try {
     const settings = await getJSON('/api/v1/appearance/panel-background')
@@ -141,12 +181,15 @@ onMounted(() => {
   initializeButtonColors()
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
+  window.addEventListener('mosdns-top-notice', handleTopNoticeEvent)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
   stopAutoRefresh()
+  clearTopNotice()
   window.removeEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
+  window.removeEventListener('mosdns-top-notice', handleTopNoticeEvent)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
@@ -157,6 +200,11 @@ onBeforeUnmount(() => {
       <header class="hero compact">
         <h1>MosDNS 仪表盘</h1>
       </header>
+      <transition name="top-inline-notice-fade">
+        <div v-if="topNotice.open" class="top-inline-notice" :class="topNotice.tone === 'error' ? 'error' : 'success'" role="status" aria-live="polite">
+          {{ topNotice.message }}
+        </div>
+      </transition>
 
       <nav class="legacy-main-nav compact">
         <button

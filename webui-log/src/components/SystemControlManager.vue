@@ -23,8 +23,6 @@ import {
 } from '../utils/appearanceButtonColor'
 
 const loading = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
 
 const audit = reactive({
   capturing: null,
@@ -67,8 +65,7 @@ const webuiPort = reactive({
 
 const overrides = reactive({
   socks5: '',
-  ecs: '',
-  replacements: []
+  ecs: ''
 })
 
 const switchLoading = reactive({})
@@ -137,7 +134,6 @@ const switchProfiles = [
   { tag: 'switch4', name: '过期缓存1', desc: '启用多组过期缓存', tip: '建议开启。', valueForOn: 'A' },
   { tag: 'switch13', name: '过期缓存2', desc: '启用全量缓存与 fakeip 缓存', tip: '建议开启。', valueForOn: 'A' },
   { tag: 'switch7', name: '广告屏蔽', desc: '启用 AdGuard 在线规则支持', tip: '按需开启。', valueForOn: 'A' },
-  { tag: 'switch9', name: 'CNFakeIP', desc: '国内域名返回 fakeip', tip: '切换后会自动清空核心缓存。', valueForOn: 'B' },
   { tag: 'switch2', name: '指定 Client fakeip', desc: '仅指定客户端可科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
   { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
   { tag: 'switch8', name: 'IPv4优先', desc: '存在 A 记录时抑制 AAAA 请求', tip: '适合希望优先走 IPv4，但仍保留纯 IPv6 域名可解析的场景。', valueForOn: 'A' },
@@ -221,18 +217,29 @@ const updateLatestBadge = computed(() => {
 })
 
 function setError(message) {
-  successMessage.value = ''
-  errorMessage.value = message
+  showTopNotice(message, 'error')
 }
 
 function setSuccess(message) {
-  errorMessage.value = ''
-  successMessage.value = message
+  showTopNotice(message, 'success')
 }
 
 function clearMessage() {
-  errorMessage.value = ''
-  successMessage.value = ''
+  showTopNotice('', 'success')
+}
+
+function showTopNotice(message, tone = 'success') {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent('mosdns-top-notice', {
+      detail: {
+        message: String(message || ''),
+        tone
+      }
+    })
+  )
 }
 
 function normalizeVersion(value) {
@@ -450,12 +457,6 @@ async function toggleSecondarySwitch(profile, checked) {
       }
     }
     await setSwitchValue(profile.tag, next)
-    if (profile.tag === 'switch9') {
-      await Promise.allSettled([
-        requestResponse('/plugins/cache_all/flush'),
-        requestResponse('/plugins/cache_all_noleak/flush')
-      ])
-    }
     if (autoDisabledProfile) {
       setSuccess(`已自动关闭“${autoDisabledProfile.name}”，因为它与“${profile.name}”互斥`)
       return
@@ -495,44 +496,15 @@ async function loadOverrides() {
   const data = await getJSON('/api/v1/overrides')
   overrides.socks5 = String(data?.socks5 || '')
   overrides.ecs = String(data?.ecs || '')
-  const source = Array.isArray(data?.replacements) ? data.replacements : []
-  overrides.replacements = source.map((item) => ({
-    original: String(item?.original || ''),
-    new: String(item?.new || ''),
-    comment: String(item?.comment || ''),
-    result: String(item?.result || '')
-  }))
-}
-
-function addReplacement() {
-  overrides.replacements.push({
-    original: '',
-    new: '',
-    comment: '',
-    result: ''
-  })
-}
-
-function removeReplacement(index) {
-  overrides.replacements.splice(index, 1)
 }
 
 async function saveOverrides() {
   clearMessage()
   applyingOverrides.value = true
   try {
-    const replacements = overrides.replacements
-      .map((rule) => ({
-        original: String(rule.original || '').trim(),
-        new: String(rule.new || '').trim(),
-        comment: String(rule.comment || '').trim()
-      }))
-      .filter((rule) => rule.original)
-
     await postJSON('/api/v1/overrides', {
       socks5: String(overrides.socks5 || '').trim(),
-      ecs: String(overrides.ecs || '').trim(),
-      replacements
+      ecs: String(overrides.ecs || '').trim()
     })
 
     if (await openConfirm('覆盖配置已保存，是否立即重启 MosDNS 使其生效？')) {
@@ -1418,9 +1390,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="system-panel">
-    <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-    <p v-if="successMessage && !errorMessage" class="msg success">{{ successMessage }}</p>
-
     <div class="system-layout-stack">
       <div class="control-panel-grid system-grid-quad">
         <section class="panel control-module control-module--mini">
@@ -1563,50 +1532,6 @@ onBeforeUnmount(() => {
                 <span class="slider"></span>
               </span>
             </label>
-          </div>
-        </section>
-      </div>
-
-      <div class="control-panel-grid">
-        <section class="panel control-module control-module-wide">
-          <header class="module-head">
-            <div>
-              <h3>高级替换规则</h3>
-              <p class="muted">可配置 DNS 覆盖映射。修改后点击保存并应用。</p>
-            </div>
-            <div class="actions">
-              <button class="btn tiny secondary" @click="loadOverrides">读取当前</button>
-              <button class="btn tiny secondary" @click="addReplacement">添加规则</button>
-              <button class="btn tiny primary" :disabled="applyingOverrides" @click="saveOverrides">
-                {{ applyingOverrides ? '保存中...' : '保存并应用' }}
-              </button>
-            </div>
-          </header>
-
-          <div class="table-wrap replacements-table-wrap">
-            <table class="replacements-table">
-              <thead>
-                <tr>
-                  <th>状态</th>
-                  <th>原值</th>
-                  <th>新值</th>
-                  <th>备注</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="overrides.replacements.length === 0">
-                  <td colspan="5" class="empty">暂无规则</td>
-                </tr>
-                <tr v-for="(item, index) in overrides.replacements" :key="`rep-${index}`">
-                  <td>{{ item.result || '未保存' }}</td>
-                  <td><input v-model="item.original" placeholder="例如: 1.1.1.1" /></td>
-                  <td><input v-model="item.new" placeholder="例如: 127.0.0.1" /></td>
-                  <td><input v-model="item.comment" placeholder="可选备注" /></td>
-                  <td><button class="btn tiny danger" @click="removeReplacement(index)">删除</button></td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </section>
       </div>

@@ -4,8 +4,6 @@ import { getJSON, getText, postJSON } from '../api/http'
 
 const loading = ref(false)
 const saving = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
 
 const selectedTag = ref('')
 const content = ref('')
@@ -18,8 +16,6 @@ const fixedProfiles = [
   { tag: 'whitelist', name: '白名单' },
   { tag: 'blocklist', name: '黑名单' },
   { tag: 'greylist', name: '灰名单' },
-  { tag: 'realiplist', name: '!CN fakeip filter' },
-  { tag: 'cnfakeipfilter', name: 'CN fakeip filter' },
   { tag: 'ddnslist', name: 'DDNS 域名' },
   { tag: 'client_ip', name: '客户端 IP' },
   { tag: 'direct_ip', name: '直连 IP' },
@@ -59,10 +55,6 @@ const selectedHintText = computed(() => {
       return '不在任何域名清单中的域名解析后的IP属于此IP清单时，此域名向被归入直连域名。以苹果公司IP段为例：17.0.0.0/8'
     case 'rewrite':
       return '格式: <域名> <IP或域名>。例如: example.com 1.2.3.4 或 test.com example.com。支持 full:, domain: 等匹配规则。'
-    case 'realiplist':
-      return '在此名单中的域名向国外DNS解析并返回真实 IP (RealIP)，不使用 FakeIP。适用于必须使用真实 IP 连接的域名。'
-    case 'cnfakeipfilter':
-      return '在此名单中的域名向国内DNS解析并返回真实 IP (RealIP)，不使用 FakeIP。适用于必须使用真实 IP 连接的域名。'
     default: {
       const profile = profiles.value.find((item) => item.tag === tag)
       if (!profile) {
@@ -77,9 +69,30 @@ const selectedHintText = computed(() => {
   }
 })
 
+function showTopNotice(message, tone = 'success') {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent('mosdns-top-notice', {
+      detail: {
+        message: String(message || ''),
+        tone
+      }
+    })
+  )
+}
+
+function setError(message) {
+  showTopNotice(message, 'error')
+}
+
+function setSuccess(message) {
+  showTopNotice(message, 'success')
+}
+
 function resetMessage() {
-  errorMessage.value = ''
-  successMessage.value = ''
+  showTopNotice('', 'success')
 }
 
 function getProfileName(tag) {
@@ -105,7 +118,7 @@ async function loadProfiles() {
     specialGroups.value = Array.isArray(groups) ? groups : []
   } catch (error) {
     specialGroups.value = []
-    errorMessage.value = `加载专属分流组失败: ${error.message}`
+    setError(`加载专属分流组失败: ${error.message}`)
   }
 }
 
@@ -130,7 +143,7 @@ async function loadList(tag, options = {}) {
     dirty.value = false
     updateStatus()
   } catch (error) {
-    errorMessage.value = `加载列表失败: ${error.message}`
+    setError(`加载列表失败: ${error.message}`)
     statusText.value = '加载失败'
   } finally {
     loading.value = false
@@ -139,7 +152,7 @@ async function loadList(tag, options = {}) {
 
 async function saveList() {
   if (!selectedTag.value) {
-    errorMessage.value = '请先选择列表'
+    setError('请先选择列表')
     return
   }
   saving.value = true
@@ -153,10 +166,10 @@ async function saveList() {
     content.value = values.join('\n')
     lastLoadedContent.value = content.value
     dirty.value = false
-    successMessage.value = `列表“${getProfileName(selectedTag.value)}”已保存`
+    setSuccess(`列表“${getProfileName(selectedTag.value)}”已保存`)
     statusText.value = `共 ${values.length} 行`
   } catch (error) {
-    errorMessage.value = `保存失败: ${error.message}`
+    setError(`保存失败: ${error.message}`)
   } finally {
     saving.value = false
   }
@@ -193,9 +206,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="list-page">
-    <p v-if="errorMessage" class="msg error">{{ errorMessage }}</p>
-    <p v-if="successMessage" class="msg success">{{ successMessage }}</p>
-
     <div class="list-layout">
       <aside class="list-sidebar">
         <button

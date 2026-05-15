@@ -3,16 +3,23 @@ package coremain
 import "testing"
 
 func TestComputeEffectiveTagDirectCandidatePromotedToProxy(t *testing.T) {
-	got := computeEffectiveTag("订阅直连", "nocnfake", "", "sequence_fakeip_addlist")
+	got := computeEffectiveTag("订阅直连", "nocnfake", "", "sequence_fakeip")
 	if got != "直连候选转代理" {
 		t.Fatalf("expected direct-candidate correction label, got %q", got)
 	}
 }
 
 func TestComputeEffectiveTagKeepsNoVTagOnCorrection(t *testing.T) {
-	got := computeEffectiveTag("记忆无V6|订阅直连", "nocnfake", "", "sequence_fakeip_addlist")
+	got := computeEffectiveTag("记忆无V6|订阅直连", "nocnfake", "", "sequence_fakeip")
 	if got != "记忆无V6|直连候选转代理" {
 		t.Fatalf("expected no-v6 correction label, got %q", got)
+	}
+}
+
+func TestComputeEffectiveTagDirectCandidatePromotedToProxyExitVariant(t *testing.T) {
+	got := computeEffectiveTag("订阅直连", "nocnfake", "", "sequence_fakeip_addlist_exit")
+	if got != "直连候选转代理" {
+		t.Fatalf("expected direct-candidate correction label for _exit variant, got %q", got)
 	}
 }
 
