@@ -1,4 +1,4 @@
-name: Preview Release (main)
+name: Preview Release (lite)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: preview-release-main
+  group: preview-release-lite
   cancel-in-progress: false
 
 jobs:
@@ -52,10 +52,11 @@ jobs:
         run: |
           DATE=$(date -u +%Y%m%d)
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          VERSION_TAG="preview-${DATE}-${SHORT_SHA}"
-          echo "BUILD_VERSION=${VERSION_TAG}" >> "$GITHUB_ENV"
-          echo "VERSION_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
-          echo "ARCHIVE_NAME=mosdns-${VERSION_TAG}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
+          BUILD_VERSION="lite-preview-${DATE}-${SHORT_SHA}"
+          VERSION_LABEL="preview-${DATE}-${SHORT_SHA}"
+          echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+          echo "VERSION_TAG=${BUILD_VERSION}" >> "$GITHUB_ENV"
+          echo "ARCHIVE_NAME=mosdns-lite-${VERSION_LABEL}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Build binary
         shell: bash
@@ -102,7 +103,7 @@ jobs:
         run: |
           DATE=$(date -u +%Y%m%d)
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
-          VERSION_TAG="preview-${DATE}-${SHORT_SHA}"
+          VERSION_TAG="lite-preview-${DATE}-${SHORT_SHA}"
           echo "VERSION_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
 
       - name: Publish preview release

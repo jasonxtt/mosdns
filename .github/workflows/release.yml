@@ -1,13 +1,13 @@
-name: Release
+name: Release (lite)
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'lite-v*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: Release tag to create, for example v0.1.0
+        description: Release tag to create, for example lite-v0.0.2
         required: true
         type: string
 
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-lite-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -64,13 +64,14 @@ jobs:
             RELEASE_TAG="${GITHUB_REF_NAME}"
           fi
           case "${RELEASE_TAG}" in
-            v*) ;;
-            *) RELEASE_TAG="v${RELEASE_TAG}" ;;
+            lite-v*) ;;
+            v*) RELEASE_TAG="lite-${RELEASE_TAG}" ;;
+            *) RELEASE_TAG="lite-v${RELEASE_TAG}" ;;
           esac
-          VERSION_TAG="${RELEASE_TAG#v}"
+          VERSION_TAG="${RELEASE_TAG#lite-v}"
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
           echo "VERSION_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
-          echo "ARCHIVE_NAME=mosdns-${VERSION_TAG}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
+          echo "ARCHIVE_NAME=mosdns-lite-${VERSION_TAG}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Build binary
         shell: bash
@@ -119,8 +120,9 @@ jobs:
             RELEASE_TAG="${GITHUB_REF_NAME}"
           fi
           case "${RELEASE_TAG}" in
-            v*) ;;
-            *) RELEASE_TAG="v${RELEASE_TAG}" ;;
+            lite-v*) ;;
+            v*) RELEASE_TAG="lite-${RELEASE_TAG}" ;;
+            *) RELEASE_TAG="lite-v${RELEASE_TAG}" ;;
           esac
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
           BODY_PATH="docs/releases/${RELEASE_TAG}.md"
