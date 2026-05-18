@@ -52,7 +52,7 @@ def go_build():
     base = os.getenv('VERSION')
     if not base:
         try:
-            base = subprocess.check_output('git describe --tags --abbrev=0', shell=True).decode().strip()
+            base = subprocess.check_output("git describe --tags --match 'v*' --abbrev=0", shell=True).decode().strip()
         except subprocess.CalledProcessError:
             base = 'dev'
 

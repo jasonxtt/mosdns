@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,16 +32,20 @@ import (
 )
 
 const (
-	githubOwner          = "jasonxtt"
-	githubRepo           = "mosdns"
-	githubReleaseAPI     = "https://api.github.com/repos/%s/%s/releases/tags/%s"
-	githubLatestAPI      = "https://api.github.com/repos/%s/%s/releases/latest"
-	githubReleasePage    = "https://github.com/%s/%s/releases/tag/%s"
-	githubExpandedAssets = "https://github.com/%s/%s/releases/expanded_assets/%s"
-	defaultCacheTTL      = 15 * time.Minute
-	httpTimeout          = 120 * time.Second
-	userAgent            = "mosdns-update-client"
-	stateFileName        = ".mosdns-update-state.json"
+	defaultUpdateChannel  = "main"
+	mainAssetBaseName     = "mosdns"
+	liteAssetBaseName     = "mosdns-lite"
+	githubOwner           = "jasonxtt"
+	githubRepo            = "mosdns"
+	githubListReleasesAPI = "https://api.github.com/repos/%s/%s/releases?per_page=100"
+	githubReleaseAPI      = "https://api.github.com/repos/%s/%s/releases/tags/%s"
+	githubLatestAPI       = "https://api.github.com/repos/%s/%s/releases/latest"
+	githubReleasePage     = "https://github.com/%s/%s/releases/tag/%s"
+	githubExpandedAssets  = "https://github.com/%s/%s/releases/expanded_assets/%s"
+	defaultCacheTTL       = 15 * time.Minute
+	httpTimeout           = 120 * time.Second
+	userAgent             = "mosdns-update-client"
+	stateFileName         = ".mosdns-update-state.json"
 )
 
 var (
@@ -52,6 +57,8 @@ var (
 	expandedTagRegex  = regexp.MustCompile(`/releases/expanded_assets/([^"'<>\s]+)`)
 	assetHashRegex    = regexp.MustCompile(`sha256:([a-fA-F0-9]{64})`)
 	relativeTimeRegex = regexp.MustCompile(`<relative-time[^>]+datetime="([^\"]+)"`)
+	mainTagRegex      = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
+	liteTagRegex      = regexp.MustCompile(`^lite-v(\d+)\.(\d+)\.(\d+)$`)
 )
 
 type UpdateStatus struct {
@@ -129,6 +136,14 @@ type releaseInfo struct {
 	tagName     string
 	publishedAt *time.Time
 	assets      []githubAsset
+}
+
+type parsedReleaseVersion struct {
+	channel string
+	major   int
+	minor   int
+	patch   int
+	rawTag  string
 }
 
 func NewUpdateManager() *UpdateManager {
@@ -378,7 +393,8 @@ func (m *UpdateManager) CheckForUpdate(ctx context.Context, force bool) (UpdateS
 		)
 	}
 
-	if asset := selectAsset(rel.assets); asset != nil {
+	channel := m.updateChannel()
+	if asset := selectAsset(channel, rel.assets); asset != nil {
 		status.AssetName = asset.Name
 		status.DownloadURL = asset.BrowserDownloadURL
 		status.AssetSignature = buildAssetSignature(*asset)
@@ -412,7 +428,7 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 		}
 		stdlog.Printf("[update] 已收到手动切换为 v3 的请求：如果存在 v3 资产将优先选择该包进行更新（不改变版本号，仅切换构建）。")
 		if rel, err := m.fetchReleaseInfo(ctx); err == nil {
-			if v3 := findV3Asset(rel.assets); v3 != nil {
+			if v3 := findV3Asset(m.updateChannel(), rel.assets); v3 != nil {
 				status.AssetName = v3.Name
 				status.DownloadURL = v3.BrowserDownloadURL
 				status.AssetSignature = buildAssetSignature(*v3)
@@ -573,10 +589,22 @@ func (m *UpdateManager) isUpdateNeeded(latest, signature string) bool {
 }
 
 func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
-	latestNorm := normalizeVersion(latest)
-	currentNorm := normalizeVersion(m.currentVersion)
-	if latestNorm != "" && currentNorm != "" && latestNorm == currentNorm {
-		return false
+	channel := m.updateChannel()
+	latestParsed, latestOK := parseReleaseVersion(latest)
+	currentParsed, currentOK := parseReleaseVersion(m.currentVersion)
+
+	if latestOK {
+		if latestParsed.channel != channel {
+			return false
+		}
+		if currentOK {
+			if currentParsed.channel != latestParsed.channel {
+				return false
+			}
+			if compareReleaseVersion(latestParsed, currentParsed) == 0 {
+				return false
+			}
+		}
 	}
 	if signature != "" {
 		if signature == m.currentAssetSignature || signature == m.pendingSignature {
@@ -584,6 +612,15 @@ func (m *UpdateManager) updateAvailableLocked(latest, signature string) bool {
 		}
 		return true
 	}
+	if latestOK {
+		if !currentOK {
+			return true
+		}
+		return compareReleaseVersion(latestParsed, currentParsed) != 0
+	}
+
+	latestNorm := normalizeVersion(latest)
+	currentNorm := normalizeVersion(m.currentVersion)
 	if latestNorm == "" {
 		return false
 	}
@@ -600,18 +637,36 @@ func normalizeVersion(v string) string {
 }
 
 func (m *UpdateManager) fetchReleaseInfo(ctx context.Context) (releaseInfo, error) {
-	info, err := m.fetchLatestReleaseInfo(ctx)
+	if strings.TrimSpace(os.Getenv("MOSDNS_UPDATE_RELEASE_TAG")) != "" {
+		info, err := m.fetchReleaseInfoAPI(ctx)
+		if err == nil {
+			return info, nil
+		}
+		if m.fixedTagMode == fixedTagFallbackDisabled {
+			return releaseInfo{}, fmt.Errorf("获取指定版本失败: %v", err)
+		}
+		if m.fixedTagMode == fixedTagFallbackWarnOnly {
+			m.logWarn("fixed-tag API lookup failed; falling back to HTML", err, zap.String("mode", m.fixedTagModeString()))
+		}
+		info, htmlErr := m.fetchReleaseInfoHTML(ctx)
+		if htmlErr == nil {
+			return info, nil
+		}
+		return releaseInfo{}, fmt.Errorf("获取指定版本失败: %v", htmlErr)
+	}
+
+	info, err := m.fetchChannelReleaseInfo(ctx, m.updateChannel())
 	if err != nil {
 		return releaseInfo{}, fmt.Errorf("获取最新版本失败: %v", err)
 	}
 	return info, nil
 }
 
-func (m *UpdateManager) fetchLatestReleaseInfo(ctx context.Context) (releaseInfo, error) {
-	if info, err := m.fetchLatestReleaseInfoAPI(ctx); err == nil {
+func (m *UpdateManager) fetchChannelReleaseInfo(ctx context.Context, channel string) (releaseInfo, error) {
+	if info, err := m.fetchChannelReleaseInfoAPI(ctx, channel); err == nil {
 		return info, nil
 	}
-	return m.fetchLatestReleaseInfoHTML(ctx)
+	return m.fetchChannelReleaseInfoHTML(ctx, channel)
 }
 
 // NOTE: This is the duplicated function from the original file, preserved as requested.
@@ -707,6 +762,68 @@ func (m *UpdateManager) fetchLatestReleaseInfoAPI(ctx context.Context) (releaseI
 	return releaseInfo{tagName: payload.TagName, publishedAt: payload.PublishedAt, assets: payload.Assets}, nil
 }
 
+func (m *UpdateManager) fetchChannelReleaseInfoAPI(ctx context.Context, channel string) (releaseInfo, error) {
+	url := fmt.Sprintf(githubListReleasesAPI, githubOwner, githubRepo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return releaseInfo{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", userAgent)
+	if token := os.Getenv("MOSDNS_GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := m.doRequestWithFallback(req)
+	if err != nil {
+		return releaseInfo{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return releaseInfo{}, fmt.Errorf("GitHub API 访问受限: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return releaseInfo{}, fmt.Errorf("GitHub API 请求失败: %s (%s)", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var payload []struct {
+		TagName     string        `json:"tag_name"`
+		PublishedAt *time.Time    `json:"published_at"`
+		Assets      []githubAsset `json:"assets"`
+		Draft       bool          `json:"draft"`
+		Prerelease  bool          `json:"prerelease"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return releaseInfo{}, err
+	}
+
+	bestIdx := -1
+	var bestVersion parsedReleaseVersion
+	for i, rel := range payload {
+		if rel.Draft || rel.Prerelease {
+			continue
+		}
+		version, ok := parseReleaseVersion(rel.TagName)
+		if !ok || version.channel != channel {
+			continue
+		}
+		if bestIdx == -1 || compareReleaseVersion(version, bestVersion) > 0 {
+			bestIdx = i
+			bestVersion = version
+		}
+	}
+	if bestIdx == -1 {
+		return releaseInfo{}, fmt.Errorf("未找到 %s 通道发布版本", channel)
+	}
+
+	best := payload[bestIdx]
+	return releaseInfo{tagName: best.TagName, publishedAt: best.PublishedAt, assets: best.Assets}, nil
+}
+
 func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (releaseInfo, error) {
 	latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", githubOwner, githubRepo)
 	body, err := m.fetchHTML(ctx, latestURL)
@@ -742,6 +859,57 @@ func (m *UpdateManager) fetchLatestReleaseInfoHTML(ctx context.Context) (release
 		return releaseInfo{}, errors.New("未在最新发布页面解析到资产")
 	}
 	return releaseInfo{tagName: tag, publishedAt: publishedAt, assets: assets}, nil
+}
+
+func (m *UpdateManager) fetchChannelReleaseInfoHTML(ctx context.Context, channel string) (releaseInfo, error) {
+	releasesURL := fmt.Sprintf("https://github.com/%s/%s/releases", githubOwner, githubRepo)
+	body, err := m.fetchHTML(ctx, releasesURL)
+	if err != nil {
+		return releaseInfo{}, err
+	}
+
+	seen := make(map[string]struct{})
+	bestTag := ""
+	var bestVersion parsedReleaseVersion
+	for _, match := range tagFromURLRegex.FindAllStringSubmatch(body, -1) {
+		if len(match) != 2 {
+			continue
+		}
+		tag := match[1]
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		seen[tag] = struct{}{}
+		version, ok := parseReleaseVersion(tag)
+		if !ok || version.channel != channel {
+			continue
+		}
+		if bestTag == "" || compareReleaseVersion(version, bestVersion) > 0 {
+			bestTag = tag
+			bestVersion = version
+		}
+	}
+	if bestTag == "" {
+		return releaseInfo{}, fmt.Errorf("未在发布页面找到 %s 通道版本", channel)
+	}
+
+	assetsHTML, err := m.fetchHTML(ctx, fmt.Sprintf(githubExpandedAssets, githubOwner, githubRepo, bestTag))
+	if err != nil {
+		return releaseInfo{}, err
+	}
+	assets := parseAssetsFromHTML(assetsHTML)
+	if len(assets) == 0 {
+		return releaseInfo{}, errors.New("未在发布页面解析到资产")
+	}
+
+	var publishedAt *time.Time
+	if match := relativeTimeRegex.FindStringSubmatch(assetsHTML); len(match) == 2 {
+		if t, err := time.Parse(time.RFC3339, match[1]); err == nil {
+			publishedAt = &t
+		}
+	}
+
+	return releaseInfo{tagName: bestTag, publishedAt: publishedAt, assets: assets}, nil
 }
 
 // NOTE: This is the duplicated function from the original file, preserved as requested.
@@ -796,63 +964,70 @@ func (m *UpdateManager) fetchHTML(ctx context.Context, url string) (string, erro
 	return string(bodyBytes), nil
 }
 
-func selectAsset(assets []githubAsset) *githubAsset {
-	var candidates []string
+func selectAsset(channel string, assets []githubAsset) *githubAsset {
+	type assetPattern struct {
+		exact  string
+		prefix string
+		suffix string
+	}
+
+	var candidates []assetPattern
+	basePrefix := releaseAssetBaseName(channel) + "-"
 	switch runtime.GOOS {
 	case "linux":
 		switch runtime.GOARCH {
 		case "amd64":
 			if binaryIsAMD64V3Plus() {
-				candidates = []string{
-					"-linux-amd64-v3.tar.gz",
-					"-linux-amd64.tar.gz",
-					"mosdns-linux-amd64-v3.zip",
-					"mosdns-linux-amd64.zip",
+				candidates = []assetPattern{
+					{prefix: basePrefix, suffix: "-linux-amd64-v3.tar.gz"},
+					{prefix: basePrefix, suffix: "-linux-amd64.tar.gz"},
+					{exact: releaseAssetBaseName(channel) + "-linux-amd64-v3.zip"},
+					{exact: releaseAssetBaseName(channel) + "-linux-amd64.zip"},
 				}
 			} else {
-				candidates = []string{
-					"-linux-amd64.tar.gz",
-					"mosdns-linux-amd64.zip",
+				candidates = []assetPattern{
+					{prefix: basePrefix, suffix: "-linux-amd64.tar.gz"},
+					{exact: releaseAssetBaseName(channel) + "-linux-amd64.zip"},
 				}
 			}
 		case "arm64":
-			candidates = []string{
-				"-linux-arm64.tar.gz",
-				"mosdns-linux-arm64.zip",
+			candidates = []assetPattern{
+				{prefix: basePrefix, suffix: "-linux-arm64.tar.gz"},
+				{exact: releaseAssetBaseName(channel) + "-linux-arm64.zip"},
 			}
 		case "arm":
-			candidates = []string{
-				"-linux-armv7.tar.gz",
-				"mosdns-linux-arm-7.zip",
-				"mosdns-linux-arm-6.zip",
-				"mosdns-linux-arm-5.zip",
+			candidates = []assetPattern{
+				{prefix: basePrefix, suffix: "-linux-armv7.tar.gz"},
+				{exact: releaseAssetBaseName(channel) + "-linux-arm-7.zip"},
+				{exact: releaseAssetBaseName(channel) + "-linux-arm-6.zip"},
+				{exact: releaseAssetBaseName(channel) + "-linux-arm-5.zip"},
 			}
 		case "mips", "mips64", "mips64le", "mipsle":
-			candidates = append(candidates, fmt.Sprintf("mosdns-linux-%s.zip", runtime.GOARCH))
+			candidates = append(candidates, assetPattern{exact: fmt.Sprintf("%s-linux-%s.zip", releaseAssetBaseName(channel), runtime.GOARCH)})
 		}
 	case "darwin":
-		candidates = append(candidates, fmt.Sprintf("mosdns-darwin-%s.zip", runtime.GOARCH))
+		candidates = append(candidates, assetPattern{exact: fmt.Sprintf("%s-darwin-%s.zip", releaseAssetBaseName(channel), runtime.GOARCH)})
 	case "windows":
 		if runtime.GOARCH == "amd64" {
 			if binaryIsAMD64V3Plus() {
-				candidates = []string{"mosdns-windows-amd64-v3.zip", "mosdns-windows-amd64.zip"}
+				candidates = []assetPattern{
+					{exact: fmt.Sprintf("%s-windows-amd64-v3.zip", releaseAssetBaseName(channel))},
+					{exact: fmt.Sprintf("%s-windows-amd64.zip", releaseAssetBaseName(channel))},
+				}
 			} else {
-				candidates = []string{"mosdns-windows-amd64.zip"}
+				candidates = []assetPattern{{exact: fmt.Sprintf("%s-windows-amd64.zip", releaseAssetBaseName(channel))}}
 			}
 		} else if runtime.GOARCH == "arm64" {
-			candidates = []string{"mosdns-windows-arm64.zip"}
+			candidates = []assetPattern{{exact: fmt.Sprintf("%s-windows-arm64.zip", releaseAssetBaseName(channel))}}
 		}
 	}
 
-	for _, name := range candidates {
+	for _, candidate := range candidates {
 		for idx := range assets {
-			if assetNameMatches(assets[idx].Name, name) {
+			if assetNameMatches(assets[idx].Name, candidate.exact) || assetNameMatchesAffix(assets[idx].Name, candidate.prefix, candidate.suffix) {
 				return &assets[idx]
 			}
 		}
-	}
-	if len(assets) > 0 {
-		return &assets[0]
 	}
 	return nil
 }
@@ -936,6 +1111,90 @@ func buildAssetSignature(asset githubAsset) string {
 	return ""
 }
 
+func (m *UpdateManager) updateChannel() string {
+	if channel := normalizeUpdateChannel(os.Getenv("MOSDNS_UPDATE_CHANNEL")); channel != "" {
+		return channel
+	}
+	if version, ok := parseReleaseVersion(m.currentVersion); ok {
+		return version.channel
+	}
+	return defaultUpdateChannel
+}
+
+func normalizeUpdateChannel(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "lite":
+		return "lite"
+	case "main":
+		return "main"
+	default:
+		return ""
+	}
+}
+
+func parseReleaseVersion(tag string) (parsedReleaseVersion, bool) {
+	if match := mainTagRegex.FindStringSubmatch(strings.ToLower(strings.TrimSpace(tag))); len(match) == 4 {
+		version, ok := buildParsedReleaseVersion("main", strings.TrimSpace(tag), match[1], match[2], match[3])
+		return version, ok
+	}
+	if match := liteTagRegex.FindStringSubmatch(strings.ToLower(strings.TrimSpace(tag))); len(match) == 4 {
+		version, ok := buildParsedReleaseVersion("lite", strings.TrimSpace(tag), match[1], match[2], match[3])
+		return version, ok
+	}
+	return parsedReleaseVersion{}, false
+}
+
+func buildParsedReleaseVersion(channel, rawTag, major, minor, patch string) (parsedReleaseVersion, bool) {
+	majorNum, err := strconv.Atoi(major)
+	if err != nil {
+		return parsedReleaseVersion{}, false
+	}
+	minorNum, err := strconv.Atoi(minor)
+	if err != nil {
+		return parsedReleaseVersion{}, false
+	}
+	patchNum, err := strconv.Atoi(patch)
+	if err != nil {
+		return parsedReleaseVersion{}, false
+	}
+	return parsedReleaseVersion{
+		channel: channel,
+		major:   majorNum,
+		minor:   minorNum,
+		patch:   patchNum,
+		rawTag:  rawTag,
+	}, true
+}
+
+func compareReleaseVersion(a, b parsedReleaseVersion) int {
+	if a.major != b.major {
+		if a.major > b.major {
+			return 1
+		}
+		return -1
+	}
+	if a.minor != b.minor {
+		if a.minor > b.minor {
+			return 1
+		}
+		return -1
+	}
+	if a.patch != b.patch {
+		if a.patch > b.patch {
+			return 1
+		}
+		return -1
+	}
+	return 0
+}
+
+func releaseAssetBaseName(channel string) string {
+	if channel == "lite" {
+		return liteAssetBaseName
+	}
+	return mainAssetBaseName
+}
+
 func parseAssetsFromHTML(html string) []githubAsset {
 	items := strings.Split(html, "<li")
 	seen := make(map[string]struct{})
@@ -975,21 +1234,22 @@ func parseAssetsFromHTML(html string) []githubAsset {
 	return result
 }
 
-func findV3Asset(assets []githubAsset) *githubAsset {
+func findV3Asset(channel string, assets []githubAsset) *githubAsset {
 	if runtime.GOARCH != "amd64" {
 		return nil
 	}
 	want := ""
+	prefix := releaseAssetBaseName(channel) + "-"
 	switch runtime.GOOS {
 	case "linux":
 		want = "-linux-amd64-v3.tar.gz"
 	case "windows":
-		want = "mosdns-windows-amd64-v3.zip"
+		want = fmt.Sprintf("%s-windows-amd64-v3.zip", releaseAssetBaseName(channel))
 	default:
 		return nil
 	}
 	for i := range assets {
-		if assetNameMatches(assets[i].Name, want) {
+		if assetNameMatches(assets[i].Name, want) || assetNameMatchesAffix(assets[i].Name, prefix, want) {
 			return &assets[i]
 		}
 	}
@@ -997,10 +1257,20 @@ func findV3Asset(assets []githubAsset) *githubAsset {
 }
 
 func assetNameMatches(assetName, pattern string) bool {
+	if pattern == "" {
+		return false
+	}
 	if assetName == pattern {
 		return true
 	}
 	return strings.HasPrefix(pattern, "-") && strings.HasSuffix(assetName, pattern)
+}
+
+func assetNameMatchesAffix(assetName, prefix, suffix string) bool {
+	if prefix == "" || suffix == "" {
+		return false
+	}
+	return strings.HasPrefix(assetName, prefix) && strings.HasSuffix(assetName, suffix)
 }
 
 func (m *UpdateManager) downloadAsset(ctx context.Context, url, assetName string) (string, error) {

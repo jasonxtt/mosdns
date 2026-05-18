@@ -7,7 +7,7 @@ WORKDIR /root/src/
 ARG VERSION=""
 ARG BUILD_DATE=""
 RUN set -eux; \
-    base=${VERSION:-$(git describe --tags --abbrev=0 || echo dev)}; \
+    base=${VERSION:-$(git describe --tags --match 'v*' --abbrev=0 || echo dev)}; \
     date=${BUILD_DATE:-$(date +%Y%m%d)}; \
     sha=$(git rev-parse --short=7 HEAD || echo nogithash); \
     v="$base-$date-$sha"; \

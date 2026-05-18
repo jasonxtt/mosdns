@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-VERSION="${BUILD_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+VERSION="${BUILD_VERSION:-$(git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev)}"
 GOOS_VALUE="${GOOS:-$(go env GOOS)}"
 GOARCH_VALUE="${GOARCH:-$(go env GOARCH)}"
 OUTPUT="${OUTPUT:-./mosdns}"
