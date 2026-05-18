@@ -39,8 +39,6 @@ jobs:
             goarch: arm
             goarm: '7'
             ext: ''
-    env:
-      LITE_VERSION: 0.0.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,10 +50,15 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      - name: Compute artifact name
+      - name: Compute preview version
         shell: bash
         run: |
-          echo "ARCHIVE_NAME=mosdns-lite-${LITE_VERSION}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
+          DATE=$(date -u +%Y%m%d)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          BUILD_VERSION="lite-preview-${DATE}-${SHORT_SHA}"
+          VERSION_LABEL="preview-${DATE}-${SHORT_SHA}"
+          echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+          echo "ARCHIVE_NAME=mosdns-lite-${VERSION_LABEL}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
 
       - name: Build binary
         shell: bash
@@ -70,7 +73,7 @@ jobs:
           BIN_NAME="mosdns${{ matrix.ext }}"
           go build \
             -trimpath \
-            -ldflags "-s -w -X main.version=${LITE_VERSION}" \
+            -ldflags "-s -w -X main.version=${BUILD_VERSION}" \
             -o "dist/${BIN_NAME}" \
             ./
 
