@@ -231,19 +231,25 @@ function getClientLabel(ip) {
   return alias ? `${alias} (${normalizedIp})` : normalizedIp
 }
 
-function getIpByAlias(alias) {
+function getIpMatchesByAlias(alias, exact = false) {
   const searchTerm = String(alias || '').trim().toLowerCase()
   if (!searchTerm) {
-    return ''
+    return []
   }
   const entries = Object.entries(clientAliases.value)
+  const matches = []
   for (let index = 0; index < entries.length; index += 1) {
     const [ip, name] = entries[index]
-    if (String(name || '').trim().toLowerCase() === searchTerm) {
-      return ip
+    const aliasName = String(name || '').trim().toLowerCase()
+    if (!aliasName) {
+      continue
+    }
+    const isMatch = exact ? aliasName === searchTerm : aliasName.includes(searchTerm)
+    if (isMatch) {
+      matches.push(ip)
     }
   }
-  return ''
+  return [...new Set(matches)]
 }
 
 function getMatchedGroupDisplay(value) {
@@ -655,16 +661,17 @@ async function loadLogs(page = 1, append = false) {
   resetMessages()
   const { query: rawQuery, exact } = parseSearchKeyword(searchInput.value)
   let query = rawQuery
-  if (query && !exact) {
-    const aliasIP = getIpByAlias(query)
-    if (aliasIP) {
-      query = aliasIP
-    }
+  const aliasIPs = query ? getIpMatchesByAlias(query, exact) : []
+  if (aliasIPs.length > 0) {
+    query = ''
   }
   try {
     const params = new URLSearchParams({
       page: String(page),
       limit: '50'
+    })
+    aliasIPs.forEach((ip) => {
+      params.append('client_ip', ip)
     })
     if (query) {
       params.set('q', query)

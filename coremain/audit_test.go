@@ -43,3 +43,56 @@ func TestComputeEffectiveTagKeepsForeignRealIPFilterLabel(t *testing.T) {
 		t.Fatalf("expected foreign real-ip filter label to remain stable, got %q", got)
 	}
 }
+
+func TestAuditClientIPEqualsSupportsIPv4MappedIPv6(t *testing.T) {
+	if !auditClientIPEquals("::ffff:10.0.0.10", "10.0.0.10") {
+		t.Fatal("expected IPv4-mapped IPv6 and plain IPv4 to compare equal")
+	}
+	if auditClientIPEquals("::ffff:10.0.0.10", "10.0.0.11") {
+		t.Fatal("expected different client IPs to remain different")
+	}
+}
+
+func TestGetV2LogsExactSearchMatchesNormalizedClientIP(t *testing.T) {
+	collector := NewAuditCollector(4)
+	collector.logs = []AuditLog{
+		{ClientIP: "::ffff:10.0.0.10", QueryName: "example.com", TraceID: "trace-1"},
+		{ClientIP: "::ffff:10.0.0.11", QueryName: "example.net", TraceID: "trace-2"},
+	}
+
+	response := collector.GetV2Logs(V2GetLogsParams{
+		Page:  1,
+		Limit: 10,
+		Q:     "10.0.0.10",
+		Exact: true,
+	})
+
+	if got := len(response.Logs); got != 1 {
+		t.Fatalf("expected one exact client IP match, got %d", got)
+	}
+	if response.Logs[0].ClientIP != "::ffff:10.0.0.10" {
+		t.Fatalf("unexpected matched client IP %q", response.Logs[0].ClientIP)
+	}
+}
+
+func TestGetV2LogsClientIPFilterSupportsMultipleAliasMatches(t *testing.T) {
+	collector := NewAuditCollector(4)
+	collector.logs = []AuditLog{
+		{ClientIP: "::ffff:10.0.0.10", QueryName: "alpha.example", TraceID: "trace-1"},
+		{ClientIP: "::ffff:10.0.0.11", QueryName: "beta.example", TraceID: "trace-2"},
+		{ClientIP: "::ffff:10.0.0.12", QueryName: "gamma.example", TraceID: "trace-3"},
+	}
+
+	response := collector.GetV2Logs(V2GetLogsParams{
+		Page:      1,
+		Limit:     10,
+		ClientIPs: []string{"10.0.0.10", "10.0.0.12"},
+	})
+
+	if got := len(response.Logs); got != 2 {
+		t.Fatalf("expected two alias-backed client IP matches, got %d", got)
+	}
+	if response.Pagination.TotalItems != 2 {
+		t.Fatalf("expected total items 2, got %d", response.Pagination.TotalItems)
+	}
+}
