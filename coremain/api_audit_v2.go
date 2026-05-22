@@ -168,6 +168,7 @@ func handleV2GetLogs(w http.ResponseWriter, r *http.Request) {
 		AnswerIP:    query.Get("answer_ip"),
 		AnswerCNAME: query.Get("cname"),
 		ClientIP:    query.Get("client_ip"),
+		ClientIPs:   append([]string(nil), query["client_ip"]...),
 		Q:           query.Get("q"),
 		Exact:       exactSearch,
 	}

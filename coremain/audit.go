@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"sort"
 	"strings"
@@ -834,8 +835,44 @@ type V2GetLogsParams struct {
 	AnswerIP    string
 	AnswerCNAME string
 	ClientIP    string
+	ClientIPs   []string
 	Q           string
 	Exact       bool
+}
+
+func normalizeAuditClientIP(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		value = strings.TrimPrefix(strings.TrimSuffix(value, "]"), "[")
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return addr.Unmap().String()
+	}
+	return value
+}
+
+func auditClientIPEquals(left, right string) bool {
+	if strings.TrimSpace(left) == strings.TrimSpace(right) {
+		return true
+	}
+	normalizedLeft := normalizeAuditClientIP(left)
+	normalizedRight := normalizeAuditClientIP(right)
+	return normalizedLeft != "" && normalizedLeft == normalizedRight
+}
+
+func auditClientIPMatchesAny(value string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if auditClientIPEquals(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *AuditCollector) getLogsSnapshot() []AuditLog {
@@ -1067,6 +1104,11 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 		params.Limit = 50
 	}
 
+	clientIPFilters := params.ClientIPs
+	if len(clientIPFilters) == 0 && params.ClientIP != "" {
+		clientIPFilters = []string{params.ClientIP}
+	}
+
 	searchTerm := params.Q
 	if params.Q != "" && !params.Exact {
 		searchTerm = strings.ToLower(searchTerm)
@@ -1100,12 +1142,15 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 
 			// 2. Check ClientIP
 			if !foundInQ {
-				haystack = log.ClientIP
-				if !params.Exact {
-					haystack = strings.ToLower(haystack)
-				}
-				if matchFunc(haystack, searchTerm) {
-					foundInQ = true
+				if params.Exact {
+					if auditClientIPEquals(log.ClientIP, searchTerm) {
+						foundInQ = true
+					}
+				} else {
+					haystack = strings.ToLower(log.ClientIP)
+					if matchFunc(haystack, searchTerm) {
+						foundInQ = true
+					}
 				}
 			}
 
@@ -1182,7 +1227,7 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 			}
 		}
 
-		if isMatched && params.ClientIP != "" && log.ClientIP != params.ClientIP {
+		if isMatched && len(clientIPFilters) > 0 && !auditClientIPMatchesAny(log.ClientIP, clientIPFilters) {
 			isMatched = false
 		}
 		if isMatched && params.Domain != "" && !strings.Contains(log.QueryName, params.Domain) {
