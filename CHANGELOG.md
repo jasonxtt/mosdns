@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## lite-v0.1.1
+
+### Fixed
+
+- fixed query-log exact client-IP search so entering plain IPv4 values such as `10.0.0.10` now matches logs stored as IPv4-mapped IPv6 like `::ffff:10.0.0.10`
+- fixed query-log client-IP filtering to normalize stored and requested client addresses before comparison
+- fixed client alias search so both fuzzy and exact alias lookups now resolve to matching client IPs before querying logs
+- fixed multi-client alias matches so one alias keyword can return logs for every matching client instead of only a single exact alias hit
+
+### Tests
+
+- added audit log regression tests for normalized client-IP equality and multi-client alias-backed filtering in `coremain/audit_test.go`
+
+### Upgrade Notes
+
+- this release does **not** require a YAML config change
+- existing deployments can update only the binary
+
 ## v0.3.21
 
 ### Fixed
