@@ -88,7 +88,6 @@ const switchProfiles = [
   { tag: 'switch13', name: '过期缓存2', desc: '启用全量缓存与 fakeip 缓存', tip: '建议开启。', valueForOn: 'A' },
   { tag: 'switch7', name: '广告屏蔽', desc: '启用 AdGuard 在线规则支持', tip: '按需开启。', valueForOn: 'A' },
   { tag: 'switch9', name: 'CNFakeIP', desc: '国内域名返回 fakeip', tip: '切换后会自动清空核心缓存。', valueForOn: 'B' },
-  { tag: 'switch15', name: '极限加速', desc: '启用极限缓存与加速路径', tip: '按需开启。', valueForOn: 'A' },
   { tag: 'switch2', name: '指定 Client fakeip', desc: '仅指定客户端可科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
   { tag: 'switch12', name: '指定 Client realip', desc: '指定客户端不科学', tip: '需配合 client_ip 名单。', valueForOn: 'A' },
   { tag: 'switch6', name: 'IPV6屏蔽', desc: '屏蔽 AAAA 请求', tip: '无 IPV6 场景建议开启。', valueForOn: 'A' }

@@ -99,6 +99,12 @@ func GetUpstreamOverrides(pluginTag string) []UpstreamOverrideConfig {
 
 	copied := make([]UpstreamOverrideConfig, len(entries))
 	copy(copied, entries)
+	for i := range copied {
+		copied[i].Protocol = normalizeUpstreamProtocol(copied[i].Protocol)
+		if copied[i].Protocol != "aliapi" {
+			copied[i].Addr = normalizeRuntimeUpstreamAddr(copied[i].Protocol, copied[i].Addr)
+		}
+	}
 	if pluginTag == "foreign" {
 		fallback := resolveGlobalSocks5Override()
 		if fallback != "" {
@@ -110,6 +116,80 @@ func GetUpstreamOverrides(pluginTag string) []UpstreamOverrideConfig {
 		}
 	}
 	return copied
+}
+
+func normalizeUpstreamProtocol(protocol string) string {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "dot":
+		return "tls"
+	case "doh":
+		return "https"
+	case "doq":
+		return "quic"
+	default:
+		return strings.ToLower(strings.TrimSpace(protocol))
+	}
+}
+
+func runtimeAddrSchemeForProtocol(protocol string) string {
+	switch normalizeUpstreamProtocol(protocol) {
+	case "udp":
+		return "udp"
+	case "tcp":
+		return "tcp"
+	case "tls":
+		return "tls"
+	case "https":
+		return "https"
+	case "quic":
+		return "quic"
+	default:
+		return ""
+	}
+}
+
+func normalizeRuntimeUpstreamAddr(protocol, addr string) string {
+	raw := strings.TrimSpace(addr)
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(raw, "://") {
+		return raw
+	}
+
+	scheme := runtimeAddrSchemeForProtocol(protocol)
+	if scheme == "" {
+		return raw
+	}
+	if scheme != "https" {
+		return scheme + "://" + raw
+	}
+	if strings.Contains(raw, "/") {
+		return scheme + "://" + raw
+	}
+	return scheme + "://" + raw + "/dns-query"
+}
+
+func validateProtocolAddrCompatibility(protocol, addr string) error {
+	normalizedProtocol := normalizeUpstreamProtocol(protocol)
+	raw := strings.TrimSpace(addr)
+	if raw == "" || !strings.Contains(raw, "://") {
+		return nil
+	}
+
+	schemeEnd := strings.Index(raw, "://")
+	if schemeEnd <= 0 {
+		return nil
+	}
+	inputScheme := strings.ToLower(strings.TrimSpace(raw[:schemeEnd]))
+	expectedScheme := runtimeAddrSchemeForProtocol(normalizedProtocol)
+	if expectedScheme == "" {
+		return nil
+	}
+	if inputScheme != expectedScheme {
+		return fmt.Errorf("协议 %s 与服务器地址中的 scheme %s 不一致", normalizedProtocol, inputScheme)
+	}
+	return nil
 }
 
 func resolveGlobalSocks5Override() string {
@@ -297,6 +377,19 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if u.Protocol != "aliapi" {
+			if u.Addr == "" {
+				msg := fmt.Sprintf(`{"error": "Item #%d (%s): addr is required for DNS types"}`, i+1, u.Tag)
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
+			if err := validateProtocolAddrCompatibility(u.Protocol, u.Addr); err != nil {
+				msg := fmt.Sprintf(`{"error": "Item #%d (%s): %s"}`, i+1, u.Tag, err.Error())
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
+		}
+
 		if !u.Enabled {
 			continue
 		}
@@ -304,12 +397,6 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 		if u.Protocol == "aliapi" {
 			if u.AccountID == "" || u.AccessKeyID == "" || u.AccessKeySecret == "" {
 				msg := fmt.Sprintf(`{"error": "Item #%d (%s): AliAPI requires account_id, access_key_id, and access_key_secret"}`, i+1, u.Tag)
-				http.Error(w, msg, http.StatusBadRequest)
-				return
-			}
-		} else {
-			if u.Addr == "" {
-				msg := fmt.Sprintf(`{"error": "Item #%d (%s): addr is required for DNS types"}`, i+1, u.Tag)
 				http.Error(w, msg, http.StatusBadRequest)
 				return
 			}

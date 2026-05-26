@@ -63,11 +63,8 @@ const protocolOptions = [
   { value: 'udp', label: 'UDP' },
   { value: 'tcp', label: 'TCP' },
   { value: 'tls', label: 'DoT (TLS)' },
-  { value: 'dot', label: 'DoT (dot)' },
   { value: 'https', label: 'DoH (HTTPS)' },
-  { value: 'doh', label: 'DoH (doh)' },
   { value: 'quic', label: 'DoQ (QUIC)' },
-  { value: 'doq', label: 'DoQ (doq)' },
   { value: 'aliapi', label: '阿里 API (AliAPI)' }
 ]
 
@@ -75,7 +72,29 @@ function isSpecialUpstreamTag(tag) {
   return /^special_upstream_\d+$/.test(String(tag || ''))
 }
 
-const protocolValue = computed(() => String(form.protocol || '').trim().toLowerCase())
+function normalizeProtocolAlias(protocol) {
+  const value = String(protocol || '').trim().toLowerCase()
+  switch (value) {
+    case 'dot':
+      return 'tls'
+    case 'doh':
+      return 'https'
+    case 'doq':
+      return 'quic'
+    default:
+      return value
+  }
+}
+
+function orderGroupOptions(options) {
+  const groups = [...options]
+  const domestic = groups.filter((group) => group === 'domestic')
+  const middle = groups.filter((group) => group !== 'domestic' && group !== 'cnfake')
+  const cnfake = groups.filter((group) => group === 'cnfake')
+  return [...domestic, ...middle, ...cnfake]
+}
+
+const protocolValue = computed(() => normalizeProtocolAlias(form.protocol))
 const isAliapi = computed(() => protocolValue.value === 'aliapi')
 const showPipeline = computed(() => ['tcp', 'dot', 'tls'].includes(protocolValue.value))
 const showHttp3 = computed(() => ['https', 'doh', 'quic', 'doq'].includes(protocolValue.value))
@@ -111,7 +130,7 @@ const groupOptions = computed(() => {
       options.add(String(group.upstream_plugin_tag))
     }
   })
-  return [...options].sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true, sensitivity: 'base' }))
+  return orderGroupOptions(options)
 })
 
 const hideDisabledLabel = computed(() => (hideDisabled.value ? '显示全部上游' : '隐藏未启用上游'))
@@ -417,7 +436,7 @@ function beginEdit(row) {
 
   form.group = row.group
   form.tag = String(item.tag || '')
-  form.protocol = String(item.protocol || 'udp')
+  form.protocol = normalizeProtocolAlias(item.protocol || 'udp')
   form.addr = String(item.addr || '')
   form.dial_addr = String(item.dial_addr || '')
   form.socks5 = String(item.socks5 || '')

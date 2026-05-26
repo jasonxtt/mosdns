@@ -23,21 +23,14 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/netip"
 
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
 )
 
-const (
-	FastActionContinue = iota
-	FastActionReply
-)
-
 type UDPServerOpts struct {
-	Logger     *zap.Logger
-	FastBypass func(reqLen int, buf []byte, clientAddr netip.AddrPort) (action int, respLen int, preMarks uint64, preDset string)
+	Logger *zap.Logger
 }
 
 func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
@@ -78,24 +71,6 @@ func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
 			dstIpFromCm, _ = oobReader(ob[:oobn])
 		}
 
-		var preMarks uint64
-		var preDset string
-		if opts.FastBypass != nil {
-			action, respLen, marks, dset := opts.FastBypass(n, *rb, remoteAddr)
-			if action == FastActionReply {
-				if respLen > 0 {
-					var oob []byte
-					if oobWriter != nil && dstIpFromCm != nil {
-						oob = oobWriter(dstIpFromCm)
-					}
-					_, _, _ = c.WriteMsgUDPAddrPort((*rb)[:respLen], oob, remoteAddr)
-				}
-				continue
-			}
-			preMarks = marks
-			preDset = dset
-		}
-
 		q := new(dns.Msg)
 		if err := q.Unpack((*rb)[:n]); err != nil {
 			logger.Warn("invalid msg", zap.Error(err), zap.Binary("msg", (*rb)[:n]), zap.Stringer("from", remoteAddr))
@@ -104,10 +79,8 @@ func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
 
 		go func() {
 			payload := h.Handle(listenerCtx, q, QueryMeta{
-				ClientAddr:       remoteAddr.Addr(),
-				FromUDP:          true,
-				PreFastFlags:     preMarks,
-				PreFastDomainSet: preDset,
+				ClientAddr: remoteAddr.Addr(),
+				FromUDP:    true,
 			}, pool.PackBuffer)
 
 			if payload == nil {

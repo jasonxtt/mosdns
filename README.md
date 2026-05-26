@@ -88,7 +88,7 @@ A detailed summary is available here:
 
 The current released version is:
 
-- `v0.4.1`
+- `v0.4.2`
 
 This fork is already used as a maintained WebUI-enhanced branch, not just a one-off preview build.
 
