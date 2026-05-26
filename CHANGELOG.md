@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## lite-v0.1.2
+
+### Fixed
+
+- removed duplicate `dot` / `doh` / `doq` protocol entries from the upstream editor while keeping alias-compatible editing for existing override data
+- updated upstream group ordering in the editor so `domestic` is pinned first, `cnfake` is pinned last, and the remaining groups keep their relative order
+- normalized bare `udp` / `tcp` / `dot` / `doh` / `doq` upstream addresses at runtime so the UI can keep showing the original input while the backend still builds a runnable target
+- added validation for conflicting explicit schemes such as `protocol=doh` with `udp://...` so invalid upstream combinations now fail fast on save
+- fixed `aliapi` live-reload metrics registration so upstream counters continue updating after override-based reloads
+- made the data-management cache list follow the current core mode and show only the matching compatibility or safe cache variants
+- removed the unused fast-bypass hook from the shared UDP server path
+
+### Tests
+
+- added upstream-override regression coverage for runtime address normalization and protocol/scheme compatibility checks in `coremain/api_upstream_test.go`
+- verified the updated binary on `10.0.0.3`
+
+### Upgrade Notes
+
+- this release does **not** require a YAML config change
+- existing deployments can update only the binary
 ## lite-v0.1.1
 
 ### Fixed
