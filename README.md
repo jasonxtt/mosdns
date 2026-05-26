@@ -1,106 +1,112 @@
 # mosdns
 
-[简体中文文档](README.zh-CN.md)
+这是一个基于 `yyysuo/mosdns` 的魔改版 mosdns，重构WebUI、新增专属上游、删除`nft` / `eBPF`支持及其他细节调整
 
-An enhanced fork of `yyysuo/mosdns`, focused on making long-term DNS rule maintenance practical through a stronger WebUI workflow, dedicated routing groups, and a Vue-based dashboard.
+## 适用场景
 
-This fork keeps the upstream architecture and core configuration style, while adding a set of features for rule-driven routing, upstream management, and day-to-day operations.
+- 以DNS分流为方案的家庭网络部署
+- 建议搭配sing-box / mosdns FakeIP模式
+- 内置相对完善的国内外域名分流策略，一次判定后自生成直连域名、代理域名列表，后续分流优先采信，越用越快
+- 可通过 WebUI 轻松维护白名单、灰名单、DDNS域名、DNS重定向，设定开关缓存、IPv4优先、指定客户端直连或代理
 
-The current UI entry points are:
+## WebUI预览
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-1.png)
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-2.png)
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-3.png)
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-4.png)
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-5.png)
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-6.png)
 
-- `/` for the maintained Vue UI
-- `/log` for the previous legacy dashboard kept for compatibility and comparison
+## 安装方法
+**步骤 1：** 新建 Debian 或 Ubuntu 虚拟机，运行安装脚本
 
-## Config Packages
+```bash
+wget --quiet --show-progress -O /mnt/main_install.sh https://raw.githubusercontent.com/jasonxtt/LinuxScripts/main/AIO/Scripts/main_install.sh && chmod +x /mnt/main_install.sh && /mnt/main_install.sh
+```
 
-The maintained config packages for this fork are published in:
+
+**步骤 2：** 输入 `6` ，再输入 `1` ，安装mosdns 
+
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-13.png)
+
+**步骤 3：** 按提示输入以下信息：
+1. sing-box/mihomo 提供的socks代理  `IP:端口`（例如 10.0.0.2:7890）
+2. 输入sing-box/mihomo监听的DNS端口，用于获取fakeip (例如 10.0.0.2:6666)
+
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-7.png)
+
+**步骤 4：** 安装完成后，UI 地址为 `IP:9099`, 例如`http://10.0.0.3:9099`
+
+## 专属分流组简介及设置
+
+“专属分流组”可以理解为一组独立的域名分流槽位。命中这个组的域名，会优先走它绑定的专属上游、专属缓存和对应的规则入口，适合把某一类域名单独交给特定 DNS 线路处理。
+
+在当前 WebUI 中，常见设置流程是：
+
+- 进入 `上游设置`
+- 点击 `新增专属分流组`
+- 为分流组命名，例如 `腾讯上游`
+- 点击 `添加上游DNS`，所属组选择刚才添加的 `腾讯上游`，再填写协议、服务器地址等参数
+- 在 `规则管理` 中配置要命中这个组的域名：
+  - `本地规则` 可直接手工录入域名
+  - `订阅规则` 可添加在线规则集，并把类型选择为对应的专属分流组
+- 命中该专属分流组的域名，会优先走它绑定的上游组及对应缓存
+
+这套机制的核心作用，是把某一批域名独立交给指定线路处理，而不混在默认国内 / 国外出口逻辑里。
+
+## 配置包
+
+这个 fork 维护中的配置包放在：
 
 - [`mosdns/config/config_all.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip)
 - [`mosdns/config/config_up.zip`](https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip)
 
-Use `config_all.zip` for a fresh deployment or a full template replacement.
+其中：
 
-Use `config_up.zip` only for incremental config updates on an existing deployment.
+- `config_all.zip` 用于新部署或整套模板替换
+- `config_up.zip` 用于现有部署的增量配置更新
 
-The old `config_tom.zip` template has been retired.
-
-After extracting the full package, the runtime path should be:
+完整配置包解压后的运行目录应为：
 
 - `/cus/mosdns`
 
-## Upstream
+## 当前相对上游的改动
 
-- Upstream repository: `yyysuo/mosdns`
+- 新增改动：
+  - 专属分流组与专属上游联动
+  - 在线规则、本地规则、日志排障等日常维护能力
+  - 使用 Vue 对 UI 进行了重构，并持续替换原有前端工作流
+- 当前 UI 路径关系如下：
+  - 默认入口 `/` 为当前维护中的 Vue UI，后续功能演进以这套界面为主
+  - main分支`/log` 保留原版 UI，主要用于兼容、对照和过渡期使用
+- 重构 UI 内容包括：
+  - 将概览、查询日志、规则管理、数据管理、上游设置、系统设置统一到同一套组件结构下
+  - 统一弹窗编辑、详情查看、刷新行为和模块层级，减少旧 UI 中大量分散式脚本交互
+  - 在保持原有功能覆盖面的前提下，让后续新增功能更容易继续扩展到 UI
+- 同时，这个 fork 也明确收缩了与当前定位无关的能力面，当前不跟 `nft` / `eBPF` 这条线。
 
-## What This Fork Adds
 
-### Dedicated Routing Groups
 
-- Create dedicated routing groups from the WebUI
-- The current implementation supports up to 10 dedicated routing groups
-- Each group can bind its own:
-  - online rule set
-  - upstream group
-  - cache
+详细说明见：
 
-### Rule-to-Upstream Binding
+- [相对上游的改动说明](docs/fork_diff_summary_zh.md)
 
-- Select a dedicated routing group directly in rule management
-- Domains matched by that group are sent to the bound upstream path
+## 发布状态
 
-### Automatic Rule Download After Save
-
-- When an online diversion rule is created with `url + files`, the backend downloads the `.srs` automatically
-- No extra manual "Update" click is required
-
-### Upstream Hot Reload
-
-- Saving upstream settings in the WebUI takes effect immediately
-- No manual `mosdns` restart is required for supported aliapi upstream groups
-
-### Better Query Log Display
-
-- Dedicated routing groups are shown with readable names in the query log
-- Matched rule source, final upstream group, and final upstream are available for troubleshooting
-
-## Typical Use Cases
-
-- Home network DNS splitting
-- Bypass DNS deployments
-- Proxy environments with long-lived geosite / srs rule maintenance
-- Users who want to manage routing and upstream behavior from WebUI instead of editing YAML repeatedly
-
-## Key Differences From Upstream
-
-This fork currently adds:
-
-- dedicated routing group APIs and WebUI flows
-- a Vue-based main dashboard at `/`, with the previous UI retained at `/log`
-- upstream hot reload for aliapi groups
-- automatic online rule download after save
-- friendlier dedicated-group display in query logs
-
-A detailed summary is available here:
-
-- [Fork Diff Summary (Chinese)](docs/fork_diff_summary_zh.md)
-
-## Release Status
-
-The current released version is:
+当前正式发布版本为：
 
 - `v0.4.2`
 
-This fork is already used as a maintained WebUI-enhanced branch, not just a one-off preview build.
+这个 fork 现在已经按持续维护的 WebUI 增强分支在发布，不再是早期预览版定位。
 
-## Documentation
+## 文档
 
-- [Chinese README](README.zh-CN.md)
-- [Project Intro Draft (Chinese)](docs/github_project_intro_zh.md)
-- [Fork Diff Summary (Chinese)](docs/fork_diff_summary_zh.md)
-- [GitHub Release Checklist (Chinese)](docs/github_release_checklist_zh.md)
+- [项目简介草案](docs/github_project_intro_zh.md)
+- [相对上游的改动说明](docs/fork_diff_summary_zh.md)
+- [GitHub 发布前清单](docs/github_release_checklist_zh.md)
 
-## Acknowledgements
+## 致谢
 
-This project is based on:
+本项目基于：
 
 - `yyysuo/mosdns`
