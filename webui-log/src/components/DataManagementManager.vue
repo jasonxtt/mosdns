@@ -10,6 +10,7 @@ const cacheRows = ref([])
 const cacheRefreshing = ref(false)
 const cacheClearingAll = ref(false)
 const cacheClearingByTag = reactive({})
+const coreMode = ref('')
 
 const listStatsRefreshing = ref(false)
 const listStats = ref([
@@ -87,12 +88,12 @@ const flushRulePaths = [
 ]
 
 const baseCacheConfig = [
-  { key: 'cache_all', name: '全部缓存 (兼容)', tag: 'cache_all' },
+  { key: 'cache_all', name: '全部缓存 (兼容)', tag: 'cache_all', coreModes: ['A'] },
   { key: 'cache_cn', name: '国内缓存', tag: 'cache_cn' },
   { key: 'cache_node', name: '节点缓存', tag: 'cache_node' },
-  { key: 'cache_google', name: '国外缓存 (兼容)', tag: 'cache_google' },
-  { key: 'cache_all_noleak', name: '全部缓存 (安全)', tag: 'cache_all_noleak' },
-  { key: 'cache_google_node', name: '国外缓存 (安全)', tag: 'cache_google_node' },
+  { key: 'cache_google', name: '国外缓存 (兼容)', tag: 'cache_google', coreModes: ['A'] },
+  { key: 'cache_all_noleak', name: '全部缓存 (安全)', tag: 'cache_all_noleak', coreModes: ['B'] },
+  { key: 'cache_google_node', name: '国外缓存 (安全)', tag: 'cache_google_node', coreModes: ['B'] },
   { key: 'cache_cnmihomo', name: '国内域名fakeip', tag: 'cache_cnmihomo' }
 ]
 
@@ -113,6 +114,19 @@ const cacheConfig = computed(() => {
       tag: `cache_special_${group.slot}`
     }))
   return [...baseCacheConfig, ...dynamic]
+})
+
+const visibleCacheConfig = computed(() => {
+  const mode = String(coreMode.value || '').trim().toUpperCase()
+  if (mode !== 'A' && mode !== 'B') {
+    return cacheConfig.value
+  }
+  return cacheConfig.value.filter((cache) => {
+    if (!Array.isArray(cache.coreModes) || cache.coreModes.length === 0) {
+      return true
+    }
+    return cache.coreModes.includes(mode)
+  })
 })
 
 const requeryStatusMeta = computed(() => {
@@ -273,7 +287,7 @@ function parseMetrics(metricsText, cacheTag) {
 }
 
 function buildCacheRows(metricsText) {
-  cacheRows.value = cacheConfig.value.map((cache) => {
+  cacheRows.value = visibleCacheConfig.value.map((cache) => {
     const stats = parseMetrics(metricsText, cache.tag)
     const hitRate = stats.query_total > 0 ? ((stats.hit_total / stats.query_total) * 100).toFixed(2) : '0.00'
     const lazyRate = stats.query_total > 0 ? ((stats.lazy_hit_total / stats.query_total) * 100).toFixed(2) : '0.00'
@@ -284,6 +298,14 @@ function buildCacheRows(metricsText) {
       lazy_hit_rate: `${lazyRate}%`
     }
   })
+}
+
+async function loadCoreMode() {
+  try {
+    coreMode.value = String(await getText('/plugins/switch3/show') || '').trim().toUpperCase()
+  } catch {
+    coreMode.value = ''
+  }
 }
 
 async function requestResponse(url, options = {}) {
@@ -322,6 +344,7 @@ async function refreshCacheStats(showMessage = false) {
       getText('/metrics')
     ])
     specialGroups.value = Array.isArray(groupsRes) ? groupsRes : []
+    await loadCoreMode()
     buildCacheRows(metricsText)
     if (showMessage) {
       setSuccess('缓存统计已刷新')
@@ -350,13 +373,13 @@ async function clearSingleCache(cacheTag, cacheName) {
 }
 
 async function clearAllCaches() {
-  if (!(await openConfirm(`将依次清空 ${cacheConfig.value.length} 个缓存实例，此操作不可恢复。`, { tone: 'danger' }))) {
+  if (!(await openConfirm(`将依次清空 ${visibleCacheConfig.value.length} 个缓存实例，此操作不可恢复。`, { tone: 'danger' }))) {
     return
   }
   cacheClearingAll.value = true
   try {
     const results = await Promise.allSettled(
-      cacheConfig.value.map((cache) => requestResponse(`/plugins/${cache.tag}/flush`))
+      visibleCacheConfig.value.map((cache) => requestResponse(`/plugins/${cache.tag}/flush`))
     )
     const failed = results.filter((item) => item.status === 'rejected').length
     await refreshCacheStats()

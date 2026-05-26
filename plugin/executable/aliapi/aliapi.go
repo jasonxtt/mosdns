@@ -274,6 +274,7 @@ type AliAPI struct {
 	pluginTag string
 
 	logger       *zap.Logger
+	metricsReg   prometheus.Registerer
 	mu           sync.RWMutex
 	us           []*upstreamWrapper
 	tag2Upstream map[string]*upstreamWrapper
@@ -386,10 +387,25 @@ func (f *AliAPI) reloadWithArgs(args *Args, opt Opts) error {
 
 	f.mu.Lock()
 	oldUs := f.us
+	oldTag2Upstream := f.tag2Upstream
+	oldArgs := f.args
 	f.us = newUs
 	f.tag2Upstream = newTag2Upstream
 	f.args = cfg
 	f.mu.Unlock()
+
+	if err := f.syncMetrics(oldUs, newUs); err != nil {
+		f.mu.Lock()
+		f.us = oldUs
+		f.tag2Upstream = oldTag2Upstream
+		f.args = oldArgs
+		f.mu.Unlock()
+		for _, u := range newUs {
+			_ = u.Close()
+		}
+		_ = f.syncMetrics(newUs, oldUs)
+		return err
+	}
 
 	for _, u := range oldUs {
 		_ = u.Close()
@@ -398,14 +414,43 @@ func (f *AliAPI) reloadWithArgs(args *Args, opt Opts) error {
 }
 
 func (f *AliAPI) RegisterMetricsTo(r prometheus.Registerer) error {
-	f.mu.RLock()
+	f.mu.Lock()
+	f.metricsReg = r
 	us := append([]*upstreamWrapper(nil), f.us...)
-	f.mu.RUnlock()
+	f.mu.Unlock()
 	for _, wu := range us {
 		if len(wu.cfg.Tag) == 0 {
 			continue
 		}
 		if err := wu.registerMetricsTo(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *AliAPI) syncMetrics(oldUs, newUs []*upstreamWrapper) error {
+	f.mu.RLock()
+	r := f.metricsReg
+	f.mu.RUnlock()
+	if r == nil {
+		return nil
+	}
+
+	for _, u := range oldUs {
+		if u == nil || len(u.cfg.Tag) == 0 {
+			continue
+		}
+		for _, collector := range u.collectors() {
+			r.Unregister(collector)
+		}
+	}
+
+	for _, u := range newUs {
+		if u == nil || len(u.cfg.Tag) == 0 {
+			continue
+		}
+		if err := u.registerMetricsTo(r); err != nil {
 			return err
 		}
 	}
@@ -1083,27 +1128,23 @@ func (w *upstreamWrapper) Close() error {
 	return w.u.Close()
 }
 
+func (w *upstreamWrapper) collectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		w.mQueryTotal,
+		w.mErrorTotal,
+		w.mWinnerTotal,
+		w.mInflight,
+		w.mResponseLatency,
+		w.mConnOpened,
+		w.mConnClosed,
+	}
+}
+
 func (w *upstreamWrapper) registerMetricsTo(r prometheus.Registerer) error {
-	if err := r.Register(w.mQueryTotal); err != nil {
-		return err
-	}
-	if err := r.Register(w.mErrorTotal); err != nil {
-		return err
-	}
-	if err := r.Register(w.mWinnerTotal); err != nil {
-		return err
-	}
-	if err := r.Register(w.mInflight); err != nil {
-		return err
-	}
-	if err := r.Register(w.mResponseLatency); err != nil {
-		return err
-	}
-	if err := r.Register(w.mConnOpened); err != nil {
-		return err
-	}
-	if err := r.Register(w.mConnClosed); err != nil {
-		return err
+	for _, collector := range w.collectors() {
+		if err := r.Register(collector); err != nil {
+			return err
+		}
 	}
 	return nil
 }
