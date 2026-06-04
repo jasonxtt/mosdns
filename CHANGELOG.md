@@ -1,618 +1,257 @@
-# Changelog
-
-## Unreleased
-
-## v0.4.3
-
-### Added
-
-- added a dedicated `switch16` toggle in the maintained root Vue UI for `DDNS` domains that should prefer the foreign upstream group without cache
-
-### Changed
-
-- dedicated `special_groups` are no longer capped at slots `50-59`; new groups now allow any slot `>=50`
-- the main-line runtime now regenerates `sub_config/special_groups.yaml` automatically from persisted `special_groups` state before loading config
-- saving or deleting a dedicated `special_group` now updates the generated config file and schedules a self-restart so newly created or removed slots take effect cleanly
-
-### Fixed
-
-- aligned the main branch dedicated-routing generator with the long-standing `sequence_special_v4` / `sequence_special_v6` / `sequence_special_ot` flow instead of switching to a `sequence_special_all` path
-- updated the main config flow so `ddnslist` domains can prefer `foreign` via `prefer_foreign_nocache` and fall back to `domestic` when `switch16` is enabled
-
-### Tests
-
-- added `coremain/api_special_groups_test.go` coverage for generated `special_groups` config rendering and runtime file sync
-- verified the updated binary and config on `10.0.0.3`
-
-### Upgrade Notes
-
-- this release **does** require updated main config files for users who want the new `special_groups` and `DDNS` behavior
-- the incremental config package for this release updates:
-  - `config_custom.yaml`
-  - `sub_config/switch.yaml`
-  - `sub_config/special_groups.yaml`
-  - `rule/switch16.txt`
-- if a deployment is still using the temporary `sequence_special_all` config from local testing, restore `process_v4.yaml` / `process_v6.yaml` / `process_ot.yaml` to the standard main-line `v4` / `v6` / `ot` variant before upgrading the binary
-
-## v0.4.2
-
-### Fixed
-
-- removed duplicate `dot` / `doh` / `doq` protocol entries from the upstream editor while keeping alias-compatible editing for existing override data
-- updated upstream group ordering in the editor so `domestic` is pinned first, `cnfake` is pinned last, and the remaining groups keep their relative order
-- normalized bare `udp` / `tcp` / `dot` / `doh` / `doq` upstream addresses at runtime so the UI can keep showing the original input while the backend still builds a runnable target
-- added validation for conflicting explicit schemes such as `protocol=doh` with `udp://...` so invalid upstream combinations now fail fast on save
-- fixed `aliapi` live-reload metrics registration so upstream counters continue updating after override-based reloads
-- made the data-management cache list follow the current core mode and show only the matching compatibility or safe cache variants
-- removed the inactive eBPF fast-path from the active UDP runtime and kept `switch15` only as a config-compatible no-op shell
-
-### Tests
-
-- added upstream-override regression coverage for runtime address normalization and protocol/scheme compatibility checks in `coremain/api_upstream_test.go`
-- verified the updated binary on `10.0.0.4`
-
-### Upgrade Notes
-
-- this release does **not** require a YAML config change
-- existing deployments can update only the binary
-- legacy `switch15` config entries still load, but the old extreme-acceleration path is no longer active
-## v0.4.1
-
-### Fixed
-
-- fixed query-log exact client-IP search so entering plain IPv4 values such as `10.0.0.10` now matches logs stored as IPv4-mapped IPv6 like `::ffff:10.0.0.10`
-- fixed query-log client-IP filtering to normalize stored and requested client addresses before comparison
-- fixed client alias search so both fuzzy and exact alias lookups now resolve to matching client IPs before querying logs
-- fixed multi-client alias matches so one alias keyword can return logs for every matching client instead of only a single exact alias hit
-
-### Tests
-
-- added audit log regression tests for normalized client-IP equality and multi-client alias-backed filtering in `coremain/audit_test.go`
-
-### Upgrade Notes
-
-- this release does **not** require YAML changes
-- existing deployments can update only the binary
-
-## v0.3.23
-
-### Fixed
-
-- fixed audit effective-tag correction so `_exit` flow variants are handled the same as base sequence names
-- `computeEffectiveTag` now treats both `sequence_fakeip_addlist` and `sequence_fakeip_addlist_exit` as direct-candidate promotion paths when final route is proxy
-- this prevents mismatched labels in logs where runtime flow uses `_exit` sequence names
-
-### Tests
-
-- added coverage for `_exit` variants in `coremain/audit_test.go`:
-  - `TestComputeEffectiveTagDirectCandidatePromotedToProxyExitVariant`
-  - `TestComputeEffectiveTagMemoryCorrectionExitVariant`
-
-### Upgrade Notes
-
-- this release does **not** require YAML config migration
-- existing deployments can update only the binary
-
-## v0.3.22
-
-### Added
-
-- added local-rules multi-list draft workflow in the maintained Vue UI:
-  - edits now remain in memory while switching between list tabs inside the local-rules page
-  - one-click `保存全部改动` now persists all changed local lists in a single action
-- added backend fallback behavior for `foreign` upstream group socks proxy:
-  - when an upstream item in `foreign` has empty `socks5`, runtime now falls back to global `/api/v1/overrides` socks5
-  - per-upstream socks5 still takes precedence when explicitly configured
-- added upstream fallback regression tests in `coremain/api_upstream_test.go`
-
-### Changed
-
-- unified full-page success/error messages into the top-right compact notice area in the maintained Vue UI
-- refined top notice width and placement so it no longer spans large horizontal area or blocks header title region
-- updated upstream editor hint text to explicitly show foreign-group socks5 fallback behavior when applicable
-
-### Fixed
-
-- fixed local-rules workflow where unsaved edits could be lost when switching list tabs before save
-- removed remaining legacy inline `msg` banner usage in maintained Vue pages to avoid layout push-down behavior
-
-### Upgrade Notes
-
-- this release does **not** require YAML config migration
-- existing deployments can update only the binary
-- if browser cache is stale, refresh once to load the latest embedded frontend assets
-
-## v0.3.21
-
-### Fixed
-
-- fixed `domain_mapper` overlap handling so `full:` / `domain:` hits now keep merging matching `keyword:` and `regexp:` rules instead of stopping at the first domain-style result
-- restored config-order-consistent routing behavior for overlapping domain sets such as white/black/grey lists, dedicated upstream domains, redirects, ddns domains, and client/domain policy combinations
-
-### Upgrade Notes
-
-- this release does **not** require a YAML config change
-- existing deployments can update only the binary
-- if a domain was already learned into generated direct/proxy cache files, clear the stale generated lists once after upgrade so new matches can be rebuilt under the fixed logic
-
-## v0.3.20
-
-### Changed
-
-- refined the maintained Vue UI overview header spacing so the total-query and average-latency values keep a stable gap as query counts grow
-- standardized secondary-menu and ordinary-button hover behavior to use color-only feedback without vertical movement
-- kept clickable UI controls on the normal cursor style for a consistent operator experience across desktop browsers
-- updated the WebUI frontend build to stamp cache-busting asset query versions in both the embedded app HTML and root `/` HTML entry
-
-### Fixed
-
-- fixed the local-rules editor scrollbar visual edge so the thumb no longer breaks the editor's top-right rounded corner when scrolled to the top
-- improved the local-rules editor note/status area with a compact glass-style hint chip while keeping the editor itself as the primary rounded input surface
-
-### Upgrade Notes
-
-- this release does **not** require a YAML config change
-- existing deployments can update only the binary
-- if the browser keeps old UI assets, refresh once to load the new embedded frontend asset version
-
-## v0.3.12
-
-### Added
-
-- added legacy-style quick actions in the Vue query-log detail modal:
-  - `客户端` / `域名` / `分流规则` / `Trace ID` now provide inline `复制` and `筛选` buttons
-  - quick filter reuses the live-query search box so operators can jump straight from a detail view to narrowed logs
-
-### Changed
-
-- refined audit effective-tag display so the UI emphasizes the final routing result more accurately:
-  - first-hit direct candidates that finally enter `sequence_fakeip_addlist` now show `生效标签=直连候选转代理`
-  - learned-memory reversals are labeled explicitly as `记忆直连转代理` / `记忆代理转直连`
-  - stable learned-proxy results continue to show `记忆代理`
-
-### Upgrade Notes
-
-- this release does **not** require manual `config_up.zip` updates
-- no YAML config migration is required for existing deployments
-
-## v0.3.11
-
-### Changed
-
-- fixed dark-theme readability regressions in custom-background/panel-background mode:
-  - restored visible text color for `专属分流组` name chips
-  - fixed contrast for `msg.success` / `result-badge.fail` / requery status chips under glass background
-- fixed mobile overlap risk in data-management `刷新分流缓存` module:
-  - removed rigid fill-height constraints in inline modules
-  - made requery status/actions/scheduler rows wrap safely on narrow screens
-- bumped embedded Vue asset query version in `log.html` to force cache refresh for updated CSS
-
-### Upgrade Notes
-
-- this release does **not** require manual `config_up.zip` updates
-- if client-side cache is stale, refresh once to load `v20260427-v052` frontend assets
-
-## v0.3.10
-
-### Added
-
-- added panel-background solid-color picker support directly in the `面板背景` row:
-  - the picker is now inline (left of `上传`) instead of a separate control block
-  - solid-color background can be applied with the same appearance workflow as image backgrounds
-- added theme-isolated panel solid-color storage:
-  - `明亮` and `黑暗` now keep independent panel solid-color values
-  - backend appearance payload now carries `light_color` and `dark_color` while keeping legacy `color` compatibility
-
-### Changed
-
-- refactored top-level and second-level page chrome to reduce redundant stacked panels:
-  - removed extra top title-wrapper panels for overview/data/upstream/system pages
-  - query/rules subnavigation now uses a clean strip + divider layout
-- refined list/data/system module structure to reduce duplicate background layers and tighten action alignment
-- updated appearance handling:
-  - panel background preview now follows theme switching immediately
-  - removed low-value success toasts for panel-background apply/upload flows
-- strengthened mobile safety styling:
-  - enabled `-webkit-text-size-adjust: 100%`
-  - removed fixed-height pressure points in dual system cards
-  - simplified narrow-screen WebUI-port row layout to prevent overlap on iOS Safari
-- bumped embedded Vue asset query version in `log.html` to force cache refresh for the updated frontend bundle
-
-### Upgrade Notes
-
-- this release does **not** require manual `config_up.zip` updates
-- existing panel background `color` settings remain compatible; on next save they will be normalized into theme-isolated fields
-
-## v0.3.9
-
-### Added
-
-- added end-to-end WebUI port management:
-  - new system APIs: `GET /api/v1/system/webui-port` and `POST /api/v1/system/webui-port`
-  - persistent settings file: `webui_port_settings.json`
-  - system-settings UI module for current/target port with confirm-and-restart flow
-
-### Changed
-
-- replaced hardcoded local restart endpoint usage with dynamic endpoint resolution from active WebUI listen address
-- updated update-manager and config-manager post-save/post-upgrade restart hooks to follow configured WebUI port
-- updated requery URL action calls to normalize local loopback targets to the configured WebUI port instead of fixed `9099`
-- improved requery diagnostics in UI:
-  - added `last_error` in task status
-  - data-management panel now shows latest failure reason
-  - sub-second completion now renders as `耗时 <1秒`
-- refined menu/switch theme behavior:
-  - dark mode switch ON knob uses white for better contrast
-  - first-level and second-level menu colors now fully invert with light/dark theme
-  - removed the extra selected-outline effect on second-level menu buttons
-- normalized page top-subnav panel structure and fixed scrollbar-gutter behavior to reduce visible horizontal layout jitter when switching main tabs
-
-### Upgrade Notes
-
-- this release can generate and use `webui_port_settings.json` under runtime config directory when WebUI port is saved
-- no manual `config_up.zip` update is required for this source release
-
-## v0.3.8
-
-### Added
-
-- added a panel-background history workflow in Vue system settings:
-  - list previously uploaded background images
-  - re-apply a historical image as current panel background
-  - delete single history entries or clear all history entries
-- added per-theme text color customization support:
-  - light/dark theme text colors are stored independently
-  - color changes apply and save immediately from the picker
-  - optional eyedropper entry is available on supported browsers
-
-### Changed
-
-- improved second-level tab selected-state visibility by adding a clearer selected border for:
-  - `实时查询 / 诊断抓取`
-  - `本地规则 / 订阅规则 / 拦截规则`
-- upgraded appearance reset behavior to reset the whole theme/appearance stack with confirmation:
-  - theme -> `明亮`
-  - panel background -> cleared
-  - transparency -> `100%`
-  - blur -> `0px`
-  - text color -> default
-- removed remaining hardcoded green text/button text colors in multiple UI surfaces so text color follows the active theme text color more consistently
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.7
-
-### Changed
-
-- hardened `刷新分流缓存` task start/status behavior to avoid occasional immediate `0秒完成` false display:
-  - backend `requery` trigger/scheduler now persist `running` state atomically before goroutine execution
-  - frontend `数据管理` requery panel adds trigger-pending state and adaptive polling (`1s` pending / `5s` running)
-  - status text now renders sub-second completion as `耗时 <1秒` instead of misleading `0秒`
-- aligned panel-background transparency behavior for additional scheduler/requery card surfaces and button text contrast in dark-theme custom background usage
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.6
-
-### Changed
-
-- fixed Vue overview `查询趋势` panel background so transparency/glass settings now apply consistently to the trend card container
-- bumped embedded dashboard asset query version to refresh browser cache for updated panel styles
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.5
-
-### Added
-
-- introduced a dynamic real-time `查询趋势` monitoring workflow in the Vue dashboard:
-  - live polling with a sliding time window for `请求数 / 平均处理时间`
-  - synchronized KPI updates for `总查询数 / 平均处理时间 / 当前请求数 / 当前处理时间`
-  - interactive series toggles and smoother live trend behavior
-
-### Changed
-
-- refined Vue WebUI interaction and visual behavior around:
-  - list/rules/upstream/system operation controls
-  - mobile compact layout and overflow handling
-  - panel background, transparency, and glass-effect appearance controls
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.4
-
-### Changed
-
-- optimized remote config apply (`/api/v1/config/update_from_url`) backup behavior:
-  - backup now only includes files that will be overwritten by the incoming ZIP
-  - avoids full-directory backup inode pressure on large runtime trees
-- refined rules WebUI operations:
-  - subscription rules now support `更新全部规则`
-  - adguard module buttons renamed to `新增拦截规则` and `更新全部规则`
-  - adguard list now supports per-rule `更新`
-- updated the subscription `更新全部规则` button style to the same warning/red tone used by update actions in adguard
-
-### Added
-
-- added adguard single-rule update API:
-  - `POST /plugins/adguard/update/{id}`
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.3
-
-### Changed
-
-- refined mobile layout behavior to avoid module-level overflow:
-  - top-level menu (including refresh button) now stays in one row without horizontal scrolling
-  - reduced mobile menu button spacing and font size to fit one-line layout
-- improved small-screen table behavior with a “compress first, scroll only when needed” approach:
-  - cache-management table spacing and font size are compacted on mobile
-  - `高级替换规则` and cache/stat tables scroll within table area when width is insufficient
-  - prevented panel/module containers from exceeding viewport width
-- adjusted inline module width handling:
-  - `域名列表统计` and `刷新分流缓存` modules now stay within screen width like other panels
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.2
-
-### Changed
-
-- improved mobile UI usability across the Vue dashboard:
-  - top-level navigation now stays on one line with the refresh button and supports horizontal scrolling
-  - diagnostic capture modules (`请求列表` / `分析结果`) now support horizontal scrolling on narrow screens
-  - system `高级替换规则` table now uses a horizontal scroll layout on small screens
-  - data management cache/stat tables now use horizontal scrolling to avoid clipped column headers
-  - `刷新分流缓存` scheduler inputs are aligned to consistent field width on mobile
-- restored list-management hint copy from legacy `/log`:
-  - brought back descriptions for 白名单/黑名单/灰名单/DDNS/客户端IP/直连IP/重定向/RealIP 相关名单
-  - list status now shows `共 X 行` consistently
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.1
-
-### Added
-
-- introduced a dynamic, real-time `查询趋势` module in the Vue dashboard overview:
-  - live polling update with sliding time window
-  - synchronized `总查询数 / 平均处理时间 / 当前请求数 / 当前处理时间`
-  - interactive series toggles for `请求数` and `平均处理时间`
-
-### Changed
-
-- refined the overview trend card layout and responsive behavior for narrow screens
-- aligned latency number styling and module interactions for consistent monitoring UX
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.3.0
-
-### Added
-
-- added a Vue-based main dashboard experience and promoted it to the root path `/`
-- added a `经典绿` color preset in the Vue UI appearance settings to match the preferred legacy green palette
-
-### Changed
-
-- swapped WebUI entry routes:
-  - `/` now serves the Vue UI
-  - `/log` now serves the previous legacy dashboard
-- expanded and stabilized Vue UI behavior across overview, query logs, rules, data management, upstream management, and system settings modules
-- refined overview presentation:
-  - top summary cards now focus on `总查询数` and `平均耗时`
-  - detail modal stacking behavior fixed so nested detail dialogs always appear on top
-  - module-internal scrollbars are thinner and visually lighter
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.2.0
-
-### Added
-
-- introduced a Vue 3 WebUI implementation under `/log` with modular pages for overview, query logs, rules, upstreams, data management, and system settings
-- added modal-based detail and edit flows across the new UI (query detail, top-domain detail, slow-query detail, rule edit, upstream edit, adblock/subscription edit)
-- added donut-chart visualization and percentage display for domain-set hit ranking in overview
-
-### Changed
-
-- aligned `/log` information architecture, first-level navigation, and major interaction patterns with the legacy dashboard behavior
-- switched overview ranking tables (`Top 域名`, `Top 客户端`, `最慢查询`, `分流命中排行`) to adaptive table layouts to avoid horizontal drag on typical widths
-- unified page refresh behavior with a global refresh action and removed redundant per-module refresh controls in migrated modules
-- refined system settings layout and mode descriptions:
-  - `兼容模式`: 表外域名优先国内dns解析，保证速度
-  - `安全模式`: 表外域名仅用国外dns解析，阻止dns泄漏
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.1.13
-
-### Changed
-
-- fixed diversion type labels in WebUI so `cuscn` is displayed as `!cn@cn` and `cusnocn` is displayed as `cn@!cn`, matching the actual routing behavior
-- updated diversion-rule help text to avoid confusion between label wording and backend rule semantics
-- improved inline confirmation popover placement near viewport edges; when the trigger is near the bottom of the screen, the popover now flips upward and remains clickable
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.1.12
-
-### Added
-
-- added sortable headers for subscription-rule and ad-block rule lists in the merged dashboard
-- added sortable headers for the upstream table and a quick toggle to hide disabled upstreams
-
-### Changed
-
-- default rule-list ordering now shows newly added items first until the user chooses a different sort key
-- default upstream ordering now shows newly added upstreams first until the user chooses a different sort key
-- local rule tabs are now labeled `本地规则 / 订阅规则 / 广告拦截` with clearer inline guidance for whitelist, greylist, DDNS, and special-group lists
-- the diversion-rule creation dialog now auto-fills the rule name and local `srs/...` file path from the URL
-- saving a diversion subscription now closes the dialog immediately while background download and refresh continue
-- refreshed README wording to reflect the WebUI module refactor and the current released version
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.1.11
-
-### Changed
-
-- unified confirmation interactions in the merged dashboard so destructive and important actions now use the same inline popover style instead of mixed native dialogs
-- updated the `SOCKS5 / ECS IP` action buttons for clearer contrast and aligned the `保存` button with the main primary-button styling
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.1.10
-
-### Changed
-
-- removed the `fastCache` FNV-1a input truncation so long DNS questions no longer hash on only the first 128 bytes
-- normalized `ClientAddr` with `Unmap()` before the UDP fast path runs, reducing IPv4-mapped IPv6 ambiguity in the fast path
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.1.9
-
-### Added
-
-- added a dedicated `数据管理` section to the merged dashboard for cache and generated-domain maintenance
-- added a one-click `清空所有缓存` action in cache management
-- added an inline confirmation popover when switching the core mode between `兼容模式` and `安全模式`
-
-### Changed
-
-- refined the merged dashboard information architecture and moved upstream management into a cleaner `上游设置` area
-- updated the upstream page so the top strip is lighter and the upstream table remains the primary focus
-- simplified special-group management in the upstream header and improved its visual hierarchy
-- moved `重启 MosDNS` into the system information module
-- moved `SOCKS5 / ECS IP` into the system settings area
-- removed automatic background update checks from the dashboard; update checks are now user-triggered only
-- renamed the update action from `强制检查` to `检查更新`
-
-### Upgrade Notes
-
-- this release does **not** require a config change for existing users
-- no `config_up.zip` update is required for this source release
-
-## v0.1.8
-
-### Added
-
-- added a new merged dashboard UI at `/` with top-level sections for 概览, 查询日志, 规则管理, 上游, and 系统
-- old root UI is still available at `/legacy` during the transition
-
-### Changed
-
-- merged the old `:9099` log-capture and analysis workflow into the new dashboard's 查询日志 section
-- promoted upstream management to a top-level navigation area instead of keeping it buried under system settings
-- reorganized system-facing controls so query, rule, upstream, and system functions are separated more clearly
-- updated README and release-facing docs to use `mosdns/config/config_all.zip` as the full template package
-- retired the legacy `config_tom.zip` template reference from the source repo documentation
-
-### Upgrade Notes
-
-- this release does not require a config change for existing users
-- the maintained full template package is now `mosdns/config/config_all.zip`
-- the maintained incremental package remains `mosdns/config/config_up.zip`
-
-## v0.1.7
-
-### Added
-
-- special groups now support manual domain lists in WebUI list management, alongside the existing online `srs` sources
-- special group metadata now exposes the manual list plugin tag and manual rule file path for the WebUI
-
-### Changed
-
-- query-log details now show `matched_rule_source` for online diversion matches
-- query-log details now distinguish `最终上游组` and the actual winning `最终上游`
-- the `最终序列` field is no longer shown in the WebUI query-log detail panel
-- list management now renders special groups dynamically after they are created in advanced settings
-- removed the legacy `NFT IP` item from list management
-- special-group deletion now also removes the corresponding manual rule file under `rule/special_<slot>.txt`
-
-### Upgrade Notes
-
-- for existing WebUI fork users, the incremental package `mosdns/config/config_up.zip` now updates `sub_config/special_groups.yaml`
-- no pre-created `rule/special_<slot>.txt` files are required; they will be created when the user saves manual rules in WebUI
-
-## v0.1.6
-
-### Changed
-
-- removed nft-related integrations from the binary and WebUI
-- removed legacy repo cruft that was not part of the maintained product surface
-- full config packages were refreshed to match the nft-free runtime
-
-### Upgrade Notes
-
-- old configs that still reference `nft_add` are not compatible with this version
-- for existing WebUI fork users, the only required config change is `sub_config/rule_set.yaml`
-- the incremental package `mosdns/config/config_up.zip` updates only `sub_config/rule_set.yaml` and does not reset user-maintained override files
-
-- update checking now targets `jasonxtt/mosdns` instead of the upstream repository
-- the built-in updater now matches the fork's Linux `tar.gz` release assets
-- WebUI project links now point to `jasonxtt/mosdns`
-- build version injection is now consistent across default builds, preview builds, and tagged releases
-
-## v0.1.0-preview
-
-Initial preview release for the WebUI-enhanced fork based on `yyysuo/mosdns`.
-
-### Added
-
-- dedicated routing groups in WebUI
-- dedicated group APIs with support for up to 10 WebUI-managed groups
-- rule-to-upstream binding for dedicated groups
-- automatic `.srs` download after saving online diversion rules
-- hot reload for aliapi upstream groups after WebUI save
-- improved query-log display for dedicated routing groups
-
-### Changed
-
-- rule management now supports dynamic dedicated-group types
-- upstream management is integrated with dedicated routing groups
-- query log tags display dedicated group names together with stable mark identifiers
+# mosdns 更新日志 (jasonxtt fork)
+
+## 2026年6月4日 二进制+配置更新
+1：special专属分流组槽位从固定50-59改为支持>=50。
+2：special_groups.yaml改为根据已保存的专属分流组状态自动生成。
+3：新增DDNS国外优先解析开关switch16，开启后DDNS优先走国外上游且不走缓存，失败回退国内。
+4：根路径Vue UI已同步新增switch16，并更新special槽位提示文案。
+5：本次增量配置更新文件为config_custom.yaml、sub_config/switch.yaml、sub_config/special_groups.yaml、rule/switch16.txt。
+
+## 2026年5月26日 二进制更新
+1：移除上游编辑器中重复的dot/doh/doq协议条目，保留别名兼容编辑。
+2：上游组排序优化：domestic置顶，cnfake置底，其余保持相对顺序。
+3：运行时自动规范化裸udp/tcp/dot/doh/doq地址，UI显示原始输入后端构建可运行目标。
+4：新增协议与地址scheme冲突校验（如protocol=doh配udp://...），保存时快速失败。
+5：修复aliapi热重载后上游计数器停止更新的问题。
+6：数据管理缓存列表跟随当前核心模式，仅显示匹配的兼容或安全缓存变体。
+7：移除UDP运行时中不活跃的eBPF快速路径，switch15仅作为配置兼容空壳保留。
+8：废弃switch15极限加速功能，旧配置条目仍可加载但不再激活。
+9：移除cilium/ebpf依赖。
+10：新增上游覆盖回归测试，验证运行时地址规范化和协议兼容性检查。
+
+## 2026年5月22日 二进制更新
+1：修复查询日志精确客户端IP搜索，纯IPv4输入（如10.0.0.10）现在匹配IPv4-mapped IPv6存储格式（::ffff:10.0.0.10）。
+2：修复客户端IP过滤，存储地址和请求地址在比较前进行规范化。
+3：修复客户端别名搜索，模糊和精确别名查找现在先解析为匹配的客户端IP再查询日志。
+4：修复多客户端别名匹配，一个别名关键词可返回所有匹配客户端的日志而非仅精确别名命中。
+5：新增audit日志回归测试，验证规范化客户端IP相等性和多客户端别名过滤。
+
+## 2026年5月18日 二进制更新
+1：发布v0.4.0主版本和lite-v0.1.0轻量版本，新增通道感知发布更新器。
+
+## 2026年5月15日 二进制更新
+1：修复audit生效标签修正，_exit流程变体现在与基础序列名处理一致。
+2：computeEffectiveTag现在将sequence_fakeip_addlist和sequence_fakeip_addlist_exit都视为直连候选提升路径。
+3：防止运行时使用_exit序列名时出现日志标签不匹配。
+
+## 2026年5月14日 二进制更新
+1：本地规则多列表草稿工作流：编辑在切换标签页时保留在内存中，一键保存全部改动。
+2：foreign上游组socks代理回退：per-item socks5为空时回退到全局/api/v1/overrides socks5。
+3：所有Vue页面统一使用右上角紧凑通知区域，不再使用全宽消息条。
+4：调整通知宽度和位置避免遮挡标题区域。
+5：修复本地规则切换标签页时未保存编辑丢失的问题。
+
+## 2026年5月11日 二进制更新
+1：修复domain_mapper重叠处理，full:/domain:命中现在继续合并匹配的keyword:和regexp:规则。
+2：恢复配置顺序一致的路由行为，适用于白/灰名单、专属上游域名、重定向、DDNS、客户端/域名策略组合等重叠域名集。
+
+## 2026年5月8日 二进制更新
+1：概览头部间距优化，总查询数和平均延迟值随查询增长保持稳定间距。
+2：次级菜单和普通按钮悬停仅变色，无垂直位移。
+3：可点击UI控件保持正常光标样式，桌面浏览器体验一致。
+4：本地规则编辑器滚动条圆角修复，顶部滚动时不再破坏右上圆角。
+5：本地规则编辑器状态区域改为紧凑玻璃风格提示芯片。
+6：WebUI前端构建添加缓存清除资产版本戳。
+
+## 2026年5月6日 二进制更新
+1：运行时状态JSON文件迁移到/cus/mosdns/state目录，首次启动自动迁移。
+2：迁移文件包括：appearance_settings.json、appearance_text_settings.json、appearance_button_settings.json、audit_settings.json、webui_port_settings.json。
+3：config_overrides.json、upstream_overrides.json、special_upstream_groups.json保留在运行时根目录不迁移。
+4：修复桌面端最慢查询时长单元格截断ms单位的问题。
+5：修复移动端最慢查询卡片域名列完全折叠的跨浏览器兼容问题。
+6：采用更安全的列宽策略替代table-layout: fixed + calc组合。
+
+## 2026年5月5日 二进制更新
+1：主题与外观面板改为紧凑玻璃风格布局，标签/控件/上传/滑块更一致。
+2：新增按钮颜色自定义持久化（明暗主题独立存储）。
+3：概览卡片间距和锚定统计弹窗展示优化。
+
+## 2026年5月4日 二进制+配置更新
+1：修复IPv4优先运行时行为，确保有A记录的域名在直连/代理/fakeip/记忆路由路径始终抑制AAAA响应。
+2：修复dual_selector执行bug，共享递归状态导致IPv4优先遗漏部分AAAA抑制。
+3：ErrExit带有现有响应时在prefer_ipv4引用查询中视为正常完成。
+4：系统设置新增IPv4优先开关，与IPv6屏蔽互斥，启用一个自动禁用另一个。
+5：prefer_ipv4现在在规则匹配和专属上游标记之后运行，DDNS和专属上游组仍可受益。
+6：requery路径在应用专属上游匹配后再执行prefer_ipv4。
+7：概览页Top域名/客户端/最慢查询/分流统计根据窗口高度自适应行数，保持最小紧凑布局。
+
+## 2026年5月3日 二进制更新
+1：概览卡片新增锚定多窗口审计统计面板（1小时/6小时/24小时/3天/7天）。
+2：GET /api/v2/audit/stats/windows新增概览时间窗口统计。
+3：弹窗使用纯白背景提升亮色主题可读性。
+4：审计保留说明区分热详细日志和时间窗口统计。
+
+## 2026年5月2日 二进制更新
+1：查询详情对话框新增客户端/域名/分流规则/Trace ID的复制和筛选快捷操作。
+2：快速筛选复用实时查询搜索框，可从详情视图直接跳转到缩小范围的日志。
+3：优化audit生效标签显示：直连候选转代理、记忆直连转代理、记忆代理转直连等。
+
+## 2026年4月26日 二进制更新（v0.3.11）
+1：修复暗色主题/自定义背景模式下专属分流组名称不可读问题。
+2：修复msg.success/result-badge.fail/requery状态芯片在玻璃背景下的对比度。
+3：修复数据管理刷新分流缓存区域移动端重叠，移除刚性填充高度约束。
+4：更新嵌入式Vue资源版本戳强制浏览器刷新缓存。
+
+## 2026年4月26日 二进制更新（v0.3.10）
+1：新增面板背景纯色选择器，集成到URL/上传控件同行（上传按钮左侧）。
+2：主题隔离的面板颜色持久化（light_color/dark_color独立存储），旧color配置向后兼容。
+3：重构顶级和次级页面层级，移除多余包装面板。
+4：查询/规则子导航改为条带+分割线布局。
+5：面板背景预览跟随主题切换立即生效。
+6：iOS Safari安全样式优化：启用-webkit-text-size-adjust:100%，移除双系统卡片固定高度压力点。
+
+## 2026年4月24日 二进制更新（v0.3.9）
+1：新增WebUI端口管理（GET/POST /api/v1/system/webui-port），支持修改端口并重启。
+2：webui_port_settings.json持久化设置文件。
+3：本地重启和更新/配置管理回调跟随已配置的WebUI端口，不再硬编码9099。
+4：requery状态新增last_error字段用于故障诊断。
+5：requery完成时间<1秒时显示耗时 <1秒。
+6：暗色主题开关旋钮改用白色提升对比度。
+7：一级和二级菜单颜色完全跟随明暗主题反转。
+8：统一页面顶部子导航面板结构，减少切换主标签时的水平布局抖动。
+
+## 2026年4月24日 二进制更新（v0.3.8）
+1：新增面板背景图片历史管理（列表/重用/删除/清空）。
+2：新增按主题独立文字颜色设置（明暗分别存储），颜色更改即时应用和保存。
+3：支持浏览器取色器（eyedropper）。
+4：二级标签选中状态边框强调优化（实时查询/诊断抓取、本地规则/订阅规则/拦截规则）。
+5：外观重置改为完整重置并带确认：主题→明亮、背景→清除、透明度→100%、模糊→0px、文字颜色→默认。
+
+## 2026年4月24日 二进制更新（v0.3.7）
+1：修复刷新分流缓存手动触发后偶现误报0秒完成。
+2：后端requery触发/调度器在goroutine执行前原子持久化running状态。
+3：前端数据管理requery面板添加触发pending状态，自适应轮询（pending 1s/running 5s）。
+4：亚秒任务显示耗时 <1秒而非误导性0秒。
+5：面板透明度/毛玻璃行为扩展到requery调度器表面。
+
+## 2026年4月23日 二进制更新（v0.3.6）
+1：修复概览查询趋势卡片面板透明度/毛玻璃效果与其他模块不一致。
+2：更新嵌入式仪表盘资产版本戳刷新浏览器缓存。
+
+## 2026年4月23日 二进制更新（v0.3.5）
+1：概览新增实时查询趋势面板（轮询式实时更新）。
+2：滑动时间窗口趋势可视化（请求数和平均处理时间）。
+3：同步KPI更新：总查询数/平均处理时间/当前请求数/当前处理时间。
+4：交互式系列切换控件，无需重新初始化图表。
+5：列表/规则/上游/系统操作控件交互和视觉优化。
+
+## 2026年4月23日 二进制更新（v0.3.4）
+1：优化远程配置应用备份行为，仅备份将被覆盖的文件，避免大运行时树的inode压力。
+2：订阅规则支持更新全部规则按钮。
+3：adguard模块按钮重命名为新增拦截规则和更新全部规则。
+4：adguard列表支持单规则更新API（POST /plugins/adguard/update/{id}）。
+
+## 2026年4月23日 二进制更新（v0.3.3）
+1：顶级移动端菜单单行显示（含刷新按钮），无横向滚动，缩小间距和字号适配。
+2：缓存管理表格移动端紧凑化，宽度不足时才出现横向滚动。
+3：高级替换规则和缓存/统计表格在表格区域内滚动。
+4：面板/模块容器防止超出视口宽度。
+5：域名列表统计和刷新分流缓存模块保持在屏幕宽度内。
+
+## 2026年4月23日 二进制更新（v0.3.2）
+1：顶级导航单行显示含刷新按钮，支持横向滚动。
+2：诊断抓取请求列表和分析结果模块支持横向滚动。
+3：系统高级替换规则表格支持横向滚动。
+4：数据管理缓存/统计表格横向滚动避免列头裁剪。
+5：刷新分流缓存调度器输入框在移动端对齐一致字段宽度。
+6：恢复legacy /log的本地规则提示描述（白名单/黑名单/灰名单/DDNS/客户端IP/直连IP/重定向/RealIP相关名单）。
+7：列表状态统一显示共 X 行。
+
+## 2026年4月23日 二进制更新（v0.3.1）
+1：概览新增实时查询趋势模块，轮询式实时更新。
+2：滑动时间窗口趋势可视化，请求数和平均处理时间同步KPI。
+3：交互式系列切换（请求数/平均处理时间）。
+4：趋势卡片布局和窄屏响应式优化。
+
+## 2026年4月21日 二进制更新（v0.3.0）
+1：Vue WebUI成为默认根路径/的主仪表盘。
+2：经典绿外观预设加入主题选项。
+3：/路径映射Vue UI，/log路径保留旧仪表盘。
+4：概览顶部摘要聚焦总查询数和平均耗时。
+5：修复嵌套详情对话框层叠行为。
+6：模块内部滚动条更细更轻。
+
+## 2026年4月19日 二进制更新（v0.2.0）
+1：Vue 3 WebUI在/log路径上线，包含概览/查询日志/规则管理/上游/数据管理/系统设置模块化页面。
+2：模态框式详情和编辑流程（查询详情、Top域名详情、慢查询详情、规则编辑、上游编辑、广告拦截/订阅编辑）。
+3：域名集命中排名环形图和百分比展示。
+4：/log信息架构、一级导航和主要交互模式与legacy仪表盘对齐。
+5：排名表格自适应布局避免典型宽度下的水平拖拽。
+6：系统模式描述更新：兼容模式表外域名优先国内dns解析保证速度，安全模式表外域名仅用国外dns解析阻止dns泄漏。
+
+## 2026年4月12日 二进制更新（v0.1.14）
+1：合并上游依赖升级。
+
+## 2026年4月10日 二进制更新（v0.1.13）
+1：修复WebUI分流类型标签映射：cuscn显示为!cn@cn，cusnocn显示为cn@!cn。
+2：更新分流规则帮助文本，类型描述与实际后端路由语义匹配。
+3：修复内联确认弹窗在页面底部溢出，触发点靠近底部时弹窗向上翻转保持可点击。
+
+## 2026年4月10日 二进制更新（v0.1.12）
+1：订阅规则和广告拦截规则列表新增排序表头。
+2：上游表格新增排序表头和隐藏禁用上游快速切换。
+3：新增条目默认置顶直到用户应用其他排序。
+4：本地规则标签改为本地规则/订阅规则/广告拦截，内联指导更清晰。
+5：分流规则创建对话框从URL自动填充规则名和本地srs文件路径。
+6：保存分流订阅立即关闭对话框，后台下载和刷新继续。
+
+## 2026年4月10日 二进制更新（v0.1.11）
+1：统一仪表盘确认交互，破坏性和重要操作使用统一内联弹窗样式替代混合原生对话框。
+2：SOCKS5/ECS IP操作按钮对比度优化，保存按钮与主按钮样式对齐。
+
+## 2026年4月9日 二进制更新（v0.1.10）
+1：移除fastCache FNV-1a输入截断，长DNS问题不再仅哈希前128字节。
+2：UDP快速路径前对ClientAddr执行Unmap()减少IPv4-mapped IPv6歧义。
+
+## 2026年4月9日 二进制更新（v0.1.9）
+1：新增数据管理区域用于缓存和生成域名维护。
+2：一键清空所有缓存操作。
+3：兼容模式/安全模式切换内联确认弹窗。
+4：上游管理移入更清晰的上游设置区域，顶部条带更轻量。
+5：专属分流组管理简化为轻量内联管理条。
+6：重启MosDNS移入系统信息模块。
+7：SOCKS5/ECS IP移入系统设置区域。
+8：移除自动后台更新检查，改为用户触发，按钮标签改为检查更新。
+
+## 2026年4月5日 二进制更新（v0.1.8）
+1：新合并仪表盘UI在/路径上线，顶级导航：概览/查询日志/规则管理/上游/系统。
+2：旧根页面保留在/legacy路径过渡。
+3：旧:9099日志抓取和分析工作流集成到查询日志模块。
+4：上游管理从系统设置提升为顶级导航区域。
+5：废弃旧config_tom.zip模板引用。
+6：配置下载改用config_all.zip（全新部署）和config_up.zip（增量更新）。
+
+## 2026年4月3日 二进制更新（v0.1.7）
+1：专属分流组支持WebUI列表管理中的手动域名列表。
+2：专属分流组元数据暴露手动列表插件标签和手动规则文件路径。
+3：查询日志详情显示在线分流匹配的matched_rule_source。
+4：查询日志详情区分最终上游组和实际获胜最终上游。
+5：移除WebUI查询日志详情面板中的最终序列字段。
+6：列表管理在高级设置创建后动态渲染专属分流组。
+7：移除legacy NFT IP列表项。
+8：删除专属分流组时同时删除rule/special_<slot>.txt手动规则文件。
+
+## 2026年4月3日 二进制更新（v0.1.6）
+1：从二进制和WebUI移除nft相关集成。
+2：移除不属于维护产品表面的legacy仓库残留。
+3：完整配置包刷新为nft-free运行时。
+4：更新检查改为指向jasonxtt/mosdns而非上游仓库。
+5：内置更新器匹配fork的Linux tar.gz发布资产。
+6：WebUI项目链接指向jasonxtt/mosdns。
+7：构建版本注入在默认构建、预览构建和标签发布间保持一致。
+
+## 2026年4月2日 二进制更新（v0.1.5）
+1：限制专属分流组mark范围为50-59。
+2：更新器指向fork发布页面。
+3：统一版本注入。
+
+## 2026年3月29日 二进制更新（v0.1.0-preview）
+1：初始预览版本发布，基于yyysuo/mosdns的WebUI增强fork。
+2：WebUI专属分流组支持。
+3：专属分流组API，支持最多10个WebUI管理的组。
+4：规则到上游绑定用于专属分流组。
+5：在线分流规则保存后自动下载.srs文件。
+6：aliapi上游组WebUI保存后热重载。
+7：查询日志改进显示专属分流组名称和稳定mark标识。
+8：规则管理支持动态专属分流组类型。
+9：上游管理与专属分流组集成。
