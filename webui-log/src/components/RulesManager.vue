@@ -933,8 +933,8 @@ onBeforeUnmount(() => {
           <button class="btn tiny secondary" type="button" @click="closeSpecialEditor">✕</button>
         </header>
         <div class="form-grid">
-          <label>槽位 (50-59)</label>
-          <input v-model.number="specialEditor.slot" type="number" min="0" max="59" />
+          <label>槽位 (&gt;=50，留空自动分配)</label>
+          <input v-model.number="specialEditor.slot" type="number" min="0" />
           <label>名称</label>
           <input v-model="specialEditor.name" placeholder="例如 移动上游" />
         </div>

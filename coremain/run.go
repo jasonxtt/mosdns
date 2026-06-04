@@ -124,6 +124,15 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 		mlog.L().Info("working directory changed", zap.String("path", sf.dir))
 	}
 
+	MainConfigBaseDir = guessMainConfigBaseDir(sf.c, sf.dir)
+	if MainConfigBaseDir != "" {
+		if err := SyncSpecialGroupsConfig(MainConfigBaseDir); err != nil {
+			mlog.L().Warn("failed to sync special_groups config before loading main config",
+				zap.String("path", MainConfigBaseDir),
+				zap.Error(err))
+		}
+	}
+
 	cfg, fileUsed, err := loadConfig(sf.c)
 	if err != nil {
 		return nil, fmt.Errorf("fail to load config, %w", err)
@@ -208,4 +217,24 @@ func resolveBaseDir(fileUsed string) string {
 		return wd
 	}
 	return ""
+}
+
+func guessMainConfigBaseDir(configPath, workDir string) string {
+	switch {
+	case configPath != "":
+		if absPath, err := filepath.Abs(configPath); err == nil {
+			return filepath.Dir(absPath)
+		}
+		return filepath.Dir(configPath)
+	case workDir != "":
+		if absPath, err := filepath.Abs(workDir); err == nil {
+			return absPath
+		}
+		return workDir
+	default:
+		if wd, err := os.Getwd(); err == nil {
+			return wd
+		}
+		return ""
+	}
 }
