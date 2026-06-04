@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+## v0.4.3
+
+### Added
+
+- added a dedicated `switch16` toggle in the maintained root Vue UI for `DDNS` domains that should prefer the foreign upstream group without cache
+
+### Changed
+
+- dedicated `special_groups` are no longer capped at slots `50-59`; new groups now allow any slot `>=50`
+- the main-line runtime now regenerates `sub_config/special_groups.yaml` automatically from persisted `special_groups` state before loading config
+- saving or deleting a dedicated `special_group` now updates the generated config file and schedules a self-restart so newly created or removed slots take effect cleanly
+
+### Fixed
+
+- aligned the main branch dedicated-routing generator with the long-standing `sequence_special_v4` / `sequence_special_v6` / `sequence_special_ot` flow instead of switching to a `sequence_special_all` path
+- updated the main config flow so `ddnslist` domains can prefer `foreign` via `prefer_foreign_nocache` and fall back to `domestic` when `switch16` is enabled
+
+### Tests
+
+- added `coremain/api_special_groups_test.go` coverage for generated `special_groups` config rendering and runtime file sync
+- verified the updated binary and config on `10.0.0.3`
+
+### Upgrade Notes
+
+- this release **does** require updated main config files for users who want the new `special_groups` and `DDNS` behavior
+- the incremental config package for this release updates:
+  - `config_custom.yaml`
+  - `sub_config/switch.yaml`
+  - `sub_config/special_groups.yaml`
+  - `rule/switch16.txt`
+- if a deployment is still using the temporary `sequence_special_all` config from local testing, restore `process_v4.yaml` / `process_v6.yaml` / `process_ot.yaml` to the standard main-line `v4` / `v6` / `ot` variant before upgrading the binary
+
 ## v0.4.2
 
 ### Fixed
