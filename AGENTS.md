@@ -13,6 +13,9 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 
 ## High-signal facts
 
+- The maintained `main` workspace is `/Users/tom/Documents/github/mosdns`.
+- The maintained `lite` workspace is `/Users/tom/Documents/github/mosdns-lite`.
+- In normal operator workflow, infer the intended line from the project folder: `mosdns` means `main`, `mosdns-lite` means `lite`.
 - The default UI at `/` is the maintained Vue UI.
 - The legacy UI is kept at `/log` for compatibility and comparison.
 - `webui-log/` is the current main Vue frontend workspace even though the directory name still says `log`.
@@ -36,9 +39,26 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 ## Operational expectations
 
 - Typical validation flow is: local build -> test host -> production host.
+- Current known deployment targets:
+  - test host: `10.0.0.91` (`mos-test`)
+  - production host: `10.0.0.3` (`mosdns`)
+  - related hosts often used in debugging:
+    - `10.0.0.2` (`sing-box`)
+    - `10.0.0.6` (`network-vm`)
+- Credentials for deployment hosts must not be stored in repo docs. Keep only non-secret host/path notes here and use a private local credential source outside the repository.
+- On this machine, prefer the SSH aliases defined in `~/.ssh/config` over typing raw IPs when they are available.
 - The user often wants real deployment verification, not only local compilation.
 - When discussing sync with upstream, use exact dates and keep the already-reviewed cutoff in mind.
 - For releases or deployment binaries that embed the Vue UI, build order matters: rebuild `webui-log/` first, then run `go build`. Do not run frontend build and Go build in parallel, or the binary can embed mismatched `app.js` / `app.css` assets.
+- Releases that need to auto-update the user's config files on first run must be built with the config-update flag enabled. Default build does NOT touch config files on update. Build command for a config-syncing release:
+  ```
+  go build -ldflags="-X github.com/IrineSistiana/mosdns/v5/coremain.autoConfigUpdate=1" .
+  ```
+  The flag is defined in `coremain/update_manager.go`. The config package URL is `https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip`. Only enable this flag when the release includes structural config changes (e.g., new sub_config files, changed plugin pipeline). Routine binary-only releases should leave it off.
+- When a task includes deployment verification, prefer this sequence:
+  - build locally
+  - validate on `mos-test` / `10.0.0.91`
+  - promote to `mosdns` / `10.0.0.3` only after confirmation
 
 ## Current known design decisions
 
@@ -47,7 +67,7 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 - The newer custom routing path was intentionally kept out of global cache for now.
 - The maintained `/` UI now exposes both `IPv4优先` and `IPV6屏蔽`, and they are intentionally treated as mutually exclusive operator modes in the UI and generated runtime flow.
 - The maintained `/` UI now persists more operator appearance state server-side, including panel background, text color, and button color settings.
-- Small runtime JSON state files are stored under `/cus/mosdns/state` and are auto-migrated there from the runtime root by the binary. Do not move config override JSON files into `state/`.
+- Small runtime JSON state files are stored under `/cus/mosdns/webinfo` and are auto-migrated there from the runtime root or legacy `/cus/mosdns/state` by the binary. When both exist, prefer `webinfo/`.
 - For `HTTPS` (`Type65`) handling, the fork can block the whole record today, but selective stripping of `ipv4hint`, `ipv6hint`, or `ECH` is not implemented yet. That feature is feasible as a response-rewrite plugin if requested.
 
 ## Frontend compatibility notes

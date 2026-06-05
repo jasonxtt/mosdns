@@ -13,6 +13,8 @@ import { previewPanelBackground } from './utils/panelBackground'
 import { applyTextColorForTheme, loadTextColorSettingsFromStorage, normalizeTextColorSettings, saveTextColorSettingsToStorage } from './utils/appearanceTextColor'
 import { applyButtonColorForTheme, loadButtonColorSettingsFromStorage, normalizeButtonColorSettings, saveButtonColorSettingsToStorage } from './utils/appearanceButtonColor'
 
+const DEFAULT_AUTO_REFRESH_STATE = { enabled: false, intervalSeconds: 15 }
+
 const activeMainTab = ref('overview')
 const activeQuerySubTab = ref('live')
 const activeRulesSubTab = ref('list-mgmt')
@@ -92,7 +94,7 @@ function loadAutoRefreshState() {
   } catch {
     saved = null
   }
-  applyAutoRefreshState(saved || { enabled: false, intervalSeconds: 15 })
+  applyAutoRefreshState(saved || DEFAULT_AUTO_REFRESH_STATE)
 }
 
 function handleAutoRefreshUpdate(event) {

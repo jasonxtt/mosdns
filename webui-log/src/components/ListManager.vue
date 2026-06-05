@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../api/http'
+import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -74,30 +75,8 @@ const selectedHintText = computed(() => {
   }
 })
 
-function showTopNotice(message, tone = 'success') {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(
-    new CustomEvent('mosdns-top-notice', {
-      detail: {
-        message: String(message || ''),
-        tone
-      }
-    })
-  )
-}
-
-function setError(message) {
-  showTopNotice(message, 'error')
-}
-
-function setSuccess(message) {
-  showTopNotice(message, 'success')
-}
-
 function resetMessage() {
-  showTopNotice('', 'success')
+  clearTopNotice()
 }
 
 function getProfileName(tag) {

@@ -2,6 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { deleteRequest, getJSON, postJSON, putJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
+import RulesAdguardPanel from './rules/RulesAdguardPanel.vue'
+import RulesDiversionPanel from './rules/RulesDiversionPanel.vue'
+import RulesAdguardEditorModal from './rules/RulesAdguardEditorModal.vue'
+import RulesSpecialGroupsPanel from './rules/RulesSpecialGroupsPanel.vue'
+import RulesSpecialEditorModal from './rules/RulesSpecialEditorModal.vue'
+import RulesDiversionEditorModal from './rules/RulesDiversionEditorModal.vue'
+import { clearTopNotice, setError, setSuccess } from '../utils/notice'
+import { formatDateTime } from '../utils/time'
 
 const props = defineProps({
   mode: {
@@ -123,41 +131,12 @@ const panelDesc = computed(() => {
   return '覆盖旧版规则管理核心能力：专属分流组、AdGuard 在线规则、在线分流规则。'
 })
 
-function showTopNotice(message, tone = 'success') {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(
-    new CustomEvent('mosdns-top-notice', {
-      detail: {
-        message: String(message || ''),
-        tone
-      }
-    })
-  )
-}
-
-function setError(message) {
-  showTopNotice(message, 'error')
-}
-
-function setSuccess(message) {
-  showTopNotice(message, 'success')
-}
-
 function clearMessage() {
-  showTopNotice('', 'success')
+  clearTopNotice()
 }
 
 function formatTime(value) {
-  if (!value || String(value).startsWith('0001-01-01')) {
-    return '-'
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return String(value)
-  }
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(value)
 }
 
 function sanitizeRulePayload(rule) {
@@ -793,219 +772,67 @@ onBeforeUnmount(() => {
       </button>
     </nav>
 
-    <section v-if="shouldShowTab('special')" class="sub-panel">
-      <div class="actions">
-        <button class="btn primary entry-action-btn" @click="openCreateSpecial">新增专属分流组</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>槽位</th>
-              <th>名称</th>
-              <th>上游组 Tag</th>
-              <th>分流插件 Tag</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading.special">
-              <td colspan="5" class="empty">加载中...</td>
-            </tr>
-            <tr v-else-if="specialGroups.length === 0">
-              <td colspan="5" class="empty">暂无专属分流组</td>
-            </tr>
-            <tr v-for="group in specialGroups" :key="group.slot">
-              <td>{{ group.slot }}</td>
-              <td>{{ group.name }}</td>
-              <td class="mono">{{ group.upstream_plugin_tag }}</td>
-              <td class="mono">{{ group.diversion_plugin_tag }}</td>
-              <td class="row-actions">
-                <button class="btn tiny secondary" @click="openEditSpecial(group)">改名</button>
-                <button class="btn tiny danger" @click="deleteSpecial(group)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <RulesSpecialGroupsPanel
+      v-if="shouldShowTab('special')"
+      :loading="loading.special"
+      :special-groups="specialGroups"
+      @create="openCreateSpecial"
+      @edit="openEditSpecial"
+      @delete="deleteSpecial"
+    />
 
-    <section v-if="shouldShowTab('adguard')" class="sub-panel">
-      <div class="actions">
-        <button class="btn primary entry-action-btn" @click="openCreateAdguard">新增拦截规则</button>
-        <button class="btn warning" @click="updateAdguardAll">更新全部规则</button>
-      </div>
-      <div class="table-wrap adaptive-table-wrap rules-adguard-wrap">
-        <table class="rules-adaptive-table rules-adguard-table">
-          <thead>
-            <tr>
-              <th>启用</th>
-              <th>名称</th>
-              <th>URL</th>
-              <th>规则数</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading.adguard">
-              <td colspan="6" class="empty">加载中...</td>
-            </tr>
-            <tr v-else-if="adguardRules.length === 0">
-              <td colspan="6" class="empty">暂无 AdGuard 规则</td>
-            </tr>
-            <tr v-for="rule in adguardRules" :key="rule.id" :class="{ disabled: !rule.enabled }">
-              <td>
-                <label class="switch switch-table">
-                  <input type="checkbox" :checked="Boolean(rule.enabled)" @change="toggleAdguard(rule)" />
-                  <span class="slider"></span>
-                </label>
-              </td>
-              <td :title="rule.name">{{ rule.name }}</td>
-              <td class="mono" :title="rule.url">{{ rule.url }}</td>
-              <td class="text-right">{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
-              <td class="mono" :title="formatTime(rule.last_updated)">{{ formatTime(rule.last_updated) }}</td>
-              <td class="row-actions">
-                <button class="btn tiny warning" @click="updateAdguard(rule)">更新</button>
-                <button class="btn tiny secondary" @click="openEditAdguard(rule)">编辑</button>
-                <button class="btn tiny danger" @click="deleteAdguard(rule)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <RulesAdguardPanel
+      v-if="shouldShowTab('adguard')"
+      :loading="loading.adguard"
+      :adguard-rules="adguardRules"
+      :format-time="formatTime"
+      @create="openCreateAdguard"
+      @update-all="updateAdguardAll"
+      @toggle="toggleAdguard"
+      @update="updateAdguard"
+      @edit="openEditAdguard"
+      @delete="deleteAdguard"
+    />
 
-    <section v-if="shouldShowTab('diversion')" class="sub-panel">
-      <div class="actions">
-        <button class="btn primary entry-action-btn" @click="openCreateDiversion">新增分流规则</button>
-        <button class="btn warning" @click="updateDiversionAll">更新全部规则</button>
-      </div>
-      <div class="table-wrap adaptive-table-wrap rules-diversion-wrap">
-        <table class="rules-adaptive-table rules-diversion-table">
-          <thead>
-            <tr>
-              <th>启用</th>
-              <th>类型</th>
-              <th>名称</th>
-              <th>文件</th>
-              <th>URL</th>
-              <th>规则数</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading.diversion">
-              <td colspan="8" class="empty">加载中...</td>
-            </tr>
-            <tr v-else-if="diversionRules.length === 0">
-              <td colspan="8" class="empty">暂无在线分流规则</td>
-            </tr>
-            <tr v-for="rule in diversionRules" :key="`${rule.type}:${rule.name}`" :class="{ disabled: !rule.enabled }">
-              <td>
-                <label class="switch switch-table">
-                  <input type="checkbox" :checked="Boolean(rule.enabled)" @change="toggleDiversion(rule)" />
-                  <span class="slider"></span>
-                </label>
-              </td>
-              <td :title="rule.__typeLabel">{{ rule.__typeLabel }}</td>
-              <td :title="rule.name">{{ rule.name }}</td>
-              <td class="mono" :title="rule.files">{{ rule.files }}</td>
-              <td class="mono" :title="rule.url">{{ rule.url }}</td>
-              <td class="text-right">{{ Number(rule.rule_count || 0).toLocaleString() }}</td>
-              <td class="mono" :title="formatTime(rule.last_updated)">{{ formatTime(rule.last_updated) }}</td>
-              <td class="row-actions">
-                <button class="btn tiny warning" @click="updateDiversion(rule)">更新</button>
-                <button class="btn tiny secondary" @click="openEditDiversion(rule)">编辑</button>
-                <button class="btn tiny danger" @click="deleteDiversion(rule)">删除</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <RulesDiversionPanel
+      v-if="shouldShowTab('diversion')"
+      :loading="loading.diversion"
+      :diversion-rules="diversionRules"
+      :format-time="formatTime"
+      @create="openCreateDiversion"
+      @update-all="updateDiversionAll"
+      @toggle="toggleDiversion"
+      @update="updateDiversion"
+      @edit="openEditDiversion"
+      @delete="deleteDiversion"
+    />
 
-    <div v-if="specialEditor.open" class="modal-mask">
-      <section class="panel form-modal-card">
-        <header class="panel-header">
-          <h3>{{ specialEditor.slot ? '修改专属分流组' : '新增专属分流组' }}</h3>
-          <button class="btn tiny secondary" type="button" @click="closeSpecialEditor">✕</button>
-        </header>
-        <div class="form-grid">
-          <label>槽位 (&gt;=50，留空自动分配)</label>
-          <input v-model.number="specialEditor.slot" type="number" min="0" />
-          <label>名称</label>
-          <input v-model="specialEditor.name" placeholder="例如 移动上游" />
-        </div>
-        <div class="actions">
-          <button class="btn secondary" @click="closeSpecialEditor">取消</button>
-          <button class="btn primary" @click="saveSpecial">保存</button>
-        </div>
-      </section>
-    </div>
+    <RulesSpecialEditorModal
+      v-if="specialEditor.open"
+      :editor="specialEditor"
+      @close="closeSpecialEditor"
+      @save="saveSpecial"
+    />
 
-    <div v-if="adguardEditor.open" class="modal-mask">
-      <section class="panel form-modal-card">
-        <header class="panel-header">
-          <h3>{{ adguardEditor.id ? '编辑 AdGuard 规则' : '新增 AdGuard 规则' }}</h3>
-          <button class="btn tiny secondary" type="button" @click="closeAdguardEditor">✕</button>
-        </header>
-        <div class="form-grid">
-          <label>名称</label>
-          <input v-model="adguardEditor.name" />
-          <label>URL</label>
-          <input v-model="adguardEditor.url" />
-          <label>更新间隔 (小时)</label>
-          <input v-model.number="adguardEditor.update_interval_hours" type="number" min="1" />
-          <label>启用</label>
-          <label class="switch-inline"><input v-model="adguardEditor.enabled" type="checkbox" /><span>{{ adguardEditor.enabled ? '已启用' : '已禁用' }}</span></label>
-          <label>自动更新</label>
-          <label class="switch-inline"><input v-model="adguardEditor.auto_update" type="checkbox" /><span>{{ adguardEditor.auto_update ? '开启' : '关闭' }}</span></label>
-        </div>
-        <div class="actions">
-          <button class="btn secondary" @click="closeAdguardEditor">取消</button>
-          <button class="btn primary" @click="saveAdguard">保存</button>
-        </div>
-      </section>
-    </div>
+    <RulesAdguardEditorModal
+      v-if="adguardEditor.open"
+      :editor="adguardEditor"
+      @close="closeAdguardEditor"
+      @save="saveAdguard"
+    />
 
-    <div v-if="diversionEditor.open" class="modal-mask">
-      <section class="panel form-modal-card">
-        <header class="panel-header">
-          <h3>{{ diversionEditor.oldName ? '编辑分流规则' : '新增分流规则' }}</h3>
-          <button class="btn tiny secondary" type="button" @click="closeDiversionEditor">✕</button>
-        </header>
-        <div class="form-grid">
-          <label>类型</label>
-          <select v-model="diversionEditor.type" @change="onDiversionTypeChange">
-            <option v-for="item in diversionTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-          </select>
-          <label v-if="!diversionEditor.oldName">自动识别</label>
-          <div v-if="!diversionEditor.oldName" class="autofill-actions">
-            <small class="muted">输入 URL 后会自动识别名称和本地文件路径，也可以手动点击“自动识别”。</small>
-            <button class="btn tiny secondary" type="button" @click="applyDiversionAutofill">自动识别</button>
-          </div>
-          <label>URL</label>
-          <input v-model="diversionEditor.url" @input="onDiversionUrlInput" />
-          <label>名称</label>
-          <input v-model="diversionEditor.name" @input="onDiversionNameInput" />
-          <label>本地文件</label>
-          <input v-model="diversionEditor.files" placeholder="例如 /cus/mosdns/srs/geo/cn.json" @input="onDiversionFilesInput" />
-          <label>更新间隔 (小时)</label>
-          <input v-model.number="diversionEditor.update_interval_hours" type="number" min="1" />
-          <label>启用</label>
-          <label class="switch-inline"><input v-model="diversionEditor.enabled" type="checkbox" /><span>{{ diversionEditor.enabled ? '已启用' : '已禁用' }}</span></label>
-          <label>自动更新</label>
-          <label class="switch-inline"><input v-model="diversionEditor.auto_update" type="checkbox" /><span>{{ diversionEditor.auto_update ? '开启' : '关闭' }}</span></label>
-          <label>启用正则</label>
-          <label class="switch-inline"><input v-model="diversionEditor.enable_regexp" type="checkbox" /><span>{{ diversionEditor.enable_regexp ? '开启' : '关闭' }}</span></label>
-        </div>
-        <div class="actions">
-          <button class="btn secondary" @click="closeDiversionEditor">取消</button>
-          <button class="btn primary" @click="saveDiversion">保存</button>
-        </div>
-      </section>
-    </div>
+    <RulesDiversionEditorModal
+      v-if="diversionEditor.open"
+      :editor="diversionEditor"
+      :diversion-type-options="diversionTypeOptions"
+      :is-editing="Boolean(diversionEditor.oldName)"
+      @close="closeDiversionEditor"
+      @save="saveDiversion"
+      @apply-autofill="applyDiversionAutofill"
+      @type-change="onDiversionTypeChange"
+      @url-input="onDiversionUrlInput"
+      @name-input="onDiversionNameInput"
+      @files-input="onDiversionFilesInput"
+    />
   </section>
 </template>

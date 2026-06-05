@@ -17,6 +17,20 @@ import (
 
 const upstreamOverridesFilename = "upstream_overrides.json"
 
+func upstreamOverridesFilePath() string {
+	return upstreamOverridesFilePathInDir(MainConfigBaseDir)
+}
+
+func upstreamOverridesFilePathInDir(baseDir string) string {
+	return managedMigratingFilePathInDir(
+		baseDir,
+		managedWebInfoDirName,
+		upstreamOverridesFilename,
+		upstreamOverridesFilename,
+		filepath.Join(managedStateDirName, upstreamOverridesFilename),
+	)
+}
+
 // UpstreamOverrideConfig 定义 UI/API 交互的完整数据结构
 type UpstreamOverrideConfig struct {
 	Tag      string `json:"tag"`      // 上游名称 (Upstream Name)
@@ -193,7 +207,7 @@ func validateProtocolAddrCompatibility(protocol, addr string) error {
 }
 
 func resolveGlobalSocks5Override() string {
-	path := filepath.Join(MainConfigBaseDir, overridesFilename)
+	path := overridesFilePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
@@ -216,7 +230,7 @@ func loadUpstreamOverrides() error {
 	}
 	// 获取绝对路径用于 Debug
 	absDir, _ := filepath.Abs(dir)
-	path := filepath.Join(dir, upstreamOverridesFilename)
+	path := upstreamOverridesFilePathInDir(dir)
 
 	mlog.L().Info("[Debug UpstreamAPI] Loading overrides",
 		zap.String("MainConfigBaseDir", dir),
@@ -258,7 +272,7 @@ func saveUpstreamOverrides() error {
 		dir = "."
 	}
 
-	path := filepath.Join(dir, upstreamOverridesFilename)
+	path := upstreamOverridesFilePathInDir(dir)
 	absPath, _ := filepath.Abs(path)
 
 	data, err := json.MarshalIndent(upstreamOverrides, "", "  ")

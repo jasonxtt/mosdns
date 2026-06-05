@@ -224,7 +224,7 @@ func loadSpecialGroupsFromDir(dir string) ([]SpecialGroup, error) {
 		dir = "."
 	}
 
-	path := managedStateFilePathInDir(dir, specialGroupsFilename)
+	path := managedWebInfoFilePathInDir(dir, specialGroupsFilename)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -262,7 +262,7 @@ func normalizeSpecialGroups(groups []SpecialGroup) []SpecialGroup {
 }
 
 func saveSpecialGroupsLocked() error {
-	path := managedStateFilePathInDir(mainConfigDir(), specialGroupsFilename)
+	path := managedWebInfoFilePathInDir(mainConfigDir(), specialGroupsFilename)
 	data, err := json.MarshalIndent(specialGroups, "", "  ")
 	if err != nil {
 		return err

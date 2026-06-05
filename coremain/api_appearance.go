@@ -574,7 +574,7 @@ func normalizeButtonColorSettings(raw buttonColorSettings) buttonColorSettings {
 }
 
 func panelBackgroundSettingsPath() string {
-	return managedStateFilePath(appearanceSettingsFilename)
+	return managedWebInfoFilePath(appearanceSettingsFilename)
 }
 
 func panelBackgroundImagePath() string {
@@ -668,11 +668,11 @@ func resolvePanelBackgroundHistoryImageURL(uploadID string, info os.FileInfo) st
 }
 
 func textColorSettingsPath() string {
-	return managedStateFilePath(appearanceTextSettingsFile)
+	return managedWebInfoFilePath(appearanceTextSettingsFile)
 }
 
 func buttonColorSettingsPath() string {
-	return managedStateFilePath(appearanceButtonSettingsFile)
+	return managedWebInfoFilePath(appearanceButtonSettingsFile)
 }
 
 func resolveUploadedPanelBackgroundURL() string {

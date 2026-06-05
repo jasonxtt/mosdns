@@ -16,6 +16,9 @@ As of `2026-05-06`, the fork is in a stable maintained state with these major ou
 
 ## Important active realities
 
+- the maintained `main` workspace is `/Users/tom/Documents/github/mosdns`
+- the maintained `lite` workspace is `/Users/tom/Documents/github/mosdns-lite`
+- in normal workflow, infer the intended line from the project folder instead of asking first: `mosdns` means `main`, `mosdns-lite` means `lite`
 - `webui-blog/` exists, but it is an experimental Bento-style branch and is currently paused
 - the main ongoing UI target is `/`, not `/blog`
 - the legacy UI is kept mainly as fallback, comparison target, and compatibility reference
@@ -42,6 +45,16 @@ Use `special_groups`, not `route_group`.
 
 This repository can store process notes, but not secrets. Keep passwords and private tokens out of committed files.
 
+Current non-secret deployment notes that are safe to keep in repo docs:
+
+- test host: `10.0.0.91` (`mos-test`)
+- production host: `10.0.0.3` (`mosdns`)
+- related debug hosts:
+  - `10.0.0.2` (`sing-box`)
+  - `10.0.0.6` (`network-vm`)
+- runtime config root on deployed hosts: `/cus/mosdns`
+- on this machine, prefer the matching aliases from `~/.ssh/config` when available
+
 ### 4. Frontend build order for embedded assets
 
 If a release binary should carry updated Vue assets, build order matters:
@@ -50,6 +63,12 @@ If a release binary should carry updated Vue assets, build order matters:
 - then run `go build`
 
 Running them in parallel can produce a binary with mismatched embedded `app.js` / `app.css`.
+
+Typical validation flow remains:
+
+- local build
+- test host first
+- production host only after confirmation
 
 ### 5. Mobile overview-table compatibility
 

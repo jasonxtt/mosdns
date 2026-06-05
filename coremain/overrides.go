@@ -11,6 +11,20 @@ import (
 
 const overridesFilename = "config_overrides.json"
 
+func overridesFilePath() string {
+	return overridesFilePathInDir(MainConfigBaseDir)
+}
+
+func overridesFilePathInDir(baseDir string) string {
+	return managedMigratingFilePathInDir(
+		baseDir,
+		managedWebInfoDirName,
+		overridesFilename,
+		overridesFilename,
+		filepath.Join(managedStateDirName, overridesFilename),
+	)
+}
+
 // ReplacementRule defines a single replacement rule.
 type ReplacementRule struct {
 	Original string `json:"original"`
@@ -49,7 +63,7 @@ func (g *GlobalOverrides) Prepare() {
 	g.lookupMap = make(map[string]*ReplacementRule)
 	if g.Replacements != nil {
 		for _, r := range g.Replacements {
-			if r.Original == "" { 
+			if r.Original == "" {
 				continue
 			}
 			g.lookupMap[r.Original] = r
@@ -78,8 +92,8 @@ func DiscoverAndCacheSettings(cfg *Config) {
 			return
 		}
 
-		mlog.L().Info("[Debug Discovery] Scanning config scope", 
-			zap.String("source", sourceFile), 
+		mlog.L().Info("[Debug Discovery] Scanning config scope",
+			zap.String("source", sourceFile),
 			zap.Int("plugins_count", len(c.Plugins)),
 			zap.Int("includes_count", len(c.Include)))
 
@@ -112,9 +126,9 @@ func DiscoverAndCacheSettings(cfg *Config) {
 			if len(c.baseDir) > 0 && !filepath.IsAbs(includePath) {
 				resolvedPath = filepath.Join(c.baseDir, includePath)
 			}
-			
+
 			mlog.L().Info("[Debug Discovery] Reading include file", zap.String("path", resolvedPath))
-			
+
 			subCfg, _, err := loadConfig(resolvedPath)
 			if err == nil {
 				discover(subCfg, resolvedPath)
@@ -125,8 +139,8 @@ func DiscoverAndCacheSettings(cfg *Config) {
 	}
 
 	discover(cfg, "root_config")
-	
-	mlog.L().Info("[Debug Discovery] <<< Discovery finished", 
+
+	mlog.L().Info("[Debug Discovery] <<< Discovery finished",
 		zap.Strings("all_aliapi_tags", discoveredAliAPITags),
 		zap.String("socks5", discoveredSocks5),
 		zap.String("ecs", discoveredECS))

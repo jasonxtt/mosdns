@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getJSON, postJSON, putJSON } from '../api/http'
+import { clearTopNotice, setError, setSuccess } from '../utils/notice'
+import { formatDateTime, formatRelativeTime as formatRelativeTimeText } from '../utils/time'
 
 const props = defineProps({
   mode: {
@@ -253,30 +255,8 @@ function getMatchedGroupDisplay(value) {
   return hit?.name || key
 }
 
-function showTopNotice(message, tone = 'success') {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(
-    new CustomEvent('mosdns-top-notice', {
-      detail: {
-        message: String(message || ''),
-        tone
-      }
-    })
-  )
-}
-
-function setError(message) {
-  showTopNotice(message, 'error')
-}
-
-function setSuccess(message) {
-  showTopNotice(message, 'success')
-}
-
 function resetMessages() {
-  showTopNotice('', 'success')
+  clearTopNotice()
 }
 
 function parseSearchKeyword(raw) {
@@ -291,39 +271,11 @@ function parseSearchKeyword(raw) {
 }
 
 function formatTime(value) {
-  if (!value || String(value).startsWith('0001-01-01')) {
-    return '-'
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return String(value)
-  }
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(value)
 }
 
-function formatRelativeTime(value) {
-  if (!value) {
-    return '-'
-  }
-  const now = Date.now()
-  const ts = new Date(value).getTime()
-  if (Number.isNaN(ts)) {
-    return String(value)
-  }
-  const diffSeconds = Math.max(0, Math.floor((now - ts) / 1000))
-  if (diffSeconds < 5) {
-    return '刚刚'
-  }
-  if (diffSeconds < 60) {
-    return `${diffSeconds}秒前`
-  }
-  if (diffSeconds < 3600) {
-    return `${Math.floor(diffSeconds / 60)}分钟前`
-  }
-  if (diffSeconds < 86400) {
-    return `${Math.floor(diffSeconds / 3600)}小时前`
-  }
-  return new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+function formatLogRelativeTime(value) {
+  return formatRelativeTimeText(value, { olderFormat: 'date' })
 }
 
 function responseSummary(log) {
@@ -817,7 +769,7 @@ onBeforeUnmount(() => {
               :class="{ selected: selectedLog === item }"
               @click="openLogDetail(item)"
             >
-              <td>{{ formatRelativeTime(item.query_time) }}</td>
+              <td>{{ formatLogRelativeTime(item.query_time) }}</td>
               <td>
                 <div>
                   <span class="status-dot" :class="!item.response_code || item.response_code === 'NOERROR' ? 'ok' : 'fail'"></span>

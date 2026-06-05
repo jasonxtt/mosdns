@@ -2,6 +2,20 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
+import SystemAuditCapacityPanel from './system/SystemAuditCapacityPanel.vue'
+import SystemAuditPanel from './system/SystemAuditPanel.vue'
+import SystemAutoRefreshPanel from './system/SystemAutoRefreshPanel.vue'
+import SystemAppearancePanel from './system/SystemAppearancePanel.vue'
+import SystemConfigManagePanel from './system/SystemConfigManagePanel.vue'
+import SystemCoreModePanel from './system/SystemCoreModePanel.vue'
+import SystemFeatureSwitchesPanel from './system/SystemFeatureSwitchesPanel.vue'
+import SystemInfoPanel from './system/SystemInfoPanel.vue'
+import SystemOverridesPanel from './system/SystemOverridesPanel.vue'
+import SystemReplacementRulesPanel from './system/SystemReplacementRulesPanel.vue'
+import SystemUpdatePanel from './system/SystemUpdatePanel.vue'
+import SystemWebuiPortPanel from './system/SystemWebuiPortPanel.vue'
+import { clearTopNotice, setError, setSuccess } from '../utils/notice'
+import { formatRelativeTime } from '../utils/time'
 import { getDefaultPanelBackgroundSettings, normalizePanelBackgroundSettings, previewPanelBackground, transparencyToOpacity } from '../utils/panelBackground'
 import {
   applyTextColorForTheme,
@@ -93,7 +107,6 @@ const eyeDropperSupported = ref(false)
 
 const panelBackgroundDefaults = getDefaultPanelBackgroundSettings()
 const panelBackgroundMaxUpload = 20 * 1024 * 1024
-const panelBackgroundPicker = ref(null)
 const panelBackground = reactive({
   mode: panelBackgroundDefaults.mode,
   url: '',
@@ -219,30 +232,8 @@ const updateLatestBadge = computed(() => {
   return Boolean(cur && latest && cur === latest)
 })
 
-function setError(message) {
-  showTopNotice(message, 'error')
-}
-
-function setSuccess(message) {
-  showTopNotice(message, 'success')
-}
-
 function clearMessage() {
-  showTopNotice('', 'success')
-}
-
-function showTopNotice(message, tone = 'success') {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(
-    new CustomEvent('mosdns-top-notice', {
-      detail: {
-        message: String(message || ''),
-        tone
-      }
-    })
-  )
+  clearTopNotice()
 }
 
 function normalizeVersion(value) {
@@ -250,30 +241,6 @@ function normalizeVersion(value) {
     return ''
   }
   return String(value).trim().toLowerCase().replace(/^v/, '')
-}
-
-function formatRelativeTime(value) {
-  if (!value) {
-    return '-'
-  }
-  const ts = new Date(value).getTime()
-  if (!Number.isFinite(ts)) {
-    return String(value)
-  }
-  const diff = Math.max(0, Math.floor((Date.now() - ts) / 1000))
-  if (diff < 5) {
-    return '刚刚'
-  }
-  if (diff < 60) {
-    return `${diff}秒前`
-  }
-  if (diff < 3600) {
-    return `${Math.floor(diff / 60)}分钟前`
-  }
-  if (diff < 86400) {
-    return `${Math.floor(diff / 3600)}小时前`
-  }
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
 
 function parseSystemMetrics(metricsText) {
@@ -1215,10 +1182,6 @@ function onPanelBackgroundSliderInput() {
   void syncPanelBackgroundPreview(false)
 }
 
-function openPanelBackgroundPicker() {
-  panelBackgroundPicker.value?.click()
-}
-
 async function onPanelBackgroundFileChange(event) {
   const input = event?.target
   const file = input?.files?.[0]
@@ -1435,386 +1398,126 @@ onBeforeUnmount(() => {
   <section class="system-panel">
     <div class="system-layout-stack">
       <div class="control-panel-grid system-grid-quad">
-        <section class="panel control-module control-module--mini">
-          <h3>系统信息</h3>
-          <div class="module-kv-list">
-            <div class="control-line"><strong>启动时间</strong><span>{{ systemInfo.startTime ? new Date(systemInfo.startTime * 1000).toLocaleString('zh-CN', { hour12: false }) : 'N/A' }}</span></div>
-            <div class="control-line"><strong>CPU 时间</strong><span>{{ Number(systemInfo.cpuTime || 0).toFixed(2) }} 秒</span></div>
-            <div class="control-line"><strong>常驻内存 (RSS)</strong><span>{{ (Number(systemInfo.residentMemory || 0) / 1024 / 1024).toFixed(2) }} MB</span></div>
-            <div class="control-line"><strong>待用堆内存 (Idle)</strong><span>{{ (Number(systemInfo.heapIdleMemory || 0) / 1024 / 1024).toFixed(2) }} MB</span></div>
-            <div class="control-line"><strong>Go 版本</strong><span>{{ systemInfo.goVersion }}</span></div>
-          </div>
-          <div class="actions">
-            <button class="btn secondary restart-mosdns-btn" :disabled="restarting" @click="restartMosdns">
-              {{ restarting ? '处理中...' : '重启 MosDNS' }}
-            </button>
-          </div>
-        </section>
+        <SystemInfoPanel
+          :restarting="restarting"
+          :system-info="systemInfo"
+          @restart="restartMosdns"
+        />
 
-        <section class="panel control-module control-module--mini">
-          <h3>版本与更新</h3>
-          <div class="module-kv-list">
-            <div class="control-line"><strong>当前版本</strong><span>{{ update.status?.current_version || '未知' }}</span></div>
-            <div class="control-line"><strong>最新版本</strong><span>{{ update.status?.latest_version || '--' }} <span v-if="updateLatestBadge" class="mini-badge">已是最新</span></span></div>
-            <div class="control-line"><strong>上次检查</strong><span>{{ updateLastCheckedText }}</span></div>
-          </div>
-          <p class="update-banner">{{ updateBannerText }}</p>
-          <div class="actions">
-            <button class="btn tiny secondary" :disabled="update.loading" @click="checkUpdate">{{ update.loading ? '处理中...' : '检查更新' }}</button>
-            <button class="btn tiny primary" :disabled="update.loading || !hasUpdate" @click="applyUpdate(false, false)">立即更新</button>
-            <button class="btn tiny danger" :disabled="update.loading || !update.status?.download_url" @click="applyUpdate(true, false)">强制更新</button>
-            <button v-if="showV3Callout" class="btn tiny warning" :disabled="update.loading" @click="applyUpdate(true, true)">切换 v3</button>
-          </div>
-        </section>
+        <SystemUpdatePanel
+          :has-update="hasUpdate"
+          :show-v3-callout="showV3Callout"
+          :update="update"
+          :update-banner-text="updateBannerText"
+          :update-last-checked-text="updateLastCheckedText"
+          :update-latest-badge="updateLatestBadge"
+          @check-update="checkUpdate"
+          @apply-update="applyUpdate(false, false)"
+          @apply-force-update="applyUpdate(true, false)"
+          @apply-v3-update="applyUpdate(true, true)"
+        />
 
-        <section class="panel control-module control-module--mini">
-          <h3>配置管理</h3>
-          <div class="module-form-stack">
-            <label class="mini-field">
-              <span>本地目录</span>
-              <input v-model="configManaging.localDir" placeholder="/cus/mosdns" @change="saveConfigManagerSettings" />
-            </label>
-            <label class="mini-field">
-              <span>远程 ZIP URL</span>
-              <input v-model="configManaging.remoteUrl" placeholder="https://example.com/mosdns.zip" @change="saveConfigManagerSettings" />
-            </label>
-          </div>
-          <div class="actions">
-            <button class="btn tiny secondary" :disabled="configManaging.backingUp" @click="backupConfig">
-              {{ configManaging.backingUp ? '备份中...' : '备份配置' }}
-            </button>
-            <button class="btn tiny primary" :disabled="configManaging.updating" @click="applyRemoteConfig">
-              {{ configManaging.updating ? '更新中...' : '应用远程配置' }}
-            </button>
-          </div>
-        </section>
+        <SystemConfigManagePanel
+          :config-managing="configManaging"
+          @save-settings="saveConfigManagerSettings"
+          @backup-config="backupConfig"
+          @apply-remote-config="applyRemoteConfig"
+        />
 
-        <section class="panel control-module control-module--mini">
-          <h3>SOCKS5 / ECS 覆盖</h3>
-          <div class="module-form-stack">
-            <label class="mini-field">
-              <span>socks5 代理</span>
-              <input v-model="overrides.socks5" placeholder="host:port" />
-            </label>
-            <label class="mini-field">
-              <span>ECS IP</span>
-              <input v-model="overrides.ecs" placeholder="IPv4 / IPv6" />
-            </label>
-          </div>
-          <div class="actions">
-            <button class="btn tiny secondary" @click="loadOverrides">读取当前</button>
-            <button class="btn tiny primary" :disabled="applyingOverrides" @click="saveOverrides">
-              {{ applyingOverrides ? '保存中...' : '保存并应用' }}
-            </button>
-          </div>
-        </section>
+        <SystemOverridesPanel
+          :applying-overrides="applyingOverrides"
+          :overrides="overrides"
+          @load-overrides="loadOverrides"
+          @save-overrides="saveOverrides"
+        />
       </div>
 
       <div class="control-panel-grid system-grid-dual">
-        <section class="panel control-module system-grid-dual-item">
-          <header class="module-head">
-            <div>
-              <h3>核心运行模式</h3>
-            </div>
-            <div class="actions">
-              <button class="btn tiny core-mode-btn" :class="coreMode === 'A' ? 'primary is-active' : 'secondary'" :disabled="switchLoading.switch3" @click="setCoreMode('A')">兼容模式</button>
-              <button class="btn tiny core-mode-btn" :class="coreMode === 'B' ? 'primary is-active' : 'secondary'" :disabled="switchLoading.switch3" @click="setCoreMode('B')">安全模式</button>
-            </div>
-          </header>
-          <div class="core-mode-hints">
-            <p class="muted">兼容模式：表外域名优先国内dns解析，保证速度。</p>
-            <p class="muted">安全模式：表外域名仅用国外dns解析，阻止dns泄漏。</p>
-          </div>
-        </section>
+        <SystemCoreModePanel
+          :core-mode="coreMode"
+          :switch-loading="switchLoading"
+          @set-core-mode="setCoreMode"
+        />
 
-        <section class="panel control-module webui-port-module system-grid-dual-item">
-          <h3>WebUI 端口</h3>
-          <div class="webui-port-inline-row">
-            <label class="webui-port-inline-field">
-              <span>当前端口</span>
-              <input
-                :value="webuiPort.loading ? '读取中...' : String(webuiPort.activePort || '--')"
-                type="text"
-                readonly
-              />
-            </label>
-            <label class="webui-port-inline-field">
-              <span>目标端口</span>
-              <input v-model="webuiPort.input" type="number" min="1" max="65535" placeholder="例如 9099" />
-            </label>
-          </div>
-          <div class="actions webui-port-actions">
-            <button class="btn tiny primary" :disabled="webuiPort.saving || webuiPort.loading" @click="applyWebUIPortAndRestart">
-              {{ webuiPort.saving ? '处理中...' : '确认并重启 MosDNS' }}
-            </button>
-          </div>
-        </section>
+        <SystemWebuiPortPanel
+          :webui-port="webuiPort"
+          @apply-port="applyWebUIPortAndRestart"
+        />
       </div>
 
       <div class="control-panel-grid">
-        <section class="panel control-module control-module-wide">
-          <header class="module-head">
-            <div>
-              <h3>功能开关</h3>
-            </div>
-          </header>
-
-          <div class="switch-list">
-            <label v-for="profile in secondarySwitches" :key="profile.tag" class="switch-row">
-              <div class="switch-meta">
-                <strong>{{ profile.name }}</strong>
-                <span class="muted">{{ profile.desc }}</span>
-              </div>
-              <span class="switch switch-compact">
-                <input
-                  type="checkbox"
-                  :checked="isSwitchChecked(profile)"
-                  :disabled="switchLoading[profile.tag] || switchStates[profile.tag] === 'error'"
-                  @change="toggleSecondarySwitch(profile, $event.target.checked)"
-                />
-                <span class="slider"></span>
-              </span>
-            </label>
-          </div>
-        </section>
+        <SystemFeatureSwitchesPanel
+          :is-switch-checked="isSwitchChecked"
+          :secondary-switches="secondarySwitches"
+          :switch-loading="switchLoading"
+          :switch-states="switchStates"
+          @toggle-switch="toggleSecondarySwitch"
+        />
       </div>
 
       <div class="control-panel-grid">
-        <section class="panel control-module control-module-wide">
-          <header class="module-head">
-            <div>
-              <h3>高级替换规则</h3>
-              <p class="muted">可配置 DNS 覆盖映射。修改后点击保存并应用。</p>
-            </div>
-            <div class="actions">
-              <button class="btn tiny secondary" @click="loadOverrides">读取当前</button>
-              <button class="btn tiny secondary" @click="addReplacement">添加规则</button>
-              <button class="btn tiny primary" :disabled="applyingOverrides" @click="saveOverrides">
-                {{ applyingOverrides ? '保存中...' : '保存并应用' }}
-              </button>
-            </div>
-          </header>
-
-          <div class="table-wrap replacements-table-wrap">
-            <table class="replacements-table">
-              <thead>
-                <tr>
-                  <th>状态</th>
-                  <th>原值</th>
-                  <th>新值</th>
-                  <th>备注</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="overrides.replacements.length === 0">
-                  <td colspan="5" class="empty">暂无规则</td>
-                </tr>
-                <tr v-for="(item, index) in overrides.replacements" :key="`rep-${index}`">
-                  <td>{{ item.result || '未保存' }}</td>
-                  <td><input v-model="item.original" placeholder="例如: 1.1.1.1" /></td>
-                  <td><input v-model="item.new" placeholder="例如: 127.0.0.1" /></td>
-                  <td><input v-model="item.comment" placeholder="可选备注" /></td>
-                  <td><button class="btn tiny danger" @click="removeReplacement(index)">删除</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <SystemReplacementRulesPanel
+          :applying-overrides="applyingOverrides"
+          :overrides="overrides"
+          @load-overrides="loadOverrides"
+          @add-replacement="addReplacement"
+          @save-overrides="saveOverrides"
+          @remove-replacement="removeReplacement"
+        />
       </div>
 
       <div class="control-panel-grid system-grid-quad">
-        <section class="panel control-module control-module--mini">
-          <h3>审计控制</h3>
-          <div class="control-line">
-            <strong>运行状态</strong>
-            <span>{{ audit.capturing === null ? '读取中...' : (audit.capturing ? '运行中' : '已停止') }}</span>
-          </div>
-          <div class="button-group-vue">
-            <button class="btn tiny primary" @click="toggleAuditCapture">{{ audit.capturing ? '停止审计' : '启动审计' }}</button>
-            <button class="btn tiny danger" @click="clearAuditLogs">清空日志</button>
-          </div>
-        </section>
+        <SystemAuditPanel
+          :audit="audit"
+          @toggle-audit="toggleAuditCapture"
+          @clear-logs="clearAuditLogs"
+        />
 
-        <section class="panel control-module control-module--mini">
-          <h3>详细日志热数据上限</h3>
-          <div class="control-line">
-            <strong>当前上限</strong>
-            <span>{{ audit.capacity === null ? '读取中...' : Number(audit.capacity).toLocaleString() }}</span>
-          </div>
-          <form class="capacity-form" @submit.prevent="submitCapacity">
-            <input v-model="audit.newCapacity" type="number" min="1" max="400000" placeholder="输入热日志上限" />
-            <button class="btn tiny primary" type="submit">设置</button>
-          </form>
-          <p class="muted">仅影响近期详细日志热数据保留条数；1小时到7天统计按时间窗单独汇总，设置新上限会清空当前详细日志。</p>
-        </section>
+        <SystemAuditCapacityPanel
+          :audit="audit"
+          @submit-capacity="submitCapacity"
+        />
 
-        <section class="panel control-module control-module--mini">
-          <h3>自动刷新</h3>
-          <div class="control-line">
-            <strong>启用状态</strong>
-            <label class="switch switch-table">
-              <input type="checkbox" :checked="autoRefresh.enabled" @change="onAutoRefreshToggle" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="control-line">
-            <strong>刷新间隔</strong>
-            <div class="capacity-form" style="max-width: 170px;">
-              <input v-model.number="autoRefresh.intervalSeconds" type="number" min="5" @change="onAutoRefreshIntervalChange" />
-              <span class="muted">秒</span>
-            </div>
-          </div>
-        </section>
+        <SystemAutoRefreshPanel
+          :auto-refresh="autoRefresh"
+          @toggle="onAutoRefreshToggle"
+          @interval-change="onAutoRefreshIntervalChange"
+        />
 
-        <section class="panel control-module control-module--mini appearance-compact-module">
-          <h3>主题与外观</h3>
-          <div class="appearance-compact-stack">
-            <div class="appearance-compact-row appearance-compact-row-theme">
-              <strong class="appearance-compact-label">界面风格</strong>
-              <div class="appearance-compact-control appearance-compact-control-end">
-                <select v-model="appearance.theme" @change="applyTheme(appearance.theme)">
-                  <option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="appearance-color-pair-row">
-              <div class="appearance-color-pair">
-                <span class="appearance-color-mini-label">字体</span>
-                <div class="panel-text-color-wrap appearance-compact-tools">
-                  <input
-                    :value="textColorDraft"
-                    type="color"
-                    :disabled="textColorSaving"
-                    @input="onTextColorPickerInput"
-                    @change="onTextColorPickerChange"
-                  />
-                  <div class="appearance-compact-inline-actions">
-                    <button v-if="eyeDropperSupported" class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="pickTextColorFromScreen">
-                      取色
-                    </button>
-                    <button class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="resetThemeTextColor">默认</button>
-                  </div>
-                </div>
-              </div>
-
-              <div class="appearance-color-pair">
-                <span class="appearance-color-mini-label">按钮</span>
-                <div class="panel-text-color-wrap appearance-compact-tools">
-                  <input
-                    :value="buttonColorDraft"
-                    type="color"
-                    :disabled="buttonColorSaving"
-                    @input="onButtonColorPickerInput"
-                    @change="onButtonColorPickerChange"
-                  />
-                  <div class="appearance-compact-inline-actions">
-                    <button v-if="eyeDropperSupported" class="btn tiny secondary" type="button" :disabled="buttonColorSaving" @click="pickButtonColorFromScreen">
-                      取色
-                    </button>
-                    <button class="btn tiny secondary" type="button" :disabled="buttonColorSaving" @click="resetThemeButtonColor">默认</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="appearance-compact-row appearance-compact-row-top appearance-compact-row-bg">
-              <strong class="appearance-compact-label appearance-compact-label-stack">
-                <span>面板</span>
-                <span>背景</span>
-              </strong>
-              <div class="appearance-compact-control">
-                <div class="appearance-bg-rows">
-                  <div class="appearance-compact-bg-layout">
-                    <input
-                      class="panel-bg-color-inline appearance-compact-bg-swatch"
-                      :value="appearance.theme === 'dark' ? panelBackground.darkColor : panelBackground.lightColor"
-                      type="color"
-                      :disabled="panelBackground.uploading || panelBackground.applying"
-                      title="纯色"
-                      @input="onPanelBackgroundColorInput"
-                    />
-                    <input
-                      v-model="panelBackground.url"
-                      class="appearance-compact-bg-url"
-                      placeholder="输入图片URL链接"
-                      @keydown.enter.prevent="onPanelBackgroundUrlEnter"
-                    />
-                    <div class="appearance-compact-bg-actions-row">
-                      <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying" @click="openPanelBackgroundPicker">
-                        {{ panelBackground.uploading ? '上传中' : '上传' }}
-                      </button>
-                      <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying || panelBackgroundHistoryLoading" @click="togglePanelBackgroundHistory">
-                        {{ panelBackgroundHistoryOpen ? '收起' : '记录' }}
-                      </button>
-                    </div>
-                  </div>
-                  <input
-                    ref="panelBackgroundPicker"
-                    class="panel-bg-file-input"
-                    type="file"
-                    accept="image/*"
-                    @change="onPanelBackgroundFileChange"
-                  />
-                </div>
-
-                <div v-if="panelBackgroundHistoryOpen" class="panel-bg-history appearance-compact-history">
-                  <div class="panel-bg-history-head">
-                    <strong>历史图片</strong>
-                    <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === 'clear-all'" @click="clearPanelBackgroundHistory">
-                      {{ panelBackgroundHistoryBusy === 'clear-all' ? '清空中...' : '清空历史' }}
-                    </button>
-                  </div>
-                  <p v-if="panelBackgroundHistoryLoading" class="muted">历史加载中...</p>
-                  <p v-else-if="panelBackgroundHistory.length === 0" class="muted">暂无历史图片</p>
-                  <div v-else class="panel-bg-history-list">
-                    <div v-for="item in panelBackgroundHistory" :key="item.id" class="panel-bg-history-item">
-                      <img class="panel-bg-history-thumb" :src="item.image_url" alt="history background" />
-                      <div class="panel-bg-history-meta">
-                        <div class="mono">{{ item.id }}</div>
-                        <div class="muted">{{ formatRelativeTime(item.modified_at) }}</div>
-                      </div>
-                      <div class="panel-bg-history-actions">
-                        <button class="btn tiny secondary" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="usePanelBackgroundHistory(item)">选用</button>
-                        <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="deletePanelBackgroundHistory(item)">
-                          {{ panelBackgroundHistoryBusy === item.id ? '删除中...' : '删除' }}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="appearance-compact-row">
-              <strong class="appearance-compact-label">透明度</strong>
-              <div class="appearance-compact-control">
-                <div class="panel-bg-range-wrap appearance-compact-range">
-                  <input v-model.number="panelBackground.transparency" type="range" min="0" max="100" step="1" @input="onPanelBackgroundSliderInput" />
-                  <span>{{ Number(panelBackground.transparency || 0) }}%</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="appearance-compact-row">
-              <strong class="appearance-compact-label">毛玻璃</strong>
-              <div class="appearance-compact-control">
-                <div class="panel-bg-range-wrap appearance-compact-range">
-                  <input v-model.number="panelBackground.blur" type="range" min="0" max="40" step="1" @input="onPanelBackgroundSliderInput" />
-                  <span>{{ Number(panelBackground.blur || 0) }}px</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="actions appearance-compact-actions">
-            <button class="btn tiny primary" type="button" :disabled="panelBackground.applying || panelBackground.uploading" @click="applyPanelBackgroundSettings">
-              {{ panelBackground.applying ? '应用中...' : '应用' }}
-            </button>
-            <button class="btn tiny secondary" type="button" :disabled="panelBackground.applying || panelBackground.uploading || textColorSaving || buttonColorSaving" @click="resetAppearanceSettings">重置</button>
-          </div>
-        </section>
+        <SystemAppearancePanel
+          :appearance="appearance"
+          :button-color-draft="buttonColorDraft"
+          :button-color-saving="buttonColorSaving"
+          :eye-dropper-supported="eyeDropperSupported"
+          :format-relative-time="formatRelativeTime"
+          :panel-background="panelBackground"
+          :panel-background-history="panelBackgroundHistory"
+          :panel-background-history-busy="panelBackgroundHistoryBusy"
+          :panel-background-history-loading="panelBackgroundHistoryLoading"
+          :panel-background-history-open="panelBackgroundHistoryOpen"
+          :text-color-draft="textColorDraft"
+          :text-color-saving="textColorSaving"
+          :theme-options="themeOptions"
+          @apply-theme="applyTheme"
+          @text-color-input="onTextColorPickerInput"
+          @text-color-change="onTextColorPickerChange"
+          @pick-text-color="pickTextColorFromScreen"
+          @reset-text-color="resetThemeTextColor"
+          @button-color-input="onButtonColorPickerInput"
+          @button-color-change="onButtonColorPickerChange"
+          @pick-button-color="pickButtonColorFromScreen"
+          @reset-button-color="resetThemeButtonColor"
+          @panel-bg-color-input="onPanelBackgroundColorInput"
+          @panel-bg-url-enter="onPanelBackgroundUrlEnter"
+          @panel-bg-file-change="onPanelBackgroundFileChange"
+          @toggle-panel-bg-history="togglePanelBackgroundHistory"
+          @clear-panel-bg-history="clearPanelBackgroundHistory"
+          @use-panel-bg-history="usePanelBackgroundHistory"
+          @delete-panel-bg-history="deletePanelBackgroundHistory"
+          @panel-bg-slider-input="onPanelBackgroundSliderInput"
+          @apply-panel-bg-settings="applyPanelBackgroundSettings"
+          @reset-appearance-settings="resetAppearanceSettings"
+        />
       </div>
     </div>
   </section>
