@@ -47,7 +47,6 @@ const (
 	userAgent             = "mosdns-update-client"
 	stateFileName         = ".mosdns-update-state.json"
 	configPackageURL      = "https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip"
-	pendingConfigFlagFile = ".mosdns-config-pending"
 )
 
 // autoConfigUpdate 控制二进制更新后是否自动下载并应用 config_up.zip。
@@ -518,17 +517,6 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 	action.Status = status
 
 	m.recordInstalled(status.AssetSignature)
-
-	// 写入配置更新标记文件，由新二进制启动时读取并执行。
-	// 因为此处运行的是旧二进制，autoConfigUpdate 是旧值，不能在这里检查。
-	if configDir := MainConfigBaseDir; configDir != "" {
-		flagPath := filepath.Join(configDir, pendingConfigFlagFile)
-		if err := os.WriteFile(flagPath, []byte(configPackageURL), 0o644); err != nil {
-			m.logWarn("写入配置更新标记失败", err)
-		} else {
-			m.logger().Info("已写入配置更新标记，新二进制启动时将自动更新配置")
-		}
-	}
 
 	endpoint := resolveLocalRestartEndpoint()
 	if err := m.triggerPostUpgradeHook(ctx); err != nil {

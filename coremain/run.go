@@ -20,8 +20,9 @@
 package coremain
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
+	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/go-viper/mapstructure/v2"
@@ -128,21 +129,26 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 
 	MainConfigBaseDir = guessMainConfigBaseDir(sf.c, sf.dir)
 
-	// 新二进制首次启动时，读取旧二进制留下的配置更新标记并执行。
+	// 新二进制首次启动时，检测是否刚完成二进制更新，如果是则自动更新配置。
+	// 通过读取 .mosdns-update-state.json 的 UpdatedAt 时间戳判断，
+	// 该文件由 PerformUpdate 在安装新二进制后写入（即使旧版本也已有此逻辑）。
 	if MainConfigBaseDir != "" && autoConfigUpdate == "1" {
-		flagPath := filepath.Join(MainConfigBaseDir, pendingConfigFlagFile)
-		if data, err := os.ReadFile(flagPath); err == nil {
-			configURL := strings.TrimSpace(string(data))
-			if configURL == "" {
-				configURL = configPackageURL
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			statePath := filepath.Join(filepath.Dir(exe), ".mosdns-update-state.json")
+			if data, readErr := os.ReadFile(statePath); readErr == nil {
+				var st struct {
+					UpdatedAt time.Time `json:"updated_at"`
+				}
+				if json.Unmarshal(data, &st) == nil && time.Since(st.UpdatedAt) < 5*time.Minute {
+					mlog.L().Info("检测到近期二进制更新，开始自动更新配置包",
+						zap.Time("updated_at", st.UpdatedAt))
+					if count, cfgErr := applyConfigPackage(configPackageURL, MainConfigBaseDir); cfgErr != nil {
+						mlog.L().Warn("配置包自动更新失败，可手动更新", zap.Error(cfgErr))
+					} else {
+						mlog.L().Info("配置包已自动更新", zap.Int("files_updated", count))
+					}
+				}
 			}
-			mlog.L().Info("检测到配置更新标记，开始自动更新配置", zap.String("url", configURL))
-			if count, cfgErr := applyConfigPackage(configURL, MainConfigBaseDir); cfgErr != nil {
-				mlog.L().Warn("配置包自动更新失败，可手动更新", zap.Error(cfgErr))
-			} else {
-				mlog.L().Info("配置包已自动更新", zap.Int("files_updated", count))
-			}
-			os.Remove(flagPath)
 		}
 	}
 
