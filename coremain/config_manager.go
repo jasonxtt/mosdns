@@ -96,6 +96,40 @@ func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// applyConfigPackage 下载配置包 ZIP 并覆盖到目标目录。
+// 仅做下载 -> 备份 -> 覆盖，不触发重启。
+// 供 PerformUpdate 在二进制更新后自动调用，也供 handleConfigUpdateFromURL 复用。
+func applyConfigPackage(url, dir string) (int, error) {
+	lg := mlog.L()
+
+	// 1. 下载（包含代理检测和降级逻辑）
+	zipData, err := downloadWithFallback(url)
+	if err != nil {
+		return 0, fmt.Errorf("下载配置包失败: %w", err)
+	}
+
+	// 2. 解析 ZIP 内文件列表
+	filesToBackup, err := listZipRelativeFiles(zipData)
+	if err != nil {
+		return 0, fmt.Errorf("解析配置包失败: %w", err)
+	}
+
+	// 3. 备份即将被覆盖的文件（失败则熔断）
+	backupDir := filepath.Join(dir, "backup")
+	if err := performLocalBackupForFiles(dir, backupDir, filesToBackup); err != nil {
+		return 0, fmt.Errorf("备份失败: %w", err)
+	}
+
+	// 4. 解压覆盖
+	count, err := extractAndOverwrite(zipData, dir)
+	if err != nil {
+		return 0, fmt.Errorf("覆盖配置失败: %w", err)
+	}
+
+	lg.Info("配置包已应用", zap.Int("files_updated", count))
+	return count, nil
+}
+
 // handleConfigUpdateFromURL 对应需求：下载 -> 备份 -> 覆盖 -> 重启
 func handleConfigUpdateFromURL(w http.ResponseWriter, r *http.Request) {
 	var req ConfigManagerRequest
@@ -108,42 +142,14 @@ func handleConfigUpdateFromURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lg := mlog.L()
-
-	// --- 1. 下载文件 (包含代理检测和降级逻辑) ---
-	zipData, err := downloadWithFallback(req.URL)
+	updatedCount, err := applyConfigPackage(req.URL, req.Dir)
 	if err != nil {
-		lg.Error("download config failed", zap.Error(err))
-		http.Error(w, "Download failed: "+err.Error(), http.StatusInternalServerError)
+		mlog.L().Error("config update failed", zap.Error(err))
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// --- 2. 执行备份 (仅备份 ZIP 将覆盖的文件，失败则熔断) ---
-	filesToBackup, err := listZipRelativeFiles(zipData)
-	if err != nil {
-		lg.Error("parse zip file list failed", zap.Error(err))
-		http.Error(w, "Parse zip failed: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	backupDir := filepath.Join(req.Dir, "backup")
-	if err := performLocalBackupForFiles(req.Dir, backupDir, filesToBackup); err != nil {
-		lg.Error("local backup failed, aborting update", zap.Error(err))
-		http.Error(w, "Backup failed (update aborted): "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// --- 3. 解压并覆盖 (包含目录创建逻辑) ---
-	updatedCount, err := extractAndOverwrite(zipData, req.Dir)
-	if err != nil {
-		lg.Error("extract and overwrite failed", zap.Error(err))
-		http.Error(w, "Update files failed: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// --- 4. 成功响应并触发重启 ---
-	lg.Info("config update successful", zap.Int("files_updated", updatedCount))
-
+	mlog.L().Info("config update successful", zap.Int("files_updated", updatedCount))
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"message": "Update successful. %d files updated. Restarting...", "status": "success"}`, updatedCount)
 
@@ -158,7 +164,7 @@ func handleConfigUpdateFromURL(w http.ResponseWriter, r *http.Request) {
 func downloadWithFallback(url string) ([]byte, error) {
 	// 1. 尝试获取代理配置
 	var proxyAddr string
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	overridesPath := overridesFilePath()
 	data, err := os.ReadFile(overridesPath)
 	if err == nil {
 		var temp struct {

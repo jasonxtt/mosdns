@@ -46,7 +46,14 @@ const (
 	httpTimeout           = 120 * time.Second
 	userAgent             = "mosdns-update-client"
 	stateFileName         = ".mosdns-update-state.json"
+	configPackageURL      = "https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip"
 )
+
+// autoConfigUpdate 控制二进制更新后是否自动下载并应用 config_up.zip。
+// 默认 "0"（关闭）。发版时如需同步配置更新，通过 ldflags 打开：
+//
+//	go build -ldflags="-X github.com/IrineSistiana/mosdns/v5/coremain.autoConfigUpdate=1"
+var autoConfigUpdate = "0"
 
 var (
 	ErrNoUpdateAvailable = errors.New("当前已是最新版本")
@@ -175,7 +182,7 @@ func (m *UpdateManager) getHttpClientForUpdate() (client *http.Client, isProxy b
 		return m.httpClient, false, nil
 	}
 
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	overridesPath := overridesFilePath()
 	data, err := os.ReadFile(overridesPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -510,6 +517,22 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 	action.Status = status
 
 	m.recordInstalled(status.AssetSignature)
+
+	// 自动更新配置包（失败不中断，二进制已替换成功）
+	// 仅当编译时通过 ldflags 开启 autoConfigUpdate=1 时才执行
+	if autoConfigUpdate != "1" {
+		m.logger().Info("跳过配置包自动更新（未启用）")
+	} else if configDir := MainConfigBaseDir; configDir != "" {
+		if count, cfgErr := applyConfigPackage(configPackageURL, configDir); cfgErr != nil {
+			m.logWarn("配置包更新失败，二进制已更新，可手动执行配置更新", cfgErr)
+			action.Notes += "（配置自动更新失败，请手动更新配置包）"
+		} else if count > 0 {
+			if lg := m.logger(); lg != nil {
+				lg.Info("配置包已随二进制自动更新", zap.Int("files_updated", count))
+			}
+		}
+	}
+
 	endpoint := resolveLocalRestartEndpoint()
 	if err := m.triggerPostUpgradeHook(ctx); err != nil {
 		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", endpoint))

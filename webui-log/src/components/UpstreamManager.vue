@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { deleteRequest, getJSON, getText, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
+import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 
 const HIDE_DISABLED_KEY = 'mosdnsHideDisabledUpstreams'
 
@@ -298,30 +299,8 @@ function rowAddress(item) {
   return item.addr || '-'
 }
 
-function showTopNotice(message, tone = 'success') {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(
-    new CustomEvent('mosdns-top-notice', {
-      detail: {
-        message: String(message || ''),
-        tone
-      }
-    })
-  )
-}
-
-function setError(message) {
-  showTopNotice(message, 'error')
-}
-
-function setSuccess(message) {
-  showTopNotice(message, 'success')
-}
-
 function resetMessage() {
-  showTopNotice('', 'success')
+  clearTopNotice()
 }
 
 function resetForm() {

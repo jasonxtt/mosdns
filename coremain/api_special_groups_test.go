@@ -66,12 +66,12 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 
 func TestSyncSpecialGroupsConfigWritesRuntimeFile(t *testing.T) {
 	dir := t.TempDir()
-	stateDir := filepath.Join(dir, managedStateDirName)
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatalf("mkdir state: %v", err)
+	webinfoDir := filepath.Join(dir, managedWebInfoDirName)
+	if err := os.MkdirAll(webinfoDir, 0o755); err != nil {
+		t.Fatalf("mkdir webinfo: %v", err)
 	}
 
-	jsonPath := filepath.Join(stateDir, specialGroupsFilename)
+	jsonPath := filepath.Join(webinfoDir, specialGroupsFilename)
 	if err := os.WriteFile(jsonPath, []byte(`[
   {"slot": 50, "name": "cmcc"},
   {"slot": 52, "name": "hk"}

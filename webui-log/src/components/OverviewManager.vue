@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON } from '../api/http'
 import DnsOverviewCard from './dashboard/DnsOverviewCard.vue'
+import { clearTopNotice, setError, setSuccess } from '../utils/notice'
+import { formatDateTime } from '../utils/time'
 
 const HISTORY_KEY = 'mosdnsHistory'
 const HISTORY_LENGTH = 60
@@ -112,29 +114,7 @@ function updateOverviewRows() {
 }
 
 function clearMessages() {
-  showTopNotice('', 'success')
-}
-
-function showTopNotice(message, tone = 'success') {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(
-    new CustomEvent('mosdns-top-notice', {
-      detail: {
-        message: String(message || ''),
-        tone
-      }
-    })
-  )
-}
-
-function setError(message) {
-  showTopNotice(message, 'error')
-}
-
-function setSuccess(message) {
-  showTopNotice(message, 'success')
+  clearTopNotice()
 }
 
 function normalizeIP(ip) {
@@ -187,14 +167,7 @@ function formatCompactDuration(value) {
 }
 
 function formatTime(value) {
-  if (!value || String(value).startsWith('0001-01-01')) {
-    return '-'
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return String(value)
-  }
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(value)
 }
 
 function getRuleLabel(key) {
@@ -399,9 +372,9 @@ function generateDualSparklineSVG(totalValues, avgValues, timestamps) {
 
 async function reloadOverview(showMessage = false) {
   loading.value = true
-  showTopNotice('', 'success')
+  clearTopNotice()
   if (showMessage) {
-    showTopNotice('', 'success')
+    clearTopNotice()
   }
   try {
     const [

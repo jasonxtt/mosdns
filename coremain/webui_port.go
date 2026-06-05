@@ -23,7 +23,7 @@ type webUIPortSettings struct {
 }
 
 func webUIPortSettingsPath() string {
-	return managedStateFilePath(webUIPortSettingsFilename)
+	return managedWebInfoFilePath(webUIPortSettingsFilename)
 }
 
 func normalizeWebUIPort(port int) (int, error) {

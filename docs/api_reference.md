@@ -598,9 +598,9 @@ API 操作涉及的配置文件（相对于配置目录）：
 
 | 文件 | 对应 API |
 |------|----------|
-| `upstream_overrides.json` | /api/v1/upstream/* |
-| `config_overrides.json` | /api/v1/overrides |
-| `special_upstream_groups.json` | /api/v1/special-groups |
+| `webinfo/upstream_overrides.json` | /api/v1/upstream/* |
+| `webinfo/config_overrides.json` | /api/v1/overrides |
+| `webinfo/special_upstream_groups.json` | /api/v1/special-groups |
 
 
 ---
@@ -773,9 +773,9 @@ GET /plugins/{tag}/ipv6        # 获取 IPv6 列表
 
 | 配置文件 | 操作方式 |
 |----------|----------|
-| `upstream_overrides.json` | `/api/v1/upstream/config` |
-| `config_overrides.json` | `/api/v1/overrides` |
-| `special_upstream_groups.json` | `/api/v1/special-groups` |
+| `webinfo/upstream_overrides.json` | `/api/v1/upstream/config` |
+| `webinfo/config_overrides.json` | `/api/v1/overrides` |
+| `webinfo/special_upstream_groups.json` | `/api/v1/special-groups` |
 | `adguard_rule/config.json` | `/plugins/adguard_rule/rules` |
 | `sd_set/config.json` | `/plugins/sd_set/config` |
 | `aliapi_upstream_*/config.json` | `/api/v1/upstream/config` |

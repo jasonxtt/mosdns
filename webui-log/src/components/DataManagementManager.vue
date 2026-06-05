@@ -1,7 +1,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText, postJSON } from '../api/http'
+import DataCachePanel from './data/DataCachePanel.vue'
+import DataListStatsPanel from './data/DataListStatsPanel.vue'
+import DataRequeryPanel from './data/DataRequeryPanel.vue'
+import DataViewModal from './data/DataViewModal.vue'
 import { openConfirm } from '../utils/confirm'
+import { clearTopNotice, setError, setSuccess } from '../utils/notice'
+import { formatRelativeTime, isZeroTime } from '../utils/time'
 
 const loading = ref(false)
 
@@ -185,56 +191,6 @@ const lastRunDomainCountText = computed(() => {
   }
   return '--'
 })
-
-function showTopNotice(message, tone = 'success') {
-  if (typeof window === 'undefined') {
-    return
-  }
-  window.dispatchEvent(
-    new CustomEvent('mosdns-top-notice', {
-      detail: {
-        message: String(message || ''),
-        tone
-      }
-    })
-  )
-}
-
-function setError(message) {
-  showTopNotice(message, 'error')
-}
-
-function setSuccess(message) {
-  showTopNotice(message, 'success')
-}
-
-function isZeroTime(value) {
-  return String(value || '').startsWith('0001-01-01')
-}
-
-function formatRelativeTime(value) {
-  if (!value) {
-    return '-'
-  }
-  const ts = new Date(value).getTime()
-  if (!Number.isFinite(ts)) {
-    return String(value)
-  }
-  const diffSeconds = Math.max(0, Math.floor((Date.now() - ts) / 1000))
-  if (diffSeconds < 5) {
-    return '刚刚'
-  }
-  if (diffSeconds < 60) {
-    return `${diffSeconds}秒前`
-  }
-  if (diffSeconds < 3600) {
-    return `${Math.floor(diffSeconds / 60)}分钟前`
-  }
-  if (diffSeconds < 86400) {
-    return `${Math.floor(diffSeconds / 3600)}小时前`
-  }
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
-}
 
 function formatDateForInputLocal(value) {
   if (!value || isZeroTime(value)) {
@@ -589,6 +545,13 @@ function closeDataView() {
   dataView.open = false
 }
 
+function clearCacheRow(cache) {
+  if (!cache) {
+    return
+  }
+  clearSingleCache(cache.tag, cache.name)
+}
+
 function onDataViewSearchInput() {
   if (dataViewSearchTimerId) {
     window.clearTimeout(dataViewSearchTimerId)
@@ -856,7 +819,7 @@ async function clearAllShuntRules() {
 
 async function reloadAll() {
   loading.value = true
-  showTopNotice('', 'success')
+  clearTopNotice()
   try {
     await Promise.all([
       refreshCacheStats(),
@@ -896,290 +859,48 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="data-panel">
-    <section class="panel sub-panel data-module cache-module">
-      <header class="panel-header cache-module-head">
-        <div>
-          <h3>缓存管理</h3>
-        </div>
-        <div class="actions">
-          <button class="btn danger cache-clear-btn" :disabled="cacheClearingAll" @click="clearAllCaches">
-            {{ cacheClearingAll ? '清空中...' : '清空所有缓存' }}
-          </button>
-        </div>
-      </header>
-
-      <div class="table-wrap cache-table-wrap data-scroll-wrap">
-        <table class="cache-adaptive-table">
-          <thead>
-            <tr>
-              <th>缓存名称</th>
-              <th>请求总数</th>
-              <th>缓存命中</th>
-              <th>过期命中</th>
-              <th>命中率</th>
-              <th>过期命中率</th>
-              <th>条目数</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="cacheRows.length === 0">
-              <td colspan="8" class="empty">暂无缓存数据</td>
-            </tr>
-            <tr v-for="cache in cacheRows" :key="cache.key">
-              <td>{{ cache.name }}</td>
-              <td>{{ Number(cache.query_total || 0).toLocaleString() }}</td>
-              <td>{{ Number(cache.hit_total || 0).toLocaleString() }}</td>
-              <td>{{ Number(cache.lazy_hit_total || 0).toLocaleString() }}</td>
-              <td>{{ cache.hit_rate }}</td>
-              <td>{{ cache.lazy_hit_rate }}</td>
-              <td>
-                <button class="btn-link" type="button" @click="openDataViewForCache(cache)">
-                  {{ Number(cache.size_current || 0).toLocaleString() }}
-                </button>
-              </td>
-              <td>
-                <button
-                  class="btn danger tiny"
-                  :disabled="Boolean(cacheClearingByTag[cache.tag])"
-                  @click="clearSingleCache(cache.tag, cache.name)"
-                >
-                  {{ cacheClearingByTag[cache.tag] ? '清空中...' : '清空' }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <DataCachePanel
+      :cache-clearing-all="cacheClearingAll"
+      :cache-clearing-by-tag="cacheClearingByTag"
+      :cache-rows="cacheRows"
+      @clear-all="clearAllCaches"
+      @open-cache="openDataViewForCache"
+      @clear-cache="clearCacheRow"
+    />
 
     <div class="data-inline-row">
-    <section class="panel sub-panel data-module data-inline-module domain-stats-module">
-      <header class="panel-header">
-        <div>
-          <h3>域名列表统计</h3>
-          <p class="muted">展示动态分流列表当前条目数。</p>
-        </div>
-      </header>
+    <DataListStatsPanel
+      :last-run-domain-count-text="lastRunDomainCountText"
+      :list-stats="listStats"
+      @open-list="openDataViewForList"
+    />
 
-      <div class="table-wrap domain-stats-table-wrap data-scroll-wrap">
-        <table class="domain-stats-table">
-          <thead>
-            <tr>
-              <th>列表名称</th>
-              <th>条目数</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in listStats" :key="row.key">
-              <td>{{ row.name }}</td>
-              <td>
-                <span v-if="row.error" class="mono">{{ row.error }}</span>
-                <span v-else-if="row.count === null">--</span>
-                <button v-else class="btn-link" type="button" @click="openDataViewForList(row)">
-                  {{ Number(row.count).toLocaleString() }}
-                </button>
-              </td>
-            </tr>
-            <tr>
-              <td><strong>刷新域名</strong></td>
-              <td><strong class="mono">{{ lastRunDomainCountText }}</strong></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel sub-panel data-module data-inline-module requery-module">
-      <header class="panel-header">
-        <div>
-          <h3>刷新分流缓存</h3>
-          <p class="muted">任务状态、进度与定时配置。</p>
-        </div>
-      </header>
-
-      <p v-if="requeryLoadError" class="muted">{{ requeryLoadError }}</p>
-
-      <template v-if="requeryAvailable">
-        <div class="requery-status-head">
-          <div class="requery-status-item">
-            <strong>当前状态</strong>
-            <span class="requery-status-chip" :class="requeryStatusMeta.className">{{ requeryStatusMeta.text }}</span>
-          </div>
-          <div class="requery-status-item">
-            <strong>上次运行</strong>
-            <span>{{ lastRunText }}</span>
-          </div>
-          <div class="actions">
-            <button
-              v-if="!isRequeryRunning"
-              class="btn primary"
-              :disabled="requeryAction === 'trigger'"
-              @click="triggerRequery"
-            >
-              {{ requeryAction === 'trigger' ? '启动中...' : '开始全新任务' }}
-            </button>
-            <button
-              v-else
-              class="btn danger"
-              :disabled="requeryAction === 'cancel'"
-              @click="cancelRequery"
-            >
-              {{ requeryAction === 'cancel' ? '取消中...' : '取消任务' }}
-            </button>
-          </div>
-        </div>
-        <p v-if="lastRunErrorText" class="muted">最近失败原因：{{ lastRunErrorText }}</p>
-
-        <div v-if="isRequeryRunning" class="requery-progress-wrap">
-          <div class="requery-progress-bar">
-            <div class="requery-progress-bar-fill" :style="{ width: `${requeryProgress.percent}%` }"></div>
-            <span class="requery-progress-text">
-              {{ Math.floor(requeryProgress.percent) }}% ({{ requeryProgress.processed.toLocaleString() }} / {{ requeryProgress.total.toLocaleString() }})
-            </span>
-          </div>
-        </div>
-
-        <div class="requery-scheduler">
-          <div class="scheduler-row">
-            <span>启用定时任务</span>
-            <label class="switch">
-              <input v-model="schedulerForm.enabled" type="checkbox" @change="updateSchedulerConfig" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="scheduler-grid">
-            <label>首次执行时间</label>
-            <input
-              class="scheduler-field"
-              v-model="schedulerForm.startDatetimeLocal"
-              type="datetime-local"
-              :disabled="!schedulerForm.enabled"
-              @change="scheduleSchedulerConfigUpdate"
-            />
-
-            <label>间隔 (分钟)</label>
-            <input
-              class="scheduler-field"
-              v-model.number="schedulerForm.intervalMinutes"
-              type="number"
-              min="1"
-              :disabled="!schedulerForm.enabled"
-              @change="scheduleSchedulerConfigUpdate"
-            />
-
-            <label>域名刷新天数</label>
-            <input
-              class="scheduler-field"
-              v-model.number="schedulerForm.dateRangeDays"
-              type="number"
-              min="1"
-              @change="scheduleSchedulerConfigUpdate"
-            />
-          </div>
-          <p class="muted">{{ schedulerSaving ? '定时配置保存中...' : '修改后自动保存配置。' }}</p>
-        </div>
-
-        <div class="requery-important">
-          <strong>重要操作</strong>
-          <div class="actions">
-            <button class="btn primary" :disabled="requeryAction === 'save-rules'" @click="saveAllShuntRules">
-              {{ requeryAction === 'save-rules' ? '保存中...' : '保存分流规则' }}
-            </button>
-            <button class="btn danger" :disabled="requeryAction === 'clear-rules'" @click="clearAllShuntRules">
-              {{ requeryAction === 'clear-rules' ? '清空中...' : '清空分流规则' }}
-            </button>
-          </div>
-        </div>
-
-      </template>
-    </section>
+    <DataRequeryPanel
+      :is-requery-running="isRequeryRunning"
+      :last-run-error-text="lastRunErrorText"
+      :last-run-text="lastRunText"
+      :requery-action="requeryAction"
+      :requery-available="requeryAvailable"
+      :requery-load-error="requeryLoadError"
+      :requery-progress="requeryProgress"
+      :requery-status-meta="requeryStatusMeta"
+      :scheduler-form="schedulerForm"
+      :scheduler-saving="schedulerSaving"
+      @trigger="triggerRequery"
+      @cancel="cancelRequery"
+      @update-scheduler="updateSchedulerConfig"
+      @schedule-scheduler-update="scheduleSchedulerConfigUpdate"
+      @save-rules="saveAllShuntRules"
+      @clear-rules="clearAllShuntRules"
+    />
     </div>
 
-    <div v-if="dataView.open" class="modal-mask" @click.self="closeDataView">
-      <section class="panel data-view-modal">
-        <header class="panel-header">
-          <div>
-            <h3>{{ dataView.title }}</h3>
-            <p class="muted">
-              <span v-if="dataView.totalCount > 0">当前显示 {{ dataView.entries.length.toLocaleString() }} / {{ dataView.totalCount.toLocaleString() }} 条</span>
-              <span v-else>当前显示 {{ dataView.entries.length.toLocaleString() }} 条</span>
-            </p>
-          </div>
-          <div class="actions">
-            <button class="btn secondary" type="button" @click="closeDataView">关闭</button>
-          </div>
-        </header>
-
-        <div class="data-view-search">
-          <input
-            v-model="dataView.query"
-            placeholder="搜索..."
-            @input="onDataViewSearchInput"
-          />
-        </div>
-
-        <p v-if="dataView.error" class="muted">{{ dataView.error }}</p>
-
-        <div v-if="dataView.mode === 'domain'" class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>次数</th>
-                <th>最后日期</th>
-                <th>域名</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="dataView.loading">
-                <td colspan="3" class="empty">加载中...</td>
-              </tr>
-              <tr v-else-if="dataView.entries.length === 0">
-                <td colspan="3" class="empty">没有匹配的条目</td>
-              </tr>
-              <tr v-for="(item, index) in dataView.entries" :key="`domain-entry-${index}`">
-                <td>{{ item.count }}</td>
-                <td>{{ item.date }}</td>
-                <td>{{ item.domain }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div v-else class="cache-entry-list">
-          <p v-if="dataView.loading" class="empty">加载中...</p>
-          <p v-else-if="dataView.entries.length === 0" class="empty">没有匹配的条目</p>
-          <details
-            v-for="item in dataView.entries"
-            :key="item.key"
-            class="cache-entry"
-          >
-            <summary>{{ item.headerTitle }}</summary>
-            <div class="table-wrap cache-meta-wrap">
-              <table>
-                <tbody>
-                  <tr v-for="(meta, index) in item.metadataRows" :key="`${item.key}-meta-${index}`">
-                    <td>{{ meta.key }}</td>
-                    <td class="mono">{{ meta.value }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <pre class="mono cache-pre">{{ item.dnsMessage }}</pre>
-          </details>
-        </div>
-
-        <div class="actions" style="margin-top: 10px;">
-          <button
-            class="btn primary"
-            type="button"
-            :disabled="dataView.loading || dataView.loadingMore || !dataView.hasMore"
-            @click="loadMoreDataView"
-          >
-            {{ dataView.loadingMore ? '加载中...' : '加载更多' }}
-          </button>
-        </div>
-      </section>
-    </div>
+    <DataViewModal
+      v-if="dataView.open"
+      :data-view="dataView"
+      @close="closeDataView"
+      @search-input="onDataViewSearchInput"
+      @load-more="loadMoreDataView"
+    />
   </section>
 </template>

@@ -101,7 +101,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	DiscoverAndCacheSettings(cfg)
 
 	// Step 2: Load overrides from file.
-	overridesPath := filepath.Join(MainConfigBaseDir, overridesFilename)
+	overridesPath := overridesFilePath()
 	data, err := os.ReadFile(overridesPath)
 	if err == nil {
 		var overrides GlobalOverrides

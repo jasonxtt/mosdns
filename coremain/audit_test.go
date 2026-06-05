@@ -1,6 +1,12 @@
 package coremain
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
+)
 
 func TestComputeEffectiveTagDirectCandidatePromotedToProxy(t *testing.T) {
 	got := computeEffectiveTag("订阅直连", "nocnfake", "", "sequence_fakeip_addlist")
@@ -101,5 +107,74 @@ func TestGetV2LogsClientIPFilterSupportsMultipleAliasMatches(t *testing.T) {
 	}
 	if response.Pagination.TotalItems != 2 {
 		t.Fatalf("expected total items 2, got %d", response.Pagination.TotalItems)
+	}
+}
+
+func TestClearLogsDropsBackingStoreReferences(t *testing.T) {
+	collector := NewAuditCollector(4)
+	collector.logs = []AuditLog{
+		{
+			QueryName: "alpha.example",
+			Answers:   []AnswerDetail{{Type: "TXT", Data: "large-retained-answer"}},
+		},
+		{QueryName: "beta.example"},
+		{QueryName: "gamma.example"},
+		{QueryName: "delta.example"},
+	}
+
+	collector.ClearLogs()
+
+	if len(collector.logs) != 0 {
+		t.Fatalf("expected logs length 0 after clear, got %d", len(collector.logs))
+	}
+	if cap(collector.logs) != 0 {
+		t.Fatalf("expected clear to release backing store, got capacity %d", cap(collector.logs))
+	}
+	if collector.head != 0 {
+		t.Fatalf("expected head reset to 0, got %d", collector.head)
+	}
+}
+
+func TestResetAuditContextDropsQueryContextReference(t *testing.T) {
+	wrapped := &auditContext{
+		Ctx:                &query_context.Context{},
+		ProcessingDuration: time.Second,
+	}
+
+	resetAuditContext(wrapped)
+
+	if wrapped.Ctx != nil {
+		t.Fatal("expected reset audit context to drop query context reference")
+	}
+	if wrapped.ProcessingDuration != 0 {
+		t.Fatalf("expected processing duration reset to 0, got %s", wrapped.ProcessingDuration)
+	}
+}
+
+func TestCalculateV2WindowStatsAvoidsFullLogSnapshotAllocation(t *testing.T) {
+	const logCount = 5000
+	collector := NewAuditCollector(logCount)
+	collector.logs = make([]AuditLog, logCount)
+	collector.head = logCount / 2
+
+	now := time.Now()
+	for i := range collector.logs {
+		collector.logs[i] = AuditLog{
+			QueryName:  "example.test",
+			QueryTime:  now.Add(-time.Duration(i%3600) * time.Second),
+			DurationMs: 1,
+		}
+	}
+
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	_ = collector.CalculateV2WindowStats()
+
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 512*1024 {
+		t.Fatalf("expected window stats to avoid full log snapshot allocation, allocated %d bytes", allocated)
 	}
 }
