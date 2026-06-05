@@ -47,6 +47,7 @@ const (
 	userAgent             = "mosdns-update-client"
 	stateFileName         = ".mosdns-update-state.json"
 	configPackageURL      = "https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip"
+	pendingConfigFlagFile = ".mosdns-config-pending"
 )
 
 // autoConfigUpdate 控制二进制更新后是否自动下载并应用 config_up.zip。
@@ -518,18 +519,14 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 
 	m.recordInstalled(status.AssetSignature)
 
-	// 自动更新配置包（失败不中断，二进制已替换成功）
-	// 仅当编译时通过 ldflags 开启 autoConfigUpdate=1 时才执行
-	if autoConfigUpdate != "1" {
-		m.logger().Info("跳过配置包自动更新（未启用）")
-	} else if configDir := MainConfigBaseDir; configDir != "" {
-		if count, cfgErr := applyConfigPackage(configPackageURL, configDir); cfgErr != nil {
-			m.logWarn("配置包更新失败，二进制已更新，可手动执行配置更新", cfgErr)
-			action.Notes += "（配置自动更新失败，请手动更新配置包）"
-		} else if count > 0 {
-			if lg := m.logger(); lg != nil {
-				lg.Info("配置包已随二进制自动更新", zap.Int("files_updated", count))
-			}
+	// 写入配置更新标记文件，由新二进制启动时读取并执行。
+	// 因为此处运行的是旧二进制，autoConfigUpdate 是旧值，不能在这里检查。
+	if configDir := MainConfigBaseDir; configDir != "" {
+		flagPath := filepath.Join(configDir, pendingConfigFlagFile)
+		if err := os.WriteFile(flagPath, []byte(configPackageURL), 0o644); err != nil {
+			m.logWarn("写入配置更新标记失败", err)
+		} else {
+			m.logger().Info("已写入配置更新标记，新二进制启动时将自动更新配置")
 		}
 	}
 

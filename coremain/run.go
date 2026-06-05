@@ -21,6 +21,8 @@ package coremain
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/kardianos/service"
@@ -125,6 +127,25 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 	}
 
 	MainConfigBaseDir = guessMainConfigBaseDir(sf.c, sf.dir)
+
+	// 新二进制首次启动时，读取旧二进制留下的配置更新标记并执行。
+	if MainConfigBaseDir != "" && autoConfigUpdate == "1" {
+		flagPath := filepath.Join(MainConfigBaseDir, pendingConfigFlagFile)
+		if data, err := os.ReadFile(flagPath); err == nil {
+			configURL := strings.TrimSpace(string(data))
+			if configURL == "" {
+				configURL = configPackageURL
+			}
+			mlog.L().Info("检测到配置更新标记，开始自动更新配置", zap.String("url", configURL))
+			if count, cfgErr := applyConfigPackage(configURL, MainConfigBaseDir); cfgErr != nil {
+				mlog.L().Warn("配置包自动更新失败，可手动更新", zap.Error(cfgErr))
+			} else {
+				mlog.L().Info("配置包已自动更新", zap.Int("files_updated", count))
+			}
+			os.Remove(flagPath)
+		}
+	}
+
 	if MainConfigBaseDir != "" {
 		if err := SyncSpecialGroupsConfig(MainConfigBaseDir); err != nil {
 			mlog.L().Warn("failed to sync special_groups config before loading main config",
