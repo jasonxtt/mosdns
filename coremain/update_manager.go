@@ -82,6 +82,7 @@ type UpdateStatus struct {
 	CacheExpiresAt   time.Time  `json:"cache_expires_at"`
 	UpdateAvailable  bool       `json:"update_available"`
 	Cached           bool       `json:"cached"`
+	ConfigAutoUpdated int       `json:"config_auto_updated,omitempty"`
 	Message          string     `json:"message,omitempty"`
 	PendingRestart   bool       `json:"pending_restart,omitempty"`
 	AMD64V3Capable   bool       `json:"amd64_v3_capable,omitempty"`

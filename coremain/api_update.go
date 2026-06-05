@@ -42,6 +42,7 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, fallback)
 		return
 	}
+	status.ConfigAutoUpdated = ConfigAutoUpdatedCount
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -65,6 +66,7 @@ func handleForceUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, fallback)
 		return
 	}
+	status.ConfigAutoUpdated = ConfigAutoUpdatedCount
 	writeJSON(w, http.StatusOK, status)
 }
 
