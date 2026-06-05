@@ -613,6 +613,9 @@ async function applyWebUIPortAndRestart() {
 async function loadUpdateStatus() {
   const status = await getJSON('/api/v1/update/status')
   update.status = status
+  if (status?.config_auto_updated > 0) {
+    setSuccess(`配置已自动更新（${status.config_auto_updated} 个文件）`)
+  }
 }
 
 async function checkUpdate() {

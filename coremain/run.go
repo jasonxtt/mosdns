@@ -40,6 +40,10 @@ import (
 // <<< ADDED: Global variable to store the base directory for other packages to use.
 var MainConfigBaseDir string
 
+// ConfigAutoUpdatedCount 记录启动时自动更新的配置文件数量。
+// 供 UI 弹窗提示使用，读后不清零（仅本次启动期间有效）。
+var ConfigAutoUpdatedCount int
+
 type serverFlags struct {
 	c         string
 	dir       string
