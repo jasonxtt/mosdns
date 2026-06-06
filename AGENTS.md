@@ -13,8 +13,6 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 
 ## High-signal facts
 
-- The maintained `main` workspace is `/Users/tom/Documents/github/mosdns`.
-- The maintained `lite` workspace is `/Users/tom/Documents/github/mosdns-lite`.
 - In normal operator workflow, infer the intended line from the project folder: `mosdns` means `main`, `mosdns-lite` means `lite`.
 - The default UI at `/` is the maintained Vue UI.
 - The legacy UI is kept at `/log` for compatibility and comparison.
@@ -51,6 +49,7 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 - When discussing sync with upstream, use exact dates and keep the already-reviewed cutoff in mind.
 - For releases or deployment binaries that embed the Vue UI, build order matters: rebuild `webui-log/` first, then run `go build`. Do not run frontend build and Go build in parallel, or the binary can embed mismatched `app.js` / `app.css` assets.
 - Config compatibility is controlled by `requiredConfigSchema` and `requiredConfigPackageID` in `coremain/config_update.go`. Keep both unchanged for binary-only releases. When structural config changes are required, bump the schema and package ID, then rebuild the external `config_up.zip` with its matching manifest. The package remains external at `https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip`; it is not embedded in the binary.
+- User-facing config version text is separate from the internal schema. When config structure changes, bump the schema/package and also update the UI display mapping in `webui-log/src/components/SystemControlManager.vue` (current labels: `v1`, `v2`).
 - Automatic config updates are transactional: the binary checks `/cus/mosdns/webinfo/config_update_state.json`, applies only manifest-managed structure files, creates a unique backup, validates the complete config tree, and commits the schema only after plugin initialization succeeds. Do not put user rule/state files in `managed_files`.
 - When a task includes deployment verification, prefer this sequence:
   - build locally
@@ -70,23 +69,14 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 ## Frontend compatibility notes
 
 - Mobile browser compatibility matters for the maintained Vue UI. Do not assume Chrome desktop behavior matches Android browsers, iOS Safari, or embedded WebViews.
-- The overview page has accumulated several custom layout behaviors, including adaptive visible-row counts, anchored trend-detail popovers, and narrow-screen truncation rules. Treat overview-card CSS as behavior-sensitive, not decorative-only styling.
-- A confirmed pitfall in this fork is the combination of `table-layout: fixed` with `calc(...)` column widths inside narrow mobile cards. This caused the `/` overview `最慢查询` card to render differently across users:
-  - some browsers looked normal
-  - some mobile browsers collapsed the left domain column almost to zero width
-  - the visible symptom was that only the right `耗时` column remained visible
-- A related confirmed pitfall is mixing aggressive emergency wrapping rules such as `overflow-wrap: anywhere` with narrow fixed-layout metric tables. That combination can make domains or client identifiers break character-by-character on some screens.
-- For narrow-screen metric tables, prefer stable sizing strategies:
-  - keep the rigid width on the short numeric/status column if needed
-  - let the primary text column use automatic remaining space
-  - prefer single-line truncation with ellipsis for long text fields
-  - avoid relying on `calc(100% - Npx)` for table columns in mobile cards unless it has been verified on real devices
-- If a table needs emergency wrapping for long values, scope that behavior carefully. Global `overflow-wrap: anywhere` or aggressive `word-break` rules can interact badly with fixed-width mobile layouts.
+- Treat overview-card and mobile table CSS as behavior-sensitive, not decorative-only styling.
+- Avoid the known bad combination of `table-layout: fixed`, `calc(...)` column widths, and broad `overflow-wrap: anywhere` rules in narrow metric tables.
+- Prefer a fixed narrow numeric column plus an automatic main text column with ellipsis, then verify on real devices if the change touches overview cards or narrow tables.
 - When touching overview-card or mobile table CSS, validate with the project's normal flow:
   - local build
   - test host
   - production host only after confirmation
-- If users report that only some phones reproduce a layout issue, treat that as a browser compatibility bug first, not a data bug.
+- If only some phones reproduce the issue, treat it as a browser compatibility bug first, not a data bug.
 
 ## When you need deeper context
 

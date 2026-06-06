@@ -65,6 +65,9 @@ The binary declares the external config structure it requires through
 - Binary-only releases keep both values unchanged.
 - Structural config releases bump both values and publish a matching
   `config_up.zip`.
+- The internal schema is not the user-facing version label. Keep schema
+  monotonic for upgrade logic, and update the UI display mapping separately
+  when a structural config release ships. Current labels are `v1` and `v2`.
 - The package is external and uses a manifest; it is not embedded in the
   binary.
 - `managed_files` may replace only maintained structure files.

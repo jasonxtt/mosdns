@@ -3,6 +3,10 @@ defineProps({
   configManaging: {
     type: Object,
     required: true
+  },
+  configVersion: {
+    type: Object,
+    default: () => ({})
   }
 })
 
@@ -12,6 +16,12 @@ defineEmits(['save-settings', 'backup-config', 'apply-remote-config'])
 <template>
   <section class="panel control-module control-module--mini">
     <h3>配置管理</h3>
+    <div class="module-kv-list">
+      <div class="control-line">
+        <strong>当前配置版本</strong>
+        <span>{{ configVersion.versionText || '--' }} <span v-if="configVersion.statusText" class="mini-badge">{{ configVersion.statusText }}</span></span>
+      </div>
+    </div>
     <div class="module-form-stack">
       <label class="mini-field">
         <span>本地目录</span>
