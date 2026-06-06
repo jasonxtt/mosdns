@@ -232,6 +232,34 @@ const updateLatestBadge = computed(() => {
   return Boolean(cur && latest && cur === latest)
 })
 
+const configVersionDisplayMap = {
+  1: 'v1',
+  2: 'v2'
+}
+
+function formatConfigVersionDisplay(schema) {
+  const value = Number(schema || 0)
+  if (!value) {
+    return '--'
+  }
+  return configVersionDisplayMap[value] || `v${value}`
+}
+
+const configVersionInfo = computed(() => {
+  const applied = Number(update.status?.config_schema_applied || 0)
+  const required = Number(update.status?.config_schema_required || 0)
+  if (!applied && !required) {
+    return {
+      versionText: '--',
+      statusText: ''
+    }
+  }
+  return {
+    versionText: formatConfigVersionDisplay(applied || required || 0),
+    statusText: applied >= required ? '已是最新' : '需要更新'
+  }
+})
+
 function clearMessage() {
   clearTopNotice()
 }
@@ -1424,6 +1452,7 @@ onBeforeUnmount(() => {
 
         <SystemConfigManagePanel
           :config-managing="configManaging"
+          :config-version="configVersionInfo"
           @save-settings="saveConfigManagerSettings"
           @backup-config="backupConfig"
           @apply-remote-config="applyRemoteConfig"
