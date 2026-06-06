@@ -39,10 +39,12 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 			Cached:          false,
 			Message:         "检查更新失败：" + err.Error(),
 		}
+		applyConfigUpdateStatus(&fallback)
 		writeJSON(w, http.StatusOK, fallback)
 		return
 	}
 	status.ConfigAutoUpdated = ConfigAutoUpdatedCount
+	applyConfigUpdateStatus(&status)
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -63,11 +65,25 @@ func handleForceUpdateStatus(w http.ResponseWriter, r *http.Request) {
 			Cached:          false,
 			Message:         "检查更新失败：" + err.Error(),
 		}
+		applyConfigUpdateStatus(&fallback)
 		writeJSON(w, http.StatusOK, fallback)
 		return
 	}
 	status.ConfigAutoUpdated = ConfigAutoUpdatedCount
+	applyConfigUpdateStatus(&status)
 	writeJSON(w, http.StatusOK, status)
+}
+
+func applyConfigUpdateStatus(status *UpdateStatus) {
+	requiredSchema, _ := requiredConfigSchemaValue()
+	state := loadConfigUpdateState(MainConfigBaseDir)
+	status.ConfigSchemaRequired = requiredSchema
+	status.ConfigSchemaApplied = state.AppliedSchema
+	status.ConfigUpdateStatus = state.Status
+	status.ConfigUpdateMessage = state.Message
+	status.ConfigUpdateError = state.LastError
+	status.ConfigUpdateBackup = state.BackupDir
+	status.ConfigPackageID = state.PackageID
 }
 
 func handleApplyUpdate(w http.ResponseWriter, r *http.Request) {

@@ -20,9 +20,7 @@
 package coremain
 
 import (
-	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/go-viper/mapstructure/v2"
@@ -133,29 +131,6 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 
 	MainConfigBaseDir = guessMainConfigBaseDir(sf.c, sf.dir)
 
-	// 新二进制首次启动时，检测是否刚完成二进制更新，如果是则自动更新配置。
-	// 通过读取 .mosdns-update-state.json 的 UpdatedAt 时间戳判断，
-	// 该文件由 PerformUpdate 在安装新二进制后写入（即使旧版本也已有此逻辑）。
-	if MainConfigBaseDir != "" && autoConfigUpdate == "1" {
-		if exe, exeErr := os.Executable(); exeErr == nil {
-			statePath := filepath.Join(filepath.Dir(exe), ".mosdns-update-state.json")
-			if data, readErr := os.ReadFile(statePath); readErr == nil {
-				var st struct {
-					UpdatedAt time.Time `json:"updated_at"`
-				}
-				if json.Unmarshal(data, &st) == nil && time.Since(st.UpdatedAt) < 5*time.Minute {
-					mlog.L().Info("检测到近期二进制更新，开始自动更新配置包",
-						zap.Time("updated_at", st.UpdatedAt))
-					if count, cfgErr := applyConfigPackage(configPackageURL, MainConfigBaseDir); cfgErr != nil {
-						mlog.L().Warn("配置包自动更新失败，可手动更新", zap.Error(cfgErr))
-					} else {
-						mlog.L().Info("配置包已自动更新", zap.Int("files_updated", count))
-					}
-				}
-			}
-		}
-	}
-
 	if MainConfigBaseDir != "" {
 		if err := SyncSpecialGroupsConfig(MainConfigBaseDir); err != nil {
 			mlog.L().Warn("failed to sync special_groups config before loading main config",
@@ -164,8 +139,16 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 		}
 	}
 
+	configUpdateTx, updateErr := prepareRequiredConfigUpdate(MainConfigBaseDir, sf.c)
+	if updateErr != nil {
+		mlog.L().Warn("配置自动升级失败，继续使用原配置", zap.Error(updateErr))
+	}
+
 	cfg, fileUsed, err := loadConfig(sf.c)
 	if err != nil {
+		if configUpdateTx != nil {
+			_ = rollbackConfigUpdate(configUpdateTx, err)
+		}
 		return nil, fmt.Errorf("fail to load config, %w", err)
 	}
 
@@ -203,7 +186,19 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 
 	mlog.L().Info("main config loaded", zap.String("file", fileUsed))
 
-	return NewMosdns(cfg)
+	m, err := NewMosdns(cfg)
+	if err != nil {
+		if configUpdateTx != nil {
+			_ = rollbackConfigUpdate(configUpdateTx, err)
+		}
+		return nil, err
+	}
+	if err := commitConfigUpdate(configUpdateTx); err != nil {
+		m.sc.SendCloseSignal(err)
+		_ = m.sc.WaitClosed()
+		return nil, err
+	}
+	return m, nil
 }
 
 // loadConfig load a config from a file. If filePath is empty, it will

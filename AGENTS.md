@@ -50,11 +50,8 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 - The user often wants real deployment verification, not only local compilation.
 - When discussing sync with upstream, use exact dates and keep the already-reviewed cutoff in mind.
 - For releases or deployment binaries that embed the Vue UI, build order matters: rebuild `webui-log/` first, then run `go build`. Do not run frontend build and Go build in parallel, or the binary can embed mismatched `app.js` / `app.css` assets.
-- Releases that need to auto-update the user's config files on first run must be built with the config-update flag enabled. Default build does NOT touch config files on update. Build command for a config-syncing release:
-  ```
-  go build -ldflags="-X github.com/IrineSistiana/mosdns/v5/coremain.autoConfigUpdate=1" .
-  ```
-  The flag is defined in `coremain/update_manager.go`. The config package URL is `https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip`. Only enable this flag when the release includes structural config changes (e.g., new sub_config files, changed plugin pipeline). Routine binary-only releases should leave it off.
+- Config compatibility is controlled by `requiredConfigSchema` and `requiredConfigPackageID` in `coremain/config_update.go`. Keep both unchanged for binary-only releases. When structural config changes are required, bump the schema and package ID, then rebuild the external `config_up.zip` with its matching manifest. The package remains external at `https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip`; it is not embedded in the binary.
+- Automatic config updates are transactional: the binary checks `/cus/mosdns/webinfo/config_update_state.json`, applies only manifest-managed structure files, creates a unique backup, validates the complete config tree, and commits the schema only after plugin initialization succeeds. Do not put user rule/state files in `managed_files`.
 - When a task includes deployment verification, prefer this sequence:
   - build locally
   - validate on `mos-test` / `10.0.0.91`

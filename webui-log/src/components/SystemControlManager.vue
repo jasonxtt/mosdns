@@ -615,6 +615,8 @@ async function loadUpdateStatus() {
   update.status = status
   if (status?.config_auto_updated > 0) {
     setSuccess(`配置已自动更新（${status.config_auto_updated} 个文件）`)
+  } else if (status?.config_update_status === 'failed') {
+    setError(`配置自动升级失败: ${status.config_update_error || status.config_update_message || '未知错误'}`)
   }
 }
 

@@ -85,7 +85,7 @@ jobs:
           BIN_NAME="mosdns${{ matrix.ext }}"
           go build \
             -trimpath \
-            -ldflags "-s -w -X main.version=${RELEASE_TAG} -X github.com/IrineSistiana/mosdns/v5/coremain.autoConfigUpdate=1" \
+            -ldflags "-s -w -X main.version=${RELEASE_TAG}" \
             -o "dist/${BIN_NAME}" \
             ./
 
