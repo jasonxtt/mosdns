@@ -52,8 +52,30 @@ The binary auto-creates this directory and migrates matching files from the runt
 - `config_overrides.json`
 - `upstream_overrides.json`
 - `special_upstream_groups.json`
+- `config_update_state.json`
 
 When both an old path and the new path exist, prefer the file under `webinfo/`.
+
+## Config package updates
+
+The binary declares the external config structure it requires through
+`requiredConfigSchema` and `requiredConfigPackageID` in
+`coremain/config_update.go`.
+
+- Binary-only releases keep both values unchanged.
+- Structural config releases bump both values and publish a matching
+  `config_up.zip`.
+- The package is external and uses a manifest; it is not embedded in the
+  binary.
+- `managed_files` may replace only maintained structure files.
+- `create_if_missing` supplies defaults for newly introduced switch state
+  files without overwriting existing operator choices.
+- User rules, WebUI state, upstream state, generated files, caches, and SRS
+  data are not managed by the package.
+
+Successful application is recorded in
+`webinfo/config_update_state.json`. Backups are kept in unique directories
+under `backup/`, and incomplete or failed updates are rolled back.
 
 ## Dedicated routing groups
 

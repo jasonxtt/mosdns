@@ -114,8 +114,16 @@ func applyConfigPackage(url, dir string) (int, error) {
 		return 0, fmt.Errorf("解析配置包失败: %w", err)
 	}
 
-	// 3. 备份即将被覆盖的文件（失败则熔断）
-	backupDir := filepath.Join(dir, "backup")
+	// 3. 备份即将被覆盖的文件（失败则熔断）。每次使用独立目录，
+	// 避免覆盖自动配置升级或此前手动更新留下的备份。
+	backupRoot := filepath.Join(dir, "backup")
+	if err := os.MkdirAll(backupRoot, 0o755); err != nil {
+		return 0, fmt.Errorf("创建备份目录失败: %w", err)
+	}
+	backupDir, err := os.MkdirTemp(backupRoot, "manual-config-update-"+time.Now().Format("20060102-150405")+"-")
+	if err != nil {
+		return 0, fmt.Errorf("创建本次备份目录失败: %w", err)
+	}
 	if err := performLocalBackupForFiles(dir, backupDir, filesToBackup); err != nil {
 		return 0, fmt.Errorf("备份失败: %w", err)
 	}
@@ -216,13 +224,9 @@ func doDownload(url, proxyAddr string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// performLocalBackup 将 source 目录备份到 dest，备份前先清空 dest
+// performLocalBackupForFiles 将 source 中即将被覆盖的文件备份到独立的 dest。
 func performLocalBackupForFiles(source, dest string, relFiles []string) error {
-	// 1. 清空旧备份
-	if err := os.RemoveAll(dest); err != nil {
-		return fmt.Errorf("clean backup dir failed: %w", err)
-	}
-	// 2. 创建新备份目录
+	// 1. 创建本次备份目录
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return fmt.Errorf("create backup dir failed: %w", err)
 	}
@@ -230,7 +234,7 @@ func performLocalBackupForFiles(source, dest string, relFiles []string) error {
 	sourceRoot := filepath.Clean(source)
 	seen := make(map[string]struct{}, len(relFiles))
 
-	// 3. 仅复制本次 ZIP 对应的文件
+	// 2. 仅复制本次 ZIP 对应的文件
 	for _, rel := range relFiles {
 		rel = strings.TrimPrefix(strings.ReplaceAll(rel, "\\", "/"), "/")
 		if rel == "" {

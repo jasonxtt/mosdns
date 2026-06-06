@@ -49,12 +49,6 @@ const (
 	configPackageURL      = "https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip"
 )
 
-// autoConfigUpdate 控制二进制更新后是否自动下载并应用 config_up.zip。
-// 默认 "0"（关闭）。发版时如需同步配置更新，通过 ldflags 打开：
-//
-//	go build -ldflags="-X github.com/IrineSistiana/mosdns/v5/coremain.autoConfigUpdate=1"
-var autoConfigUpdate = "0"
-
 var (
 	ErrNoUpdateAvailable = errors.New("当前已是最新版本")
 	GlobalUpdateManager  = NewUpdateManager()
@@ -69,24 +63,31 @@ var (
 )
 
 type UpdateStatus struct {
-	CurrentVersion   string     `json:"current_version"`
-	LatestVersion    string     `json:"latest_version"`
-	ReleaseURL       string     `json:"release_url"`
-	Architecture     string     `json:"architecture"`
-	AssetName        string     `json:"asset_name,omitempty"`
-	DownloadURL      string     `json:"download_url,omitempty"`
-	AssetSignature   string     `json:"asset_signature,omitempty"`
-	CurrentSignature string     `json:"current_signature,omitempty"`
-	PublishedAt      *time.Time `json:"published_at,omitempty"`
-	CheckedAt        time.Time  `json:"checked_at"`
-	CacheExpiresAt   time.Time  `json:"cache_expires_at"`
-	UpdateAvailable  bool       `json:"update_available"`
-	Cached           bool       `json:"cached"`
-	ConfigAutoUpdated int       `json:"config_auto_updated,omitempty"`
-	Message          string     `json:"message,omitempty"`
-	PendingRestart   bool       `json:"pending_restart,omitempty"`
-	AMD64V3Capable   bool       `json:"amd64_v3_capable,omitempty"`
-	CurrentIsV3      bool       `json:"current_is_v3,omitempty"`
+	CurrentVersion       string     `json:"current_version"`
+	LatestVersion        string     `json:"latest_version"`
+	ReleaseURL           string     `json:"release_url"`
+	Architecture         string     `json:"architecture"`
+	AssetName            string     `json:"asset_name,omitempty"`
+	DownloadURL          string     `json:"download_url,omitempty"`
+	AssetSignature       string     `json:"asset_signature,omitempty"`
+	CurrentSignature     string     `json:"current_signature,omitempty"`
+	PublishedAt          *time.Time `json:"published_at,omitempty"`
+	CheckedAt            time.Time  `json:"checked_at"`
+	CacheExpiresAt       time.Time  `json:"cache_expires_at"`
+	UpdateAvailable      bool       `json:"update_available"`
+	Cached               bool       `json:"cached"`
+	ConfigAutoUpdated    int        `json:"config_auto_updated,omitempty"`
+	ConfigSchemaRequired int        `json:"config_schema_required,omitempty"`
+	ConfigSchemaApplied  int        `json:"config_schema_applied,omitempty"`
+	ConfigUpdateStatus   string     `json:"config_update_status,omitempty"`
+	ConfigUpdateMessage  string     `json:"config_update_message,omitempty"`
+	ConfigUpdateError    string     `json:"config_update_error,omitempty"`
+	ConfigUpdateBackup   string     `json:"config_update_backup,omitempty"`
+	ConfigPackageID      string     `json:"config_package_id,omitempty"`
+	Message              string     `json:"message,omitempty"`
+	PendingRestart       bool       `json:"pending_restart,omitempty"`
+	AMD64V3Capable       bool       `json:"amd64_v3_capable,omitempty"`
+	CurrentIsV3          bool       `json:"current_is_v3,omitempty"`
 }
 
 type UpdateActionResponse struct {
