@@ -24,6 +24,7 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 
 ## Working rules for this fork
 
+- This repo has a local CodeGraph index under `.codegraph/`. For non-trivial code navigation, run `codegraph sync /Users/tom/github/mosdns` first, then use `codegraph query`, `codegraph callers`, `codegraph impact`, or `codegraph context` alongside `rg`. Use CodeGraph for symbols, call chains, and impact analysis; use `rg` for exact text, config fields, YAML, docs, and UI copy searches.
 - Preserve behavior parity first when changing the main UI. Do not redesign core flows on `/` unless the user asks.
 - Treat WebUI changes as configuration workflow changes, not just frontend styling. Saving in the UI is expected to affect generated config and runtime behavior.
 - Be conservative with mobile WebUI table layout changes. In this fork, some users access `/` through mobile browsers or embedded WebViews with inconsistent CSS table behavior.
@@ -49,6 +50,7 @@ This repository is a maintained fork of `yyysuo/mosdns`. The main work here is n
 - When discussing sync with upstream, use exact dates and keep the already-reviewed cutoff in mind.
 - For releases or deployment binaries that embed the Vue UI, build order matters: rebuild `webui-log/` first, then run `go build`. Do not run frontend build and Go build in parallel, or the binary can embed mismatched `app.js` / `app.css` assets.
 - Config compatibility is controlled by `requiredConfigSchema` and `requiredConfigPackageID` in `coremain/config_update.go`. Keep both unchanged for binary-only releases. When structural config changes are required, bump the schema and package ID, then rebuild the external `config_up.zip` with its matching manifest. The package remains external at `https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip`; it is not embedded in the binary.
+- When structural config changes are required, maintain the external package source in `/Users/tom/github/file/mosdns/config/config_up` and the builder script `/Users/tom/github/file/mosdns/config/build_config_up.sh`: update the script `SCHEMA` / `PACKAGE_ID` to match the binary, add new maintained YAML files to `managed_files`, add removed `sub_config/*.yaml` files to `deleted_files`, run the script, and commit/push the regenerated `config_up.zip`, synced `config_all/`, and `config_all.zip` in the `jasonxtt/file` repository.
 - User-facing config version text is separate from the internal schema. When config structure changes, bump the schema/package and also update the UI display mapping in `webui-log/src/components/SystemControlManager.vue` (current labels: `v1`, `v2`).
 - Automatic config updates are transactional: the binary checks `/cus/mosdns/webinfo/config_update_state.json`, applies only manifest-managed structure files, creates a unique backup, validates the complete config tree, and commits the schema only after plugin initialization succeeds. Do not put user rule/state files in `managed_files`.
 - When a task includes deployment verification, prefer this sequence:
