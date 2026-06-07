@@ -70,11 +70,28 @@ The binary declares the external config structure it requires through
   when a structural config release ships. Current labels are `v1` and `v2`.
 - The package is external and uses a manifest; it is not embedded in the
   binary.
+- The external package source is maintained in
+  `/Users/tom/github/file/mosdns/config/config_up`, with the builder script at
+  `/Users/tom/github/file/mosdns/config/build_config_up.sh`.
+- For structural config releases:
+  - edit the YAML files under `config_up/`
+  - bump `SCHEMA` and `PACKAGE_ID` in `build_config_up.sh` to match
+    `coremain/config_update.go`
+  - add new maintained YAML files to the script's `managed_files`
+  - add removed `sub_config/*.yaml` files to the script's `deleted_files`
+  - run `build_config_up.sh`, which regenerates `manifest.json`,
+    `config_up.zip`, syncs `config_all/`, and rebuilds `config_all.zip`
+  - commit and push the regenerated files in the `jasonxtt/file` repository
 - `managed_files` may replace only maintained structure files.
 - `create_if_missing` supplies defaults for newly introduced switch state
   files without overwriting existing operator choices.
+- `delete_files` may remove obsolete `sub_config/*.yaml` files only. A deleted
+  file must not also be listed in `managed_files`.
 - User rules, WebUI state, upstream state, generated files, caches, and SRS
   data are not managed by the package.
+- Do not put `webinfo/config_update_state.json` in the package. The binary
+  writes that state after the transactional upgrade and plugin initialization
+  succeed.
 
 Successful application is recorded in
 `webinfo/config_update_state.json`. Backups are kept in unique directories
