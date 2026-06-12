@@ -465,7 +465,7 @@ body,
     width: 100%;
     max-width: 100vw;
     padding: 16px;
-    gap: 12px;
+    gap: 6px;
     overflow-x: hidden;
   }
 
@@ -518,9 +518,14 @@ body,
   }
 
   .log1-top-inline-notice {
-    top: 14px;
-    right: 14px;
-    max-width: min(420px, calc(100vw - 20px));
+    top: 10px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(300px, calc(100vw - 44px));
+    max-width: 300px;
+    padding: 10px 12px;
+    border-radius: 14px;
   }
 
   .log1-primary-nav {
@@ -601,8 +606,8 @@ body,
 
   .log1-secondary-bar {
     width: 100%;
-    margin: 12px 0 16px;
-    padding: 6px;
+    margin: 2px 0 16px;
+    padding: 4px;
     border-radius: 14px;
     background: rgba(15, 23, 42, 0.42);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -613,7 +618,7 @@ body,
 
   .log1-secondary-nav {
     width: 100%;
-    gap: 6px;
+    gap: 4px;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
@@ -623,10 +628,11 @@ body,
   }
 
   .log1-secondary-btn {
-    min-height: 38px;
-    padding: 0 12px;
+    min-height: 40px;
+    padding: 0 8px;
     border-radius: 10px;
-    font-size: 0.95rem;
+    font-size: 0.72rem;
+    font-weight: 700;
     background: transparent;
     color: #fff;
   }

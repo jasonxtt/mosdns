@@ -1593,6 +1593,7 @@ tr.disabled {
 
 .confirm-pop-bubble {
   width: min(460px, 96vw);
+  max-width: 460px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface-input);
@@ -1630,6 +1631,44 @@ tr.disabled {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .confirm-pop-mask {
+    padding: 12px 16px 0;
+    align-items: flex-start;
+    justify-content: center;
+    background: rgba(14, 23, 31, 0.08);
+  }
+
+  .confirm-pop-bubble {
+    width: min(320px, calc(100vw - 44px));
+    max-width: 320px;
+    padding: 12px 12px 14px;
+    border-radius: 16px;
+  }
+
+  .confirm-pop-bubble::before {
+    display: none;
+  }
+
+  .confirm-pop-bubble h4 {
+    font-size: 0.96rem;
+    line-height: 1.35;
+  }
+
+  .confirm-pop-bubble p {
+    font-size: 0.9rem;
+  }
+
+  .confirm-pop-actions {
+    margin-top: 14px;
+    flex-wrap: nowrap;
+  }
+
+  .confirm-pop-actions .btn {
+    min-width: 76px;
+  }
 }
 
 .editor {
@@ -3640,20 +3679,22 @@ label.switch-table *,
   }
 
   .top-inline-notice {
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: -46px;
-    width: auto;
-    max-width: 100%;
-    transform: none;
+    top: 10px;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    width: min(300px, calc(100vw - 44px));
+    max-width: 300px;
+    transform: translateX(-50%);
+    padding: 10px 12px;
+    border-radius: 14px;
     font-size: 0.82rem;
   }
 
   .top-inline-notice-fade-enter-from,
   .top-inline-notice-fade-leave-to {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translate(-50%, -8px);
   }
 
   .hero.compact {

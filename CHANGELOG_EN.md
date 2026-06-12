@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.4.8
+
+### Changed
+
+- continued polishing the legacy `/log` mobile UI on top of `v0.4.7` and published the result as a follow-up patch release
+- tightened the vertical spacing between the compact primary nav and secondary nav on phone-width layouts
+- kept the mobile top notice in a smaller bubble-like footprint instead of a near full-width bar
+
+### Fixed
+
+- fixed the mobile `/log` top notice positioning so the bubble no longer drifts to the right and clips text outside the viewport
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## v0.4.7
 
 ### Added
