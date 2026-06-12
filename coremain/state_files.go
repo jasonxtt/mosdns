@@ -23,6 +23,7 @@ func InitializeManagedStateFiles() {
 		appearanceButtonSettingsFile,
 		auditSettingsFilename,
 		webUIPortSettingsFilename,
+		domainGenerationSettingsFilename,
 	} {
 		_ = managedWebInfoFilePath(filename)
 	}

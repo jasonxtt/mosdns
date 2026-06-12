@@ -9,6 +9,13 @@ import { openConfirm } from '../utils/confirm'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 import { formatRelativeTime, isZeroTime } from '../utils/time'
 
+const props = defineProps({
+  mode: {
+    type: String,
+    default: 'cache-management'
+  }
+})
+
 const loading = ref(false)
 
 const specialGroups = ref([])
@@ -191,6 +198,10 @@ const lastRunDomainCountText = computed(() => {
   }
   return '--'
 })
+
+const showCachePanel = computed(() => props.mode === 'cache-management')
+const showListStatsPanel = computed(() => props.mode === 'domain-stats')
+const showRequeryPanel = computed(() => props.mode === 'requery-cache')
 
 function formatDateForInputLocal(value) {
   if (!value || isZeroTime(value)) {
@@ -860,6 +871,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="data-panel">
     <DataCachePanel
+      v-if="showCachePanel"
       :cache-clearing-all="cacheClearingAll"
       :cache-clearing-by-tag="cacheClearingByTag"
       :cache-rows="cacheRows"
@@ -868,14 +880,16 @@ onBeforeUnmount(() => {
       @clear-cache="clearCacheRow"
     />
 
-    <div class="data-inline-row">
+    <div v-if="showListStatsPanel || showRequeryPanel" class="data-inline-row data-inline-row-single">
     <DataListStatsPanel
+      v-if="showListStatsPanel"
       :last-run-domain-count-text="lastRunDomainCountText"
       :list-stats="listStats"
       @open-list="openDataViewForList"
     />
 
     <DataRequeryPanel
+      v-if="showRequeryPanel"
       :is-requery-running="isRequeryRunning"
       :last-run-error-text="lastRunErrorText"
       :last-run-text="lastRunText"

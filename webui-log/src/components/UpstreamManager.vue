@@ -1,8 +1,16 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { deleteRequest, getJSON, getText, postJSON } from '../api/http'
+import { deleteRequest, getJSON, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
+import { orderUpstreamGroups, upstreamAddressDisplay, upstreamGroupDisplay } from '../utils/upstreamStats'
+
+defineProps({
+  mode: {
+    type: String,
+    default: 'upstream-settings'
+  }
+})
 
 const HIDE_DISABLED_KEY = 'mosdnsHideDisabledUpstreams'
 
@@ -28,13 +36,6 @@ const specialEditor = reactive({
   name: ''
 })
 const editingCtx = ref({ group: '', index: -1 })
-const metrics = ref({
-  latSum: {},
-  latCount: {},
-  queryTotal: {},
-  errorTotal: {},
-  winnerTotal: {}
-})
 
 const form = reactive({
   group: '',
@@ -87,14 +88,6 @@ function normalizeProtocolAlias(protocol) {
   }
 }
 
-function orderGroupOptions(options) {
-  const groups = [...options]
-  const domestic = groups.filter((group) => group === 'domestic')
-  const middle = groups.filter((group) => group !== 'domestic' && group !== 'cnfake')
-  const cnfake = groups.filter((group) => group === 'cnfake')
-  return [...domestic, ...middle, ...cnfake]
-}
-
 const protocolValue = computed(() => normalizeProtocolAlias(form.protocol))
 const isAliapi = computed(() => protocolValue.value === 'aliapi')
 const showPipeline = computed(() => ['tcp', 'dot', 'tls'].includes(protocolValue.value))
@@ -131,87 +124,13 @@ const groupOptions = computed(() => {
       options.add(String(group.upstream_plugin_tag))
     }
   })
-  return orderGroupOptions(options)
+  return orderUpstreamGroups(Array.from(options), specialGroups.value)
 })
 
 const hideDisabledLabel = computed(() => (hideDisabled.value ? '显示全部上游' : '隐藏未启用上游'))
 
 function groupDisplayName(group) {
-  const special = (specialGroups.value || []).find((item) => item?.upstream_plugin_tag === group)
-  if (special?.name) {
-    return `${special.name} (${group})`
-  }
-  return group
-}
-
-function parseMetricMap(rawText, metricName) {
-  const map = {}
-  const regex = new RegExp(`${metricName}\\{[^}]*metrics_tag="([^"]+)"[^}]*tag="([^"]+)"[^}]*\\} ([0-9.eE+-]+)`, 'g')
-  let match = regex.exec(rawText)
-  while (match !== null) {
-    const metricsTag = match[1]
-    const tag = match[2]
-    const value = Number.parseFloat(match[3] || '0') || 0
-    map[`${metricsTag}|${tag}`] = value
-    match = regex.exec(rawText)
-  }
-  return map
-}
-
-function parseAllMetrics(rawText) {
-  const text = String(rawText || '')
-  metrics.value = {
-    latSum: parseMetricMap(text, 'mosdns_aliapi_response_latency_millisecond_sum'),
-    latCount: parseMetricMap(text, 'mosdns_aliapi_response_latency_millisecond_count'),
-    queryTotal: parseMetricMap(text, 'mosdns_aliapi_query_total'),
-    errorTotal: parseMetricMap(text, 'mosdns_aliapi_error_total'),
-    winnerTotal: parseMetricMap(text, 'mosdns_aliapi_upstream_winner_total')
-  }
-}
-
-function getRowStats(group, item) {
-  const enabled = Boolean(item?.enabled)
-  if (!enabled) {
-    return {
-      avgLatency: '-',
-      query: '-',
-      winner: '-',
-      winRate: '-',
-      error: '-',
-      errorRate: '-',
-      avgLatencyNumber: 0,
-      queryNumber: 0,
-      winnerNumber: 0,
-      winRateNumber: 0,
-      errorNumber: 0,
-      errorRateNumber: 0
-    }
-  }
-
-  const key = `${group}|${item?.tag || ''}`
-  const q = Number(metrics.value.queryTotal[key] || 0)
-  const e = Number(metrics.value.errorTotal[key] || 0)
-  const w = Number(metrics.value.winnerTotal[key] || 0)
-  const lSum = Number(metrics.value.latSum[key] || 0)
-  const lCount = Number(metrics.value.latCount[key] || 0)
-  const avgLatencyNumber = lCount > 0 ? (lSum / lCount) : 0
-  const errorRateNumber = q > 0 ? ((e / q) * 100) : 0
-  const winRateNumber = q > 0 ? ((w / q) * 100) : 0
-
-  return {
-    avgLatency: `${avgLatencyNumber.toFixed(2)} ms`,
-    query: q.toLocaleString(),
-    winner: w.toLocaleString(),
-    winRate: `${winRateNumber.toFixed(2)}%`,
-    error: e.toLocaleString(),
-    errorRate: `${errorRateNumber.toFixed(2)}%`,
-    avgLatencyNumber,
-    queryNumber: q,
-    winnerNumber: w,
-    winRateNumber,
-    errorNumber: e,
-    errorRateNumber
-  }
+  return upstreamGroupDisplay(group, specialGroups.value).title
 }
 
 function getSortValue(row) {
@@ -224,18 +143,8 @@ function getSortValue(row) {
       return String(row.data?.tag || '')
     case 'protocol':
       return String(row.data?.protocol || '')
-    case 'avg_latency':
-      return row.stats.avgLatencyNumber
-    case 'query':
-      return row.stats.queryNumber
-    case 'winner':
-      return row.stats.winnerNumber
-    case 'win_rate':
-      return row.stats.winRateNumber
-    case 'error':
-      return row.stats.errorNumber
-    case 'error_rate':
-      return row.stats.errorRateNumber
+    case 'address':
+      return rowAddress(row.data || {})
     default:
       return ''
   }
@@ -259,8 +168,7 @@ const rows = computed(() => {
         group,
         index,
         originalOrder,
-        data: item || {},
-        stats: getRowStats(group, item || {})
+        data: item || {}
       })
       originalOrder += 1
     })
@@ -290,13 +198,7 @@ const rows = computed(() => {
 })
 
 function rowAddress(item) {
-  if (!item) {
-    return '-'
-  }
-  if (String(item.protocol || '').toLowerCase() === 'aliapi') {
-    return item.server_addr || '-'
-  }
-  return item.addr || '-'
+  return upstreamAddressDisplay(item)
 }
 
 function resetMessage() {
@@ -348,23 +250,6 @@ function sortIndicator(key) {
   return sortState.order === 'asc' ? '▲' : '▼'
 }
 
-function getAvgLatencyStyle(row) {
-  if (!row?.data?.enabled) {
-    return null
-  }
-  const value = Number(row?.stats?.avgLatencyNumber || 0)
-  if (!Number.isFinite(value)) {
-    return null
-  }
-  if (value > 100) {
-    return { color: 'var(--danger)' }
-  }
-  if (value > 50) {
-    return { color: 'var(--warn)' }
-  }
-  return { color: 'var(--ok)' }
-}
-
 function toggleHideDisabled() {
   hideDisabled.value = !hideDisabled.value
   localStorage.setItem(HIDE_DISABLED_KEY, hideDisabled.value ? '1' : '0')
@@ -374,22 +259,20 @@ async function loadData() {
   loading.value = true
   resetMessage()
   try {
-    const [tagsRes, configRes, groupsRes, metricsRes, overridesRes] = await Promise.allSettled([
+    const [tagsRes, configRes, groupsRes, overridesRes] = await Promise.allSettled([
       getJSON('/api/v1/upstream/tags'),
       getJSON('/api/v1/upstream/config'),
       getJSON('/api/v1/special-groups'),
-      getText('/metrics'),
       getJSON('/api/v1/overrides')
     ])
     upstreamTags.value = tagsRes.status === 'fulfilled' && Array.isArray(tagsRes.value) ? tagsRes.value : []
     upstreamConfig.value = configRes.status === 'fulfilled' && configRes.value ? configRes.value : {}
     specialGroups.value = groupsRes.status === 'fulfilled' && Array.isArray(groupsRes.value) ? groupsRes.value : []
-    parseAllMetrics(metricsRes.status === 'fulfilled' ? metricsRes.value : '')
     globalSocks5.value = overridesRes.status === 'fulfilled'
       ? String(overridesRes.value?.socks5 || '').trim()
       : ''
 
-    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || groupsRes.status === 'rejected' || metricsRes.status === 'rejected' || overridesRes.status === 'rejected') {
+    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || groupsRes.status === 'rejected' || overridesRes.status === 'rejected') {
       setError('部分数据加载失败，已使用可用数据渲染页面。')
     }
   } catch (error) {
@@ -669,21 +552,16 @@ onBeforeUnmount(() => {
             <th class="sortable" @click="onSort('group')">所属组 <span class="sort-indicator">{{ sortIndicator('group') }}</span></th>
             <th class="sortable" @click="onSort('tag')">标识 <span class="sort-indicator">{{ sortIndicator('tag') }}</span></th>
             <th class="sortable" @click="onSort('protocol')">协议 <span class="sort-indicator">{{ sortIndicator('protocol') }}</span></th>
-            <th class="sortable text-center" @click="onSort('avg_latency')">平均响应 <span class="sort-indicator">{{ sortIndicator('avg_latency') }}</span></th>
-            <th class="sortable text-center" @click="onSort('query')">请求数 <span class="sort-indicator">{{ sortIndicator('query') }}</span></th>
-            <th class="sortable text-center" @click="onSort('winner')">采纳数 <span class="sort-indicator">{{ sortIndicator('winner') }}</span></th>
-            <th class="sortable text-center" @click="onSort('win_rate')">采纳率 <span class="sort-indicator">{{ sortIndicator('win_rate') }}</span></th>
-            <th class="sortable text-center" @click="onSort('error')">错误数 <span class="sort-indicator">{{ sortIndicator('error') }}</span></th>
-            <th class="sortable text-center" @click="onSort('error_rate')">出错率 <span class="sort-indicator">{{ sortIndicator('error_rate') }}</span></th>
+            <th class="sortable" @click="onSort('address')">地址 <span class="sort-indicator">{{ sortIndicator('address') }}</span></th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="11" class="empty">加载中...</td>
+            <td colspan="6" class="empty">加载中...</td>
           </tr>
           <tr v-else-if="rows.length === 0">
-            <td colspan="11" class="empty">{{ hideDisabled ? '当前没有已启用的上游配置' : '暂无上游配置' }}</td>
+            <td colspan="6" class="empty">{{ hideDisabled ? '当前没有已启用的上游配置' : '暂无上游配置' }}</td>
           </tr>
           <tr v-for="row in rows" :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`" :class="{ disabled: !row.data?.enabled }">
             <td>
@@ -695,12 +573,7 @@ onBeforeUnmount(() => {
             <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
             <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
             <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
-            <td class="text-center" :style="getAvgLatencyStyle(row)">{{ row.stats.avgLatency }}</td>
-            <td class="text-center">{{ row.stats.query }}</td>
-            <td class="text-center">{{ row.stats.winner }}</td>
-            <td class="text-center">{{ row.stats.winRate }}</td>
-            <td class="text-center">{{ row.stats.error }}</td>
-            <td class="text-center">{{ row.stats.errorRate }}</td>
+            <td :title="rowAddress(row.data || {})" class="mono">{{ rowAddress(row.data || {}) }}</td>
             <td class="row-actions">
               <button class="btn tiny secondary" @click="beginEdit(row)">编辑</button>
               <button class="btn tiny danger" @click="removeRow(row)">删除</button>

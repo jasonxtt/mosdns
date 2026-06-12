@@ -3,8 +3,8 @@ package domain_output
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"container/heap"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,9 +48,9 @@ type Args struct {
 	DomainSetURL   string `yaml:"domain_set_url"`
 	EnableFlags    bool   `yaml:"enable_flags"`
 
-	TargetMapper   string `yaml:"target_mapper"`
-	TargetMark     uint8  `yaml:"target_mark"`
-	TargetTag      string `yaml:"target_tag"`
+	TargetMapper string `yaml:"target_mapper"`
+	TargetMark   uint8  `yaml:"target_mark"`
+	TargetTag    string `yaml:"target_tag"`
 }
 
 type statEntry struct {
@@ -68,6 +68,7 @@ type logItem struct {
 }
 
 type domainOutput struct {
+	tag            string
 	fileStat       string
 	fileRule       string
 	genRule        string
@@ -76,9 +77,9 @@ type domainOutput struct {
 	maxEntries     int
 	dumpInterval   time.Duration
 
-	stats        map[string]*statEntry
-	mu           sync.Mutex
-	
+	stats map[string]*statEntry
+	mu    sync.Mutex
+
 	// Atomic counters for performance
 	totalCount   int64
 	entryCounter int64
@@ -138,6 +139,7 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		cfg.DumpInterval = 60
 	}
 	d := &domainOutput{
+		tag:              bp.Tag(),
 		fileStat:         cfg.FileStat,
 		fileRule:         cfg.FileRule,
 		genRule:          cfg.GenRule,
@@ -185,6 +187,7 @@ func QuickSetup(_ sequence.BQ, s string) (any, error) {
 		dumpInterval = 60
 	}
 	d := &domainOutput{
+		tag:             "",
 		fileStat:        fileStat,
 		fileRule:        fileRule,
 		genRule:         genRule,
@@ -210,6 +213,10 @@ func QuickSetup(_ sequence.BQ, s string) (any, error) {
 }
 
 func (d *domainOutput) Exec(ctx context.Context, qCtx *query_context.Context) error {
+	if !d.generationEnabled() {
+		return nil
+	}
+
 	q := qCtx.Q()
 	if q == nil || len(q.Question) == 0 {
 		return nil
@@ -261,6 +268,10 @@ func (d *domainOutput) GetFastExec() func(ctx context.Context, qCtx *query_conte
 	rChan := d.recordChan
 
 	return func(ctx context.Context, qCtx *query_context.Context) error {
+		if !d.generationEnabled() {
+			return nil
+		}
+
 		q := qCtx.Q()
 		if q == nil || len(q.Question) == 0 {
 			return nil
@@ -320,6 +331,10 @@ func (d *domainOutput) startWorker() {
 }
 
 func (d *domainOutput) processRecord(item *logItem) {
+	if !d.generationEnabled() {
+		return
+	}
+
 	// Move string operations to background worker
 	rawDomain := strings.TrimSuffix(item.name, ".")
 	storageKey := rawDomain
@@ -377,6 +392,10 @@ func (d *domainOutput) processRecord(item *logItem) {
 }
 
 func (d *domainOutput) performWrite(mode WriteMode) {
+	if mode == WriteModePeriodic && !d.generationEnabled() {
+		return
+	}
+
 	// Update current date cache
 	d.currentDate.Store(time.Now().Format("2006-01-02"))
 
@@ -498,14 +517,14 @@ func (d *domainOutput) loadFromFile() {
 	scanner := bufio.NewScanner(file)
 	today := time.Now().Format("2006-01-02")
 
-        _ = d.ensureMapperBound() 
+	_ = d.ensureMapperBound()
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		fields := strings.Fields(line)
-		
+
 		var count int
 		var domain string
 		var date string
@@ -553,7 +572,9 @@ func (d *domainOutput) pushToDomainSet(statsData map[string]*statEntry) {
 		vals = append(vals, fmt.Sprintf("full:%s", domainOnly))
 	}
 
-	payload := struct{ Values []string `json:"values"` }{Values: vals}
+	payload := struct {
+		Values []string `json:"values"`
+	}{Values: vals}
 	body, _ := json.Marshal(payload)
 
 	go func() {
@@ -581,6 +602,17 @@ func (d *domainOutput) Close() error {
 		d.performWrite(WriteModeShutdown)
 	})
 	return nil
+}
+
+func (d *domainOutput) generationEnabled() bool {
+	if d == nil {
+		return false
+	}
+	return coremain.DomainGenerationEnabledForTag(d.tag)
+}
+
+func (d *domainOutput) FlushGeneratedData() {
+	d.performWrite(WriteModeFlush)
 }
 
 func restartSelf() {
@@ -615,20 +647,24 @@ func (d *domainOutput) Api() *chi.Mux {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
-		if limit <= 0 { limit = 100 }
-		if offset < 0 { offset = 0 }
+		if limit <= 0 {
+			limit = 100
+		}
+		if offset < 0 {
+			offset = 0
+		}
 
 		h := &outputRankHeap{}
 		heap.Init(h)
 		maxHeapSize := offset + limit
 
 		d.mu.Lock()
-		totalFiltered := 0 
+		totalFiltered := 0
 		for domain, entry := range d.stats {
 			if query != "" && !strings.Contains(strings.ToLower(domain), query) {
 				continue
 			}
-			totalFiltered++ 
+			totalFiltered++
 			item := outputRankItem{Domain: domain, Count: entry.Count, Date: entry.LastDate}
 			if h.Len() < maxHeapSize {
 				heap.Push(h, item)
