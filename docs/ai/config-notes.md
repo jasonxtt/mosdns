@@ -35,6 +35,7 @@ Current examples include appearance-related state such as:
 - panel background settings and history
 - text color settings
 - button color settings
+- domain generation switch settings
 
 Those still matter operationally even though they do not belong in the generated routing YAML.
 
@@ -53,6 +54,7 @@ The binary auto-creates this directory and migrates matching files from the runt
 - `upstream_overrides.json`
 - `special_upstream_groups.json`
 - `config_update_state.json`
+- `domain_generation_settings.json`
 
 When both an old path and the new path exist, prefer the file under `webinfo/`.
 
@@ -183,3 +185,21 @@ For binaries that embed the maintained Vue UI, the practical build workflow is:
 Do not assume parallel frontend/backend builds are safe for release artifacts in this fork.
 
 Do not commit private credentials or passwords into repo docs. Keep only non-secret operator workflow notes here.
+
+## Domain generation runtime switches
+
+The current first version of domain-generation control is intentionally implemented as runtime binary state, not as a structural external config-package change.
+
+Current exposed switches:
+
+- `enabled`
+- `remember_direct`
+- `remember_proxy`
+- `no_v4`
+- `no_v6`
+
+Behavior notes:
+
+- disabling the total switch stops new generated-domain writes and clears the currently generated domain data for the maintained domain-output lists
+- disabling an individual sub-switch stops new writes for that list and clears its current generated data
+- this design keeps `requiredConfigSchema` and `requiredConfigPackageID` unchanged for the first rollout

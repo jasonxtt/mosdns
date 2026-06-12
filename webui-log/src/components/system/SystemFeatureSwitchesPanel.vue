@@ -22,7 +22,7 @@ defineEmits(['toggle-switch'])
 </script>
 
 <template>
-  <section class="panel control-module control-module-wide">
+  <section class="panel control-module system-feature-switches-module">
     <header class="module-head">
       <div>
         <h3>功能开关</h3>

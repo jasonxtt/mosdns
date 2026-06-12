@@ -130,6 +130,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	RegisterOverridesAPI(m.httpMux, m) // <<< MODIFIED: Pass 'm'
 	RegisterAppearanceAPI(m.httpMux)
 	RegisterConfigManagerAPI(m.httpMux)
+	RegisterDomainGenerationAPI(m.httpMux, m)
 	RegisterUpdateAPI(m.httpMux)    // For binary updates
 	RegisterSystemAPI(m.httpMux, m) // For self-restart
 	RegisterUpstreamAPI(m.httpMux, m)
@@ -293,37 +294,10 @@ func (m *Mosdns) initHttpMux() {
 		}
 	}
 
-	legacyHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/mosdnsp.html")
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/mosdnsp.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
-	// /log 路由使用原 dashboard 页面
 	logHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/dashboard.html")
+		data, err := content.ReadFile("www/log1.html")
 		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/dashboard.html"), zap.Error(err))
-			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if _, err := w.Write(data); err != nil {
-			m.logger.Error("Error writing response", zap.Error(err))
-		}
-	}
-
-	blogHandler := func(w http.ResponseWriter, r *http.Request) {
-		data, err := content.ReadFile("www/blog.html")
-		if err != nil {
-			m.logger.Error("Error reading embedded file", zap.String("file", "www/blog.html"), zap.Error(err))
+			m.logger.Error("Error reading embedded file", zap.String("file", "www/log1.html"), zap.Error(err))
 			http.Error(w, "Error reading the embedded file", http.StatusInternalServerError)
 			return
 		}
@@ -367,9 +341,7 @@ func (m *Mosdns) initHttpMux() {
 
 	// [修改] 为每个路由注册对应的 handler
 	m.httpMux.Get("/", rootHandler)
-	m.httpMux.Get("/legacy", legacyHandler)
 	m.httpMux.Get("/log", logHandler)
-	m.httpMux.Get("/blog", blogHandler)
 	m.httpMux.Get("/assets/*", staticAssetHandler)
 
 	// [新增逻辑] 自动扫描配置目录下 ui 目录的子文件夹并挂载为前端版本
@@ -378,7 +350,7 @@ func (m *Mosdns) initHttpMux() {
 	if info, err := os.Stat(uiBaseDir); err == nil && info.IsDir() {
 		// 定义保留的路由名称，防止外部文件夹覆盖核心功能
 		reservedPaths := map[string]bool{
-			"log": true, "blog": true, "assets": true,
+			"log": true, "log1": true, "legacy": true, "blog": true, "assets": true,
 			"debug": true, "metrics": true, "plugins": true, "api": true, "": true,
 		}
 

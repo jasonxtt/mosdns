@@ -1,11 +1,39 @@
 # Changelog
 
+## v0.4.7
+
+### Added
+
+- added runtime domain-generation controls in system settings, with persisted state stored under `/cus/mosdns/webinfo/domain_generation_settings.json`
+- added a dedicated embedded `vue-log1` build for the legacy `/log` UI so the maintained `/` UI and compatibility `/log` UI can ship independently in the same binary
+
+### Changed
+
+- extended the legacy `/log` overview with grouped upstream DNS statistics that reflect enabled upstreams only
+- flattened the legacy `/log` system-settings information architecture so maintenance, behavior, appearance, and log-refresh sections are easier to reach without nested wrapper panels
+- rebuilt the `/log` appearance panel into a full-width two-card layout for theme controls and panel background controls
+- refined legacy `/log` navigation labels and removed secondary-menu icons for a cleaner operator-facing layout
+
+### Fixed
+
+- fixed mobile Safari / iPhone layout issues in `/log`:
+  - the brand area is now a compact single-row header instead of a separate large pill card
+  - the primary nav is kept on a single compact row without horizontal carousel behavior
+  - secondary nav placement no longer shifts downward when switching tabs
+  - rounded glass containers no longer expose clipped square background blocks
+- fixed the mobile primary nav regression where very narrow screens could still fall back to a two-row layout
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## Unreleased
 
 ### Frontend Refactoring (2026-06-06)
 
 - large-scale Vue codebase cleanup: extracted shared utility modules, split the three largest components, deduplicated CSS; net 777-line reduction across the 4 biggest source files
-
 
 ## v0.4.3
 

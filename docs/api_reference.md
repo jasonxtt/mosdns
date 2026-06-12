@@ -497,8 +497,7 @@ POST /api/v1/config/update_from_url
 | 路径 | 说明 |
 |------|------|
 | `/` | Vue 主界面 (log.html) |
-| `/legacy` | 旧版界面 (mosdnsp.html) |
-| `/log` | 原版 dashboard 界面 (dashboard.html) |
+| `/log` | Log1 预览界面 (log1.html) |
 
 ---
 

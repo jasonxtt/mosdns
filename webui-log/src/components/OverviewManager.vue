@@ -1,9 +1,26 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { getJSON } from '../api/http'
+import { getJSON, getText } from '../api/http'
 import DnsOverviewCard from './dashboard/DnsOverviewCard.vue'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 import { formatDateTime } from '../utils/time'
+import {
+  applyUpstreamStatsBaseline,
+  loadUpstreamStatsBaseline,
+  orderUpstreamGroups,
+  parseUpstreamStatsMetrics,
+  protocolDisplayLabel,
+  saveUpstreamStatsBaseline,
+  upstreamAddressDisplay,
+  upstreamGroupDisplay
+} from '../utils/upstreamStats'
+
+const props = defineProps({
+  showSystemSummary: {
+    type: Boolean,
+    default: false
+  }
+})
 
 const HISTORY_KEY = 'mosdnsHistory'
 const HISTORY_LENGTH = 60
@@ -14,6 +31,21 @@ const lastUpdatedText = ref('--')
 const stats = reactive({
   totalQueries: 0,
   averageDurationMs: 0
+})
+
+const systemSummary = reactive({
+  startTime: 0,
+  cpuTime: 0,
+  residentMemory: 0,
+  networkReceiveBytes: 0,
+  networkTransmitBytes: 0,
+  gcCount: 0,
+  gcDurationSeconds: 0,
+  lastGcTime: 0,
+  goVersion: 'N/A',
+  threads: 0,
+  openFds: 0,
+  goroutines: 0
 })
 
 const history = reactive({
@@ -28,6 +60,10 @@ const topClients = ref([])
 const slowestQueries = ref([])
 const domainSetRank = ref([])
 const specialGroups = ref([])
+const upstreamConfig = ref({})
+const upstreamMetricsText = ref('')
+const upstreamStatsBaseline = ref(loadUpstreamStatsBaseline())
+const upstreamStatsResetting = ref(false)
 const slowDetailOpen = ref(false)
 const selectedSlowQuery = ref(null)
 const topDomainDetailOpen = ref(false)
@@ -91,6 +127,147 @@ const overviewLayoutVars = computed(() => {
     '--overview-list-max-height': `${listHeight}px`,
     '--overview-card-min-height': `${cardHeight}px`
   }
+})
+const systemSummaryCards = computed(() => {
+  if (!props.showSystemSummary) {
+    return []
+  }
+  return [
+    {
+      key: 'start-time',
+      title: '启动时间',
+      value: systemSummary.startTime
+        ? new Date(systemSummary.startTime * 1000).toLocaleString('zh-CN', { hour12: false })
+        : '--',
+      tone: 'ok'
+    },
+    {
+      key: 'cpu-time',
+      title: 'CPU 时间',
+      value: formatSeconds(systemSummary.cpuTime, 2),
+      tone: 'neutral'
+    },
+    {
+      key: 'memory',
+      title: '常驻内存 (RSS)',
+      value: formatBytes(systemSummary.residentMemory),
+      tone: 'neutral'
+    },
+    {
+      key: 'network-receive',
+      title: '系统累计接收流量',
+      value: formatBytes(systemSummary.networkReceiveBytes),
+      tone: 'neutral'
+    },
+    {
+      key: 'network-transmit',
+      title: '系统累计发送流量',
+      value: formatBytes(systemSummary.networkTransmitBytes),
+      tone: 'neutral'
+    },
+    {
+      key: 'gc-count',
+      title: 'GC 次数',
+      value: Number(systemSummary.gcCount || 0).toLocaleString(),
+      tone: 'neutral'
+    },
+    {
+      key: 'gc-duration',
+      title: 'GC 累计耗时',
+      value: formatSeconds(systemSummary.gcDurationSeconds, 3),
+      tone: 'neutral'
+    },
+    {
+      key: 'last-gc',
+      title: '上次 GC 时间',
+      value: systemSummary.lastGcTime
+        ? new Date(systemSummary.lastGcTime * 1000).toLocaleString('zh-CN', { hour12: false })
+        : '--',
+      tone: 'neutral'
+    },
+    {
+      key: 'go-version',
+      title: 'Go 版本',
+      value: systemSummary.goVersion || '--',
+      tone: 'ok'
+    },
+    {
+      key: 'threads',
+      title: '线程数',
+      value: Number(systemSummary.threads || 0).toLocaleString(),
+      tone: 'neutral'
+    },
+    {
+      key: 'open-fds',
+      title: '打开文件描述符',
+      value: Number(systemSummary.openFds || 0).toLocaleString(),
+      tone: 'neutral'
+    },
+    {
+      key: 'goroutines',
+      title: 'go_goroutines',
+      value: Number(systemSummary.goroutines || 0).toLocaleString(),
+      tone: 'neutral'
+    }
+  ]
+})
+const upstreamStatsMap = computed(() => applyUpstreamStatsBaseline(
+  parseUpstreamStatsMetrics(upstreamMetricsText.value),
+  upstreamStatsBaseline.value.snapshots
+))
+const upstreamStatSections = computed(() => {
+  const configuredGroups = Object.keys(upstreamConfig.value || {})
+  const orderedGroups = orderUpstreamGroups(configuredGroups, specialGroups.value)
+  const sections = []
+
+  orderedGroups.forEach((group) => {
+    const rows = Array.isArray(upstreamConfig.value?.[group]) ? upstreamConfig.value[group] : []
+    const enabledRows = rows
+      .filter((item) => Boolean(item?.enabled))
+      .map((item, index) => {
+        const key = `${group}|${item?.tag || ''}`
+        const stats = upstreamStatsMap.value[key] || {}
+        const queryNumber = Number(stats.queryTotal || 0)
+        const winnerNumber = Number(stats.winnerTotal || 0)
+        const errorNumber = Number(stats.errorTotal || 0)
+        const latencySum = Number(stats.latencySum || 0)
+        const latencyCount = Number(stats.latencyCount || 0)
+        const avgLatencyNumber = latencyCount > 0 ? latencySum / latencyCount : 0
+        const winnerRateNumber = queryNumber > 0 ? (winnerNumber / queryNumber) * 100 : 0
+        const errorRateNumber = queryNumber > 0 ? (errorNumber / queryNumber) * 100 : 0
+
+        return {
+          key: `${group}-${item?.tag || index}`,
+          name: String(item?.tag || '-'),
+          typeLabel: protocolDisplayLabel(item?.protocol),
+          address: upstreamAddressDisplay(item || {}),
+          avgLatencyText: latencyCount > 0 ? avgLatencyNumber.toFixed(2) : '-',
+          avgLatencyNumber,
+          queryText: queryNumber.toLocaleString(),
+          queryNumber,
+          winnerRateText: `${winnerRateNumber.toFixed(2)}%`,
+          winnerRateNumber,
+          errorText: errorNumber.toLocaleString(),
+          errorNumber,
+          errorRateText: `${errorRateNumber.toFixed(2)}%`,
+          errorRateNumber
+        }
+      })
+
+    if (enabledRows.length === 0) {
+      return
+    }
+
+    const groupMeta = upstreamGroupDisplay(group, specialGroups.value)
+    sections.push({
+      key: group,
+      title: groupMeta.title,
+      tone: groupMeta.tone,
+      rows: enabledRows
+    })
+  })
+
+  return sections
 })
 
 function clamp(value, min, max) {
@@ -166,6 +343,31 @@ function formatCompactDuration(value) {
   return num.toFixed(2)
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0)
+  if (!Number.isFinite(value) || value <= 0) {
+    return '--'
+  }
+  if (value >= 1024 ** 3) {
+    return `${(value / 1024 ** 3).toFixed(2)} GB`
+  }
+  if (value >= 1024 ** 2) {
+    return `${(value / 1024 ** 2).toFixed(2)} MB`
+  }
+  if (value >= 1024) {
+    return `${(value / 1024).toFixed(2)} KB`
+  }
+  return `${value.toFixed(0)} B`
+}
+
+function formatSeconds(value, fractionDigits = 2) {
+  const num = Number(value || 0)
+  if (!Number.isFinite(num) || num < 0) {
+    return '--'
+  }
+  return `${num.toFixed(fractionDigits)} 秒`
+}
+
 function formatTime(value) {
   return formatDateTime(value)
 }
@@ -185,6 +387,19 @@ function getRuleLabel(key) {
 
 function formatPercent(value) {
   return `${Number(value || 0).toFixed(1)}%`
+}
+
+function resetUpstreamStatsBaseline() {
+  upstreamStatsResetting.value = true
+  try {
+    const snapshots = parseUpstreamStatsMetrics(upstreamMetricsText.value)
+    upstreamStatsBaseline.value = saveUpstreamStatsBaseline(snapshots)
+    setSuccess('上游统计已重置')
+  } catch (error) {
+    setError(`重置上游统计失败: ${error.message}`)
+  } finally {
+    upstreamStatsResetting.value = false
+  }
 }
 
 function formatResponseFlags(flags) {
@@ -288,6 +503,74 @@ function addHistoryPoint(totalQueriesValue, avgDurationValue) {
   saveHistory()
 }
 
+function parseSystemMetrics(metricsText) {
+  const lines = String(metricsText || '').split('\n')
+  const next = {
+    startTime: 0,
+    cpuTime: 0,
+    residentMemory: 0,
+    networkReceiveBytes: 0,
+    networkTransmitBytes: 0,
+    gcCount: 0,
+    gcDurationSeconds: 0,
+    lastGcTime: 0,
+    goVersion: 'N/A',
+    threads: 0,
+    openFds: 0,
+    goroutines: 0
+  }
+  lines.forEach((line) => {
+    if (line.startsWith('process_start_time_seconds')) {
+      next.startTime = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('process_cpu_seconds_total')) {
+      next.cpuTime = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('process_resident_memory_bytes')) {
+      next.residentMemory = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('process_network_receive_bytes_total')) {
+      next.networkReceiveBytes = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('process_network_transmit_bytes_total')) {
+      next.networkTransmitBytes = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('go_gc_duration_seconds_count')) {
+      next.gcCount = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('go_gc_duration_seconds_sum')) {
+      next.gcDurationSeconds = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('go_memstats_last_gc_time_seconds')) {
+      next.lastGcTime = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('go_threads')) {
+      next.threads = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('process_open_fds')) {
+      next.openFds = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('go_goroutines')) {
+      next.goroutines = Number.parseFloat(line.split(' ')[1] || '0') || 0
+    } else if (line.startsWith('go_info{version="')) {
+      const match = line.match(/go_info\{version="([^"]+)"/)
+      if (match?.[1]) {
+        next.goVersion = match[1]
+      }
+    }
+  })
+  return next
+}
+
+function applySystemSummaryState({ metricsText = '' } = {}) {
+  if (!props.showSystemSummary) {
+    return
+  }
+  const metrics = parseSystemMetrics(metricsText)
+  systemSummary.startTime = metrics.startTime
+  systemSummary.cpuTime = metrics.cpuTime
+  systemSummary.residentMemory = metrics.residentMemory
+  systemSummary.networkReceiveBytes = metrics.networkReceiveBytes
+  systemSummary.networkTransmitBytes = metrics.networkTransmitBytes
+  systemSummary.gcCount = metrics.gcCount
+  systemSummary.gcDurationSeconds = metrics.gcDurationSeconds
+  systemSummary.lastGcTime = metrics.lastGcTime
+  systemSummary.goVersion = metrics.goVersion
+  systemSummary.threads = metrics.threads
+  systemSummary.openFds = metrics.openFds
+  systemSummary.goroutines = metrics.goroutines
+}
+
 function applyEWMA(values, alpha = 0.4) {
   if (!Array.isArray(values) || values.length < 2) {
     return values || []
@@ -384,7 +667,9 @@ async function reloadOverview(showMessage = false) {
       slowestRes,
       domainSetRes,
       specialGroupsRes,
-      aliasesRes
+      aliasesRes,
+      upstreamConfigRes,
+      metricsRes
     ] = await Promise.all([
       getJSON('/api/v2/audit/stats'),
       getJSON('/api/v2/audit/rank/domain?limit=20'),
@@ -392,7 +677,9 @@ async function reloadOverview(showMessage = false) {
       getJSON('/api/v2/audit/rank/slowest?limit=20'),
       getJSON('/api/v2/audit/rank/effective?limit=20').catch(() => getJSON('/api/v2/audit/rank/domain_set?limit=20')),
       getJSON('/api/v1/special-groups'),
-      getJSON('/plugins/clientname').catch(() => ({}))
+      getJSON('/plugins/clientname').catch(() => ({})),
+      getJSON('/api/v1/upstream/config').catch(() => ({})),
+      getText('/metrics').catch(() => '')
     ])
 
     stats.totalQueries = Number(statsRes?.total_queries || 0)
@@ -405,6 +692,9 @@ async function reloadOverview(showMessage = false) {
     domainSetRank.value = Array.isArray(domainSetRes) ? domainSetRes : []
     specialGroups.value = Array.isArray(specialGroupsRes) ? specialGroupsRes : []
     aliases.value = normalizeAliasMap(aliasesRes)
+    upstreamConfig.value = upstreamConfigRes && typeof upstreamConfigRes === 'object' ? upstreamConfigRes : {}
+    upstreamMetricsText.value = String(metricsRes || '')
+    applySystemSummaryState({ metricsText: metricsRes })
     lastUpdatedText.value = new Date().toLocaleString('zh-CN', { hour12: false })
 
     if (showMessage) {
@@ -443,6 +733,70 @@ onBeforeUnmount(() => {
 <template>
   <section class="overview-page" :style="overviewLayoutVars">
     <DnsOverviewCard />
+
+    <section class="panel sub-panel upstream-stats-panel">
+      <header class="upstream-stats-head">
+        <div class="upstream-stats-title-wrap">
+          <h3>上游 DNS 统计</h3>
+        </div>
+        <button
+          class="btn tiny secondary"
+          type="button"
+          :disabled="upstreamStatsResetting || loading"
+          @click="resetUpstreamStatsBaseline"
+        >
+          {{ upstreamStatsResetting ? '重置中...' : '重置统计' }}
+        </button>
+      </header>
+      <div class="table-wrap upstream-stats-table-wrap">
+        <table class="upstream-stats-table">
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>名称</th>
+              <th>地址</th>
+              <th class="text-right">平均响应(ms)</th>
+              <th class="text-right">请求数</th>
+              <th class="text-right">采纳率</th>
+              <th class="text-right">出错数</th>
+              <th class="text-right">出错率</th>
+            </tr>
+          </thead>
+          <tbody v-if="loading">
+            <tr>
+              <td colspan="8" class="empty">加载中...</td>
+            </tr>
+          </tbody>
+          <tbody v-else-if="upstreamStatSections.length === 0">
+            <tr>
+              <td colspan="8" class="empty">暂无已启用上游统计</td>
+            </tr>
+          </tbody>
+          <tbody v-for="section in upstreamStatSections" v-else :key="section.key">
+            <tr class="upstream-stats-group-row" :class="`tone-${section.tone}`">
+              <td colspan="8">
+                <span class="upstream-stats-group-name">{{ section.title }}</span>
+                <span class="upstream-stats-group-count">({{ section.rows.length }})</span>
+              </td>
+            </tr>
+            <tr v-for="row in section.rows" :key="row.key">
+              <td :title="row.typeLabel">
+                <span class="upstream-stats-type-chip">{{ row.typeLabel }}</span>
+              </td>
+              <td class="upstream-stats-name-cell" :title="row.name">{{ row.name }}</td>
+              <td class="mono upstream-stats-address-cell" :title="row.address">{{ row.address }}</td>
+              <td class="text-right" :title="row.avgLatencyText === '-' ? '-' : `${row.avgLatencyText} ms`">
+                {{ row.avgLatencyText }}
+              </td>
+              <td class="text-right">{{ row.queryText }}</td>
+              <td class="text-right">{{ row.winnerRateText }}</td>
+              <td class="text-right">{{ row.errorText }}</td>
+              <td class="text-right">{{ row.errorRateText }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <div ref="overviewGridRef" class="overview-grid">
       <section class="panel sub-panel overview-metric-module">
@@ -562,6 +916,26 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
+    <section v-if="showSystemSummary" class="panel sub-panel overview-system-summary-panel">
+      <header class="overview-system-summary-head">
+        <div>
+          <h3>系统信息</h3>
+        </div>
+      </header>
+      <div class="overview-system-summary-grid">
+        <article
+          v-for="item in systemSummaryCards"
+          :key="item.key"
+          class="overview-system-summary-card"
+          :class="`tone-${item.tone}`"
+        >
+          <span class="overview-system-summary-label">{{ item.title }}</span>
+          <strong>{{ item.value }}</strong>
+          <small v-if="item.desc">{{ item.desc }}</small>
+        </article>
+      </div>
+    </section>
+
     <div v-if="slowDetailOpen && selectedSlowQuery" class="modal-mask modal-mask-top" @click.self="closeSlowDetail">
       <section class="panel data-view-modal overview-slow-detail-modal">
         <header class="panel-header">
@@ -657,3 +1031,187 @@ onBeforeUnmount(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.upstream-stats-panel {
+  padding-top: 10px;
+}
+
+.upstream-stats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.upstream-stats-title-wrap h3 {
+  margin: 0;
+}
+
+.upstream-stats-table-wrap {
+  overflow-x: auto;
+}
+
+.upstream-stats-table {
+  width: 100%;
+  min-width: 980px;
+  table-layout: fixed;
+}
+
+.upstream-stats-table th:nth-child(1),
+.upstream-stats-table td:nth-child(1) {
+  width: 92px;
+}
+
+.upstream-stats-table th:nth-child(2),
+.upstream-stats-table td:nth-child(2) {
+  width: 128px;
+}
+
+.upstream-stats-table th:nth-child(3),
+.upstream-stats-table td:nth-child(3) {
+  width: 240px;
+}
+
+.upstream-stats-group-row td {
+  font-weight: 700;
+  border-top: 1px solid var(--line);
+}
+
+.upstream-stats-group-row.tone-domestic td {
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+}
+
+.upstream-stats-group-row.tone-foreign-fake td {
+  background: rgba(244, 114, 182, 0.08);
+  color: #be185d;
+}
+
+.upstream-stats-group-row.tone-foreign-proxy td {
+  background: rgba(249, 115, 22, 0.08);
+  color: #c2410c;
+}
+
+.upstream-stats-group-row.tone-foreign-ecs td {
+  background: rgba(139, 92, 246, 0.08);
+  color: #7c3aed;
+}
+
+.upstream-stats-group-row.tone-domestic-fake td {
+  background: rgba(16, 185, 129, 0.08);
+  color: #047857;
+}
+
+.upstream-stats-group-row.tone-special td,
+.upstream-stats-group-row.tone-other td {
+  background: rgba(100, 116, 139, 0.08);
+  color: var(--ink-0);
+}
+
+.upstream-stats-group-name {
+  display: inline-block;
+}
+
+.upstream-stats-group-count {
+  margin-left: 6px;
+  opacity: 0.78;
+}
+
+.upstream-stats-type-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563eb;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.upstream-stats-name-cell,
+.upstream-stats-address-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-system-summary-panel {
+  padding-bottom: 12px;
+}
+
+.overview-system-summary-head {
+  margin-bottom: 10px;
+}
+
+.overview-system-summary-head h3 {
+  margin: 0;
+}
+
+.overview-system-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 10px;
+}
+
+.overview-system-summary-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px 11px;
+  background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity));
+  backdrop-filter: blur(var(--panel-glass-blur));
+  -webkit-backdrop-filter: blur(var(--panel-glass-blur));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.overview-system-summary-card strong {
+  font-size: 0.98rem;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.overview-system-summary-card small {
+  color: var(--ink-1);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+
+.overview-system-summary-label {
+  color: var(--ink-1);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.overview-system-summary-card.tone-ok strong {
+  color: var(--ok);
+}
+
+.overview-system-summary-card.tone-warn strong {
+  color: var(--warn);
+}
+
+@media (max-width: 760px) {
+  .upstream-stats-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .overview-system-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 540px) {
+  .overview-system-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

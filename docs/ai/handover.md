@@ -2,7 +2,7 @@
 
 ## Current state
 
-As of `2026-06-06`, the maintained line is stable with these active realities:
+As of `2026-06-10`, the maintained line is stable with these active realities:
 
 - `/` is the maintained Vue UI
 - `/log` is the legacy compatibility UI
@@ -10,6 +10,8 @@ As of `2026-06-06`, the maintained line is stable with these active realities:
 - dedicated routing groups use the backend name `special_groups`
 - online rules, local lists, and upstream-group binding are already first-class workflow pieces
 - the maintained UI already ships operator-facing controls such as `IPv4优先`, `IPV6屏蔽`, appearance persistence, and transactional config-update status
+- domain-generation controls are now runtime JSON state, not external config-package structure changes
+- the current first version exposes `总开关 / 记忆直连 / 记忆代理 / 记忆无v4 / 记忆无v6`
 
 ## Keep in mind
 
@@ -33,6 +35,12 @@ As of `2026-06-06`, the maintained line is stable with these active realities:
   - local build
   - test host
   - production only after confirmation
+
+## Recent note
+
+- The new domain-generation switches were intentionally implemented in the binary/runtime layer so `/Users/tom/github/file` does not need config package changes for this first version.
+- Runtime state is persisted in `webinfo/domain_generation_settings.json`.
+- Total disable currently clears generated data for `top_domains`, `my_sv4list`, `my_realiplist`, `my_fakeiplist`, `my_nov4list`, `my_nov6list`, `my_nodenov4list`, and `my_nodenov6list`.
 
 ## Known pitfalls
 
