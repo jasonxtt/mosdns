@@ -2024,6 +2024,9 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(var(--panel-glass-blur));
   -webkit-backdrop-filter: blur(var(--panel-glass-blur));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
 }
 
 .log1-ip-option strong {
@@ -2041,9 +2044,36 @@ onBeforeUnmount(() => {
 }
 
 .log1-ip-option.active {
-  border-color: rgba(var(--brand-rgb), 0.32);
-  background: linear-gradient(135deg, rgba(var(--brand-rgb), 0.14), rgba(var(--panel-glass-rgb), var(--panel-glass-opacity)));
-  box-shadow: 0 10px 18px rgba(var(--brand-rgb), 0.08);
+  border-color: var(--selectable-active-border);
+  background: var(--selectable-active-bg);
+  color: var(--selectable-active-text);
+  box-shadow: 0 0 0 3px var(--selectable-active-ring), 0 10px 18px rgba(var(--brand-rgb), 0.16);
+}
+
+.log1-ip-option::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12%;
+  bottom: 12%;
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: rgba(255, 255, 255, 0.94);
+  opacity: 0;
+  transform: scaleY(0.7);
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.log1-ip-option.active::before {
+  opacity: 1;
+}
+
+.log1-ip-option.active::before {
+  transform: scaleY(1);
+}
+
+.log1-ip-option.active span {
+  color: rgba(255, 255, 255, 0.88);
 }
 
 :deep(.restart-mosdns-btn),
@@ -2063,10 +2093,47 @@ onBeforeUnmount(() => {
 }
 
 :deep(.core-mode-btn.is-active) {
-  background: linear-gradient(135deg, rgba(var(--brand-rgb), 0.14), rgba(var(--panel-glass-rgb), var(--panel-glass-opacity))) !important;
-  border-color: rgba(var(--brand-rgb), 0.34) !important;
-  color: var(--ink-0) !important;
-  box-shadow: 0 8px 18px rgba(var(--brand-rgb), 0.12) !important;
+  background: var(--selectable-active-bg) !important;
+  border-color: var(--selectable-active-border) !important;
+  color: var(--selectable-active-text) !important;
+  box-shadow: 0 0 0 3px var(--selectable-active-ring), 0 10px 18px rgba(var(--brand-rgb), 0.16) !important;
+}
+
+:deep(.system-core-mode-option) {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 14px;
+}
+
+:deep(.system-core-mode-option::before) {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12%;
+  bottom: 12%;
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: rgba(255, 255, 255, 0.94);
+  opacity: 0;
+  transform: scaleY(0.7);
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+:deep(.system-core-mode-option.active) {
+  border-color: var(--selectable-active-border) !important;
+  background: var(--selectable-active-bg) !important;
+  color: var(--selectable-active-text) !important;
+  box-shadow: 0 0 0 3px var(--selectable-active-ring), 0 10px 18px rgba(var(--brand-rgb), 0.16) !important;
+}
+
+:deep(.system-core-mode-option.active::before) {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+:deep(.system-core-mode-option.active span) {
+  color: rgba(255, 255, 255, 0.88) !important;
 }
 
 .log1-module-toggle-row {

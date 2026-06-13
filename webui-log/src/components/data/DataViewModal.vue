@@ -10,20 +10,21 @@ defineEmits(['close', 'search-input', 'load-more'])
 </script>
 
 <template>
-  <div class="modal-mask" @click.self="$emit('close')">
-    <section class="panel data-view-modal">
-      <header class="panel-header">
-        <div>
-          <h3>{{ dataView.title }}</h3>
-          <p class="muted">
-            <span v-if="dataView.totalCount > 0">当前显示 {{ dataView.entries.length.toLocaleString() }} / {{ dataView.totalCount.toLocaleString() }} 条</span>
-            <span v-else>当前显示 {{ dataView.entries.length.toLocaleString() }} 条</span>
-          </p>
-        </div>
-        <div class="actions">
-          <button class="btn secondary" type="button" @click="$emit('close')">关闭</button>
-        </div>
-      </header>
+  <Teleport to="body">
+    <div class="modal-mask" @click.self="$emit('close')">
+      <section class="panel data-view-modal">
+        <header class="panel-header">
+          <div>
+            <h3>{{ dataView.title }}</h3>
+            <p class="muted">
+              <span v-if="dataView.totalCount > 0">当前显示 {{ dataView.entries.length.toLocaleString() }} / {{ dataView.totalCount.toLocaleString() }} 条</span>
+              <span v-else>当前显示 {{ dataView.entries.length.toLocaleString() }} 条</span>
+            </p>
+          </div>
+          <div class="actions">
+            <button class="btn secondary" type="button" @click="$emit('close')">关闭</button>
+          </div>
+        </header>
 
       <div class="data-view-search">
         <input
@@ -83,16 +84,17 @@ defineEmits(['close', 'search-input', 'load-more'])
         </details>
       </div>
 
-      <div class="actions" style="margin-top: 10px;">
-        <button
-          class="btn primary"
-          type="button"
-          :disabled="dataView.loading || dataView.loadingMore || !dataView.hasMore"
-          @click="$emit('load-more')"
-        >
-          {{ dataView.loadingMore ? '加载中...' : '加载更多' }}
-        </button>
-      </div>
-    </section>
-  </div>
+        <div class="actions" style="margin-top: 10px;">
+          <button
+            class="btn primary"
+            type="button"
+            :disabled="dataView.loading || dataView.loadingMore || !dataView.hasMore"
+            @click="$emit('load-more')"
+          >
+            {{ dataView.loadingMore ? '加载中...' : '加载更多' }}
+          </button>
+        </div>
+      </section>
+    </div>
+  </Teleport>
 </template>

@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON } from './api/http'
 import ConfirmBubbleHost from './components/ConfirmBubbleHost.vue'
 import DataManagementManager from './components/DataManagementManager.vue'
@@ -109,6 +109,24 @@ function triggerGlobalRefresh() {
   window.dispatchEvent(new CustomEvent('mosdns-log-refresh'))
 }
 
+function handleOpenLogFilter(event) {
+  const detail = event?.detail || {}
+  const text = String(detail.value || '').trim()
+  if (!text) {
+    return
+  }
+  activeMainTab.value = 'log-query'
+  activeQuerySubTab.value = 'live'
+  nextTick(() => {
+    window.dispatchEvent(new CustomEvent('mosdns-open-log-filter-ready', {
+      detail: {
+        value: text,
+        exact: Boolean(detail.exact)
+      }
+    }))
+  })
+}
+
 function clearTopNotice() {
   if (topNoticeTimerId) {
     window.clearTimeout(topNoticeTimerId)
@@ -184,6 +202,7 @@ onMounted(() => {
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   window.addEventListener('mosdns-top-notice', handleTopNoticeEvent)
+  window.addEventListener('mosdns-open-log-filter', handleOpenLogFilter)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -192,6 +211,7 @@ onBeforeUnmount(() => {
   clearTopNotice()
   window.removeEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   window.removeEventListener('mosdns-top-notice', handleTopNoticeEvent)
+  window.removeEventListener('mosdns-open-log-filter', handleOpenLogFilter)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>

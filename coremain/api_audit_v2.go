@@ -162,15 +162,17 @@ func handleV2GetLogs(w http.ResponseWriter, r *http.Request) {
 	exactSearch, _ := strconv.ParseBool(query.Get("exact"))
 
 	params := V2GetLogsParams{
-		Page:        parseQueryInt(r, "page", 1),
-		Limit:       parseQueryInt(r, "limit", 50),
-		Domain:      query.Get("domain"),
-		AnswerIP:    query.Get("answer_ip"),
-		AnswerCNAME: query.Get("cname"),
-		ClientIP:    query.Get("client_ip"),
-		ClientIPs:   append([]string(nil), query["client_ip"]...),
-		Q:           query.Get("q"),
-		Exact:       exactSearch,
+		Page:         parseQueryInt(r, "page", 1),
+		Limit:        parseQueryInt(r, "limit", 50),
+		Domain:       query.Get("domain"),
+		AnswerIP:     query.Get("answer_ip"),
+		AnswerCNAME:  query.Get("cname"),
+		ClientIP:     query.Get("client_ip"),
+		ClientIPs:    append([]string(nil), query["client_ip"]...),
+		DomainSet:    query.Get("domain_set"),
+		EffectiveTag: query.Get("effective_tag"),
+		Q:            query.Get("q"),
+		Exact:        exactSearch,
 	}
 
 	response := GlobalAuditCollector.GetV2Logs(params)
