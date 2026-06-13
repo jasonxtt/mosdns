@@ -839,15 +839,17 @@ func (c *AuditCollector) saveSettings(capacityToSave int, configBaseDir string) 
 }
 
 type V2GetLogsParams struct {
-	Page        int
-	Limit       int
-	Domain      string
-	AnswerIP    string
-	AnswerCNAME string
-	ClientIP    string
-	ClientIPs   []string
-	Q           string
-	Exact       bool
+	Page         int
+	Limit        int
+	Domain       string
+	AnswerIP     string
+	AnswerCNAME  string
+	ClientIP     string
+	ClientIPs    []string
+	DomainSet    string
+	EffectiveTag string
+	Q            string
+	Exact        bool
 }
 
 func normalizeAuditClientIP(raw string) string {
@@ -1252,6 +1254,12 @@ func (c *AuditCollector) GetV2Logs(params V2GetLogsParams) V2PaginatedLogsRespon
 		}
 
 		if isMatched && len(clientIPFilters) > 0 && !auditClientIPMatchesAny(log.ClientIP, clientIPFilters) {
+			isMatched = false
+		}
+		if isMatched && params.DomainSet != "" && log.DomainSet != params.DomainSet {
+			isMatched = false
+		}
+		if isMatched && params.EffectiveTag != "" && log.EffectiveTag != params.EffectiveTag {
 			isMatched = false
 		}
 		if isMatched && params.Domain != "" && !strings.Contains(log.QueryName, params.Domain) {

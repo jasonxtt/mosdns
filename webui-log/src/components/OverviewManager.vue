@@ -66,10 +66,20 @@ const upstreamStatsBaseline = ref(loadUpstreamStatsBaseline())
 const upstreamStatsResetting = ref(false)
 const slowDetailOpen = ref(false)
 const selectedSlowQuery = ref(null)
-const topDomainDetailOpen = ref(false)
-const selectedTopDomain = ref('')
-const topDomainDetailLoading = ref(false)
-const topDomainDetailLogs = ref([])
+const domainSetRankSource = ref('effective_tag')
+const rankingDetail = reactive({
+  open: false,
+  type: 'domain',
+  filterField: 'q',
+  key: '',
+  title: '',
+  headline: '',
+  subline: '',
+  count: 0,
+  percent: 0,
+  loading: false,
+  logs: []
+})
 const overviewGridRef = ref(null)
 const visibleOverviewRows = ref(7)
 
@@ -101,6 +111,108 @@ const domainSetRows = computed(() => {
   })
 })
 const domainSetTotal = computed(() => domainSetRows.value.reduce((sum, item) => sum + item.count, 0))
+const rankingDetailSummaryCards = computed(() => {
+  if (!rankingDetail.open) {
+    return []
+  }
+
+  const logs = Array.isArray(rankingDetail.logs) ? rankingDetail.logs : []
+  const latestTime = findLatestLogTime(logs)
+  const averageLatency = computeAverageLatency(logs)
+  const maxLatency = computeMaxLatency(logs)
+  const uniqueDomainCount = countUniqueValues(logs, (item) => String(item?.query_name || '').trim())
+  const uniqueClientCount = countUniqueValues(logs, (item) => normalizeIP(item?.client_ip))
+  const topClient = topLogValue(logs, (item) => normalizeIP(item?.client_ip))
+  const topRule = topLogValue(logs, (item) => getRuleDetailValue(item))
+  const topDomain = topLogValue(logs, (item) => String(item?.query_name || '').trim())
+  const topUpstream = topLogValue(logs, (item) => getUpstreamDetailValue(item))
+
+  const cards = [
+    {
+      key: 'count',
+      title: rankingDetail.type === 'rule' ? '命中次数' : '查询次数',
+      value: Number(rankingDetail.count || 0).toLocaleString()
+    },
+    {
+      key: 'percent',
+      title: '占总查询比例',
+      value: formatPercent(rankingDetail.percent)
+    },
+    {
+      key: 'latest',
+      title: rankingDetail.type === 'rule' ? '最近命中时间' : '最近查询时间',
+      value: latestTime ? formatTime(latestTime) : '--'
+    },
+    {
+      key: 'avg',
+      title: '平均耗时',
+      value: logs.length > 0 ? formatDuration(averageLatency) : '--'
+    },
+    {
+      key: 'max',
+      title: '最大耗时',
+      value: logs.length > 0 ? formatDuration(maxLatency) : '--'
+    }
+  ]
+
+  if (rankingDetail.type === 'domain') {
+    cards.push(
+      {
+        key: 'client',
+        title: '主要客户端',
+        value: topClient ? getClientDisplay(topClient.key) : '--'
+      },
+      {
+        key: 'rule',
+        title: '主要分流规则',
+        value: topRule ? getDetailRuleLabel(topRule.key) : '--'
+      }
+    )
+  } else if (rankingDetail.type === 'client') {
+    cards.push(
+      {
+        key: 'domains',
+        title: '唯一域名数量',
+        value: uniqueDomainCount.toLocaleString()
+      },
+      {
+        key: 'rule',
+        title: '主要分流规则',
+        value: topRule ? getDetailRuleLabel(topRule.key) : '--'
+      },
+      {
+        key: 'upstream',
+        title: '主要上游',
+        value: topUpstream ? topUpstream.key : '--'
+      }
+    )
+  } else if (rankingDetail.type === 'rule') {
+    cards.push(
+      {
+        key: 'domains',
+        title: '唯一域名数量',
+        value: uniqueDomainCount.toLocaleString()
+      },
+      {
+        key: 'clients',
+        title: '唯一客户端数量',
+        value: uniqueClientCount.toLocaleString()
+      },
+      {
+        key: 'domain',
+        title: '主要域名',
+        value: topDomain ? topDomain.key : '--'
+      },
+      {
+        key: 'client',
+        title: '主要客户端',
+        value: topClient ? getClientDisplay(topClient.key) : '--'
+      }
+    )
+  }
+
+  return cards
+})
 const domainSetSegments = computed(() => {
   const total = domainSetTotal.value
   let offset = 0
@@ -126,6 +238,42 @@ const overviewLayoutVars = computed(() => {
     '--overview-visible-rows': String(rows),
     '--overview-list-max-height': `${listHeight}px`,
     '--overview-card-min-height': `${cardHeight}px`
+  }
+})
+const slowDetailActionFields = computed(() => {
+  const log = selectedSlowQuery.value
+  if (!log) {
+    return {}
+  }
+  return {
+    client_ip: {
+      value: getClientDisplay(log.client_ip),
+      copyValue: normalizeIP(log.client_ip),
+      filterValue: normalizeIP(log.client_ip),
+      exact: true,
+      mono: false
+    },
+    query_name: {
+      value: log.query_name || '-',
+      copyValue: String(log.query_name || '').trim(),
+      filterValue: String(log.query_name || '').trim(),
+      exact: false,
+      mono: false
+    },
+    domain_set: {
+      value: getDetailRuleLabel(log.domain_set || log.effective_tag || '-'),
+      copyValue: String(log.domain_set || '').trim(),
+      filterValue: String(log.domain_set || '').trim(),
+      exact: true,
+      mono: false
+    },
+    trace_id: {
+      value: log.trace_id || '-',
+      copyValue: String(log.trace_id || '').trim(),
+      filterValue: String(log.trace_id || '').trim(),
+      exact: true,
+      mono: true
+    }
   }
 })
 const systemSummaryCards = computed(() => {
@@ -419,6 +567,78 @@ function getDetailRuleLabel(value) {
   return getRuleLabel(value)
 }
 
+function getRuleDetailValue(log) {
+  return String(log?.effective_tag || log?.domain_set || '').trim()
+}
+
+function getUpstreamDetailValue(log) {
+  return String(log?.selected_upstream || log?.final_upstream || log?.upstream_group || '-').trim()
+}
+
+function findLatestLogTime(logs) {
+  return logs.reduce((latest, item) => {
+    const timestamp = new Date(item?.query_time || 0).getTime()
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      return latest
+    }
+    return Math.max(latest, timestamp)
+  }, 0)
+}
+
+function computeAverageLatency(logs) {
+  if (!Array.isArray(logs) || logs.length === 0) {
+    return 0
+  }
+  const total = logs.reduce((sum, item) => sum + Number(item?.duration_ms || 0), 0)
+  return total / logs.length
+}
+
+function computeMaxLatency(logs) {
+  if (!Array.isArray(logs) || logs.length === 0) {
+    return 0
+  }
+  return logs.reduce((max, item) => Math.max(max, Number(item?.duration_ms || 0)), 0)
+}
+
+function countUniqueValues(logs, selector) {
+  const values = new Set()
+  logs.forEach((item) => {
+    const key = String(selector(item) || '').trim()
+    if (key) {
+      values.add(key)
+    }
+  })
+  return values.size
+}
+
+function topLogValue(logs, selector) {
+  const counts = new Map()
+  logs.forEach((item) => {
+    const key = String(selector(item) || '').trim()
+    if (!key) {
+      return
+    }
+    counts.set(key, (counts.get(key) || 0) + 1)
+  })
+  let bestKey = ''
+  let bestCount = 0
+  counts.forEach((count, key) => {
+    if (count > bestCount) {
+      bestKey = key
+      bestCount = count
+    }
+  })
+  return bestKey ? { key: bestKey, count: bestCount } : null
+}
+
+function calculateRankingPercent(count) {
+  const total = Number(stats.totalQueries || 0)
+  if (total <= 0) {
+    return 0
+  }
+  return (Number(count || 0) / total) * 100
+}
+
 function openSlowDetail(item) {
   selectedSlowQuery.value = item || null
   slowDetailOpen.value = Boolean(item)
@@ -429,40 +649,137 @@ function closeSlowDetail() {
   selectedSlowQuery.value = null
 }
 
-async function loadTopDomainDetail(domain) {
-  topDomainDetailLoading.value = true
+async function copyText(text) {
+  const value = String(text || '').trim()
+  if (!value) {
+    setError('没有可复制的内容')
+    return
+  }
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(value)
+    } else {
+      const textArea = document.createElement('textarea')
+      textArea.value = value
+      textArea.setAttribute('readonly', 'readonly')
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px'
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+    }
+    setSuccess('已复制到剪贴板')
+  } catch (error) {
+    setError(`复制失败: ${error.message}`)
+  }
+}
+
+function getSlowDetailActionField(key) {
+  return slowDetailActionFields.value?.[key] || null
+}
+
+function openLogFilterFromOverview(value, exact = false) {
+  const text = String(value || '').trim()
+  if (!text) {
+    setError('没有可筛选的内容')
+    return
+  }
+  closeSlowDetail()
+  closeRankingDetail()
+  window.dispatchEvent(new CustomEvent('mosdns-open-log-filter', {
+    detail: {
+      value: text,
+      exact: Boolean(exact)
+    }
+  }))
+}
+
+async function loadRankingDetailLogs() {
+  const detailKey = rankingDetail.key
+  const filterField = rankingDetail.filterField
+  rankingDetail.loading = true
   try {
     const params = new URLSearchParams({
-      q: String(domain || ''),
-      exact: 'true',
       page: '1',
-      limit: '20'
+      limit: '50'
     })
+    if (filterField === 'q') {
+      params.set('q', detailKey)
+      params.set('exact', 'true')
+    } else {
+      params.set(filterField, detailKey)
+    }
     const data = await getJSON(`/api/v2/audit/logs?${params.toString()}`)
-    topDomainDetailLogs.value = Array.isArray(data?.logs) ? data.logs : []
+    if (!rankingDetail.open || rankingDetail.key !== detailKey || rankingDetail.filterField !== filterField) {
+      return
+    }
+    rankingDetail.logs = Array.isArray(data?.logs) ? data.logs : []
   } catch (error) {
-    topDomainDetailLogs.value = []
-    setError(`加载域名详情失败: ${error.message}`)
+    rankingDetail.logs = []
+    setError(`加载详情失败: ${error.message}`)
   } finally {
-    topDomainDetailLoading.value = false
+    if (rankingDetail.key === detailKey && rankingDetail.filterField === filterField) {
+      rankingDetail.loading = false
+    }
   }
+}
+
+function openRankingDetail(type, item) {
+  const rawKey = String(item?.key || '').trim()
+  const count = Number(item?.count || 0)
+  if (!rawKey) {
+    return
+  }
+  rankingDetail.type = type
+  rankingDetail.key = rawKey
+  rankingDetail.count = count
+  rankingDetail.percent = calculateRankingPercent(count)
+  rankingDetail.logs = []
+  rankingDetail.loading = false
+
+  if (type === 'domain') {
+    rankingDetail.title = '域名详情'
+    rankingDetail.headline = rawKey
+    rankingDetail.subline = ''
+    rankingDetail.filterField = 'q'
+  } else if (type === 'client') {
+    rankingDetail.title = '客户端详情'
+    rankingDetail.headline = getClientDisplay(rawKey)
+    rankingDetail.subline = hasAlias(rawKey) ? normalizeIP(rawKey) : ''
+    rankingDetail.filterField = 'client_ip'
+    rankingDetail.key = normalizeIP(rawKey)
+  } else {
+    const filterField = domainSetRankSource.value === 'domain_set' ? 'domain_set' : 'effective_tag'
+    rankingDetail.title = '分流规则详情'
+    rankingDetail.headline = getRuleLabel(rawKey)
+    rankingDetail.subline = `${filterField}: ${rawKey}`
+    rankingDetail.filterField = filterField
+  }
+
+  rankingDetail.open = true
+  loadRankingDetailLogs()
 }
 
 function openTopDomainDetail(item) {
-  const domain = String(item?.key || '').trim()
-  if (!domain) {
-    return
-  }
-  selectedTopDomain.value = domain
-  topDomainDetailOpen.value = true
-  topDomainDetailLogs.value = []
-  loadTopDomainDetail(domain)
+  openRankingDetail('domain', item)
 }
 
-function closeTopDomainDetail() {
-  topDomainDetailOpen.value = false
-  selectedTopDomain.value = ''
-  topDomainDetailLogs.value = []
+function openTopClientDetail(item) {
+  openRankingDetail('client', item)
+}
+
+function openDomainSetDetail(item) {
+  openRankingDetail('rule', item)
+}
+
+function closeRankingDetail() {
+  rankingDetail.open = false
+  rankingDetail.key = ''
+  rankingDetail.headline = ''
+  rankingDetail.subline = ''
+  rankingDetail.logs = []
+  rankingDetail.loading = false
 }
 
 function loadHistory() {
@@ -660,6 +977,13 @@ async function reloadOverview(showMessage = false) {
     clearTopNotice()
   }
   try {
+    const domainSetRankPromise = getJSON('/api/v2/audit/rank/effective?limit=20')
+      .then((data) => ({ data, source: 'effective_tag' }))
+      .catch(async () => ({
+        data: await getJSON('/api/v2/audit/rank/domain_set?limit=20'),
+        source: 'domain_set'
+      }))
+
     const [
       statsRes,
       topDomainsRes,
@@ -675,7 +999,7 @@ async function reloadOverview(showMessage = false) {
       getJSON('/api/v2/audit/rank/domain?limit=20'),
       getJSON('/api/v2/audit/rank/client?limit=20'),
       getJSON('/api/v2/audit/rank/slowest?limit=20'),
-      getJSON('/api/v2/audit/rank/effective?limit=20').catch(() => getJSON('/api/v2/audit/rank/domain_set?limit=20')),
+      domainSetRankPromise,
       getJSON('/api/v1/special-groups'),
       getJSON('/plugins/clientname').catch(() => ({})),
       getJSON('/api/v1/upstream/config').catch(() => ({})),
@@ -689,7 +1013,8 @@ async function reloadOverview(showMessage = false) {
     topDomains.value = Array.isArray(topDomainsRes) ? topDomainsRes : []
     topClients.value = Array.isArray(topClientsRes) ? topClientsRes : []
     slowestQueries.value = Array.isArray(slowestRes) ? slowestRes : []
-    domainSetRank.value = Array.isArray(domainSetRes) ? domainSetRes : []
+    domainSetRank.value = Array.isArray(domainSetRes?.data) ? domainSetRes.data : []
+    domainSetRankSource.value = domainSetRes?.source || 'effective_tag'
     specialGroups.value = Array.isArray(specialGroupsRes) ? specialGroupsRes : []
     aliases.value = normalizeAliasMap(aliasesRes)
     upstreamConfig.value = upstreamConfigRes && typeof upstreamConfigRes === 'object' ? upstreamConfigRes : {}
@@ -819,7 +1144,12 @@ onBeforeUnmount(() => {
                 class="overview-click-row"
                 @click="openTopDomainDetail(item)"
               >
-                <td>{{ item.key }}</td>
+                <td>
+                  <div class="overview-row-main-cell">
+                    <span class="overview-row-label">{{ item.key }}</span>
+                    <span class="overview-row-hint">详情</span>
+                  </div>
+                </td>
                 <td class="text-right">{{ Number(item.count || 0).toLocaleString() }}</td>
               </tr>
             </tbody>
@@ -841,10 +1171,23 @@ onBeforeUnmount(() => {
               <tr v-if="topClients.length === 0">
                 <td colspan="2" class="empty">暂无数据</td>
               </tr>
-              <tr v-for="item in topClients" :key="`client-${item.key}`">
+              <tr
+                v-for="item in topClients"
+                :key="`client-${item.key}`"
+                class="overview-click-row"
+                @click="openTopClientDetail(item)"
+              >
                 <td>
-                  <div>{{ getClientDisplay(item.key) }}</div>
-                  <small v-if="hasAlias(item.key)" class="muted mono">{{ normalizeIP(item.key) }}</small>
+                  <div class="overview-row-main-cell overview-row-main-cell-client">
+                    <div class="overview-row-meta">
+                      <div class="overview-row-label">{{ getClientDisplay(item.key) }}</div>
+                      <div v-if="hasAlias(item.key)" class="overview-row-subline">
+                        <small class="muted mono">{{ normalizeIP(item.key) }}</small>
+                        <span class="overview-row-hint">详情</span>
+                      </div>
+                    </div>
+                    <span v-if="!hasAlias(item.key)" class="overview-row-hint">详情</span>
+                  </div>
                 </td>
                 <td class="text-right">{{ Number(item.count || 0).toLocaleString() }}</td>
               </tr>
@@ -873,7 +1216,12 @@ onBeforeUnmount(() => {
                 class="overview-click-row"
                 @click="openSlowDetail(item)"
               >
-                <td>{{ item.query_name }}</td>
+                <td>
+                  <div class="overview-row-main-cell">
+                    <span class="overview-row-label">{{ item.query_name }}</span>
+                    <span class="overview-row-hint">详情</span>
+                  </div>
+                </td>
                 <td class="text-right" :title="formatDuration(item.duration_ms)">
                   <span class="duration-compact">
                     <span class="duration-value">{{ formatCompactDuration(item.duration_ms) }}</span>
@@ -901,11 +1249,19 @@ onBeforeUnmount(() => {
               <tr v-if="domainSetRows.length === 0">
                 <td colspan="3" class="empty">暂无数据</td>
               </tr>
-              <tr v-for="item in domainSetRows" :key="`set-${item.key}`">
+              <tr
+                v-for="item in domainSetRows"
+                :key="`set-${item.key}`"
+                class="overview-click-row"
+                @click="openDomainSetDetail(item)"
+              >
                 <td>
-                  <span class="domain-set-rule">
-                    <span class="domain-set-name">{{ getRuleLabel(item.key) }}</span>
-                  </span>
+                  <div class="overview-row-main-cell">
+                    <span class="domain-set-rule">
+                      <span class="domain-set-name">{{ getRuleLabel(item.key) }}</span>
+                    </span>
+                    <span class="overview-row-hint">详情</span>
+                  </div>
                 </td>
                 <td class="text-right">{{ item.count.toLocaleString() }}</td>
                 <td class="text-right">{{ formatPercent(item.percent) }}</td>
@@ -936,99 +1292,147 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <div v-if="slowDetailOpen && selectedSlowQuery" class="modal-mask modal-mask-top" @click.self="closeSlowDetail">
-      <section class="panel data-view-modal overview-slow-detail-modal">
-        <header class="panel-header">
-          <div>
-            <h3>最慢查询详情</h3>
+    <Teleport to="body">
+      <div v-if="slowDetailOpen && selectedSlowQuery" class="modal-mask modal-mask-top" @click.self="closeSlowDetail">
+        <section class="panel data-view-modal overview-slow-detail-modal">
+          <header class="panel-header">
+            <div>
+              <h3>最慢查询详情</h3>
+            </div>
+            <div class="actions">
+              <button class="btn secondary" type="button" @click="closeSlowDetail">关闭</button>
+            </div>
+          </header>
+          <div class="detail-grid">
+            <div><strong>时间:</strong> {{ formatTime(selectedSlowQuery.query_time) }}</div>
+            <div>
+              <strong>客户端:</strong>
+              <span :class="{ mono: getSlowDetailActionField('client_ip')?.mono }">{{ getSlowDetailActionField('client_ip')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('client_ip')?.copyValue" @click="copyText(getSlowDetailActionField('client_ip')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('client_ip')?.filterValue" @click="openLogFilterFromOverview(getSlowDetailActionField('client_ip')?.filterValue, getSlowDetailActionField('client_ip')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div>
+              <strong>域名:</strong>
+              <span :class="{ mono: getSlowDetailActionField('query_name')?.mono }">{{ getSlowDetailActionField('query_name')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('query_name')?.copyValue" @click="copyText(getSlowDetailActionField('query_name')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('query_name')?.filterValue" @click="openLogFilterFromOverview(getSlowDetailActionField('query_name')?.filterValue, getSlowDetailActionField('query_name')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div><strong>类型:</strong> {{ selectedSlowQuery.query_type || '-' }}</div>
+            <div><strong>类别:</strong> {{ selectedSlowQuery.query_class || '-' }}</div>
+            <div>
+              <strong>Trace ID:</strong>
+              <span class="mono">{{ getSlowDetailActionField('trace_id')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('trace_id')?.copyValue" @click="copyText(getSlowDetailActionField('trace_id')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('trace_id')?.filterValue" @click="openLogFilterFromOverview(getSlowDetailActionField('trace_id')?.filterValue, getSlowDetailActionField('trace_id')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div><strong>生效标签:</strong> {{ getDetailRuleLabel(selectedSlowQuery.effective_tag || selectedSlowQuery.domain_set) }}</div>
+            <div>
+              <strong>分流规则:</strong>
+              <span>{{ getSlowDetailActionField('domain_set')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('domain_set')?.copyValue" @click="copyText(getSlowDetailActionField('domain_set')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getSlowDetailActionField('domain_set')?.filterValue" @click="openLogFilterFromOverview(getSlowDetailActionField('domain_set')?.filterValue, getSlowDetailActionField('domain_set')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div><strong>上游组:</strong> {{ selectedSlowQuery.final_upstream || selectedSlowQuery.upstream_group || '-' }}</div>
+            <div><strong>最终上游:</strong> {{ selectedSlowQuery.selected_upstream || '-' }}</div>
+            <div><strong>响应码:</strong> {{ selectedSlowQuery.response_code || '-' }}</div>
+            <div><strong>响应标志:</strong> {{ formatResponseFlags(selectedSlowQuery.response_flags) }}</div>
+            <div><strong>耗时:</strong> {{ formatDuration(selectedSlowQuery.duration_ms) }}</div>
           </div>
-          <div class="actions">
-            <button class="btn secondary" type="button" @click="closeSlowDetail">关闭</button>
+          <div class="table-wrap" style="margin-top: 10px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>应答类型</th>
+                  <th>数据</th>
+                  <th class="text-right">TTL</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="!Array.isArray(selectedSlowQuery.answers) || selectedSlowQuery.answers.length === 0">
+                  <td colspan="3" class="empty">(empty)</td>
+                </tr>
+                <tr v-for="(answer, index) in (selectedSlowQuery.answers || [])" :key="`slow-answer-${index}`">
+                  <td>{{ answer.type || '-' }}</td>
+                  <td class="mono">{{ answer.data || '-' }}</td>
+                  <td class="text-right">{{ Number(answer.ttl || 0) }}s</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        </header>
-        <div class="detail-grid">
-          <div><strong>时间:</strong> {{ formatTime(selectedSlowQuery.query_time) }}</div>
-          <div><strong>客户端:</strong> {{ getClientDisplay(selectedSlowQuery.client_ip) }}</div>
-          <div><strong>域名:</strong> {{ selectedSlowQuery.query_name || '-' }}</div>
-          <div><strong>类型:</strong> {{ selectedSlowQuery.query_type || '-' }}</div>
-          <div><strong>类别:</strong> {{ selectedSlowQuery.query_class || '-' }}</div>
-          <div><strong>Trace ID:</strong> <span class="mono">{{ selectedSlowQuery.trace_id || '-' }}</span></div>
-          <div><strong>生效标签:</strong> {{ getDetailRuleLabel(selectedSlowQuery.effective_tag || selectedSlowQuery.domain_set) }}</div>
-          <div><strong>上游组:</strong> {{ selectedSlowQuery.final_upstream || selectedSlowQuery.upstream_group || '-' }}</div>
-          <div><strong>最终上游:</strong> {{ selectedSlowQuery.selected_upstream || '-' }}</div>
-          <div><strong>响应码:</strong> {{ selectedSlowQuery.response_code || '-' }}</div>
-          <div><strong>响应标志:</strong> {{ formatResponseFlags(selectedSlowQuery.response_flags) }}</div>
-          <div><strong>耗时:</strong> {{ formatDuration(selectedSlowQuery.duration_ms) }}</div>
-        </div>
-        <div class="table-wrap" style="margin-top: 10px;">
-          <table>
-            <thead>
-              <tr>
-                <th>应答类型</th>
-                <th>数据</th>
-                <th class="text-right">TTL</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!Array.isArray(selectedSlowQuery.answers) || selectedSlowQuery.answers.length === 0">
-                <td colspan="3" class="empty">(empty)</td>
-              </tr>
-              <tr v-for="(answer, index) in (selectedSlowQuery.answers || [])" :key="`slow-answer-${index}`">
-                <td>{{ answer.type || '-' }}</td>
-                <td class="mono">{{ answer.data || '-' }}</td>
-                <td class="text-right">{{ Number(answer.ttl || 0) }}s</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+        </section>
+      </div>
 
-    <div v-if="topDomainDetailOpen" class="modal-mask" @click.self="closeTopDomainDetail">
-      <section class="panel data-view-modal overview-slow-detail-modal">
-        <header class="panel-header">
-          <div>
-            <h3>域名详情</h3>
-            <p class="muted">{{ selectedTopDomain || '-' }}</p>
+      <div v-if="rankingDetail.open" class="modal-mask modal-mask-ranking" @click.self="closeRankingDetail">
+        <section class="panel data-view-modal overview-ranking-detail-modal">
+          <header class="panel-header">
+            <div>
+              <h3>{{ rankingDetail.title }}</h3>
+              <p class="muted">{{ rankingDetail.headline || '-' }}</p>
+              <p v-if="rankingDetail.subline" class="muted mono ranking-detail-subline">{{ rankingDetail.subline }}</p>
+            </div>
+            <div class="actions">
+              <button class="btn secondary" type="button" @click="closeRankingDetail">关闭</button>
+            </div>
+          </header>
+          <div class="overview-ranking-summary-grid">
+            <article
+              v-for="card in rankingDetailSummaryCards"
+              :key="card.key"
+              class="overview-ranking-summary-card"
+            >
+              <span class="overview-ranking-summary-label">{{ card.title }}</span>
+              <strong>{{ card.value }}</strong>
+            </article>
           </div>
-          <div class="actions">
-            <button class="btn secondary" type="button" @click="closeTopDomainDetail">关闭</button>
-          </div>
-        </header>
-        <div class="table-wrap top-domain-detail-fit">
-          <table>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>客户端</th>
-                <th>类型</th>
-                <th class="text-right">耗时</th>
-                <th>响应</th>
-                <th class="text-right">详情</th>
+          <div class="table-wrap ranking-detail-table-fit">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>域名</th>
+                  <th>客户端</th>
+                  <th>类型</th>
+                  <th>分流规则</th>
+                  <th>上游</th>
+                  <th class="text-right">耗时</th>
+                  <th>响应</th>
+                  <th class="text-right">详情</th>
+                </tr>
+              </thead>
+              <tbody>
+              <tr v-if="rankingDetail.loading">
+                <td colspan="9" class="empty">加载中...</td>
               </tr>
-            </thead>
-            <tbody>
-              <tr v-if="topDomainDetailLoading">
-                <td colspan="6" class="empty">加载中...</td>
+              <tr v-else-if="rankingDetail.logs.length === 0">
+                <td colspan="9" class="empty">暂无详情数据</td>
               </tr>
-              <tr v-else-if="topDomainDetailLogs.length === 0">
-                <td colspan="6" class="empty">暂无详情数据</td>
-              </tr>
-              <tr v-for="(log, index) in topDomainDetailLogs" :key="`top-domain-log-${log.trace_id || log.query_time || index}`">
-                <td>{{ formatTime(log.query_time) }}</td>
-                <td>{{ getClientDisplay(log.client_ip) }}</td>
-                <td>{{ log.query_type || '-' }}</td>
-                <td class="text-right">{{ formatDuration(log.duration_ms) }}</td>
-                <td>{{ log.response_code || '-' }}</td>
-                <td class="text-right">
+              <tr v-for="(log, index) in rankingDetail.logs" :key="`ranking-log-${log.trace_id || log.query_time || index}`">
+                <td data-label="时间">{{ formatTime(log.query_time) }}</td>
+                <td data-label="域名" class="mono ranking-detail-domain-cell" :title="log.query_name || '-'">{{ log.query_name || '-' }}</td>
+                <td data-label="客户端">{{ getClientDisplay(log.client_ip) }}</td>
+                <td data-label="类型">{{ log.query_type || '-' }}</td>
+                <td data-label="分流规则" :title="getDetailRuleLabel(getRuleDetailValue(log))">{{ getDetailRuleLabel(getRuleDetailValue(log)) }}</td>
+                <td data-label="上游" :title="getUpstreamDetailValue(log)">{{ getUpstreamDetailValue(log) }}</td>
+                <td data-label="耗时" class="text-right">{{ formatDuration(log.duration_ms) }}</td>
+                <td data-label="响应">{{ log.response_code || '-' }}</td>
+                <td data-label="详情" class="text-right">
                   <button class="btn tiny secondary" type="button" @click="openSlowDetail(log)">查看</button>
                 </td>
               </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>
 

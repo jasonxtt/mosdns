@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, postJSON } from '../src/api/http'
 import ConfirmBubbleHost from '../src/components/ConfirmBubbleHost.vue'
 import DataManagementManager from '../src/components/DataManagementManager.vue'
@@ -21,7 +21,7 @@ const activeRulesSubTab = ref('list-mgmt')
 const activeDataSubTab = ref('cache-management')
 
 const mainTabs = [
-  { id: 'overview', label: '概览', icon: '◫', spaced: true },
+  { id: 'overview', label: '概览', icon: '◫' },
   { id: 'log-query', label: '查询日志', icon: '⌕' },
   { id: 'rules', label: '规则管理', icon: '☰' },
   { id: 'data-management', label: '数据管理', icon: '◌' },
@@ -88,15 +88,8 @@ const currentSecondaryTabs = computed(() => {
 const hasSecondaryTabs = computed(() => currentSecondaryTabs.value.length > 0)
 const showTopRail = computed(() => activeMainTab.value !== 'overview')
 
-function formatPrimaryLabel(label = '', spaced = false) {
-  if (!spaced) {
-    return label
-  }
-  const chars = Array.from(String(label))
-  if (chars.length !== 2) {
-    return label
-  }
-  return `${chars[0]}\u3000\u3000${chars[1]}`
+function formatPrimaryLabel(label = '') {
+  return String(label || '')
 }
 
 function initializeAppearance() {
@@ -154,6 +147,24 @@ function handleVisibilityChange() {
 
 function triggerGlobalRefresh() {
   window.dispatchEvent(new CustomEvent('mosdns-log-refresh'))
+}
+
+function handleOpenLogFilter(event) {
+  const detail = event?.detail || {}
+  const text = String(detail.value || '').trim()
+  if (!text) {
+    return
+  }
+  activeMainTab.value = 'log-query'
+  activeQuerySubTab.value = 'live'
+  nextTick(() => {
+    window.dispatchEvent(new CustomEvent('mosdns-open-log-filter-ready', {
+      detail: {
+        value: text,
+        exact: Boolean(detail.exact)
+      }
+    }))
+  })
 }
 
 function clearTopNotice() {
@@ -296,6 +307,7 @@ onMounted(() => {
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   window.addEventListener('mosdns-top-notice', handleTopNoticeEvent)
+  window.addEventListener('mosdns-open-log-filter', handleOpenLogFilter)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -304,6 +316,7 @@ onBeforeUnmount(() => {
   clearTopNotice()
   window.removeEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   window.removeEventListener('mosdns-top-notice', handleTopNoticeEvent)
+  window.removeEventListener('mosdns-open-log-filter', handleOpenLogFilter)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
@@ -327,7 +340,7 @@ onBeforeUnmount(() => {
           @click="onMainTabClick(tab.id)"
         >
           <span class="log1-primary-icon" aria-hidden="true">{{ tab.icon }}</span>
-          <span class="log1-primary-label" :class="{ 'is-spaced': tab.spaced }">{{ formatPrimaryLabel(tab.label, tab.spaced) }}</span>
+          <span class="log1-primary-label">{{ formatPrimaryLabel(tab.label) }}</span>
         </button>
         <button
           class="log1-primary-btn log1-primary-btn-refresh-mobile"
@@ -337,7 +350,7 @@ onBeforeUnmount(() => {
           @click="triggerGlobalRefresh"
         >
           <span class="log1-primary-icon" aria-hidden="true">⟳</span>
-          <span class="log1-primary-label is-spaced">{{ formatPrimaryLabel('刷新', true) }}</span>
+          <span class="log1-primary-label">{{ formatPrimaryLabel('刷新') }}</span>
         </button>
         <button
           class="log1-primary-btn log1-primary-btn-refresh-mobile"
@@ -348,18 +361,18 @@ onBeforeUnmount(() => {
           @click="restartMosdns"
         >
           <span class="log1-primary-icon" aria-hidden="true">↻</span>
-          <span class="log1-primary-label" :class="{ 'is-spaced': !restartLoading }">{{ restartLoading ? '重启中' : formatPrimaryLabel('重启', true) }}</span>
+          <span class="log1-primary-label">{{ restartLoading ? '重启中' : formatPrimaryLabel('重启') }}</span>
         </button>
       </nav>
 
       <div class="log1-sidebar-tools">
         <button class="log1-primary-btn log1-primary-btn-refresh-desktop" type="button" title="刷新当前页面数据" @click="triggerGlobalRefresh">
           <span class="log1-primary-icon" aria-hidden="true">⟳</span>
-          <span class="log1-primary-label is-spaced">{{ formatPrimaryLabel('刷新', true) }}</span>
+          <span class="log1-primary-label">{{ formatPrimaryLabel('刷新') }}</span>
         </button>
         <button class="log1-primary-btn log1-primary-btn-refresh-desktop" type="button" title="重启" :disabled="restartLoading" @click="restartMosdns">
           <span class="log1-primary-icon" aria-hidden="true">↻</span>
-          <span class="log1-primary-label" :class="{ 'is-spaced': !restartLoading }">{{ restartLoading ? '重启中' : formatPrimaryLabel('重启', true) }}</span>
+          <span class="log1-primary-label">{{ restartLoading ? '重启中' : formatPrimaryLabel('重启') }}</span>
         </button>
       </div>
     </aside>

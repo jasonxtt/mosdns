@@ -110,6 +110,50 @@ func TestGetV2LogsClientIPFilterSupportsMultipleAliasMatches(t *testing.T) {
 	}
 }
 
+func TestGetV2LogsSupportsExactDomainSetAndEffectiveTagFilters(t *testing.T) {
+	collector := NewAuditCollector(4)
+	collector.logs = []AuditLog{
+		{
+			ClientIP:     "::ffff:10.0.0.10",
+			QueryName:    "alpha.example",
+			DomainSet:    "gfwlist",
+			EffectiveTag: "国外域名",
+			TraceID:      "trace-1",
+		},
+		{
+			ClientIP:     "::ffff:10.0.0.11",
+			QueryName:    "beta.example",
+			DomainSet:    "Netflix",
+			EffectiveTag: "特殊上游1",
+			TraceID:      "trace-2",
+		},
+	}
+
+	domainSetResponse := collector.GetV2Logs(V2GetLogsParams{
+		Page:      1,
+		Limit:     10,
+		DomainSet: "Netflix",
+	})
+	if got := len(domainSetResponse.Logs); got != 1 {
+		t.Fatalf("expected one domain_set match, got %d", got)
+	}
+	if domainSetResponse.Logs[0].TraceID != "trace-2" {
+		t.Fatalf("unexpected domain_set match trace id %q", domainSetResponse.Logs[0].TraceID)
+	}
+
+	effectiveResponse := collector.GetV2Logs(V2GetLogsParams{
+		Page:         1,
+		Limit:        10,
+		EffectiveTag: "国外域名",
+	})
+	if got := len(effectiveResponse.Logs); got != 1 {
+		t.Fatalf("expected one effective_tag match, got %d", got)
+	}
+	if effectiveResponse.Logs[0].TraceID != "trace-1" {
+		t.Fatalf("unexpected effective_tag match trace id %q", effectiveResponse.Logs[0].TraceID)
+	}
+}
+
 func TestClearLogsDropsBackingStoreReferences(t *testing.T) {
 	collector := NewAuditCollector(4)
 	collector.logs = []AuditLog{

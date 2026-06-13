@@ -350,6 +350,19 @@ function applyQuickFilter(value, exact = false) {
   refreshLogs()
 }
 
+function handleOpenLogFilter(event) {
+  if (!isLiveMode.value) {
+    return
+  }
+  const detail = event?.detail || {}
+  const text = String(detail.value || '').trim()
+  if (!text) {
+    return
+  }
+  searchInput.value = detail.exact ? `"${text}"` : text
+  refreshLogs()
+}
+
 function getDetailActionField(key) {
   return detailActionFields.value?.[key] || null
 }
@@ -713,10 +726,12 @@ onMounted(async () => {
     refreshLogs()
   }
   window.addEventListener('mosdns-log-refresh', handleGlobalRefresh)
+  window.addEventListener('mosdns-open-log-filter-ready', handleOpenLogFilter)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('mosdns-log-refresh', handleGlobalRefresh)
+  window.removeEventListener('mosdns-open-log-filter-ready', handleOpenLogFilter)
 })
 </script>
 
@@ -913,106 +928,107 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="detailModalOpen && selectedLog" class="modal-mask" @click.self="closeLogDetail">
-      <section class="panel data-view-modal">
-        <header class="panel-header">
-          <div>
-            <h3>查询详情</h3>
+    <Teleport to="body">
+      <div v-if="detailModalOpen && selectedLog" class="modal-mask" @click.self="closeLogDetail">
+        <section class="panel data-view-modal">
+          <header class="panel-header">
+            <div>
+              <h3>查询详情</h3>
+            </div>
+            <div class="actions">
+              <button class="btn secondary" type="button" @click="closeLogDetail">关闭</button>
+            </div>
+          </header>
+          <div class="detail-grid">
+            <div><strong>时间:</strong> {{ formatTime(selectedLog.query_time) }}</div>
+            <div>
+              <strong>客户端:</strong>
+              <span :class="{ mono: getDetailActionField('client_ip')?.mono }">{{ getDetailActionField('client_ip')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('client_ip')?.copyValue" @click="copyText(getDetailActionField('client_ip')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('client_ip')?.filterValue" @click="applyQuickFilter(getDetailActionField('client_ip')?.filterValue, getDetailActionField('client_ip')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div>
+              <strong>域名:</strong>
+              <span :class="{ mono: getDetailActionField('query_name')?.mono }">{{ getDetailActionField('query_name')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('query_name')?.copyValue" @click="copyText(getDetailActionField('query_name')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('query_name')?.filterValue" @click="applyQuickFilter(getDetailActionField('query_name')?.filterValue, getDetailActionField('query_name')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div><strong>类型:</strong> {{ selectedLog.query_type || '-' }}</div>
+            <div><strong>类别:</strong> {{ selectedLog.query_class || '-' }}</div>
+            <div>
+              <strong>Trace ID:</strong>
+              <span class="mono">{{ getDetailActionField('trace_id')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('trace_id')?.copyValue" @click="copyText(getDetailActionField('trace_id')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('trace_id')?.filterValue" @click="applyQuickFilter(getDetailActionField('trace_id')?.filterValue, getDetailActionField('trace_id')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div><strong>生效标签:</strong> {{ selectedLog.effective_tag || selectedLog.domain_set || '-' }}</div>
+            <div><strong>命中标签:</strong> {{ selectedLog.domain_set || '-' }}</div>
+            <div>
+              <strong>匹配来源:</strong>
+              <span>{{ selectedLog.matched_rule_source || '-' }}</span>
+            </div>
+            <div>
+              <strong>分流规则:</strong>
+              <span>{{ getDetailActionField('domain_set')?.value || '-' }}</span>
+              <span class="detail-inline-actions">
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('domain_set')?.copyValue" @click="copyText(getDetailActionField('domain_set')?.copyValue)">复制</button>
+                <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('domain_set')?.filterValue" @click="applyQuickFilter(getDetailActionField('domain_set')?.filterValue, getDetailActionField('domain_set')?.exact)">筛选</button>
+              </span>
+            </div>
+            <div><strong>专属分流组:</strong> {{ getMatchedGroupDisplay(selectedLog.matched_group) }}</div>
+            <div><strong>最终序列:</strong> {{ selectedLog.final_sequence || '-' }}</div>
+            <div><strong>最终上游组:</strong> {{ selectedLog.final_upstream || '-' }}</div>
+            <div><strong>上游目标:</strong> {{ selectedLog.upstream_targets || '-' }}</div>
+            <div><strong>最终上游:</strong> {{ selectedLog.selected_upstream || '-' }}</div>
+            <div>
+              <strong>响应码:</strong>
+              {{ selectedLog.response_code || '-' }}<span v-if="selectedLog.is_blocked"> (已拦截)</span>
+            </div>
+            <div><strong>响应标志:</strong> {{ responseFlagText }}</div>
+            <div><strong>耗时:</strong> {{ Number(selectedLog.duration_ms || 0).toFixed(2) }} ms</div>
           </div>
-          <div class="actions">
-            <button class="btn secondary" type="button" @click="closeLogDetail">关闭</button>
-          </div>
-        </header>
-        <div class="detail-grid">
-          <div><strong>时间:</strong> {{ formatTime(selectedLog.query_time) }}</div>
-          <div>
-            <strong>客户端:</strong>
-            <span :class="{ mono: getDetailActionField('client_ip')?.mono }">{{ getDetailActionField('client_ip')?.value || '-' }}</span>
-            <span class="detail-inline-actions">
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('client_ip')?.copyValue" @click="copyText(getDetailActionField('client_ip')?.copyValue)">复制</button>
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('client_ip')?.filterValue" @click="applyQuickFilter(getDetailActionField('client_ip')?.filterValue, getDetailActionField('client_ip')?.exact)">筛选</button>
-            </span>
-          </div>
-          <div>
-            <strong>域名:</strong>
-            <span :class="{ mono: getDetailActionField('query_name')?.mono }">{{ getDetailActionField('query_name')?.value || '-' }}</span>
-            <span class="detail-inline-actions">
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('query_name')?.copyValue" @click="copyText(getDetailActionField('query_name')?.copyValue)">复制</button>
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('query_name')?.filterValue" @click="applyQuickFilter(getDetailActionField('query_name')?.filterValue, getDetailActionField('query_name')?.exact)">筛选</button>
-            </span>
-          </div>
-          <div><strong>类型:</strong> {{ selectedLog.query_type || '-' }}</div>
-          <div><strong>类别:</strong> {{ selectedLog.query_class || '-' }}</div>
-          <div>
-            <strong>Trace ID:</strong>
-            <span class="mono">{{ getDetailActionField('trace_id')?.value || '-' }}</span>
-            <span class="detail-inline-actions">
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('trace_id')?.copyValue" @click="copyText(getDetailActionField('trace_id')?.copyValue)">复制</button>
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('trace_id')?.filterValue" @click="applyQuickFilter(getDetailActionField('trace_id')?.filterValue, getDetailActionField('trace_id')?.exact)">筛选</button>
-            </span>
-          </div>
-          <div><strong>生效标签:</strong> {{ selectedLog.effective_tag || selectedLog.domain_set || '-' }}</div>
-          <div><strong>命中标签:</strong> {{ selectedLog.domain_set || '-' }}</div>
-          <div>
-            <strong>匹配来源:</strong>
-            <span>{{ selectedLog.matched_rule_source || '-' }}</span>
-          </div>
-          <div>
-            <strong>分流规则:</strong>
-            <span>{{ getDetailActionField('domain_set')?.value || '-' }}</span>
-            <span class="detail-inline-actions">
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('domain_set')?.copyValue" @click="copyText(getDetailActionField('domain_set')?.copyValue)">复制</button>
-              <button class="btn tiny secondary" type="button" :disabled="!getDetailActionField('domain_set')?.filterValue" @click="applyQuickFilter(getDetailActionField('domain_set')?.filterValue, getDetailActionField('domain_set')?.exact)">筛选</button>
-            </span>
-          </div>
-          <div><strong>专属分流组:</strong> {{ getMatchedGroupDisplay(selectedLog.matched_group) }}</div>
-          <div><strong>最终序列:</strong> {{ selectedLog.final_sequence || '-' }}</div>
-          <div><strong>最终上游组:</strong> {{ selectedLog.final_upstream || '-' }}</div>
-          <div><strong>上游目标:</strong> {{ selectedLog.upstream_targets || '-' }}</div>
-          <div><strong>最终上游:</strong> {{ selectedLog.selected_upstream || '-' }}</div>
-          <div>
-            <strong>响应码:</strong>
-            {{ selectedLog.response_code || '-' }}<span v-if="selectedLog.is_blocked"> (已拦截)</span>
-          </div>
-          <div><strong>响应标志:</strong> {{ responseFlagText }}</div>
-          <div><strong>耗时:</strong> {{ Number(selectedLog.duration_ms || 0).toFixed(2) }} ms</div>
-        </div>
 
-        <div class="table-wrap" style="margin-top: 10px;">
-          <table>
-            <thead>
-              <tr>
-                <th>应答类型</th>
-                <th>数据</th>
-                <th>TTL</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!Array.isArray(selectedLog.answers) || selectedLog.answers.length === 0">
-                <td colspan="3" class="empty">(empty)</td>
-              </tr>
-              <tr v-for="(answer, index) in (selectedLog.answers || [])" :key="`answer-${index}`">
-                <td>{{ answer.type || '-' }}</td>
-                <td class="mono">{{ answer.data || '-' }}</td>
-                <td>{{ Number(answer.ttl || 0) }}s</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+          <div class="table-wrap" style="margin-top: 10px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>应答类型</th>
+                  <th>数据</th>
+                  <th>TTL</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="!Array.isArray(selectedLog.answers) || selectedLog.answers.length === 0">
+                  <td colspan="3" class="empty">(empty)</td>
+                </tr>
+                <tr v-for="(answer, index) in (selectedLog.answers || [])" :key="`answer-${index}`">
+                  <td>{{ answer.type || '-' }}</td>
+                  <td class="mono">{{ answer.data || '-' }}</td>
+                  <td>{{ Number(answer.ttl || 0) }}s</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
 
-    <div v-if="aliasModalOpen" class="modal-mask" @click.self="closeAliasManager">
-      <section class="panel data-view-modal alias-modal">
-        <header class="panel-header">
-          <div>
-            <h3>客户端别名管理</h3>
-            <p class="muted">保存后立即生效，搜索框可直接输入别名。</p>
-          </div>
-          <div class="actions">
-            <button class="btn secondary" @click="closeAliasManager">关闭</button>
-          </div>
-        </header>
+      <div v-if="aliasModalOpen" class="modal-mask" @click.self="closeAliasManager">
+        <section class="panel data-view-modal alias-modal">
+          <header class="panel-header">
+            <div>
+              <h3>客户端别名管理</h3>
+              <p class="muted">保存后立即生效，搜索框可直接输入别名。</p>
+            </div>
+            <div class="actions">
+              <button class="btn secondary" @click="closeAliasManager">关闭</button>
+            </div>
+          </header>
 
         <div class="form-grid alias-manual-grid">
           <label>手动新增</label>
@@ -1056,7 +1072,8 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
-      </section>
-    </div>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>
