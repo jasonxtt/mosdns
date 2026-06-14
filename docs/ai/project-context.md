@@ -121,7 +121,7 @@ The fork is already published and maintained as a real release branch, not just 
 
 Current released version in repo docs:
 
-- `v0.4.9`
+- `v0.4.10`
 
 ## Code areas likely to matter for future feature work
 

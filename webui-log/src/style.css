@@ -472,7 +472,9 @@ body::after {
 .overview-card {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--surface-soft-2);
+  background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity));
+  backdrop-filter: blur(var(--panel-glass-blur));
+  -webkit-backdrop-filter: blur(var(--panel-glass-blur));
   padding: 12px;
 }
 
@@ -722,11 +724,13 @@ body::after {
 }
 
 .panel {
-  background: var(--panel);
+  background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity));
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px;
   box-shadow: 0 10px 18px rgba(18, 28, 40, 0.06);
+  backdrop-filter: blur(var(--panel-glass-blur));
+  -webkit-backdrop-filter: blur(var(--panel-glass-blur));
   min-width: 0;
 }
 
@@ -1810,8 +1814,30 @@ tr.disabled {
 
 .form-modal-card {
   width: min(760px, 96vw);
-  max-height: 86vh;
+  max-height: calc(100vh - 40px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  margin: 0 auto;
+}
+
+.form-modal-card .panel-header {
+  margin-bottom: 10px;
+}
+
+.form-modal-card .form-grid {
+  min-height: 0;
   overflow: auto;
+  align-content: start;
+  padding-right: 4px;
+}
+
+.form-modal-card .actions {
+  justify-content: flex-end;
+  border-top: 0;
+  padding-top: 8px;
+  margin-top: 8px;
+  background: transparent;
 }
 
 .upstream-editor-modal-card {
@@ -2600,7 +2626,9 @@ tr.disabled {
 .sys-card {
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--surface-soft);
+  background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity));
+  backdrop-filter: blur(var(--panel-glass-blur));
+  -webkit-backdrop-filter: blur(var(--panel-glass-blur));
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -2781,7 +2809,9 @@ tr.disabled {
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
-  background: var(--surface-input);
+  background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity));
+  backdrop-filter: blur(var(--panel-glass-blur));
+  -webkit-backdrop-filter: blur(var(--panel-glass-blur));
 }
 
 .appearance-color-shell input[type="color"] {
@@ -2835,7 +2865,9 @@ tr.disabled {
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
-  background: var(--surface-input);
+  background: rgba(var(--panel-glass-rgb), var(--panel-glass-opacity));
+  backdrop-filter: blur(var(--panel-glass-blur));
+  -webkit-backdrop-filter: blur(var(--panel-glass-blur));
 }
 
 .appearance-background-swatch {
