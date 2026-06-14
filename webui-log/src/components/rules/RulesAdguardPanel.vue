@@ -21,7 +21,7 @@ defineEmits(['create', 'update-all', 'toggle', 'update', 'edit', 'delete'])
   <section class="sub-panel">
     <div class="actions">
       <button class="btn primary entry-action-btn" @click="$emit('create')">新增拦截规则</button>
-      <button class="btn warning" @click="$emit('update-all')">更新全部规则</button>
+      <button class="btn warning entry-action-btn" @click="$emit('update-all')">更新全部规则</button>
     </div>
     <div class="table-wrap adaptive-table-wrap rules-adguard-wrap">
       <table class="rules-adaptive-table rules-adguard-table">

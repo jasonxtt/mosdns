@@ -2044,10 +2044,10 @@ onBeforeUnmount(() => {
 }
 
 .log1-ip-option.active {
-  border-color: var(--selectable-active-border);
-  background: var(--selectable-active-bg);
-  color: var(--selectable-active-text);
-  box-shadow: 0 0 0 3px var(--selectable-active-ring), 0 10px 18px rgba(var(--brand-rgb), 0.16);
+  border-color: var(--log1-menu-btn-active-border);
+  background: var(--log1-menu-btn-active-bg);
+  color: var(--log1-menu-btn-active-text);
+  box-shadow: var(--log1-menu-btn-active-shadow);
 }
 
 .log1-ip-option::before {
@@ -2058,7 +2058,7 @@ onBeforeUnmount(() => {
   bottom: 12%;
   width: 4px;
   border-radius: 0 999px 999px 0;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--log1-menu-btn-active-line);
   opacity: 0;
   transform: scaleY(0.7);
   transition: transform 0.18s ease, opacity 0.18s ease;
@@ -2073,7 +2073,7 @@ onBeforeUnmount(() => {
 }
 
 .log1-ip-option.active span {
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--log1-menu-btn-active-text);
 }
 
 :deep(.restart-mosdns-btn),
@@ -2093,10 +2093,10 @@ onBeforeUnmount(() => {
 }
 
 :deep(.core-mode-btn.is-active) {
-  background: var(--selectable-active-bg) !important;
-  border-color: var(--selectable-active-border) !important;
-  color: var(--selectable-active-text) !important;
-  box-shadow: 0 0 0 3px var(--selectable-active-ring), 0 10px 18px rgba(var(--brand-rgb), 0.16) !important;
+  background: var(--log1-menu-btn-active-bg) !important;
+  border-color: var(--log1-menu-btn-active-border) !important;
+  color: var(--log1-menu-btn-active-text) !important;
+  box-shadow: var(--log1-menu-btn-active-shadow) !important;
 }
 
 :deep(.system-core-mode-option) {
@@ -2114,17 +2114,17 @@ onBeforeUnmount(() => {
   bottom: 12%;
   width: 4px;
   border-radius: 0 999px 999px 0;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--log1-menu-btn-active-line);
   opacity: 0;
   transform: scaleY(0.7);
   transition: transform 0.18s ease, opacity 0.18s ease;
 }
 
 :deep(.system-core-mode-option.active) {
-  border-color: var(--selectable-active-border) !important;
-  background: var(--selectable-active-bg) !important;
-  color: var(--selectable-active-text) !important;
-  box-shadow: 0 0 0 3px var(--selectable-active-ring), 0 10px 18px rgba(var(--brand-rgb), 0.16) !important;
+  border-color: var(--log1-menu-btn-active-border) !important;
+  background: var(--log1-menu-btn-active-bg) !important;
+  color: var(--log1-menu-btn-active-text) !important;
+  box-shadow: var(--log1-menu-btn-active-shadow) !important;
 }
 
 :deep(.system-core-mode-option.active::before) {
@@ -2133,7 +2133,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.system-core-mode-option.active span) {
-  color: rgba(255, 255, 255, 0.88) !important;
+  color: var(--log1-menu-btn-active-text) !important;
 }
 
 .log1-module-toggle-row {
@@ -2182,9 +2182,10 @@ onBeforeUnmount(() => {
 }
 
 .log1-module-toggle.active {
-  border-color: rgba(var(--brand-rgb), 0.32);
-  background: linear-gradient(135deg, rgba(var(--brand-rgb), 0.16), rgba(var(--panel-glass-rgb), 0.9));
-  box-shadow: 0 10px 18px rgba(var(--brand-rgb), 0.08);
+  border-color: var(--log1-menu-btn-active-border);
+  background: var(--log1-menu-btn-active-bg);
+  color: var(--log1-menu-btn-active-text);
+  box-shadow: var(--log1-menu-btn-active-shadow);
 }
 
 .log1-module-toggle-compact {
@@ -2210,10 +2211,10 @@ onBeforeUnmount(() => {
 }
 
 .log1-module-toggle-compact.active {
-  border-color: rgba(var(--brand-rgb), 0.56);
-  color: var(--ink-0);
-  background: transparent;
-  box-shadow: none;
+  border-color: var(--log1-menu-btn-active-border);
+  color: var(--log1-menu-btn-active-text);
+  background: var(--log1-menu-btn-active-bg);
+  box-shadow: var(--log1-menu-btn-active-shadow);
 }
 
 .log1-advanced-module-panel {

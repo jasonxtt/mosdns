@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.4.10
+
+### Changed
+
+- continued polishing the legacy `/log` compatibility UI so primary nav,
+  secondary nav, and selected-state treatments stay consistent across light
+  and dark themes
+- aligned state-button styling in local rules, core mode, and behavior panels
+  with the newer `/log` selectable-button treatment
+- normalized the `更新全部规则` button sizing in rules management to match the
+  main create-action buttons
+
+### Fixed
+
+- fixed panel-background transparency and glass blur propagation in legacy
+  `/log` pages outside Overview, including system settings, upstream settings,
+  and rules pages
+- fixed clipping issues in the legacy `/log` rule-management editor dialogs by
+  moving diversion-rule, AdGuard-rule, and special-group modals out of the
+  parent panel container and rendering them at `body` level
+- fixed rule-editor dialog layout so the internal form area scrolls correctly
+  and bottom action buttons remain visible
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## v0.4.8
 
 ### Changed
