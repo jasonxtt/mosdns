@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.13
+
+### Changed
+
+- published one final clean correction tag because `v0.4.12` also inherited
+  the earlier tag-pointing mistake during release sequencing
+- kept the intended release contents unchanged from the planned `v0.4.12`
+  patch: compact legacy `/log` navigation updates and the restored maintained
+  `/` appearance-card placement
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## v0.4.12
 
 ### Changed
