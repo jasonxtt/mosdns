@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.12
+
+### Changed
+
+- republished the latest UI-fix binary as a clean follow-up patch because the
+  previous `v0.4.11` tag pointed at the wrong commit for GitHub cloud builds
+- kept the compact legacy `/log` navigation updates, including the mobile
+  top-row `刷新` / `重启` placement and the tightened desktop menu spacing
+
+### Fixed
+
+- ensured the maintained `/` system-settings appearance module remains in the
+  restored compact top-right grid card in the release artifacts used by online
+  updates and GitHub cloud builds
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## v0.4.11
 
 ### Changed
