@@ -12,7 +12,7 @@ import { formatRelativeTime, isZeroTime } from '../utils/time'
 const props = defineProps({
   mode: {
     type: String,
-    default: 'cache-management'
+    default: 'all'
   }
 })
 
@@ -199,9 +199,14 @@ const lastRunDomainCountText = computed(() => {
   return '--'
 })
 
-const showCachePanel = computed(() => props.mode === 'cache-management')
-const showListStatsPanel = computed(() => props.mode === 'domain-stats')
-const showRequeryPanel = computed(() => props.mode === 'requery-cache')
+const showAllPanels = computed(() => {
+  const mode = String(props.mode || '').trim()
+  return mode === '' || mode === 'all'
+})
+
+const showCachePanel = computed(() => showAllPanels.value || props.mode === 'cache-management')
+const showListStatsPanel = computed(() => showAllPanels.value || props.mode === 'domain-stats')
+const showRequeryPanel = computed(() => showAllPanels.value || props.mode === 'requery-cache')
 
 function formatDateForInputLocal(value) {
   if (!value || isZeroTime(value)) {
@@ -880,7 +885,10 @@ onBeforeUnmount(() => {
       @clear-cache="clearCacheRow"
     />
 
-    <div v-if="showListStatsPanel || showRequeryPanel" class="data-inline-row data-inline-row-single">
+    <div
+      v-if="showListStatsPanel || showRequeryPanel"
+      :class="showAllPanels ? 'data-inline-row' : 'data-inline-row data-inline-row-single'"
+    >
     <DataListStatsPanel
       v-if="showListStatsPanel"
       :last-run-domain-count-text="lastRunDomainCountText"

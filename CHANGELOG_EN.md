@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.4.14
+
+### Fixed
+
+- restored the historic maintained `/` data-management behavior so the page
+  again shows `缓存管理`, `域名列表统计`, and `刷新分流缓存` together by
+  default
+- limited the change to the maintained `/` Vue UI and left the compatibility
+  `/log` UI unchanged
+- realigned the embedded frontend assets and release binary so the maintained
+  data-management page no longer regresses to a cache-only view
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## v0.4.13
 
 ### Changed
