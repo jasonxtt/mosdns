@@ -324,10 +324,34 @@ onBeforeUnmount(() => {
 <template>
   <div class="log1-shell">
     <aside class="log1-sidebar">
-      <div class="log1-brand">
-        <div class="log1-brand-mark">M</div>
-        <div class="log1-brand-copy">
-          <strong>MosDNS</strong>
+      <div class="log1-top-row">
+        <div class="log1-brand">
+          <div class="log1-brand-mark">M</div>
+          <div class="log1-brand-copy">
+            <strong>MosDNS</strong>
+          </div>
+        </div>
+
+        <div class="log1-mobile-actions">
+          <button
+            class="log1-mobile-action-btn"
+            type="button"
+            title="刷新当前页面数据"
+            aria-label="刷新当前页面数据"
+            @click="triggerGlobalRefresh"
+          >
+            刷新
+          </button>
+          <button
+            class="log1-mobile-action-btn log1-mobile-action-restart"
+            type="button"
+            title="重启"
+            aria-label="重启"
+            :disabled="restartLoading"
+            @click="restartMosdns"
+          >
+            {{ restartLoading ? '重启中' : '重启' }}
+          </button>
         </div>
       </div>
 
@@ -341,27 +365,6 @@ onBeforeUnmount(() => {
         >
           <span class="log1-primary-icon" aria-hidden="true">{{ tab.icon }}</span>
           <span class="log1-primary-label">{{ formatPrimaryLabel(tab.label) }}</span>
-        </button>
-        <button
-          class="log1-primary-btn log1-primary-btn-refresh-mobile"
-          type="button"
-          title="刷新当前页面数据"
-          aria-label="刷新当前页面数据"
-          @click="triggerGlobalRefresh"
-        >
-          <span class="log1-primary-icon" aria-hidden="true">⟳</span>
-          <span class="log1-primary-label">{{ formatPrimaryLabel('刷新') }}</span>
-        </button>
-        <button
-          class="log1-primary-btn log1-primary-btn-refresh-mobile"
-          type="button"
-          title="重启"
-          aria-label="重启"
-          :disabled="restartLoading"
-          @click="restartMosdns"
-        >
-          <span class="log1-primary-icon" aria-hidden="true">↻</span>
-          <span class="log1-primary-label">{{ restartLoading ? '重启中' : formatPrimaryLabel('重启') }}</span>
         </button>
       </nav>
 
