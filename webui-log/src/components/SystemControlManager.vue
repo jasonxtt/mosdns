@@ -5,7 +5,6 @@ import { openConfirm } from "../utils/confirm";
 import SystemAuditCapacityPanel from "./system/SystemAuditCapacityPanel.vue";
 import SystemAuditPanel from "./system/SystemAuditPanel.vue";
 import SystemAutoRefreshPanel from "./system/SystemAutoRefreshPanel.vue";
-import SystemAppearancePanel from "./system/SystemAppearancePanel.vue";
 import SystemConfigManagePanel from "./system/SystemConfigManagePanel.vue";
 import SystemCoreModePanel from "./system/SystemCoreModePanel.vue";
 import SystemDomainGenerationPanel from "./system/SystemDomainGenerationPanel.vue";
@@ -121,6 +120,7 @@ const buttonColorSettings = reactive(getDefaultButtonColorSettings());
 const buttonColorDraft = ref(defaultButtonColorSettings.light.color);
 const buttonColorSaving = ref(false);
 const eyeDropperSupported = ref(false);
+const panelBackgroundPicker = ref(null);
 
 const panelBackgroundDefaults = getDefaultPanelBackgroundSettings();
 const panelBackgroundMaxUpload = 20 * 1024 * 1024;
@@ -1448,6 +1448,10 @@ async function onPanelBackgroundUrlEnter() {
   await applyPanelBackgroundSettings();
 }
 
+function openPanelBackgroundPicker() {
+  panelBackgroundPicker.value?.click();
+}
+
 function onPanelBackgroundColorInput(event) {
   const next = event?.target?.value || "";
   if (activeThemeKey() === "dark") {
@@ -1830,40 +1834,178 @@ onBeforeUnmount(() => {
           @interval-change="onAutoRefreshIntervalChange"
         />
 
-        <SystemAppearancePanel
-          :appearance="appearance"
-          :button-color-draft="buttonColorDraft"
-          :button-color-saving="buttonColorSaving"
-          :eye-dropper-supported="eyeDropperSupported"
-          :format-relative-time="formatRelativeTime"
-          :panel-background="panelBackground"
-          :panel-background-history="panelBackgroundHistory"
-          :panel-background-history-busy="panelBackgroundHistoryBusy"
-          :panel-background-history-loading="panelBackgroundHistoryLoading"
-          :panel-background-history-open="panelBackgroundHistoryOpen"
-          :text-color-draft="textColorDraft"
-          :text-color-saving="textColorSaving"
-          :theme-options="themeOptions"
-          @apply-theme="applyTheme"
-          @text-color-input="onTextColorPickerInput"
-          @text-color-change="onTextColorPickerChange"
-          @pick-text-color="pickTextColorFromScreen"
-          @reset-text-color="resetThemeTextColor"
-          @button-color-input="onButtonColorPickerInput"
-          @button-color-change="onButtonColorPickerChange"
-          @pick-button-color="pickButtonColorFromScreen"
-          @reset-button-color="resetThemeButtonColor"
-          @panel-bg-color-input="onPanelBackgroundColorInput"
-          @panel-bg-url-enter="onPanelBackgroundUrlEnter"
-          @panel-bg-file-change="onPanelBackgroundFileChange"
-          @toggle-panel-bg-history="togglePanelBackgroundHistory"
-          @clear-panel-bg-history="clearPanelBackgroundHistory"
-          @use-panel-bg-history="usePanelBackgroundHistory"
-          @delete-panel-bg-history="deletePanelBackgroundHistory"
-          @panel-bg-slider-input="onPanelBackgroundSliderInput"
-          @apply-panel-bg-settings="applyPanelBackgroundSettings"
-          @reset-appearance-settings="resetAppearanceSettings"
-        />
+        <section class="panel control-module control-module--mini appearance-compact-module">
+          <h3>主题与外观</h3>
+          <div class="appearance-compact-stack">
+            <div class="appearance-compact-row appearance-compact-row-theme">
+              <strong class="appearance-compact-label">界面风格</strong>
+              <div class="appearance-compact-control appearance-compact-control-end">
+                <select v-model="appearance.theme" @change="applyTheme(appearance.theme)">
+                  <option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="appearance-color-pair-row">
+              <div class="appearance-color-pair">
+                <span class="appearance-color-mini-label">字体</span>
+                <div class="panel-text-color-wrap appearance-compact-tools">
+                  <input
+                    :value="textColorDraft"
+                    type="color"
+                    :disabled="textColorSaving"
+                    @input="onTextColorPickerInput"
+                    @change="onTextColorPickerChange"
+                  />
+                  <div class="appearance-compact-inline-actions">
+                    <button
+                      v-if="eyeDropperSupported"
+                      class="btn tiny secondary"
+                      type="button"
+                      :disabled="textColorSaving"
+                      @click="pickTextColorFromScreen"
+                    >
+                      取色
+                    </button>
+                    <button class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="resetThemeTextColor">默认</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="appearance-color-pair">
+                <span class="appearance-color-mini-label">按钮</span>
+                <div class="panel-text-color-wrap appearance-compact-tools">
+                  <input
+                    :value="buttonColorDraft"
+                    type="color"
+                    :disabled="buttonColorSaving"
+                    @input="onButtonColorPickerInput"
+                    @change="onButtonColorPickerChange"
+                  />
+                  <div class="appearance-compact-inline-actions">
+                    <button
+                      v-if="eyeDropperSupported"
+                      class="btn tiny secondary"
+                      type="button"
+                      :disabled="buttonColorSaving"
+                      @click="pickButtonColorFromScreen"
+                    >
+                      取色
+                    </button>
+                    <button class="btn tiny secondary" type="button" :disabled="buttonColorSaving" @click="resetThemeButtonColor">默认</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="appearance-compact-row appearance-compact-row-top appearance-compact-row-bg">
+              <strong class="appearance-compact-label appearance-compact-label-stack">
+                <span>面板</span>
+                <span>背景</span>
+              </strong>
+              <div class="appearance-compact-control">
+                <div class="appearance-bg-rows">
+                  <div class="appearance-compact-bg-layout">
+                    <input
+                      class="panel-bg-color-inline appearance-compact-bg-swatch"
+                      :value="appearance.theme === 'dark' ? panelBackground.darkColor : panelBackground.lightColor"
+                      type="color"
+                      :disabled="panelBackground.uploading || panelBackground.applying"
+                      title="纯色"
+                      @input="onPanelBackgroundColorInput"
+                    />
+                    <input
+                      v-model="panelBackground.url"
+                      class="appearance-compact-bg-url"
+                      placeholder="输入图片URL链接"
+                      @keydown.enter.prevent="onPanelBackgroundUrlEnter"
+                    />
+                    <div class="appearance-compact-bg-actions-row">
+                      <button class="btn tiny secondary" type="button" :disabled="panelBackground.uploading || panelBackground.applying" @click="openPanelBackgroundPicker">
+                        {{ panelBackground.uploading ? "上传中" : "上传" }}
+                      </button>
+                      <button
+                        class="btn tiny secondary"
+                        type="button"
+                        :disabled="panelBackground.uploading || panelBackground.applying || panelBackgroundHistoryLoading"
+                        @click="togglePanelBackgroundHistory"
+                      >
+                        {{ panelBackgroundHistoryOpen ? "收起" : "记录" }}
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    ref="panelBackgroundPicker"
+                    class="panel-bg-file-input"
+                    type="file"
+                    accept="image/*"
+                    @change="onPanelBackgroundFileChange"
+                  />
+                </div>
+
+                <div v-if="panelBackgroundHistoryOpen" class="panel-bg-history appearance-compact-history">
+                  <div class="panel-bg-history-head">
+                    <strong>历史图片</strong>
+                    <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === 'clear-all'" @click="clearPanelBackgroundHistory">
+                      {{ panelBackgroundHistoryBusy === "clear-all" ? "清空中..." : "清空历史" }}
+                    </button>
+                  </div>
+                  <p v-if="panelBackgroundHistoryLoading" class="muted">历史加载中...</p>
+                  <p v-else-if="panelBackgroundHistory.length === 0" class="muted">暂无历史图片</p>
+                  <div v-else class="panel-bg-history-list">
+                    <div v-for="item in panelBackgroundHistory" :key="item.id" class="panel-bg-history-item">
+                      <img class="panel-bg-history-thumb" :src="item.image_url" alt="history background" />
+                      <div class="panel-bg-history-meta">
+                        <div class="mono">{{ item.id }}</div>
+                        <div class="muted">{{ formatRelativeTime(item.modified_at) }}</div>
+                      </div>
+                      <div class="panel-bg-history-actions">
+                        <button class="btn tiny secondary" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="usePanelBackgroundHistory(item)">选用</button>
+                        <button class="btn tiny danger" type="button" :disabled="panelBackgroundHistoryBusy === item.id" @click="deletePanelBackgroundHistory(item)">
+                          {{ panelBackgroundHistoryBusy === item.id ? "删除中..." : "删除" }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="appearance-compact-row">
+              <strong class="appearance-compact-label">透明度</strong>
+              <div class="appearance-compact-control">
+                <div class="panel-bg-range-wrap appearance-compact-range">
+                  <input v-model.number="panelBackground.transparency" type="range" min="0" max="100" step="1" @input="onPanelBackgroundSliderInput" />
+                  <span>{{ Number(panelBackground.transparency || 0) }}%</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="appearance-compact-row">
+              <strong class="appearance-compact-label">毛玻璃</strong>
+              <div class="appearance-compact-control">
+                <div class="panel-bg-range-wrap appearance-compact-range">
+                  <input v-model.number="panelBackground.blur" type="range" min="0" max="40" step="1" @input="onPanelBackgroundSliderInput" />
+                  <span>{{ Number(panelBackground.blur || 0) }}px</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions appearance-compact-actions">
+            <button class="btn tiny primary" type="button" :disabled="panelBackground.applying || panelBackground.uploading" @click="applyPanelBackgroundSettings">
+              {{ panelBackground.applying ? "应用中..." : "应用" }}
+            </button>
+            <button
+              class="btn tiny secondary"
+              type="button"
+              :disabled="panelBackground.applying || panelBackground.uploading || textColorSaving || buttonColorSaving"
+              @click="resetAppearanceSettings"
+            >
+              重置
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   </section>

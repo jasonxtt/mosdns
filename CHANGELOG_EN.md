@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.4.11
+
+### Changed
+
+- continued refining the legacy `/log` navigation layout across screen sizes
+- moved `刷新` / `重启` into the mobile top-row button area to reduce sidebar
+  pressure on narrow screens
+- scaled down desktop `/log` menu sizing and spacing, and tightened the
+  primary/secondary-nav breakpoint behavior for a more compact compatibility UI
+
+### Fixed
+
+- restored the maintained `/` system-settings appearance module to the historic
+  compact top-right card in the four-panel grid instead of the accidental
+  full-width layout regression
+- kept the latest `/log` mobile navigation updates while separating the `/`
+  and `/log` appearance structures again so the maintained UI is no longer
+  affected by legacy-layout changes
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## v0.4.10
 
 ### Changed
