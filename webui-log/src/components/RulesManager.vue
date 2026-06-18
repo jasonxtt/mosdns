@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deleteRequest, getJSON, postJSON, putJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 import RulesAdguardPanel from './rules/RulesAdguardPanel.vue'
@@ -72,7 +72,8 @@ const specialEditor = reactive({
   open: false,
   slot: 0,
   name: '',
-  listenPort: ''
+  listenPort: '',
+  customPortOnly: false
 })
 
 const adguardEditor = reactive({
@@ -246,6 +247,7 @@ function openCreateSpecial() {
   specialEditor.slot = 0
   specialEditor.name = ''
   specialEditor.listenPort = ''
+  specialEditor.customPortOnly = false
 }
 
 function openEditSpecial(group) {
@@ -254,6 +256,7 @@ function openEditSpecial(group) {
   specialEditor.slot = Number(group.slot) || 0
   specialEditor.name = String(group.name || '')
   specialEditor.listenPort = group?.listen_port ? String(group.listen_port) : ''
+  specialEditor.customPortOnly = Boolean(group?.custom_port_only && group?.listen_port)
 }
 
 function closeSpecialEditor() {
@@ -280,11 +283,13 @@ async function saveSpecial() {
     }
     listenPort = parsed
   }
+  const customPortOnly = listenPort !== 0 && Boolean(specialEditor.customPortOnly)
   try {
     await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
       name,
-      listen_port: listenPort
+      listen_port: listenPort,
+      custom_port_only: customPortOnly
     })
     setSuccess('专属分流组已保存')
     closeSpecialEditor()
@@ -767,6 +772,12 @@ async function updateDiversionAll() {
 function handleGlobalRefresh() {
   reloadCurrentView()
 }
+
+watch(() => specialEditor.listenPort, (value) => {
+  if (!String(value || '').trim()) {
+    specialEditor.customPortOnly = false
+  }
+})
 
 onMounted(() => {
   reloadCurrentView()

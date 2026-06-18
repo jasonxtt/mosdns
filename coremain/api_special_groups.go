@@ -26,15 +26,17 @@ const (
 )
 
 type SpecialGroup struct {
-	Slot       int    `json:"slot"`
-	Name       string `json:"name"`
-	ListenPort int    `json:"listen_port,omitempty"`
+	Slot           int    `json:"slot"`
+	Name           string `json:"name"`
+	ListenPort     int    `json:"listen_port,omitempty"`
+	CustomPortOnly bool   `json:"custom_port_only,omitempty"`
 }
 
 type SpecialGroupView struct {
 	Slot               int    `json:"slot"`
 	Name               string `json:"name"`
 	ListenPort         int    `json:"listen_port,omitempty"`
+	CustomPortOnly     bool   `json:"custom_port_only,omitempty"`
 	Key                string `json:"key"`
 	UpstreamPluginTag  string `json:"upstream_plugin_tag"`
 	DiversionPluginTag string `json:"diversion_plugin_tag"`
@@ -82,9 +84,10 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Slot       int    `json:"slot"`
-		Name       string `json:"name"`
-		ListenPort int    `json:"listen_port"`
+		Slot           int    `json:"slot"`
+		Name           string `json:"name"`
+		ListenPort     int    `json:"listen_port"`
+		CustomPortOnly bool   `json:"custom_port_only"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -101,6 +104,7 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
 		return
 	}
+	customPortOnly := payload.CustomPortOnly && listenPort != 0
 
 	specialGroupsLock.Lock()
 	defer specialGroupsLock.Unlock()
@@ -133,9 +137,11 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	for i := range specialGroups {
 		if specialGroups[i].Slot == slot {
 			previousPort := specialGroups[i].ListenPort
+			previousCustomPortOnly := specialGroups[i].CustomPortOnly
 			specialGroups[i].Name = payload.Name
 			specialGroups[i].ListenPort = listenPort
-			if previousPort != listenPort {
+			specialGroups[i].CustomPortOnly = customPortOnly
+			if previousPort != listenPort || previousCustomPortOnly != customPortOnly {
 				needsConfigSync = true
 				needsRestart = true
 			}
@@ -144,7 +150,12 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !updated {
-		specialGroups = append(specialGroups, SpecialGroup{Slot: slot, Name: payload.Name, ListenPort: listenPort})
+		specialGroups = append(specialGroups, SpecialGroup{
+			Slot:           slot,
+			Name:           payload.Name,
+			ListenPort:     listenPort,
+			CustomPortOnly: customPortOnly,
+		})
 		needsConfigSync = true
 		needsRestart = true
 	}
@@ -179,7 +190,12 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(buildSpecialGroupView(SpecialGroup{Slot: slot, Name: payload.Name, ListenPort: listenPort}))
+	_ = json.NewEncoder(w).Encode(buildSpecialGroupView(SpecialGroup{
+		Slot:           slot,
+		Name:           payload.Name,
+		ListenPort:     listenPort,
+		CustomPortOnly: customPortOnly,
+	}))
 }
 
 func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
@@ -293,12 +309,16 @@ func normalizeSpecialGroups(groups []SpecialGroup) []SpecialGroup {
 		} else {
 			g.ListenPort = 0
 		}
+		if g.ListenPort == 0 {
+			g.CustomPortOnly = false
+		}
 		if _, ok := seen[g.Slot]; ok {
 			continue
 		}
 		if g.ListenPort != 0 {
 			if _, ok := usedPorts[g.ListenPort]; ok {
 				g.ListenPort = 0
+				g.CustomPortOnly = false
 			} else {
 				usedPorts[g.ListenPort] = struct{}{}
 			}
@@ -379,6 +399,7 @@ func buildSpecialGroupView(g SpecialGroup) SpecialGroupView {
 		Slot:               g.Slot,
 		Name:               g.Name,
 		ListenPort:         g.ListenPort,
+		CustomPortOnly:     g.CustomPortOnly,
 		Key:                specialGroupKey(g.Slot),
 		UpstreamPluginTag:  specialUpstreamPluginTag(g.Slot),
 		DiversionPluginTag: specialDiversionPluginTag(g.Slot),
@@ -461,6 +482,10 @@ func checkSpecialGroupListenPortAvailable(port int) error {
 	defer udpConn.Close()
 
 	return nil
+}
+
+func specialGroupEnabledOn53(g SpecialGroup) bool {
+	return !(g.ListenPort != 0 && g.CustomPortOnly)
 }
 
 func mainConfigDir() string {
@@ -565,11 +590,17 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 	b.WriteString("    args:\n")
 	b.WriteString("      default_mark: 0\n")
 	b.WriteString("      default_tag: \"\"\n")
-	if len(groups) == 0 {
+	mainFlowGroups := make([]SpecialGroup, 0, len(groups))
+	for _, g := range groups {
+		if specialGroupEnabledOn53(g) {
+			mainFlowGroups = append(mainFlowGroups, g)
+		}
+	}
+	if len(mainFlowGroups) == 0 {
 		b.WriteString("      rules: []\n\n")
 	} else {
 		b.WriteString("      rules:\n")
-		for _, g := range groups {
+		for _, g := range mainFlowGroups {
 			slot := g.Slot
 			b.WriteString(fmt.Sprintf("        - tag: special_route_%d\n", slot))
 			b.WriteString(fmt.Sprintf("          ctx_mark: %d\n", slot))
@@ -584,12 +615,12 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 	for _, tag := range []string{"sequence_special_v4", "sequence_special_v6", "sequence_special_ot"} {
 		b.WriteString(fmt.Sprintf("  - tag: %s\n", tag))
 		b.WriteString("    type: sequence\n")
-		if len(groups) == 0 {
+		if len(mainFlowGroups) == 0 {
 			b.WriteString("    args: []\n\n")
 			continue
 		}
 		b.WriteString("    args:\n")
-		for _, g := range groups {
+		for _, g := range mainFlowGroups {
 			slot := g.Slot
 			b.WriteString(fmt.Sprintf("      - matches: mark %d\n", slot))
 			b.WriteString(fmt.Sprintf("        exec: $sequence_special_%d\n", slot))
