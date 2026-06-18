@@ -43,7 +43,7 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 
 	t.Run("populated", func(t *testing.T) {
 		raw := renderSpecialGroupsConfig([]SpecialGroup{
-			{Slot: 50, Name: "cmcc", ListenPort: 6053},
+			{Slot: 50, Name: "cmcc", ListenPort: 6053, CustomPortOnly: true},
 			{Slot: 53, Name: "hk"},
 		})
 		if err := validateSpecialGroupsConfig(raw); err != nil {
@@ -54,15 +54,18 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 			"special_route_50",
 			"special_manual_50",
 			"special_upstream_53",
-			"mark 53",
 			"cache/cache_special_53.dump",
 			"special_udp_server_50",
 			"special_tcp_server_50",
 			`listen: ":6053"`,
+			"mark 53",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("expected generated config to contain %q, got:\n%s", want, text)
 			}
+		}
+		if strings.Contains(text, "mark 50") {
+			t.Fatalf("custom-port-only group should not be reachable from 53 chain:\n%s", text)
 		}
 		if strings.Contains(text, "special_udp_server_53") || strings.Contains(text, "special_tcp_server_53") {
 			t.Fatalf("unexpected listeners rendered for group without listen_port:\n%s", text)
@@ -79,7 +82,7 @@ func TestSyncSpecialGroupsConfigWritesRuntimeFile(t *testing.T) {
 
 	jsonPath := filepath.Join(webinfoDir, specialGroupsFilename)
 	if err := os.WriteFile(jsonPath, []byte(`[
-  {"slot": 50, "name": "cmcc", "listen_port": 6053},
+  {"slot": 50, "name": "cmcc", "listen_port": 6053, "custom_port_only": true},
   {"slot": 52, "name": "hk"}
 ]`), 0o644); err != nil {
 		t.Fatalf("write json: %v", err)
@@ -100,13 +103,15 @@ func TestSyncSpecialGroupsConfigWritesRuntimeFile(t *testing.T) {
 	for _, want := range []string{
 		"special_route_50",
 		"special_route_52",
-		"mark 50",
 		"mark 52",
 		`listen: ":6053"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected generated config to contain %q, got:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "mark 50") {
+		t.Fatalf("custom-port-only group should not be rendered into 53 chain:\n%s", text)
 	}
 }
 
@@ -145,9 +150,9 @@ func TestNormalizeSpecialGroupListenPort(t *testing.T) {
 
 func TestNormalizeSpecialGroupsDedupListenPorts(t *testing.T) {
 	groups := normalizeSpecialGroups([]SpecialGroup{
-		{Slot: 50, Name: "cmcc", ListenPort: 6053},
-		{Slot: 51, Name: "hk", ListenPort: 6053},
-		{Slot: 52, Name: "bad", ListenPort: 53},
+		{Slot: 50, Name: "cmcc", ListenPort: 6053, CustomPortOnly: true},
+		{Slot: 51, Name: "hk", ListenPort: 6053, CustomPortOnly: true},
+		{Slot: 52, Name: "bad", ListenPort: 53, CustomPortOnly: true},
 	})
 
 	if len(groups) != 3 {
@@ -156,11 +161,20 @@ func TestNormalizeSpecialGroupsDedupListenPorts(t *testing.T) {
 	if groups[0].ListenPort != 6053 {
 		t.Fatalf("first listen_port = %d, want 6053", groups[0].ListenPort)
 	}
+	if !groups[0].CustomPortOnly {
+		t.Fatalf("first custom_port_only = false, want true")
+	}
 	if groups[1].ListenPort != 0 {
 		t.Fatalf("duplicate listen_port should be cleared, got %d", groups[1].ListenPort)
 	}
+	if groups[1].CustomPortOnly {
+		t.Fatalf("duplicate listen_port should also clear custom_port_only")
+	}
 	if groups[2].ListenPort != 0 {
 		t.Fatalf("invalid listen_port should be cleared, got %d", groups[2].ListenPort)
+	}
+	if groups[2].CustomPortOnly {
+		t.Fatalf("invalid listen_port should also clear custom_port_only")
 	}
 }
 

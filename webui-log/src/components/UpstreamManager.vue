@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deleteRequest, getJSON, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
@@ -35,7 +35,8 @@ const specialSaving = ref(false)
 const specialEditor = reactive({
   slot: 0,
   name: '',
-  listenPort: ''
+  listenPort: '',
+  customPortOnly: false
 })
 const editingCtx = ref({ group: '', index: -1 })
 
@@ -144,6 +145,9 @@ const specialGroupCards = computed(() => {
     return {
       ...group,
       portLabel: group?.listen_port ? `监听端口 ${group.listen_port}` : '未设置专属端口',
+      routeLabel: group?.listen_port
+        ? (group?.custom_port_only ? '仅自定义端口生效' : '53端口 + 自定义端口')
+        : '53端口生效',
       upstreamCountLabel: `已绑定 ${upstreamCount} 个上游`
     }
   })
@@ -348,6 +352,7 @@ function openCreateSpecialGroup() {
   specialEditor.slot = 0
   specialEditor.name = ''
   specialEditor.listenPort = ''
+  specialEditor.customPortOnly = false
   specialModalOpen.value = true
 }
 
@@ -361,6 +366,7 @@ function openEditSpecialGroup(group) {
   specialEditor.slot = Number(group?.slot) || 0
   specialEditor.name = String(group?.name || '')
   specialEditor.listenPort = group?.listen_port ? String(group.listen_port) : ''
+  specialEditor.customPortOnly = Boolean(group?.custom_port_only && group?.listen_port)
   specialModalOpen.value = true
 }
 
@@ -392,6 +398,7 @@ async function saveSpecialGroup() {
     }
     listenPort = parsed
   }
+  const customPortOnly = listenPort !== 0 && Boolean(specialEditor.customPortOnly)
 
   specialSaving.value = true
   resetMessage()
@@ -399,7 +406,8 @@ async function saveSpecialGroup() {
     await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
       name,
-      listen_port: listenPort
+      listen_port: listenPort,
+      custom_port_only: customPortOnly
     })
     setSuccess('专属分流组已保存')
     closeSpecialGroupModal()
@@ -543,6 +551,12 @@ function handleGlobalRefresh() {
   loadData()
 }
 
+watch(() => specialEditor.listenPort, (value) => {
+  if (!String(value || '').trim()) {
+    specialEditor.customPortOnly = false
+  }
+})
+
 onMounted(() => {
   hideDisabled.value = localStorage.getItem(HIDE_DISABLED_KEY) === '1'
   loadData()
@@ -605,7 +619,7 @@ onBeforeUnmount(() => {
                   {{ group.portLabel }}
                 </span>
               </div>
-              <p class="special-group-meta">{{ group.upstreamCountLabel }}</p>
+              <p class="special-group-meta">{{ group.routeLabel }} · {{ group.upstreamCountLabel }}</p>
             </div>
             <div class="special-group-actions special-group-card-actions">
               <button class="btn tiny secondary" type="button" @click="openEditSpecialGroup(group)">编辑</button>
@@ -799,8 +813,18 @@ onBeforeUnmount(() => {
             placeholder="留空则沿用原逻辑"
             @keyup.enter="saveSpecialGroup"
           />
+          <label for="special-group-port-only-vue">仅自定义端口生效</label>
+          <label class="switch-inline">
+            <input
+              id="special-group-port-only-vue"
+              v-model="specialEditor.customPortOnly"
+              type="checkbox"
+              :disabled="!String(specialEditor.listenPort || '').trim()"
+            />
+          </label>
         </div>
-        <p class="muted">保存后可在上游设置中维护该组上游，并在在线分流中直接选择该组。</p>
+        <p class="muted">1.未勾选则53端口及自定义端口均生效</p>
+        <p class="muted">2.保存后可在上游设置中维护该组上游，并在在线分流中直接选择该组。</p>
         <div class="actions">
           <button class="btn secondary" type="button" @click="closeSpecialGroupModal">取消</button>
           <button class="btn primary" type="button" :disabled="specialSaving" @click="saveSpecialGroup">

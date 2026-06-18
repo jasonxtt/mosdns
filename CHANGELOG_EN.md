@@ -8,14 +8,20 @@
   to expose its own UDP/TCP DNS entrypoint and send those queries directly to
   that group's upstream path without entering the normal port-53 diversion
   chain
+- added a `custom_port_only` mode for dedicated groups: when disabled, both
+  port `53` and the custom port stay active; when enabled, the group is
+  removed from the port-`53` chain and remains available only on its custom
+  listener
 - updated the maintained `/` upstream-settings UI so dedicated groups are
   shown as a compact same-row summary beside `添加上游DNS`, with full editing
-  moved into a separate management modal
+  moved into a separate management modal, while the editor now covers both the
+  listen port and the port-`53` participation mode
 - aligned the compatibility `/log` UI with the same compact-summary and
   management-modal workflow, including matched height, typography, and compact
   two-line summary behavior
 - extended the rules-management dedicated-group editor to support the new
-  listen-port field and unified the action wording to `编辑`
+  listen-port and `custom_port_only` fields, and unified the action wording to
+  `编辑`
 
 ### Fixed
 
@@ -23,11 +29,11 @@
   `1-65535`, rejecting port `53`, and rejecting duplicate ports across
   dedicated groups
 - regenerated dedicated-group runtime config and restarted the service when a
-  listen-port change affects the active listener set
+  listen-port or port-53 participation change affects the active routing set
 
 ### Upgrade Notes
 
-- this release does **not** require YAML config changes
+- this release does **not** require external config package changes
 - existing deployments can update only the binary
 - if the browser still shows stale embedded assets, refresh once after upgrade
 
