@@ -71,7 +71,8 @@ const typeLabelMap = computed(() => {
 const specialEditor = reactive({
   open: false,
   slot: 0,
-  name: ''
+  name: '',
+  listenPort: ''
 })
 
 const adguardEditor = reactive({
@@ -244,6 +245,7 @@ function openCreateSpecial() {
   specialEditor.open = true
   specialEditor.slot = 0
   specialEditor.name = ''
+  specialEditor.listenPort = ''
 }
 
 function openEditSpecial(group) {
@@ -251,6 +253,7 @@ function openEditSpecial(group) {
   specialEditor.open = true
   specialEditor.slot = Number(group.slot) || 0
   specialEditor.name = String(group.name || '')
+  specialEditor.listenPort = group?.listen_port ? String(group.listen_port) : ''
 }
 
 function closeSpecialEditor() {
@@ -263,10 +266,25 @@ async function saveSpecial() {
     setError('专属分流组名称不能为空')
     return
   }
+  const listenPortText = String(specialEditor.listenPort || '').trim()
+  let listenPort = 0
+  if (listenPortText) {
+    const parsed = Number(listenPortText)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+      setError('监听端口必须在 1-65535 之间')
+      return
+    }
+    if (parsed === 53) {
+      setError('监听端口不能使用 53')
+      return
+    }
+    listenPort = parsed
+  }
   try {
     await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
-      name
+      name,
+      listen_port: listenPort
     })
     setSuccess('专属分流组已保存')
     closeSpecialEditor()

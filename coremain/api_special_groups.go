@@ -2,7 +2,9 @@ package coremain
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,16 +22,19 @@ const (
 	specialGroupsConfigRelativePath = "sub_config/special_groups.yaml"
 	specialSlotMin                  = 50
 	specialGroupRestartDelayMs      = 1500
+	specialGroupReservedPort        = 53
 )
 
 type SpecialGroup struct {
-	Slot int    `json:"slot"`
-	Name string `json:"name"`
+	Slot       int    `json:"slot"`
+	Name       string `json:"name"`
+	ListenPort int    `json:"listen_port,omitempty"`
 }
 
 type SpecialGroupView struct {
 	Slot               int    `json:"slot"`
 	Name               string `json:"name"`
+	ListenPort         int    `json:"listen_port,omitempty"`
 	Key                string `json:"key"`
 	UpstreamPluginTag  string `json:"upstream_plugin_tag"`
 	DiversionPluginTag string `json:"diversion_plugin_tag"`
@@ -77,8 +82,9 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Slot int    `json:"slot"`
-		Name string `json:"name"`
+		Slot       int    `json:"slot"`
+		Name       string `json:"name"`
+		ListenPort int    `json:"listen_port"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -90,13 +96,19 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"name is required"}`, http.StatusBadRequest)
 		return
 	}
+	listenPort, err := normalizeSpecialGroupListenPort(payload.ListenPort)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
+	}
 
 	specialGroupsLock.Lock()
 	defer specialGroupsLock.Unlock()
 
 	oldState := cloneSpecialGroups(specialGroups)
 	slot := payload.Slot
-	created := false
+	needsConfigSync := false
+	needsRestart := false
 
 	if slot == 0 {
 		slot = firstFreeSpecialSlot(specialGroups)
@@ -111,21 +123,43 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"name already exists"}`, http.StatusConflict)
 			return
 		}
+		if listenPort != 0 && g.Slot != slot && g.ListenPort == listenPort {
+			http.Error(w, fmt.Sprintf(`{"error":"监听端口 %d 已被其他专属分流组使用"}`, listenPort), http.StatusConflict)
+			return
+		}
 	}
 
 	updated := false
 	for i := range specialGroups {
 		if specialGroups[i].Slot == slot {
+			previousPort := specialGroups[i].ListenPort
 			specialGroups[i].Name = payload.Name
+			specialGroups[i].ListenPort = listenPort
+			if previousPort != listenPort {
+				needsConfigSync = true
+				needsRestart = true
+			}
 			updated = true
 			break
 		}
 	}
 	if !updated {
-		specialGroups = append(specialGroups, SpecialGroup{Slot: slot, Name: payload.Name})
-		created = true
+		specialGroups = append(specialGroups, SpecialGroup{Slot: slot, Name: payload.Name, ListenPort: listenPort})
+		needsConfigSync = true
+		needsRestart = true
 	}
 	sort.Slice(specialGroups, func(i, j int) bool { return specialGroups[i].Slot < specialGroups[j].Slot })
+
+	if listenPort != 0 {
+		previousPort := findSpecialGroupListenPort(oldState, slot)
+		if previousPort != listenPort {
+			if err := checkSpecialGroupListenPortAvailable(listenPort); err != nil {
+				specialGroups = oldState
+				http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusConflict)
+				return
+			}
+		}
+	}
 
 	if err := saveSpecialGroupsLocked(); err != nil {
 		specialGroups = oldState
@@ -133,17 +167,19 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if created {
+	if needsConfigSync {
 		if err := syncSpecialGroupsConfigLocked(); err != nil {
 			rollbackSpecialGroupsLocked(oldState)
 			http.Error(w, `{"error":"failed to update special groups config"}`, http.StatusInternalServerError)
 			return
 		}
+	}
+	if needsRestart {
 		_ = scheduleSelfRestart(GetCurrentMosdns(), specialGroupRestartDelayMs)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(buildSpecialGroupView(SpecialGroup{Slot: slot, Name: payload.Name}))
+	_ = json.NewEncoder(w).Encode(buildSpecialGroupView(SpecialGroup{Slot: slot, Name: payload.Name, ListenPort: listenPort}))
 }
 
 func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
@@ -246,13 +282,26 @@ func loadSpecialGroupsFromDir(dir string) ([]SpecialGroup, error) {
 func normalizeSpecialGroups(groups []SpecialGroup) []SpecialGroup {
 	filtered := make([]SpecialGroup, 0, len(groups))
 	seen := make(map[int]struct{}, len(groups))
+	usedPorts := make(map[int]struct{}, len(groups))
 	for _, g := range groups {
 		g.Name = strings.TrimSpace(g.Name)
 		if !isValidSpecialSlot(g.Slot) || g.Name == "" {
 			continue
 		}
+		if port, err := normalizeSpecialGroupListenPort(g.ListenPort); err == nil {
+			g.ListenPort = port
+		} else {
+			g.ListenPort = 0
+		}
 		if _, ok := seen[g.Slot]; ok {
 			continue
+		}
+		if g.ListenPort != 0 {
+			if _, ok := usedPorts[g.ListenPort]; ok {
+				g.ListenPort = 0
+			} else {
+				usedPorts[g.ListenPort] = struct{}{}
+			}
 		}
 		seen[g.Slot] = struct{}{}
 		filtered = append(filtered, g)
@@ -273,6 +322,7 @@ func saveSpecialGroupsLocked() error {
 			return err
 		}
 		seen := make(map[int]struct{}, len(groups))
+		usedPorts := make(map[int]struct{}, len(groups))
 		for _, g := range groups {
 			if !isValidSpecialSlot(g.Slot) {
 				return fmt.Errorf("slot must be >= %d", specialSlotMin)
@@ -283,6 +333,16 @@ func saveSpecialGroupsLocked() error {
 			}
 			if _, ok := seen[g.Slot]; ok {
 				return fmt.Errorf("duplicate slot %d", g.Slot)
+			}
+			listenPort, err := normalizeSpecialGroupListenPort(g.ListenPort)
+			if err != nil {
+				return err
+			}
+			if listenPort != 0 {
+				if _, ok := usedPorts[listenPort]; ok {
+					return fmt.Errorf("duplicate listen_port %d", listenPort)
+				}
+				usedPorts[listenPort] = struct{}{}
 			}
 			seen[g.Slot] = struct{}{}
 		}
@@ -318,6 +378,7 @@ func buildSpecialGroupView(g SpecialGroup) SpecialGroupView {
 	return SpecialGroupView{
 		Slot:               g.Slot,
 		Name:               g.Name,
+		ListenPort:         g.ListenPort,
 		Key:                specialGroupKey(g.Slot),
 		UpstreamPluginTag:  specialUpstreamPluginTag(g.Slot),
 		DiversionPluginTag: specialDiversionPluginTag(g.Slot),
@@ -347,8 +408,59 @@ func specialManualRulePath(slot int) string {
 	return filepath.Join("rule", fmt.Sprintf("special_%d.txt", slot))
 }
 
+func specialListenUDPServerTag(slot int) string {
+	return fmt.Sprintf("special_udp_server_%d", slot)
+}
+
+func specialListenTCPServerTag(slot int) string {
+	return fmt.Sprintf("special_tcp_server_%d", slot)
+}
+
 func isValidSpecialSlot(slot int) bool {
 	return slot >= specialSlotMin
+}
+
+func normalizeSpecialGroupListenPort(port int) (int, error) {
+	switch {
+	case port == 0:
+		return 0, nil
+	case port < 0 || port > 65535:
+		return 0, errors.New("监听端口必须在 1-65535 之间")
+	case port == specialGroupReservedPort:
+		return 0, errors.New("监听端口不能使用 53")
+	default:
+		return port, nil
+	}
+}
+
+func findSpecialGroupListenPort(groups []SpecialGroup, slot int) int {
+	for _, g := range groups {
+		if g.Slot == slot {
+			return g.ListenPort
+		}
+	}
+	return 0
+}
+
+func checkSpecialGroupListenPortAvailable(port int) error {
+	if _, err := normalizeSpecialGroupListenPort(port); err != nil {
+		return err
+	}
+
+	listenAddr := net.JoinHostPort("", strconv.Itoa(port))
+	tcpListener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return fmt.Errorf("监听端口 %d 已被占用", port)
+	}
+	defer tcpListener.Close()
+
+	udpConn, err := net.ListenPacket("udp", listenAddr)
+	if err != nil {
+		return fmt.Errorf("监听端口 %d 已被占用", port)
+	}
+	defer udpConn.Close()
+
+	return nil
 }
 
 func mainConfigDir() string {
@@ -430,6 +542,22 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 		b.WriteString(fmt.Sprintf("      - exec: flow_setter group=special_%d sequence=sequence_special_%d upstream=special_upstream_%d\n", slot, slot, slot))
 		b.WriteString(fmt.Sprintf("      - exec: $special_upstream_%d\n", slot))
 		b.WriteString("      - exec: cname_remover\n\n")
+
+		if g.ListenPort != 0 {
+			listenAddr := net.JoinHostPort("", strconv.Itoa(g.ListenPort))
+
+			b.WriteString(fmt.Sprintf("  - tag: %s\n", specialListenUDPServerTag(slot)))
+			b.WriteString("    type: udp_server\n")
+			b.WriteString("    args:\n")
+			b.WriteString(fmt.Sprintf("      entry: sequence_special_%d\n", slot))
+			b.WriteString(fmt.Sprintf("      listen: %q\n\n", listenAddr))
+
+			b.WriteString(fmt.Sprintf("  - tag: %s\n", specialListenTCPServerTag(slot)))
+			b.WriteString("    type: tcp_server\n")
+			b.WriteString("    args:\n")
+			b.WriteString(fmt.Sprintf("      entry: sequence_special_%d\n", slot))
+			b.WriteString(fmt.Sprintf("      listen: %q\n\n", listenAddr))
+		}
 	}
 
 	b.WriteString("  - tag: special_upstream_matcher\n")

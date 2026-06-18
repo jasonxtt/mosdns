@@ -24,6 +24,7 @@ defineEmits(['create', 'edit', 'delete'])
           <tr>
             <th>槽位</th>
             <th>名称</th>
+            <th>监听端口</th>
             <th>上游组 Tag</th>
             <th>分流插件 Tag</th>
             <th>操作</th>
@@ -31,18 +32,19 @@ defineEmits(['create', 'edit', 'delete'])
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="5" class="empty">加载中...</td>
+            <td colspan="6" class="empty">加载中...</td>
           </tr>
           <tr v-else-if="specialGroups.length === 0">
-            <td colspan="5" class="empty">暂无专属分流组</td>
+            <td colspan="6" class="empty">暂无专属分流组</td>
           </tr>
           <tr v-for="group in specialGroups" :key="group.slot">
             <td>{{ group.slot }}</td>
             <td>{{ group.name }}</td>
+            <td>{{ group.listen_port || '-' }}</td>
             <td class="mono">{{ group.upstream_plugin_tag }}</td>
             <td class="mono">{{ group.diversion_plugin_tag }}</td>
             <td class="row-actions">
-              <button class="btn tiny secondary" @click="$emit('edit', group)">改名</button>
+              <button class="btn tiny secondary" @click="$emit('edit', group)">编辑</button>
               <button class="btn tiny danger" @click="$emit('delete', group)">删除</button>
             </td>
           </tr>
