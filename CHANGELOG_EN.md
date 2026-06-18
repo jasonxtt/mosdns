@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.5.0
+
+### Changed
+
+- added dedicated listen-port support for `special_groups`, allowing a group
+  to expose its own UDP/TCP DNS entrypoint and send those queries directly to
+  that group's upstream path without entering the normal port-53 diversion
+  chain
+- updated the maintained `/` upstream-settings UI so dedicated groups are
+  shown as a compact same-row summary beside `添加上游DNS`, with full editing
+  moved into a separate management modal
+- aligned the compatibility `/log` UI with the same compact-summary and
+  management-modal workflow, including matched height, typography, and compact
+  two-line summary behavior
+- extended the rules-management dedicated-group editor to support the new
+  listen-port field and unified the action wording to `编辑`
+
+### Fixed
+
+- validated dedicated listen ports on save and edit, rejecting values outside
+  `1-65535`, rejecting port `53`, and rejecting duplicate ports across
+  dedicated groups
+- regenerated dedicated-group runtime config and restarted the service when a
+  listen-port change affects the active listener set
+
+### Upgrade Notes
+
+- this release does **not** require YAML config changes
+- existing deployments can update only the binary
+- if the browser still shows stale embedded assets, refresh once after upgrade
+
 ## v0.4.14
 
 ### Fixed

@@ -590,6 +590,10 @@ body,
   font-size: 0.95rem;
 }
 
+.log1-content .special-groups-summary-title {
+  font-size: 0.95rem;
+}
+
 @media (max-width: 1080px) {
   :root {
     --log1-sticky-clip-height: 0px;

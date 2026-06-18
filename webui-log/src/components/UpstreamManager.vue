@@ -29,11 +29,13 @@ const upstreamTags = ref([])
 const upstreamConfig = ref({})
 const specialGroups = ref([])
 const globalSocks5 = ref('')
+const specialGroupsManagerOpen = ref(false)
 const specialModalOpen = ref(false)
 const specialSaving = ref(false)
 const specialEditor = reactive({
   slot: 0,
-  name: ''
+  name: '',
+  listenPort: ''
 })
 const editingCtx = ref({ group: '', index: -1 })
 
@@ -132,6 +134,23 @@ const hideDisabledLabel = computed(() => (hideDisabled.value ? '显示全部上�
 function groupDisplayName(group) {
   return upstreamGroupDisplay(group, specialGroups.value).title
 }
+
+const specialGroupCards = computed(() => {
+  return (specialGroups.value || []).map((group) => {
+    const upstreamCount = Array.isArray(upstreamConfig.value?.[group?.upstream_plugin_tag])
+      ? upstreamConfig.value[group.upstream_plugin_tag].length
+      : 0
+
+    return {
+      ...group,
+      portLabel: group?.listen_port ? `监听端口 ${group.listen_port}` : '未设置专属端口',
+      upstreamCountLabel: `已绑定 ${upstreamCount} 个上游`
+    }
+  })
+})
+
+const summarySpecialGroups = computed(() => specialGroupCards.value.slice(0, 2))
+const summarySpecialGroupsOverflow = computed(() => Math.max(0, specialGroupCards.value.length - summarySpecialGroups.value.length))
 
 function getSortValue(row) {
   switch (sortState.key) {
@@ -328,18 +347,29 @@ function openCreateSpecialGroup() {
   resetMessage()
   specialEditor.slot = 0
   specialEditor.name = ''
+  specialEditor.listenPort = ''
   specialModalOpen.value = true
+}
+
+function openSpecialGroupsManager() {
+  resetMessage()
+  specialGroupsManagerOpen.value = true
 }
 
 function openEditSpecialGroup(group) {
   resetMessage()
   specialEditor.slot = Number(group?.slot) || 0
   specialEditor.name = String(group?.name || '')
+  specialEditor.listenPort = group?.listen_port ? String(group.listen_port) : ''
   specialModalOpen.value = true
 }
 
 function closeSpecialGroupModal() {
   specialModalOpen.value = false
+}
+
+function closeSpecialGroupsManager() {
+  specialGroupsManagerOpen.value = false
 }
 
 async function saveSpecialGroup() {
@@ -348,13 +378,28 @@ async function saveSpecialGroup() {
     setError('专属分流组名称不能为空')
     return
   }
+  const listenPortText = String(specialEditor.listenPort || '').trim()
+  let listenPort = 0
+  if (listenPortText) {
+    const parsed = Number(listenPortText)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+      setError('监听端口必须在 1-65535 之间')
+      return
+    }
+    if (parsed === 53) {
+      setError('监听端口不能使用 53')
+      return
+    }
+    listenPort = parsed
+  }
 
   specialSaving.value = true
   resetMessage()
   try {
     await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
-      name
+      name,
+      listen_port: listenPort
     })
     setSuccess('专属分流组已保存')
     closeSpecialGroupModal()
@@ -514,73 +559,61 @@ onBeforeUnmount(() => {
     <div class="upstream-toolbar">
       <div class="upstream-toolbar-left">
         <button class="btn primary entry-action-btn" type="button" @click="beginAdd">添加上游DNS</button>
-        <button class="btn secondary entry-action-btn" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
-      </div>
-      <div class="upstream-toolbar-right">
-        <div class="upstream-special-groups-strip">
-          <span class="special-groups-title-inline">专属分流组</span>
-          <div class="special-groups-list">
-            <span v-if="specialGroups.length === 0" class="special-groups-empty">
-              还没有专属分流组。点击左侧“新增专属分流组”后即可在上游设置和在线分流里使用。
-            </span>
-            <div v-for="group in specialGroups" v-else :key="group.slot" class="special-group-row">
-              <span class="special-group-name">{{ group.name }}</span>
-              <div class="special-group-actions">
-                <button class="btn tiny secondary" type="button" @click="openEditSpecialGroup(group)">改名</button>
-                <button class="btn tiny danger" type="button" @click="deleteSpecialGroup(group)">删除</button>
-              </div>
+        <section class="special-groups-summary" aria-label="专属分流组摘要">
+          <div class="special-groups-summary-copy">
+            <span class="special-groups-summary-title">专属分流组</span>
+            <div v-if="summarySpecialGroups.length > 0" class="special-groups-summary-list">
+              <span v-for="group in summarySpecialGroups" :key="group.slot" class="special-groups-summary-chip" :title="group.portLabel">
+                {{ group.listen_port ? `${group.name} · ${group.listen_port}` : group.name }}
+              </span>
+              <span v-if="summarySpecialGroupsOverflow > 0" class="special-groups-summary-chip summary-overflow-chip">
+                +{{ summarySpecialGroupsOverflow }}
+              </span>
             </div>
+            <span v-else class="special-groups-summary-empty">暂未配置</span>
           </div>
-        </div>
+          <button class="btn secondary" type="button" @click="openSpecialGroupsManager">管理</button>
+        </section>
       </div>
     </div>
 
-    <div class="toolbar upstream-filter-toolbar">
-      <label for="group-filter">过滤分组</label>
-      <select id="group-filter" v-model="filterGroup">
-        <option value="all">全部</option>
-        <option v-for="group in groupOptions" :key="group" :value="group">{{ groupDisplayName(group) }}</option>
-      </select>
-      <button class="btn secondary" type="button" @click="toggleHideDisabled">{{ hideDisabledLabel }}</button>
-    </div>
+    <div v-if="specialGroupsManagerOpen" class="modal-mask" @click.self="closeSpecialGroupsManager">
+      <section class="panel special-groups-manager-modal">
+        <header class="panel-header special-groups-manager-header">
+          <div class="special-groups-panel-copy">
+            <h3>专属分流组管理</h3>
+            <p class="muted">管理组名、监听端口和删除操作</p>
+          </div>
+          <button class="btn tiny secondary" type="button" @click="closeSpecialGroupsManager" aria-label="Close">✕</button>
+        </header>
 
-    <div class="table-wrap adaptive-table-wrap upstream-adaptive-wrap">
-      <table class="upstream-adaptive-table">
-        <thead>
-          <tr>
-            <th class="sortable" @click="onSort('enabled')">启用 <span class="sort-indicator">{{ sortIndicator('enabled') }}</span></th>
-            <th class="sortable" @click="onSort('group')">所属组 <span class="sort-indicator">{{ sortIndicator('group') }}</span></th>
-            <th class="sortable" @click="onSort('tag')">标识 <span class="sort-indicator">{{ sortIndicator('tag') }}</span></th>
-            <th class="sortable" @click="onSort('protocol')">协议 <span class="sort-indicator">{{ sortIndicator('protocol') }}</span></th>
-            <th class="sortable" @click="onSort('address')">地址 <span class="sort-indicator">{{ sortIndicator('address') }}</span></th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading">
-            <td colspan="6" class="empty">加载中...</td>
-          </tr>
-          <tr v-else-if="rows.length === 0">
-            <td colspan="6" class="empty">{{ hideDisabled ? '当前没有已启用的上游配置' : '暂无上游配置' }}</td>
-          </tr>
-          <tr v-for="row in rows" :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`" :class="{ disabled: !row.data?.enabled }">
-            <td>
-              <label class="switch switch-table">
-                <input type="checkbox" :checked="Boolean(row.data?.enabled)" @change="toggleEnable(row)" />
-                <span class="slider"></span>
-              </label>
-            </td>
-            <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
-            <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
-            <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
-            <td :title="rowAddress(row.data || {})" class="mono">{{ rowAddress(row.data || {}) }}</td>
-            <td class="row-actions">
-              <button class="btn tiny secondary" @click="beginEdit(row)">编辑</button>
-              <button class="btn tiny danger" @click="removeRow(row)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+        <div class="special-groups-manager-actions">
+          <button class="btn secondary entry-action-btn" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
+        </div>
+
+        <div v-if="specialGroupCards.length === 0" class="special-group-empty">
+          <strong>还没有专属分流组</strong>
+          <p>新增后即可在上游设置和在线分流里使用，也可以为该组单独设置监听端口。</p>
+        </div>
+
+        <div v-else class="special-groups-grid">
+          <article v-for="group in specialGroupCards" :key="group.slot" class="special-group-card">
+            <div class="special-group-card-top">
+              <div class="special-group-heading">
+                <h4 :title="group.name">{{ group.name }}</h4>
+                <span class="special-group-port-chip" :class="{ unset: !group.listen_port }">
+                  {{ group.portLabel }}
+                </span>
+              </div>
+              <p class="special-group-meta">{{ group.upstreamCountLabel }}</p>
+            </div>
+            <div class="special-group-actions special-group-card-actions">
+              <button class="btn tiny secondary" type="button" @click="openEditSpecialGroup(group)">编辑</button>
+              <button class="btn tiny danger" type="button" @click="deleteSpecialGroup(group)">删除</button>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
 
     <div v-if="showEditor" class="modal-mask">
@@ -693,10 +726,58 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
+    <div class="toolbar upstream-filter-toolbar">
+      <label for="group-filter">过滤分组</label>
+      <select id="group-filter" v-model="filterGroup">
+        <option value="all">全部</option>
+        <option v-for="group in groupOptions" :key="group" :value="group">{{ groupDisplayName(group) }}</option>
+      </select>
+      <button class="btn secondary" type="button" @click="toggleHideDisabled">{{ hideDisabledLabel }}</button>
+    </div>
+
+    <div class="table-wrap adaptive-table-wrap upstream-adaptive-wrap">
+      <table class="upstream-adaptive-table">
+        <thead>
+          <tr>
+            <th class="sortable" @click="onSort('enabled')">启用 <span class="sort-indicator">{{ sortIndicator('enabled') }}</span></th>
+            <th class="sortable" @click="onSort('group')">所属组 <span class="sort-indicator">{{ sortIndicator('group') }}</span></th>
+            <th class="sortable" @click="onSort('tag')">标识 <span class="sort-indicator">{{ sortIndicator('tag') }}</span></th>
+            <th class="sortable" @click="onSort('protocol')">协议 <span class="sort-indicator">{{ sortIndicator('protocol') }}</span></th>
+            <th class="sortable" @click="onSort('address')">地址 <span class="sort-indicator">{{ sortIndicator('address') }}</span></th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="loading">
+            <td colspan="6" class="empty">加载中...</td>
+          </tr>
+          <tr v-else-if="rows.length === 0">
+            <td colspan="6" class="empty">{{ hideDisabled ? '当前没有已启用的上游配置' : '暂无上游配置' }}</td>
+          </tr>
+          <tr v-for="row in rows" :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`" :class="{ disabled: !row.data?.enabled }">
+            <td>
+              <label class="switch switch-table">
+                <input type="checkbox" :checked="Boolean(row.data?.enabled)" @change="toggleEnable(row)" />
+                <span class="slider"></span>
+              </label>
+            </td>
+            <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
+            <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
+            <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
+            <td :title="rowAddress(row.data || {})" class="mono">{{ rowAddress(row.data || {}) }}</td>
+            <td class="row-actions">
+              <button class="btn tiny secondary" @click="beginEdit(row)">编辑</button>
+              <button class="btn tiny danger" @click="removeRow(row)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div v-if="specialModalOpen" class="modal-mask">
       <section class="panel special-group-modal-card">
         <header class="panel-header special-group-modal-header">
-          <h3>{{ specialEditor.slot ? '修改专属分流组' : '新增专属分流组' }}</h3>
+          <h3>{{ specialEditor.slot ? '编辑专属分流组' : '新增专属分流组' }}</h3>
           <button class="btn tiny secondary" type="button" @click="closeSpecialGroupModal" aria-label="Close">✕</button>
         </header>
         <div class="form-grid special-group-form-grid">
@@ -706,6 +787,16 @@ onBeforeUnmount(() => {
             v-model="specialEditor.name"
             type="text"
             placeholder="例如：移动上游 / CMCC"
+            @keyup.enter="saveSpecialGroup"
+          />
+          <label for="special-group-port-vue">监听端口</label>
+          <input
+            id="special-group-port-vue"
+            v-model="specialEditor.listenPort"
+            type="number"
+            min="1"
+            max="65535"
+            placeholder="留空则沿用原逻辑"
             @keyup.enter="saveSpecialGroup"
           />
         </div>
