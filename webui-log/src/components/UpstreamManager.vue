@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deleteRequest, getJSON, getText, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 
@@ -20,11 +20,14 @@ const upstreamTags = ref([])
 const upstreamConfig = ref({})
 const specialGroups = ref([])
 const globalSocks5 = ref('')
+const specialGroupsManagerOpen = ref(false)
 const specialModalOpen = ref(false)
 const specialSaving = ref(false)
 const specialEditor = reactive({
   slot: 0,
-  name: ''
+  name: '',
+  listenPort: '',
+  customPortOnly: false
 })
 const editingCtx = ref({ group: '', index: -1 })
 const metrics = ref({
@@ -140,6 +143,26 @@ function groupDisplayName(group) {
   }
   return group
 }
+
+const specialGroupCards = computed(() => {
+  return (specialGroups.value || []).map((group) => {
+    const upstreamCount = Array.isArray(upstreamConfig.value?.[group?.upstream_plugin_tag])
+      ? upstreamConfig.value[group.upstream_plugin_tag].length
+      : 0
+
+    return {
+      ...group,
+      portLabel: group?.listen_port ? `监听端口 ${group.listen_port}` : '未设置专属端口',
+      routeLabel: group?.listen_port
+        ? (group?.custom_port_only ? '仅自定义端口生效' : '53端口 + 自定义端口')
+        : '53端口生效',
+      upstreamCountLabel: `已绑定 ${upstreamCount} 个上游`
+    }
+  })
+})
+
+const summarySpecialGroups = computed(() => specialGroupCards.value.slice(0, 2))
+const summarySpecialGroupsOverflow = computed(() => Math.max(0, specialGroupCards.value.length - summarySpecialGroups.value.length))
 
 function parseMetricMap(rawText, metricName) {
   const map = {}
@@ -462,18 +485,31 @@ function openCreateSpecialGroup() {
   resetMessage()
   specialEditor.slot = 0
   specialEditor.name = ''
+  specialEditor.listenPort = ''
+  specialEditor.customPortOnly = false
   specialModalOpen.value = true
+}
+
+function openSpecialGroupsManager() {
+  resetMessage()
+  specialGroupsManagerOpen.value = true
 }
 
 function openEditSpecialGroup(group) {
   resetMessage()
   specialEditor.slot = Number(group?.slot) || 0
   specialEditor.name = String(group?.name || '')
+  specialEditor.listenPort = group?.listen_port ? String(group.listen_port) : ''
+  specialEditor.customPortOnly = Boolean(group?.custom_port_only && group?.listen_port)
   specialModalOpen.value = true
 }
 
 function closeSpecialGroupModal() {
   specialModalOpen.value = false
+}
+
+function closeSpecialGroupsManager() {
+  specialGroupsManagerOpen.value = false
 }
 
 async function saveSpecialGroup() {
@@ -482,13 +518,30 @@ async function saveSpecialGroup() {
     setError('专属分流组名称不能为空')
     return
   }
+  const listenPortText = String(specialEditor.listenPort || '').trim()
+  let listenPort = 0
+  if (listenPortText) {
+    const parsed = Number(listenPortText)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+      setError('监听端口必须在 1-65535 之间')
+      return
+    }
+    if (parsed === 53) {
+      setError('监听端口不能使用 53')
+      return
+    }
+    listenPort = parsed
+  }
+  const customPortOnly = listenPort !== 0 && Boolean(specialEditor.customPortOnly)
 
   specialSaving.value = true
   resetMessage()
   try {
     await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
-      name
+      name,
+      listen_port: listenPort,
+      custom_port_only: customPortOnly
     })
     setSuccess('专属分流组已保存')
     closeSpecialGroupModal()
@@ -631,6 +684,12 @@ function handleGlobalRefresh() {
   loadData()
 }
 
+watch(() => specialEditor.listenPort, (value) => {
+  if (!String(value || '').trim()) {
+    specialEditor.customPortOnly = false
+  }
+})
+
 onMounted(() => {
   hideDisabled.value = localStorage.getItem(HIDE_DISABLED_KEY) === '1'
   loadData()
@@ -647,25 +706,61 @@ onBeforeUnmount(() => {
     <div class="upstream-toolbar">
       <div class="upstream-toolbar-left">
         <button class="btn primary entry-action-btn" type="button" @click="beginAdd">添加上游DNS</button>
-        <button class="btn secondary entry-action-btn" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
-      </div>
-      <div class="upstream-toolbar-right">
-        <div class="upstream-special-groups-strip">
-          <span class="special-groups-title-inline">专属分流组</span>
-          <div class="special-groups-list">
-            <span v-if="specialGroups.length === 0" class="special-groups-empty">
-              还没有专属分流组。点击左侧“新增专属分流组”后即可在上游设置和在线分流里使用。
-            </span>
-            <div v-for="group in specialGroups" v-else :key="group.slot" class="special-group-row">
-              <span class="special-group-name">{{ group.name }}</span>
-              <div class="special-group-actions">
-                <button class="btn tiny secondary" type="button" @click="openEditSpecialGroup(group)">改名</button>
-                <button class="btn tiny danger" type="button" @click="deleteSpecialGroup(group)">删除</button>
-              </div>
+        <section class="special-groups-summary" aria-label="专属分流组摘要">
+          <div class="special-groups-summary-copy">
+            <span class="special-groups-summary-title">专属分流组</span>
+            <div v-if="summarySpecialGroups.length > 0" class="special-groups-summary-list">
+              <span v-for="group in summarySpecialGroups" :key="group.slot" class="special-groups-summary-chip" :title="group.portLabel">
+                {{ group.listen_port ? `${group.name} · ${group.listen_port}` : group.name }}
+              </span>
+              <span v-if="summarySpecialGroupsOverflow > 0" class="special-groups-summary-chip summary-overflow-chip">
+                +{{ summarySpecialGroupsOverflow }}
+              </span>
             </div>
+            <span v-else class="special-groups-summary-empty">暂未配置</span>
           </div>
-        </div>
+          <button class="btn secondary" type="button" @click="openSpecialGroupsManager">管理</button>
+        </section>
       </div>
+    </div>
+
+    <div v-if="specialGroupsManagerOpen" class="modal-mask" @click.self="closeSpecialGroupsManager">
+      <section class="panel special-groups-manager-modal">
+        <header class="panel-header special-groups-manager-header">
+          <div class="special-groups-panel-copy">
+            <h3>专属分流组管理</h3>
+            <p class="muted">管理组名、监听端口和删除操作</p>
+          </div>
+          <button class="btn tiny secondary" type="button" @click="closeSpecialGroupsManager" aria-label="Close">✕</button>
+        </header>
+
+        <div class="special-groups-manager-actions">
+          <button class="btn secondary entry-action-btn" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
+        </div>
+
+        <div v-if="specialGroupCards.length === 0" class="special-group-empty">
+          <strong>还没有专属分流组</strong>
+          <p>新增后即可在上游设置和在线分流里使用，也可以为该组单独设置监听端口。</p>
+        </div>
+
+        <div v-else class="special-groups-grid">
+          <article v-for="group in specialGroupCards" :key="group.slot" class="special-group-card">
+            <div class="special-group-card-top">
+              <div class="special-group-heading">
+                <h4 :title="group.name">{{ group.name }}</h4>
+                <span class="special-group-port-chip" :class="{ unset: !group.listen_port }">
+                  {{ group.portLabel }}
+                </span>
+              </div>
+              <p class="special-group-meta">{{ group.routeLabel }} · {{ group.upstreamCountLabel }}</p>
+            </div>
+            <div class="special-group-actions special-group-card-actions">
+              <button class="btn tiny secondary" type="button" @click="openEditSpecialGroup(group)">编辑</button>
+              <button class="btn tiny danger" type="button" @click="deleteSpecialGroup(group)">删除</button>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
 
     <div class="toolbar upstream-filter-toolbar">
@@ -843,8 +938,29 @@ onBeforeUnmount(() => {
             placeholder="例如：移动上游 / CMCC"
             @keyup.enter="saveSpecialGroup"
           />
+          <label for="special-group-port-vue">监听端口</label>
+          <input
+            id="special-group-port-vue"
+            v-model="specialEditor.listenPort"
+            type="number"
+            min="1"
+            max="65535"
+            placeholder="留空则沿用原逻辑"
+            @keyup.enter="saveSpecialGroup"
+          />
+          <label for="special-group-port-only-vue">仅自定义端口生效</label>
+          <label class="switch-inline">
+            <input
+              id="special-group-port-only-vue"
+              v-model="specialEditor.customPortOnly"
+              type="checkbox"
+              :disabled="!String(specialEditor.listenPort || '').trim()"
+            />
+            <span>{{ specialEditor.customPortOnly ? '开启' : '关闭' }}</span>
+          </label>
         </div>
-        <p class="muted">保存后可在上游设置中维护该组上游，并在在线分流中直接选择该组。</p>
+        <p class="muted">1.未勾选则53端口及自定义端口均生效</p>
+        <p class="muted">2.保存后可在上游设置中维护该组上游，并在在线分流中直接选择该组。</p>
         <div class="actions">
           <button class="btn secondary" type="button" @click="closeSpecialGroupModal">取消</button>
           <button class="btn primary" type="button" :disabled="specialSaving" @click="saveSpecialGroup">

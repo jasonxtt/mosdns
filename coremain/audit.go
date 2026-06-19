@@ -107,6 +107,19 @@ var auditCtxPool = sync.Pool{
 	New: func() any { return new(auditContext) },
 }
 
+func resetAuditContext(wrappedCtx *auditContext) {
+	if wrappedCtx == nil {
+		return
+	}
+	wrappedCtx.Ctx = nil
+	wrappedCtx.ProcessingDuration = 0
+}
+
+func releaseAuditContext(wrappedCtx *auditContext) {
+	resetAuditContext(wrappedCtx)
+	auditCtxPool.Put(wrappedCtx)
+}
+
 type AnswerDetail struct {
 	Type string `json:"type"`
 	TTL  uint32 `json:"ttl"`
@@ -284,7 +297,7 @@ func (c *AuditCollector) worker() {
 		c.processBatch(batch)
 
 		for _, item := range batch {
-			auditCtxPool.Put(item)
+			releaseAuditContext(item)
 		}
 	}
 }
@@ -727,7 +740,7 @@ func (c *AuditCollector) Collect(qCtx *query_context.Context) {
 	case c.ctxChan <- wrappedCtx:
 	default:
 		// Non-blocking drop during system overload
-		auditCtxPool.Put(wrappedCtx)
+		releaseAuditContext(wrappedCtx)
 	}
 }
 
@@ -763,10 +776,7 @@ func (c *AuditCollector) ClearLogs() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.logs != nil {
-		c.logs = c.logs[:0]
-	}
-
+	c.logs = nil
 	c.head = 0
 	c.slowestQueries = make(slowestQueryHeap, 0, slowestQueriesCapacity)
 	heap.Init(&c.slowestQueries)
@@ -926,8 +936,11 @@ func (c *AuditCollector) CalculateV2WindowStats() V2WindowStatsResponse {
 		})
 	}
 
-	snapshot := c.getLogsSnapshot()
-	if len(snapshot) == 0 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	totalLogs := len(c.logs)
+	if c.capacity == 0 || totalLogs == 0 {
 		return V2WindowStatsResponse{
 			GeneratedAt: time.Now().Format(time.RFC3339),
 			Items:       items,
@@ -945,7 +958,11 @@ func (c *AuditCollector) CalculateV2WindowStats() V2WindowStatsResponse {
 		}
 	}
 
-	oldestTime := snapshot[len(snapshot)-1].QueryTime
+	oldestIndex := 0
+	if totalLogs == c.capacity {
+		oldestIndex = c.head
+	}
+	oldestTime := c.logs[oldestIndex].QueryTime
 	if !oldestTime.IsZero() {
 		coverageStart := oldestTime.Format(time.RFC3339)
 		for i := range items {
@@ -955,9 +972,15 @@ func (c *AuditCollector) CalculateV2WindowStats() V2WindowStatsResponse {
 	}
 
 	durationSums := make([]float64, len(items))
-	for _, log := range snapshot {
+	curr := totalLogs - 1
+	if totalLogs == c.capacity {
+		curr = (c.head - 1 + totalLogs) % totalLogs
+	}
+	for i := 0; i < totalLogs; i++ {
+		log := c.logs[curr]
 		queryTime := log.QueryTime
 		if queryTime.IsZero() {
+			curr = (curr - 1 + totalLogs) % totalLogs
 			continue
 		}
 		if queryTime.Before(oldestRelevantCutoff) {
@@ -969,6 +992,7 @@ func (c *AuditCollector) CalculateV2WindowStats() V2WindowStatsResponse {
 				durationSums[i] += log.DurationMs
 			}
 		}
+		curr = (curr - 1 + totalLogs) % totalLogs
 	}
 
 	for i := range items {
