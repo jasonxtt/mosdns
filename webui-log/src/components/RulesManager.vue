@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deleteRequest, getJSON, postJSON, putJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 
@@ -63,7 +63,9 @@ const typeLabelMap = computed(() => {
 const specialEditor = reactive({
   open: false,
   slot: 0,
-  name: ''
+  name: '',
+  listenPort: '',
+  customPortOnly: false
 })
 
 const adguardEditor = reactive({
@@ -265,6 +267,8 @@ function openCreateSpecial() {
   specialEditor.open = true
   specialEditor.slot = 0
   specialEditor.name = ''
+  specialEditor.listenPort = ''
+  specialEditor.customPortOnly = false
 }
 
 function openEditSpecial(group) {
@@ -272,6 +276,8 @@ function openEditSpecial(group) {
   specialEditor.open = true
   specialEditor.slot = Number(group.slot) || 0
   specialEditor.name = String(group.name || '')
+  specialEditor.listenPort = group?.listen_port ? String(group.listen_port) : ''
+  specialEditor.customPortOnly = Boolean(group?.custom_port_only && group?.listen_port)
 }
 
 function closeSpecialEditor() {
@@ -284,10 +290,27 @@ async function saveSpecial() {
     setError('专属分流组名称不能为空')
     return
   }
+  const listenPortText = String(specialEditor.listenPort || '').trim()
+  let listenPort = 0
+  if (listenPortText) {
+    const parsed = Number(listenPortText)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+      setError('监听端口必须在 1-65535 之间')
+      return
+    }
+    if (parsed === 53) {
+      setError('监听端口不能使用 53')
+      return
+    }
+    listenPort = parsed
+  }
+  const customPortOnly = listenPort !== 0 && Boolean(specialEditor.customPortOnly)
   try {
     await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
-      name
+      name,
+      listen_port: listenPort,
+      custom_port_only: customPortOnly
     })
     setSuccess('专属分流组已保存')
     closeSpecialEditor()
@@ -771,6 +794,12 @@ function handleGlobalRefresh() {
   reloadCurrentView()
 }
 
+watch(() => specialEditor.listenPort, (value) => {
+  if (!String(value || '').trim()) {
+    specialEditor.customPortOnly = false
+  }
+})
+
 onMounted(() => {
   reloadCurrentView()
   window.addEventListener('mosdns-log-refresh', handleGlobalRefresh)
@@ -803,6 +832,8 @@ onBeforeUnmount(() => {
             <tr>
               <th>槽位</th>
               <th>名称</th>
+              <th>监听端口</th>
+              <th>53端口</th>
               <th>上游组 Tag</th>
               <th>分流插件 Tag</th>
               <th>操作</th>
@@ -810,14 +841,16 @@ onBeforeUnmount(() => {
           </thead>
           <tbody>
             <tr v-if="loading.special">
-              <td colspan="5" class="empty">加载中...</td>
+              <td colspan="7" class="empty">加载中...</td>
             </tr>
             <tr v-else-if="specialGroups.length === 0">
-              <td colspan="5" class="empty">暂无专属分流组</td>
+              <td colspan="7" class="empty">暂无专属分流组</td>
             </tr>
             <tr v-for="group in specialGroups" :key="group.slot">
               <td>{{ group.slot }}</td>
               <td>{{ group.name }}</td>
+              <td>{{ group.listen_port || '-' }}</td>
+              <td>{{ group.listen_port && group.custom_port_only ? '关闭' : '启用' }}</td>
               <td class="mono">{{ group.upstream_plugin_tag }}</td>
               <td class="mono">{{ group.diversion_plugin_tag }}</td>
               <td class="row-actions">
@@ -937,7 +970,16 @@ onBeforeUnmount(() => {
           <input v-model.number="specialEditor.slot" type="number" min="0" max="59" />
           <label>名称</label>
           <input v-model="specialEditor.name" placeholder="例如 移动上游" />
+          <label>监听端口</label>
+          <input v-model="specialEditor.listenPort" type="number" min="1" max="65535" placeholder="留空则沿用原逻辑" />
+          <label>仅自定义端口生效</label>
+          <label class="switch-inline">
+            <input v-model="specialEditor.customPortOnly" type="checkbox" :disabled="!String(specialEditor.listenPort || '').trim()" />
+            <span>{{ specialEditor.customPortOnly ? '开启' : '关闭' }}</span>
+          </label>
         </div>
+        <p class="muted">1.未勾选则53端口及自定义端口均生效</p>
+        <p class="muted">2.保存后会同步更新专属分流组在 53 主链和自定义端口上的生效方式。</p>
         <div class="actions">
           <button class="btn secondary" @click="closeSpecialEditor">取消</button>
           <button class="btn primary" @click="saveSpecial">保存</button>
