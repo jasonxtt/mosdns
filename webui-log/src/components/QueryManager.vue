@@ -406,6 +406,19 @@ function applyQuickFilter(value, exact = false) {
   refreshLogs()
 }
 
+function handleOpenLogFilter(event) {
+  if (!isLiveMode.value) {
+    return
+  }
+  const detail = event?.detail || {}
+  const text = String(detail.value || '').trim()
+  if (!text) {
+    return
+  }
+  searchInput.value = detail.exact ? `"${text}"` : text
+  refreshLogs()
+}
+
 function getDetailActionField(key) {
   return detailActionFields.value?.[key] || null
 }
@@ -861,10 +874,12 @@ onMounted(async () => {
     refreshLogs()
   }
   window.addEventListener('mosdns-log-refresh', handleGlobalRefresh)
+  window.addEventListener('mosdns-open-log-filter-ready', handleOpenLogFilter)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('mosdns-log-refresh', handleGlobalRefresh)
+  window.removeEventListener('mosdns-open-log-filter-ready', handleOpenLogFilter)
   stopCaptureCountdown()
 })
 </script>

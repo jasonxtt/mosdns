@@ -1321,6 +1321,66 @@ th.sortable:hover {
   background: var(--surface-soft-2);
 }
 
+.overview-row-main-cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.overview-row-main-cell > :first-child {
+  min-width: 0;
+}
+
+.overview-row-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.overview-row-subline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.overview-row-subline small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-row-hint {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  font-size: 1rem;
+  line-height: 1;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
+.overview-click-row:hover .overview-row-hint {
+  opacity: 1;
+  transform: translateX(1px);
+}
+
 .table-wrap.overview-table-fit {
   overflow-x: hidden;
 }
@@ -1493,12 +1553,32 @@ th.sortable:hover {
   word-break: normal;
 }
 
-.top-clients-fit td:nth-child(1) > div,
+.top-clients-fit td:nth-child(1) > div:not(.overview-row-main-cell),
 .top-clients-fit td:nth-child(1) > small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.top-clients-fit td:nth-child(1) > .overview-row-main-cell {
+  display: flex;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.overview-row-main-cell-client {
+  align-items: center;
+}
+
+.overview-row-main-cell-client .overview-row-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.overview-row-main-cell-client .overview-row-hint {
+  margin-left: 6px;
 }
 
 .domain-set-fit th:nth-child(1),
@@ -1629,6 +1709,52 @@ th.sortable:hover {
 .top-domain-detail-fit th:nth-child(6),
 .top-domain-detail-fit td:nth-child(6) {
   width: 20%;
+  white-space: nowrap;
+}
+
+.overview-ranking-detail-modal {
+  width: min(1120px, 96vw);
+}
+
+.ranking-detail-subline {
+  margin-top: 4px;
+}
+
+.overview-ranking-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.overview-ranking-summary-card {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.overview-ranking-summary-label {
+  display: block;
+  color: var(--ink-1);
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+}
+
+.overview-ranking-summary-card strong {
+  color: var(--ink-0);
+  font-size: 1rem;
+}
+
+.ranking-detail-table-fit table {
+  min-width: 920px;
+}
+
+.ranking-detail-domain-cell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -4045,6 +4171,72 @@ label.switch-table *,
 
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .modal-mask-ranking {
+    align-items: flex-start;
+    padding: 10px;
+  }
+
+  .overview-ranking-detail-modal {
+    width: min(96vw, 1120px);
+    max-height: 86vh;
+  }
+
+  .overview-ranking-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ranking-detail-table-fit table,
+  .ranking-detail-table-fit thead,
+  .ranking-detail-table-fit tbody,
+  .ranking-detail-table-fit tr,
+  .ranking-detail-table-fit td {
+    display: block;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ranking-detail-table-fit thead {
+    display: none;
+  }
+
+  .ranking-detail-table-fit tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .ranking-detail-table-fit tr {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-soft);
+    padding: 8px 10px;
+  }
+
+  .ranking-detail-table-fit td {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    border-bottom: 0;
+    padding: 4px 0;
+    text-align: left !important;
+    white-space: normal;
+  }
+
+  .ranking-detail-table-fit td::before {
+    content: attr(data-label);
+    color: var(--ink-1);
+    font-size: 0.78rem;
+  }
+
+  .ranking-detail-table-fit td:last-child .btn {
+    justify-self: start;
+  }
+
+  .ranking-detail-domain-cell {
+    max-width: none;
+    white-space: normal;
   }
 
   .diagnostic-layout {
