@@ -9,8 +9,11 @@ import (
 const (
 	containerModeEnv               = "MOSDNS_CONTAINER_MODE"
 	containerNetworkModeEnv        = "MOSDNS_CONTAINER_NETWORK_MODE"
+	containerAutoInitEnv           = "MOSDNS_AUTO_INIT"
+	containerConfigInitURLEnv      = "MOSDNS_CONFIG_INIT_URL"
 	containerNetworkModeBridge     = "bridge"
 	containerNetworkModeHost       = "host"
+	defaultContainerConfigInitURL  = "https://github.com/jasonxtt/file/raw/refs/heads/main/mosdns/config/config_all.zip"
 	containerUpdateMessage         = "容器版请拉取新镜像并重建容器，不支持在 WebUI 内直接更新二进制。"
 	containerWebUIPortMessage      = "当前为 bridge 端口映射模式，不支持在 WebUI 中变更端口。请通过Compose文件或容器运行参数修改。"
 	containerUpdateConflictReason  = "容器版不支持在 WebUI 内直接更新二进制，请改为拉取新镜像并重建容器。"
@@ -38,6 +41,22 @@ func containerNetworkMode() string {
 	default:
 		return containerNetworkModeBridge
 	}
+}
+
+func containerAutoInitEnabled() bool {
+	switch os.Getenv(containerAutoInitEnv) {
+	case "1", "true", "TRUE", "True", "yes", "YES", "on", "ON":
+		return true
+	default:
+		return false
+	}
+}
+
+func containerConfigInitURL() string {
+	if s := strings.TrimSpace(os.Getenv(containerConfigInitURLEnv)); s != "" {
+		return s
+	}
+	return defaultContainerConfigInitURL
 }
 
 func webUIPortChangeSupported() bool {

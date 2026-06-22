@@ -131,6 +131,10 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 
 	MainConfigBaseDir = guessMainConfigBaseDir(sf.c, sf.dir)
 
+	if err := ensureContainerConfigInitialized(MainConfigBaseDir, sf.c); err != nil {
+		return nil, err
+	}
+
 	if MainConfigBaseDir != "" {
 		if err := SyncSpecialGroupsConfig(MainConfigBaseDir); err != nil {
 			mlog.L().Warn("failed to sync special_groups config before loading main config",

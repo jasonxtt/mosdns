@@ -65,6 +65,28 @@ func TestContainerNetworkMode(t *testing.T) {
 	}
 }
 
+func TestContainerAutoInitSettings(t *testing.T) {
+	t.Setenv(containerAutoInitEnv, "")
+	if containerAutoInitEnabled() {
+		t.Fatal("containerAutoInitEnabled() = true, want false for empty env")
+	}
+
+	t.Setenv(containerAutoInitEnv, "1")
+	if !containerAutoInitEnabled() {
+		t.Fatal("containerAutoInitEnabled() = false, want true for 1")
+	}
+
+	t.Setenv(containerConfigInitURLEnv, "")
+	if got := containerConfigInitURL(); got != defaultContainerConfigInitURL {
+		t.Fatalf("containerConfigInitURL() = %q, want %q", got, defaultContainerConfigInitURL)
+	}
+
+	t.Setenv(containerConfigInitURLEnv, " https://example.com/config_all.zip ")
+	if got := containerConfigInitURL(); got != "https://example.com/config_all.zip" {
+		t.Fatalf("containerConfigInitURL() = %q, want trimmed custom url", got)
+	}
+}
+
 func TestWebUIPortChangeSupported(t *testing.T) {
 	t.Setenv(containerModeEnv, "")
 	if !webUIPortChangeSupported() {
