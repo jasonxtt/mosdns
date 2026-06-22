@@ -48,6 +48,7 @@ wget --quiet --show-progress -O /mnt/main_install.sh https://raw.githubuserconte
 
 容器版的重要约束：
 
+- 新部署时，空的 `/cus/mosdns` 挂载目录会在首次启动时自动初始化默认配置包
 - WebUI 仍可检查新版本
 - 容器内不支持直接更新二进制，升级方式改为更新镜像并重建容器
 - 容器内不支持直接修改 WebUI 端口，端口应通过 Compose 或 `docker run` 映射管理

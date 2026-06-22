@@ -8,8 +8,6 @@ services:
     # host.docker.internal instead of 127.0.0.1.
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
-    environment:
-      MOSDNS_CONTAINER_NETWORK_MODE: bridge
     ports:
       - "53:53/tcp"
       - "53:53/udp"

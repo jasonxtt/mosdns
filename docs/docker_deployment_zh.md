@@ -8,7 +8,6 @@
 
 重要说明：
 
-- 当前维护中的默认 `config_all.zip` 不是“单容器自包含”模板。
 - 常见部署会依赖同机的 `sing-box` / `mihomo` / fakeip DNS 之类的伴生服务。
 - 如果配置文件里仍然写着 `127.0.0.1:1053`、`127.0.0.1:6666` 这类地址，bridge 模式容器内会把它们解释成 `mosdns` 容器自己，而不是宿主机或其他容器。
 - 这会导致 WebUI 能打开，但真实 DNS 查询返回 `SERVFAIL`。
@@ -43,23 +42,38 @@ docker buildx build \
 
 ### 新部署
 
-先把完整配置包解压到宿主机目录，再挂载到容器内的 `/cus/mosdns`：
+新镜像默认已内置以下环境变量：
+
+```text
+MOSDNS_CONTAINER_MODE=1
+MOSDNS_CONTAINER_NETWORK_MODE=bridge
+MOSDNS_AUTO_INIT=1
+MOSDNS_CONFIG_INIT_URL=https://github.com/jasonxtt/file/raw/refs/heads/main/mosdns/config/config_all.zip
+```
+
+因此新部署时只需要准备一个空目录并挂载到 `/cus/mosdns`。容器首次启动如果发现：
+
+- `/cus/mosdns/config_custom.yaml` 不存在
+- `/cus/mosdns` 是空目录
+
+就会自动下载并解压默认 `config_all.zip` 到该目录。
+
+例如：
 
 ```bash
 mkdir -p ./mosdns-data
-curl -L https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip -o /tmp/config_all.zip
-unzip /tmp/config_all.zip -d ./mosdns-data
+docker compose up -d
 ```
 
-解压后应保证主配置文件位于：
+注意：
 
-```text
-./mosdns-data/config_custom.yaml
-```
+- 自动初始化只会在“空目录且缺少主配置”时触发
+- 如果目录里已经有文件但没有 `config_custom.yaml`，容器会直接报错退出，不会擅自覆盖
+- 如果部署环境无法访问 GitHub，仍可手动把 `config_all.zip` 解压到宿主机目录后再启动
 
 ### 旧部署迁移
 
-如果宿主机上已经有现成的 `/cus/mosdns`，直接 bind mount 到容器即可，不需要改目录结构。
+如果宿主机上已经有现成的 `/cus/mosdns`，直接 bind mount 到容器即可，不需要改目录结构，也不会触发自动初始化。
 
 ## 3. 标准 bridge 模式
 
@@ -70,7 +84,7 @@ unzip /tmp/config_all.zip -d ./mosdns-data
 - 发布 `53/tcp`、`53/udp`、`9099/tcp`
 - `restart: unless-stopped`
 - 宿主机目录挂载到 `/cus/mosdns`
-- 默认 `MOSDNS_CONTAINER_NETWORK_MODE=bridge`
+- bridge 模式不需要额外环境变量，镜像内默认就是这个模式
 
 bridge 模式适合这些场景：
 
@@ -123,6 +137,9 @@ bridge 模式下的端口行为：
 
 ```text
 MOSDNS_CONTAINER_MODE=1
+MOSDNS_CONTAINER_NETWORK_MODE=bridge
+MOSDNS_AUTO_INIT=1
+MOSDNS_CONFIG_INIT_URL=https://github.com/jasonxtt/file/raw/refs/heads/main/mosdns/config/config_all.zip
 ```
 
 容器模式下：
@@ -133,6 +150,7 @@ MOSDNS_CONTAINER_MODE=1
 - host 模式下，WebUI 可以直接修改监听端口
 - 配置在线更新仍可用，因为它更新的是挂载卷中的 `/cus/mosdns`
 - bridge 模式下，专属分流组可设置自定义监听端口，但保存后仍需同步补齐容器端口映射
+- 新部署时，空目录会自动初始化默认配置包；已有配置目录不会被覆盖
 
 这不代表所有默认业务流都天然可用。
 

@@ -49,7 +49,9 @@ LABEL org.opencontainers.image.title="mosdns" \
       org.opencontainers.image.revision="${VCS_REF}"
 
 ENV MOSDNS_CONTAINER_MODE=1 \
-    MOSDNS_CONTAINER_NETWORK_MODE=bridge
+    MOSDNS_CONTAINER_NETWORK_MODE=bridge \
+    MOSDNS_AUTO_INIT=1 \
+    MOSDNS_CONFIG_INIT_URL=https://github.com/jasonxtt/file/raw/refs/heads/main/mosdns/config/config_all.zip
 WORKDIR /cus/mosdns
 VOLUME ["/cus/mosdns"]
 
