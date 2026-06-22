@@ -1,0 +1,12 @@
+.DS_Store
+.codegraph/
+.git/
+.github/
+.superpowers/
+.tmp/
+dist/
+docs/
+mosdns-linux-amd64
+node_modules/
+webui-blog/node_modules/
+webui-log/node_modules/

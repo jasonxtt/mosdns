@@ -33,16 +33,18 @@ type SpecialGroup struct {
 }
 
 type SpecialGroupView struct {
-	Slot               int    `json:"slot"`
-	Name               string `json:"name"`
-	ListenPort         int    `json:"listen_port,omitempty"`
-	CustomPortOnly     bool   `json:"custom_port_only,omitempty"`
-	Key                string `json:"key"`
-	UpstreamPluginTag  string `json:"upstream_plugin_tag"`
-	DiversionPluginTag string `json:"diversion_plugin_tag"`
-	ManualPluginTag    string `json:"manual_plugin_tag"`
-	LocalConfig        string `json:"local_config"`
-	ManualRulePath     string `json:"manual_rule_path"`
+	Slot                int    `json:"slot"`
+	Name                string `json:"name"`
+	ListenPort          int    `json:"listen_port,omitempty"`
+	CustomPortOnly      bool   `json:"custom_port_only,omitempty"`
+	PortMappingRequired bool   `json:"port_mapping_required,omitempty"`
+	Message             string `json:"message,omitempty"`
+	Key                 string `json:"key"`
+	UpstreamPluginTag   string `json:"upstream_plugin_tag"`
+	DiversionPluginTag  string `json:"diversion_plugin_tag"`
+	ManualPluginTag     string `json:"manual_plugin_tag"`
+	LocalConfig         string `json:"local_config"`
+	ManualRulePath      string `json:"manual_rule_path"`
 }
 
 var (
@@ -395,7 +397,7 @@ func firstFreeSpecialSlot(groups []SpecialGroup) int {
 }
 
 func buildSpecialGroupView(g SpecialGroup) SpecialGroupView {
-	return SpecialGroupView{
+	view := SpecialGroupView{
 		Slot:               g.Slot,
 		Name:               g.Name,
 		ListenPort:         g.ListenPort,
@@ -407,6 +409,21 @@ func buildSpecialGroupView(g SpecialGroup) SpecialGroupView {
 		LocalConfig:        fmt.Sprintf("srs/special_%d.json", g.Slot),
 		ManualRulePath:     specialManualRulePath(g.Slot),
 	}
+	applySpecialGroupRuntimeHints(&view)
+	return view
+}
+
+func applySpecialGroupRuntimeHints(view *SpecialGroupView) {
+	if view == nil {
+		return
+	}
+
+	if !specialGroupPortMappingRequired(view.ListenPort) {
+		return
+	}
+
+	view.PortMappingRequired = true
+	view.Message = specialGroupPortMappingMessage(view.ListenPort)
 }
 
 func specialGroupKey(slot int) string {
@@ -575,12 +592,14 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 			b.WriteString("    type: udp_server\n")
 			b.WriteString("    args:\n")
 			b.WriteString(fmt.Sprintf("      entry: sequence_special_%d\n", slot))
+			b.WriteString("      enable_audit: true\n")
 			b.WriteString(fmt.Sprintf("      listen: %q\n\n", listenAddr))
 
 			b.WriteString(fmt.Sprintf("  - tag: %s\n", specialListenTCPServerTag(slot)))
 			b.WriteString("    type: tcp_server\n")
 			b.WriteString("    args:\n")
 			b.WriteString(fmt.Sprintf("      entry: sequence_special_%d\n", slot))
+			b.WriteString("      enable_audit: true\n")
 			b.WriteString(fmt.Sprintf("      listen: %q\n\n", listenAddr))
 		}
 	}

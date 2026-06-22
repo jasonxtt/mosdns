@@ -37,6 +37,11 @@ func RegisterConfigManagerAPI(router *chi.Mux) {
 
 // handleConfigExport 对应需求：把本地目录打包下载
 func handleConfigExport(w http.ResponseWriter, r *http.Request) {
+	if containerModeEnabled() {
+		http.Error(w, containerConfigManageMessage, http.StatusConflict)
+		return
+	}
+
 	var req ConfigManagerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -140,6 +145,11 @@ func applyConfigPackage(url, dir string) (int, error) {
 
 // handleConfigUpdateFromURL 对应需求：下载 -> 备份 -> 覆盖 -> 重启
 func handleConfigUpdateFromURL(w http.ResponseWriter, r *http.Request) {
+	if containerModeEnabled() {
+		http.Error(w, containerConfigManageMessage, http.StatusConflict)
+		return
+	}
+
 	var req ConfigManagerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)

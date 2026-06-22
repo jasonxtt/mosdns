@@ -1,0 +1,15 @@
+services:
+  mosdns:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mosdns:docker
+    container_name: mosdns
+    restart: unless-stopped
+    # This mode is often simpler for the maintained default config package,
+    # because many deployments pair mosdns with same-host companions.
+    network_mode: host
+    environment:
+      MOSDNS_CONTAINER_NETWORK_MODE: host
+    volumes:
+      - ./mosdns-data:/cus/mosdns

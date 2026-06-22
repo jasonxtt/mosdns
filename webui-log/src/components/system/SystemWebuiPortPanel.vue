@@ -3,6 +3,10 @@ defineProps({
   webuiPort: {
     type: Object,
     required: true
+  },
+  changeSupported: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -23,11 +27,12 @@ defineEmits(['apply-port'])
       </label>
       <label class="webui-port-inline-field">
         <span>目标端口</span>
-        <input v-model="webuiPort.input" type="number" min="1" max="65535" placeholder="例如 9099" />
+        <input v-model="webuiPort.input" :disabled="!changeSupported" type="number" min="1" max="65535" placeholder="例如 9099" />
       </label>
     </div>
+    <p v-if="webuiPort.message" class="muted">{{ webuiPort.message }}</p>
     <div class="actions webui-port-actions">
-      <button class="btn tiny primary" :disabled="webuiPort.saving || webuiPort.loading" @click="$emit('apply-port')">
+      <button class="btn tiny primary" :disabled="webuiPort.saving || webuiPort.loading || !changeSupported" @click="$emit('apply-port')">
         {{ webuiPort.saving ? '处理中...' : '确认并重启 MosDNS' }}
       </button>
     </div>

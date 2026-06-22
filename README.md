@@ -37,6 +37,21 @@ wget --quiet --show-progress -O /mnt/main_install.sh https://raw.githubuserconte
 
 **步骤 4：** 安装完成后，UI 地址为 `IP:9099`, 例如`http://10.0.0.3:9099`
 
+## Docker 容器化部署
+
+当前仓库已经提供标准容器化支持，容器版继续使用 `/cus/mosdns` 作为运行目录，并保留现有配置包与 WebUI 工作流。
+
+- Docker 部署文档：[Docker 容器化部署](docs/docker_deployment_zh.md)
+- bridge 网络 Compose 示例：[docker-compose.yml.example](docker-compose.yml.example)
+- Docker Hub 镜像 Compose 示例：[docker-compose.image.yml.example](docker-compose.image.yml.example)
+- Linux host 网络 Compose 示例：[docker-compose.host.yml.example](docker-compose.host.yml.example)
+
+容器版的重要约束：
+
+- WebUI 仍可检查新版本
+- 容器内不支持直接更新二进制，升级方式改为更新镜像并重建容器
+- 容器内不支持直接修改 WebUI 端口，端口应通过 Compose 或 `docker run` 映射管理
+
 ## 专属分流组简介及设置
 
 “专属分流组”可以理解为一组独立的域名分流槽位。命中这个组的域名，会优先走它绑定的专属上游、专属缓存和对应的规则入口，适合把某一类域名单独交给特定 DNS 线路处理。
