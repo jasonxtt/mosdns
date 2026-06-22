@@ -57,6 +57,7 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 			"cache/cache_special_53.dump",
 			"special_udp_server_50",
 			"special_tcp_server_50",
+			"enable_audit: true",
 			`listen: ":6053"`,
 			"mark 53",
 		} {
@@ -203,5 +204,41 @@ func TestCleanupOrphanSpecialCacheDumps(t *testing.T) {
 	}
 	if _, err := os.Stat(remove); !os.IsNotExist(err) {
 		t.Fatalf("expected orphan file removed, stat err = %v", err)
+	}
+}
+
+func TestBuildSpecialGroupViewMarksBridgePortMappingRequirement(t *testing.T) {
+	t.Setenv(containerModeEnv, "1")
+	t.Setenv(containerNetworkModeEnv, containerNetworkModeBridge)
+
+	view := buildSpecialGroupView(SpecialGroup{
+		Slot:       50,
+		Name:       "cmcc",
+		ListenPort: 6053,
+	})
+
+	if !view.PortMappingRequired {
+		t.Fatal("PortMappingRequired = false, want true in bridge container mode")
+	}
+	if !strings.Contains(view.Message, "6053/tcp") || !strings.Contains(view.Message, "6053/udp") {
+		t.Fatalf("Message = %q, want port mapping hint", view.Message)
+	}
+}
+
+func TestBuildSpecialGroupViewSkipsPortMappingRequirementInHostMode(t *testing.T) {
+	t.Setenv(containerModeEnv, "1")
+	t.Setenv(containerNetworkModeEnv, containerNetworkModeHost)
+
+	view := buildSpecialGroupView(SpecialGroup{
+		Slot:       50,
+		Name:       "cmcc",
+		ListenPort: 6053,
+	})
+
+	if view.PortMappingRequired {
+		t.Fatal("PortMappingRequired = true, want false in host container mode")
+	}
+	if view.Message != "" {
+		t.Fatalf("Message = %q, want empty in host container mode", view.Message)
 	}
 }

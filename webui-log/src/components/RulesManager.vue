@@ -285,18 +285,19 @@ async function saveSpecial() {
   }
   const customPortOnly = listenPort !== 0 && Boolean(specialEditor.customPortOnly)
   try {
-    await postJSON('/api/v1/special-groups', {
+    const saved = await postJSON('/api/v1/special-groups', {
       slot: Number(specialEditor.slot) || 0,
       name,
       listen_port: listenPort,
       custom_port_only: customPortOnly
     })
-    setSuccess('专属分流组已保存')
     closeSpecialEditor()
     await loadSpecialGroups()
     if (mode.value === 'all' || mode.value === 'diversion') {
       await loadDiversionRules()
     }
+    const followup = String(saved?.message || '').trim()
+    setSuccess(followup ? `专属分流组已保存。${followup}` : '专属分流组已保存')
   } catch (error) {
     setError(`保存专属分流组失败: ${error.message}`)
   }
