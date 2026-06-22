@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## lite-v0.1.5
+
+### Fixed
+
+- fixed audit logging for `special_groups` custom listen ports by adding
+  `enable_audit: true` to the dynamically generated `special_udp_server_*` and
+  `special_tcp_server_*` runtime entries
+- ensured queries entering through a dedicated group's custom UDP/TCP port can
+  appear in the WebUI audit log with the expected `matched_group`,
+  `final_sequence`, and `final_upstream` metadata
+
+### Tests
+
+- added regression coverage for the generated `special_groups` config so custom
+  listen-port servers keep audit logging enabled
+
+### Upgrade Notes
+
+- this release does **not** require a YAML config change
+- existing deployments can update only the binary
+
 ## lite-v0.1.2
 
 ### Fixed
