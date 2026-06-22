@@ -575,12 +575,14 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 			b.WriteString("    type: udp_server\n")
 			b.WriteString("    args:\n")
 			b.WriteString(fmt.Sprintf("      entry: sequence_special_%d\n", slot))
+			b.WriteString("      enable_audit: true\n")
 			b.WriteString(fmt.Sprintf("      listen: %q\n\n", listenAddr))
 
 			b.WriteString(fmt.Sprintf("  - tag: %s\n", specialListenTCPServerTag(slot)))
 			b.WriteString("    type: tcp_server\n")
 			b.WriteString("    args:\n")
 			b.WriteString(fmt.Sprintf("      entry: sequence_special_%d\n", slot))
+			b.WriteString("      enable_audit: true\n")
 			b.WriteString(fmt.Sprintf("      listen: %q\n\n", listenAddr))
 		}
 	}

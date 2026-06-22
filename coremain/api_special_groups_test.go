@@ -50,6 +50,7 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 			"cache/cache_special_53.dump",
 			"special_udp_server_50",
 			"special_tcp_server_50",
+			"enable_audit: true",
 			`listen: ":6053"`,
 			"tag: sequence_special_all",
 			"mark 53",
