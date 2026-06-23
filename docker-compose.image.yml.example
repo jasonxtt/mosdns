@@ -1,6 +1,6 @@
 services:
   mosdns:
-    image: your-dockerhub-user/mosdns:v0.5.0
+    image: your-dockerhub-user/mosdns:v0.5.1
     container_name: mosdns
     restart: unless-stopped
     # If your upstream/proxy companion runs on the Docker host,

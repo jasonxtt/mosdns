@@ -111,7 +111,7 @@ wget --quiet --show-progress -O /mnt/main_install.sh https://raw.githubuserconte
 
 当前正式发布版本为：
 
-- `v0.5.0`
+- `v0.5.1`
 
 这个 fork 现在已经按持续维护的 WebUI 增强分支在发布，不再是早期预览版定位。
 

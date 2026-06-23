@@ -18,7 +18,7 @@
 
 ```bash
 docker build \
-  --build-arg VERSION=v0.5.0 \
+  --build-arg VERSION=v0.5.1 \
   --build-arg BUILD_DATE="$(date -u +%Y%m%d)" \
   --build-arg VCS_REF="$(git rev-parse --short=7 HEAD)" \
   -t mosdns:docker .
@@ -29,7 +29,7 @@ docker build \
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=v0.5.0 \
+  --build-arg VERSION=v0.5.1 \
   --build-arg BUILD_DATE="$(date -u +%Y%m%d)" \
   --build-arg VCS_REF="$(git rev-parse --short=7 HEAD)" \
   -f Dockerfile_buildx \
