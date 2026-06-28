@@ -4254,20 +4254,6 @@ label.switch-table *,
   --menu-active-border: #f8fafc;
 }
 
-:root[data-theme='dark'] #app .btn.system-mode-btn.is-active,
-:root[data-theme='sakura'] #app .btn.system-mode-btn.is-active,
-:root[data-theme='evergreen'] #app .btn.system-mode-btn.is-active,
-:root[data-theme='starlight'] #app .btn.system-mode-btn.is-active,
-:root[data-theme='dusk'] #app .btn.system-mode-btn.is-active,
-:root[data-theme='terra'] #app .btn.system-mode-btn.is-active {
-  border: 2px solid #ffffff !important;
-  color: #ffffff !important;
-  background: #4b5563 !important;
-  box-shadow:
-    inset 0 0 0 2px #ffffff,
-    0 0 0 1px #ffffff !important;
-}
-
 @media (max-width: 900px) {
   .top-strip {
     flex-direction: column;
