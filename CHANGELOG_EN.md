@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.6.0
+
+### Added
+
+- introduced a DNS routing mode switch that toggles between `FakeIP` and
+  `Redir-Host / RealIP` responses for proxied domains; the new mode is
+  persisted by `switch17` and defaults to `FakeIP` after upgrade
+- `FakeIP` mode keeps proxied domains on the `nocnfake` foreign FakeIP
+  upstream; `Redir-Host / RealIP` mode routes proxied domains to the
+  `foreign` proxied upstream and returns real foreign IPs, matching
+  redir-host / realip transparent proxy setups
+- added a "DNS routing mode" card to the maintained `/` system settings and
+  consolidated the core run mode, DNS routing mode, and WebUI port modules
+  into a more compact and consistent layout
+
+### Changed
+
+- upgraded config structure to schema v3: `switch.yaml` adds `switch17`,
+  `forward_1.yaml` splits the proxied-domain response entry into FakeIP and
+  RealIP paths, and `rule/switch17.txt` is created as `A` by the config
+  upgrade
+- the maintained `/` upstream view now reflects the active DNS routing mode;
+  in `Redir-Host / RealIP` mode the foreign FakeIP upstream is marked
+  "inactive for current mode" and the focus shifts to the foreign proxy
+  upstream
+- overview upstream statistics now follow the active routing mode; foreign
+  FakeIP upstream stats are hidden in `Redir-Host / RealIP` mode
+- data-management labels updated to "remembered proxy domains / remembered
+  direct domains / remembered no-V4 domains / remembered no-V6 domains" to
+  reduce semantic confusion with legacy internal file names
+
+### Notes
+
+- this release updates both the binary and the config structure; the schema
+  v3 `config_up` / `config_all` packages are published alongside
+
 ## v0.5.1
 
 ### Fixed

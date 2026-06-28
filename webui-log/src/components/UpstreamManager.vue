@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { deleteRequest, getJSON, postJSON } from '../api/http'
+import { deleteRequest, getJSON, getText, postJSON } from '../api/http'
 import { openConfirm } from '../utils/confirm'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 import { orderUpstreamGroups, upstreamAddressDisplay, upstreamGroupDisplay } from '../utils/upstreamStats'
@@ -13,12 +13,14 @@ defineProps({
 })
 
 const HIDE_DISABLED_KEY = 'mosdnsHideDisabledUpstreams'
+const DNS_ROUTING_SWITCH_TAG = 'switch17'
 
 const loading = ref(false)
 const saving = ref(false)
 const filterGroup = ref('all')
 const showEditor = ref(false)
 const hideDisabled = ref(false)
+const dnsRoutingMode = ref('')
 
 const sortState = reactive({
   key: '',
@@ -131,6 +133,19 @@ const groupOptions = computed(() => {
 })
 
 const hideDisabledLabel = computed(() => (hideDisabled.value ? '显示全部上游' : '隐藏未启用上游'))
+const isRealIpRoutingMode = computed(() => dnsRoutingMode.value === 'B')
+
+function isModeDisabledGroup(group) {
+  return isRealIpRoutingMode.value && String(group || '').trim() === 'nocnfake'
+}
+
+function isRowModeDisabled(row) {
+  return isModeDisabledGroup(row?.group)
+}
+
+function isRowEffectiveEnabled(row) {
+  return Boolean(row?.data?.enabled) && !isRowModeDisabled(row)
+}
 
 function groupDisplayName(group) {
   return upstreamGroupDisplay(group, specialGroups.value).title
@@ -184,15 +199,16 @@ const rows = computed(() => {
       return
     }
     upstreams.forEach((item, index) => {
-      if (hideDisabled.value && !Boolean(item?.enabled)) {
-        return
-      }
-      all.push({
+      const row = {
         group,
         index,
         originalOrder,
         data: item || {}
-      })
+      }
+      if (hideDisabled.value && !isRowEffectiveEnabled(row)) {
+        return
+      }
+      all.push(row)
       originalOrder += 1
     })
   })
@@ -222,6 +238,21 @@ const rows = computed(() => {
 
 function rowAddress(item) {
   return upstreamAddressDisplay(item)
+}
+
+function rowStatusLabel(row) {
+  if (isRowModeDisabled(row)) {
+    return '当前模式未启用'
+  }
+  return Boolean(row?.data?.enabled) ? '已启用' : '已关闭'
+}
+
+function blockModeDisabledGroup(group) {
+  if (!isModeDisabledGroup(group)) {
+    return false
+  }
+  setError('RealIP 分流模式下，国外 FakeIP 上游当前未启用。请切换到 FakeIP 分流后再编辑。')
+  return true
 }
 
 function resetMessage() {
@@ -282,11 +313,12 @@ async function loadData() {
   loading.value = true
   resetMessage()
   try {
-    const [tagsRes, configRes, groupsRes, overridesRes] = await Promise.allSettled([
+    const [tagsRes, configRes, groupsRes, overridesRes, dnsModeRes] = await Promise.allSettled([
       getJSON('/api/v1/upstream/tags'),
       getJSON('/api/v1/upstream/config'),
       getJSON('/api/v1/special-groups'),
-      getJSON('/api/v1/overrides')
+      getJSON('/api/v1/overrides'),
+      getText(`/plugins/${DNS_ROUTING_SWITCH_TAG}/show`)
     ])
     upstreamTags.value = tagsRes.status === 'fulfilled' && Array.isArray(tagsRes.value) ? tagsRes.value : []
     upstreamConfig.value = configRes.status === 'fulfilled' && configRes.value ? configRes.value : {}
@@ -294,8 +326,9 @@ async function loadData() {
     globalSocks5.value = overridesRes.status === 'fulfilled'
       ? String(overridesRes.value?.socks5 || '').trim()
       : ''
+    dnsRoutingMode.value = dnsModeRes.status === 'fulfilled' ? String(dnsModeRes.value || '').trim() : ''
 
-    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || groupsRes.status === 'rejected' || overridesRes.status === 'rejected') {
+    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || groupsRes.status === 'rejected' || overridesRes.status === 'rejected' || dnsModeRes.status === 'rejected') {
       setError('部分数据加载失败，已使用可用数据渲染页面。')
     }
   } catch (error) {
@@ -315,6 +348,9 @@ function beginAdd() {
 
 function beginEdit(row) {
   resetMessage()
+  if (blockModeDisabledGroup(row?.group)) {
+    return
+  }
   const item = row.data || {}
   editingCtx.value = { group: row.group, index: row.index }
   resetForm()
@@ -471,6 +507,9 @@ async function saveUpstream() {
     setError('请选择所属组')
     return
   }
+  if (blockModeDisabledGroup(group)) {
+    return
+  }
   if (!tag) {
     setError('上游标识不能为空')
     return
@@ -507,6 +546,10 @@ async function saveUpstream() {
 }
 
 async function removeRow(row) {
+  resetMessage()
+  if (blockModeDisabledGroup(row?.group)) {
+    return
+  }
   const ok = await openConfirm(`确定删除上游 "${row.data?.tag || 'unnamed'}" 吗？`, { tone: 'danger' })
   if (!ok) {
     return
@@ -528,6 +571,9 @@ async function removeRow(row) {
 
 async function toggleEnable(row) {
   resetMessage()
+  if (blockModeDisabledGroup(row?.group)) {
+    return
+  }
   try {
     const list = Array.isArray(upstreamConfig.value[row.group]) ? [...upstreamConfig.value[row.group]] : []
     if (!list[row.index]) {
@@ -768,20 +814,30 @@ onBeforeUnmount(() => {
           <tr v-else-if="rows.length === 0">
             <td colspan="6" class="empty">{{ hideDisabled ? '当前没有已启用的上游配置' : '暂无上游配置' }}</td>
           </tr>
-          <tr v-for="row in rows" :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`" :class="{ disabled: !row.data?.enabled }">
+          <tr
+            v-for="row in rows"
+            :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`"
+            :class="{ disabled: !isRowEffectiveEnabled(row), 'upstream-row-mode-disabled': isRowModeDisabled(row) }"
+          >
             <td>
               <label class="switch switch-table">
-                <input type="checkbox" :checked="Boolean(row.data?.enabled)" @change="toggleEnable(row)" />
+                <input
+                  type="checkbox"
+                  :checked="Boolean(row.data?.enabled)"
+                  :disabled="isRowModeDisabled(row)"
+                  @change="toggleEnable(row)"
+                />
                 <span class="slider"></span>
               </label>
+              <span v-if="isRowModeDisabled(row)" class="upstream-mode-disabled-chip">当前模式未启用</span>
             </td>
             <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
             <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
             <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
             <td :title="rowAddress(row.data || {})" class="mono">{{ rowAddress(row.data || {}) }}</td>
             <td class="row-actions">
-              <button class="btn tiny secondary" @click="beginEdit(row)">编辑</button>
-              <button class="btn tiny danger" @click="removeRow(row)">删除</button>
+              <button class="btn tiny secondary" :disabled="isRowModeDisabled(row)" @click="beginEdit(row)">编辑</button>
+              <button class="btn tiny danger" :disabled="isRowModeDisabled(row)" @click="removeRow(row)">删除</button>
             </td>
           </tr>
         </tbody>

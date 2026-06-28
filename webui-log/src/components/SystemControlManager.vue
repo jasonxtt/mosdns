@@ -7,6 +7,7 @@ import SystemAuditPanel from "./system/SystemAuditPanel.vue";
 import SystemAutoRefreshPanel from "./system/SystemAutoRefreshPanel.vue";
 import SystemConfigManagePanel from "./system/SystemConfigManagePanel.vue";
 import SystemCoreModePanel from "./system/SystemCoreModePanel.vue";
+import SystemDnsRoutingModePanel from "./system/SystemDnsRoutingModePanel.vue";
 import SystemDomainGenerationPanel from "./system/SystemDomainGenerationPanel.vue";
 import SystemFeatureSwitchesPanel from "./system/SystemFeatureSwitchesPanel.vue";
 import SystemInfoPanel from "./system/SystemInfoPanel.vue";
@@ -161,6 +162,12 @@ const switchProfiles = [
     modes: { A: { name: "兼容模式" }, B: { name: "安全模式" } },
   },
   {
+    tag: "switch17",
+    name: "DNS 分流模式",
+    tip: "切换后会清空相关缓存并重建分流数据。",
+    modes: { A: { name: "FakeIP 分流" }, B: { name: "RealIP 分流" } },
+  },
+  {
     tag: "switch1",
     name: "请求屏蔽",
     desc: "对无解析结果的请求进行屏蔽",
@@ -243,11 +250,12 @@ const domainGenerationProfiles = [
   { key: "enabled", name: "总开关", desc: "统一控制域名表生成" },
   { key: "remember_direct", name: "记忆直连", desc: "生成直连域名表" },
   { key: "remember_proxy", name: "记忆代理", desc: "生成代理域名表" },
-  { key: "no_v4", name: "记忆无v4", desc: "生成无 IPv4 域名表" },
-  { key: "no_v6", name: "记忆无v6", desc: "生成无 IPv6 域名表" },
+  { key: "no_v4", name: "记忆无 V4", desc: "生成无 IPv4 域名表" },
+  { key: "no_v6", name: "记忆无 V6", desc: "生成无 IPv6 域名表" },
 ];
 
 const coreMode = computed(() => String(switchStates.switch3 || ""));
+const dnsRoutingMode = computed(() => String(switchStates.switch17 || ""));
 const secondarySwitches = computed(() =>
   switchProfiles.filter((profile) => !profile.modes),
 );
@@ -332,6 +340,7 @@ const updateLatestBadge = computed(() => {
 const configVersionDisplayMap = {
   1: "v1",
   2: "v2",
+  3: "v3",
 };
 
 function formatConfigVersionDisplay(schema) {
@@ -431,6 +440,16 @@ async function requestResponse(url, options = {}) {
 
 async function postEmpty(url) {
   return requestResponse(url, { method: "POST" });
+}
+
+function isHttpConflictError(error) {
+  return /(^|\b)409(\b|$)|conflict/i.test(String(error?.message || error || ""));
+}
+
+async function readSwitchValue(tag) {
+  const value = String(await getText(`/plugins/${tag}/show`) || "").trim();
+  switchStates[tag] = value;
+  return value;
 }
 
 async function loadAuditStatusAndCapacity() {
@@ -547,6 +566,68 @@ async function setCoreMode(modeValue) {
     }
   } catch (error) {
     setError(`切换核心模式失败: ${error.message}`);
+  }
+}
+
+async function setDnsRoutingMode(modeValue) {
+  if (
+    switchLoading.switch17 ||
+    !["A", "B"].includes(String(modeValue)) ||
+    dnsRoutingMode.value === modeValue
+  ) {
+    return;
+  }
+
+  const fromName = dnsRoutingMode.value === "B" ? "RealIP 分流" : "FakeIP 分流";
+  const toName = modeValue === "B" ? "RealIP 分流" : "FakeIP 分流";
+  const confirmText =
+    modeValue === "B"
+      ? `确认从“${fromName}”切换到“${toName}”？切换后代理域名会直接返回国外真实 IP，并清空相关缓存后重建分流数据。`
+      : `确认从“${fromName}”切换到“${toName}”？切换后代理域名会恢复返回 FakeIP，并清空相关缓存后重建分流数据。`;
+  if (!(await openConfirm(confirmText))) {
+    return;
+  }
+
+  clearMessage();
+  switchLoading.switch17 = true;
+  try {
+    try {
+      await postJSON("/plugins/switch17/post", { value: modeValue });
+      switchStates.switch17 = modeValue;
+    } catch (error) {
+      const applied = isHttpConflictError(error)
+        ? (await readSwitchValue("switch17")) === modeValue
+        : false;
+      if (!applied) {
+        throw error;
+      }
+    }
+
+    const flushResults = await Promise.allSettled([
+      requestResponse("/plugins/cache_all/flush"),
+      requestResponse("/plugins/cache_all_noleak/flush"),
+      requestResponse("/plugins/cache_google/flush"),
+      requestResponse("/plugins/cache_google_node/flush"),
+      requestResponse("/plugins/cache_cnmihomo/flush"),
+    ]);
+    const requeryResults = await Promise.allSettled([
+      postEmpty("/plugins/requery/trigger"),
+    ]);
+    const backgroundErrors = [...flushResults, ...requeryResults]
+      .filter((item) => item.status === "rejected")
+      .map((item) => item.reason);
+    if (!backgroundErrors.length) {
+      setSuccess("DNS 分流模式已切换");
+    } else if (backgroundErrors.every(isHttpConflictError)) {
+      setSuccess("DNS 分流模式已切换，后台缓存/重查任务正在处理中");
+    } else {
+      setSuccess("DNS 分流模式已切换；部分后台重建任务未完成，可稍后刷新重试");
+    }
+  } catch (error) {
+    setError(`切换 DNS 分流模式失败: ${error.message}`);
+    await loadFeatureSwitches();
+  } finally {
+    switchLoading.switch17 = false;
   }
 }
 
@@ -1765,6 +1846,12 @@ onBeforeUnmount(() => {
             :core-mode="coreMode"
             :switch-loading="switchLoading"
             @set-core-mode="setCoreMode"
+          />
+
+          <SystemDnsRoutingModePanel
+            :routing-mode="dnsRoutingMode"
+            :switch-loading="switchLoading"
+            @set-dns-routing-mode="setDnsRoutingMode"
           />
 
           <SystemWebuiPortPanel

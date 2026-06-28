@@ -35,8 +35,8 @@ const (
 // These values describe the external config package required by this binary.
 // Keep them unchanged for binary-only releases. Bump both when config structure changes.
 var (
-	requiredConfigSchema    = "2"
-	requiredConfigPackageID = "main-config-schema-2"
+	requiredConfigSchema    = "3"
+	requiredConfigPackageID = "main-config-schema-3"
 )
 
 type configUpdateManifest struct {
