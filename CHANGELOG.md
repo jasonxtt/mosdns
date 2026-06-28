@@ -1,5 +1,15 @@
 # mosdns 更新日志 (jasonxtt fork)
 
+## 2026年6月29日 二进制+配置更新（v0.6.0）
+1：新增 DNS 分流模式，支持在 `FakeIP` 与 `Redir-Host / RealIP` 两种代理域名响应方式之间切换；新模式由 `switch17` 持久化，升级后默认保持 `FakeIP`。
+2：`FakeIP` 模式继续让代理域名走 `nocnfake` 国外 FakeIP 上游；`Redir-Host / RealIP` 模式让代理域名走 `foreign` 国外代理上游并返回真实国外 IP，适配 redir-host / realip 透明代理方案。
+3：配置结构升级到 schema v3，`switch.yaml` 新增 `switch17`，`forward_1.yaml` 将代理域名响应入口拆分为 FakeIP 与 RealIP 两组路径，`rule/switch17.txt` 通过配置升级默认创建为 `A`。
+4：维护版 `/` 的系统设置新增“DNS 分流模式”卡片，并将核心运行模式、DNS 分流模式、WebUI 端口等模块整理为更紧凑一致的布局。
+5：维护版 `/` 的上游设置会结合当前 DNS 分流模式展示上游有效状态；在 `Redir-Host / RealIP` 模式下，国外 FakeIP 上游标记为“当前模式未启用”，日常配置重点转向国外代理上游。
+6：概览页上游统计会按当前 DNS 分流模式展示有效上游，`Redir-Host / RealIP` 模式下不再展示国外 FakeIP 上游统计。
+7：数据管理中的域名列表文案调整为“记忆代理域名 / 记忆直连域名 / 记忆无 V4 域名 / 记忆无 V6 域名”，减少历史内部文件名与新 DNS 分流模式之间的语义混淆。
+8：本次涉及二进制与配置结构更新，需要同步发布 schema v3 的 `config_up` / `config_all`。
+
 ## 2026年6月22日 二进制更新（v0.5.1）
 1：修复专属分流组自定义监听端口查询不进入 WebUI 审计日志的问题。动态生成的 `special_udp_server_*` / `special_tcp_server_*` 现在会写入 `enable_audit: true`。
 2：特殊端口查询进入专属分流组后，审计日志可正确记录 `matched_group`、`final_sequence`、`final_upstream` 等字段，概览和查询日志可以看到这类请求。
