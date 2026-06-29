@@ -223,14 +223,14 @@ const switchProfiles = [
   {
     tag: 'switch8',
     name: 'IPv4优先',
-    desc: '存在 A 记录时抑制 AAAA 请求',
+    desc: '优先采信A记录',
     tip: '适合希望优先走 IPv4，但仍保留纯 IPv6 域名可解析的场景。',
     valueForOn: 'A',
   },
   {
     tag: 'switch6',
     name: 'IPV6屏蔽',
-    desc: '屏蔽 AAAA 请求',
+    desc: '屏蔽AAAA记录',
     tip: '无 IPV6 场景建议开启。',
     valueForOn: 'A',
   },
@@ -1931,7 +1931,7 @@ onBeforeUnmount(() => {
               @click="setIpStrategy('auto')"
             >
               <strong>自动</strong>
-              <span>保持默认解析行为</span>
+              <span>默认解析行为</span>
             </button>
             <button
               class="log1-ip-option"
@@ -1939,7 +1939,7 @@ onBeforeUnmount(() => {
               @click="setIpStrategy('prefer-v4')"
             >
               <strong>IPv4 优先</strong>
-              <span>存在 A 记录时抑制 AAAA 请求</span>
+              <span>优先采信A记录</span>
             </button>
             <button
               class="log1-ip-option"
@@ -1947,7 +1947,7 @@ onBeforeUnmount(() => {
               @click="setIpStrategy('block-v6')"
             >
               <strong>IPv6 屏蔽</strong>
-              <span>直接屏蔽 AAAA 请求</span>
+              <span>屏蔽AAAA记录</span>
             </button>
           </div>
         </section>

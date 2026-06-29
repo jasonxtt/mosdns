@@ -362,7 +362,11 @@ const systemSummaryCards = computed(() => {
 })
 const upstreamStatsMap = computed(() => applyUpstreamStatsBaseline(
   parseUpstreamStatsMetrics(upstreamMetricsText.value),
-  upstreamStatsBaseline.value.snapshots
+  upstreamStatsBaseline.value.snapshots,
+  {
+    currentProcessStartTime: parseSystemMetrics(upstreamMetricsText.value).startTime,
+    baselineProcessStartTime: upstreamStatsBaseline.value.processStartTime
+  }
 ))
 const upstreamStatSections = computed(() => {
   const configuredGroups = Object.keys(upstreamConfig.value || {})
@@ -545,7 +549,7 @@ function resetUpstreamStatsBaseline() {
   upstreamStatsResetting.value = true
   try {
     const snapshots = parseUpstreamStatsMetrics(upstreamMetricsText.value)
-    upstreamStatsBaseline.value = saveUpstreamStatsBaseline(snapshots)
+    upstreamStatsBaseline.value = saveUpstreamStatsBaseline(snapshots, parseSystemMetrics(upstreamMetricsText.value).startTime)
     setSuccess('上游统计已重置')
   } catch (error) {
     setError(`重置上游统计失败: ${error.message}`)
