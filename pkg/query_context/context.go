@@ -76,7 +76,7 @@ var (
 	// Performance patch: preset seed
 	traceSeed = uint32(time.Now().UnixNano())
 
-	// GlobalSwitchMask mirrors the state of switchers into a bitmask (Bits 32-48)
+	// GlobalSwitchMask mirrors the state of switchers into a bitmask (Bits 32-49)
 	GlobalSwitchMask atomic.Uint64
 )
 

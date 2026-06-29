@@ -20,7 +20,7 @@ import (
 )
 
 const PluginType = "switch17"
-const switchBit = 48
+const switchBit = 49
 
 type Args struct {
 	InitialValue string `yaml:"initial_value"`

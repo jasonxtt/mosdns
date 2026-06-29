@@ -6,7 +6,6 @@ import { openConfirm } from '../src/utils/confirm'
 import SystemAuditCapacityPanel from '../src/components/system/SystemAuditCapacityPanel.vue'
 import SystemAppearancePanel from '../src/components/system/SystemAppearancePanel.vue'
 import SystemConfigManagePanel from '../src/components/system/SystemConfigManagePanel.vue'
-import SystemCoreModePanel from '../src/components/system/SystemCoreModePanel.vue'
 import SystemDomainGenerationPanel from '../src/components/system/SystemDomainGenerationPanel.vue'
 import SystemOverridesPanel from '../src/components/system/SystemOverridesPanel.vue'
 import SystemReplacementRulesPanel from '../src/components/system/SystemReplacementRulesPanel.vue'
@@ -153,6 +152,12 @@ const switchProfiles = [
     modes: { A: { name: '兼容模式' }, B: { name: '安全模式' } },
   },
   {
+    tag: 'switch17',
+    name: 'DNS 分流模式',
+    tip: '切换后会清空相关缓存并重建分流数据。',
+    modes: { A: { name: 'FakeIP 分流' }, B: { name: 'RealIP 分流' } },
+  },
+  {
     tag: 'switch1',
     name: '请求屏蔽',
     desc: '对无解析结果的请求进行屏蔽',
@@ -258,6 +263,7 @@ const domainGenerationProfiles = [
 ]
 
 const coreMode = computed(() => String(switchStates.switch3 || ''))
+const dnsRoutingMode = computed(() => String(switchStates.switch17 || ''))
 const currentMode = computed(() => String(props.mode || 'system-upstream'))
 
 const switchGroups = computed(() =>
@@ -421,6 +427,16 @@ async function postEmpty(url) {
   return requestResponse(url, { method: 'POST' })
 }
 
+function isHttpConflictError(error) {
+  return /(^|\b)409(\b|$)|conflict/i.test(String(error?.message || error || ''))
+}
+
+async function readSwitchValue(tag) {
+  const value = String(await getText(`/plugins/${tag}/show`) || '').trim()
+  switchStates[tag] = value
+  return value
+}
+
 async function loadAuditStatusAndCapacity() {
   const [statusRes, capacityRes] = await Promise.all([
     getJSON('/api/v1/audit/status'),
@@ -563,6 +579,68 @@ async function setCoreMode(modeValue) {
     }
   } catch (error) {
     setError(`切换核心模式失败: ${error.message}`)
+  }
+}
+
+async function setDnsRoutingMode(modeValue) {
+  if (
+    switchLoading.switch17 ||
+    !['A', 'B'].includes(String(modeValue)) ||
+    dnsRoutingMode.value === modeValue
+  ) {
+    return
+  }
+
+  const fromName = dnsRoutingMode.value === 'B' ? 'RealIP 分流' : 'FakeIP 分流'
+  const toName = modeValue === 'B' ? 'RealIP 分流' : 'FakeIP 分流'
+  const confirmText =
+    modeValue === 'B'
+      ? `确认从“${fromName}”切换到“${toName}”？切换后代理域名会直接返回国外真实 IP，并清空相关缓存后重建分流数据。`
+      : `确认从“${fromName}”切换到“${toName}”？切换后代理域名会恢复返回 FakeIP，并清空相关缓存后重建分流数据。`
+  if (!(await openConfirm(confirmText))) {
+    return
+  }
+
+  clearMessage()
+  switchLoading.switch17 = true
+  try {
+    try {
+      await postJSON('/plugins/switch17/post', { value: modeValue })
+      switchStates.switch17 = modeValue
+    } catch (error) {
+      const applied = isHttpConflictError(error)
+        ? (await readSwitchValue('switch17')) === modeValue
+        : false
+      if (!applied) {
+        throw error
+      }
+    }
+
+    const flushResults = await Promise.allSettled([
+      requestResponse('/plugins/cache_all/flush'),
+      requestResponse('/plugins/cache_all_noleak/flush'),
+      requestResponse('/plugins/cache_google/flush'),
+      requestResponse('/plugins/cache_google_node/flush'),
+      requestResponse('/plugins/cache_cnmihomo/flush'),
+    ])
+    const requeryResults = await Promise.allSettled([
+      postEmpty('/plugins/requery/trigger'),
+    ])
+    const backgroundErrors = [...flushResults, ...requeryResults]
+      .filter((item) => item.status === 'rejected')
+      .map((item) => item.reason)
+    if (!backgroundErrors.length) {
+      setSuccess('DNS 分流模式已切换')
+    } else if (backgroundErrors.every(isHttpConflictError)) {
+      setSuccess('DNS 分流模式已切换，后台缓存/重查任务正在处理中')
+    } else {
+      setSuccess('DNS 分流模式已切换；部分后台重建任务未完成，可稍后刷新重试')
+    }
+  } catch (error) {
+    setError(`切换 DNS 分流模式失败: ${error.message}`)
+    await loadFeatureSwitches()
+  } finally {
+    switchLoading.switch17 = false
   }
 }
 
@@ -1783,13 +1861,62 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else-if="currentMode === 'system-behavior'" class="log1-system-mode">
-      <div class="control-panel-grid log1-system-grid-two">
-        <SystemCoreModePanel
-          :core-mode="coreMode"
-          layout="cards"
-          :switch-loading="switchLoading"
-          @set-core-mode="setCoreMode"
-        />
+      <div class="control-panel-grid log1-system-grid-three">
+        <section class="panel control-module log1-switch-group-card">
+          <header class="module-head">
+            <div>
+              <h3>核心运行模式</h3>
+            </div>
+          </header>
+          <div class="log1-core-mode-list">
+            <button
+              class="log1-ip-option"
+              :class="{ active: coreMode === 'A' }"
+              :disabled="switchLoading.switch3"
+              @click="setCoreMode('A')"
+            >
+              <strong>兼容模式</strong>
+              <span>表外域名国内解析，保证速度</span>
+            </button>
+            <button
+              class="log1-ip-option"
+              :class="{ active: coreMode === 'B' }"
+              :disabled="switchLoading.switch3"
+              @click="setCoreMode('B')"
+            >
+              <strong>安全模式</strong>
+              <span>表外域名国外解析，阻止泄漏</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="panel control-module log1-switch-group-card">
+          <header class="module-head">
+            <div>
+              <h3>DNS 分流模式</h3>
+            </div>
+          </header>
+          <div class="log1-dns-routing-list">
+            <button
+              class="log1-ip-option"
+              :class="{ active: dnsRoutingMode === 'A' }"
+              :disabled="switchLoading.switch17"
+              @click="setDnsRoutingMode('A')"
+            >
+              <strong>FakeIP</strong>
+              <span>国外域名返回 FakeIP</span>
+            </button>
+            <button
+              class="log1-ip-option"
+              :class="{ active: dnsRoutingMode === 'B' }"
+              :disabled="switchLoading.switch17"
+              @click="setDnsRoutingMode('B')"
+            >
+              <strong>Redir-Host</strong>
+              <span>国外域名返回真实 IP</span>
+            </button>
+          </div>
+        </section>
 
         <section class="panel control-module log1-switch-group-card">
           <header class="module-head">
@@ -1990,6 +2117,10 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.log1-system-grid-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .log1-advanced-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2010,6 +2141,13 @@ onBeforeUnmount(() => {
 .log1-ip-strategy-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.log1-core-mode-list,
+.log1-dns-routing-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2269,6 +2407,7 @@ onBeforeUnmount(() => {
 @media (max-width: 1280px) {
   .log1-advanced-grid,
   .log1-system-grid-four,
+  .log1-system-grid-three,
   .log1-logs-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2278,8 +2417,11 @@ onBeforeUnmount(() => {
   .log1-advanced-grid,
   .log1-logs-grid,
   .log1-system-grid-four,
+  .log1-system-grid-three,
   .log1-system-grid-two,
   .log1-module-toggle-row-quad,
+  .log1-core-mode-list,
+  .log1-dns-routing-list,
   .log1-ip-strategy-list {
     grid-template-columns: 1fr;
   }

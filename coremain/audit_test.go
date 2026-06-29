@@ -57,6 +57,13 @@ func TestComputeEffectiveTagKeepsForeignRealIPFilterLabel(t *testing.T) {
 	}
 }
 
+func TestComputeEffectiveTagRealIPFilterWinsOverSubscriptionProxy(t *testing.T) {
+	got := computeEffectiveTag("!CN fakeip filter|订阅代理", "foreign", "", "sequence_google_exit")
+	if got != "!CN fakeip filter" {
+		t.Fatalf("expected foreign real-ip filter label to win over subscription proxy, got %q", got)
+	}
+}
+
 func TestAuditClientIPEqualsSupportsIPv4MappedIPv6(t *testing.T) {
 	if !auditClientIPEquals("::ffff:10.0.0.10", "10.0.0.10") {
 		t.Fatal("expected IPv4-mapped IPv6 and plain IPv4 to compare equal")

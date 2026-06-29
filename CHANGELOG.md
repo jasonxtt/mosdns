@@ -1,5 +1,11 @@
 # mosdns 更新日志 (jasonxtt fork)
 
+## 2026年6月29日 二进制更新（v0.6.1）
+1：修正 `switch17` 占用的 `GlobalSwitchMask` bit 位，由 `48` 调整为 `49`，避免与其他 switcher 的位掩码重叠；`pkg/query_context` 的掩码范围注释同步更新为 `Bits 32-49`。
+2：修正审计生效标签计算：`Redir-Host / RealIP` 模式下命中 `!CN fakeip filter` 的域名，其生效标签现在会正确盖过“订阅代理”标签，查询日志与概览显示的最终路由标签与实际行为一致；补充对应回归测试。
+3：兼容版 `/log` 界面补齐 DNS 分流模式（`switch17`）切换能力，与维护版 `/` 行为对齐：支持在 `FakeIP 分流` 与 `RealIP 分流` 之间切换，切换前确认提示、切换后清空相关缓存并重建分流数据。
+4：本次为纯二进制更新，不需要额外更新 `config_up` / `config_all`。
+
 ## 2026年6月29日 二进制+配置更新（v0.6.0）
 1：新增 DNS 分流模式，支持在 `FakeIP` 与 `Redir-Host / RealIP` 两种代理域名响应方式之间切换；新模式由 `switch17` 持久化，升级后默认保持 `FakeIP`。
 2：`FakeIP` 模式继续让代理域名走 `nocnfake` 国外 FakeIP 上游；`Redir-Host / RealIP` 模式让代理域名走 `foreign` 国外代理上游并返回真实国外 IP，适配 redir-host / realip 透明代理方案。

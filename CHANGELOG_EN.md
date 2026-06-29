@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.6.1
+
+### Fixed
+
+- corrected the `GlobalSwitchMask` bit used by `switch17` from `48` to `49` to
+  avoid overlapping another switcher's bitmask; updated the mask range comment
+  in `pkg/query_context` to `Bits 32-49`
+- fixed effective-tag computation in audit: domains hitting the
+  `!CN fakeip filter` tag in `Redir-Host / RealIP` mode now correctly win over
+  the "subscription proxy" label, so the final routing tag shown in the query
+  log and overview matches actual behavior; added a regression test
+
+### Added
+
+- brought the legacy `/log` UI to parity with the maintained `/` UI for the
+  DNS routing mode (`switch17`): toggle between `FakeIP` and `RealIP` modes
+  with a confirmation prompt, then clear related caches and rebuild routing
+  data after the switch
+
+### Notes
+
+- binary-only update; no `config_up` / `config_all` changes required
+
 ## v0.6.0
 
 ### Added
