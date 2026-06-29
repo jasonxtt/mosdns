@@ -1,5 +1,9 @@
 # mosdns 更新日志 (jasonxtt fork)
 
+## 2026年6月29日 二进制更新（v0.6.2）
+1：修复概览页上游 DNS 统计在 mosdns 重启后可能全部显示为 0 的问题。
+2：本次为纯二进制更新，不需要额外更新 `config_up` / `config_all`。
+
 ## 2026年6月29日 二进制更新（v0.6.1）
 1：修正 `switch17` 占用的 `GlobalSwitchMask` bit 位，由 `48` 调整为 `49`，避免与其他 switcher 的位掩码重叠；`pkg/query_context` 的掩码范围注释同步更新为 `Bits 32-49`。
 2：修正审计生效标签计算：`Redir-Host / RealIP` 模式下命中 `!CN fakeip filter` 的域名，其生效标签现在会正确盖过“订阅代理”标签，查询日志与概览显示的最终路由标签与实际行为一致；补充对应回归测试。

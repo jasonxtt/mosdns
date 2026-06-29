@@ -233,14 +233,14 @@ const switchProfiles = [
   {
     tag: "switch8",
     name: "IPv4优先",
-    desc: "存在 A 记录时抑制 AAAA 请求",
+    desc: "优先采信A记录",
     tip: "适合希望优先走 IPv4，但仍保留纯 IPv6 域名可解析的场景。",
     valueForOn: "A",
   },
   {
     tag: "switch6",
     name: "IPV6屏蔽",
-    desc: "屏蔽 AAAA 请求",
+    desc: "屏蔽AAAA记录",
     tip: "无 IPV6 场景建议开启。",
     valueForOn: "A",
   },

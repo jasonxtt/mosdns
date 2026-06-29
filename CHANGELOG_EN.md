@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.6.2
+
+### Fixed
+
+- fixed overview upstream DNS statistics sometimes showing all zeros after
+  mosdns restarts
+
+### Notes
+
+- binary-only update; no `config_up` / `config_all` changes required
+
 ## v0.6.1
 
 ### Fixed
