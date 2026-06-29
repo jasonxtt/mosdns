@@ -36,11 +36,11 @@ func handleGetWebUIPort(m *Mosdns) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("读取 WebUI 端口设置失败: %w", err))
 			return
 		}
-		if settings.Port > 0 {
+		changeSupported := webUIPortChangeSupported()
+		if changeSupported && settings.Port > 0 {
 			configuredPort = settings.Port
 		}
 
-		changeSupported := webUIPortChangeSupported()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"port":             configuredPort,
 			"active_port":      activePort,
