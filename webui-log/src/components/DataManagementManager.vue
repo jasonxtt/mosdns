@@ -27,10 +27,10 @@ const coreMode = ref('')
 
 const listStatsRefreshing = ref(false)
 const listStats = ref([
-  { key: 'fakeip', name: 'FakeIP 域名', endpoint: '/plugins/my_fakeiplist/show', count: null, error: '' },
-  { key: 'realip', name: 'RealIP 域名', endpoint: '/plugins/my_realiplist/show', count: null, error: '' },
-  { key: 'nov4', name: '无 V4 域名', endpoint: '/plugins/my_nov4list/show', count: null, error: '' },
-  { key: 'nov6', name: '无 V6 域名', endpoint: '/plugins/my_nov6list/show', count: null, error: '' },
+  { key: 'fakeip', name: '记忆代理域名', endpoint: '/plugins/my_fakeiplist/show', count: null, error: '' },
+  { key: 'realip', name: '记忆直连域名', endpoint: '/plugins/my_realiplist/show', count: null, error: '' },
+  { key: 'nov4', name: '记忆无 V4 域名', endpoint: '/plugins/my_nov4list/show', count: null, error: '' },
+  { key: 'nov6', name: '记忆无 V6 域名', endpoint: '/plugins/my_nov6list/show', count: null, error: '' },
   { key: 'total', name: '域名排行', endpoint: '/plugins/top_domains/show', count: null, error: '' }
 ])
 

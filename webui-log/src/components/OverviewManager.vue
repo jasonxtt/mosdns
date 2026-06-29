@@ -62,6 +62,7 @@ const domainSetRank = ref([])
 const specialGroups = ref([])
 const upstreamConfig = ref({})
 const upstreamMetricsText = ref('')
+const dnsRoutingMode = ref('')
 const upstreamStatsBaseline = ref(loadUpstreamStatsBaseline())
 const upstreamStatsResetting = ref(false)
 const slowDetailOpen = ref(false)
@@ -369,6 +370,9 @@ const upstreamStatSections = computed(() => {
   const sections = []
 
   orderedGroups.forEach((group) => {
+    if (dnsRoutingMode.value === 'B' && group === 'nocnfake') {
+      return
+    }
     const rows = Array.isArray(upstreamConfig.value?.[group]) ? upstreamConfig.value[group] : []
     const enabledRows = rows
       .filter((item) => Boolean(item?.enabled))
@@ -993,7 +997,8 @@ async function reloadOverview(showMessage = false) {
       specialGroupsRes,
       aliasesRes,
       upstreamConfigRes,
-      metricsRes
+      metricsRes,
+      dnsRoutingModeRes
     ] = await Promise.all([
       getJSON('/api/v2/audit/stats'),
       getJSON('/api/v2/audit/rank/domain?limit=20'),
@@ -1003,7 +1008,8 @@ async function reloadOverview(showMessage = false) {
       getJSON('/api/v1/special-groups'),
       getJSON('/plugins/clientname').catch(() => ({})),
       getJSON('/api/v1/upstream/config').catch(() => ({})),
-      getText('/metrics').catch(() => '')
+      getText('/metrics').catch(() => ''),
+      getText('/plugins/switch17/show').catch(() => '')
     ])
 
     stats.totalQueries = Number(statsRes?.total_queries || 0)
@@ -1019,6 +1025,7 @@ async function reloadOverview(showMessage = false) {
     aliases.value = normalizeAliasMap(aliasesRes)
     upstreamConfig.value = upstreamConfigRes && typeof upstreamConfigRes === 'object' ? upstreamConfigRes : {}
     upstreamMetricsText.value = String(metricsRes || '')
+    dnsRoutingMode.value = String(dnsRoutingModeRes || '').trim()
     applySystemSummaryState({ metricsText: metricsRes })
     lastUpdatedText.value = new Date().toLocaleString('zh-CN', { hour12: false })
 

@@ -1,8 +1,8 @@
 <script setup>
 defineProps({
-  coreMode: {
+  routingMode: {
     type: String,
-    default: "",
+    required: true,
   },
   switchLoading: {
     type: Object,
@@ -10,42 +10,42 @@ defineProps({
   },
 });
 
-defineEmits(["set-core-mode"]);
+defineEmits(["set-dns-routing-mode"]);
 </script>
 
 <template>
   <section class="panel control-module system-grid-dual-item system-mode-panel">
     <div class="system-mode-head">
       <h3 class="system-mode-title">
-        <span>核心运行模式</span>
+        <span>DNS 分流模式</span>
       </h3>
 
       <div class="system-mode-actions">
         <button
           class="btn tiny system-mode-btn"
-          :class="coreMode === 'A' ? 'primary is-active' : 'secondary'"
-          :disabled="switchLoading.switch3"
-          @click="$emit('set-core-mode', 'A')"
+          :class="routingMode === 'A' ? 'primary is-active' : 'secondary'"
+          :disabled="switchLoading.switch17"
+          @click="$emit('set-dns-routing-mode', 'A')"
         >
-          兼容模式
+          FakeIP
         </button>
         <button
           class="btn tiny system-mode-btn"
-          :class="coreMode === 'B' ? 'primary is-active' : 'secondary'"
-          :disabled="switchLoading.switch3"
-          @click="$emit('set-core-mode', 'B')"
+          :class="routingMode === 'B' ? 'primary is-active' : 'secondary'"
+          :disabled="switchLoading.switch17"
+          @click="$emit('set-dns-routing-mode', 'B')"
         >
-          安全模式
+          Redir-Host
         </button>
       </div>
     </div>
 
     <div class="system-mode-notes">
-      <p :class="{ active: coreMode === 'A' }">
-        <strong>兼容：</strong>表外域名国内解析，保证速度
+      <p :class="{ active: routingMode === 'A' }">
+        <strong>FakeIP：</strong>国外域名返回 FakeIP
       </p>
-      <p :class="{ active: coreMode === 'B' }">
-        <strong>安全：</strong>表外域名国外解析，阻止泄漏
+      <p :class="{ active: routingMode === 'B' }">
+        <strong>Redir-Host：</strong>国外域名返回真实 IP
       </p>
     </div>
   </section>
@@ -88,6 +88,9 @@ defineEmits(["set-core-mode"]);
 }
 
 .system-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -98,6 +101,8 @@ defineEmits(["set-core-mode"]);
   line-height: 1.15;
   white-space: nowrap;
   text-align: center;
+  font-family: Arial, Helvetica, sans-serif;
+  font-variant-ligatures: none;
 }
 
 .btn.system-mode-btn.is-active {
