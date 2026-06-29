@@ -617,6 +617,12 @@ func computeEffectiveTag(domainSet, finalUpstream, matchedGroup, finalSequence s
 		noVTags = append(noVTags, "记忆无V6")
 	}
 
+	if hasDomainTag(tags, "!CN fakeip filter") {
+		if joined := joinEffectiveTag(noVTags, "!CN fakeip filter"); joined != "" {
+			return joined
+		}
+	}
+
 	hasMemoryDirect := hasDomainTag(tags, "记忆直连")
 	hasMemoryProxy := hasDomainTag(tags, "记忆代理")
 	routeKind := classifyRouteKind(strings.TrimSpace(finalUpstream))
