@@ -5,12 +5,9 @@ import DnsOverviewCard from './dashboard/DnsOverviewCard.vue'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 import { formatDateTime } from '../utils/time'
 import {
-  applyUpstreamStatsBaseline,
-  loadUpstreamStatsBaseline,
   orderUpstreamGroups,
   parseUpstreamStatsMetrics,
   protocolDisplayLabel,
-  saveUpstreamStatsBaseline,
   upstreamAddressDisplay,
   upstreamGroupDisplay
 } from '../utils/upstreamStats'
@@ -63,8 +60,6 @@ const specialGroups = ref([])
 const upstreamConfig = ref({})
 const upstreamMetricsText = ref('')
 const dnsRoutingMode = ref('')
-const upstreamStatsBaseline = ref(loadUpstreamStatsBaseline())
-const upstreamStatsResetting = ref(false)
 const slowDetailOpen = ref(false)
 const selectedSlowQuery = ref(null)
 const domainSetRankSource = ref('effective_tag')
@@ -360,14 +355,7 @@ const systemSummaryCards = computed(() => {
     }
   ]
 })
-const upstreamStatsMap = computed(() => applyUpstreamStatsBaseline(
-  parseUpstreamStatsMetrics(upstreamMetricsText.value),
-  upstreamStatsBaseline.value.snapshots,
-  {
-    currentProcessStartTime: parseSystemMetrics(upstreamMetricsText.value).startTime,
-    baselineProcessStartTime: upstreamStatsBaseline.value.processStartTime
-  }
-))
+const upstreamStatsMap = computed(() => parseUpstreamStatsMetrics(upstreamMetricsText.value))
 const upstreamStatSections = computed(() => {
   const configuredGroups = Object.keys(upstreamConfig.value || {})
   const orderedGroups = orderUpstreamGroups(configuredGroups, specialGroups.value)
@@ -543,19 +531,6 @@ function getRuleLabel(key) {
 
 function formatPercent(value) {
   return `${Number(value || 0).toFixed(1)}%`
-}
-
-function resetUpstreamStatsBaseline() {
-  upstreamStatsResetting.value = true
-  try {
-    const snapshots = parseUpstreamStatsMetrics(upstreamMetricsText.value)
-    upstreamStatsBaseline.value = saveUpstreamStatsBaseline(snapshots, parseSystemMetrics(upstreamMetricsText.value).startTime)
-    setSuccess('上游统计已重置')
-  } catch (error) {
-    setError(`重置上游统计失败: ${error.message}`)
-  } finally {
-    upstreamStatsResetting.value = false
-  }
 }
 
 function formatResponseFlags(flags) {
@@ -1075,14 +1050,6 @@ onBeforeUnmount(() => {
         <div class="upstream-stats-title-wrap">
           <h3>上游 DNS 统计</h3>
         </div>
-        <button
-          class="btn tiny secondary"
-          type="button"
-          :disabled="upstreamStatsResetting || loading"
-          @click="resetUpstreamStatsBaseline"
-        >
-          {{ upstreamStatsResetting ? '重置中...' : '重置统计' }}
-        </button>
       </header>
       <div class="table-wrap upstream-stats-table-wrap">
         <table class="upstream-stats-table">

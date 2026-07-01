@@ -126,6 +126,20 @@ body::after {
   position: relative;
 }
 
+.top-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.top-strip-actions {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .hero {
   background: var(--hero-gradient);
   color: #f7fffe;
@@ -240,6 +254,13 @@ body::after {
   padding: 0;
 }
 
+.nav-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .main-refresh-btn {
   width: 42px;
   height: 42px;
@@ -283,6 +304,7 @@ body::after {
 .legacy-main-btn.refresh-inline-btn {
   min-width: 42px;
   width: 42px;
+  height: 42px;
   padding: 10px 0;
   font-size: 1.4rem;
   font-weight: 700;
@@ -291,7 +313,14 @@ body::after {
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.legacy-main-btn.reset-inline-btn {
+  height: 42px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  line-height: 1.2;
   flex-shrink: 0;
 }
 
@@ -4260,6 +4289,11 @@ label.switch-table *,
     align-items: stretch;
   }
 
+  .top-strip-head {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .top-inline-notice {
     top: 10px;
     left: 50%;
@@ -4280,8 +4314,44 @@ label.switch-table *,
   }
 
   .hero.compact {
-    width: 100%;
+    width: auto;
     min-width: 0;
+    max-width: calc(100% - 84px);
+    flex: 0 1 auto;
+    padding: 10px 14px;
+  }
+
+  .hero.compact h1 {
+    font-size: 1rem;
+  }
+
+  .top-strip-actions {
+    display: flex;
+    flex: 0 0 auto;
+  }
+
+  .top-strip-actions .legacy-main-btn {
+    flex: 0 0 auto;
+    min-width: 0;
+    white-space: nowrap;
+    border-radius: 8px;
+    text-align: center;
+  }
+
+  .top-strip-actions .legacy-main-btn.refresh-inline-btn {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    padding: 7px 0;
+    font-size: 1.18rem;
+    margin-left: 0;
+  }
+
+  .top-strip-actions .legacy-main-btn.reset-inline-btn {
+    height: 30px;
+    padding: 7px 10px;
+    font-size: 0.78rem;
+    margin-left: 0;
   }
 
   .legacy-main-nav.compact {
@@ -4307,8 +4377,21 @@ label.switch-table *,
     flex: 0 0 30px;
     min-width: 30px;
     width: 30px;
+    height: 30px;
     padding: 7px 0;
     font-size: 1.18rem;
+  }
+
+  .legacy-main-btn.reset-inline-btn {
+    flex: 0 0 auto;
+    min-width: 0;
+    height: 30px;
+    padding: 7px 10px;
+    font-size: 0.78rem;
+  }
+
+  .legacy-main-nav.compact .desktop-only-action {
+    display: none;
   }
 
   .main-refresh-btn {
