@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.3
+
+### Fixed
+
+- changed overview `重置统计` to a confirm-and-restart flow instead of browser-local baselines
+- removed the frontend local-delta logic from overview upstream DNS statistics so the view always follows backend cumulative counters
+- polished the maintained `/` top navigation on narrow screens and removed the extra appearance eyedropper buttons
+
+### Notes
+
+- binary-only update; no `config_up` / `config_all` changes required
+
 ## v0.6.2
 
 ### Fixed

@@ -16,10 +16,6 @@ defineProps({
     type: Boolean,
     default: false
   },
-  eyeDropperSupported: {
-    type: Boolean,
-    default: false
-  },
   formatRelativeTime: {
     type: Function,
     required: true
@@ -111,15 +107,6 @@ function openPanelBackgroundPicker() {
               />
               <button class="btn tiny secondary appearance-color-inline-btn" type="button" :disabled="textColorSaving" @click="$emit('reset-text-color')">默认</button>
             </div>
-            <button
-              v-if="eyeDropperSupported"
-              class="btn tiny secondary appearance-color-side-btn"
-              type="button"
-              :disabled="textColorSaving"
-              @click="$emit('pick-text-color')"
-            >
-              取色
-            </button>
           </div>
         </div>
 
@@ -136,15 +123,6 @@ function openPanelBackgroundPicker() {
               />
               <button class="btn tiny secondary appearance-color-inline-btn" type="button" :disabled="buttonColorSaving" @click="$emit('reset-button-color')">默认</button>
             </div>
-            <button
-              v-if="eyeDropperSupported"
-              class="btn tiny secondary appearance-color-side-btn"
-              type="button"
-              :disabled="buttonColorSaving"
-              @click="$emit('pick-button-color')"
-            >
-              取色
-            </button>
           </div>
         </div>
       </div>

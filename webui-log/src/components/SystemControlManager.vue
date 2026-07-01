@@ -120,7 +120,6 @@ const defaultButtonColorSettings = getDefaultButtonColorSettings();
 const buttonColorSettings = reactive(getDefaultButtonColorSettings());
 const buttonColorDraft = ref(defaultButtonColorSettings.light.color);
 const buttonColorSaving = ref(false);
-const eyeDropperSupported = ref(false);
 const panelBackgroundPicker = ref(null);
 
 const panelBackgroundDefaults = getDefaultPanelBackgroundSettings();
@@ -1178,23 +1177,6 @@ async function onTextColorPickerChange(event) {
   await saveTextColorSettings(false);
 }
 
-async function pickTextColorFromScreen() {
-  if (!eyeDropperSupported.value) {
-    return;
-  }
-  try {
-    const dropper = new window.EyeDropper();
-    const result = await dropper.open();
-    if (!result?.sRGBHex) {
-      return;
-    }
-    setCustomTextColorForActiveTheme(result.sRGBHex);
-    await saveTextColorSettings(false);
-  } catch {
-    // user cancelled or unsupported runtime state
-  }
-}
-
 function setCustomButtonColorForActiveTheme(rawColor) {
   const theme = activeThemeKey();
   const fallback = defaultButtonColorSettings[theme].color;
@@ -1217,23 +1199,6 @@ async function onButtonColorPickerChange(event) {
     event?.target?.value || buttonColorDraft.value,
   );
   await saveButtonColorSettings(false);
-}
-
-async function pickButtonColorFromScreen() {
-  if (!eyeDropperSupported.value) {
-    return;
-  }
-  try {
-    const dropper = new window.EyeDropper();
-    const result = await dropper.open();
-    if (!result?.sRGBHex) {
-      return;
-    }
-    setCustomButtonColorForActiveTheme(result.sRGBHex);
-    await saveButtonColorSettings(false);
-  } catch {
-    // user cancelled or unsupported runtime state
-  }
 }
 
 async function resetThemeTextColor() {
@@ -1773,8 +1738,6 @@ function toggleAdvancedSection(key) {
 }
 
 onMounted(() => {
-  eyeDropperSupported.value =
-    typeof window !== "undefined" && "EyeDropper" in window;
   initializeAppearance();
   loadTextColorSettings();
   loadButtonColorSettings();
@@ -1945,15 +1908,6 @@ onBeforeUnmount(() => {
                     @change="onTextColorPickerChange"
                   />
                   <div class="appearance-compact-inline-actions">
-                    <button
-                      v-if="eyeDropperSupported"
-                      class="btn tiny secondary"
-                      type="button"
-                      :disabled="textColorSaving"
-                      @click="pickTextColorFromScreen"
-                    >
-                      取色
-                    </button>
                     <button class="btn tiny secondary" type="button" :disabled="textColorSaving" @click="resetThemeTextColor">默认</button>
                   </div>
                 </div>
@@ -1970,15 +1924,6 @@ onBeforeUnmount(() => {
                     @change="onButtonColorPickerChange"
                   />
                   <div class="appearance-compact-inline-actions">
-                    <button
-                      v-if="eyeDropperSupported"
-                      class="btn tiny secondary"
-                      type="button"
-                      :disabled="buttonColorSaving"
-                      @click="pickButtonColorFromScreen"
-                    >
-                      取色
-                    </button>
                     <button class="btn tiny secondary" type="button" :disabled="buttonColorSaving" @click="resetThemeButtonColor">默认</button>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { getJSON } from './api/http'
+import { getJSON, postJSON } from './api/http'
 import ConfirmBubbleHost from './components/ConfirmBubbleHost.vue'
 import DataManagementManager from './components/DataManagementManager.vue'
 import ListManager from './components/ListManager.vue'
@@ -9,11 +9,15 @@ import QueryManager from './components/QueryManager.vue'
 import RulesManager from './components/RulesManager.vue'
 import SystemControlManager from './components/SystemControlManager.vue'
 import UpstreamManager from './components/UpstreamManager.vue'
+import { openConfirm } from './utils/confirm'
+import { setError, setSuccess } from './utils/notice'
 import { previewPanelBackground } from './utils/panelBackground'
 import { applyTextColorForTheme, loadTextColorSettingsFromStorage, normalizeTextColorSettings, saveTextColorSettingsToStorage } from './utils/appearanceTextColor'
 import { applyButtonColorForTheme, loadButtonColorSettingsFromStorage, normalizeButtonColorSettings, saveButtonColorSettingsToStorage } from './utils/appearanceButtonColor'
 
 const DEFAULT_AUTO_REFRESH_STATE = { enabled: false, intervalSeconds: 15 }
+const OVERVIEW_HISTORY_KEY = 'mosdnsHistory'
+const UPSTREAM_STATS_RESET_KEY = 'mosdnsUpstreamStatsResetBaselineV1'
 
 const activeMainTab = ref('overview')
 const activeQuerySubTab = ref('live')
@@ -48,6 +52,7 @@ const topNotice = reactive({
   tone: 'success',
   message: ''
 })
+const overviewResetting = ref(false)
 
 let autoRefreshTimerId = 0
 let topNoticeTimerId = 0
@@ -107,6 +112,33 @@ function handleVisibilityChange() {
 
 function triggerGlobalRefresh() {
   window.dispatchEvent(new CustomEvent('mosdns-log-refresh'))
+}
+
+async function triggerOverviewReset() {
+  if (overviewResetting.value) {
+    return
+  }
+  const confirmed = await openConfirm('将清空概览页全部统计并重启 mosdns，是否继续？', {
+    title: '重置统计',
+    confirmText: '继续',
+    tone: 'danger'
+  })
+  if (!confirmed) {
+    return
+  }
+
+  overviewResetting.value = true
+  try {
+    await postJSON('/api/v1/system/restart', { delay_ms: 500 })
+    localStorage.removeItem(OVERVIEW_HISTORY_KEY)
+    localStorage.removeItem(UPSTREAM_STATS_RESET_KEY)
+    setSuccess('已发送重启请求，页面将自动刷新。')
+    window.setTimeout(() => window.location.reload(), 4000)
+  } catch (error) {
+    setError(`重置统计失败: ${error.message}`)
+  } finally {
+    overviewResetting.value = false
+  }
 }
 
 function handleOpenLogFilter(event) {
@@ -219,9 +251,31 @@ onBeforeUnmount(() => {
 <template>
   <div class="app-shell">
     <div class="top-strip">
-      <header class="hero compact">
-        <h1>MosDNS 仪表盘</h1>
-      </header>
+      <div class="top-strip-head">
+        <header class="hero compact">
+          <h1>MosDNS 仪表盘</h1>
+        </header>
+        <div class="top-strip-actions">
+          <button
+            v-if="activeMainTab === 'overview'"
+            class="legacy-main-btn reset-inline-btn"
+            type="button"
+            :disabled="overviewResetting"
+            title="清空概览页全部统计并重启 mosdns"
+            @click="triggerOverviewReset"
+          >
+            {{ overviewResetting ? '重置中...' : '重置统计' }}
+          </button>
+          <button
+            class="legacy-main-btn refresh-inline-btn"
+            type="button"
+            title="刷新当前页面数据"
+            @click="triggerGlobalRefresh"
+          >
+            ⟳
+          </button>
+        </div>
+      </div>
       <transition name="top-inline-notice-fade">
         <div v-if="topNotice.open" class="top-inline-notice" :class="topNotice.tone === 'error' ? 'error' : 'success'" role="status" aria-live="polite">
           {{ topNotice.message }}
@@ -238,14 +292,26 @@ onBeforeUnmount(() => {
         >
           {{ tab.label }}
         </button>
-        <button
-          class="legacy-main-btn refresh-inline-btn"
-          type="button"
-          title="刷新当前页面数据"
-          @click="triggerGlobalRefresh"
-        >
-          ⟳
-        </button>
+        <div class="nav-inline-actions desktop-only-action">
+          <button
+            v-if="activeMainTab === 'overview'"
+            class="legacy-main-btn reset-inline-btn"
+            type="button"
+            :disabled="overviewResetting"
+            title="清空概览页全部统计并重启 mosdns"
+            @click="triggerOverviewReset"
+          >
+            {{ overviewResetting ? '重置中...' : '重置统计' }}
+          </button>
+          <button
+            class="legacy-main-btn refresh-inline-btn"
+            type="button"
+            title="刷新当前页面数据"
+            @click="triggerGlobalRefresh"
+          >
+            ⟳
+          </button>
+        </div>
       </nav>
     </div>
 
