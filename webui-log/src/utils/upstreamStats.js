@@ -1,5 +1,3 @@
-const UPSTREAM_STATS_RESET_KEY = 'mosdnsUpstreamStatsResetBaselineV1'
-
 const BUILTIN_GROUP_DEFS = [
   { key: 'domestic', title: '国内直连上游', tone: 'domestic' },
   { key: 'nocnfake', title: '国外 FakeIP 上游', tone: 'foreign-fake' },
@@ -122,76 +120,6 @@ export function parseUpstreamStatsMetrics(rawText = '') {
   }
 
   return buckets
-}
-
-export function loadUpstreamStatsBaseline() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(UPSTREAM_STATS_RESET_KEY) || 'null')
-    if (!parsed || typeof parsed !== 'object' || typeof parsed.snapshots !== 'object' || Array.isArray(parsed.snapshots)) {
-      return { snapshots: {}, resetAt: 0, processStartTime: 0 }
-    }
-    return {
-      snapshots: parsed.snapshots,
-      resetAt: toNumber(parsed.resetAt),
-      processStartTime: toNumber(parsed.processStartTime)
-    }
-  } catch {
-    return { snapshots: {}, resetAt: 0, processStartTime: 0 }
-  }
-}
-
-export function saveUpstreamStatsBaseline(snapshots, processStartTime = 0) {
-  const payload = {
-    resetAt: Date.now(),
-    processStartTime: toNumber(processStartTime),
-    snapshots: snapshots && typeof snapshots === 'object' ? snapshots : {}
-  }
-  localStorage.setItem(UPSTREAM_STATS_RESET_KEY, JSON.stringify(payload))
-  return payload
-}
-
-export function clearUpstreamStatsBaseline() {
-  localStorage.removeItem(UPSTREAM_STATS_RESET_KEY)
-}
-
-function hasCounterReset(current = {}, baseline = {}) {
-  return ['queryTotal', 'errorTotal', 'winnerTotal', 'latencySum', 'latencyCount'].some((field) => (
-    toNumber(baseline[field]) > 0 && toNumber(current[field]) < toNumber(baseline[field])
-  ))
-}
-
-export function applyUpstreamStatsBaseline(currentStats, baselineSnapshots = {}, options = {}) {
-  const adjusted = {}
-  const currentProcessStartTime = toNumber(options.currentProcessStartTime)
-  const baselineProcessStartTime = toNumber(options.baselineProcessStartTime)
-  const processRestarted = Boolean(
-    currentProcessStartTime &&
-    baselineProcessStartTime &&
-    currentProcessStartTime !== baselineProcessStartTime
-  )
-
-  Object.entries(currentStats || {}).forEach(([key, value]) => {
-    const baseline = baselineSnapshots[key] || {}
-    if (processRestarted || hasCounterReset(value, baseline)) {
-      adjusted[key] = {
-        queryTotal: clampNonNegative(value?.queryTotal),
-        errorTotal: clampNonNegative(value?.errorTotal),
-        winnerTotal: clampNonNegative(value?.winnerTotal),
-        latencySum: clampNonNegative(value?.latencySum),
-        latencyCount: clampNonNegative(value?.latencyCount)
-      }
-      return
-    }
-
-    adjusted[key] = {
-      queryTotal: clampNonNegative(toNumber(value?.queryTotal) - toNumber(baseline.queryTotal)),
-      errorTotal: clampNonNegative(toNumber(value?.errorTotal) - toNumber(baseline.errorTotal)),
-      winnerTotal: clampNonNegative(toNumber(value?.winnerTotal) - toNumber(baseline.winnerTotal)),
-      latencySum: clampNonNegative(toNumber(value?.latencySum) - toNumber(baseline.latencySum)),
-      latencyCount: clampNonNegative(toNumber(value?.latencyCount) - toNumber(baseline.latencyCount))
-    }
-  })
-  return adjusted
 }
 
 export function orderUpstreamGroups(groupKeys = [], specialGroups = []) {
