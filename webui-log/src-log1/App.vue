@@ -14,6 +14,8 @@ import { applyTextColorForTheme, loadTextColorSettingsFromStorage, normalizeText
 import { applyButtonColorForTheme, loadButtonColorSettingsFromStorage, normalizeButtonColorSettings, saveButtonColorSettingsToStorage } from '../src/utils/appearanceButtonColor'
 
 const DEFAULT_AUTO_REFRESH_STATE = { enabled: false, intervalSeconds: 15 }
+const OVERVIEW_HISTORY_KEY = 'mosdnsHistory'
+const UPSTREAM_STATS_RESET_KEY = 'mosdnsUpstreamStatsResetBaselineV1'
 
 const activeMainTab = ref('overview')
 const activeQuerySubTab = ref('live')
@@ -55,6 +57,7 @@ const systemSecondaryTabs = [
 
 const activeSystemSection = ref('system-upstream')
 const restartLoading = ref(false)
+const overviewResetting = ref(false)
 
 const autoRefreshState = ref({
   enabled: false,
@@ -299,6 +302,33 @@ async function restartMosdns() {
   }
 }
 
+async function resetOverviewStats() {
+  if (overviewResetting.value) {
+    return
+  }
+  if (!(await openConfirm('将清空概览页全部统计并重启 mosdns，是否继续？', {
+    title: '重置统计',
+    confirmText: '继续',
+    tone: 'danger'
+  }))) {
+    return
+  }
+  overviewResetting.value = true
+  try {
+    await postJSON('/api/v1/system/restart', { delay_ms: 500 })
+    localStorage.removeItem(OVERVIEW_HISTORY_KEY)
+    localStorage.removeItem(UPSTREAM_STATS_RESET_KEY)
+    showTopNotice({ message: '已重置概览统计，mosdns 正在重启。', tone: 'success', durationMs: 3200 })
+    window.setTimeout(() => {
+      window.location.reload()
+    }, 4000)
+  } catch (error) {
+    showTopNotice({ message: `重置统计失败: ${error.message}`, tone: 'error', durationMs: 4200 })
+  } finally {
+    overviewResetting.value = false
+  }
+}
+
 onMounted(() => {
   initializeAppearance()
   initializePanelBackground()
@@ -345,12 +375,16 @@ onBeforeUnmount(() => {
           <button
             class="log1-mobile-action-btn log1-mobile-action-restart"
             type="button"
-            title="重启"
-            aria-label="重启"
-            :disabled="restartLoading"
-            @click="restartMosdns"
+            :title="activeMainTab === 'overview' ? '重置统计' : '重启'"
+            :aria-label="activeMainTab === 'overview' ? '重置统计' : '重启'"
+            :disabled="activeMainTab === 'overview' ? overviewResetting : restartLoading"
+            @click="activeMainTab === 'overview' ? resetOverviewStats() : restartMosdns()"
           >
-            {{ restartLoading ? '重启中' : '重启' }}
+            {{
+              activeMainTab === 'overview'
+                ? (overviewResetting ? '重置中' : '重置统计')
+                : (restartLoading ? '重启中' : '重启')
+            }}
           </button>
         </div>
       </div>
@@ -373,9 +407,21 @@ onBeforeUnmount(() => {
           <span class="log1-primary-icon" aria-hidden="true">⟳</span>
           <span class="log1-primary-label">{{ formatPrimaryLabel('刷新') }}</span>
         </button>
-        <button class="log1-primary-btn log1-primary-btn-refresh-desktop" type="button" title="重启" :disabled="restartLoading" @click="restartMosdns">
+        <button
+          class="log1-primary-btn log1-primary-btn-refresh-desktop"
+          type="button"
+          :title="activeMainTab === 'overview' ? '重置统计' : '重启'"
+          :disabled="activeMainTab === 'overview' ? overviewResetting : restartLoading"
+          @click="activeMainTab === 'overview' ? resetOverviewStats() : restartMosdns()"
+        >
           <span class="log1-primary-icon" aria-hidden="true">↻</span>
-          <span class="log1-primary-label">{{ restartLoading ? '重启中' : formatPrimaryLabel('重启') }}</span>
+          <span class="log1-primary-label">
+            {{
+              activeMainTab === 'overview'
+                ? (overviewResetting ? '重置中' : formatPrimaryLabel('重置统计'))
+                : (restartLoading ? '重启中' : formatPrimaryLabel('重启'))
+            }}
+          </span>
         </button>
       </div>
     </aside>
