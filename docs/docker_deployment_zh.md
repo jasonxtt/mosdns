@@ -38,6 +38,90 @@ docker buildx build \
 
 如果不传这些参数，镜像里的版本信息会回退成 `dev-日期-nogithash`，不影响运行，但会影响 WebUI 中的版本展示。
 
+### 1.1 在 macOS 上节省 `apple/container` 资源
+
+如果这台 Mac 平时不运行容器，只在发布 Docker Hub 时临时使用 `apple/container`，不要让 builder 常驻。
+
+对这个仓库，推荐让 AI/代理直接执行 [scripts/publish-dockerhub-apple.sh](../scripts/publish-dockerhub-apple.sh)，不要让用户手动拼构建、推送、manifest 命令。
+
+这个脚本会自动完成：
+
+- 按当前 `Dockerfile_buildx` 构建 `linux/amd64` 和 `linux/arm64`
+- 推送 `:<version>-amd64` 和 `:<version>-arm64`
+- 合成并校验多架构 `:<version>`
+- 在 `PUSH_LATEST=1` 时同步更新并校验 `:latest`
+- 构建阶段只在需要时临时启动 builder，结束后自动停止
+
+默认使用：
+
+- `IMAGE_REPO=jasonxtt/mosdns-t`
+- `VERSION=$(git describe --tags --match 'v*' --abbrev=0)`
+- `PUSH_LATEST=0`
+
+AI 常用发布方式：
+
+```bash
+VERSION=v0.6.3 ./scripts/publish-dockerhub-apple.sh
+```
+
+如果这次发布也要更新 `latest`：
+
+```bash
+VERSION=v0.6.3 PUSH_LATEST=1 ./scripts/publish-dockerhub-apple.sh
+```
+
+底层资源控制由 [scripts/with-apple-builder.sh](../scripts/with-apple-builder.sh) 负责：
+
+- 需要时自动启动 builder
+- 命令结束后自动停止 builder
+- 平时不发布时，不需要手动保持 `container` 的 8G builder 运行
+
+只有在需要排查脚本内部行为时，才需要直接看这一层。正常发布不需要用户手动调用它。
+
+例如把多架构构建和推送包在一次 builder 会话里：
+
+```bash
+./scripts/with-apple-builder.sh bash -lc '
+  container build \
+    --platform linux/amd64 \
+    -f Dockerfile_buildx \
+    --build-arg VERSION=v0.6.3 \
+    --build-arg BUILD_DATE="$(date -u +%Y%m%d)" \
+    --build-arg VCS_REF="$(git rev-parse --short=7 HEAD)" \
+    -t jasonxtt/mosdns-t:tmp-v0.6.3-amd64 .
+
+  container build \
+    --platform linux/arm64 \
+    -f Dockerfile_buildx \
+    --build-arg VERSION=v0.6.3 \
+    --build-arg BUILD_DATE="$(date -u +%Y%m%d)" \
+    --build-arg VCS_REF="$(git rev-parse --short=7 HEAD)" \
+    -t jasonxtt/mosdns-t:tmp-v0.6.3-arm64 .
+
+  container image push jasonxtt/mosdns-t:tmp-v0.6.3-amd64
+  container image push jasonxtt/mosdns-t:tmp-v0.6.3-arm64
+'
+```
+
+然后再单独合成并检查多架构 manifest：
+
+```bash
+docker buildx imagetools create \
+  -t jasonxtt/mosdns-t:v0.6.3 \
+  jasonxtt/mosdns-t:tmp-v0.6.3-amd64 \
+  jasonxtt/mosdns-t:tmp-v0.6.3-arm64
+
+docker buildx imagetools inspect jasonxtt/mosdns-t:v0.6.3
+```
+
+如需调整 builder 资源，可临时覆盖：
+
+```bash
+APPLE_CONTAINER_BUILDER_CPUS=4 \
+APPLE_CONTAINER_BUILDER_MEMORY=6G \
+./scripts/with-apple-builder.sh <你的命令>
+```
+
 ## 2. 准备运行目录
 
 ### 新部署
