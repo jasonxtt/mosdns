@@ -50,6 +50,7 @@ docker buildx build \
 - 推送 `:<version>-amd64` 和 `:<version>-arm64`
 - 合成并校验多架构 `:<version>`
 - 在 `PUSH_LATEST=1` 时同步更新并校验 `:latest`
+- 默认在发布成功后自动删除 `:<version>-amd64` 和 `:<version>-arm64`
 - 构建阶段只在需要时临时启动 builder，结束后自动停止
 
 默认使用：
@@ -57,6 +58,7 @@ docker buildx build \
 - `IMAGE_REPO=docker.io/jasonxtt/mosdns-t`
 - `VERSION=$(git describe --tags --match 'v*' --abbrev=0)`
 - `PUSH_LATEST=0`
+- `KEEP_ARCH_TAGS=0`
 
 AI 常用发布方式：
 
@@ -68,6 +70,12 @@ VERSION=v0.6.3 ./scripts/publish-dockerhub-apple.sh
 
 ```bash
 VERSION=v0.6.3 PUSH_LATEST=1 ./scripts/publish-dockerhub-apple.sh
+```
+
+如果确实需要暂时保留 `-amd64` / `-arm64` tag，才显式覆盖：
+
+```bash
+VERSION=v0.6.3 PUSH_LATEST=1 KEEP_ARCH_TAGS=1 ./scripts/publish-dockerhub-apple.sh
 ```
 
 底层资源控制由 [scripts/with-apple-builder.sh](../scripts/with-apple-builder.sh) 负责：
