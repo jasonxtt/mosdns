@@ -7,7 +7,7 @@ cd "${ROOT_DIR}"
 VERSION="${VERSION:-$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo dev)}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y%m%d)}"
 VCS_REF="${VCS_REF:-$(git rev-parse --short=7 HEAD 2>/dev/null || echo nogithash)}"
-IMAGE_REPO="${IMAGE_REPO:-jasonxtt/mosdns-t}"
+IMAGE_REPO="${IMAGE_REPO:-docker.io/jasonxtt/mosdns-t}"
 PUSH_LATEST="${PUSH_LATEST:-0}"
 
 VERSION_TAG="${IMAGE_REPO}:${VERSION}"

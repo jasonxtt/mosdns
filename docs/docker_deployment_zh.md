@@ -54,7 +54,7 @@ docker buildx build \
 
 默认使用：
 
-- `IMAGE_REPO=jasonxtt/mosdns-t`
+- `IMAGE_REPO=docker.io/jasonxtt/mosdns-t`
 - `VERSION=$(git describe --tags --match 'v*' --abbrev=0)`
 - `PUSH_LATEST=0`
 
