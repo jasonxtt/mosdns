@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## lite-v0.1.6
+
+### Fixed
+
+- added an explicit `use_socks_proxy` switch for upstream overrides so `foreign` and `foreignecs` rows can now disable SOCKS independently instead of always inheriting the global proxy
+- kept backward compatibility for historical override data by inferring the new switch from the existing protocol, group, and per-row socks settings
+- extended runtime fallback behavior so `foreignecs` inherits the global SOCKS5 proxy the same way `foreign` already did when the row keeps proxying enabled
+
+### Tests
+
+- added upstream-override regression coverage for `use_socks_proxy`, `foreignecs` fallback, and historical-row inference in `coremain/api_upstream_test.go`
+- validated with `go test ./coremain`
+- rebuilt the maintained Vue UI bundle with `npm run build`
+- verified on `192.168.2.2` that `foreign` and `foreignecs` both inherit the global SOCKS5 proxy by default, stop using it when `use_socks_proxy=false`, and recover correctly after restoring the original config
+
+### Upgrade Notes
+
+- this release does **not** require a YAML config change
+- existing deployments can update only the binary
+
 ## lite-v0.1.5
 
 ### Fixed
