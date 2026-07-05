@@ -1,6 +1,9 @@
 package coremain
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +27,7 @@ func TestGetUpstreamOverridesForeignSocksFallback(t *testing.T) {
 	upstreamOverrides = GlobalUpstreamOverrides{
 		"foreign": {
 			{Tag: "f1", Protocol: "doh", Addr: "https://dns.google/dns-query"},
-			{Tag: "f2", Protocol: "doh", Addr: "https://dns.alidns.com/dns-query", Socks5: "127.0.0.1:2080"},
+			{Tag: "f2", Protocol: "doh", Addr: "https://dns.alidns.com/dns-query", Socks5: "127.0.0.1:2080", UseSocksProxy: boolPtr(true)},
 		},
 	}
 	upstreamOverridesLock.Unlock()
@@ -54,9 +57,63 @@ func TestGetUpstreamOverridesForeignSocksFallback(t *testing.T) {
 	if stored[0].Socks5 != "" {
 		t.Fatalf("expected stored entry 0 socks5 to remain empty, got %q", stored[0].Socks5)
 	}
+	if stored[0].UseSocksProxy != nil {
+		t.Fatalf("expected stored entry 0 use_socks_proxy to remain nil, got %v", *stored[0].UseSocksProxy)
+	}
 }
 
-func TestGetUpstreamOverridesNoFallbackForNonForeign(t *testing.T) {
+func TestGetUpstreamOverridesForeignAndForeignEcsRespectUseSocksProxy(t *testing.T) {
+	tempDir := t.TempDir()
+	overridesFile := filepath.Join(tempDir, overridesFilename)
+	if err := os.WriteFile(overridesFile, []byte(`{"socks5":"127.0.0.1:1080"}`), 0o644); err != nil {
+		t.Fatalf("write overrides file: %v", err)
+	}
+
+	oldBaseDir := MainConfigBaseDir
+	MainConfigBaseDir = tempDir
+	defer func() {
+		MainConfigBaseDir = oldBaseDir
+	}()
+
+	upstreamOverridesLock.Lock()
+	oldOverrides := upstreamOverrides
+	upstreamOverrides = GlobalUpstreamOverrides{
+		"foreign": {
+			{Tag: "f-disabled", Protocol: "doh", Addr: "https://dns.google/dns-query", Socks5: "127.0.0.1:2080", UseSocksProxy: boolPtr(false)},
+		},
+		"foreignecs": {
+			{Tag: "fe-fallback", Protocol: "doh", Addr: "https://dns.google/dns-query"},
+			{Tag: "fe-custom", Protocol: "doh", Addr: "https://dns.alidns.com/dns-query", Socks5: "127.0.0.1:3080", UseSocksProxy: boolPtr(true)},
+		},
+	}
+	upstreamOverridesLock.Unlock()
+	defer func() {
+		upstreamOverridesLock.Lock()
+		upstreamOverrides = oldOverrides
+		upstreamOverridesLock.Unlock()
+	}()
+
+	gotForeign := GetUpstreamOverrides("foreign")
+	if len(gotForeign) != 1 {
+		t.Fatalf("expected 1 foreign entry, got %d", len(gotForeign))
+	}
+	if gotForeign[0].Socks5 != "" {
+		t.Fatalf("expected explicit disabled socks to bypass fallback, got %q", gotForeign[0].Socks5)
+	}
+
+	got := GetUpstreamOverrides("foreignecs")
+	if len(got) != 2 {
+		t.Fatalf("expected 2 foreignecs entries, got %d", len(got))
+	}
+	if got[0].Socks5 != "127.0.0.1:1080" {
+		t.Fatalf("expected fallback socks5 for foreignecs entry 0, got %q", got[0].Socks5)
+	}
+	if got[1].Socks5 != "127.0.0.1:3080" {
+		t.Fatalf("expected foreignecs custom socks5 to be preserved, got %q", got[1].Socks5)
+	}
+}
+
+func TestGetUpstreamOverridesNoFallbackForNonTargetGroup(t *testing.T) {
 	tempDir := t.TempDir()
 	overridesFile := filepath.Join(tempDir, overridesFilename)
 	if err := os.WriteFile(overridesFile, []byte(`{"socks5":"127.0.0.1:1080"}`), 0o644); err != nil {
@@ -88,7 +145,53 @@ func TestGetUpstreamOverridesNoFallbackForNonForeign(t *testing.T) {
 		t.Fatalf("expected 1 entry, got %d", len(got))
 	}
 	if got[0].Socks5 != "" {
-		t.Fatalf("expected no fallback for non-foreign tag, got %q", got[0].Socks5)
+		t.Fatalf("expected no fallback for non-target tag, got %q", got[0].Socks5)
+	}
+}
+
+func TestHandleGetUpstreamConfigInfersUseSocksProxyForHistoricalRows(t *testing.T) {
+	upstreamOverridesLock.Lock()
+	oldOverrides := upstreamOverrides
+	upstreamOverrides = GlobalUpstreamOverrides{
+		"foreign": {
+			{Tag: "f1", Protocol: "doh", Addr: "https://dns.google/dns-query"},
+		},
+		"foreignecs": {
+			{Tag: "fe1", Protocol: "doh", Addr: "https://dns.google/dns-query"},
+		},
+		"domestic": {
+			{Tag: "d1", Protocol: "doh", Addr: "https://dns.alidns.com/dns-query"},
+		},
+	}
+	upstreamOverridesLock.Unlock()
+	defer func() {
+		upstreamOverridesLock.Lock()
+		upstreamOverrides = oldOverrides
+		upstreamOverridesLock.Unlock()
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/upstream/config", nil)
+	rec := httptest.NewRecorder()
+
+	handleGetUpstreamConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var got GlobalUpstreamOverrides
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got["foreign"][0].UseSocksProxy == nil || !*got["foreign"][0].UseSocksProxy {
+		t.Fatalf("expected historical foreign row to infer use_socks_proxy=true")
+	}
+	if got["foreignecs"][0].UseSocksProxy == nil || !*got["foreignecs"][0].UseSocksProxy {
+		t.Fatalf("expected historical foreignecs row to infer use_socks_proxy=true")
+	}
+	if got["domestic"][0].UseSocksProxy == nil || *got["domestic"][0].UseSocksProxy {
+		t.Fatalf("expected historical domestic row to infer use_socks_proxy=false")
 	}
 }
 

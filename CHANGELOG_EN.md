@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.6.4
+
+### Fixed
+
+- added a `使用 socks 代理` toggle to upstream editor rows for `foreign` and
+  `foreignecs`; when disabled, that upstream now connects directly and no
+  longer inherits the global SOCKS setting
+- kept the existing fallback behavior when the toggle is enabled and the
+  per-upstream SOCKS value is empty: both `foreign` and `foreignecs` inherit
+  the global SOCKS value, while an explicitly filled value still wins
+- added compatibility inference for historical upstream rows so existing empty
+  `foreign` / `foreignecs` SOCKS entries keep behaving as enabled-with-global-
+  fallback after upgrade
+
+### Notes
+
+- binary-only update; no `config_up` / `config_all` changes required
+
 ## v0.6.3
 
 ### Fixed
