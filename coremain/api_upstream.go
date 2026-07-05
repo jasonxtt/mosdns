@@ -48,6 +48,7 @@ type UpstreamOverrideConfig struct {
 	EnableHTTP3        bool   `json:"enable_http3,omitempty"`
 	InsecureSkipVerify bool   `json:"insecure_skip_verify,omitempty"`
 	Socks5             string `json:"socks5,omitempty"`
+	UseSocksProxy      *bool  `json:"use_socks_proxy,omitempty"`
 	SoMark             int    `json:"so_mark,omitempty"`
 	BindToDevice       string `json:"bind_to_device,omitempty"`
 	Bootstrap          string `json:"bootstrap,omitempty"`
@@ -111,23 +112,74 @@ func GetUpstreamOverrides(pluginTag string) []UpstreamOverrideConfig {
 		return nil
 	}
 
-	copied := make([]UpstreamOverrideConfig, len(entries))
-	copy(copied, entries)
+	copied := cloneUpstreamOverrideConfigs(pluginTag, entries)
 	for i := range copied {
 		copied[i].Protocol = normalizeUpstreamProtocol(copied[i].Protocol)
 		if copied[i].Protocol != "aliapi" {
 			copied[i].Addr = normalizeRuntimeUpstreamAddr(copied[i].Protocol, copied[i].Addr)
 		}
+		if !effectiveUseSocksProxy(pluginTag, copied[i]) {
+			copied[i].Socks5 = ""
+		}
 	}
-	if pluginTag == "foreign" {
+	if supportsGlobalSocksFallback(pluginTag) {
 		fallback := resolveGlobalSocks5Override()
 		if fallback != "" {
 			for i := range copied {
-				if strings.TrimSpace(copied[i].Socks5) == "" {
+				if effectiveUseSocksProxy(pluginTag, copied[i]) && strings.TrimSpace(copied[i].Socks5) == "" {
 					copied[i].Socks5 = fallback
 				}
 			}
 		}
+	}
+	return copied
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func supportsUpstreamSocks(protocol string) bool {
+	switch normalizeUpstreamProtocol(protocol) {
+	case "tcp", "tls", "https", "quic":
+		return true
+	default:
+		return false
+	}
+}
+
+func supportsGlobalSocksFallback(pluginTag string) bool {
+	switch strings.TrimSpace(pluginTag) {
+	case "foreign", "foreignecs":
+		return true
+	default:
+		return false
+	}
+}
+
+func inferUseSocksProxy(pluginTag string, entry UpstreamOverrideConfig) bool {
+	if entry.UseSocksProxy != nil {
+		return *entry.UseSocksProxy
+	}
+	if !supportsUpstreamSocks(entry.Protocol) {
+		return false
+	}
+	if strings.TrimSpace(entry.Socks5) != "" {
+		return true
+	}
+	return supportsGlobalSocksFallback(pluginTag)
+}
+
+func effectiveUseSocksProxy(pluginTag string, entry UpstreamOverrideConfig) bool {
+	return inferUseSocksProxy(pluginTag, entry)
+}
+
+func cloneUpstreamOverrideConfigs(pluginTag string, entries []UpstreamOverrideConfig) []UpstreamOverrideConfig {
+	copied := make([]UpstreamOverrideConfig, len(entries))
+	copy(copied, entries)
+	for i := range copied {
+		useSocks := inferUseSocksProxy(pluginTag, copied[i])
+		copied[i].UseSocksProxy = boolPtr(useSocks)
 	}
 	return copied
 }
@@ -318,9 +370,9 @@ func handleGetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 	upstreamOverridesLock.RLock()
 	defer upstreamOverridesLock.RUnlock()
 
-	safeData := upstreamOverrides
-	if safeData == nil {
-		safeData = make(GlobalUpstreamOverrides)
+	safeData := make(GlobalUpstreamOverrides)
+	for pluginTag, entries := range upstreamOverrides {
+		safeData[pluginTag] = cloneUpstreamOverrideConfigs(pluginTag, entries)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(safeData)
@@ -385,6 +437,12 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i, u := range payload.Upstreams {
+		if u.UseSocksProxy == nil {
+			useSocks := inferUseSocksProxy(payload.PluginTag, u)
+			u.UseSocksProxy = boolPtr(useSocks)
+			payload.Upstreams[i].UseSocksProxy = u.UseSocksProxy
+		}
+
 		if u.Tag == "" {
 			msg := fmt.Sprintf(`{"error": "Item #%d: tag (name) is required"}`, i+1)
 			http.Error(w, msg, http.StatusBadRequest)
