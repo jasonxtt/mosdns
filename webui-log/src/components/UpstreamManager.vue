@@ -49,6 +49,7 @@ const form = reactive({
   addr: '',
   dial_addr: '',
   socks5: '',
+  use_socks_proxy: true,
   bootstrap: '',
   bootstrap_version: 0,
   enable_pipeline: false,
@@ -99,14 +100,16 @@ const showPipeline = computed(() => ['tcp', 'dot', 'tls'].includes(protocolValue
 const showHttp3 = computed(() => ['https', 'doh', 'quic', 'doq'].includes(protocolValue.value))
 const showSocks5 = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
 const showTlsVerify = computed(() => ['dot', 'tls', 'tcp', 'doh', 'https', 'quic', 'doq'].includes(protocolValue.value))
+const showSocksProxyToggle = computed(() => showSocks5.value && ['foreign', 'foreignecs'].includes(String(form.group || '').trim()))
+const showSocks5Input = computed(() => showSocks5.value && (!showSocksProxyToggle.value || form.use_socks_proxy))
 const showForeignSocksFallbackHint = computed(() => {
-  if (!showSocks5.value) {
+  if (!showSocks5Input.value) {
     return false
   }
-  if (String(form.group || '').trim() !== 'foreign') {
+  if (!['foreign', 'foreignecs'].includes(String(form.group || '').trim())) {
     return false
   }
-  if (String(form.socks5 || '').trim()) {
+  if (!form.use_socks_proxy || String(form.socks5 || '').trim()) {
     return false
   }
   return Boolean(String(globalSocks5.value || '').trim())
@@ -266,6 +269,7 @@ function resetForm() {
   form.addr = ''
   form.dial_addr = ''
   form.socks5 = ''
+  form.use_socks_proxy = true
   form.bootstrap = ''
   form.bootstrap_version = 0
   form.enable_pipeline = false
@@ -361,6 +365,7 @@ function beginEdit(row) {
   form.addr = String(item.addr || '')
   form.dial_addr = String(item.dial_addr || '')
   form.socks5 = String(item.socks5 || '')
+  form.use_socks_proxy = Boolean(item.use_socks_proxy)
   form.bootstrap = String(item.bootstrap || '')
   form.bootstrap_version = toInt(item.bootstrap_version, 0)
   form.enable_pipeline = Boolean(item.enable_pipeline)
@@ -474,6 +479,11 @@ async function deleteSpecialGroup(group) {
 
 function buildUpstreamObject(enabledWhenSave = true) {
   const protocol = protocolValue.value
+  const targetGroupUsesSocksToggle = ['foreign', 'foreignecs'].includes(String(form.group || '').trim())
+  const useSocksProxy = protocol !== 'aliapi' && targetGroupUsesSocksToggle ? Boolean(form.use_socks_proxy) : undefined
+  const socks5Value = protocol !== 'aliapi' && (!targetGroupUsesSocksToggle || useSocksProxy)
+    ? String(form.socks5 || '').trim()
+    : ''
   return {
     tag: String(form.tag || '').trim(),
     protocol,
@@ -486,7 +496,8 @@ function buildUpstreamObject(enabledWhenSave = true) {
     enable_pipeline: protocol !== 'aliapi' ? Boolean(form.enable_pipeline) : false,
     enable_http3: protocol !== 'aliapi' ? Boolean(form.enable_http3) : false,
     insecure_skip_verify: protocol !== 'aliapi' ? Boolean(form.insecure_skip_verify) : false,
-    socks5: protocol !== 'aliapi' ? String(form.socks5 || '').trim() : '',
+    socks5: socks5Value,
+    use_socks_proxy: useSocksProxy,
     bootstrap: protocol !== 'aliapi' ? String(form.bootstrap || '').trim() : '',
     bootstrap_version: protocol !== 'aliapi' ? toInt(form.bootstrap_version, 0) : 0,
     account_id: protocol === 'aliapi' ? String(form.account_id || '').trim() : '',
@@ -708,8 +719,14 @@ onBeforeUnmount(() => {
             <label>拨号地址 (Dial Addr)</label>
             <input v-model="form.dial_addr" placeholder="可选，填 IP 可免域名解析" />
 
-            <label v-if="showSocks5">Socks5 代理</label>
-            <div v-if="showSocks5">
+            <label v-if="showSocksProxyToggle">使用 socks 代理</label>
+            <label v-if="showSocksProxyToggle" class="switch-inline">
+              <input v-model="form.use_socks_proxy" type="checkbox" />
+              <span>{{ form.use_socks_proxy ? '开启' : '关闭' }}</span>
+            </label>
+
+            <label v-if="showSocks5Input">Socks5 代理</label>
+            <div v-if="showSocks5Input">
               <input v-model="form.socks5" placeholder="host:port" />
               <small v-if="showForeignSocksFallbackHint" class="muted">
                 当前为空时会自动继承系统设置中的 SOCKS5：{{ globalSocks5 }}
