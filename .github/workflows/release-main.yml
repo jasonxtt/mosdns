@@ -47,6 +47,13 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webui-log/package-lock.json
+
       - name: Compute preview version
         shell: bash
         run: |
@@ -56,6 +63,14 @@ jobs:
           echo "BUILD_VERSION=${VERSION_TAG}" >> "$GITHUB_ENV"
           echo "VERSION_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
           echo "ARCHIVE_NAME=mosdns-${VERSION_TAG}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Build embedded UI
+        shell: bash
+        working-directory: webui-log
+        run: |
+          npm ci
+          npm run build
+          npm run build:log1
 
       - name: Build binary
         shell: bash

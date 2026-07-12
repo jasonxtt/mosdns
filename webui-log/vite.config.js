@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename)
 const assetVersion = process.env.MOSDNS_ASSET_VERSION || new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
 const outDir = path.resolve(__dirname, '../coremain/www/assets/vue-log')
 const rootHtmlPath = path.resolve(__dirname, '../coremain/www/log.html')
+const devProxyTarget = process.env.MOSDNS_DEV_TARGET || 'http://10.0.0.91'
 
 export default defineConfig({
   plugins: [
@@ -22,8 +23,8 @@ export default defineConfig({
         }
         const html = fs.readFileSync(indexPath, 'utf8')
         const stamped = html
-          .replace('/app.js', `/app.js?v=${assetVersion}`)
-          .replace('/app.css', `/app.css?v=${assetVersion}`)
+          .replace(/\/app\.js(?:\?v=[^"']+)?/g, `/app.js?v=${assetVersion}`)
+          .replace(/\/app\.css(?:\?v=[^"']+)?/g, `/app.css?v=${assetVersion}`)
         if (stamped !== html) {
           fs.writeFileSync(indexPath, stamped, 'utf8')
         }
@@ -42,6 +43,13 @@ export default defineConfig({
     }
   ],
   publicDir: false,
+  server: {
+    proxy: {
+      '/api': devProxyTarget,
+      '/plugins': devProxyTarget,
+      '/metrics': devProxyTarget
+    }
+  },
   build: {
     outDir,
     emptyOutDir: true,
