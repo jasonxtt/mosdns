@@ -1,8 +1,8 @@
 # Handover
 
-## Current state
+## Stable baseline
 
-As of `2026-06-10`, the maintained line is stable with these active realities:
+The maintained line has these active realities:
 
 - `/` is the maintained Vue UI
 - `/log` is the legacy compatibility UI
@@ -10,8 +10,8 @@ As of `2026-06-10`, the maintained line is stable with these active realities:
 - dedicated routing groups use the backend name `special_groups`
 - online rules, local lists, and upstream-group binding are already first-class workflow pieces
 - the maintained UI already ships operator-facing controls such as `IPv4优先`, `IPV6屏蔽`, appearance persistence, and transactional config-update status
-- domain-generation controls are now runtime JSON state, not external config-package structure changes
-- the current first version exposes `总开关 / 记忆直连 / 记忆代理 / 记忆无v4 / 记忆无v6`
+- domain-generation controls are runtime JSON state, not external config-package structure changes
+- domain-generation exposes `总开关 / 记忆直连 / 记忆代理 / 记忆无v4 / 记忆无v6`
 
 ## Keep in mind
 
@@ -25,30 +25,13 @@ As of `2026-06-10`, the maintained line is stable with these active realities:
   - related debug hosts: `10.0.0.2` (`sing-box`), `10.0.0.6` (`network-vm`)
   - runtime config root on deployed hosts: `/cus/mosdns`
 
-## Release and config rules
+## Release and config reminders
 
-- For embedded Vue assets, always run the `webui-log/` production build before `go build`.
+- For embedded Vue assets, use the repo build scripts/workflows so `webui-log/` is built before `go build`.
 - Binary-only releases keep `requiredConfigSchema` and `requiredConfigPackageID` unchanged.
-- Structural config releases bump schema/package and rebuild the external `config_up.zip`.
+- Structural config releases bump schema/package and rebuild the external `config_up.zip`; see `docs/ai/config-notes.md` for details.
 - User-facing config version text is separate from the internal schema. Current UI labels are `v1` and `v2`.
 - Validate in this order when deployment matters:
   - local build
   - test host
   - production only after confirmation
-
-## Recent note
-
-- The new domain-generation switches were intentionally implemented in the binary/runtime layer so `/Users/tom/github/file` does not need config package changes for this first version.
-- Runtime state is persisted in `webinfo/domain_generation_settings.json`.
-- Total disable currently clears generated data for `top_domains`, `my_sv4list`, `my_realiplist`, `my_fakeiplist`, `my_nov4list`, `my_nov6list`, `my_nodenov4list`, and `my_nodenov6list`.
-
-## Known pitfalls
-
-- Mobile overview-card CSS is behavior-sensitive. Avoid mixing `table-layout: fixed`, `calc(...)` widths, and broad `overflow-wrap: anywhere` rules in narrow tables.
-- If a layout issue reproduces only on some phones, treat it as a browser compatibility issue first.
-- The newer custom dedicated-routing path should not use global cache for now.
-
-## Likely future work
-
-- selective `Type65` / `HTTPS` rewriting is still feasible but not implemented; if added, it should be a response-rewrite plugin, not a UI-only toggle
-- most follow-up work is likely to continue in the maintained Vue UI, routing diagnostics, or plugins that align with existing config concepts

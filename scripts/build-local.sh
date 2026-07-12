@@ -8,8 +8,17 @@ VERSION="${BUILD_VERSION:-$(git describe --tags --match 'v*' --always --dirty 2>
 GOOS_VALUE="${GOOS:-$(go env GOOS)}"
 GOARCH_VALUE="${GOARCH:-$(go env GOARCH)}"
 OUTPUT="${OUTPUT:-./mosdns}"
+SKIP_UI_BUILD="${SKIP_UI_BUILD:-0}"
 
 mkdir -p "$(dirname "${OUTPUT}")"
+
+if [[ "${SKIP_UI_BUILD}" != "1" ]]; then
+  (
+    cd webui-log
+    npm run build
+    npm run build:log1
+  )
+fi
 
 CGO_ENABLED="${CGO_ENABLED:-0}" \
 GOOS="${GOOS_VALUE}" \

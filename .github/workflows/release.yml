@@ -55,6 +55,13 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webui-log/package-lock.json
+
       - name: Compute version
         shell: bash
         run: |
@@ -71,6 +78,14 @@ jobs:
           echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
           echo "VERSION_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
           echo "ARCHIVE_NAME=mosdns-${VERSION_TAG}-${{ matrix.id }}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Build embedded UI
+        shell: bash
+        working-directory: webui-log
+        run: |
+          npm ci
+          npm run build
+          npm run build:log1
 
       - name: Build binary
         shell: bash
@@ -136,12 +151,22 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
+      - name: Generate transactional update manifest
+        shell: bash
+        run: |
+          scripts/generate-update-manifest.sh \
+            "${RELEASE_TAG}" \
+            release-artifacts \
+            release-artifacts/mosdns-update-manifest.json
+
       - name: Publish release from docs
         if: ${{ env.RELEASE_BODY_PATH != '' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          files: release-artifacts/*.tar.gz
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/mosdns-update-manifest.json
           prerelease: false
           body_path: ${{ env.RELEASE_BODY_PATH }}
         env:
@@ -152,7 +177,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          files: release-artifacts/*.tar.gz
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/mosdns-update-manifest.json
           prerelease: false
           generate_release_notes: true
         env:

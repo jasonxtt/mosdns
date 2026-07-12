@@ -32,6 +32,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/IrineSistiana/mosdns/v5/pkg/safe_close"
@@ -66,6 +67,7 @@ type Mosdns struct {
 	sc              *safe_close.SafeClose
 	globalOverrides *GlobalOverrides // <<< ADDED
 	apiHTTPAddr     string
+	ready           atomic.Bool
 }
 
 // NewMosdns initializes a mosdns instance and its plugins.
@@ -194,6 +196,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 		return nil, err
 	}
 	m.logger.Info("all plugins are loaded")
+	m.ready.Store(true)
 
 	return m, nil
 }
