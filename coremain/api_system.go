@@ -20,9 +20,28 @@ import (
 func RegisterSystemAPI(router *chi.Mux, m *Mosdns) {
 	router.Route("/api/v1/system", func(r chi.Router) {
 		r.Post("/restart", handleSelfRestart(m))
+		r.Get("/health", handleSystemHealth(m))
 		r.Get("/webui-port", handleGetWebUIPort(m))
 		r.Post("/webui-port", handleSetWebUIPort(m))
 	})
+}
+
+func handleSystemHealth(m *Mosdns) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		requiredSchema, _ := requiredConfigSchemaValue()
+		state := loadConfigUpdateState(MainConfigBaseDir)
+		ready := m != nil && m.ready.Load()
+		status := http.StatusOK
+		if !ready {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]any{
+			"ready":                  ready,
+			"version":                GetBuildVersion(),
+			"required_config_schema": requiredSchema,
+			"applied_config_schema":  state.AppliedSchema,
+		})
+	}
 }
 
 func handleGetWebUIPort(m *Mosdns) http.HandlerFunc {

@@ -311,7 +311,7 @@ const updateBannerText = computed(() => {
   }
   if (status.pending_restart) {
     const isWindows = String(status.architecture || '').startsWith('windows/')
-    return isWindows ? '更新已安装，等待手动重启。' : '更新已安装，正在自重启…'
+    return isWindows ? '更新已下载，等待手动替换。' : '更新已暂存，正在安全切换…'
   }
   if (status.message) {
     return String(status.message)

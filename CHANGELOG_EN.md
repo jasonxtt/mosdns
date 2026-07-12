@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.7.0
+
+### Added
+
+- added release update manifests with SHA-256 verification for every binary
+  asset
+- download config packages only when the target release requires a newer
+  config schema than the local installation
+- stage the candidate binary, required config package, and previous binary
+  before changing the running installation
+- reuse the previous MosDNS binary as a temporary update guard that probes the
+  candidate and restores both binary and config on failure
+
+### Notes
+
+- binary-only update; config schema remains `3`
+- transactional protection applies to updates initiated by `v0.7.0` and later
+
 ## v0.6.4
 
 ### Fixed
