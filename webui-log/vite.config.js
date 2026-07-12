@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename)
 const assetVersion = process.env.MOSDNS_ASSET_VERSION || new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
 const outDir = path.resolve(__dirname, '../coremain/www/assets/vue-log')
 const rootHtmlPath = path.resolve(__dirname, '../coremain/www/log.html')
+const devProxyTarget = process.env.MOSDNS_DEV_TARGET || 'http://127.0.0.1:9099'
 
 export default defineConfig({
   plugins: [
@@ -42,6 +43,13 @@ export default defineConfig({
     }
   ],
   publicDir: false,
+  server: {
+    proxy: {
+      '/api': devProxyTarget,
+      '/plugins': devProxyTarget,
+      '/metrics': devProxyTarget
+    }
+  },
   build: {
     outDir,
     emptyOutDir: true,

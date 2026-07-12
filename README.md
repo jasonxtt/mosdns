@@ -88,7 +88,7 @@ A detailed summary is available here:
 
 The current released version is:
 
-- `lite-v0.1.6`
+- `lite-v0.1.7`
 
 This fork is already used as a maintained WebUI-enhanced branch, not just a one-off preview build.
 

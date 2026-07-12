@@ -2043,6 +2043,37 @@ tr.disabled {
 
 .upstream-editor-modal-card {
   width: min(980px, 96vw);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.upstream-editor-modal-mask {
+  align-items: flex-start;
+  overflow: hidden;
+  padding-block: 16px;
+}
+
+.upstream-editor-modal-header {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.upstream-editor-modal-body {
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.upstream-editor-close {
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .special-group-modal-header {
