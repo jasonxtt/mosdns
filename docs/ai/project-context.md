@@ -115,13 +115,11 @@ Important currently-shipped examples:
 - The `nft` / `eBPF` line is intentionally not followed.
 - Upstream changes on or before `2026-04-18` were already checked in prior work. Do not burn time re-auditing them unless explicitly asked.
 
-## Current release posture
+## Release posture
 
 The fork is already published and maintained as a real release branch, not just a local experiment.
 
-Current released version in repo docs:
-
-- `v0.4.10`
+Do not maintain the current version number in this context file. Use Git tags and the changelogs as the source of truth for release history.
 
 ## Code areas likely to matter for future feature work
 
