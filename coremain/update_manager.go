@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	stdlog "log"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/mlog"
@@ -88,6 +86,8 @@ type UpdateStatus struct {
 	PendingRestart       bool       `json:"pending_restart,omitempty"`
 	AMD64V3Capable       bool       `json:"amd64_v3_capable,omitempty"`
 	CurrentIsV3          bool       `json:"current_is_v3,omitempty"`
+	RollbackPerformed    bool       `json:"rollback_performed,omitempty"`
+	RollbackMessage      string     `json:"rollback_message,omitempty"`
 }
 
 type UpdateActionResponse struct {
@@ -279,27 +279,6 @@ func (m *UpdateManager) loadState() {
 	}
 }
 
-func (m *UpdateManager) saveState(signature string) {
-	if signature == "" {
-		return
-	}
-	m.mu.Lock()
-	path := m.statePath
-	m.mu.Unlock()
-	if path == "" {
-		return
-	}
-	payload := updateState{AssetSignature: signature, UpdatedAt: time.Now()}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		m.logWarn("save update state marshal failed", err)
-		return
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		m.logWarn("save update state failed", err)
-	}
-}
-
 func (m *UpdateManager) SetCurrentVersion(version string) {
 	if version == "" {
 		return
@@ -461,12 +440,32 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 		return UpdateActionResponse{Status: status}, errors.New(note)
 	}
 
+	rel, err := m.fetchReleaseInfo(ctx)
+	if err != nil {
+		status.Message = fmt.Sprintf("读取发布信息失败: %v", err)
+		return UpdateActionResponse{Status: status}, err
+	}
+	manifest, err := m.loadReleaseUpdateManifest(ctx, status, rel.assets)
+	if err != nil {
+		status.Message = err.Error()
+		return UpdateActionResponse{Status: status}, err
+	}
+	if manifest.Channel != m.updateChannel() {
+		err := fmt.Errorf("更新清单通道 %q 与当前通道 %q 不一致", manifest.Channel, m.updateChannel())
+		status.Message = err.Error()
+		return UpdateActionResponse{Status: status}, err
+	}
+
 	assetFile, err := m.downloadAsset(ctx, status.DownloadURL, status.AssetName)
 	if err != nil {
 		status.Message = fmt.Sprintf("下载失败: %v", err)
 		return UpdateActionResponse{Status: status}, err
 	}
 	defer os.Remove(assetFile)
+	if err := verifyFileSHA256(assetFile, manifest.Artifacts[status.AssetName].SHA256); err != nil {
+		status.Message = fmt.Sprintf("二进制校验失败: %v", err)
+		return UpdateActionResponse{Status: status}, err
+	}
 
 	if status.AssetSignature == "" {
 		if sig, hashErr := fileSHA256(assetFile); hashErr == nil {
@@ -480,6 +479,43 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 		return UpdateActionResponse{Status: status}, err
 	}
 	defer os.Remove(extractedBinary)
+
+	configPackagePath := ""
+	configState := loadConfigUpdateState(MainConfigBaseDir)
+	if configState.AppliedSchema < manifest.RequiredConfigSchema {
+		if runtime.GOOS == "windows" {
+			err := errors.New("Windows 暂不支持需要配置迁移的事务更新，请手动同时更新二进制和配置")
+			status.Message = err.Error()
+			return UpdateActionResponse{Status: status}, err
+		}
+		if manifest.Config == nil {
+			err := fmt.Errorf("目标版本需要配置 schema %d，但更新清单没有配置资产", manifest.RequiredConfigSchema)
+			status.Message = err.Error()
+			return UpdateActionResponse{Status: status}, err
+		}
+		configData, err := m.downloadBytes(ctx, manifest.Config.URL, maxConfigPackageSize)
+		if err != nil {
+			status.Message = fmt.Sprintf("配置包下载失败，已取消更新: %v", err)
+			return UpdateActionResponse{Status: status}, err
+		}
+		if err := verifyBytesSHA256(configData, manifest.Config.SHA256); err != nil {
+			status.Message = fmt.Sprintf("配置包校验失败，已取消更新: %v", err)
+			return UpdateActionResponse{Status: status}, err
+		}
+		if _, err := parseConfigUpdatePackage(configData, manifest.RequiredConfigSchema, manifest.ConfigPackageID); err != nil {
+			status.Message = fmt.Sprintf("配置包不适用于目标版本，已取消更新: %v", err)
+			return UpdateActionResponse{Status: status}, err
+		}
+		stageDir, err := os.MkdirTemp("", "mosdns-config-stage-*")
+		if err != nil {
+			return UpdateActionResponse{Status: status}, err
+		}
+		defer os.RemoveAll(stageDir)
+		configPackagePath = filepath.Join(stageDir, "config_up.zip")
+		if err := writeBytesAtomic(configPackagePath, configData, 0o600); err != nil {
+			return UpdateActionResponse{Status: status}, err
+		}
+	}
 
 	action := UpdateActionResponse{Status: status}
 	exePath, err := os.Executable()
@@ -505,91 +541,27 @@ func (m *UpdateManager) PerformUpdate(ctx context.Context, force bool, preferV3 
 		return action, nil
 	}
 
-	if err := installBinary(exePath, extractedBinary, mode); err != nil {
-		action.Notes = err.Error()
+	transactionPath, err := stageUpdateTransaction(status, manifest, extractedBinary, configPackagePath)
+	if err != nil {
+		action.Notes = fmt.Sprintf("暂存更新失败: %v", err)
 		return action, err
 	}
 
-	action.Installed = true
+	action.Installed = false
 	action.RestartRequired = true
-	action.Notes = "更新已安装，正在自重启…"
+	action.Notes = "二进制与所需配置已下载并校验，正在安全切换…"
 
 	status.PendingRestart = true
 	status.Message = action.Notes
 	action.Status = status
 
-	m.recordInstalled(status.AssetSignature)
-
-	endpoint := resolveLocalRestartEndpoint()
-	if err := m.triggerPostUpgradeHook(ctx); err != nil {
-		m.logWarn("post-upgrade restart hook failed", err, zap.String("endpoint", endpoint))
-		action.Notes = "更新已安装，请手动重启。"
+	if err := scheduleUpdateGuard(transactionPath, 750*time.Millisecond); err != nil {
+		action.Notes = fmt.Sprintf("启动更新守护失败，当前版本未变更: %v", err)
 		status.Message = action.Notes
-	} else {
-		action.Notes = "更新已安装，正在自重启…"
-		status.Message = action.Notes
+		return action, err
 	}
 
 	return action, nil
-}
-
-func (m *UpdateManager) recordInstalled(signature string) {
-	if signature == "" {
-		signature = fmt.Sprintf("manual-%d", time.Now().Unix())
-	}
-	m.mu.Lock()
-	m.currentAssetSignature = signature
-	m.pendingSignature = ""
-	m.mu.Unlock()
-	m.saveState(signature)
-}
-
-func (m *UpdateManager) triggerPostUpgradeHook(ctx context.Context) error {
-	endpoint := resolveLocalRestartEndpoint()
-
-	if endpoint != "" {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		payload := strings.NewReader(`{"delay_ms":500}`)
-		req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, payload)
-		if err == nil {
-			req.Header.Set("Content-Type", "application/json")
-			if host, _, err := net.SplitHostPort(req.URL.Host); err == nil && (host == "localhost" || host == "127.0.0.1") {
-				req.Host = req.URL.Host
-			}
-			// This local call should not use proxy.
-			if resp, err := m.httpClient.Do(req); err == nil {
-				defer resp.Body.Close()
-				io.Copy(io.Discard, resp.Body)
-				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-					return nil
-				}
-				m.logWarn("self-restart hook returned non-2xx", fmt.Errorf("HTTP %s", resp.Status), zap.String("endpoint", endpoint))
-			} else {
-				m.logWarn("self-restart hook request failed", err, zap.String("endpoint", endpoint))
-			}
-		} else {
-			m.logWarn("self-restart hook request build failed", err, zap.String("endpoint", endpoint))
-		}
-	}
-
-	if runtime.GOOS != "windows" {
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		args := append([]string{exe}, os.Args[1:]...)
-		env := os.Environ()
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			_ = syscall.Exec(exe, args, env)
-		}()
-		return nil
-	}
-	return errors.New("self-restart is not supported on Windows")
 }
 
 func (m *UpdateManager) isUpdateNeeded(latest, signature string) bool {

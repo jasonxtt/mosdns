@@ -130,6 +130,9 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 	}
 
 	MainConfigBaseDir = guessMainConfigBaseDir(sf.c, sf.dir)
+	if err := recoverAbandonedUpdateTransaction(MainConfigBaseDir); err != nil {
+		return nil, fmt.Errorf("recover interrupted binary update: %w", err)
+	}
 
 	if MainConfigBaseDir != "" {
 		if err := SyncSpecialGroupsConfig(MainConfigBaseDir); err != nil {
@@ -199,6 +202,7 @@ func NewServer(sf *serverFlags) (*Mosdns, error) {
 		_ = m.sc.WaitClosed()
 		return nil, err
 	}
+	cleanupVerifiedUpdateTransactions(MainConfigBaseDir)
 	return m, nil
 }
 

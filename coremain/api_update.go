@@ -84,6 +84,13 @@ func applyConfigUpdateStatus(status *UpdateStatus) {
 	status.ConfigUpdateError = state.LastError
 	status.ConfigUpdateBackup = state.BackupDir
 	status.ConfigPackageID = state.PackageID
+	if message, ok := latestUpdateRollback(MainConfigBaseDir); ok {
+		status.RollbackPerformed = true
+		status.RollbackMessage = message
+		if status.Message == "" {
+			status.Message = "上次更新启动失败，已自动恢复旧二进制和旧配置"
+		}
+	}
 }
 
 func handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
