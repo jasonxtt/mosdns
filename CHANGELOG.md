@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## lite-v0.1.7
+
+### Fixed
+
+- kept the upstream editor inside the visible viewport on short screens and browser zoomed layouts
+- kept the editor title and close button visible while long `foreign` and `foreignecs` forms scroll independently
+- moved the long-form scrollbar below the modal header so it no longer overlaps the top-right corner
+
+### Tests
+
+- validated the Vue UI through Vite against the live lite API on `192.168.2.2`
+- verified the `foreign` editor in a 1920x839 browser viewport with separate fixed header and form scrolling
+- rebuilt the maintained Vue UI bundle with `npm run build`
+
+### Upgrade Notes
+
+- this release does **not** require a config change
+- existing deployments can update only the binary
+
 ## lite-v0.1.6
 
 ### Fixed
