@@ -4,6 +4,10 @@ defineProps({
     type: Boolean,
     default: false
   },
+  applySupported: {
+    type: Boolean,
+    default: true
+  },
   showV3Callout: {
     type: Boolean,
     default: false
@@ -38,7 +42,7 @@ defineEmits(['check-update', 'apply-update', 'apply-force-update', 'apply-v3-upd
       <div class="control-line"><strong>上次检查</strong><span>{{ updateLastCheckedText }}</span></div>
     </div>
     <p class="update-banner">{{ updateBannerText }}</p>
-    <div class="actions">
+    <div v-if="applySupported" class="actions">
       <button class="btn tiny secondary" :disabled="update.loading" @click="$emit('check-update')">{{ update.loading ? '处理中...' : '检查更新' }}</button>
       <button class="btn tiny primary" :disabled="update.loading || !hasUpdate" @click="$emit('apply-update')">立即更新</button>
       <button class="btn tiny danger" :disabled="update.loading || !update.status?.download_url" @click="$emit('apply-force-update')">强制更新</button>

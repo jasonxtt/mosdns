@@ -1,0 +1,14 @@
+{
+	"admin/services/mosdns-t": {
+		"title": "MosDNS-T",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "mosdns-t/overview"
+		},
+		"depends": {
+			"acl": [ "luci-app-mosdns-t" ],
+			"uci": { "mosdns-t": true }
+		}
+	}
+}

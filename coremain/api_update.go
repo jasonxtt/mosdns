@@ -36,15 +36,18 @@ func handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 			CheckedAt:       time.Now(),
 			CacheExpiresAt:  time.Now(),
 			UpdateAvailable: false,
+			ApplySupported:  true,
 			Cached:          false,
 			Message:         "检查更新失败：" + err.Error(),
 		}
 		applyConfigUpdateStatus(&fallback)
+		applyOpenWrtModeToUpdateStatus(&fallback)
 		writeJSON(w, http.StatusOK, fallback)
 		return
 	}
 	status.ConfigAutoUpdated = ConfigAutoUpdatedCount
 	applyConfigUpdateStatus(&status)
+	applyOpenWrtModeToUpdateStatus(&status)
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -62,15 +65,18 @@ func handleForceUpdateStatus(w http.ResponseWriter, r *http.Request) {
 			CheckedAt:       time.Now(),
 			CacheExpiresAt:  time.Now(),
 			UpdateAvailable: false,
+			ApplySupported:  true,
 			Cached:          false,
 			Message:         "检查更新失败：" + err.Error(),
 		}
 		applyConfigUpdateStatus(&fallback)
+		applyOpenWrtModeToUpdateStatus(&fallback)
 		writeJSON(w, http.StatusOK, fallback)
 		return
 	}
 	status.ConfigAutoUpdated = ConfigAutoUpdatedCount
 	applyConfigUpdateStatus(&status)
+	applyOpenWrtModeToUpdateStatus(&status)
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -94,6 +100,11 @@ func applyConfigUpdateStatus(status *UpdateStatus) {
 }
 
 func handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
+	if openWrtModeEnabled() {
+		writeError(w, http.StatusConflict, errors.New(openWrtUpdateConflictReason))
+		return
+	}
+
 	force := false
 	preferV3 := false
 	if r.Body != nil && r.Body != http.NoBody {

@@ -73,6 +73,7 @@ type UpdateStatus struct {
 	CheckedAt            time.Time  `json:"checked_at"`
 	CacheExpiresAt       time.Time  `json:"cache_expires_at"`
 	UpdateAvailable      bool       `json:"update_available"`
+	ApplySupported       bool       `json:"apply_supported"`
 	Cached               bool       `json:"cached"`
 	ConfigAutoUpdated    int        `json:"config_auto_updated,omitempty"`
 	ConfigSchemaRequired int        `json:"config_schema_required,omitempty"`

@@ -272,12 +272,19 @@ const hasUpdate = computed(() => {
   if (cur && latest && cur === latest) {
     return false;
   }
-  return Boolean(status.update_available && status.download_url);
+  return Boolean(status.apply_supported !== false && status.update_available && status.download_url);
+});
+
+const updateApplySupported = computed(() => {
+  return update.status?.apply_supported !== false;
 });
 
 const showV3Callout = computed(() => {
   const status = update.status;
   if (!status) {
+    return false;
+  }
+  if (status.apply_supported === false) {
     return false;
   }
   const arch = String(status.architecture || "");
@@ -1776,6 +1783,7 @@ onBeforeUnmount(() => {
 
         <SystemUpdatePanel
           :has-update="hasUpdate"
+          :apply-supported="updateApplySupported"
           :show-v3-callout="showV3Callout"
           :update="update"
           :update-banner-text="updateBannerText"
