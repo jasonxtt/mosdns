@@ -15,6 +15,7 @@
 		"write": {
 			"file": {
 				"/etc/init.d/mosdns-t": [ "exec" ],
+				"/usr/libexec/mosdns-t-settings": [ "exec" ],
 				"/usr/libexec/mosdns-t-updater": [ "exec" ]
 			},
 			"uci": [ "mosdns-t" ]
