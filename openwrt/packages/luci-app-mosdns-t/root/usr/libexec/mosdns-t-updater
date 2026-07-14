@@ -1,7 +1,27 @@
 #!/bin/sh
 
 package_version() {
-	apk list --installed "$1" 2>/dev/null | sed -n "s/^$1-\([^ ]*\).*/\1/p" | head -n 1
+	if command -v apk >/dev/null 2>&1; then
+		apk list --installed "$1" 2>/dev/null | sed -n "s/^$1-\([^ ]*\).*/\1/p" | head -n 1
+	else
+		opkg list-installed "$1" 2>/dev/null | awk 'NR == 1 { print $3 }'
+	fi
+}
+
+package_update() {
+	if command -v apk >/dev/null 2>&1; then
+		apk update
+	else
+		opkg update
+	fi
+}
+
+package_upgrade() {
+	if command -v apk >/dev/null 2>&1; then
+		apk add --upgrade mosdns-t luci-app-mosdns-t
+	else
+		opkg install mosdns-t luci-app-mosdns-t
+	fi
 }
 
 print_status() {
@@ -16,7 +36,11 @@ print_status() {
 	[ -n "$dns_port" ] || dns_port="$(uci -q get mosdns-t.main.listen_port)"
 	[ -n "$dns_port" ] || dns_port=5335
 	update_available=0
-	if apk list -u 2>/dev/null | grep -Eq '^(mosdns-t|luci-app-mosdns-t)-'; then
+	if command -v apk >/dev/null 2>&1; then
+		if apk list -u 2>/dev/null | grep -Eq '^(mosdns-t|luci-app-mosdns-t)-'; then
+			update_available=1
+		fi
+	elif opkg list-upgradable 2>/dev/null | grep -Eq '^(mosdns-t|luci-app-mosdns-t) - '; then
 		update_available=1
 	fi
 
@@ -32,12 +56,12 @@ case "$1" in
 		print_status
 		;;
 	check)
-		apk update
+		package_update
 		print_status
 		;;
 	upgrade)
-		apk update
-		apk add --upgrade mosdns-t luci-app-mosdns-t
+		package_update
+		package_upgrade
 		/etc/init.d/mosdns-t restart
 		print_status
 		;;

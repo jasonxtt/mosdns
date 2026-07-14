@@ -1,4 +1,4 @@
-name: Build and publish OpenWrt APK repository
+name: Build and publish OpenWrt package repositories
 
 on:
   push:
@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: build ${{ matrix.repo_arch }}
+  build_apk:
+    name: build APK ${{ matrix.repo_arch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -119,13 +119,125 @@ jobs:
       - name: Upload repository artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-${{ matrix.repo_arch }}
+          name: openwrt-apk-${{ matrix.repo_arch }}
+          path: site
+          if-no-files-found: error
+
+  build_ipk:
+    name: build IPK ${{ matrix.repo_arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo_arch: x86_64
+            goarch: amd64
+            sdk_path: x86/64
+            sdk_file: openwrt-sdk-24.10.7-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - repo_arch: aarch64_cortex-a53
+            goarch: arm64
+            sdk_path: mediatek/filogic
+            sdk_file: openwrt-sdk-24.10.7-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+          - repo_arch: aarch64_generic
+            goarch: arm64
+            sdk_path: rockchip/armv8
+            sdk_file: openwrt-sdk-24.10.7-rockchip-armv8_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webui-log/package-lock.json
+
+      - name: Read package version
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(sed -n 's/^PKG_VERSION:=//p' openwrt/packages/mosdns-t/Makefile)
+          PACKAGE_RELEASE=$(sed -n 's/^PKG_RELEASE:=//p' openwrt/packages/mosdns-t/Makefile)
+          echo "PACKAGE_VERSION=${PACKAGE_VERSION}" >> "$GITHUB_ENV"
+          echo "PACKAGE_RELEASE=${PACKAGE_RELEASE}" >> "$GITHUB_ENV"
+
+      - name: Build embedded WebUI
+        working-directory: webui-log
+        run: |
+          npm ci
+          npm run build
+          npm run build:log1
+
+      - name: Build MosDNS-T binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=v${PACKAGE_VERSION}" \
+            -o openwrt/packages/mosdns-t/files/mosdns-t \
+            ./
+          chmod 0755 openwrt/packages/mosdns-t/files/mosdns-t
+
+      - name: Download OpenWrt SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+          wget -q "https://downloads.openwrt.org/releases/24.10.7/targets/${{ matrix.sdk_path }}/${{ matrix.sdk_file }}" -O sdk.tar.zst
+          mkdir sdk
+          tar --zstd -xf sdk.tar.zst -C sdk --strip-components=1
+
+      - name: Build IPK packages
+        working-directory: sdk
+        run: |
+          cp -a ../openwrt/packages/mosdns-t package/mosdns-t
+          cp -a ../openwrt/packages/luci-app-mosdns-t package/luci-app-mosdns-t
+          make defconfig
+          make package/mosdns-t/compile V=s -j1
+          make package/luci-app-mosdns-t/compile V=s -j1
+
+      - name: Create signed IPK repository
+        env:
+          OPENWRT_IPK_SIGNING_KEY: ${{ secrets.OPENWRT_IPK_SIGNING_KEY }}
+        run: |
+          test -n "$OPENWRT_IPK_SIGNING_KEY"
+          REPO_DIR="site/packages/24.10/${{ matrix.repo_arch }}"
+          mkdir -p "$REPO_DIR"
+          find sdk/bin -type f \( -name 'mosdns-t_*.ipk' -o -name 'luci-app-mosdns-t_*.ipk' \) -exec cp {} "$REPO_DIR/" \;
+          test "$(find "$REPO_DIR" -name '*.ipk' | wc -l)" -eq 2
+          printf '%s\n' "$OPENWRT_IPK_SIGNING_KEY" > signing-key
+          chmod 0600 signing-key
+          (
+            cd "$REPO_DIR"
+            "$GITHUB_WORKSPACE/sdk/scripts/ipkg-make-index.sh" . > Packages
+            gzip -9nc Packages > Packages.gz
+            "$GITHUB_WORKSPACE/sdk/staging_dir/host/bin/usign" \
+              -S \
+              -m Packages \
+              -s "$GITHUB_WORKSPACE/signing-key" \
+              -x Packages.sig
+          )
+          rm -f signing-key
+
+      - name: Upload repository artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-ipk-${{ matrix.repo_arch }}
           path: site
           if-no-files-found: error
 
   pages:
     if: github.ref == 'refs/heads/openwrt' || github.event_name == 'workflow_dispatch'
-    needs: build
+    needs:
+      - build_apk
+      - build_ipk
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -152,6 +264,7 @@ jobs:
           cp openwrt/repository/install.sh site/install.sh
           mkdir -p site/keys
           cp openwrt/packages/mosdns-t/files/mosdns-t.pem site/keys/mosdns-t.pem
+          cp openwrt/repository/mosdns-t.pub site/keys/mosdns-t.pub
 
       - uses: actions/configure-pages@v5
 
@@ -165,7 +278,9 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/openwrt-v')
-    needs: build
+    needs:
+      - build_apk
+      - build_ipk
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -182,4 +297,7 @@ jobs:
           files: |
             release-artifacts/packages/25.12/*/*.apk
             release-artifacts/packages/25.12/*/packages.adb
+            release-artifacts/packages/24.10/*/*.ipk
+            release-artifacts/packages/24.10/*/Packages.gz
+            release-artifacts/packages/24.10/*/Packages.sig
           generate_release_notes: true

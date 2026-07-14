@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mosdns-t
 PKG_VERSION:=0.7.0
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
 CONFIG_COMMIT:=30a5e74d23a5d35ac4adc330382f4522d373755c
@@ -32,7 +32,8 @@ endef
 
 define Package/mosdns-t/description
 	MosDNS-T packaged for OpenWrt with procd, dnsmasq integration and an
-	embedded WebUI. Program upgrades are managed through LuCI or apk.
+	embedded WebUI. Program upgrades are managed through LuCI or the system
+	package manager.
 endef
 
 define Package/mosdns-t/conffiles
@@ -84,7 +85,9 @@ endef
 define Package/mosdns-t/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
-	sed -i "s|@ARCH@|$$(apk --print-arch)|g" /etc/apk/repositories.d/mosdns-t.list
+	if command -v apk >/dev/null 2>&1; then
+		sed -i "s|@ARCH@|$$(apk --print-arch)|g" /etc/apk/repositories.d/mosdns-t.list
+	fi
 	/etc/init.d/mosdns-t enable
 }
 exit 0

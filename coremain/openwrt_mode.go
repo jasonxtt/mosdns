@@ -4,8 +4,8 @@ import "os"
 
 const (
 	openWrtModeEnv              = "MOSDNS_OPENWRT_MODE"
-	openWrtUpdateMessage        = "OpenWrt 版请通过 LuCI 或 APK 软件源升级 MosDNS-T。"
-	openWrtUpdateConflictReason = "OpenWrt 版不支持在 WebUI 内直接更新程序，请通过 LuCI 或 APK 软件源升级 MosDNS-T。"
+	openWrtUpdateMessage        = "OpenWrt 版请通过 LuCI 或系统软件源升级 MosDNS-T。"
+	openWrtUpdateConflictReason = "OpenWrt 版不支持在 WebUI 内直接更新程序，请通过 LuCI 或系统软件源升级 MosDNS-T。"
 )
 
 func openWrtModeEnabled() bool {
