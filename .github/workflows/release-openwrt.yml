@@ -216,7 +216,8 @@ jobs:
           chmod 0600 signing-key
           (
             cd "$REPO_DIR"
-            "$GITHUB_WORKSPACE/sdk/scripts/ipkg-make-index.sh" . > Packages
+            MKHASH="$GITHUB_WORKSPACE/sdk/staging_dir/host/bin/mkhash" \
+              "$GITHUB_WORKSPACE/sdk/scripts/ipkg-make-index.sh" . > Packages
             gzip -9nc Packages > Packages.gz
             "$GITHUB_WORKSPACE/sdk/staging_dir/host/bin/usign" \
               -S \
