@@ -1,0 +1,185 @@
+name: Build and publish OpenWrt APK repository
+
+on:
+  push:
+    branches:
+      - openwrt
+    tags:
+      - 'openwrt-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.repo_arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo_arch: x86_64
+            goarch: amd64
+            sdk_path: x86/64
+            sdk_file: immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          - repo_arch: aarch64_cortex-a53
+            goarch: arm64
+            sdk_path: mediatek/filogic
+            sdk_file: immortalwrt-sdk-25.12.1-mediatek-filogic_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          - repo_arch: aarch64_generic
+            goarch: arm64
+            sdk_path: rockchip/armv8
+            sdk_file: immortalwrt-sdk-25.12.1-rockchip-armv8_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webui-log/package-lock.json
+
+      - name: Read package version
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(sed -n 's/^PKG_VERSION:=//p' openwrt/packages/mosdns-t/Makefile)
+          PACKAGE_RELEASE=$(sed -n 's/^PKG_RELEASE:=//p' openwrt/packages/mosdns-t/Makefile)
+          echo "PACKAGE_VERSION=${PACKAGE_VERSION}" >> "$GITHUB_ENV"
+          echo "PACKAGE_RELEASE=${PACKAGE_RELEASE}" >> "$GITHUB_ENV"
+
+      - name: Build embedded WebUI
+        working-directory: webui-log
+        run: |
+          npm ci
+          npm run build
+          npm run build:log1
+
+      - name: Build MosDNS-T binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=v${PACKAGE_VERSION}" \
+            -o openwrt/packages/mosdns-t/files/mosdns-t \
+            ./
+          chmod 0755 openwrt/packages/mosdns-t/files/mosdns-t
+
+      - name: Download ImmortalWrt SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+          wget -q "https://downloads.immortalwrt.org/releases/25.12.1/targets/${{ matrix.sdk_path }}/${{ matrix.sdk_file }}" -O sdk.tar.zst
+          mkdir sdk
+          tar --zstd -xf sdk.tar.zst -C sdk --strip-components=1
+
+      - name: Build APK packages
+        working-directory: sdk
+        run: |
+          cp -a ../openwrt/packages/mosdns-t package/mosdns-t
+          cp -a ../openwrt/packages/luci-app-mosdns-t package/luci-app-mosdns-t
+          make defconfig
+          make package/mosdns-t/compile V=s -j1
+          make package/luci-app-mosdns-t/compile V=s -j1
+
+      - name: Create signed APK repository
+        env:
+          OPENWRT_APK_SIGNING_KEY: ${{ secrets.OPENWRT_APK_SIGNING_KEY }}
+        run: |
+          test -n "$OPENWRT_APK_SIGNING_KEY"
+          REPO_DIR="site/packages/25.12/${{ matrix.repo_arch }}"
+          mkdir -p "$REPO_DIR"
+          find sdk/bin -type f \( -name 'mosdns-t-*.apk' -o -name 'luci-app-mosdns-t-*.apk' \) -exec cp {} "$REPO_DIR/" \;
+          test "$(find "$REPO_DIR" -name '*.apk' | wc -l)" -eq 2
+          printf '%s\n' "$OPENWRT_APK_SIGNING_KEY" > signing-key.pem
+          chmod 0600 signing-key.pem
+          openssl ec -in signing-key.pem -pubout -out generated-public.pem
+          cmp generated-public.pem openwrt/packages/mosdns-t/files/mosdns-t.pem
+          (
+            cd "$REPO_DIR"
+            "$GITHUB_WORKSPACE/sdk/staging_dir/host/bin/apk" mkndx \
+              --allow-untrusted \
+              --sign-key "$GITHUB_WORKSPACE/signing-key.pem" \
+              --description "MosDNS-T OpenWrt 25.12 ${{ matrix.repo_arch }}" \
+              --output packages.adb \
+              ./*.apk
+          )
+          rm -f signing-key.pem generated-public.pem
+
+      - name: Upload repository artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ matrix.repo_arch }}
+          path: site
+          if-no-files-found: error
+
+  pages:
+    if: github.ref == 'refs/heads/openwrt' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: openwrt-*
+          path: site
+          merge-multiple: true
+
+      - name: Add repository metadata
+        run: |
+          cp openwrt/repository/index.html site/index.html
+          cp openwrt/repository/install.sh site/install.sh
+          mkdir -p site/keys
+          cp openwrt/packages/mosdns-t/files/mosdns-t.pem site/keys/mosdns-t.pem
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/openwrt-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: openwrt-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish OpenWrt release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/packages/25.12/*/*.apk
+            release-artifacts/packages/25.12/*/packages.adb
+          generate_release_notes: true

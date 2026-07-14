@@ -1,0 +1,23 @@
+{
+	"luci-app-mosdns-t": {
+		"description": "Grant access to MosDNS-T controls",
+		"read": {
+			"file": {
+				"/etc/init.d/mosdns-t": [ "exec" ],
+				"/usr/bin/mosdns-t": [ "exec" ],
+				"/usr/libexec/mosdns-t-updater": [ "exec" ]
+			},
+			"ubus": {
+				"service": [ "list" ]
+			},
+			"uci": [ "mosdns-t" ]
+		},
+		"write": {
+			"file": {
+				"/etc/init.d/mosdns-t": [ "exec" ],
+				"/usr/libexec/mosdns-t-updater": [ "exec" ]
+			},
+			"uci": [ "mosdns-t" ]
+		}
+	}
+}

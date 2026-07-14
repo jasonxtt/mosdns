@@ -1,0 +1,58 @@
+#!/bin/sh
+
+FORWARD_SERVER='127.0.0.1#5335'
+STATE_SECTION='mosdns-t.main'
+
+save_previous_state() {
+	[ -n "$(uci -q get ${STATE_SECTION}.previous_dnsmasq_noresolv)" ] && return 0
+
+	previous="$(uci -q get dhcp.@dnsmasq[0].noresolv)"
+	[ -n "$previous" ] || previous='__unset__'
+	uci -q set "${STATE_SECTION}.previous_dnsmasq_noresolv=${previous}"
+	uci -q commit mosdns-t
+}
+
+enable_forwarding() {
+	save_previous_state
+	uci -q del_list dhcp.@dnsmasq[0].server="$FORWARD_SERVER"
+	uci -q add_list dhcp.@dnsmasq[0].server="$FORWARD_SERVER"
+	uci -q set dhcp.@dnsmasq[0].noresolv='1'
+	uci -q commit dhcp
+	/etc/init.d/dnsmasq restart
+}
+
+disable_forwarding() {
+	uci -q del_list dhcp.@dnsmasq[0].server="$FORWARD_SERVER"
+	previous="$(uci -q get ${STATE_SECTION}.previous_dnsmasq_noresolv)"
+	case "$previous" in
+		__unset__|'') uci -q delete dhcp.@dnsmasq[0].noresolv ;;
+		*) uci -q set "dhcp.@dnsmasq[0].noresolv=${previous}" ;;
+	esac
+	uci -q delete "${STATE_SECTION}.previous_dnsmasq_noresolv"
+	uci -q commit dhcp
+	uci -q commit mosdns-t
+	/etc/init.d/dnsmasq restart
+}
+
+case "$1" in
+	enable)
+		enable_forwarding
+		;;
+	disable)
+		disable_forwarding
+		;;
+	apply)
+		if [ "$(uci -q get ${STATE_SECTION}.dnsmasq_forward)" = '1' ]; then
+			enable_forwarding
+		else
+			disable_forwarding
+		fi
+		;;
+	status)
+		uci -q show dhcp.@dnsmasq[0].server | grep -Fq "$FORWARD_SERVER"
+		;;
+	*)
+		echo "usage: $0 {enable|disable|apply|status}" >&2
+		exit 1
+		;;
+esac

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MosDNS-T OpenWrt 软件源</title>
+  <style>
+    body { max-width: 760px; margin: 48px auto; padding: 0 20px; font: 16px/1.65 system-ui, sans-serif; color: #202124; }
+    code, pre { background: #f5f7f9; border-radius: 6px; }
+    code { padding: 2px 5px; }
+    pre { padding: 16px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>MosDNS-T OpenWrt 软件源</h1>
+  <p>适用于使用 APK 包管理器的 OpenWrt/ImmortalWrt 25.12。安装后可在 LuCI 的“服务 → MosDNS-T”中管理服务和定向升级。</p>
+  <pre><code>wget -qO- https://jasonxtt.github.io/mosdns/install.sh | sh</code></pre>
+  <p>升级只会更新 <code>mosdns-t</code> 和 <code>luci-app-mosdns-t</code>，不会执行系统全量升级。</p>
+</body>
+</html>

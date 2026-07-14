@@ -1,0 +1,42 @@
+#!/bin/sh
+
+package_version() {
+	apk list --installed "$1" 2>/dev/null | sed -n "s/^$1-\([^ ]*\).*/\1/p" | head -n 1
+}
+
+print_status() {
+	core_version="$(package_version mosdns-t)"
+	luci_version="$(package_version luci-app-mosdns-t)"
+	webui_port="$(jsonfilter -i /etc/mosdns-t/webinfo/webui_port_settings.json -e '@.port' 2>/dev/null)"
+	[ -n "$webui_port" ] || webui_port="$(uci -q get mosdns-t.main.webui_port)"
+	[ -n "$webui_port" ] || webui_port=9099
+	update_available=0
+	if apk list -u 2>/dev/null | grep -Eq '^(mosdns-t|luci-app-mosdns-t)-'; then
+		update_available=1
+	fi
+
+	printf 'core_version=%s\n' "$core_version"
+	printf 'luci_version=%s\n' "$luci_version"
+	printf 'webui_port=%s\n' "$webui_port"
+	printf 'update_available=%s\n' "$update_available"
+}
+
+case "$1" in
+	status)
+		print_status
+		;;
+	check)
+		apk update
+		print_status
+		;;
+	upgrade)
+		apk update
+		apk add --upgrade mosdns-t luci-app-mosdns-t
+		/etc/init.d/mosdns-t restart
+		print_status
+		;;
+	*)
+		echo "usage: $0 {status|check|upgrade}" >&2
+		exit 1
+		;;
+esac
