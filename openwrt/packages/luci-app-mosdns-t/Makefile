@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-mosdns-t
 PKG_VERSION:=0.7.0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKGARCH:=all
 
 PKG_LICENSE:=GPL-3.0-only
@@ -40,6 +40,7 @@ define Package/luci-app-mosdns-t/install
 		$(1)/usr/share/ucitrack/luci-app-mosdns-t.json
 	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./root/usr/libexec/mosdns-t-updater $(1)/usr/libexec/mosdns-t-updater
+	$(INSTALL_BIN) ./root/usr/libexec/mosdns-t-settings $(1)/usr/libexec/mosdns-t-settings
 endef
 
 $(eval $(call BuildPackage,luci-app-mosdns-t))

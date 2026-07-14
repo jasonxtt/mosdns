@@ -1,0 +1,68 @@
+#!/bin/sh
+
+CONFIG_FILE="$(uci -q get mosdns-t.main.configfile)"
+[ -n "$CONFIG_FILE" ] || CONFIG_FILE='/etc/mosdns-t/config_custom.yaml'
+WEBUI_FILE='/etc/mosdns-t/webinfo/webui_port_settings.json'
+
+valid_port() {
+	case "$1" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+set_dns_port() {
+	new_port="$1"
+	valid_port "$new_port" || {
+		echo 'DNS port must be between 1 and 65535' >&2
+		return 1
+	}
+
+	old_port="$(sed -n 's/^[[:space:]]*listen: "127\.0\.0\.1:\([0-9][0-9]*\)".*/\1/p' "$CONFIG_FILE" | head -n 1)"
+	[ -n "$old_port" ] || {
+		echo 'Unable to find the MosDNS DNS listener' >&2
+		return 1
+	}
+	[ "$old_port" = "$new_port" ] && return 0
+
+	tmp_file="$(mktemp "${CONFIG_FILE}.XXXXXX")" || return 1
+	cp -p "$CONFIG_FILE" "$tmp_file" || {
+		rm -f "$tmp_file"
+		return 1
+	}
+	sed -i "s/listen: \"127\.0\.0\.1:${old_port}\"/listen: \"127.0.0.1:${new_port}\"/g" "$tmp_file" || {
+		rm -f "$tmp_file"
+		return 1
+	}
+	mv "$tmp_file" "$CONFIG_FILE"
+}
+
+set_webui_port() {
+	new_port="$1"
+	valid_port "$new_port" || {
+		echo 'WebUI port must be between 1 and 65535' >&2
+		return 1
+	}
+
+	mkdir -p "${WEBUI_FILE%/*}"
+	tmp_file="$(mktemp "${WEBUI_FILE}.XXXXXX")" || return 1
+	printf '{\n  "port": %s\n}\n' "$new_port" > "$tmp_file" || {
+		rm -f "$tmp_file"
+		return 1
+	}
+	chmod 644 "$tmp_file"
+	mv "$tmp_file" "$WEBUI_FILE"
+}
+
+case "$1" in
+	set-dns-port)
+		set_dns_port "$2"
+		;;
+	set-webui-port)
+		set_webui_port "$2"
+		;;
+	*)
+		echo "usage: $0 {set-dns-port|set-webui-port} PORT" >&2
+		exit 1
+		;;
+esac

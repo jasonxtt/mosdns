@@ -10,6 +10,11 @@ print_status() {
 	webui_port="$(jsonfilter -i /etc/mosdns-t/webinfo/webui_port_settings.json -e '@.port' 2>/dev/null)"
 	[ -n "$webui_port" ] || webui_port="$(uci -q get mosdns-t.main.webui_port)"
 	[ -n "$webui_port" ] || webui_port=9099
+	config_file="$(uci -q get mosdns-t.main.configfile)"
+	[ -n "$config_file" ] || config_file=/etc/mosdns-t/config_custom.yaml
+	dns_port="$(sed -n 's/^[[:space:]]*listen: "127\.0\.0\.1:\([0-9][0-9]*\)".*/\1/p' "$config_file" | head -n 1)"
+	[ -n "$dns_port" ] || dns_port="$(uci -q get mosdns-t.main.listen_port)"
+	[ -n "$dns_port" ] || dns_port=5335
 	update_available=0
 	if apk list -u 2>/dev/null | grep -Eq '^(mosdns-t|luci-app-mosdns-t)-'; then
 		update_available=1
@@ -18,6 +23,7 @@ print_status() {
 	printf 'core_version=%s\n' "$core_version"
 	printf 'luci_version=%s\n' "$luci_version"
 	printf 'webui_port=%s\n' "$webui_port"
+	printf 'dns_port=%s\n' "$dns_port"
 	printf 'update_available=%s\n' "$update_available"
 }
 

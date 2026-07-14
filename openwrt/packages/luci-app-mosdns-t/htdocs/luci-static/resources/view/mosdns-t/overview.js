@@ -62,6 +62,14 @@ function runUpdater(action) {
 	});
 }
 
+function writePort(sectionId, option, action, value) {
+	return fs.exec('/usr/libexec/mosdns-t-settings', [ action, value ]).then(result => {
+		if (result.code !== 0)
+			throw new Error(result.stderr || _('端口设置失败'));
+		uci.set('mosdns-t', sectionId, option, value);
+	});
+}
+
 return view.extend({
 	load() {
 		return Promise.all([
@@ -80,10 +88,11 @@ return view.extend({
 		const packageStatus = data[4] || {};
 		const updateAvailable = packageStatus.update_available === '1';
 		const webuiPort = packageStatus.webui_port || '9099';
+		const dnsPort = packageStatus.dns_port || '5335';
 		let m, s, o;
 
 		m = new form.Map('mosdns-t', _('MosDNS-T'),
-			_('dnsmasq 保留 53 端口并把请求转发到 MosDNS 5335 端口。'));
+			_('dnsmasq 保留 53 端口，并把请求转发到 MosDNS-T 的 DNS 监听端口。'));
 
 		s = m.section(form.TypedSection);
 		s.anonymous = true;
@@ -157,15 +166,21 @@ return view.extend({
 		o = s.option(form.Flag, 'dnsmasq_forward', _('接管 dnsmasq 上游'));
 		o.default = o.enabled;
 		o.rmempty = false;
-		o.description = _('启用后，dnsmasq 继续监听 53，并把上游请求发往 127.0.0.1#5335。');
+		o.description = _('启用后，dnsmasq 继续监听 53，并把上游请求发往当前 MosDNS-T DNS 端口。');
 
 		o = s.option(form.Value, 'listen_port', _('MosDNS DNS 端口'));
-		o.default = '5335';
-		o.readonly = true;
+		o.cfgvalue = () => dnsPort;
+		o.datatype = 'port';
+		o.rmempty = false;
+		o.write = (sectionId, value) => writePort(sectionId, 'listen_port', 'set-dns-port', value);
+		o.description = _('保存并应用后，会同时更新 UDP/TCP 监听地址和 dnsmasq 转发目标。');
 
 		o = s.option(form.Value, 'webui_port', _('MosDNS WebUI 端口'));
 		o.cfgvalue = () => webuiPort;
-		o.readonly = true;
+		o.datatype = 'port';
+		o.rmempty = false;
+		o.write = (sectionId, value) => writePort(sectionId, 'webui_port', 'set-webui-port', value);
+		o.description = _('与 MosDNS WebUI 使用同一个端口设置；从任一界面修改后，另一边都会显示相同端口。');
 
 		poll.add(() => getStatus().then(isRunning => {
 			const el = document.getElementById('mosdns-t-status');
