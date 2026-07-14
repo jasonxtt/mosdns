@@ -87,6 +87,7 @@ return view.extend({
 		const autostart = data[3];
 		const packageStatus = data[4] || {};
 		const updateAvailable = packageStatus.update_available === '1';
+		const updateChecked = packageStatus.update_checked === '1';
 		const webuiPort = packageStatus.webui_port || '9099';
 		const dnsPort = packageStatus.dns_port || '5335';
 		let m, s, o;
@@ -142,7 +143,9 @@ return view.extend({
 			E('p', {}, '%s %s'.format(_('已安装：'), packageStatus.core_version || _('未知'))),
 			E('p', {}, updateAvailable
 				? _('软件源中有新版本可用。')
-				: _('点击“检查更新”刷新 MosDNS-T 软件源。')),
+				: updateChecked
+					? _('当前已是最新版本。')
+					: _('点击“检查更新”刷新 MosDNS-T 软件源。')),
 			E('div', { class: 'right' }, [
 				E('button', {
 					class: 'btn cbi-button cbi-button-action',

@@ -1,5 +1,7 @@
 #!/bin/sh
 
+CHECK_STATE='/tmp/mosdns-t-update-checked'
+
 package_version() {
 	if command -v apk >/dev/null 2>&1; then
 		apk list --installed "$1" 2>/dev/null | sed -n "s/^$1-\([^ ]*\).*/\1/p" | head -n 1
@@ -49,6 +51,7 @@ print_status() {
 	printf 'webui_port=%s\n' "$webui_port"
 	printf 'dns_port=%s\n' "$dns_port"
 	printf 'update_available=%s\n' "$update_available"
+	[ -e "$CHECK_STATE" ] && printf 'update_checked=1\n' || printf 'update_checked=0\n'
 }
 
 case "$1" in
@@ -57,10 +60,12 @@ case "$1" in
 		;;
 	check)
 		package_update
+		: > "$CHECK_STATE"
 		print_status
 		;;
 	upgrade)
 		package_update
+		: > "$CHECK_STATE"
 		package_upgrade
 		/etc/init.d/mosdns-t restart
 		print_status
