@@ -78,8 +78,14 @@ jobs:
       - name: Download ImmortalWrt SDK
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd
-          wget -q "https://downloads.immortalwrt.org/releases/25.12.1/targets/${{ matrix.sdk_path }}/${{ matrix.sdk_file }}" -O sdk.tar.zst
+          sudo apt-get install -y aria2 zstd
+          aria2c \
+            --max-connection-per-server=8 \
+            --split=8 \
+            --min-split-size=10M \
+            --dir=. \
+            --out=sdk.tar.zst \
+            "https://downloads.immortalwrt.org/releases/25.12.1/targets/${{ matrix.sdk_path }}/${{ matrix.sdk_file }}"
           mkdir sdk
           tar --zstd -xf sdk.tar.zst -C sdk --strip-components=1
 
