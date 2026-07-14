@@ -90,6 +90,11 @@ return view.extend({
 		const webuiPort = packageStatus.webui_port || '9099';
 		const dnsPort = packageStatus.dns_port || '5335';
 		let m, s, o;
+		const upgradeButton = E('button', {
+			class: 'btn cbi-button cbi-button-positive',
+			click: ui.createHandlerFn(this, () => runUpdater('upgrade'))
+		}, _('升级 MosDNS-T'));
+		upgradeButton.disabled = !updateAvailable;
 
 		m = new form.Map('mosdns-t', _('MosDNS-T'),
 			_('dnsmasq 保留 53 端口，并把请求转发到 MosDNS-T 的 DNS 监听端口。'));
@@ -144,11 +149,7 @@ return view.extend({
 					click: ui.createHandlerFn(this, () => runUpdater('check'))
 				}, _('检查更新')),
 				' ',
-				E('button', {
-					class: 'btn cbi-button cbi-button-positive',
-					disabled: !updateAvailable,
-					click: ui.createHandlerFn(this, () => runUpdater('upgrade'))
-				}, _('升级 MosDNS-T'))
+				upgradeButton
 			])
 		]);
 
