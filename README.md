@@ -84,6 +84,9 @@ wget -qO- https://jasonxtt.github.io/mosdns/install.sh | sh
 
 ```sh
 wget -qO- https://cdn.jsdelivr.net/gh/jasonxtt/mosdns@openwrt/openwrt/repository/install.sh | sh
+```
+或
+```sh
 wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/mosdns/openwrt/openwrt/repository/install.sh | sh
 ```
 
