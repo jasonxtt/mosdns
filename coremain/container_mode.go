@@ -13,6 +13,7 @@ const (
 	containerConfigInitURLEnv       = "MOSDNS_CONFIG_INIT_URL"
 	containerNetworkModeBridge      = "bridge"
 	containerNetworkModeHost        = "host"
+	legacyContainerConfigInitURL    = "https://github.com/jasonxtt/file/raw/refs/heads/main/mosdns/config/config_all.zip"
 	defaultContainerConfigInitURL   = "https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip"
 	fallbackContainerConfigCDNURL   = "https://cdn.jsdelivr.net/gh/jasonxtt/file@main/mosdns/config/config_all.zip"
 	fallbackContainerConfigProxyURL = "https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip"
@@ -56,6 +57,9 @@ func containerAutoInitEnabled() bool {
 
 func containerConfigInitURL() string {
 	if s := strings.TrimSpace(os.Getenv(containerConfigInitURLEnv)); s != "" {
+		if normalized, ok := normalizeContainerConfigInitURL(s); ok {
+			return normalized
+		}
 		return s
 	}
 	return defaultContainerConfigInitURL
@@ -63,12 +67,30 @@ func containerConfigInitURL() string {
 
 func containerConfigInitURLs() []string {
 	if s := strings.TrimSpace(os.Getenv(containerConfigInitURLEnv)); s != "" {
+		if normalized, ok := normalizeContainerConfigInitURL(s); ok {
+			return []string{
+				normalized,
+				fallbackContainerConfigCDNURL,
+				fallbackContainerConfigProxyURL,
+			}
+		}
 		return []string{s}
 	}
 	return []string{
 		defaultContainerConfigInitURL,
 		fallbackContainerConfigCDNURL,
 		fallbackContainerConfigProxyURL,
+	}
+}
+
+func normalizeContainerConfigInitURL(url string) (string, bool) {
+	switch strings.TrimSpace(url) {
+	case "", defaultContainerConfigInitURL:
+		return defaultContainerConfigInitURL, true
+	case legacyContainerConfigInitURL:
+		return defaultContainerConfigInitURL, true
+	default:
+		return "", false
 	}
 }
 

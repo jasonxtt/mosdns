@@ -84,6 +84,14 @@ func TestContainerAutoInitSettings(t *testing.T) {
 		t.Fatalf("containerConfigInitURLs() = %v, want [%q %q %q]", got, defaultContainerConfigInitURL, fallbackContainerConfigCDNURL, fallbackContainerConfigProxyURL)
 	}
 
+	t.Setenv(containerConfigInitURLEnv, " "+legacyContainerConfigInitURL+" ")
+	if got := containerConfigInitURL(); got != defaultContainerConfigInitURL {
+		t.Fatalf("containerConfigInitURL() = %q, want normalized built-in raw url", got)
+	}
+	if got := containerConfigInitURLs(); len(got) != 3 || got[0] != defaultContainerConfigInitURL || got[1] != fallbackContainerConfigCDNURL || got[2] != fallbackContainerConfigProxyURL {
+		t.Fatalf("containerConfigInitURLs() = %v, want built-in fallback chain for legacy url", got)
+	}
+
 	t.Setenv(containerConfigInitURLEnv, " https://example.com/config_all.zip ")
 	if got := containerConfigInitURL(); got != "https://example.com/config_all.zip" {
 		t.Fatalf("containerConfigInitURL() = %q, want trimmed custom url", got)
