@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mosdns-t
 PKG_VERSION:=0.7.0
-PKG_RELEASE:=8
+PKG_RELEASE:=9
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
 CONFIG_COMMIT:=30a5e74d23a5d35ac4adc330382f4522d373755c
@@ -15,7 +15,10 @@ PKG_MAINTAINER:=jasonxtt
 include $(INCLUDE_DIR)/package.mk
 
 define Download/mosdns-config
-	URL:=https://raw.githubusercontent.com/jasonxtt/file/$(CONFIG_COMMIT)/mosdns/config/
+	URL:= \
+		https://raw.githubusercontent.com/jasonxtt/file/$(CONFIG_COMMIT)/mosdns/config/ \
+		https://cdn.jsdelivr.net/gh/jasonxtt/file@$(CONFIG_COMMIT)/mosdns/config/ \
+		https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/file/$(CONFIG_COMMIT)/mosdns/config/
 	URL_FILE:=config_all.zip
 	FILE:=$(CONFIG_ARCHIVE)
 	HASH:=$(CONFIG_HASH)
