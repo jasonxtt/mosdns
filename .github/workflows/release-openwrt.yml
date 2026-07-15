@@ -247,7 +247,7 @@ jobs:
       - build_ipk
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pages: write
       id-token: write
     environment:
@@ -272,6 +272,21 @@ jobs:
           mkdir -p site/keys
           cp openwrt/packages/mosdns-t/files/mosdns-t.pem site/keys/mosdns-t.pem
           cp openwrt/repository/mosdns-t.pub site/keys/mosdns-t.pub
+
+      - name: Publish repository mirror branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          mirror_index="$RUNNER_TEMP/openwrt-feed-index"
+          rm -f "$mirror_index"
+          cd site
+          export GIT_DIR="$GITHUB_WORKSPACE/.git"
+          export GIT_WORK_TREE="$PWD"
+          export GIT_INDEX_FILE="$mirror_index"
+          git add -A
+          mirror_tree=$(git write-tree)
+          mirror_commit=$(printf 'Publish OpenWrt feed from %s\n' "$GITHUB_SHA" | git commit-tree "$mirror_tree")
+          git push --force origin "$mirror_commit:refs/heads/openwrt-feed"
 
       - uses: actions/configure-pages@v5
 
