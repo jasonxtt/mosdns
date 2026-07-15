@@ -155,7 +155,7 @@ APPLE_CONTAINER_BUILDER_MEMORY=6G \
 MOSDNS_CONTAINER_MODE=1
 MOSDNS_CONTAINER_NETWORK_MODE=bridge
 MOSDNS_AUTO_INIT=1
-MOSDNS_CONFIG_INIT_URL=https://github.com/jasonxtt/file/raw/refs/heads/main/mosdns/config/config_all.zip
+MOSDNS_CONFIG_INIT_URL=https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip
 ```
 
 因此新部署时只需要准备一个空目录并挂载到 `/cus/mosdns`。容器首次启动如果发现：
@@ -164,6 +164,12 @@ MOSDNS_CONFIG_INIT_URL=https://github.com/jasonxtt/file/raw/refs/heads/main/mosd
 - `/cus/mosdns` 是空目录
 
 就会自动下载并解压默认 `config_all.zip` 到该目录。
+
+镜像内置自动初始化默认会按下面顺序回退：
+
+- `https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip`
+- `https://cdn.jsdelivr.net/gh/jasonxtt/file@main/mosdns/config/config_all.zip`
+- `https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip`
 
 例如：
 
@@ -246,7 +252,7 @@ bridge 模式下的端口行为：
 MOSDNS_CONTAINER_MODE=1
 MOSDNS_CONTAINER_NETWORK_MODE=bridge
 MOSDNS_AUTO_INIT=1
-MOSDNS_CONFIG_INIT_URL=https://github.com/jasonxtt/file/raw/refs/heads/main/mosdns/config/config_all.zip
+MOSDNS_CONFIG_INIT_URL=https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_all.zip
 ```
 
 容器模式下：

@@ -49,13 +49,13 @@ func ensureContainerConfigInitialized(baseDir, configPath string) error {
 		return fmt.Errorf("container auto-init refused: %s is not empty but %s is missing", baseDir, configPath)
 	}
 
-	initURL := containerConfigInitURL()
+	initURLs := containerConfigInitURLs()
 	mlog.L().Info("starting container config auto-init",
 		zap.String("dir", baseDir),
 		zap.String("config", configPath),
-		zap.String("url", initURL))
+		zap.Strings("urls", initURLs))
 
-	if err := downloadAndExtractConfigZip(initURL, baseDir); err != nil {
+	if err := downloadAndExtractConfigZip(initURLs, baseDir); err != nil {
 		return err
 	}
 
@@ -92,7 +92,29 @@ func dirIsEmpty(dir string) (bool, error) {
 	return true, nil
 }
 
-func downloadAndExtractConfigZip(url, destDir string) error {
+func downloadAndExtractConfigZip(urls []string, destDir string) error {
+	var errs []string
+	for _, url := range urls {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		if err := downloadAndExtractConfigZipOnce(url, destDir); err == nil {
+			return nil
+		} else {
+			errs = append(errs, fmt.Sprintf("%s: %v", url, err))
+			mlog.L().Warn("container config auto-init download failed, trying next url if available",
+				zap.String("url", url),
+				zap.Error(err))
+		}
+	}
+	if len(errs) == 0 {
+		return fmt.Errorf("failed to download container init config package: no valid init url configured")
+	}
+	return fmt.Errorf("failed to download container init config package from all urls: %s", strings.Join(errs, "; "))
+}
+
+func downloadAndExtractConfigZipOnce(url, destDir string) error {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to build config init request: %w", err)

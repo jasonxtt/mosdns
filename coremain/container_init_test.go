@@ -92,6 +92,43 @@ func TestEnsureContainerConfigInitializedRejectsNonEmptyDirWithoutConfig(t *test
 	}
 }
 
+func TestDownloadAndExtractConfigZipFallsBackToNextURL(t *testing.T) {
+	payload := buildTestConfigZip(t, map[string]string{
+		"config_custom.yaml": "api:\n  http: 127.0.0.1:9099\n",
+	})
+
+	var badHits atomic.Int32
+	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		badHits.Add(1)
+		http.Error(w, "upstream blocked", http.StatusBadGateway)
+	}))
+	defer badServer.Close()
+
+	var goodHits atomic.Int32
+	goodServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodHits.Add(1)
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(payload)
+	}))
+	defer goodServer.Close()
+
+	dir := t.TempDir()
+	if err := downloadAndExtractConfigZip([]string{
+		badServer.URL + "/config_all.zip",
+		goodServer.URL + "/config_all.zip",
+	}, dir); err != nil {
+		t.Fatalf("downloadAndExtractConfigZip() error = %v", err)
+	}
+
+	if badHits.Load() != 1 {
+		t.Fatalf("bad server hits = %d, want 1", badHits.Load())
+	}
+	if goodHits.Load() != 1 {
+		t.Fatalf("good server hits = %d, want 1", goodHits.Load())
+	}
+	assertTestFileContains(t, filepath.Join(dir, "config_custom.yaml"), "127.0.0.1:9099")
+}
+
 func buildTestConfigZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 
