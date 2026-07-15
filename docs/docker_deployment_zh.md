@@ -51,6 +51,7 @@ docker buildx build \
 - 合成并校验多架构 `:<version>`
 - 在 `PUSH_LATEST=1` 时同步更新并校验 `:latest`
 - 默认在发布成功后自动删除 `:<version>-amd64` 和 `:<version>-arm64`
+- 默认 `VERSION` 同时作为镜像构建版本与 Hub tag；如果只是 docker 分支补发镜像、不想把主版本号加 `+1`，可额外传 `IMAGE_VERSION`
 - 构建阶段只在需要时临时启动 builder，结束后自动停止
 
 默认使用：
@@ -66,10 +67,24 @@ AI 常用发布方式：
 VERSION=v0.6.3 ./scripts/publish-dockerhub-apple.sh
 ```
 
+如果只是 docker 分支补发镜像，程序版本仍保持 `v0.6.3`，但 Docker Hub 需要一个新的 tag，可分开传：
+
+```bash
+VERSION=v0.6.3 IMAGE_VERSION=v0.6.3-d1 ./scripts/publish-dockerhub-apple.sh
+```
+
+这会让镜像发布到 `:v0.6.3-d1`，但构建时仍沿用 `v0.6.3` 这条主版本线。
+
 如果这次发布也要更新 `latest`：
 
 ```bash
 VERSION=v0.6.3 PUSH_LATEST=1 ./scripts/publish-dockerhub-apple.sh
+```
+
+补发镜像同时更新 `latest` 时也是同理：
+
+```bash
+VERSION=v0.6.3 IMAGE_VERSION=v0.6.3-d1 PUSH_LATEST=1 ./scripts/publish-dockerhub-apple.sh
 ```
 
 如果确实需要暂时保留 `-amd64` / `-arm64` tag，才显式覆盖：

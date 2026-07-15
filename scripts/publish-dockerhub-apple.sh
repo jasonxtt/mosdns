@@ -5,15 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 VERSION="${VERSION:-$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo dev)}"
+IMAGE_VERSION="${IMAGE_VERSION:-${VERSION}}"
 BUILD_DATE="${BUILD_DATE:-$(date -u +%Y%m%d)}"
 VCS_REF="${VCS_REF:-$(git rev-parse --short=7 HEAD 2>/dev/null || echo nogithash)}"
 IMAGE_REPO="${IMAGE_REPO:-docker.io/jasonxtt/mosdns-t}"
 PUSH_LATEST="${PUSH_LATEST:-0}"
 KEEP_ARCH_TAGS="${KEEP_ARCH_TAGS:-0}"
 
-VERSION_TAG="${IMAGE_REPO}:${VERSION}"
-AMD64_TAG="${IMAGE_REPO}:${VERSION}-amd64"
-ARM64_TAG="${IMAGE_REPO}:${VERSION}-arm64"
+VERSION_TAG="${IMAGE_REPO}:${IMAGE_VERSION}"
+AMD64_TAG="${IMAGE_REPO}:${IMAGE_VERSION}-amd64"
+ARM64_TAG="${IMAGE_REPO}:${IMAGE_VERSION}-arm64"
 
 docker_imagetools() {
   DOCKER_HOST=unix:///tmp/does-not-exist.sock docker buildx imagetools "$@"
