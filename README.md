@@ -80,6 +80,13 @@ bridge 模式下，配置中的 `127.0.0.1` 指向容器自身，不是宿主机
 wget -qO- https://jasonxtt.github.io/mosdns/install.sh | sh
 ```
 
+如果原地址无法访问，可改用以下加速地址：
+
+```sh
+wget -qO- https://cdn.jsdelivr.net/gh/jasonxtt/mosdns@openwrt/openwrt/repository/install.sh | sh
+wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/mosdns/openwrt/openwrt/repository/install.sh | sh
+```
+
 安装脚本会自动识别 `apk` 或 `opkg`，添加 MosDNS-T 签名软件源，并安装或升级：
 
 - `mosdns-t`
