@@ -15,12 +15,22 @@ repository:
 ## Install
 
 ```sh
-wget -qO- https://jasonxtt.github.io/mosdns/install.sh | sh
+install_script=/tmp/mosdns-t-install.sh
+rm -f "$install_script"
+for url in \
+  https://jasonxtt.github.io/mosdns/install.sh \
+  https://cdn.jsdelivr.net/gh/jasonxtt/mosdns@openwrt/openwrt/repository/install.sh \
+  https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/mosdns/openwrt/openwrt/repository/install.sh; do
+  wget -q -T 15 -O "$install_script" "$url" && break
+done
+[ -s "$install_script" ] && sh "$install_script"
 ```
 
 The installer detects `apk` or `opkg`, adds the matching MosDNS-T public
 signing key and only installs or upgrades `mosdns-t` and
-`luci-app-mosdns-t`.
+`luci-app-mosdns-t`. It selects the first reachable repository from GitHub
+Pages, the `openwrt-feed` raw mirror, ghproxy and jsDelivr. LuCI repeats this
+selection before every package check or upgrade.
 
 ## Release maintenance
 

@@ -14,7 +14,15 @@
 <body>
   <h1>MosDNS-T OpenWrt 软件源</h1>
   <p>支持使用 APK 的 OpenWrt/ImmortalWrt 25.12，以及使用 opkg/IPK 的 OpenWrt 24.10。安装脚本会自动识别包管理器和架构。</p>
-  <pre><code>wget -qO- https://jasonxtt.github.io/mosdns/install.sh | sh</code></pre>
+  <pre><code>install_script=/tmp/mosdns-t-install.sh
+rm -f "$install_script"
+for url in \
+  https://jasonxtt.github.io/mosdns/install.sh \
+  https://cdn.jsdelivr.net/gh/jasonxtt/mosdns@openwrt/openwrt/repository/install.sh \
+  https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/mosdns/openwrt/openwrt/repository/install.sh; do
+  wget -q -T 15 -O "$install_script" "$url" &amp;&amp; break
+done
+[ -s "$install_script" ] &amp;&amp; sh "$install_script"</code></pre>
   <p>升级只会更新 <code>mosdns-t</code> 和 <code>luci-app-mosdns-t</code>，不会执行系统全量升级。</p>
 </body>
 </html>

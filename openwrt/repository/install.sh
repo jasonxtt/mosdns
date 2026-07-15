@@ -1,7 +1,37 @@
 #!/bin/sh
 set -eu
 
-BASE_URL="${MOSDNS_T_REPO_URL:-https://jasonxtt.github.io/mosdns}"
+DEFAULT_REPO_URLS='https://jasonxtt.github.io/mosdns
+https://raw.githubusercontent.com/jasonxtt/mosdns/openwrt-feed
+https://ghproxy.net/https://raw.githubusercontent.com/jasonxtt/mosdns/openwrt-feed
+https://cdn.jsdelivr.net/gh/jasonxtt/mosdns@openwrt-feed'
+REPO_URLS="${MOSDNS_T_REPO_URLS:-${MOSDNS_T_REPO_URL:-$DEFAULT_REPO_URLS}}"
+SELECTED_REPO_URL=''
+
+select_repository() {
+	index_path="$1"
+	key_path="$2"
+	key_file="$3"
+	index_tmp="/tmp/mosdns-t-repository-index.$$"
+	key_tmp="${key_file}.tmp"
+
+	for base_url in $REPO_URLS; do
+		rm -f "$index_tmp" "$key_tmp"
+		if wget -q -T 15 -O "$index_tmp" "${base_url}/${index_path}" &&
+			[ -s "$index_tmp" ] &&
+			wget -q -T 15 -O "$key_tmp" "${base_url}/${key_path}" &&
+			[ -s "$key_tmp" ]; then
+			mv "$key_tmp" "$key_file"
+			rm -f "$index_tmp"
+			SELECTED_REPO_URL="$base_url"
+			return 0
+		fi
+	done
+
+	rm -f "$index_tmp" "$key_tmp"
+	echo '所有 MosDNS-T 软件源均无法访问。' >&2
+	return 1
+}
 if [ "$(id -u)" -ne 0 ]; then
 	echo "请使用 root 用户运行此脚本。" >&2
 	exit 1
@@ -9,13 +39,12 @@ fi
 
 install_apk() {
 	arch="$(apk --print-arch)"
-	repository_url="${BASE_URL}/packages/25.12/${arch}/packages.adb"
 	key_file='/etc/apk/keys/mosdns-t.pem'
 	repository_file='/etc/apk/repositories.d/mosdns-t.list'
 
 	mkdir -p /etc/apk/keys /etc/apk/repositories.d
-	wget -qO "${key_file}.tmp" "${BASE_URL}/keys/mosdns-t.pem"
-	mv "${key_file}.tmp" "$key_file"
+	select_repository "packages/25.12/${arch}/packages.adb" 'keys/mosdns-t.pem' "$key_file"
+	repository_url="${SELECTED_REPO_URL}/packages/25.12/${arch}/packages.adb"
 	printf '%s\n' "$repository_url" > "$repository_file"
 
 	apk update
@@ -28,13 +57,12 @@ install_opkg() {
 		echo '无法识别 OpenWrt 软件包架构。' >&2
 		exit 1
 	}
-	repository_url="${BASE_URL}/packages/24.10/${arch}"
 	key_file='/etc/opkg/keys/e876ba860888cd76'
 	custom_feeds='/etc/opkg/customfeeds.conf'
 
 	mkdir -p /etc/opkg/keys
-	wget -qO "${key_file}.tmp" "${BASE_URL}/keys/mosdns-t.pub"
-	mv "${key_file}.tmp" "$key_file"
+	select_repository "packages/24.10/${arch}/Packages.gz" 'keys/mosdns-t.pub' "$key_file"
+	repository_url="${SELECTED_REPO_URL}/packages/24.10/${arch}"
 	[ -f "$custom_feeds" ] || : > "$custom_feeds"
 	sed -i '/^src\/gz mosdns_t /d' "$custom_feeds"
 	printf 'src/gz mosdns_t %s\n' "$repository_url" >> "$custom_feeds"
