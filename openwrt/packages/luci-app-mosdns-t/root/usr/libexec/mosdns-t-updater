@@ -68,9 +68,23 @@ package_version() {
 package_update() {
 	configure_repository || return 1
 	if command -v apk >/dev/null 2>&1; then
-		apk update
+		apk update || echo '系统软件源更新失败，继续检查 MosDNS-T 更新。' >&2
 	else
-		opkg update
+		opkg_update_log="/tmp/mosdns-t-opkg-update.$$"
+		rm -f /var/opkg-lists/mosdns_t "$opkg_update_log"
+		if ! opkg update > "$opkg_update_log" 2>&1; then
+			cat "$opkg_update_log"
+			if [ -s /var/opkg-lists/mosdns_t ]; then
+				echo '系统软件源更新失败，但 MosDNS-T 软件源已更新，继续检查更新。' >&2
+			else
+				rm -f "$opkg_update_log"
+				echo 'MosDNS-T 软件源更新失败。' >&2
+				return 1
+			fi
+		else
+			cat "$opkg_update_log"
+		fi
+		rm -f "$opkg_update_log"
 	fi
 }
 
