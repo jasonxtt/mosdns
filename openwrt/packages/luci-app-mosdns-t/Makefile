@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-mosdns-t
 PKG_VERSION:=0.7.0
-PKG_RELEASE:=12
+PKG_RELEASE:=13
 PKGARCH:=all
 
 PKG_LICENSE:=GPL-3.0-only
@@ -32,6 +32,9 @@ define Package/luci-app-mosdns-t/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DATA) ./root/usr/lib/lua/luci/controller/mosdns_t.lua \
 		$(1)/usr/lib/lua/luci/controller/mosdns_t.lua
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi/mosdns_t
+	$(INSTALL_DATA) ./root/usr/lib/lua/luci/model/cbi/mosdns_t/overview.lua \
+		$(1)/usr/lib/lua/luci/model/cbi/mosdns_t/overview.lua
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
 	$(INSTALL_DATA) ./root/usr/share/luci/menu.d/luci-app-mosdns-t.json \
 		$(1)/usr/share/luci/menu.d/luci-app-mosdns-t.json
