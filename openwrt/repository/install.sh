@@ -47,7 +47,7 @@ install_apk() {
 	repository_url="${SELECTED_REPO_URL}/packages/25.12/${arch}/packages.adb"
 	printf '%s\n' "$repository_url" > "$repository_file"
 
-	apk update
+	apk update || echo '系统软件源更新失败，继续尝试安装 MosDNS-T。' >&2
 	apk add --upgrade mosdns-t luci-app-mosdns-t
 }
 
@@ -67,7 +67,21 @@ install_opkg() {
 	sed -i '/^src\/gz mosdns_t /d' "$custom_feeds"
 	printf 'src/gz mosdns_t %s\n' "$repository_url" >> "$custom_feeds"
 
-	opkg update
+	opkg_update_log="/tmp/mosdns-t-opkg-update.$$"
+	rm -f /var/opkg-lists/mosdns_t "$opkg_update_log"
+	if ! opkg update > "$opkg_update_log" 2>&1; then
+		cat "$opkg_update_log"
+		if [ -s /var/opkg-lists/mosdns_t ]; then
+			echo '系统软件源更新失败，但 MosDNS-T 软件源已更新，继续安装。' >&2
+		else
+			rm -f "$opkg_update_log"
+			echo 'MosDNS-T 软件源更新失败。' >&2
+			exit 1
+		fi
+	else
+		cat "$opkg_update_log"
+	fi
+	rm -f "$opkg_update_log"
 	opkg install mosdns-t luci-app-mosdns-t
 }
 
