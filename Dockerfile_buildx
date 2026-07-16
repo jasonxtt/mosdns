@@ -59,7 +59,9 @@ WORKDIR /cus/mosdns
 VOLUME ["/cus/mosdns"]
 
 COPY --from=builder /out/mosdns /usr/bin/mosdns
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 53/tcp 53/udp 9099/tcp
 
-ENTRYPOINT ["/usr/bin/mosdns", "start", "-d", "/cus/mosdns", "-c", "/cus/mosdns/config_custom.yaml"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["start", "-d", "/cus/mosdns", "-c", "/cus/mosdns/config_custom.yaml"]
