@@ -41,18 +41,19 @@ MosDNS-T 是基于 [`yyysuo/mosdns`](https://github.com/yyysuo/mosdns) 持续维
 wget --quiet --show-progress -O /mnt/main_install.sh https://raw.githubusercontent.com/jasonxtt/LinuxScripts/main/AIO/Scripts/main_install.sh && chmod +x /mnt/main_install.sh && /mnt/main_install.sh
 ```
 
+**步骤 2：** 输入 `5` ，再输入 `1` ，安装 mosdns
 
-**步骤 2：** 输入 `6` ，再输入 `1` ，安装mosdns 
-
-![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-13.png)
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-14.png)
 
 **步骤 3：** 按提示输入以下信息：
-1. sing-box/mihomo 提供的socks代理  `IP:端口`（例如 10.0.0.2:7890）
-2. 输入sing-box/mihomo监听的DNS端口，用于获取fakeip (例如 10.0.0.2:6666)
 
-![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-7.png)
+1. sing-box / mihomo 提供的 SOCKS 代理 `IP:端口`（例如 `127.0.0.1:8888`）
+2. 选择默认使用的 DNS 分流模式，安装完成后也可在 WebUI 的「系统设置」中切换
+3. 输入 sing-box / mihomo 监听的 DNS 端口，用于获取 FakeIP（例如 `127.0.0.1:6666`）
 
-**步骤 4：** 安装完成后，UI 地址为 `IP:9099`, 例如`http://10.0.0.3:9099`
+![](https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-15.png)
+
+**步骤 4：** 安装完成后，WebUI 地址为 `http://IP:9099`，例如 `http://10.0.0.3:9099`
 
 ## Docker 容器版部署
 
