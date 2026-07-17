@@ -14,14 +14,14 @@ MosDNS-T 是基于 [`yyysuo/mosdns`](https://github.com/yyysuo/mosdns) 持续维
 点击缩略图可查看原图。
 
 <p>
-  <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-1.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-1.png" width="31%" alt="MosDNS-T WebUI 预览 1"></a>
+  <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-16.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-16.png" width="31%" alt="MosDNS-T WebUI 预览 1"></a>
   <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-2.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-2.png" width="31%" alt="MosDNS-T WebUI 预览 2"></a>
   <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-3.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-3.png" width="31%" alt="MosDNS-T WebUI 预览 3"></a>
 </p>
 <p>
   <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-4.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-4.png" width="31%" alt="MosDNS-T WebUI 预览 4"></a>
-  <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-5.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-5.png" width="31%" alt="MosDNS-T WebUI 预览 5"></a>
-  <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-6.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosui-6.png" width="31%" alt="MosDNS-T WebUI 预览 6"></a>
+  <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-17.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-17.png" width="31%" alt="MosDNS-T WebUI 预览 5"></a>
+  <a href="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-18.png"><img src="https://raw.githubusercontent.com/jasonxtt/images/main/images/mosdns-18.png" width="31%" alt="MosDNS-T WebUI 预览 6"></a>
 </p>
 
 ## 多版本支持
