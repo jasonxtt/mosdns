@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.7.1
+
+### Fixed
+
+- moved the upstream editor modal to the page root and gave it an independent
+  scroll area so its close and save controls remain visible at constrained
+  viewport sizes and in embedded WebViews
+- allowed the rule-management content column to shrink inside its grid so the
+  rightmost save action no longer requires horizontal scrolling at affected
+  desktop resolutions
+- kept the "保存全部改动" action on one line
+
+### Notes
+
+- binary-only update; config schema remains `3` and no `config_up` /
+  `config_all` changes are required
+
 ## v0.7.0
 
 ### Added
