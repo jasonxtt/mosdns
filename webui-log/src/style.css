@@ -848,10 +848,12 @@ body::after {
 }
 
 .save-list-btn {
+  flex: 0 0 auto;
   font-size: 1rem;
   font-weight: 700;
   padding: 8px 14px;
   border-width: 1px;
+  white-space: nowrap;
 }
 
 .toolbar {
@@ -2127,7 +2129,7 @@ tr.disabled {
 
 .list-layout {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
   gap: 12px;
   align-items: stretch;
 }
@@ -2187,6 +2189,7 @@ tr.disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .list-editor {

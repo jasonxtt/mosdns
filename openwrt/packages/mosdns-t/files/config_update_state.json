@@ -4,6 +4,6 @@
   "required_schema": 3,
   "status": "success",
   "package_id": "main-config-schema-3",
-  "binary_version": "v0.7.0",
+  "binary_version": "v0.7.1",
   "message": "MosDNS-T OpenWrt package config schema 3"
 }
