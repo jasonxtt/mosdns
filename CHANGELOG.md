@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## lite-v0.1.8
+
+### Fixed
+
+- allowed the rule-management content column to shrink inside its grid so the rightmost save action remains visible without dragging the page's horizontal scrollbar at affected desktop resolutions
+- kept the "保存全部改动" action on one line
+
+### Tests
+
+- validated the maintained Vue UI at narrow and affected desktop viewport widths
+- rebuilt the maintained Vue UI bundle with `npm run build`
+- ran the full Go test suite with `go test ./...`
+
+### Upgrade Notes
+
+- this release does **not** require a config change
+- existing deployments can update only the binary
+
 ## lite-v0.1.7
 
 ### Fixed
