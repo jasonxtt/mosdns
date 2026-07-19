@@ -848,10 +848,12 @@ body::after {
 }
 
 .save-list-btn {
+  flex: 0 0 auto;
   font-size: 1rem;
   font-weight: 700;
   padding: 8px 14px;
   border-width: 1px;
+  white-space: nowrap;
 }
 
 .toolbar {
@@ -2033,18 +2035,37 @@ tr.disabled {
 
 .upstream-editor-modal-card {
   width: min(980px, 96vw);
-  max-height: calc(100vh - 40px);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
   overflow: hidden;
-  margin: 0 auto;
 }
 
-.upstream-editor-modal-card .form-grid {
+.upstream-editor-modal-mask {
+  align-items: flex-start;
+  overflow: hidden;
+  padding-block: 16px;
+}
+
+.upstream-editor-modal-header {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.upstream-editor-modal-body {
   min-height: 0;
-  overflow: auto;
-  align-content: start;
-  padding-right: 4px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.upstream-editor-close {
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .upstream-editor-modal-card .actions {
@@ -2108,7 +2129,7 @@ tr.disabled {
 
 .list-layout {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
   gap: 12px;
   align-items: stretch;
 }
@@ -2168,6 +2189,7 @@ tr.disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .list-editor {

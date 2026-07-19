@@ -688,12 +688,14 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="showEditor" class="modal-mask">
+    <Teleport to="body">
+    <div v-if="showEditor" class="modal-mask upstream-editor-modal-mask">
       <section class="panel form-modal-card upstream-editor-modal-card">
-        <header class="panel-header">
+        <header class="panel-header upstream-editor-modal-header">
           <h3>{{ editingCtx.index >= 0 ? '编辑上游' : '新增上游' }}</h3>
-          <button class="btn tiny secondary" type="button" @click="closeEditor">✕</button>
+          <button class="btn tiny secondary upstream-editor-close" type="button" aria-label="关闭" @click="closeEditor">✕</button>
         </header>
+        <div class="upstream-editor-modal-body">
         <div class="form-grid">
           <label>所属组</label>
           <input v-if="editingCtx.index >= 0" v-model="form.group" disabled />
@@ -801,8 +803,10 @@ onBeforeUnmount(() => {
             {{ saving ? '保存中...' : '保存' }}
           </button>
         </div>
+        </div>
       </section>
     </div>
+    </Teleport>
 
     <div class="toolbar upstream-filter-toolbar">
       <label for="group-filter">过滤分组</label>
