@@ -313,13 +313,30 @@ jobs:
           path: release-artifacts
           merge-multiple: true
 
+      - name: Prepare uniquely named release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-upload
+
+          for repo_dir in release-artifacts/packages/25.12/*; do
+            arch="${repo_dir##*/}"
+            for package in "$repo_dir"/*.apk; do
+              package_name="$(basename "$package" .apk)"
+              cp "$package" "release-upload/${package_name}-${arch}.apk"
+            done
+            cp "$repo_dir/packages.adb" "release-upload/packages-25.12-${arch}.adb"
+          done
+
+          for repo_dir in release-artifacts/packages/24.10/*; do
+            arch="${repo_dir##*/}"
+            cp "$repo_dir"/*.ipk release-upload/
+            cp "$repo_dir/Packages.gz" "release-upload/Packages-24.10-${arch}.gz"
+            cp "$repo_dir/Packages.sig" "release-upload/Packages-24.10-${arch}.sig"
+          done
+
       - name: Publish OpenWrt release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release-artifacts/packages/25.12/*/*.apk
-            release-artifacts/packages/25.12/*/packages.adb
-            release-artifacts/packages/24.10/*/*.ipk
-            release-artifacts/packages/24.10/*/Packages.gz
-            release-artifacts/packages/24.10/*/Packages.sig
+          files: release-upload/*
           generate_release_notes: true
