@@ -4,6 +4,10 @@ function index()
 	local fs = require "nixio.fs"
 	local dispatcher = fs.readfile("/usr/lib/lua/luci/dispatcher.lua") or ""
 
+	if fs.access("/usr/share/ucode/luci/dispatcher.uc") then
+		return
+	end
+
 	if dispatcher:find("menu.d", 1, true) then
 		return
 	end
