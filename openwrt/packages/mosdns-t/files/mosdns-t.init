@@ -6,15 +6,55 @@ USE_PROCD=1
 
 PROG=/usr/bin/mosdns-t
 
+valid_port() {
+	case "$1" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	[ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+configure_dns_listeners() {
+	local listen_addr
+
+	if [ "$dnsmasq_forward" -eq 1 ]; then
+		listen_addr="127.0.0.1:${listen_port}"
+	else
+		listen_addr=":${listen_port}"
+	fi
+
+	if [ ! -f "$configfile" ]; then
+		logger -t mosdns-t "MosDNS config file not found: $configfile"
+		return 1
+	fi
+
+	sed -i \
+		-e "/^[[:space:]]*-[[:space:]]*tag:[[:space:]]*udp_all[[:space:]]*$/,/^[[:space:]]*listen:/ s|^\([[:space:]]*listen:[[:space:]]*\).*|\1\"${listen_addr}\"|" \
+		-e "/^[[:space:]]*-[[:space:]]*tag:[[:space:]]*tcp_all[[:space:]]*$/,/^[[:space:]]*listen:/ s|^\([[:space:]]*listen:[[:space:]]*\).*|\1\"${listen_addr}\"|" \
+		"$configfile"
+}
+
+dns_listener_ready() {
+	netstat -ln 2>/dev/null | grep -Eq ":${listen_port}([[:space:]]|$)"
+}
+
 start_service() {
 	config_load mosdns-t
 	config_get_bool enabled main enabled 1
 	config_get workdir main workdir /etc/mosdns-t
 	config_get configfile main configfile /etc/mosdns-t/config_custom.yaml
+	config_get_bool dnsmasq_forward main dnsmasq_forward 1
+	config_get listen_port main listen_port 5335
 
 	if [ "$enabled" -ne 1 ]; then
 		/usr/libexec/mosdns-t-dnsmasq disable
 		return 0
+	fi
+	if ! valid_port "$listen_port"; then
+		logger -t mosdns-t "Invalid DNS listen port: $listen_port"
+		return 1
+	fi
+	if ! configure_dns_listeners; then
+		return 1
 	fi
 
 	procd_open_instance main
@@ -36,7 +76,7 @@ service_started() {
 
 	local waited=0
 	while [ "$waited" -lt 30 ]; do
-		if netstat -ln 2>/dev/null | grep -q "127.0.0.1:${listen_port}"; then
+		if dns_listener_ready; then
 			/usr/libexec/mosdns-t-dnsmasq apply
 			return 0
 		fi

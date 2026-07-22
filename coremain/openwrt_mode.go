@@ -17,6 +17,10 @@ func openWrtModeEnabled() bool {
 	}
 }
 
+func configManagementEnabled() bool {
+	return !openWrtModeEnabled()
+}
+
 func applyOpenWrtModeToUpdateStatus(status *UpdateStatus) {
 	if status == nil {
 		return

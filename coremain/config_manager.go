@@ -35,6 +35,19 @@ func RegisterConfigManagerAPI(router *chi.Mux) {
 	router.Post("/api/v1/config/update_from_url", handleConfigUpdateFromURL)
 }
 
+func registerConfigManagerAPIIfEnabled(router *chi.Mux, enabled bool) {
+	if enabled {
+		RegisterConfigManagerAPI(router)
+		return
+	}
+	router.Post("/api/v1/config/export", handleConfigManagerDisabled)
+	router.Post("/api/v1/config/update_from_url", handleConfigManagerDisabled)
+}
+
+func handleConfigManagerDisabled(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "OpenWrt版本不支持使用配置管理远程更新配置", http.StatusNotFound)
+}
+
 // handleConfigExport 对应需求：把本地目录打包下载
 func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	var req ConfigManagerRequest

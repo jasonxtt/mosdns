@@ -106,10 +106,12 @@ enabled_flag.rmempty = false
 local dnsmasq_forward = settings:option(Flag, "dnsmasq_forward", translate("DNSMasq forward"))
 dnsmasq_forward.default = "1"
 dnsmasq_forward.rmempty = false
+dnsmasq_forward.description = translate("Enabled: dnsmasq keeps port 53 and forwards to MosDNS-T. Disabled: MosDNS-T listens on all addresses at the DNS listen port.")
 
 local listen_port = settings:option(Value, "listen_port", translate("DNS listen port"))
 listen_port.datatype = "port"
 listen_port.placeholder = "5335"
+listen_port.description = translate("Enabled DNSMasq forwarding listens only on 127.0.0.1; disabled forwarding accepts LAN clients directly.")
 
 local web_port = settings:option(Value, "webui_port", translate("WebUI port"))
 web_port.datatype = "port"

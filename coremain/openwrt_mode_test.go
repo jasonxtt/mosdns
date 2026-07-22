@@ -23,6 +23,18 @@ func TestOpenWrtModeEnabled(t *testing.T) {
 	}
 }
 
+func TestConfigManagementEnabled(t *testing.T) {
+	t.Setenv(openWrtModeEnv, "")
+	if !configManagementEnabled() {
+		t.Fatal("configManagementEnabled() = false, want true outside OpenWrt mode")
+	}
+
+	t.Setenv(openWrtModeEnv, "1")
+	if configManagementEnabled() {
+		t.Fatal("configManagementEnabled() = true, want false in OpenWrt mode")
+	}
+}
+
 func TestApplyOpenWrtModeToUpdateStatus(t *testing.T) {
 	status := UpdateStatus{
 		DownloadURL:     "https://example.com/mosdns.tar.gz",

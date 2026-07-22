@@ -98,7 +98,7 @@ return view.extend({
 		upgradeButton.disabled = !updateAvailable;
 
 		m = new form.Map('mosdns-t', _('MosDNS-T'),
-			_('dnsmasq 保留 53 端口，并把请求转发到 MosDNS-T 的 DNS 监听端口。'));
+			_('接管 dnsmasq 时，dnsmasq 保留 53 端口并把请求转发到 MosDNS-T；未接管时，MosDNS-T 直接在所设端口提供 DNS 服务。'));
 
 		s = m.section(form.TypedSection);
 		s.anonymous = true;
@@ -177,7 +177,7 @@ return view.extend({
 		o.datatype = 'port';
 		o.rmempty = false;
 		o.write = (sectionId, value) => writePort(sectionId, 'listen_port', 'set-dns-port', value);
-		o.description = _('保存并应用后，会同时更新 UDP/TCP 监听地址和 dnsmasq 转发目标。');
+		o.description = _('接管 dnsmasq 时仅监听 127.0.0.1；未接管时监听全部地址，可由局域网客户端直接访问。保存并应用后会更新 UDP/TCP 监听地址和 dnsmasq 转发目标。');
 
 		o = s.option(form.Value, 'webui_port', _('MosDNS WebUI 端口'));
 		o.cfgvalue = () => webuiPort;

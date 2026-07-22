@@ -18,19 +18,21 @@ set_dns_port() {
 		return 1
 	}
 
-	old_port="$(sed -n 's/^[[:space:]]*listen: "127\.0\.0\.1:\([0-9][0-9]*\)".*/\1/p' "$CONFIG_FILE" | head -n 1)"
-	[ -n "$old_port" ] || {
-		echo 'Unable to find the MosDNS DNS listener' >&2
-		return 1
-	}
-	[ "$old_port" = "$new_port" ] && return 0
+	if [ "$(uci -q get mosdns-t.main.dnsmasq_forward)" = '1' ]; then
+		listen_addr="127.0.0.1:${new_port}"
+	else
+		listen_addr=":${new_port}"
+	fi
 
 	tmp_file="$(mktemp "${CONFIG_FILE}.XXXXXX")" || return 1
 	cp -p "$CONFIG_FILE" "$tmp_file" || {
 		rm -f "$tmp_file"
 		return 1
 	}
-	sed -i "s/listen: \"127\.0\.0\.1:${old_port}\"/listen: \"127.0.0.1:${new_port}\"/g" "$tmp_file" || {
+	sed -i \
+		-e "/^[[:space:]]*-[[:space:]]*tag:[[:space:]]*udp_all[[:space:]]*$/,/^[[:space:]]*listen:/ s|^\([[:space:]]*listen:[[:space:]]*\).*|\1\"${listen_addr}\"|" \
+		-e "/^[[:space:]]*-[[:space:]]*tag:[[:space:]]*tcp_all[[:space:]]*$/,/^[[:space:]]*listen:/ s|^\([[:space:]]*listen:[[:space:]]*\).*|\1\"${listen_addr}\"|" \
+		"$tmp_file" || {
 		rm -f "$tmp_file"
 		return 1
 	}

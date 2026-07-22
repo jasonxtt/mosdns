@@ -32,6 +32,12 @@ signing key and only installs or upgrades `mosdns-t` and
 Pages, the `openwrt-feed` raw mirror, ghproxy and jsDelivr. LuCI repeats this
 selection before every package check or upgrade.
 
+When DNSMasq forwarding is disabled, MosDNS-T listens on all addresses at the
+configured DNS port. For example, setting the port to `5336` permits both
+`dig @127.0.0.1 -p 5336 example.com` and LAN queries to
+`dig @router-address -p 5336 example.com`. With forwarding enabled, the same
+port is limited to `127.0.0.1` and dnsmasq keeps port 53.
+
 ## Release maintenance
 
 1. Merge the matching main release into `openwrt`.
