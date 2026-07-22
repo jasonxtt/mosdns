@@ -104,8 +104,7 @@ print_status() {
 	[ -n "$webui_port" ] || webui_port=9099
 	config_file="$(uci -q get mosdns-t.main.configfile)"
 	[ -n "$config_file" ] || config_file=/etc/mosdns-t/config_custom.yaml
-	dns_port="$(sed -n 's/^[[:space:]]*listen: "127\.0\.0\.1:\([0-9][0-9]*\)".*/\1/p' "$config_file" | head -n 1)"
-	[ -n "$dns_port" ] || dns_port="$(uci -q get mosdns-t.main.listen_port)"
+	dns_port="$(uci -q get mosdns-t.main.listen_port)"
 	[ -n "$dns_port" ] || dns_port=5335
 	update_available=0
 	if command -v apk >/dev/null 2>&1; then
