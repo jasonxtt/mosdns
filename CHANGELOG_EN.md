@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7.2
+
+### Fixed
+
+- fixed dedicated upstream domains being diverted by the DDNS suffix rule
+  before their special upstream group could run
+- added one `sequence_special` dispatcher before DDNS and ordinary routing in
+  both the main query and requery paths
+- removed the duplicated v4, v6, and other-query special dispatcher calls
+
+### Notes
+
+- upgraded the configuration structure to schema `4` with package ID
+  `main-config-schema-4`; automatic updates apply the matching config package
+
 ## v0.7.1
 
 ### Fixed
