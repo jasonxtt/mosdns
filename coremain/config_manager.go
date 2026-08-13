@@ -35,6 +35,12 @@ func RegisterConfigManagerAPI(router *chi.Mux) {
 	router.Post("/api/v1/config/update_from_url", handleConfigUpdateFromURL)
 }
 
+func registerConfigManagerAPIIfEnabled(router *chi.Mux, enabled bool) {
+	if enabled {
+		RegisterConfigManagerAPI(router)
+	}
+}
+
 // handleConfigExport 对应需求：把本地目录打包下载
 func handleConfigExport(w http.ResponseWriter, r *http.Request) {
 	var req ConfigManagerRequest

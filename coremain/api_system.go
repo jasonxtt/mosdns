@@ -36,10 +36,11 @@ func handleSystemHealth(m *Mosdns) http.HandlerFunc {
 			status = http.StatusServiceUnavailable
 		}
 		writeJSON(w, status, map[string]any{
-			"ready":                  ready,
-			"version":                GetBuildVersion(),
-			"required_config_schema": requiredSchema,
-			"applied_config_schema":  state.AppliedSchema,
+			"ready":                     ready,
+			"version":                   GetBuildVersion(),
+			"required_config_schema":    requiredSchema,
+			"applied_config_schema":     state.AppliedSchema,
+			"config_management_enabled": configManagementEnabled(),
 		})
 	}
 }

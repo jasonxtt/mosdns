@@ -74,6 +74,7 @@ const configManaging = reactive({
   backingUp: false,
   updating: false,
 });
+const configManagementEnabled = ref(true);
 
 const webuiPort = reactive({
   loading: false,
@@ -1579,6 +1580,11 @@ function loadConfigManagerSettings() {
   configManaging.remoteUrl = localStorage.getItem("mosdns-config-url") || "";
 }
 
+async function loadSystemHealth() {
+  const health = await getJSON("/api/v1/system/health");
+  configManagementEnabled.value = health?.config_management_enabled !== false;
+}
+
 function saveConfigManagerSettings() {
   localStorage.setItem(
     "mosdns-config-dir",
@@ -1718,6 +1724,7 @@ async function reloadAll() {
       loadSystemInfo(),
       loadUpdateStatus(),
       loadWebUIPortSettings(),
+      loadSystemHealth(),
     ]);
   } catch (error) {
     setError(`加载系统设置失败: ${error.message}`);
@@ -1789,6 +1796,7 @@ onBeforeUnmount(() => {
 
         <SystemConfigManagePanel
           :config-managing="configManaging"
+          :config-management-enabled="configManagementEnabled"
           :config-version="configVersionInfo"
           @save-settings="saveConfigManagerSettings"
           @backup-config="backupConfig"

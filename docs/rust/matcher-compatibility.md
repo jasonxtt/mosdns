@@ -1,10 +1,13 @@
 # Rust matcher compatibility matrix
 
-Status: Slice 5 matcher foundation evidence complete; Rust remains experimental.
-This is the authoritative contract record for
-`08-13-rust-matcher-foundation`. It maps every matcher behavior and consumer to
-a fixture owner and a migration status. MosDNS semantics are authoritative;
-KixDNS tests are only supplementary.
+Status: Slice 0 contract freeze for `08-13-rust-matcher-phase2-expansion` is
+complete; Rust remains experimental and default builds remain Go-only. The
+archived matcher foundation is implemented, while provider fan-out and
+`domain_mapper` Rust integration are not yet implemented.
+This is the authoritative contract record for the current Phase 2 expansion.
+It maps every matcher behavior and consumer to a fixture owner and an exact
+migration state. MosDNS semantics are authoritative; KixDNS tests are only
+supplementary.
 
 Last verified against working tree on `2026-08-13`.
 
@@ -86,9 +89,11 @@ type DetailedRuleExporter interface { GetRuleEntries() ([]RuleEntry, error) }
 
 ## 2. Producer / consumer matrix
 
-Classification: **direct** = adapted to Rust in this task (Slice 4);
-**inherited** = derives through a direct matcher and needs no separate adapter;
-**deferred** = fixtures/interfaces only, migrated in a follow-up fan-out task.
+Classification: **foundation-direct** = adapted by the archived matcher
+foundation; **inherited** = derives through a direct matcher and needs no
+separate adapter; **contract-frozen** = the current Go behavior has executable
+Slice 0 fixtures; **pending** = a later slice in the active expansion owns the
+Rust adapter or valued snapshot.
 
 | Owner | Kind | Matcher type | Default type | Value | Status | Fixture owner |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -103,11 +108,11 @@ Classification: **direct** = adapted to Rust in this task (Slice 4);
 | `client_ip` | inherited via `base_ip` | netlist | — | bool | inherited | — |
 | `resp_ip` | inherited via `base_ip` | netlist | — | bool | inherited | — |
 | `ptr_ip` | inherited via `base_ip` | netlist | — | bool | inherited | — |
-| `sd_set` | provider+matcher | domain | domain | `struct{}` | deferred | rules/composition |
-| `sd_set_light` | provider+matcher | domain | domain | `struct{}` | deferred | rules/composition |
-| `domain_set_light` | provider+matcher | domain | domain | `struct{}` | deferred | rules/composition |
-| `si_set` | provider+matcher | netlist | — | bool | deferred | rules/composition |
-| `domain_mapper` | aggregator (consumes `RuleExporter`, compiles results) | domain | domain | valued | deferred | rule text/result fixtures |
+| `sd_set` | provider+matcher | domain | domain | `struct{}` | Go contract frozen (Slice 0); Rust adapter pending Slice 2 | `sd_set/slice0_contract_test.go` |
+| `sd_set_light` | provider/exporter | domain | domain | `struct{}` | Go constant-false/export contract frozen (Slice 0); mapper fan-out pending Slice 4 | `sd_set_light/slice0_contract_test.go` |
+| `domain_set_light` | provider/exporter | domain | domain | `struct{}` | Go constant-false/export contract frozen (Slice 0); mapper fan-out pending Slice 4 | `domain_set_light/slice0_contract_test.go` |
+| `si_set` | provider+matcher | netlist | — | bool | Go contract frozen (Slice 0); Rust adapter pending Slice 2 | `si_set/slice0_contract_test.go` |
+| `domain_mapper` | aggregator (consumes `RuleExporter`, compiles results) | domain | domain | valued | Go aggregation contract frozen (Slice 0); valued Rust snapshot pending Slices 3–4 | `domain_mapper/slice0_contract_test.go` |
 | `rewrite` | executable | domain | **full** | `*rewriteTarget` | deferred | — |
 | `redirect` | executable | domain | **full** | `string` | deferred | — |
 | `adguard` | executable | domain | domain | `struct{}` | deferred | — |
@@ -127,9 +132,16 @@ snapshot off-path, validate, then atomically publish":
 | --- | --- | --- | --- |
 | `domain_set` | `mixM *MixMatcher` | `d.mu.Lock()` swap on API `/post` | `notifySubscribers` |
 | `ip_set` | `matcherVal atomic.Value` (`MatcherGroup`) | `rebuildSnapshot()` after reload | none |
-| `sd_set` | `matcher atomic.Value` (`*MixMatcher`) | `process()` builds new matcher, `Store` | `Subscribe` |
-| `si_set` | `matcher atomic.Value` | rebuild on reload | `Subscribe` |
-| `domain_set_light` | rebuild on reload | swap | `Subscribe` |
+| `sd_set` | `matcher atomic.Value` (`*MixMatcher`) | `reloadAllRules()` builds new matcher, `Store` | `Subscribe` |
+| `sd_set_light` | no resident matcher | source scan and exporter reads | `Subscribe` |
+| `si_set` | `matcher atomic.Value` | `reloadAllRules()` builds new list, `Store` | no `RuleExporter` subscription; caller-driven reload |
+| `domain_set_light` | rule slice only | API/file load replaces exported slice | `Subscribe` |
+
+Current lifecycle boundary: `sd_set`, `sd_set_light`, and `si_set` expose
+`Close` to stop their background updater; `domain_set_light` has no background
+worker or resident handle and therefore has no `Close` method in the frozen Go
+contract. The expansion must not silently add a second matcher or reinterpret
+that distinction.
 
 Reload sources: local files (`files`), explicit expressions (`exps`/`ips`),
 API `POST` (text for `domain_set`), and SRS binary (`magic "SRS"`, domain and
@@ -169,32 +181,34 @@ Linux+cgo adapter).
 | SRS domain parse | `TestGoldenDomainSetSRSLoad` | `plugin/data_provider/domain_set` |
 | SRS IP parse (range→prefix, incl. mapped normalize) | `TestGoldenIPSetSRSLoad`, `TestGoldenIPSetNormalizePrefix` | `plugin/data_provider/ip_set` |
 | Real rule-set representative subset load | `TestGoldenRealRuleSetLoad` (Slice 0c) | `plugin/data_provider/domain_set` |
-| `domain_mapper` rule text aggregation + result compilation (deferred, fixtures only) | design artifact (Slice 0c) | `plugin/data_provider/domain_mapper` |
+| `sd_set` SRS composition, source metadata, reload, online validation, and close | `TestSlice0SdSetRulesSourcesReloadAndClose`, `TestSlice0SdSetOnlineInvalidSourceDoesNotOverwriteFile` | `plugin/data_provider/sd_set` |
+| `sd_set_light` SRS export, regexp gating, constant-false match, reload, subscription, online validation, and close | `TestSlice0SdSetLightExportsRulesButNeverMatches`, `TestSlice0SdSetLightOnlineInvalidSourceDoesNotOverwriteFile` | `plugin/data_provider/sd_set_light` |
+| `domain_set_light` expression/text/SRS composition, missing-source behavior, POST persistence, subscription, and constant-false match | `TestSlice0DomainSetLightComposesSourcesAndStaysConstantFalse` | `plugin/data_provider/domain_set_light` |
+| `si_set` SRS composition, atomic reload, online validation, and close | `TestSlice0SiSetSRSCompositionReloadAndClose`, `TestSlice0SiSetOnlineInvalidSourceDoesNotOverwriteFile` | `plugin/data_provider/si_set` |
+| `domain_mapper` ancestor inheritance, overlap merge, mark/tag/source deduplication, defaults, `QuickAdd`, detailed metadata, and concurrent rebuild/lookup | `TestSlice0DomainMapperInheritanceOverlapMetadataAndDefaults`, `TestSlice0DomainMapperQuickAddAndConcurrentRebuildLookup` | `plugin/data_provider/domain_mapper` |
 
 ## 5. Migration boundary reminders
 
 - Do not change YAML fields, API bodies/status codes, rule-file text, SRS
   behavior, metrics, audit/query-context fields, or `special_groups` semantics.
-- `domain_mapper`, `sd_set`, `sd_set_light`, `si_set`, `domain_set_light`,
-  `adguard`, `hosts`, `rewrite`, `redirect` keep their Go ownership in this
-  task; only their input fixtures and compatible interfaces are in scope.
+  - `domain_mapper`, `sd_set`, `sd_set_light`, `si_set`, and
+  `domain_set_light` keep Go as the control plane and compatibility fallback;
+  their Rust consumers are implemented only in the explicitly ordered slices
+  of the active expansion. `adguard`, `hosts`, `rewrite`, and `redirect` are
+  outside this expansion.
 - Go `regexp` vs Rust regex differences must be detected by parity fixtures and
   must select Go, never silently reinterpret a rule.
 - Reload must be transactional; no partial snapshot may be published.
 
-## 6. Slice 5 evidence boundary
+## 6. Slice 0 evidence boundary
 
-- Direct Linux+cgo positive/negative FFI assertions cover `domain_set`,
-  `ip_set`, base-domain Files/SRS/inline rules, and base-IP Files/inline
-  rules. The surrounding `MatchFunc`/CNAME and Go fallback tests remain in
-  place.
-- `scripts/benchmark-rust-matchers.sh` and
-  `docs/rust/benchmarks/matcher-foundation.md` record fixed-fixture build,
-  lookup, index-entry, Go-side allocation, and transitional cgo evidence.
-  Per-object Rust heap/RSS is explicitly not claimed at this ABI boundary.
-- `scripts/smoke-rust-matcher-mos-test.sh` exercises valid and malformed API
-  reloads, concurrent query/reload, Go-only fallback mode, and process restart
-  using only temporary files and high loopback ports on `mos-test`.
-- Provider fan-out (`sd_set`, `sd_set_light`, `domain_set_light`, `si_set`)
-  and `domain_mapper` remain deferred and require an independently approved
-  continuation task. No status in this matrix authorizes their migration.
+- The current Go fixtures directly exercise accepted SRS/text input,
+  expression/source composition, source metadata, rule counts, subscription
+  callbacks, online validation, invalid-source retention, close idempotence,
+  constant-false light-provider behavior, mapper inheritance/overlap/defaults,
+  `QuickAdd`, and concurrent rebuild/lookup.
+- No Slice 1 shared adapter, Slice 2 online-provider Rust handle, Slice 3 valued
+  Rust ABI, or Slice 4 mapper fan-out is authorized by these fixtures alone.
+- Later Linux+cgo tests must call the real Rust symbols directly and retain the
+  same Go fallback and lifecycle assertions; Rust remains opt-in through
+  `MOSDNS_MATCHER_BACKEND=rust`.
