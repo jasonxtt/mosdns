@@ -1,0 +1,4 @@
+{"file": "docs/ai/rust-rewrite-plan.md", "reason": "Approved migration architecture and phase order"}
+{"file": ".trellis/spec/backend/rust-migration.md", "reason": "Rust ABI, reuse, compatibility, and phase constraints"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Single runtime and ownership placement rules"}
+{"file": "docs/ai/rust-handover.md", "reason": "Canonical cross-session state and worktree ownership boundary"}

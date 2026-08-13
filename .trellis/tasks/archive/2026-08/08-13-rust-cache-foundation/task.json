@@ -1,0 +1,29 @@
+{
+  "id": "rust-cache-foundation",
+  "name": "rust-cache-foundation",
+  "title": "Rust cache foundation",
+  "description": "Freeze cache compatibility contracts and build the reviewed foundation for a safe opt-in Rust cache backend using KixDNS patterns and the prior mosdns Rust cache prototype as references.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "rust/cache-core and plugin/executable/cache experimental bridge",
+  "package": null,
+  "priority": "P0",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-08-13",
+  "completedAt": "2026-08-13",
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "handoff_state": "implemented_with_remaining_gates",
+    "successor": "08-13-rust-matcher-foundation"
+  }
+}

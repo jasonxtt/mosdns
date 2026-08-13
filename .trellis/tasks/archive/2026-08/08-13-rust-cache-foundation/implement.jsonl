@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Repository backend and migration rules"}
+{"file": "docs/ai/rust-rewrite-plan.md", "reason": "Approved migration architecture and phase gates"}
+{"file": "/Users/tom/github/mosdns-rust-cache/", "type": "directory", "reason": "Prior prototype reference; inspect selectively, never copy wholesale"}
+{"file": "docs/ai/rust-handover.md", "reason": "Canonical cross-session state, remaining gates, and worktree ownership"}
