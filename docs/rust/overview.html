@@ -1,0 +1,313 @@
+<title>Rust 迁移全景</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<style>
+:root {
+  --bg: #f8f9fb;
+  --surface: #ffffff;
+  --text: #1a1d23;
+  --text-secondary: #5b6270;
+  --border: #e2e4e9;
+  --accent: #2563eb;
+  --accent-light: #eff4ff;
+  --done: #16a34a;
+  --done-bg: #f0fdf4;
+  --partial: #d97706;
+  --partial-bg: #fffbeb;
+  --pending: #6b7280;
+  --pending-bg: #f9fafb;
+  --disabled: #9ca3af;
+}
+@media (prefers-color-scheme:dark) {
+:root:not([data-theme="light"]) {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --text: #e4e6ed;
+  --text-secondary: #8b92a0;
+  --border: #2d3142;
+  --accent: #60a5fa;
+  --accent-light: #1e293b;
+  --done: #22c55e;
+  --done-bg: #163b20;
+  --partial: #f59e0b;
+  --partial-bg: #33250a;
+  --pending: #6b7280;
+  --pending-bg: #1f212b;
+  --disabled: #4b5563;
+}}
+:root[data-theme="dark"] {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --text: #e4e6ed;
+  --text-secondary: #8b92a0;
+  --border: #2d3142;
+  --accent: #60a5fa;
+  --accent-light: #1e293b;
+  --done: #22c55e;
+  --done-bg: #163b20;
+  --partial: #f59e0b;
+  --partial-bg: #33250a;
+  --pending: #6b7280;
+  --pending-bg: #1f212b;
+  --disabled: #4b5563;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial; background: var(--bg); color: var(--text); line-height:1.6; }
+.container { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+
+h1 { font-size: 1.8rem; font-weight: 700; letter-spacing:-0.02em; margin-bottom:0.25rem; }
+.subtitle { color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 2.5rem; }
+
+/* Section */
+.section { margin-bottom: 2rem; }
+.section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: var(--text); display:flex; align-items:center; gap:0.5rem; }
+.section-title .count { font-size:0.75rem; font-weight:500; color:var(--text-secondary); background:var(--border); padding:0.1rem 0.5rem; border-radius:999px; }
+
+/* Cards */
+.phase-list { display:flex; flex-direction:column; gap:0.75rem; }
+.phase-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.25rem; }
+.phase-header { display:flex; align-items:center; gap:0.75rem; }
+.phase-id { font-size:0.7rem; font-weight:700; color:var(--text-secondary); letter-spacing:0.04em; min-width:2rem; }
+.phase-name { font-weight:600; font-size:0.95rem; flex:1; }
+.badge { font-size:0.7rem; font-weight:600; padding:0.15rem 0.55rem; border-radius:999px; white-space:nowrap; }
+.badge-done { background:var(--done-bg); color:var(--done); }
+.badge-partial { background:var(--partial-bg); color:var(--partial); }
+.badge-pending { background:var(--pending-bg); color:var(--disabled); }
+
+/* Tasks */
+.task-list { margin-top:0.75rem; padding-left:2.75rem; }
+.task { position:relative; padding:0.3rem 0; font-size:0.85rem; display:flex; align-items:center; gap:0.5rem; }
+.task::before { content:''; position:absolute; left:-1rem; top:0; bottom:0; width:1px; background:var(--border); }
+.task:last-child::before { height:50%; }
+.dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.dot-done { background:var(--done); }
+.dot-partial { background:var(--partial); }
+.dot-pending { background:var(--border); }
+.task-text { color:var(--text-secondary); }
+.task-done { color:var(--done); font-weight:500; }
+.task-partial { color:var(--partial); font-weight:500; }
+
+/* Architecture diagram */
+.diagram { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.5rem; margin-bottom:2rem; font-size:0.85rem; }
+.diagram pre { font-family:"SF Mono","Fira Code","Cascadia Code",monospace; font-size:0.8rem; line-height:1.7; overflow-x:auto; white-space:pre; }
+.diagram .hl { color:var(--done); font-weight:600; }
+.diagram .hl2 { color:var(--partial); font-weight:600; }
+.diagram .dim { color:var(--disabled); }
+
+/* File tree */
+.file-tree { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.25rem; font-size:0.82rem; font-family:"SF Mono","Fira Code","Cascadia Code",monospace; line-height:2; }
+.file-tree .dir { color:var(--text); }
+.file-tree .file { color:var(--text-secondary); }
+.file-tree .tag { font-size:0.65rem; font-weight:600; padding:0.1rem 0.4rem; border-radius:4px; margin-left:0.5rem; }
+.tag-done { background:var(--done-bg); color:var(--done); }
+.tag-partial { background:var(--partial-bg); color:var(--partial); }
+
+/* Milestone table */
+.milestone-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+.milestone-table th { text-align:left; padding:0.6rem 0.75rem; font-weight:600; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); border-bottom:1px solid var(--border); }
+.milestone-table td { padding:0.6rem 0.75rem; border-bottom:1px solid var(--border); }
+.milestone-table tr:last-child td { border-bottom:none; }
+
+/* Stats row */
+.stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:0.75rem; margin-bottom:2rem; }
+.stat-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem; text-align:center; }
+.stat-num { font-size:1.6rem; font-weight:700; line-height:1.2; }
+.stat-label { font-size:0.8rem; color:var(--text-secondary); margin-top:0.2rem; }
+.stat-green { color:var(--done); }
+.stat-amber { color:var(--partial); }
+
+/* Additional */
+.info-box { background:var(--accent-light); border:1px solid var(--accent); border-radius:8px; padding:0.75rem 1rem; font-size:0.85rem; margin-top:0.75rem; color:var(--text); }
+</style>
+
+<div class="container">
+
+<h1>🦀 MosDNS Rust 迁移全景</h1>
+<div class="subtitle">分阶段渐进替换（ Strangler Fig ）· <code>rust</code> 分支 · v0.7.1 基线</div>
+
+<div class="stats">
+  <div class="stat-card"><div class="stat-num stat-green">2</div><div class="stat-label">阶段已完成</div></div>
+  <div class="stat-card"><div class="stat-num stat-amber">1</div><div class="stat-label">阶段进行中</div></div>
+  <div class="stat-card"><div class="stat-num">2</div><div class="stat-label">阶段待开始</div></div>
+  <div class="stat-card"><div class="stat-num stat-green">55</div><div class="stat-label">Rust 测试通过</div></div>
+  <div class="stat-card"><div class="stat-num">36</div><div class="stat-label">新增 Go 测试</div></div>
+</div>
+
+<div class="section">
+  <div class="section-title">架构总览</div>
+  <div class="diagram">
+<pre>Vue WebUI / YAML / HTTP API (Go, 不变)
+           │
+      Go coremain (Go, 不变)
+           │
+   ┌───────┴───────┐
+   │  Go 插件宿主  │  (Go, 未来迁移)
+   └───────┬───────┘
+           │
+  ═════════╪═══════════ C ABI boundary
+           │
+   ┌───────┴───────┐
+   │  mosdns-runtime │  ← <span class="hl">唯一 staticlib</span>
+   │  (staticlib)    │
+   └───┬───────┬───┘
+       │       │
+  ┌────┴──┐ ┌──┴──────┐
+  │cache- │ │matcher- │  ← <span class="hl">纯 Rust rlib</span>
+  │core   │ │core     │
+  │(rlib)  │ │(rlib)    │
+  │ <span class="dim">▪ moka</span>  │ │<span class="hl">▪ domain</span>  │
+  │ <span class="dim">▪ bytes</span> │ │<span class="hl">▪ IP</span>     │
+  │ <span class="dim">▪ wire</span> │ └────────┘
+  └───────┘
+
+<span class="dim">rust_goals_   试验性 Go 桥接 (cgo + build tag)</span></pre>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">阶段进度 <span class="count">6 phases</span></div>
+  <div class="phase-list">
+
+    <!-- Phase 0 -->
+    <div class="phase-card">
+      <div class="phase-header">
+        <span class="phase-id">PHASE 0</span>
+        <span class="phase-name">冻结兼容契约与基准</span>
+        <span class="badge badge-done">DONE</span>
+      </div>
+      <div class="task-list">
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">记录分支同步点、Go baseline、固化性能基准</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">cache Golden fixtures + matcher consumer matrix</span></div>
+      </div>
+    </div>
+
+    <!-- Phase 1 -->
+    <div class="phase-card">
+      <div class="phase-header">
+        <span class="phase-id">PHASE 1</span>
+        <span class="phase-name">移植并硬化 Rust cache</span>
+        <span class="badge badge-done">DONE ✅ 已归档</span>
+      </div>
+      <div class="task-list">
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">cache-core（Moka/Bytes/AEI/taw-wire）</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">Linux+cgo 桥接 · dump/API/指标/熔断</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">Soak 基准 · Miri · mos-test 扩展验证</span></div>
+      </div>
+    </div>
+
+    <!-- Phase 2 -->
+    <div class="phase-card">
+      <div class="phase-header">
+        <span class="phase-id">PHASE 2</span>
+        <span class="phase-name">迁移 domain/IP matcher</span>
+        <span class="badge badge-partial">IMPLEMENTED · FINISH GATE</span>
+      </div>
+      <div class="task-list">
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">Consumer 矩阵 · Go golden · KixDNS 台账</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">单一 runtime 抽取（cache-core rlib + matcher-core rlib）</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">纯 Rust domain matcher（MixMatcher, 29 测试）</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">纯 Rust IP matcher（IpPrefixList, 10 测试）</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">FFI + C header + Go 桥接 + domain_set/ip_set 集成</span></div>
+        <div class="task"><span class="dot dot-done"></span><span class="task-text task-done">Linux+cgo 集成测试（mos-test 已验证）</span></div>
+      </div>
+    </div>
+
+    <!-- Phase 3 -->
+    <div class="phase-card">
+      <div class="phase-header">
+        <span class="phase-id">PHASE 3</span>
+        <span class="phase-name">Rust DNS/query 执行核心</span>
+        <span class="badge badge-pending">PENDING</span>
+      </div>
+    </div>
+
+    <!-- Phase 4 -->
+    <div class="phase-card">
+      <div class="phase-header">
+        <span class="phase-id">PHASE 4</span>
+        <span class="phase-name">Upstream / server 数据面</span>
+        <span class="badge badge-pending">PENDING</span>
+      </div>
+    </div>
+
+    <!-- Phase 5 -->
+    <div class="phase-card">
+      <div class="phase-header">
+        <span class="phase-id">PHASE 5</span>
+        <span class="phase-name">替换 Go host，原生 Rust 二进制</span>
+        <span class="badge badge-pending">PENDING</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">工作区结构</div>
+  <div class="file-tree">
+    <span class="dir">rust/</span><br>
+    <span class="dir">  Cargo.toml</span><span class="tag tag-done">workspace</span><span class="file"> members: cache-core, matcher-core, runtime</span><br>
+    <br>
+    <span class="dir">  cache-core/</span><span class="tag tag-done">rlib</span><br>
+    <span class="file">    src/lib.rs — 缓存逻辑 + handle registry + boundary</span><br>
+    <span class="file">    src/wire.rs — raw-wire DNS 解析/TTL 补丁（KixDNS adapted）</span><br>
+    <br>
+    <span class="dir">  matcher-core/</span><span class="tag tag-done">rlib</span><br>
+    <span class="file">    src/mix.rs — MixMatcher（full→domain→regex→keyword）</span><br>
+    <span class="file">    src/trie.rs — DomainSuffixMatcher（reverse-label trie）</span><br>
+    <span class="file">    src/full.rs — FullMatcher（HashMap）</span><br>
+    <span class="file">    src/keyword.rs — KeywordMatcher</span><br>
+    <span class="file">    src/regex.rs — RegexMatcher</span><br>
+    <span class="file">    src/ipnet.rs — IpPrefixList（to6/sort/binary search/overlap fold）</span><br>
+    <span class="file">    src/normalize.rs — NormalizeDomain</span><br>
+    <br>
+    <span class="dir">  runtime/</span><span class="tag tag-done">staticlib</span><br>
+    <span class="file">    src/lib.rs — cache ABI 委派</span><br>
+    <span class="file">    src/matcher.rs — matcher ABI handle registry</span><br>
+    <span class="file">    include/mosdns_cache_core.h — 统一 C header</span><br>
+    <span class="file">    tests/abi_contract.rs — 18 ABI 契约测试</span><br>
+    <br>
+    <span class="dir">  plugin/data_provider/domain_set/</span><br>
+    <span class="file">    rust_backend.go <span class="tag tag-done">CGo 桥接</span></span><br>
+    <span class="file">    rust_stub.go <span class="tag tag-done">默认空桩</span></span><br>
+    <br>
+    <span class="dir">  plugin/data_provider/ip_set/</span><br>
+    <span class="file">    rust_backend.go <span class="tag tag-done">CGo 桥接</span></span><br>
+    <span class="file">    rust_stub.go <span class="tag tag-done">默认空桩</span></span><br>
+    <br>
+    <span class="dir">  plugin/executable/cache/</span><br>
+    <span class="file">    rust_backend{,_linux,_linux_test,_stub,soak_test}.go <span class="tag tag-done">CGo 桥接 + soak</span></span><br>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">验证矩阵</div>
+  <table class="milestone-table">
+    <tr><th>检查</th><th>Cache</th><th>Matcher</th></tr>
+    <tr><td>Rust 单元/集成测试</td><td>16</td><td>39</td></tr>
+    <tr><td>Go golden/parity 测试</td><td>已有 + contract/dump</td><td>4 文件, 17 测试</td></tr>
+    <tr><td>cargo fmt --check</td><td>✅</td><td>✅</td></tr>
+    <tr><td>cargo clippy -D warnings</td><td>0 errors</td><td>0 errors</td></tr>
+    <tr><td>cargo build --release --locked</td><td>✅</td><td>✅</td></tr>
+    <tr><td>go build ./...</td><td>✅</td><td>✅</td></tr>
+    <tr><td>go test ./...</td><td>✅</td><td>✅</td></tr>
+    <tr><td>go test -race</td><td>✅</td><td>—</td></tr>
+    <tr><td>Miri</td><td>✅ 16 tests (Tree Borrows)</td><td>—</td></tr>
+    <tr><td>mos-test 集成</td><td>✅ dump/soak/故障/并发</td><td>✅ hit/fallback/reload/restart</td></tr>
+  </table>
+</div>
+
+<div class="section">
+  <div class="section-title">下一步</div>
+  <div class="info-box">
+    <strong>近期最优工作项</strong>
+    <ul style="margin:0.5rem 0 0 1.2rem;line-height:1.8;">
+      <li><strong>Phase 2 finish gate：</strong>完成 A–E work commits，再按 Trellis 显式 <code>--no-commit</code> 流程执行 F task archive 与 G journal</li>
+      <li><strong>Phase 3 启动：</strong>Rust DNS wire 解析、query context 数据模型（需较大的架构设计）</li>
+      <li><strong>Release 沉淀：</strong>审核工作树改动、组织 commits、考虑是否给 rust 分支打 tag</li>
+    </ul>
+  </div>
+</div>
+
+</div>
