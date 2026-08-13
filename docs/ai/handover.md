@@ -13,6 +13,20 @@ The maintained line has these active realities:
 - domain-generation controls are runtime JSON state, not external config-package structure changes
 - domain-generation exposes `总开关 / 记忆直连 / 记忆代理 / 记忆无v4 / 记忆无v6`
 
+## Rust migration planning
+
+The canonical cross-session Rust state, resume procedure, task gates, and
+dirty-worktree ownership boundary are in `docs/ai/rust-handover.md`. Read it
+before changing or staging Rust migration files.
+
+- The long-lived local `rust` branch was created from `main` v0.7.1 (`3896a4a`) on `2026-08-13`.
+- The migration architecture and acceptance gates are documented in `docs/ai/rust-rewrite-plan.md`.
+- The old `/Users/tom/github/mosdns-rust-cache` workspace served as a selective cache compatibility reference. The new foundation was implemented in this repository with hardened FFI, concurrency, metrics, fallback, and parity coverage; keep the old workspace read-only and never treat it as a drop-in subtree.
+- Do not merge the old Rust workspace wholesale or copy its older release workflows over the current Vue-aware workflows.
+- KixDNS (`olicesx/kixdns`) is the preferred upstream source for reusable Rust data-plane work. The audited baseline is `2da3a2d` (`2026-08-12`); reuse its raw DNS utilities, ECS, Moka/Bytes cache approach, matchers, indexes, and later transports through mosdns compatibility adapters rather than adopting its JSON pipeline or whole binary.
+- Trellis 0.6.14 is initialized as lightweight planning/governance on the `rust` branch. It runs inline with `session_auto_commit: false`; `.trellis/tasks/08-13-rust-cache-foundation/` is archived/completed, while `.trellis/tasks/08-13-rust-matcher-foundation/` remains the current in-progress task with Slices 0–5 implemented; independent review passed on 2026-08-13, A–E exact-scope work commits are completed and reviewed, and only F task archive and G journal commits remain under the explicit `--no-commit` Trellis finish sequence.
+- Cache hot-path profiling on `mos-test` identified the fixed cgo transition, output copying, and duplicate lifecycle locks as the main costs. Borrowed Moka keys, caller-owned output buffers, atomic handles, and an allocation-free TTL walk reduced the preliminary median gap from about 85.7% to a noisy 39% range and Rust allocations from 704 to 688 B/op; Rust remains experimental because the 10% gate and p99/CPU/RSS soak are not met.
+
 ## Keep in mind
 
 - Infer intended line from the repo folder: `mosdns` means `main`, `mosdns-lite` means `lite`.

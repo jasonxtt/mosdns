@@ -9,6 +9,7 @@ GOOS_VALUE="${GOOS:-$(go env GOOS)}"
 GOARCH_VALUE="${GOARCH:-$(go env GOARCH)}"
 OUTPUT="${OUTPUT:-./mosdns}"
 SKIP_UI_BUILD="${SKIP_UI_BUILD:-0}"
+GO_TAGS_VALUE="${GO_TAGS:-}"
 
 mkdir -p "$(dirname "${OUTPUT}")"
 
@@ -20,13 +21,19 @@ if [[ "${SKIP_UI_BUILD}" != "1" ]]; then
   )
 fi
 
+go_build_args=(
+  -trimpath
+  -ldflags "-s -w -X main.version=${VERSION}"
+  -o "${OUTPUT}"
+)
+if [[ -n "${GO_TAGS_VALUE}" ]]; then
+  go_build_args+=(-tags "${GO_TAGS_VALUE}")
+fi
+go_build_args+=(./)
+
 CGO_ENABLED="${CGO_ENABLED:-0}" \
 GOOS="${GOOS_VALUE}" \
 GOARCH="${GOARCH_VALUE}" \
-go build \
-  -trimpath \
-  -ldflags "-s -w -X main.version=${VERSION}" \
-  -o "${OUTPUT}" \
-  ./
+go build "${go_build_args[@]}"
 
 echo "built ${OUTPUT} (version=${VERSION}, platform=${GOOS_VALUE}/${GOARCH_VALUE})"

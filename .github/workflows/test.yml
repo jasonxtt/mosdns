@@ -18,6 +18,79 @@ jobs:
 
       - name: Build
         run: go build -v ./...
-#
-#      - name: Test
-#        run: go test -race -v ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Focused matcher tests
+        run: >-
+          go test -count=1
+          ./pkg/matcher/domain ./pkg/matcher/netlist
+          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
+          ./plugin/matcher/base_domain ./plugin/matcher/base_ip
+
+      - name: Focused matcher race tests
+        run: >-
+          go test -race -count=1
+          ./pkg/matcher/domain ./pkg/matcher/netlist
+          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
+          ./plugin/matcher/base_domain ./plugin/matcher/base_ip
+
+  rust-runtime-experimental:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webui-log/package-lock.json
+      - name: Check unified Rust runtime
+        run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all --check
+          cargo test --manifest-path rust/Cargo.toml --all-targets --locked
+          cargo test --manifest-path rust/Cargo.toml -p mosdns-runtime --test abi_contract --locked checked_in_header_matches_abi_constants_and_entrypoints
+          cargo clippy --manifest-path rust/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Build unified Rust runtime static library
+        run: scripts/build-rust-cache.sh
+      - name: Test real Linux cgo bridge
+        env:
+          CGO_ENABLED: '1'
+        run: go test -tags mosdns_rust ./plugin/executable/cache ./pkg/matcher/... ./plugin/matcher/... -count=1
+      - name: Test Linux matcher cgo bridge
+        env:
+          CGO_ENABLED: '1'
+          MOSDNS_MATCHER_BACKEND: rust
+        run: go test -tags mosdns_rust ./plugin/data_provider/domain_set/... ./plugin/data_provider/ip_set/... ./plugin/matcher/... -count=1
+      - name: Test Linux matcher cgo bridge with race detector
+        env:
+          CGO_ENABLED: '1'
+          MOSDNS_MATCHER_BACKEND: rust
+        run: go test -race -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1
+      - name: Benchmark Linux matcher cgo bridge
+        env:
+          CGO_ENABLED: '1'
+          MOSDNS_MATCHER_BACKEND: rust
+          BENCHTIME: 100ms
+          COUNT: '1'
+        run: scripts/benchmark-rust-matchers.sh
+      - name: Install UI dependencies
+        working-directory: webui-log
+        run: npm ci
+      - name: Build experimental unified Rust runtime binary with embedded UI
+        env:
+          OUTPUT: ./dist/mosdns-rust-runtime
+        run: scripts/build-rust-experimental.sh
