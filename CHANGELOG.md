@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## lite-v0.1.9
+
+### Fixed
+
+- execute the dedicated-group dispatcher in `sequence_6666` before the DDNS
+  branch, so a domain that matches both lists still reaches its special
+  upstream group
+- keep lite's `sequence_special_all` dispatcher while removing the duplicate
+  calls from the A/AAAA and other-record processing sequences
+
+### Config
+
+- published the matching `config_lite_all.zip` package in the external config
+  repository at commit `28c6493`
+
+### Tests
+
+- ran `go test ./...`
+- rebuilt the maintained Vue UI with `npm run build`
+- ran `git diff --check`
+
+### Upgrade Notes
+
+- update the lite binary to `lite-v0.1.9` and replace the lite full config with
+  the package linked in the release notes to activate the priority fix
+
 ## lite-v0.1.8
 
 ### Fixed
