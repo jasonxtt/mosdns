@@ -30,13 +30,20 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 			t.Fatalf("expected empty rules list, got:\n%s", text)
 		}
 		for _, want := range []string{
-			"tag: sequence_special_v4",
-			"tag: sequence_special_v6",
-			"tag: sequence_special_ot",
+			"tag: sequence_special",
 			"args: []",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("expected empty config to contain %q, got:\n%s", want, text)
+			}
+		}
+		for _, oldTag := range []string{
+			"tag: sequence_special_v4",
+			"tag: sequence_special_v6",
+			"tag: sequence_special_ot",
+		} {
+			if strings.Contains(text, oldTag) {
+				t.Fatalf("unexpected legacy dispatcher %q in generated config:\n%s", oldTag, text)
 			}
 		}
 	})
@@ -64,6 +71,12 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 			if !strings.Contains(text, want) {
 				t.Fatalf("expected generated config to contain %q, got:\n%s", want, text)
 			}
+		}
+		if got := strings.Count(text, "  - tag: sequence_special\n"); got != 1 {
+			t.Fatalf("expected one unified special dispatcher, got %d:\n%s", got, text)
+		}
+		if got := strings.Count(text, "        exec: $sequence_special_53\n"); got != 1 {
+			t.Fatalf("expected one dispatcher entry for group 53, got %d:\n%s", got, text)
 		}
 		if strings.Contains(text, "mark 50") {
 			t.Fatalf("custom-port-only group should not be reachable from 53 chain:\n%s", text)

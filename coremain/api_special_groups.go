@@ -631,13 +631,11 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 		b.WriteString("\n")
 	}
 
-	for _, tag := range []string{"sequence_special_v4", "sequence_special_v6", "sequence_special_ot"} {
-		b.WriteString(fmt.Sprintf("  - tag: %s\n", tag))
-		b.WriteString("    type: sequence\n")
-		if len(mainFlowGroups) == 0 {
-			b.WriteString("    args: []\n\n")
-			continue
-		}
+	b.WriteString("  - tag: sequence_special\n")
+	b.WriteString("    type: sequence\n")
+	if len(mainFlowGroups) == 0 {
+		b.WriteString("    args: []\n\n")
+	} else {
 		b.WriteString("    args:\n")
 		for _, g := range mainFlowGroups {
 			slot := g.Slot
