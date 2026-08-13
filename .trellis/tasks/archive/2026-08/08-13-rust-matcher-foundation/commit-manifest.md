@@ -2,24 +2,23 @@
 
 Date: `2026-08-13`
 
-This is a preflight manifest for an ordered, reviewable commit series. It is
-not a staging instruction by itself. The matcher task remains `in_progress`:
-independent review passed on `2026-08-13`, and the next gates are an
-exact-scope commit series followed by the Trellis finish gate. The task
-metadata remains `commit: null`. Do not use `git add -A`.
+This is the historical manifest for an ordered, reviewable commit series. The
+matcher foundation's independent review passed on `2026-08-13`; A–E exact-
+scope work commits are completed and reviewed, F archives this task, and G is
+a journal-only finish commit. The archived task metadata retains
+`commit: null`. Do not use `git add -A`.
 
 The work series follows the module/contract/core/bridge/build-and-document
-split in `docs/ai/rust-rewrite-plan.md`. A–E are the work commits for the
-current pre-finish snapshot. F/G are the later Trellis finish commits and
-their generated paths are classified below in advance. Every path in the
-current tracked diff or untracked enumeration must be classified exactly once
-as one of A–E, `REVIEW REQUIRED`, or `EXCLUDE`; every dynamic F/G output is
-classified by its exact source/target path below. A path not listed there is
-not a commit input.
+split in `docs/ai/rust-rewrite-plan.md`. A–E are the completed work commits.
+F is the task-archive finish commit and G is the journal-only finish commit;
+their generated paths are classified below. Every path in the original
+tracked diff or untracked enumeration was classified exactly once as one of
+A–E, `REVIEW REQUIRED`, or `EXCLUDE`; every F/G output is classified by its
+exact path below. A path not listed there is not a commit input.
 
-The current A–E snapshot was checked against 25 tracked diff paths and 188
-untracked file paths (213 total). F/G generated outputs are intentionally not
-included in that 213-path number.
+The A–E snapshot was checked against 25 tracked diff paths and 188 untracked
+file paths (213 total). F/G generated outputs are intentionally not included
+in that 213-path number.
 
 ## Commit A — Trellis/governance, planning, specs, and task history
 
@@ -203,8 +202,8 @@ coremain/audit_raw_test.go
 
 This commit supplies the one Rust staticlib workspace, preserves cache
 exports, adds matcher-core, and owns the matcher ABI/header contract tests.
-After C lands, the tagged B+C integration link/build gate can be run before
-reviewing adapters in D.
+After C lands, the Linux cache cgo and matcher ABI/symbol gates can be run
+before reviewing provider adapters in D.
 
 ```text
 rust/Cargo.lock
@@ -289,9 +288,9 @@ five work commits.
 
 ## Commit F — `chore(task): archive rust-matcher-foundation`
 
-F is the first finish-phase commit and runs only after A–E have been committed
-and their exact-scope diffs are reviewed. `session_auto_commit: false` is
-required, and the explicit `--no-commit` is retained as a second guard:
+F is the task-archive finish commit after A–E have been committed and their
+exact-scope diffs reviewed. `session_auto_commit: false` is required, and the
+explicit `--no-commit` is retained as a second guard:
 
 ```bash
 python3 ./.trellis/scripts/task.py archive \
@@ -308,6 +307,17 @@ target created:
   .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation/
 ```
 
+The exact F staged path set is the two task source/target paths plus these
+three durable status documents:
+
+```text
+.trellis/tasks/08-13-rust-matcher-foundation/       # source deletions
+.trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation/  # archive additions
+docs/ai/handover.md
+docs/ai/rust-handover.md
+docs/ai/rust-rewrite-plan.md
+```
+
 `task.py archive` updates only the archived `task.json` lifecycle fields to
 `status: completed` and the current `completedAt`; it does not write a
 `commit` field. The archived `task.json` therefore retains `commit: null`.
@@ -320,15 +330,28 @@ source-side deletions:
 ```bash
 git add -- .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation
 git add -u -- .trellis/tasks/08-13-rust-matcher-foundation
+git add -- \
+  docs/ai/handover.md \
+  docs/ai/rust-handover.md \
+  docs/ai/rust-rewrite-plan.md
 git diff --cached --check -- \
   .trellis/tasks/08-13-rust-matcher-foundation \
-  .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation
+  .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation \
+  docs/ai/handover.md \
+  docs/ai/rust-handover.md \
+  docs/ai/rust-rewrite-plan.md
 git diff --cached --name-status -- \
   .trellis/tasks/08-13-rust-matcher-foundation \
-  .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation
+  .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation \
+  docs/ai/handover.md \
+  docs/ai/rust-handover.md \
+  docs/ai/rust-rewrite-plan.md
 git diff --cached -- \
   .trellis/tasks/08-13-rust-matcher-foundation \
-  .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation
+  .trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation \
+  docs/ai/handover.md \
+  docs/ai/rust-handover.md \
+  docs/ai/rust-rewrite-plan.md
 git commit -m 'chore(task): archive rust-matcher-foundation'
 ```
 
@@ -393,18 +416,17 @@ other workspace path in G.
 ## A–G verification matrix and gates
 
 Each row is a post-commit gate for that boundary; a failure blocks the next
-commit. These commands are recorded for the future finish sequence and are
-not being rerun in this documentation-only review.
+commit. These rows preserve the A–E evidence and the exact F/G finish gates.
 
 | Commit | Required verification and threshold |
 | --- | --- |
 | A | Exact staged governance paths only; `session_auto_commit: false`; JSON/task/spec references parse; `task.py validate` passes; no credential/local-database content; staged diff has no unrelated hunks. |
 | B | Default Go/cache/raw gate only: `go vet ./plugin/executable/cache ./pkg/query_context ./pkg/server_handler ./coremain` and `go test ./plugin/executable/cache ./pkg/query_context ./pkg/server_handler ./coremain`; no Rust build, `mosdns_rust` tag, or Linux cgo link is claimed at B alone. |
-| C | On any host, cargo fmt/locked all-target tests/locked clippy with `-D warnings`/locked release build must pass; macOS cargo success is cargo-only evidence. After B+C, **on a Linux runner only** (CI or the isolated `mos-test` environment), run `scripts/build-rust-cache.sh` and both tagged bridges: `CGO_ENABLED=1 go test -tags mosdns_rust ./plugin/executable/cache ./pkg/matcher/... ./plugin/matcher/... -count=1`, plus the real provider selector `CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -tags mosdns_rust ./plugin/data_provider/domain_set/... ./plugin/data_provider/ip_set/... ./plugin/matcher/... -count=1`. A macOS `go test -tags mosdns_rust` is not a cgo pass because `rust_backend_linux.go` is excluded and the stub can compile. |
-| D | Matcher golden/default tests, focused race tests, and real Linux+cgo domain/IP adapter tests pass with positive/negative Rust evidence and Go fallback semantics; use the focused package set from `.github/workflows/test.yml`, including `CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -race -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1`. |
+| C | On any host, `cargo fmt --manifest-path rust/Cargo.toml --all --check`, `cargo test --manifest-path rust/Cargo.toml --all-targets --locked`, `cargo clippy --manifest-path rust/Cargo.toml --all-targets --locked -- -D warnings`, and `cargo build --manifest-path rust/Cargo.toml --release --locked` must pass. On a Linux runner only (CI or isolated `mos-test`), run `scripts/build-rust-cache.sh`, `CGO_ENABLED=1 go test -tags mosdns_rust ./plugin/executable/cache -count=1`, the runtime `abi_contract` header/ABI test `cargo test --manifest-path rust/Cargo.toml -p mosdns-runtime --test abi_contract --locked checked_in_header_matches_abi_constants_and_entrypoints`, and `nm -g rust/target/release/libmosdns_runtime.a | rg 'domain_matcher_(create|match|len|close)|ip_matcher_(create|match|len|close)'`. macOS cargo success is cargo-only evidence; no provider adapter test belongs to C. |
+| D | Real Linux+cgo domain/IP provider and base-matcher tests pass in both normal and race modes with positive/negative Rust evidence and Go fallback semantics: `CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1` and the same focused package set with `go test -race`. |
 | E | Full/CI-equivalent `go build ./...`, `go vet ./...`, `go test ./...`, Rust/ABI/header checks, experimental binary build, benchmark/evidence consistency, and isolated smoke all pass; docs match actual command outputs and keep Rust experimental/default Go-only. |
-| F | `task.py list` no longer shows the active matcher task; `task.py list-archive 2026-08` shows `08-13-rust-matcher-foundation`; archived `task.json` has `status: completed`, non-null `completedAt`, and unchanged `commit: null`; staged diff contains only the exact source deletion/target archive paths. |
-| G | `index.md` and `journal-1.md` contain the session record with A–E hashes only; staged diff contains only those two exact workspace paths; `git diff --cached --check` passes; after G, verify the exact-scope commit series and no staged paths remain. |
+| F | `task.py list` no longer shows the active matcher task; `task.py list-archive 2026-08` shows `08-13-rust-matcher-foundation`; archived `task.json` has `status: completed`, non-null `completedAt`, and unchanged `commit: null`; staged diff contains only the exact source deletion/target archive paths plus the three listed durable handover/planning documents. |
+| G | Journal-only finish commit: `index.md` and `journal-1.md` contain the session record with A–E hashes only; staged diff contains only those two exact workspace paths; `git diff --cached --check` passes. |
 
 F/G are finish artifacts generated after the A–E snapshot. They were
 pre-classified above but are deliberately not counted in the current 213-path
@@ -488,18 +510,18 @@ Before any of A–E is staged:
    other files; never use `git add -A`.
 4. Confirm `git diff --cached --name-only` is empty before beginning staging.
 
-After each work commit A–E, review its staged diff and run its row in the
-verification matrix before proceeding. Only after E is committed may the
-finish phase begin. Run F's archive command with `--no-commit`, inspect and
-stage only its exact source/target task paths, and commit F. Then run G's
-`add_session.py` command with `--no-commit`, inspect and stage only the exact
-workspace paths, and commit G. Never use `git add -A` at any phase.
+The A–E work commits were reviewed and committed before the finish phase. F
+archives this task with `--no-commit` before its exact source/target and
+durable-document paths are reviewed and staged; G is a journal-only finish
+commit using `add_session.py --no-commit`. Never use `git add -A` at any phase.
 
-This documentation-only review does not execute F/G, change task lifecycle
-state, stage files, or create commits. The task remains `in_progress` with
-`commit: null` until the future A–G sequence and Trellis finish gate complete.
+This manifest is retained with the archived task as historical evidence of the
+A–E review and the F/G exact-scope finish procedure. F changes this task's
+lifecycle to archived/completed while retaining `commit: null`; G changes only
+the journal workspace files. The overall Rust rewrite plan remains active and
+Rust remains experimental/default Go-only.
 
-This manifest, `task.json`, all current matcher task artifacts, and the
-project-level Trellis/Codex files are part of the review scope. Do not mark
-the task completed or archived before the exact series is committed and the
-Trellis finish gate runs.
+This manifest, `task.json`, the archived matcher task artifacts, and the
+project-level Trellis/Codex files are part of the review scope. The matcher
+task lifecycle is archived/completed by F; the overall Rust rewrite remains
+active and is not archived by this task.

@@ -138,8 +138,9 @@ Exit: the matcher foundation is safe and reviewable; moving online providers
 or `domain_mapper` requires its own approved continuation task.
 
 Status after independent review: independent review passed on `2026-08-13`;
-the task remains `in_progress` and is awaiting exact-scope commit and Trellis
-finish gate.
+Slices 0–5 validation and A–E exact-scope work commits are completed and
+reviewed. Commit F archives this task; commit G is a journal-only finish
+commit.
 
 Slice 5 exit evidence (`2026-08-13`):
 

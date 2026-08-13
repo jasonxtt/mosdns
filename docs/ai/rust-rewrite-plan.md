@@ -214,10 +214,11 @@ plugin/.../rust_bridge_*.go
 
 完成标准：规则语法、优先级、匹配结果、`special_groups` 路由标签全部一致。
 
-当前 foundation 状态（`2026-08-13`）：matcher task 的 Slice 0–5 已完成
-实现和验证，independent review passed on 2026-08-13，当前 awaiting
-ordered A–E exact-scope work commits, then F task archive and G journal under
-the explicit `--no-commit` Trellis finish sequence；默认仍为 Go-only。唯一 Rust `staticlib`、domain/IP 不可变
+当前 foundation 状态（`2026-08-13`）：matcher foundation task 的 Slice 0–5
+已完成实现和验证，independent review passed on 2026-08-13，task 已归档/完成；
+A–E exact-scope work commits 已完成并复核，F 是 task archive finish commit，G
+是 journal-only finish commit；整体 Rust rewrite 仍在进行，默认仍为
+Go-only。唯一 Rust `staticlib`、domain/IP 不可变
 index、事务式 Go adapter、ABI/header gate、Linux+cgo 普通与 race gate、
 固定 fixture 性能证据和隔离 `mos-test` smoke 已记录在
 `docs/rust/matcher-compatibility.md` 与
@@ -291,11 +292,11 @@ Vue 源码无需因后端语言变化而重写。只有当 Rust host 覆盖当�
 阶段 0 与阶段 1 的 cache 基础实现已经完成；cache 仍保留独立的
 replay/soak、sanitizer/Miri 和扩展测试机验证门槛，且不得成为默认后端。
 
-`.trellis/tasks/08-13-rust-matcher-foundation/` 的 Slice 0–5 已在
-`rust` 分支完成，independent review passed on 2026-08-13，当前 awaiting
-ordered A–E exact-scope work commits, then F task archive and G journal under
-the explicit `--no-commit` Trellis finish sequence；本 task 不结束或归档整个 Rust
-重写计划。下一步若要扩展 matcher，必须先为 provider fan-out 或
+`.trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation/` 的 Slice 0–5
+已在 `rust` 分支完成，independent review passed on 2026-08-13，A–E
+exact-scope work commits 已完成并复核；F 是 task archive finish commit，G 是
+journal-only finish commit。本 task 的归档不结束或归档整个 Rust 重写计划。
+下一步若要扩展 matcher，必须先为 provider fan-out 或
 `domain_mapper` 创建并独立批准后续任务；不得顺手迁移 sequence、upstream
 或 server。只有 matcher foundation 经过 review 和后续批准，才进入阶段 3
 的 Rust query/sequence core。

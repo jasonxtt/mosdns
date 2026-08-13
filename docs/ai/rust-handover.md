@@ -32,15 +32,16 @@ base release: v0.7.1
 
 A-E Rust migration work commits are completed and reviewed (`A` governance,
 `B` cache, `C` unified runtime, `D` matcher adapters, and `E` CI/build/evidence).
-Only F task archive and G journal recording remain; neither finish operation has
-run.
+F is the task-archive finish commit and G is a journal-only finish commit; the
+overall Rust rewrite remains active and Rust remains experimental/default
+Go-only.
 
 ## Task state
 
 | Task | Trellis state | Implementation state | Successor action |
 | --- | --- | --- | --- |
 | `08-13-rust-cache-foundation` | **archived/completed** (`2026-08-13`) | All slices 0–6 complete; all three remaining gates (reproducible soak, Miri, extended mos-test verification) closed on `2026-08-13`. Rust stays experimental because the 10% QPS/latency gate is not met. | Do not redesign or micro-optimize it; preserve the implementation as-is while the matcher task extracts the single Rust runtime. |
-| `08-13-rust-matcher-foundation` | `in_progress`, P1, current | Approved `2026-08-13`; Slices 0–5 complete. Compatibility matrix, Go golden fixtures, real rule-set fixture, KixDNS matcher ledger, single Rust runtime extraction, pure Rust domain/IP matchers (`matcher-core`), transactional FFI with matcher ABI in runtime, C header, Go provider integration (`domain_set`/`ip_set` with `MOSDNS_MATCHER_BACKEND=rust` env-gated Rust backend and Go fallback), Linux+cgo tagged integration/race, fixed-fixture evidence, CI gates, and isolated `mos-test` reload/fallback/restart smoke are verified. | Independent review passed on 2026-08-13; A–E work commits are committed and reviewed, with only F task archive and G journal commits remaining under the manifest's explicit `--no-commit` finish sequence; do not enable Rust by default. |
+| `08-13-rust-matcher-foundation` | **archived/completed** (`2026-08-13`) | Approved `2026-08-13`; Slices 0–5 complete. Compatibility matrix, Go golden fixtures, real rule-set fixture, KixDNS matcher ledger, single Rust runtime extraction, pure Rust domain/IP matchers (`matcher-core`), transactional FFI with matcher ABI in runtime, C header, Go provider integration (`domain_set`/`ip_set` with `MOSDNS_MATCHER_BACKEND=rust` env-gated Rust backend and Go fallback), Linux+cgo tagged integration/race, fixed-fixture evidence, CI gates, and isolated `mos-test` reload/fallback/restart smoke are verified. | A–E work commits are completed and reviewed; F is the archive finish commit and G is a journal-only finish commit under the manifest's explicit `--no-commit` sequence; do not enable Rust by default. |
 
 The matcher task targets branch `rust`, is scoped to `rust/runtime`,
 `rust/matcher-core`, opt-in Go matcher adapters, CI/evidence scripts, and the
@@ -187,14 +188,15 @@ AGENTS.md
 .trellis/workspace/tom/journal-1.md
 ```
 
-After the A–E work commits, the finish phase has two separate exact-scope
-commits: F moves `.trellis/tasks/08-13-rust-matcher-foundation/` to
+After the A–E work commits, the finish sequence has two separate exact-scope
+commits: F, the archive finish commit, moves
+`.trellis/tasks/08-13-rust-matcher-foundation/` to
 `.trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation/` and records
 the task lifecycle transition; G updates only
 `.trellis/workspace/tom/index.md` and
 `.trellis/workspace/tom/journal-1.md`. Both operations use explicit
 `--no-commit` flags before manual path review. The journal records A–E hashes,
-not F.
+not F; G is journal-only.
 
 The real `scripts/build-rust-cache.sh` plus tagged cgo matcher gate is
 Linux-only (CI or isolated `mos-test`); macOS cargo success is not cgo evidence.
