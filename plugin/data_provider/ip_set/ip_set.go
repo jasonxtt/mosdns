@@ -65,6 +65,30 @@ var _ data_provider.IPMatcherProvider = (*IPSet)(nil)
 
 var _ netlist.Matcher = (*IPSet)(nil)
 
+// RustMatcher is the interface for an experimental Rust IP matcher.
+type RustMatcher interface {
+	Match(string) (bool, error)
+	Close() error
+}
+
+var rustIPMatcherBuilder = buildRustIPMatcher
+
+// BuildRustIPMatcher builds a Rust snapshot when the experimental backend is
+// enabled. A disabled backend returns (nil, nil).
+func BuildRustIPMatcher(prefixes []string) (RustMatcher, error) {
+	return rustIPMatcherBuilder(prefixes)
+}
+
+// InitRustIPMatcher creates a Rust matcher and keeps the established Go
+// fallback when the experimental backend cannot be built.
+func InitRustIPMatcher(prefixes []string) RustMatcher {
+	rb, err := BuildRustIPMatcher(prefixes)
+	if err != nil {
+		fmt.Printf("[ip_set] failed to initialize experimental rust matcher: %v\n", err)
+	}
+	return rb
+}
+
 // IPSet implements IPMatcherProvider and holds state
 type IPSet struct {
 	matcherVal atomic.Value
@@ -74,19 +98,63 @@ type IPSet struct {
 
 	otherSets []netlist.Matcher
 
-	mutex sync.Mutex
+	mutex    sync.RWMutex
+	updateMu sync.Mutex
+
+	// 实验性 Rust 后端
+	rustMatcher RustMatcher
 }
 
 func (d *IPSet) GetIPMatcher() netlist.Matcher {
 	return d
 }
 
-func (d *IPSet) Match(addr netip.Addr) bool {
-	m, ok := d.matcherVal.Load().(netlist.Matcher)
-	if !ok || m == nil {
-		return false
+// Close implements io.Closer for lifecycle cleanup of the Rust handle.
+func (d *IPSet) Close() error {
+	d.updateMu.Lock()
+	defer d.updateMu.Unlock()
+
+	d.mutex.Lock()
+	old := d.rustMatcher
+	d.rustMatcher = nil
+	d.mutex.Unlock()
+	if old != nil {
+		return old.Close()
 	}
-	return m.Match(addr)
+	return nil
+}
+
+func (d *IPSet) Match(addr netip.Addr) bool {
+	d.mutex.RLock()
+	rb := d.rustMatcher
+	var rustErr error
+	if rb != nil {
+		var matched bool
+		matched, rustErr = rb.Match(addr.String())
+		if rustErr == nil && matched {
+			d.mutex.RUnlock()
+			return true
+		}
+	}
+	m, ok := d.matcherVal.Load().(netlist.Matcher)
+	matched := ok && m != nil && m.Match(addr)
+	d.mutex.RUnlock()
+
+	if rustErr != nil {
+		// Only disable the handle that produced the error. A concurrent reload
+		// may already have published a newer generation.
+		closeRust := false
+		d.mutex.Lock()
+		if d.rustMatcher == rb {
+			d.rustMatcher = nil
+			closeRust = true
+		}
+		d.mutex.Unlock()
+		if closeRust {
+			_ = rb.Close()
+		}
+	}
+	return matched
 }
 
 // Init plugin, build IPSet and register HTTP API
@@ -121,6 +189,15 @@ func NewIPSet(bp *coremain.BP, args *Args) (*IPSet, error) {
 
 	p.rebuildSnapshot()
 
+	// 实验性 Rust IP matcher 初始化
+	prefixes := prefixStrings(p.list)
+	if rb, err := BuildRustIPMatcher(prefixes); err != nil {
+		fmt.Printf("[ip_set] failed to initialize experimental rust matcher: %v\n", err)
+	} else if rb != nil {
+		p.rustMatcher = rb
+		fmt.Printf("[ip_set] experimental rust matcher enabled (%d prefixes)\n", len(prefixes))
+	}
+
 	// 提示回收解析期间产生的临时对象
 	go func() {
 		time.Sleep(1 * time.Second)
@@ -130,18 +207,29 @@ func NewIPSet(bp *coremain.BP, args *Args) (*IPSet, error) {
 	return p, nil
 }
 
-func (d *IPSet) rebuildSnapshot() {
-	var mg MatcherGroup
+func prefixStrings(list *netlist.List) []string {
+	var prefixStrs []string
+	list.ForEach(func(pfx netip.Prefix) {
+		prefixStrs = append(prefixStrs, normalizePrefix(pfx).String())
+	})
+	return prefixStrs
+}
 
-	if d.list != nil && d.list.Len() > 0 {
-		mg = append(mg, d.list)
+func (d *IPSet) rebuildSnapshot() {
+	d.matcherVal.Store(d.snapshotForList(d.list))
+}
+
+func (d *IPSet) snapshotForList(list *netlist.List) MatcherGroup {
+	var mg MatcherGroup
+	if list != nil && list.Len() > 0 {
+		mg = append(mg, list)
 	}
 
 	if len(d.otherSets) > 0 {
 		mg = append(mg, d.otherSets...)
 	}
 
-	d.matcherVal.Store(mg)
+	return mg
 }
 
 // api registers HTTP routes: show, save, flush, post
@@ -150,11 +238,10 @@ func (d *IPSet) api() *chi.Mux {
 
 	// GET /show: list in-memory prefixes
 	r.Get("/show", func(w http.ResponseWriter, r *http.Request) {
-		d.mutex.Lock()
-		l := d.list
-		d.mutex.Unlock()
-
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		d.mutex.RLock()
+		defer d.mutex.RUnlock()
+		l := d.list
 		if l != nil {
 			l.ForEach(func(pfx netip.Prefix) {
 				io.WriteString(w, normalizePrefix(pfx).String()+"\n")
@@ -164,8 +251,8 @@ func (d *IPSet) api() *chi.Mux {
 
 	// GET /save: persist to files
 	r.Get("/save", func(w http.ResponseWriter, r *http.Request) {
-		d.mutex.Lock()
-		defer d.mutex.Unlock()
+		d.updateMu.Lock()
+		defer d.updateMu.Unlock()
 		if err := d.saveToFiles(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -175,16 +262,32 @@ func (d *IPSet) api() *chi.Mux {
 
 	// GET /flush: clear in-memory and save empty list
 	r.Get("/flush", func(w http.ResponseWriter, r *http.Request) {
-		d.mutex.Lock()
-		defer d.mutex.Unlock()
+		d.updateMu.Lock()
+		defer d.updateMu.Unlock()
 
-		d.list = netlist.NewList()
-
-		d.rebuildSnapshot()
-
-		if err := d.saveToFiles(); err != nil {
+		tmpList := netlist.NewList()
+		tmpList.Sort()
+		rb, err := BuildRustIPMatcher(prefixStrings(tmpList))
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if err := d.saveListToFiles(tmpList); err != nil {
+			if rb != nil {
+				_ = rb.Close()
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		d.mutex.Lock()
+		oldRust := d.rustMatcher
+		d.list = tmpList
+		d.matcherVal.Store(d.snapshotForList(tmpList))
+		d.rustMatcher = rb
+		d.mutex.Unlock()
+		if oldRust != nil {
+			_ = oldRust.Close()
 		}
 		w.Write([]byte("ip_set flushed and saved"))
 		coremain.ManualGC()
@@ -192,7 +295,12 @@ func (d *IPSet) api() *chi.Mux {
 
 	// POST /post: replace in-memory list with provided values and save
 	r.Post("/post", func(w http.ResponseWriter, r *http.Request) {
-		var body struct{ Values []string `json:"values"` }
+		d.updateMu.Lock()
+		defer d.updateMu.Unlock()
+
+		var body struct {
+			Values []string `json:"values"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
 			return
@@ -206,19 +314,30 @@ func (d *IPSet) api() *chi.Mux {
 		}
 		tmpList.Sort()
 
-		d.mutex.Lock()
-		defer d.mutex.Unlock()
-
-		d.list = tmpList
-
-		d.rebuildSnapshot()
-
-		if err := d.saveToFiles(); err != nil {
+		rb, err := BuildRustIPMatcher(prefixStrings(tmpList))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := d.saveListToFiles(tmpList); err != nil {
+			if rb != nil {
+				_ = rb.Close()
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		w.Write([]byte(fmt.Sprintf("ip_set replaced with %d entries", d.list.Len())))
+		d.mutex.Lock()
+		oldRust := d.rustMatcher
+		d.list = tmpList
+		d.matcherVal.Store(d.snapshotForList(tmpList))
+		d.rustMatcher = rb
+		d.mutex.Unlock()
+		if oldRust != nil {
+			_ = oldRust.Close()
+		}
+
+		w.Write([]byte(fmt.Sprintf("ip_set replaced with %d entries", tmpList.Len())))
 		coremain.ManualGC()
 	})
 
@@ -227,6 +346,13 @@ func (d *IPSet) api() *chi.Mux {
 
 // saveToFiles writes the current list to each configured file
 func (d *IPSet) saveToFiles() error {
+	d.mutex.RLock()
+	list := d.list
+	d.mutex.RUnlock()
+	return d.saveListToFiles(list)
+}
+
+func (d *IPSet) saveListToFiles(list *netlist.List) error {
 	for _, path := range d.files {
 		f, err := os.Create(path)
 		if err != nil {
@@ -234,7 +360,7 @@ func (d *IPSet) saveToFiles() error {
 		}
 		w := bufio.NewWriter(f)
 		var writeErr error
-		d.list.ForEach(func(pfx netip.Prefix) {
+		list.ForEach(func(pfx netip.Prefix) {
 			if writeErr == nil {
 				_, writeErr = w.WriteString(normalizePrefix(pfx).String() + "\n")
 			}

@@ -22,12 +22,14 @@ package base_domain
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync/atomic"
+
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
-	"strings"
 )
 
 var _ sequence.Matcher = (*Matcher)(nil)
@@ -40,13 +42,48 @@ type Args struct {
 
 type MatchFunc func(qCtx *query_context.Context, m domain.Matcher[struct{}]) (bool, error)
 
+// rustDomainWrapper adapts domain_set.RustMatcher to domain.Matcher[struct{}]
+// so it integrates naturally with qname/cname MatchFunc selection.
+type rustDomainWrapper struct {
+	backend  domain_set.RustMatcher
+	disabled atomic.Bool
+}
+
+func (w *rustDomainWrapper) Match(s string) (struct{}, bool) {
+	if w.disabled.Load() {
+		return struct{}{}, false
+	}
+	matched, err := w.backend.Match(s)
+	if err != nil {
+		w.Close()
+		return struct{}{}, false
+	}
+	return struct{}{}, matched
+}
+
+func (w *rustDomainWrapper) Close() error {
+	if !w.disabled.CompareAndSwap(false, true) {
+		return nil
+	}
+	return w.backend.Close()
+}
+
 type Matcher struct {
-	match MatchFunc
-	mg    []domain.Matcher[struct{}]
+	match       MatchFunc
+	mg          []domain.Matcher[struct{}]
+	rustBackend *rustDomainWrapper
 }
 
 func (m *Matcher) Match(_ context.Context, qCtx *query_context.Context) (bool, error) {
 	return m.match(qCtx, domain_set.MatcherGroup(m.mg))
+}
+
+// Close implements io.Closer for Rust backend lifecycle cleanup.
+func (m *Matcher) Close() error {
+	if m.rustBackend != nil {
+		return m.rustBackend.Close()
+	}
+	return nil
 }
 
 func NewMatcher(bq sequence.BQ, args *Args, f MatchFunc) (m *Matcher, err error) {
@@ -68,8 +105,16 @@ func NewMatcher(bq sequence.BQ, args *Args, f MatchFunc) (m *Matcher, err error)
 	// Anonymous set from plugin's args and files.
 	if len(args.Exps)+len(args.Files) > 0 {
 		anonymousSet := domain.NewDomainMixMatcher()
-		if err := domain_set.LoadExpsAndFiles(args.Exps, args.Files, anonymousSet); err != nil {
+		rustRules, err := domain_set.LoadExpsAndFilesWithRules(args.Exps, args.Files, anonymousSet)
+		if err != nil {
 			return nil, err
+		}
+		// Keep the Rust candidate at the same position as the anonymous Go
+		// matcher. Referenced domain sets retain their established order.
+		if rb := domain_set.InitRustDomainMatcher(rustRules); rb != nil {
+			wrapper := &rustDomainWrapper{backend: rb}
+			m.rustBackend = wrapper
+			m.mg = append(m.mg, wrapper)
 		}
 		if anonymousSet.Len() > 0 {
 			m.mg = append(m.mg, anonymousSet)
