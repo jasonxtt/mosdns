@@ -40,19 +40,34 @@ type domainPayload struct {
 
 var _ data_provider.DomainMatcherProvider = (*DomainSet)(nil)
 var _ domain.Matcher[struct{}] = (*DomainSet)(nil)
+
 // 确保实现了 RuleExporter 接口
 var _ data_provider.RuleExporter = (*DomainSet)(nil)
 
-type DomainSet struct {
-	mu     sync.RWMutex
-	mixM   *domain.MixMatcher[struct{}]
-	otherM []domain.Matcher[struct{}]
+// rustMatcher 是 Rust domain matcher 后端的接口抽象，非 tagged 构建时编译为 nil 占位。
+// RustMatcher is the public interface for a Rust-backed domain matcher.
+type RustMatcher interface {
+	Match(string) (bool, error)
+	Close() error
+}
 
-	ruleFile string
-	rules    []string
+var rustDomainMatcherBuilder = buildRustDomainMatcher
+
+type DomainSet struct {
+	mu       sync.RWMutex
+	updateMu sync.Mutex
+	mixM     *domain.MixMatcher[struct{}]
+	otherM   []domain.Matcher[struct{}]
+
+	ruleFile  string
+	rules     []string
+	rustRules []string
 
 	// 新增：订阅者列表
 	subscribers []func()
+
+	// 实验性 Rust 后端（仅当 MOSDNS_MATCHER_BACKEND=rust 且 linux+cgo 时非 nil）
+	rustMatcher RustMatcher
 }
 
 // GetRules 实现 RuleExporter 接口
@@ -72,7 +87,39 @@ func (d *DomainSet) Subscribe(cb func()) {
 	d.subscribers = append(d.subscribers, cb)
 }
 
+// BuildRustDomainMatcher builds a Rust snapshot when the experimental backend
+// is enabled. A disabled backend returns (nil, nil); an enabled backend
+// returns an error without publishing a handle when the build fails.
+func BuildRustDomainMatcher(rules []string) (RustMatcher, error) {
+	return rustDomainMatcherBuilder(rules)
+}
+
+// InitRustDomainMatcher creates a Rust domain matcher when the experimental
+// backend is enabled. Build errors use the established Go fallback.
+func InitRustDomainMatcher(rules []string) RustMatcher {
+	rb, err := BuildRustDomainMatcher(rules)
+	if err != nil {
+		fmt.Printf("[domain_set] failed to initialize experimental rust matcher: %v\n", err)
+	}
+	return rb
+}
+
 // notifySubscribers 通知所有订阅者（异步执行）
+// Close implements io.Closer for lifecycle cleanup of the Rust handle.
+func (d *DomainSet) Close() error {
+	d.updateMu.Lock()
+	defer d.updateMu.Unlock()
+
+	d.mu.Lock()
+	old := d.rustMatcher
+	d.rustMatcher = nil
+	d.mu.Unlock()
+	if old != nil {
+		return old.Close()
+	}
+	return nil
+}
+
 func (d *DomainSet) notifySubscribers() {
 	d.mu.RLock()
 	subs := make([]func(), len(d.subscribers))
@@ -86,31 +133,36 @@ func (d *DomainSet) notifySubscribers() {
 
 // initAndLoadRules is a new internal function for loading rules within this plugin.
 // It populates the matcher and returns the list of rule strings.
-func (d *DomainSet) initAndLoadRules(exps, files []string) ([]string, error) {
+func (d *DomainSet) initAndLoadRules(exps, files []string) ([]string, []string, error) {
 	allRules := make([]string, 0, len(exps)+len(files)*100)
+	rustRules := make([]string, 0, len(exps)+len(files)*100)
 
 	// Load from expressions
 	if err := LoadExps(exps, d.mixM); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	allRules = append(allRules, exps...)
+	rustRules = append(rustRules, exps...)
 
 	// Load from files
 	for i, f := range files {
-		// Use a new internal loading function for files
-		rules, err := d.loadFileInternal(f)
+		rules, err := d.loadFileInternalWithRules(f, &rustRules)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load file %d %s: %w", i, f, err)
+			return nil, nil, fmt.Errorf("failed to load file %d %s: %w", i, f, err)
 		}
 		allRules = append(allRules, rules...)
 	}
 
-	return allRules, nil
+	return allRules, rustRules, nil
 }
 
 // loadFileInternal is the new internal version of LoadFile.
 // It loads rules into the instance's mixM and returns the rule strings.
 func (d *DomainSet) loadFileInternal(f string) ([]string, error) {
+	return d.loadFileInternalWithRules(f, nil)
+}
+
+func (d *DomainSet) loadFileInternalWithRules(f string, rustRules *[]string) ([]string, error) {
 	if f == "" {
 		return nil, nil
 	}
@@ -122,7 +174,7 @@ func (d *DomainSet) loadFileInternal(f string) ([]string, error) {
 		return nil, err
 	}
 
-	if ok, count, last := tryLoadSRS(b, d.mixM); ok {
+	if ok, count, last := tryLoadSRSWithRules(b, d.mixM, rustRules); ok {
 		fmt.Printf("[domain_set] loaded %d rules from srs file: %s (last rule: %s)\n", count, f, last)
 		return nil, nil
 	}
@@ -138,6 +190,9 @@ func (d *DomainSet) loadFileInternal(f string) ([]string, error) {
 		}
 		if err := d.mixM.Add(line, struct{}{}); err == nil {
 			rules = append(rules, line)
+			if rustRules != nil {
+				*rustRules = append(*rustRules, line)
+			}
 			lastTxt = line
 		}
 	}
@@ -162,12 +217,20 @@ func Init(bp *coremain.BP, args any) (any, error) {
 	}
 
 	// Use the new internal loading function to avoid changing public API.
-	loadedRules, err := ds.initAndLoadRules(cfg.Exps, cfg.Files)
+	loadedRules, rustRules, err := ds.initAndLoadRules(cfg.Exps, cfg.Files)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load rules: %w", err)
 	}
 	ds.rules = loadedRules
-                coremain.ManualGC()
+	ds.rustRules = rustRules
+	coremain.ManualGC()
+	rb := InitRustDomainMatcher(ds.rustRules)
+	ds.mu.Lock()
+	ds.rustMatcher = rb
+	ds.mu.Unlock()
+	if rb != nil {
+		fmt.Printf("[domain_set] experimental rust matcher enabled (%d rules)\n", len(ds.rustRules))
+	}
 
 	for _, tag := range cfg.Sets {
 		provider, ok := bp.M().GetPlugin(tag).(data_provider.DomainMatcherProvider)
@@ -186,11 +249,42 @@ func (d *DomainSet) GetDomainMatcher() domain.Matcher[struct{}] {
 }
 
 func (d *DomainSet) Match(domainStr string) (value struct{}, ok bool) {
+	// Keep the Rust and Go snapshots paired while matching. A POST waits for
+	// this read lock before publishing the next generation.
 	d.mu.RLock()
+	rb := d.rustMatcher
+	var rustErr error
+	if rb != nil {
+		var matched bool
+		matched, rustErr = rb.Match(domainStr)
+		if rustErr == nil && matched {
+			d.mu.RUnlock()
+			return struct{}{}, true
+		}
+	}
+
 	m := d.mixM
+	goMatched := m != nil
+	if goMatched {
+		_, goMatched = m.Match(domainStr)
+	}
 	d.mu.RUnlock()
 
-	if _, ok := m.Match(domainStr); ok {
+	if rustErr != nil {
+		// Circuit breaker: only close if this exact backend is still active.
+		// The generation check prevents a stale reader from closing a new POST.
+		closeRust := false
+		d.mu.Lock()
+		if d.rustMatcher == rb {
+			d.rustMatcher = nil
+			closeRust = true
+		}
+		d.mu.Unlock()
+		if closeRust {
+			_ = rb.Close()
+		}
+	}
+	if goMatched {
 		return struct{}{}, true
 	}
 
@@ -216,6 +310,8 @@ func (d *DomainSet) api() *chi.Mux {
 	})
 
 	r.Get("/save", func(w http.ResponseWriter, r *http.Request) {
+		d.updateMu.Lock()
+		defer d.updateMu.Unlock()
 		d.mu.RLock()
 		defer d.mu.RUnlock()
 		if d.ruleFile == "" {
@@ -230,6 +326,9 @@ func (d *DomainSet) api() *chi.Mux {
 	})
 
 	r.Post("/post", func(w http.ResponseWriter, r *http.Request) {
+		d.updateMu.Lock()
+		defer d.updateMu.Unlock()
+
 		var p domainPayload
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -249,26 +348,41 @@ func (d *DomainSet) api() *chi.Mux {
 			}
 		}
 
-		d.mu.Lock()
-		d.mixM = tmpMix
-		d.rules = tmpRules
-		d.mu.Unlock()
-
-        tmpMix = nil
-        tmpRules = nil
-
-		if err := writeRulesToFile(d.ruleFile, d.rules); err != nil {
+		// Build the request's immutable Rust candidate before publishing any
+		// part of the new generation. An enabled-backend failure keeps the
+		// complete previous generation active.
+		rb, err := BuildRustDomainMatcher(tmpRules)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
+		if err := writeRulesToFile(d.ruleFile, tmpRules); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			if rb != nil {
+				_ = rb.Close()
+			}
+			return
+		}
+
+		d.mu.Lock()
+		oldRust := d.rustMatcher
+		d.mixM = tmpMix
+		d.rules = tmpRules
+		d.rustRules = tmpRules
+		d.rustMatcher = rb
+		d.mu.Unlock()
+		if oldRust != nil {
+			_ = oldRust.Close()
+		}
+
 		// 规则更新成功，通知订阅者
 		d.notifySubscribers()
 
-        coremain.ManualGC()
+		coremain.ManualGC()
 
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "domain_set replaced with %d entries", len(d.rules))
+		fmt.Fprintf(w, "domain_set replaced with %d entries", len(tmpRules))
 	})
 
 	return r
@@ -292,10 +406,27 @@ func writeRulesToFile(path string, rules []string) error {
 // --- Public loading functions (UNCHANGED to maintain compatibility) ---
 
 func LoadExpsAndFiles(exps, fs []string, m *domain.MixMatcher[struct{}]) error {
+	_, err := LoadExpsAndFilesWithRules(exps, fs, m)
+	return err
+}
+
+// LoadExpsAndFilesWithRules loads the Go matcher and returns the exact
+// accepted rule batch for a Rust candidate. SRS entries are converted to the
+// equivalent typed rules without changing LoadFile's public text behavior.
+func LoadExpsAndFilesWithRules(exps, fs []string, m *domain.MixMatcher[struct{}]) ([]string, error) {
+	rules := make([]string, 0, len(exps)+len(fs)*100)
 	if err := LoadExps(exps, m); err != nil {
-		return err
+		return nil, err
 	}
-	return LoadFiles(fs, m)
+	rules = append(rules, exps...)
+	for i, f := range fs {
+		loaded, err := loadFileWithRules(f, m)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load file %d %s: %w", i, f, err)
+		}
+		rules = append(rules, loaded...)
+	}
+	return rules, nil
 }
 
 func LoadExps(exps []string, m *domain.MixMatcher[struct{}]) error {
@@ -317,22 +448,29 @@ func LoadFiles(fs []string, m *domain.MixMatcher[struct{}]) error {
 }
 
 func LoadFile(f string, m *domain.MixMatcher[struct{}]) error {
+	_, err := loadFileWithRules(f, m)
+	return err
+}
+
+func loadFileWithRules(f string, m *domain.MixMatcher[struct{}]) ([]string, error) {
 	if f == "" {
-		return nil
+		return nil, nil
 	}
 	b, err := os.ReadFile(f)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 
-	if ok, count, last := tryLoadSRS(b, m); ok {
+	var rustRules []string
+	if ok, count, last := tryLoadSRSWithRules(b, m, &rustRules); ok {
 		fmt.Printf("[domain_set] loaded %d rules from srs file: %s (last rule: %s)\n", count, f, last)
-		return nil
+		return rustRules, nil
 	}
 
+	var rules []string
 	var lastTxt string
 	before := m.Len()
 	scanner := bufio.NewScanner(bytes.NewReader(b))
@@ -342,19 +480,25 @@ func LoadFile(f string, m *domain.MixMatcher[struct{}]) error {
 			continue
 		}
 		lastTxt = line
-		m.Add(line, struct{}{}) // Ignore error to match original behavior
+		if err := m.Add(line, struct{}{}); err == nil {
+			rules = append(rules, line)
+		}
 	}
 
 	after := m.Len()
 	if after > before {
 		fmt.Printf("[domain_set] loaded %d rules from text file: %s (last rule: %s)\n", after-before, f, lastTxt)
 	}
-	return scanner.Err()
+	return rules, scanner.Err()
 }
 
 // --- SRS parsing functions (mostly unchanged) ---
 
 func tryLoadSRS(b []byte, m *domain.MixMatcher[struct{}]) (bool, int, string) {
+	return tryLoadSRSWithRules(b, m, nil)
+}
+
+func tryLoadSRSWithRules(b []byte, m *domain.MixMatcher[struct{}], rustRules *[]string) (bool, int, string) {
 	r := bytes.NewReader(b)
 	var mb [3]byte
 	if _, err := io.ReadFull(r, mb[:]); err != nil || mb != magicBytes {
@@ -377,7 +521,7 @@ func tryLoadSRS(b []byte, m *domain.MixMatcher[struct{}]) (bool, int, string) {
 	count := 0
 	var lastRule string
 	for i := uint64(0); i < length; i++ {
-		count += readRuleCompat(br, m, &lastRule)
+		count += readRuleCompatWithRules(br, m, &lastRule, rustRules)
 	}
 	return true, count, lastRule
 }
@@ -393,6 +537,10 @@ var (
 const ruleSetVersionCurrent = 3
 
 func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string) int {
+	return readRuleCompatWithRules(r, m, last, nil)
+}
+
+func readRuleCompatWithRules(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string, rustRules *[]string) int {
 	ct := 0
 	mode, err := r.ReadByte()
 	if err != nil {
@@ -400,12 +548,12 @@ func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *strin
 	}
 	switch mode {
 	case 0:
-		ct += readDefaultRuleCompat(r, m, last)
+		ct += readDefaultRuleCompatWithRules(r, m, last, rustRules)
 	case 1:
 		r.ReadByte()
 		n, _ := binary.ReadUvarint(r)
 		for i := uint64(0); i < n; i++ {
-			ct += readRuleCompat(r, m, last)
+			ct += readRuleCompatWithRules(r, m, last, rustRules)
 		}
 		r.ReadByte()
 	}
@@ -413,6 +561,10 @@ func readRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *strin
 }
 
 func readDefaultRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string) int {
+	return readDefaultRuleCompatWithRules(r, m, last, nil)
+}
+
+func readDefaultRuleCompatWithRules(r *bufio.Reader, m *domain.MixMatcher[struct{}], last *string, rustRules *[]string) int {
 	count := 0
 	for {
 		item, err := r.ReadByte()
@@ -427,31 +579,47 @@ func readDefaultRuleCompat(r *bufio.Reader, m *domain.MixMatcher[struct{}], last
 			}
 			doms, suffix := matcher.Dump()
 			for _, d := range doms {
-				*last = "full:" + d
-				if m.Add(*last, struct{}{}) == nil {
+				rule := "full:" + d
+				*last = rule
+				if m.Add(rule, struct{}{}) == nil {
 					count++
+					if rustRules != nil {
+						*rustRules = append(*rustRules, rule)
+					}
 				}
 			}
 			for _, d := range suffix {
-				*last = "domain:" + d
-				if m.Add(*last, struct{}{}) == nil {
+				rule := "domain:" + d
+				*last = rule
+				if m.Add(rule, struct{}{}) == nil {
 					count++
+					if rustRules != nil {
+						*rustRules = append(*rustRules, rule)
+					}
 				}
 			}
 		case ruleItemDomainKeyword:
 			sl, _ := varbin.ReadValue[[]string](r, binary.BigEndian)
 			for _, d := range sl {
-				*last = "keyword:" + d
-				if m.Add(*last, struct{}{}) == nil {
+				rule := "keyword:" + d
+				*last = rule
+				if m.Add(rule, struct{}{}) == nil {
 					count++
+					if rustRules != nil {
+						*rustRules = append(*rustRules, rule)
+					}
 				}
 			}
 		case ruleItemDomainRegex:
 			sl, _ := varbin.ReadValue[[]string](r, binary.BigEndian)
 			for _, d := range sl {
-				*last = "regexp:" + d
-				if m.Add(*last, struct{}{}) == nil {
+				rule := "regexp:" + d
+				*last = rule
+				if m.Add(rule, struct{}{}) == nil {
 					count++
+					if rustRules != nil {
+						*rustRules = append(*rustRules, rule)
+					}
 				}
 			}
 		case ruleItemFinal:

@@ -22,12 +22,15 @@ package base_ip
 import (
 	"context"
 	"fmt"
+	"net/netip"
+	"strings"
+	"sync/atomic"
+
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/ip_set"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
-	"strings"
 )
 
 var _ sequence.Matcher = (*Matcher)(nil)
@@ -40,10 +43,43 @@ type Args struct {
 
 type MatchFunc func(qCtx *query_context.Context, m netlist.Matcher) (bool, error)
 
+type rustIPWrapper struct {
+	backend  ip_set.RustMatcher
+	disabled atomic.Bool
+}
+
+func (w *rustIPWrapper) Match(addr netip.Addr) bool {
+	if w.disabled.Load() {
+		return false
+	}
+	matched, err := w.backend.Match(addr.String())
+	if err != nil {
+		_ = w.Close()
+		return false
+	}
+	return matched
+}
+
+func (w *rustIPWrapper) Close() error {
+	if !w.disabled.CompareAndSwap(false, true) {
+		return nil
+	}
+	return w.backend.Close()
+}
+
 type Matcher struct {
-	match MatchFunc
+	match       MatchFunc
+	rustBackend *rustIPWrapper
 
 	mg []netlist.Matcher
+}
+
+// Close implements io.Closer for the direct Rust matcher snapshot.
+func (m *Matcher) Close() error {
+	if m.rustBackend == nil {
+		return nil
+	}
+	return m.rustBackend.Close()
 }
 
 func (m *Matcher) Match(_ context.Context, qCtx *query_context.Context) (matched bool, err error) {
@@ -73,6 +109,17 @@ func NewMatcher(bq sequence.BQ, args *Args, f MatchFunc) (m *Matcher, err error)
 			return nil, err
 		}
 		anonymousList.Sort()
+		prefixes := make([]string, 0, anonymousList.Len())
+		anonymousList.ForEach(func(prefix netip.Prefix) {
+			prefixes = append(prefixes, prefix.String())
+		})
+		if rb := ip_set.InitRustIPMatcher(prefixes); rb != nil {
+			wrapper := &rustIPWrapper{backend: rb}
+			m.rustBackend = wrapper
+			// Keep the Rust candidate at the anonymous matcher position so
+			// referenced IP sets retain their existing order.
+			m.mg = append(m.mg, wrapper)
+		}
 		if anonymousList.Len() > 0 {
 			m.mg = append(m.mg, anonymousList)
 		}

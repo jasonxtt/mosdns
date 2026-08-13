@@ -1,0 +1,115 @@
+# Representative real rule-set fixture (Slice 0c).
+#
+# This is a synthetic but realistic subset in the shape of a production
+# ad/tracker domain list: a mix of full:, domain:, regexp:, keyword: and bare
+# (default domain) rules, with comments and blank lines. It contains no
+# secrets and requires no network access. It exists to exercise the loader and
+# matcher against a realistic rule distribution and to seed Go/Rust parity.
+
+# --- full: exact hosts ---
+full:doubleclick.net
+full:googleadservices.com
+full:pagead2.googlesyndication.com
+full:adservice.google.com
+full:ads.yahoo.com
+full:advertising.com
+
+# --- domain: suffix lists (the dominant form in real lists) ---
+domain:google-analytics.com
+domain:analytics.google.com
+domain:googletagmanager.com
+domain:scorecardresearch.com
+domain:amazon-adsystem.com
+domain:adnxs.com
+domain:adsafeprotected.com
+domain:moatads.com
+domain:criteo.com
+domain:criteo.net
+domain:doubleverify.com
+domain:facebook.net
+domain:fbcdn.net
+domain:instagram.com
+domain:youtube.com
+domain:ytimg.com
+domain:tiktok.com
+domain:ttwstatic.com
+domain:snapchat.com
+domain:sc-static.net
+domain:twitter.com
+domain:twimg.com
+domain:linkedin.com
+domain:licdn.com
+domain:pinterest.com
+domain:reddit.com
+domain:redditmedia.com
+domain:quantserve.com
+domain:quantservers.com
+domain:zedo.com
+domain:taboola.com
+domain:outbrain.com
+domain:smartadserver.com
+domain:casalemedia.com
+domain:openx.net
+domain:pubmatic.com
+domain:rubiconproject.com
+domain:appnexus.com
+domain:spotxchange.com
+domain:spotx.tv
+domain:teads.tv
+domain:emxdgt.com
+domain:contextweb.com
+domain:chartbeat.com
+domain:hotjar.com
+domain:mouseflow.com
+domain:fullstory.com
+domain:sessioncam.com
+domain:crazyegg.com
+domain:luckyorange.com
+domain:heap.io
+domain:segment.io
+domain:amplitude.com
+domain:mixpanel.com
+domain:branch.io
+domain:adjust.com
+domain:kochava.com
+domain:appsflyer.com
+domain:onesignal.com
+domain:pusher.com
+domain:socket.io
+domain:hotjar.io
+domain:cdnjs.cloudflare.com
+domain:cloudflareinsights.com
+domain:jsdelivr.net
+domain:unpkg.com
+domain:googleadservices.com
+domain:googleadsserving.cn
+domain:googlesyndication.com
+domain:googletagservices.com
+
+# --- regexp: ---
+regexp:^ads\..*\.example$
+regexp:^.*\.ads\.example$
+regexp:^ad[a-z]{2}\.tracker\.example$
+regexp:^pixel\.example$
+regexp:^beacon\.example$
+
+# --- keyword: ---
+keyword:analytics
+keyword:tracking
+keyword:telemetry
+keyword:webpush
+keyword:pushnotification
+keyword:remarketing
+keyword:beacons
+
+# --- bare rules (default: domain) ---
+example.com
+adserver.example
+ads.example
+pixel.example.com
+
+# --- intentionally-dropped invalid row (regexp that cannot compile) ---
+regexp:[broken
+
+# --- rows that load but never match (inline '#' is not stripped) ---
+full:with-inline-comment # note
