@@ -1,0 +1,87 @@
+<h2>开关面板布局方案</h2>
+<p class="subtitle">15个运行时开关的展示方式</p>
+
+<div class="cards">
+  <div class="card" data-choice="grid" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(135deg, #0a0e1a, #0a1a2e); padding: 20px; min-height: 200px;">
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+        <div style="background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="color: #60a5fa; font-size: 10px;">广告拦截</div>
+          <div style="width: 32px; height: 18px; background: #3b82f6; border-radius: 9px; margin: 6px auto 0; position: relative;"><div style="width: 14px; height: 14px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+        </div>
+        <div style="background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="color: #60a5fa; font-size: 10px;">泄漏模式</div>
+          <div style="width: 32px; height: 18px; background: #3b82f6; border-radius: 9px; margin: 6px auto 0; position: relative;"><div style="width: 14px; height: 14px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+        </div>
+        <div style="background: rgba(100, 100, 120, 0.2); border: 1px solid #555; border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="color: #888; font-size: 10px;">AAAA拦截</div>
+          <div style="width: 32px; height: 18px; background: #555; border-radius: 9px; margin: 6px auto 0; position: relative;"><div style="width: 14px; height: 14px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+        </div>
+        <div style="background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="color: #60a5fa; font-size: 10px;">缓存L1</div>
+          <div style="width: 32px; height: 18px; background: #3b82f6; border-radius: 9px; margin: 6px auto 0; position: relative;"><div style="width: 14px; height: 14px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+        </div>
+        <div style="background: rgba(100, 100, 120, 0.2); border: 1px solid #555; border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="color: #888; font-size: 10px;">IPv4优先</div>
+          <div style="width: 32px; height: 18px; background: #555; border-radius: 9px; margin: 6px auto 0; position: relative;"><div style="width: 14px; height: 14px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+        </div>
+        <div style="background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; border-radius: 6px; padding: 10px; text-align: center;">
+          <div style="color: #60a5fa; font-size: 10px;">FakeIP</div>
+          <div style="width: 32px; height: 18px; background: #3b82f6; border-radius: 9px; margin: 6px auto 0; position: relative;"><div style="width: 14px; height: 14px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+        </div>
+      </div>
+      <div style="color: #555; font-size: 10px; text-align: center; margin-top: 8px;">... 共15个开关</div>
+    </div>
+    <div class="card-body">
+      <h3>网格卡片</h3>
+      <p>3列网格，每个开关一张小卡片，带名称和状态色，紧凑整齐</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="list" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(135deg, #0a0e1a, #0a1a2e); padding: 20px; min-height: 200px;">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(59, 130, 246, 0.1); border-radius: 6px; border-left: 3px solid #3b82f6;">
+          <div>
+            <span style="color: #e0e0e0; font-size: 12px;">广告拦截</span>
+            <span style="color: #60a5fa; font-size: 10px; margin-left: 8px;">AdGuard</span>
+          </div>
+          <div style="width: 28px; height: 16px; background: #3b82f6; border-radius: 8px; position: relative;"><div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(59, 130, 246, 0.1); border-radius: 6px; border-left: 3px solid #3b82f6;">
+          <div>
+            <span style="color: #e0e0e0; font-size: 12px;">泄漏模式</span>
+            <span style="color: #60a5fa; font-size: 10px; margin-left: 8px;">DNS泄漏</span>
+          </div>
+          <div style="width: 28px; height: 16px; background: #3b82f6; border-radius: 8px; position: relative;"><div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(100, 100, 120, 0.1); border-radius: 6px; border-left: 3px solid #555;">
+          <div>
+            <span style="color: #999; font-size: 12px;">AAAA拦截</span>
+            <span style="color: #666; font-size: 10px; margin-left: 8px;">IPv6</span>
+          </div>
+          <div style="width: 28px; height: 16px; background: #555; border-radius: 8px; position: relative;"><div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(59, 130, 246, 0.1); border-radius: 6px; border-left: 3px solid #3b82f6;">
+          <div>
+            <span style="color: #e0e0e0; font-size: 12px;">缓存L1</span>
+            <span style="color: #60a5fa; font-size: 10px; margin-left: 8px;">过期缓存</span>
+          </div>
+          <div style="width: 28px; height: 16px; background: #3b82f6; border-radius: 8px; position: relative;"><div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(100, 100, 120, 0.1); border-radius: 6px; border-left: 3px solid #555;">
+          <div>
+            <span style="color: #999; font-size: 12px;">FakeIP</span>
+            <span style="color: #666; font-size: 10px; margin-left: 8px;">CN FakeIP</span>
+          </div>
+          <div style="width: 28px; height: 16px; background: #555; border-radius: 8px; position: relative;"><div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+        </div>
+      </div>
+      <div style="color: #555; font-size: 10px; text-align: center; margin-top: 6px;">... 共15个开关</div>
+    </div>
+    <div class="card-body">
+      <h3>列表行</h3>
+      <p>每行一个开关，左侧彩色边框标识状态，右侧开关，信息更丰富</p>
+    </div>
+  </div>
+</div>

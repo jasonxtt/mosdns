@@ -1,0 +1,222 @@
+<h2>MosDNS 全新 UI 设计方案预览</h2>
+<p class="subtitle">深蓝紫暗黑科技风 · Bento 网格布局 · 可折叠侧边栏</p>
+
+<div class="mockup">
+  <div class="mockup-header">完整页面 Mockup — 仪表盘视图</div>
+  <div class="mockup-body" style="padding: 0; overflow: hidden;">
+    <div style="display: flex; min-height: 520px; background: #0a0e1a; font-family: 'Segoe UI', system-ui, sans-serif;">
+      <!-- Sidebar -->
+      <div style="width: 56px; background: #0d1117; border-right: 1px solid rgba(59,130,246,0.15); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 4px;">
+        <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
+          <span style="color: white; font-size: 14px; font-weight: 800;">M</span>
+        </div>
+        <div style="width: 40px; height: 40px; background: rgba(59,130,246,0.15); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+          <span style="color: #60a5fa; font-size: 16px;">📊</span>
+        </div>
+        <div style="width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+          <span style="color: #555; font-size: 16px;">📋</span>
+        </div>
+        <div style="width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+          <span style="color: #555; font-size: 16px;">🔀</span>
+        </div>
+        <div style="width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+          <span style="color: #555; font-size: 16px;">⚙️</span>
+        </div>
+      </div>
+
+      <!-- Main Content -->
+      <div style="flex: 1; padding: 16px; overflow: hidden;">
+        <!-- Header -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div>
+            <h2 style="color: #e0e0e0; font-size: 18px; font-weight: 600; margin: 0;">仪表盘</h2>
+            <span style="color: #555; font-size: 11px;">MosDNS 运行概览</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <div style="width: 6px; height: 6px; background: #22c55e; border-radius: 50%;"></div>
+              <span style="color: #4ade80; font-size: 11px;">运行中</span>
+            </div>
+            <span style="color: #555; font-size: 10px;">运行 3d 12h</span>
+          </div>
+        </div>
+
+        <!-- Bento Grid -->
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+          <!-- Big chart -->
+          <div style="grid-row: span 2; background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.15); border-radius: 10px; padding: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <span style="color: #60a5fa; font-size: 11px; font-weight: 600;">查询趋势</span>
+              <div style="display: flex; gap: 4px;">
+                <span style="color: #60a5fa; font-size: 9px; background: rgba(59,130,246,0.15); padding: 2px 6px; border-radius: 4px;">1H</span>
+                <span style="color: #888; font-size: 9px; padding: 2px 6px;">6H</span>
+                <span style="color: #888; font-size: 9px; padding: 2px 6px;">24H</span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 4px; align-items: flex-end; height: 140px;">
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 25%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 35%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 30%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 50%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 45%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 65%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 80%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 90%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.8), rgba(139,92,246,0.5)); border-radius: 3px 3px 0 0; height: 100%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 75%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 60%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 55%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 70%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 85%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 65%;"></div>
+              <div style="flex:1; background: linear-gradient(to top, rgba(59,130,246,0.6), rgba(139,92,246,0.3)); border-radius: 3px 3px 0 0; height: 50%;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-top: 6px;">
+              <span style="color: #444; font-size: 8px;">00:00</span>
+              <span style="color: #444; font-size: 8px;">06:00</span>
+              <span style="color: #444; font-size: 8px;">12:00</span>
+              <span style="color: #444; font-size: 8px;">18:00</span>
+              <span style="color: #444; font-size: 8px;">现在</span>
+            </div>
+          </div>
+
+          <!-- Stat card 1 -->
+          <div style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 10px; padding: 12px;">
+            <div style="color: #60a5fa; font-size: 10px; text-transform: uppercase; letter-spacing: 1px;">查询总量</div>
+            <div style="color: #fff; font-size: 24px; font-weight: 700; margin: 4px 0;">1,234,567</div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span style="color: #22c55e; font-size: 10px;">↑ 12.5%</span>
+              <span style="color: #555; font-size: 9px;">较昨日</span>
+            </div>
+          </div>
+
+          <!-- Stat card 2 -->
+          <div style="background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.2); border-radius: 10px; padding: 12px;">
+            <div style="color: #a78bfa; font-size: 10px; text-transform: uppercase; letter-spacing: 1px;">缓存命中率</div>
+            <div style="color: #fff; font-size: 24px; font-weight: 700; margin: 4px 0;">87.3%</div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span style="color: #22c55e; font-size: 10px;">↑ 2.1%</span>
+              <span style="color: #555; font-size: 9px;">较昨日</span>
+            </div>
+          </div>
+
+          <!-- Bottom stats row -->
+          <div style="grid-column: span 2; display: flex; gap: 10px;">
+            <div style="flex:1; background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); border-radius: 10px; padding: 10px 12px;">
+              <div style="color: #4ade80; font-size: 10px; text-transform: uppercase;">平均延迟</div>
+              <div style="color: #fff; font-size: 18px; font-weight: 700;">8.2ms</div>
+            </div>
+            <div style="flex:1; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); border-radius: 10px; padding: 10px 12px;">
+              <div style="color: #fbbf24; font-size: 10px; text-transform: uppercase;">活跃客户端</div>
+              <div style="color: #fff; font-size: 18px; font-weight: 700;">23</div>
+            </div>
+            <div style="flex:1; background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); border-radius: 10px; padding: 10px 12px;">
+              <div style="color: #f87171; font-size: 10px; text-transform: uppercase;">广告拦截</div>
+              <div style="color: #fff; font-size: 18px; font-weight: 700;">12,847</div>
+            </div>
+            <div style="flex:1; background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.2); border-radius: 10px; padding: 10px 12px;">
+              <div style="color: #22d3ee; font-size: 10px; text-transform: uppercase;">域名分类</div>
+              <div style="color: #fff; font-size: 18px; font-weight: 700;">48.2K</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Switch Panel -->
+        <div style="margin-top: 12px; background: rgba(139,92,246,0.04); border: 1px solid rgba(139,92,246,0.12); border-radius: 10px; padding: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="color: #a78bfa; font-size: 11px; font-weight: 600;">运行时开关</span>
+            <span style="color: #555; font-size: 10px;">9 / 15 已启用</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;">
+            <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #60a5fa; font-size: 9px;">广告拦截</div>
+              <div style="width: 28px; height: 14px; background: #3b82f6; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #60a5fa; font-size: 9px;">泄漏模式</div>
+              <div style="width: 28px; height: 14px; background: #3b82f6; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(80,80,100,0.15); border: 1px solid rgba(80,80,100,0.3); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #777; font-size: 9px;">AAAA拦截</div>
+              <div style="width: 28px; height: 14px; background: #555; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #60a5fa; font-size: 9px;">缓存L1</div>
+              <div style="width: 28px; height: 14px; background: #3b82f6; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(80,80,100,0.15); border: 1px solid rgba(80,80,100,0.3); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #777; font-size: 9px;">IPv4优先</div>
+              <div style="width: 28px; height: 14px; background: #555; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #60a5fa; font-size: 9px;">FakeIP</div>
+              <div style="width: 28px; height: 14px; background: #3b82f6; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #60a5fa; font-size: 9px;">缓存L2</div>
+              <div style="width: 28px; height: 14px; background: #3b82f6; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(80,80,100,0.15); border: 1px solid rgba(80,80,100,0.3); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #777; font-size: 9px;">SOA拦截</div>
+              <div style="width: 28px; height: 14px; background: #555; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #60a5fa; font-size: 9px;">IPv6优先</div>
+              <div style="width: 28px; height: 14px; background: #3b82f6; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; right: 2px;"></div></div>
+            </div>
+            <div style="background: rgba(80,80,100,0.15); border: 1px solid rgba(80,80,100,0.3); border-radius: 6px; padding: 8px; text-align: center;">
+              <div style="color: #777; font-size: 9px;">Ali DoH</div>
+              <div style="width: 28px; height: 14px; background: #555; border-radius: 7px; margin: 4px auto 0; position: relative;"><div style="width: 10px; height: 10px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px;"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 20px;">
+  <h3>页面结构总结</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;">
+    <div style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 8px; padding: 14px;">
+      <h4 style="color: #60a5fa; margin: 0 0 8px; font-size: 13px;">📊 仪表盘</h4>
+      <ul style="color: #aaa; font-size: 12px; margin: 0; padding-left: 16px; line-height: 1.8;">
+        <li>Bento 网格布局</li>
+        <li>查询趋势大图表 (1H/6H/24H)</li>
+        <li>4个核心数据卡片</li>
+        <li>15个开关网格面板</li>
+        <li>服务状态指示</li>
+      </ul>
+    </div>
+    <div style="background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.2); border-radius: 8px; padding: 14px;">
+      <h4 style="color: #a78bfa; margin: 0 0 8px; font-size: 13px;">📋 日志与审计</h4>
+      <ul style="color: #aaa; font-size: 12px; margin: 0; padding-left: 16px; line-height: 1.8;">
+        <li>表格列表展示查询记录</li>
+        <li>搜索/过滤/分页</li>
+        <li>Top域名/客户端排名</li>
+        <li>统计概览卡片</li>
+        <li>自动轮询刷新</li>
+      </ul>
+    </div>
+    <div style="background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); border-radius: 8px; padding: 14px;">
+      <h4 style="color: #4ade80; margin: 0 0 8px; font-size: 13px;">🔀 规则与上游</h4>
+      <ul style="color: #aaa; font-size: 12px; margin: 0; padding-left: 16px; line-height: 1.8;">
+        <li>左右分栏：规则列表 + 编辑区</li>
+        <li>黑白灰名单管理</li>
+        <li>上游DNS分组卡片</li>
+        <li>特殊路由组配置</li>
+        <li>热重载支持</li>
+      </ul>
+    </div>
+    <div style="background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 14px;">
+      <h4 style="color: #fbbf24; margin: 0 0 8px; font-size: 13px;">⚙️ 系统与缓存</h4>
+      <ul style="color: #aaa; font-size: 12px; margin: 0; padding-left: 16px; line-height: 1.8;">
+        <li>缓存状态与管理</li>
+        <li>配置导出/导入</li>
+        <li>更新检查与安装</li>
+        <li>WebUI端口设置</li>
+        <li>外观自定义</li>
+      </ul>
+    </div>
+  </div>
+</div>

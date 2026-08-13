@@ -131,7 +131,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	RegisterAuditAPIV2(m.httpMux)      // For audit logs v2
 	RegisterOverridesAPI(m.httpMux, m) // <<< MODIFIED: Pass 'm'
 	RegisterAppearanceAPI(m.httpMux)
-	RegisterConfigManagerAPI(m.httpMux)
+	registerConfigManagerAPIIfEnabled(m.httpMux, configManagementEnabled())
 	RegisterDomainGenerationAPI(m.httpMux, m)
 	RegisterUpdateAPI(m.httpMux)    // For binary updates
 	RegisterSystemAPI(m.httpMux, m) // For self-restart

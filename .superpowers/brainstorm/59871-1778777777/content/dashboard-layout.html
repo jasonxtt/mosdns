@@ -1,0 +1,110 @@
+<h2>仪表盘布局方案</h2>
+<p class="subtitle">首页仪表盘的整体排版结构</p>
+
+<div class="cards">
+  <div class="card" data-choice="classic" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(135deg, #0a0e1a, #0a1a2e); padding: 16px; min-height: 220px;">
+      <!-- Top stat cards row -->
+      <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+        <div style="flex:1; background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.3); border-radius: 6px; padding: 10px;">
+          <div style="color: #60a5fa; font-size: 9px; text-transform: uppercase;">查询总量</div>
+          <div style="color: #fff; font-size: 20px; font-weight: 700;">1.2M</div>
+          <div style="color: #22c55e; font-size: 9px;">+12.5%</div>
+        </div>
+        <div style="flex:1; background: rgba(139,92,246,0.12); border: 1px solid rgba(139,92,246,0.3); border-radius: 6px; padding: 10px;">
+          <div style="color: #a78bfa; font-size: 9px; text-transform: uppercase;">缓存命中</div>
+          <div style="color: #fff; font-size: 20px; font-weight: 700;">87.3%</div>
+          <div style="color: #22c55e; font-size: 9px;">+2.1%</div>
+        </div>
+        <div style="flex:1; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); border-radius: 6px; padding: 10px;">
+          <div style="color: #4ade80; font-size: 9px; text-transform: uppercase;">平均延迟</div>
+          <div style="color: #fff; font-size: 20px; font-weight: 700;">8ms</div>
+          <div style="color: #ef4444; font-size: 9px;">+1.2ms</div>
+        </div>
+        <div style="flex:1; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); border-radius: 6px; padding: 10px;">
+          <div style="color: #fbbf24; font-size: 9px; text-transform: uppercase;">活跃客户端</div>
+          <div style="color: #fff; font-size: 20px; font-weight: 700;">23</div>
+          <div style="color: #888; font-size: 9px;">在线</div>
+        </div>
+      </div>
+      <!-- Chart area -->
+      <div style="background: rgba(59,130,246,0.05); border: 1px solid rgba(59,130,246,0.15); border-radius: 6px; padding: 12px; height: 90px;">
+        <div style="color: #60a5fa; font-size: 9px; margin-bottom: 8px;">查询趋势 (24h)</div>
+        <div style="display: flex; gap: 3px; align-items: flex-end; height: 50px;">
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 30%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 45%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 35%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 60%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 50%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 75%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 85%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 70%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 55%;"></div>
+          <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 40%;"></div>
+        </div>
+      </div>
+      <!-- Switch panel hint -->
+      <div style="margin-top: 8px; background: rgba(139,92,246,0.08); border: 1px dashed rgba(139,92,246,0.3); border-radius: 6px; padding: 8px; text-align: center;">
+        <span style="color: #a78bfa; font-size: 10px;">开关控制面板 (下方展开)</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>经典布局</h3>
+      <p>顶部数据卡片 → 中间图表 → 底部开关面板，自上而下阅读流</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="bento" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(135deg, #0a0e1a, #0a1a2e); padding: 16px; min-height: 220px;">
+      <div style="display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: auto auto auto; gap: 8px;">
+        <!-- Big chart spans 2 rows -->
+        <div style="grid-row: span 2; background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 8px; padding: 12px;">
+          <div style="color: #60a5fa; font-size: 9px; margin-bottom: 6px;">查询趋势</div>
+          <div style="display: flex; gap: 3px; align-items: flex-end; height: 100px;">
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 25%;"></div>
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 40%;"></div>
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 55%;"></div>
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 45%;"></div>
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 70%;"></div>
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 90%;"></div>
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 65%;"></div>
+            <div style="flex:1; background: linear-gradient(to top, #3b82f6, #8b5cf6); border-radius: 2px; height: 50%;"></div>
+          </div>
+        </div>
+        <!-- Stat 1 -->
+        <div style="background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; padding: 10px;">
+          <div style="color: #60a5fa; font-size: 9px;">查询总量</div>
+          <div style="color: #fff; font-size: 18px; font-weight: 700;">1.2M</div>
+        </div>
+        <!-- Stat 2 -->
+        <div style="background: rgba(139,92,246,0.12); border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; padding: 10px;">
+          <div style="color: #a78bfa; font-size: 9px;">缓存命中</div>
+          <div style="color: #fff; font-size: 18px; font-weight: 700;">87%</div>
+        </div>
+        <!-- Stats row -->
+        <div style="grid-column: span 2; display: flex; gap: 8px;">
+          <div style="flex:1; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.3); border-radius: 8px; padding: 8px;">
+            <div style="color: #4ade80; font-size: 9px;">延迟</div>
+            <div style="color: #fff; font-size: 16px; font-weight: 700;">8ms</div>
+          </div>
+          <div style="flex:1; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 8px;">
+            <div style="color: #fbbf24; font-size: 9px;">客户端</div>
+            <div style="color: #fff; font-size: 16px; font-weight: 700;">23</div>
+          </div>
+          <div style="flex:1; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 8px;">
+            <div style="color: #f87171; font-size: 9px;">拦截</div>
+            <div style="color: #fff; font-size: 16px; font-weight: 700;">1.2K</div>
+          </div>
+        </div>
+        <!-- Switch hint -->
+        <div style="grid-column: span 2; background: rgba(139,92,246,0.08); border: 1px dashed rgba(139,92,246,0.3); border-radius: 6px; padding: 6px; text-align: center;">
+          <span style="color: #a78bfa; font-size: 10px;">开关面板 (下方展开)</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Bento 网格</h3>
+      <p>不对称网格布局，大图表突出，数据卡片环绕，更有设计感</p>
+    </div>
+  </div>
+</div>
