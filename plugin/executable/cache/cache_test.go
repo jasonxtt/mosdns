@@ -30,8 +30,10 @@ import (
 func Test_cachePlugin_Dump(t *testing.T) {
 	c := NewCache(&Args{Size: 16 * dumpBlockSize}, Opts{}) // Big enough to create dump fragments.
 
+	q := new(dns.Msg)
+	q.SetQuestion("test.", dns.TypeA)
 	resp := new(dns.Msg)
-	resp.SetQuestion("test.", dns.TypeA)
+	resp.SetReply(q)
 
 	// Fix: Pack the dns.Msg to []byte because item.resp is now []byte
 	packedResp, err := resp.Pack()

@@ -58,6 +58,7 @@ type Context struct {
 	clientOpt  *dns.OPT // may be nil
 
 	resp        *dns.Msg
+	rawResp     []byte   // Pre-packed DNS response without a TCP length prefix.
 	respOpt     *dns.OPT // nil if clientOpt == nil
 	upstreamOpt *dns.OPT // may be nil
 
@@ -175,6 +176,7 @@ func (ctx *Context) ClientOpt() *dns.OPT {
 // If m is nil. It removes existing response.
 func (ctx *Context) SetResponse(m *dns.Msg) {
 	ctx.resp = m
+	ctx.rawResp = nil
 	if m == nil {
 		ctx.upstreamOpt = nil
 	} else {
@@ -182,11 +184,36 @@ func (ctx *Context) SetResponse(m *dns.Msg) {
 	}
 }
 
+// SetRawResponse sets a pre-packed DNS response payload without a TCP length
+// prefix. It takes ownership of payload and defers dns.Msg decoding until a
+// plugin or audit consumer calls R.
+func (ctx *Context) SetRawResponse(payload []byte) {
+	ctx.rawResp = payload
+	ctx.resp = nil
+	ctx.upstreamOpt = nil
+}
+
 // R returns the response that will be sent to client. It might be nil.
 // Note: R does not have EDNS0. Caller MUST NOT add a dns.OPT into R.
 // Use RespOpt() instead.
 func (ctx *Context) R() *dns.Msg {
+	if ctx.resp == nil && len(ctx.rawResp) > 0 {
+		m := new(dns.Msg)
+		if err := m.Unpack(ctx.rawResp); err == nil {
+			m.Id = ctx.query.Id
+			ctx.resp = m
+			ctx.upstreamOpt = popOpt(m)
+		}
+		ctx.rawResp = nil
+	}
 	return ctx.resp
+}
+
+// RawResponse returns the pre-packed response while it has not been decoded.
+// The returned slice is owned by this Context and must not be retained or
+// modified by callers.
+func (ctx *Context) RawResponse() []byte {
+	return ctx.rawResp
 }
 
 // RespOpt returns the OPT that will be sent to client.
@@ -230,8 +257,13 @@ func (ctx *Context) CopyTo(d *Context) *Context {
 	d.query = ctx.query.Copy()
 	d.clientOpt = ctx.clientOpt
 
+	d.resp = nil
+	d.rawResp = nil
 	if ctx.resp != nil {
 		d.resp = ctx.resp.Copy()
+	}
+	if len(ctx.rawResp) > 0 {
+		d.rawResp = append([]byte(nil), ctx.rawResp...)
 	}
 	if ctx.respOpt != nil {
 		d.respOpt = dns.Copy(ctx.respOpt).(*dns.OPT)
