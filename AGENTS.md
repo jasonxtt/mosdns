@@ -8,6 +8,9 @@ If you are a successor agent working on this repository, read files in this orde
 2. `docs/ai/project-context.md`
 3. `docs/ai/config-notes.md`
 4. `docs/ai/handover.md`
+5. `docs/ai/rust-handover.md` when working on the `rust` branch or Rust migration
+6. `docs/ai/rust-rewrite-plan.md` when working on the `rust` branch or Rust migration
+7. `.trellis/workflow.md` when a Trellis task is active
 
 This repository is a maintained fork of `yyysuo/mosdns` with custom routing, custom WebUI behavior, and operator-specific workflows.
 
@@ -24,6 +27,7 @@ This repository is a maintained fork of `yyysuo/mosdns` with custom routing, cus
 ## Working rules for this fork
 
 - This repo has a local CodeGraph index under `.codegraph/`. Use CodeGraph for cross-module symbols, call chains, and impact analysis; use `rg` for exact text, config fields, YAML, docs, and UI copy searches. For small UI copy or single-file edits, `rg` alone is enough.
+- Rust migration work is tracked under `.trellis/tasks/`. Treat each task's `prd.md`, `design.md`, and `implement.md` as the implementation gate. Trellis is configured for inline execution with auto-commit disabled so it cannot accidentally commit unrelated worktree changes.
 - Preserve behavior parity first when changing the main UI. Do not redesign core flows on `/` unless the user asks.
 - Treat WebUI changes as configuration workflow changes, not just frontend styling. Saving in the UI is expected to affect generated config and runtime behavior.
 - Be conservative with mobile WebUI table layout changes. In this fork, some users access `/` through mobile browsers or embedded WebViews with inconsistent CSS table behavior.
@@ -65,3 +69,5 @@ This repository is a maintained fork of `yyysuo/mosdns` with custom routing, cus
 - Project shape and code map: `docs/ai/project-context.md`
 - Config generation and runtime behavior: `docs/ai/config-notes.md`
 - Current state, pending work, and pitfalls: `docs/ai/handover.md`
+- Rust migration architecture, gates, and phase order: `docs/ai/rust-rewrite-plan.md`
+- Rust cross-session task state and worktree ownership: `docs/ai/rust-handover.md`

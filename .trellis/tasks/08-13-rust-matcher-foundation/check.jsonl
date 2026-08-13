@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required Go, Rust, race, FFI, and default-build gates"}
+{"file": ".trellis/spec/backend/config-compatibility.md", "reason": "YAML, API, reload, and provider compatibility"}
+{"file": "docs/ai/rust-handover.md", "reason": "Verify delivery against the canonical remaining-work boundary"}

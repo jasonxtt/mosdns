@@ -22,6 +22,7 @@ release/
 .idea/
 node_modules/
 webui-log/node_modules/
+rust/target/
 
 # test utils
 testutils/

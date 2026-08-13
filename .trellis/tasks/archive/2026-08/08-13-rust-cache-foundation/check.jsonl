@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required test, safety, and review gates"}
+{"file": ".trellis/spec/backend/config-compatibility.md", "reason": "Configuration, API, metrics, dump, and runtime compatibility"}
+{"file": ".trellis/spec/backend/rust-migration.md", "reason": "Rust reuse, ABI, and rollout constraints"}
+{"file": "docs/ai/rust-rewrite-plan.md", "reason": "Full acceptance gates"}
+{"file": "docs/ai/rust-handover.md", "reason": "Verify cache closure against canonical remaining gates"}

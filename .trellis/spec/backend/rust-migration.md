@@ -1,0 +1,152 @@
+# Rust Migration
+
+The complete architecture and phase gates are in `docs/ai/rust-rewrite-plan.md`. That document overrides abbreviated notes here.
+
+## Architecture
+
+Use a strangler migration: Go continues to own YAML, plugin lifecycle, sequence hosting, WebUI/API, and unmigrated modules; Rust gradually owns bounded data-plane modules behind a versioned C ABI. The first module is cache, followed by matchers, DNS/query execution, sequence, transports, and servers only after the previous gates pass.
+
+## Reuse policy
+
+- Preferred Rust upstream: KixDNS at audited commit `2da3a2d` (2026-08-12).
+- Prefer direct crates such as Moka when they provide the needed capability; otherwise classify KixDNS material as direct dependency, extracted code, adapted design, or rejected.
+- Preserve attribution and GPL-3.0 obligations for copied/adapted source. Pin reviewed upstream revisions and audit every update.
+- `/Users/tom/github/mosdns-rust-cache` is a compatibility reference for MosDNS bridge, dump, API, tests, and fallback—not a subtree to copy wholesale.
+
+## Cache foundation constraints
+
+- Use a concurrent O(1)-style cache design (Moka/sharding) and `Bytes`/raw-wire techniques; do not carry over the old global `Mutex` or linear L1 scan.
+- Reuse audited KixDNS DNS wire, TTL, truncation, and ECS ideas only after golden parity against MosDNS semantics.
+- Preserve `mosdns_cache_v2`, show/load/flush behavior, `domain_set`, exclusion, lazy TTL, metrics, and raw response paths.
+- Keep ABI calls coarse-grained. Check ABI version/capabilities at startup and contain every panic.
+- Default releases remain on the Go backend until correctness, safety, performance, and test-host gates are satisfied.
+
+## Phase gate
+
+Do not begin a later migration module merely because its Rust implementation is available upstream. Each module needs an approved Trellis task, frozen compatibility fixtures, parity results, performance evidence, and a rollback path.
+
+## Scenario: cgo borrowed byte slices
+
+### 1. Scope / Trigger
+
+Any Go-to-Rust ABI call that passes one or more Go-owned byte slices through
+cgo uses this contract. It prevents the runtime panic caused by passing C a
+pointer to a Go struct that itself contains Go pointers.
+
+### 2. Signatures
+
+Expose each borrowed slice as a C-compatible `{const uint8_t *ptr, uint64_t
+len}` value. Pass those slice descriptors **by value** to the C function; an
+opaque integer handle and fixed-width timestamps may accompany them.
+
+### 3. Contracts
+
+- Go retains each backing slice for the complete call and invokes
+  `runtime.KeepAlive` when lifetime is not otherwise obvious.
+- Empty input is `{NULL, 0}`; non-empty input is `{live pointer, positive len}`.
+- Rust validates pointer/length pairs before constructing a slice and never
+  retains a borrowed view after returning.
+- Rust-owned output uses the separate owned-buffer/release contract.
+
+### 4. Validation & Error Matrix
+
+- `NULL, positive len` -> `InvalidArgument`
+- non-NULL, zero len -> `InvalidArgument`
+- length not representable as `usize` -> `InvalidArgument`
+- closed/unknown handle -> `Closed`
+- caught panic -> `Panic`
+
+### 5. Good/Base/Bad Cases
+
+- Good: three `BorrowedSlice` values passed directly to `cache_store`.
+- Base: an empty optional `domain_set` passed as `{NULL, 0}`.
+- Bad: `&GoRequest{keyPtr, responsePtr}` passed to C, because the outer Go
+  pointer references memory containing additional Go pointers.
+
+### 6. Tests Required
+
+- Rust ABI tests assert null/length status mapping and no panic escape.
+- A real Linux+cgo integration test passes multiple non-empty slices in one
+  call; mock-only coverage is insufficient.
+- Go race tests cover concurrent operation and close ordering.
+
+### 7. Wrong vs Correct
+
+Wrong: `C.cache_store(handle, (*C.Request)(unsafe.Pointer(&goRequest)))` where
+`goRequest` contains pointers into Go byte slices.
+
+Correct: `C.cache_store(handle, keySlice, responseSlice, domainSetSlice, ...)`
+with each descriptor passed by value and each backing slice kept alive until
+the call returns.
+
+## Scenario: provider matcher snapshot publication
+
+### 1. Scope / Trigger
+
+Any Go provider that owns a reloadable Rust domain/IP matcher and is called from
+a DNS match hot path uses this publication contract. It prevents a large Rust
+build or file write from turning the provider state lock into global hot-path
+serialization.
+
+### 2. Signatures
+
+- Update entrypoints: provider `POST`/`flush`/`save` and `Close`.
+- State: Go matcher snapshot plus optional Rust integer handle.
+- Rust candidate: `BuildRustDomainMatcher(rules)` or
+  `BuildRustIPMatcher(prefixes)`, returning `(matcher, error)`.
+
+### 3. Contracts
+
+- A provider-local `updateMu` serializes complete updates, persistence, and
+  close; it is not used by `Match`.
+- Parse and copy request-owned rules/prefixes, build the Rust candidate, and
+  write configured files while the state `RWMutex` is unlocked.
+- Acquire the state write lock only long enough to exchange every member of one
+  generation: Go list/mix, published Go snapshot, and Rust handle.
+- Readers hold the state read lock through the Rust match call. Close the old
+  handle only after releasing the write lock, so prior readers have exited.
+- Build or persistence failure publishes nothing and leaves the complete old
+  generation active. A match error may disable only the handle that returned
+  the error; it must not close a concurrently published generation.
+- Rust selection is opt-in; the default Go path and matcher order remain
+  unchanged.
+
+### 4. Validation & Error Matrix
+
+- Rust build error -> update error, old Go/Rust generation remains active.
+- File write error -> update error, candidate is closed, old generation remains
+  active.
+- Concurrent update -> updates are serialized and each response publishes one
+  whole generation; no cross-generation Go/Rust combination is observable.
+- Match during candidate build/write -> old snapshot can complete without
+  waiting for the off-path work.
+- Close during/after update -> update serialization and handle identity checks
+  prevent closing another generation; repeated close is harmless.
+
+### 5. Good/Base/Bad Cases
+
+- Good: build `tmpList`/`tmpMix` and Rust handle off-path, then swap all fields
+  under one short state lock and close the old handle after unlock.
+- Base: a disabled backend returns no handle and the established Go matcher is
+  still published.
+- Bad: hold the state mutex during Rust compilation or disk I/O, or publish Go
+  state before the Rust candidate is ready.
+
+### 6. Tests Required
+
+- A controllably blocked builder proves an old `Match` completes during the
+  candidate build and that the new generation is published afterward.
+- Build/persistence failure tests assert both Go and Rust old-generation
+  behavior and no partial file/state publication.
+- Race tests cover concurrent match, update, and repeated close.
+- Linux+cgo tests directly assert Rust positive and negative results, while
+  separate whole-matcher tests retain fallback and consumer semantics.
+
+### 7. Wrong vs Correct
+
+Wrong: acquire the provider state lock, compile a large Rust matcher, write the
+rule file, then publish fields one at a time.
+
+Correct: serialize the update with `updateMu`, build and persist immutable
+request-local candidates without the state lock, exchange the complete
+generation in one short critical section, then retire the exact old handle.
