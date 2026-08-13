@@ -3,7 +3,7 @@
   "name": "rust-matcher-foundation",
   "title": "Rust matcher and rule compiler foundation",
   "description": "Migrate domain/IP matcher parsing and compiled read-only indexes to Rust while preserving MosDNS configuration, reload, routing, and audit behavior.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "rust/runtime, rust/matcher-core, and opt-in Go matcher adapters",
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "tom",
   "assignee": "tom",
   "createdAt": "2026-08-13",
-  "completedAt": null,
+  "completedAt": "2026-08-13",
   "branch": "rust",
   "base_branch": "rust",
   "worktree_path": null,
@@ -23,7 +23,7 @@
   "relatedFiles": [],
   "notes": "",
   "meta": {
-    "planning_gate": "review_passed_awaiting_commit_finish",
+    "planning_gate": "completed_reviewed_archived",
     "predecessor": "08-13-rust-cache-foundation"
   }
 }
