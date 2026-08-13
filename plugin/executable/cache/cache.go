@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,7 +54,7 @@ const (
 	dumpBlockSize          = 128
 	dumpMaximumBlockLength = 1 << 20 // 1M block. 8kb pre entry. Should be enough.
 
-	shardCount   = 256  // 256分段锁，平衡锁竞争与内存开销
+	shardCount   = 256   // 256分段锁，平衡锁竞争与内存开销
 	l1TotalCap   = 51200 // L1 总容量限制
 	shardMaxSize = 200   // 每个分段桶的配额 (51200/shardCount)
 
@@ -180,6 +181,7 @@ type Cache struct {
 	closeOnce    sync.Once
 	closeNotify  chan struct{}
 	updatedKey   atomic.Uint64
+	rustBackend  atomic.Pointer[rustCacheBackendHolder]
 
 	// 分段 L1 池
 	shards [shardCount]*l1Shard
@@ -251,12 +253,13 @@ func NewCache(args *Args, opts Opts) *Cache {
 
 	backend := cache.New[key, *item](cache.Opts{Size: args.Size})
 	lb := map[string]string{"tag": opts.MetricsTag}
-	p := &Cache{
-		args:        args,
-		logger:      logger,
-		backend:     backend,
-		closeNotify: make(chan struct{}),
-		excludeNets: excludeNets,
+	var p *Cache
+	p = &Cache{
+		args:            args,
+		logger:          logger,
+		backend:         backend,
+		closeNotify:     make(chan struct{}),
+		excludeNets:     excludeNets,
 		lazyUpdateLimit: make(chan struct{}, maxConcurrentLazyUpdate),
 
 		queryTotal: prometheus.NewCounter(prometheus.CounterOpts{
@@ -279,7 +282,7 @@ func NewCache(args *Args, opts Opts) *Cache {
 			Help:        "Current cache size in records",
 			ConstLabels: lb,
 		}, func() float64 {
-			return float64(backend.Len())
+			return float64(p.currentCacheLen())
 		}),
 	}
 
@@ -294,6 +297,12 @@ func NewCache(args *Args, opts Opts) *Cache {
 
 	if err := p.loadDump(); err != nil {
 		p.logger.Error("failed to load cache dump", zap.Error(err))
+	}
+	if rustBackend, _ := openRustCacheBackend(args, logger); rustBackend != nil {
+		p.rustBackend.Store(&rustCacheBackendHolder{backend: rustBackend})
+		if err := p.seedRustFromGo(); err != nil {
+			p.disableRustBackend("initial dump seed", err)
+		}
 	}
 	p.startDumpLoop()
 
@@ -387,10 +396,15 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	h := k.Sum()
 	shard := c.shards[h%shardCount]
 
-	// --- L1 极速路径查询 (免解包) ---
-	shard.RLock()
-	v1, ok1 := shard.items[k]
-	shard.RUnlock()
+	rustActive := c.rustActive()
+	var v1 *l1Item
+	var ok1 bool
+	if !rustActive {
+		// --- L1 极速路径查询 (免解包) ---
+		shard.RLock()
+		v1, ok1 = shard.items[k]
+		shard.RUnlock()
+	}
 
 	now := time.Now()
 	if ok1 && now.Before(v1.expirationTime) {
@@ -406,7 +420,7 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 		if v1.domainSet != "" {
 			qCtx.StoreValue(query_context.KeyDomainSet, v1.domainSet)
 		}
-		
+
 		// 归还 Key 缓冲区
 		keyBufferPool.Put(bufPtr)
 		return nil
@@ -415,12 +429,42 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 	// 命中 L1 失败或过期，需要正式生成 string Key 用于后续 L2 存储或异步任务
 	msgKey := string(msgKeyBuf)
 	kReal := key(msgKey)
-	
+
 	// 归还 Key 缓冲区
 	keyBufferPool.Put(bufPtr)
 
-	// --- L2 路径查询 ---
-	cachedResp, lazyHit, domainSet := getRespFromCache(msgKey, c.backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
+	useGoLookup := true
+	if rustActive {
+		if result, ok := c.lookupRust([]byte(msgKey), now); ok {
+			useGoLookup = false
+			if result.State != rustCacheMiss {
+				if len(result.Response) == 0 {
+					c.disableRustBackend("lookup response", errors.New("rust cache returned an empty response"))
+					useGoLookup = true
+				} else {
+					lazyHit := result.State == rustCacheLazy
+					if lazyHit {
+						c.lazyHitTotal.Inc()
+						c.doLazyUpdate(msgKey, qCtx, next)
+					}
+					c.hitTotal.Inc()
+					qCtx.SetRawResponse(result.Response)
+					if result.DomainSet != "" {
+						qCtx.StoreValue(query_context.KeyDomainSet, result.DomainSet)
+					}
+					return nil
+				}
+			}
+		}
+	}
+
+	// --- L2 路径查询 / Go fallback ---
+	var cachedResp *dns.Msg
+	var lazyHit bool
+	var domainSet string
+	if useGoLookup {
+		cachedResp, lazyHit, domainSet = getRespFromCache(msgKey, c.backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
+	}
 	if lazyHit {
 		c.lazyHitTotal.Inc()
 		c.doLazyUpdate(msgKey, qCtx, next)
@@ -459,6 +503,9 @@ func (c *Cache) Exec(ctx context.Context, qCtx *query_context.Context, next sequ
 				}
 			}
 			shard.updateL1(kReal, r, now, now.Add(time.Duration(minTTL)*time.Second), dset)
+			if value, cacheExpiresAt, ok := c.backend.Get(kReal); ok {
+				c.storeRust([]byte(msgKey), value, cacheExpiresAt)
+			}
 		}
 	}
 
@@ -506,6 +553,9 @@ func (c *Cache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next se
 					}
 				}
 				shard.updateL1(k, r, time.Now(), time.Now().Add(time.Duration(minTTL)*time.Second), dset)
+				if value, cacheExpiresAt, ok := c.backend.Get(k); ok {
+					c.storeRust([]byte(msgKey), value, cacheExpiresAt)
+				}
 			}
 		}
 		c.logger.Debug("lazy cache updated", qCtx.InfoField())
@@ -521,6 +571,7 @@ func (c *Cache) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.closeNotify)
 	})
+	c.closeRust()
 	return c.backend.Close()
 }
 
@@ -577,15 +628,37 @@ func (c *Cache) dumpCache() error {
 	if len(c.args.DumpFile) == 0 {
 		return nil
 	}
-	f, err := os.Create(c.args.DumpFile)
+	dumpPath := c.args.DumpFile
+	dir := filepath.Dir(dumpPath)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dumpPath)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	mode := os.FileMode(0o644)
+	if info, statErr := os.Stat(dumpPath); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
 
-	en, err := c.writeDump(f)
+	en, err := c.writeDump(tmp)
 	if err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("failed to write dump, %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to sync dump, %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close dump, %w", err)
+	}
+	if err := os.Rename(tmpPath, dumpPath); err != nil {
+		return fmt.Errorf("failed to replace dump, %w", err)
 	}
 	c.logger.Info("cache dumped", zap.Int("entries", en))
 	return nil
@@ -734,6 +807,7 @@ func (c *Cache) Api() *chi.Mux {
 }
 
 func (c *Cache) Flush() error {
+	c.flushRust()
 	c.backend.Flush()
 
 	for i := 0; i < shardCount; i++ {
@@ -885,72 +959,99 @@ func (c *Cache) writeDump(w io.Writer) (int, error) {
 }
 
 func (c *Cache) readDump(r io.Reader) (int, error) {
-	en := 0
 	gr, err := gzip.NewReader(r)
 	if err != nil {
-		return en, fmt.Errorf("failed to read gzip header, %w", err)
+		return 0, fmt.Errorf("failed to read gzip header, %w", err)
 	}
+	defer gr.Close()
 	if gr.Name != dumpHeader {
-		return en, fmt.Errorf("invalid or old cache dump, header is %s, want %s", gr.Name, dumpHeader)
+		return 0, fmt.Errorf("invalid or old cache dump, header is %s, want %s", gr.Name, dumpHeader)
 	}
 
-	var errReadHeaderEOF = errors.New("")
-	readBlock := func() error {
+	type pendingEntry struct {
+		key            key
+		value          *item
+		cacheExpiresAt time.Time
+	}
+	pending := make([]pendingEntry, 0)
+	readBlock := func() (bool, error) {
 		h := pool.GetBuf(8)
 		defer pool.ReleaseBuf(h)
 		_, err := io.ReadFull(gr, *h)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return errReadHeaderEOF
+				return false, nil
 			}
-			return fmt.Errorf("failed to read block header, %w", err)
+			return false, fmt.Errorf("failed to read block header, %w", err)
 		}
 		u := binary.BigEndian.Uint64(*h)
 		if u > dumpMaximumBlockLength {
-			return fmt.Errorf("invalid header, block length is big, %d", u)
+			return false, fmt.Errorf("invalid header, block length is big, %d", u)
 		}
 		b := pool.GetBuf(int(u))
 		defer pool.ReleaseBuf(b)
 		_, err = io.ReadFull(gr, *b)
 		if err != nil {
-			return fmt.Errorf("failed to read block data, %w", err)
+			return false, fmt.Errorf("failed to read block data, %w", err)
 		}
 		block := new(CacheDumpBlock)
 		if err := proto.Unmarshal(*b, block); err != nil {
-			return fmt.Errorf("failed to decode block data, %w", err)
+			return false, fmt.Errorf("failed to decode block data, %w", err)
 		}
 
-		en += len(block.GetEntries())
 		for _, entry := range block.GetEntries() {
+			if len(entry.GetKey()) == 0 || len(entry.GetMsg()) == 0 {
+				return false, errors.New("cache dump entry has an empty key or DNS message")
+			}
 			cacheExpTime := time.Unix(entry.GetCacheExpirationTime(), 0)
 			msgExpTime := time.Unix(entry.GetMsgExpirationTime(), 0)
 			storedTime := time.Unix(entry.GetMsgStoredTime(), 0)
-
-			i := &item{
-				resp:           entry.GetMsg(),
-				storedTime:     storedTime,
-				expirationTime: msgExpTime,
-				domainSet:      entry.GetDomainSet(),
+			if msgExpTime.Before(storedTime) || cacheExpTime.Before(storedTime) {
+				return false, errors.New("cache dump entry has invalid timestamps")
 			}
-			c.backend.Store(key(entry.GetKey()), i, cacheExpTime)
+			msg := new(dns.Msg)
+			if err := msg.Unpack(entry.GetMsg()); err != nil {
+				return false, fmt.Errorf("cache dump entry has invalid DNS response: %w", err)
+			}
+			if !msg.Response {
+				return false, errors.New("cache dump entry DNS message is not a response")
+			}
+			pending = append(pending, pendingEntry{
+				key: key(string(entry.GetKey())),
+				value: &item{
+					resp:           append([]byte(nil), entry.GetMsg()...),
+					storedTime:     storedTime,
+					expirationTime: msgExpTime,
+					domainSet:      entry.GetDomainSet(),
+				},
+				cacheExpiresAt: cacheExpTime,
+			})
 		}
-		return nil
+		return true, nil
 	}
 
 	for {
-		err = readBlock()
-		if err != nil {
-			if err == errReadHeaderEOF {
-				err = nil
-			}
+		more, readErr := readBlock()
+		if readErr != nil {
+			return len(pending), readErr
+		}
+		if !more {
 			break
 		}
 	}
-
-	if err != nil {
-		return en, err
+	if err := gr.Close(); err != nil {
+		return len(pending), fmt.Errorf("failed to close gzip dump, %w", err)
 	}
-	return en, gr.Close()
+
+	now := time.Now()
+	for _, entry := range pending {
+		if entry.cacheExpiresAt.Before(now) {
+			continue
+		}
+		c.backend.Store(entry.key, entry.value, entry.cacheExpiresAt)
+		c.storeRust([]byte(entry.key), entry.value, entry.cacheExpiresAt)
+	}
+	return len(pending), nil
 }
 
 func getECSClient(qCtx *query_context.Context) string {
@@ -1060,11 +1161,11 @@ func getRespFromCache(msgKey string, backend *cache.Cache[key, *item], lazyCache
 	v, _, _ := backend.Get(key(msgKey))
 	if v != nil {
 		now := time.Now()
-		
+
 		// 性能补丁：利用 Pool 进行解包，减少对象分配
 		m := dnsMsgPool.Get().(*dns.Msg)
 		defer dnsMsgPool.Put(m)
-		
+
 		if err := m.Unpack(v.resp); err != nil {
 			return nil, false, ""
 		}

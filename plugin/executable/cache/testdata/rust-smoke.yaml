@@ -1,0 +1,30 @@
+log:
+  level: debug
+
+api:
+  http: "127.0.0.1:19099"
+
+plugins:
+  - tag: smoke_cache
+    type: cache
+    args:
+      size: 1024
+      lazy_cache_ttl: 300
+
+  - tag: smoke_forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "127.0.0.1:53"
+
+  - tag: smoke_sequence
+    type: sequence
+    args:
+      - exec: $smoke_cache
+      - exec: $smoke_forward
+
+  - tag: smoke_udp
+    type: udp_server
+    args:
+      entry: smoke_sequence
+      listen: "127.0.0.1:15353"
