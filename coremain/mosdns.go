@@ -120,6 +120,18 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 			mlog.L().Error("failed to parse config_overrides.json, it will be ignored", zap.Error(err))
 		}
 	}
+	if err := prepareConfiguredUpstreamGroups(cfg, m.globalOverrides); err != nil {
+		mlog.L().Warn("failed to prepare upstream source catalog", zap.Error(err))
+	} else if groups, err := loadSpecialGroupsFromDir(MainConfigBaseDir); err == nil {
+		if _, err := refreshSpecialGroupRuntimeState(groups); err != nil {
+			mlog.L().Warn("failed to refresh special upstream bindings", zap.Error(err))
+		}
+		if err := SyncSpecialGroupsConfig(MainConfigBaseDir); err != nil {
+			mlog.L().Warn("failed to sync special_groups config after upstream binding refresh", zap.Error(err))
+		}
+	} else {
+		mlog.L().Warn("failed to load special groups before upstream binding refresh", zap.Error(err))
+	}
 	// <<< END OF MODIFICATIONS >>>
 
 	// This must be called after m.httpMux and m.metricsReg been set.
