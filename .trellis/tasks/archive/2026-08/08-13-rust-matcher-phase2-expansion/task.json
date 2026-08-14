@@ -1,0 +1,42 @@
+{
+  "id": "rust-matcher-phase2-expansion",
+  "name": "rust-matcher-phase2-expansion",
+  "title": "Rust matcher phase 2 expansion",
+  "description": "Complete Phase 2 by extending the experimental Rust matcher runtime to sd_set, si_set, light-provider fan-out, and domain_mapper while preserving Go-only defaults and exact MosDNS behavior.",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "rust matcher provider fan-out and domain_mapper",
+  "package": null,
+  "priority": "P1",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-08-13",
+  "completedAt": "2026-08-14",
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "rust/matcher-core/",
+    "rust/runtime/",
+    "plugin/data_provider/domain_set/",
+    "plugin/data_provider/ip_set/",
+    "plugin/data_provider/sd_set/",
+    "plugin/data_provider/sd_set_light/",
+    "plugin/data_provider/domain_set_light/",
+    "plugin/data_provider/si_set/",
+    "plugin/data_provider/domain_mapper/",
+    "docs/rust/",
+    ".github/workflows/test.yml"
+  ],
+  "notes": "Planning and acceptance review are owned by the root session. A separately opened Luna session will implement one slice at a time and report through Herdr. Planning remains blocked until the user approves prd.md, design.md, and implement.md. Rust remains experimental and default builds remain Go-only.",
+  "meta": {
+    "planning_gate": "approved_2026-08-13",
+    "implementation_owner": "external_luna_via_herdr",
+    "review_owner": "root"
+  }
+}
