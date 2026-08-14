@@ -57,11 +57,71 @@ configure_repository() {
 	fi
 }
 
-package_version() {
+package_manager_busy() {
 	if command -v apk >/dev/null 2>&1; then
-		apk list --installed "$1" 2>/dev/null | sed -n "s/^$1-\([^ ]*\).*/\1/p" | head -n 1
+		pidof apk >/dev/null 2>&1
 	else
-		opkg list-installed "$1" 2>/dev/null | awk 'NR == 1 { print $3 }'
+		pidof opkg >/dev/null 2>&1
+	fi
+}
+
+apk_package_version() {
+	[ -r /lib/apk/db/installed ] || return 0
+	awk -v package="$1" '
+		function flush() {
+			if (name == package && version != "") {
+				print version
+				found = 1
+				exit
+			}
+			name = version = ""
+		}
+		/^$/ { flush(); next }
+		/^P:/ { name = substr($0, 3); next }
+		/^V:/ { version = substr($0, 3); next }
+		END { if (!found) flush() }
+	' /lib/apk/db/installed
+}
+
+opkg_package_version() {
+	[ -r /usr/lib/opkg/status ] || return 0
+	awk -v package="$1" '
+		function flush() {
+			if (name == package && version != "" && status == "installed") {
+				print version
+				found = 1
+				exit
+			}
+			name = version = status = ""
+		}
+		/^$/ { flush(); next }
+		/^Package:[[:space:]]/ { name = $2; next }
+		/^Version:[[:space:]]/ { version = $2; next }
+		/^Status:[[:space:]]/ { status = $4; next }
+		END { if (!found) flush() }
+	' /usr/lib/opkg/status
+}
+
+package_version() {
+	version=''
+	if command -v apk >/dev/null 2>&1; then
+		version="$(apk_package_version "$1")"
+		if [ -z "$version" ] && ! package_manager_busy; then
+			version="$(apk list --installed "$1" 2>/dev/null | sed -n "s/^$1-\([^ ]*\).*/\1/p" | head -n 1)"
+		fi
+	else
+		version="$(opkg_package_version "$1")"
+		if [ -z "$version" ] && ! package_manager_busy; then
+			version="$(opkg list-installed "$1" 2>/dev/null | awk 'NR == 1 { print $3 }')"
+		fi
+	fi
+	printf '%s\n' "$version"
+}
+
+ensure_package_manager_idle() {
+	if package_manager_busy; then
+		echo 'MosDNS-T 软件包操作正在进行中，请稍候再试。' >&2
+		return 1
 	fi
 }
 
@@ -107,7 +167,10 @@ print_status() {
 	dns_port="$(uci -q get mosdns-t.main.listen_port)"
 	[ -n "$dns_port" ] || dns_port=5335
 	update_available=0
-	if command -v apk >/dev/null 2>&1; then
+	update_in_progress=0
+	if package_manager_busy; then
+		update_in_progress=1
+	elif command -v apk >/dev/null 2>&1; then
 		if apk list -u 2>/dev/null | grep -Eq '^(mosdns-t|luci-app-mosdns-t)-'; then
 			update_available=1
 		fi
@@ -120,6 +183,7 @@ print_status() {
 	printf 'webui_port=%s\n' "$webui_port"
 	printf 'dns_port=%s\n' "$dns_port"
 	printf 'update_available=%s\n' "$update_available"
+	printf 'update_in_progress=%s\n' "$update_in_progress"
 	[ -e "$CHECK_STATE" ] && printf 'update_checked=1\n' || printf 'update_checked=0\n'
 }
 
@@ -128,11 +192,13 @@ case "$1" in
 		print_status
 		;;
 	check)
+		ensure_package_manager_idle || exit 1
 		package_update
 		: > "$CHECK_STATE"
 		print_status
 		;;
 	upgrade)
+		ensure_package_manager_idle || exit 1
 		package_update
 		: > "$CHECK_STATE"
 		package_upgrade

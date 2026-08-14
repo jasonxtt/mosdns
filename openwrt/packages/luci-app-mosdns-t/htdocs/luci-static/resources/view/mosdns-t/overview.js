@@ -87,6 +87,7 @@ return view.extend({
 		const autostart = data[3];
 		const packageStatus = data[4] || {};
 		const updateAvailable = packageStatus.update_available === '1';
+		const updateInProgress = packageStatus.update_in_progress === '1';
 		const updateChecked = packageStatus.update_checked === '1';
 		const webuiPort = packageStatus.webui_port || '9099';
 		const dnsPort = packageStatus.dns_port || '5335';
@@ -95,7 +96,12 @@ return view.extend({
 			class: 'btn cbi-button cbi-button-positive',
 			click: ui.createHandlerFn(this, () => runUpdater('upgrade'))
 		}, _('升级 MosDNS-T'));
-		upgradeButton.disabled = !updateAvailable;
+		upgradeButton.disabled = updateInProgress || !updateAvailable;
+		const checkButton = E('button', {
+			class: 'btn cbi-button cbi-button-action',
+			click: ui.createHandlerFn(this, () => runUpdater('check'))
+		}, _('检查更新'));
+		checkButton.disabled = updateInProgress;
 
 		m = new form.Map('mosdns-t', _('MosDNS-T'),
 			_('接管 dnsmasq 时，dnsmasq 保留 53 端口并把请求转发到 MosDNS-T；未接管时，MosDNS-T 直接在所设端口提供 DNS 服务。'));
@@ -141,16 +147,15 @@ return view.extend({
 		s.anonymous = true;
 		s.render = () => E('div', { class: 'cbi-section' }, [
 			E('p', {}, '%s %s'.format(_('已安装：'), packageStatus.core_version || _('未知'))),
-			E('p', {}, updateAvailable
-				? _('软件源中有新版本可用。')
-				: updateChecked
-					? _('当前已是最新版本。')
-					: _('点击“检查更新”刷新 MosDNS-T 软件源。')),
+			E('p', {}, updateInProgress
+				? _('软件包操作正在进行中，请稍候刷新。')
+				: updateAvailable
+					? _('软件源中有新版本可用。')
+					: updateChecked
+						? _('当前已是最新版本。')
+						: _('点击“检查更新”刷新 MosDNS-T 软件源。')),
 			E('div', { class: 'right' }, [
-				E('button', {
-					class: 'btn cbi-button cbi-button-action',
-					click: ui.createHandlerFn(this, () => runUpdater('check'))
-				}, _('检查更新')),
+				checkButton,
 				' ',
 				upgradeButton
 			])
