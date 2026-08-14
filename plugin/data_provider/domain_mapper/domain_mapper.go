@@ -3,6 +3,7 @@ package domain_mapper
 import (
 	"context"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
+	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/matcher_adapter"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"go.uber.org/zap"
 )
@@ -59,22 +61,54 @@ type compiledMatcher struct {
 	overlapRules []overlapRule
 }
 
+type ruleAggregation struct {
+	fastMarkMap map[string]uint64
+	ctxMarkMap  map[string]map[uint32]struct{}
+	tagMap      map[string]string
+	sourceMap   map[string]string
+	ruleOrder   []string
+	valuedRules []matcher_adapter.ValuedRule
+	totalRules  int
+}
+
+type hotEntry struct {
+	name string
+	res  *MatchResult
+}
+
+type goCandidate struct {
+	matcher    *compiledMatcher
+	hotEntries []hotEntry
+	poolSize   int
+}
+
+type valuedGeneration struct {
+	snapshot matcher_adapter.ValuedSnapshot
+	disabled atomic.Bool
+}
+
 type DomainMapper struct {
 	logger         *zap.Logger
 	matcher        atomic.Value
 	updateMu       sync.Mutex
+	generationMu   sync.RWMutex
 	updateTimer    *time.Timer
+	closed         atomic.Bool
 	ruleConfigs    []RuleConfig
 	defaultMark    uint8
 	defaultCtxMark uint32
 	defaultTag     string
 	providers      map[string]data_provider.RuleExporter
 	runBit         uint8
+	rustGeneration *valuedGeneration
 
 	hotMap sync.Map
 }
 
 var _ sequence.Executable = (*DomainMapper)(nil)
+var _ io.Closer = (*DomainMapper)(nil)
+
+var valuedSnapshotBuilder = matcher_adapter.BuildValuedDomainSnapshot
 
 func NewMapper(bp *coremain.BP, args any) (any, error) {
 	cfg := args.(*Args)
@@ -115,203 +149,36 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 	}
 
 	rebuild := func() {
+		dm.updateMu.Lock()
+		defer dm.updateMu.Unlock()
+
 		dm.logger.Info("rebuilding domain_mapper with logic inheritance...")
 		start := time.Now()
-
-		fastMarkMap := make(map[string]uint64)
-		ctxMarkMap := make(map[string]map[uint32]struct{})
-		tagMap := make(map[string]string)
-		sourceMap := make(map[string]string)
-		totalRules := 0
-
-		for _, ruleCfg := range dm.ruleConfigs {
-			provider, ok := dm.providers[ruleCfg.Tag]
-			if !ok {
-				continue
-			}
-			ruleEntries, err := getRuleEntriesFromProvider(ruleCfg, provider)
-			if err != nil {
-				continue
-			}
-
-			targetTag := ruleCfg.OutputTag
-			if targetTag == "" {
-				targetTag = ruleCfg.Tag
-			}
-
-			for _, ruleEntry := range ruleEntries {
-				ruleStr := ruleEntry.Rule
-				sourceName := firstNonEmpty(ruleEntry.SourceName, ruleCfg.Tag)
-				if ruleCfg.Mark > 0 && ruleCfg.Mark <= 63 {
-					fastMarkMap[ruleStr] |= (1 << (ruleCfg.Mark - 1))
-				}
-				if ruleCfg.CtxMark > 0 {
-					if ctxMarkMap[ruleStr] == nil {
-						ctxMarkMap[ruleStr] = make(map[uint32]struct{})
-					}
-					ctxMarkMap[ruleStr][ruleCfg.CtxMark] = struct{}{}
-				}
-				tagMap[ruleStr] = appendJoinedValue(tagMap[ruleStr], targetTag)
-				sourceMap[ruleStr] = appendJoinedValue(sourceMap[ruleStr], sourceName)
-			}
-			totalRules += len(ruleEntries)
+		agg := dm.aggregateRules()
+		candidate := dm.buildGoCandidate(agg)
+		var rustSnapshot matcher_adapter.ValuedSnapshot
+		var rustErr error
+		if valuedSnapshotBuilder != nil {
+			rustSnapshot, rustErr = valuedSnapshotBuilder(agg.valuedRules)
 		}
-
-		for _, ruleStr := range collectRuleKeys(fastMarkMap, ctxMarkMap, tagMap, sourceMap) {
-			dotPos := strings.Index(ruleStr, ":")
-			if dotPos == -1 {
-				continue
+		if rustErr != nil {
+			if dm.logger != nil {
+				dm.logger.Warn("valued Rust domain_mapper build failed; using Go candidate",
+					zap.String("plugin", PluginType),
+					zap.Error(rustErr),
+					zap.Int("rules", len(agg.valuedRules)))
 			}
-			originalDName := ruleStr[dotPos+1:]
-			dName := originalDName
-
-			if strings.HasPrefix(ruleStr, "full:") {
-				ancestorKey := "domain:" + originalDName
-				if aMask, ok := fastMarkMap[ancestorKey]; ok {
-					fastMarkMap[ruleStr] |= aMask
-				}
-				if aMarks, ok := ctxMarkMap[ancestorKey]; ok {
-					if ctxMarkMap[ruleStr] == nil {
-						ctxMarkMap[ruleStr] = make(map[uint32]struct{})
-					}
-					for m := range aMarks {
-						ctxMarkMap[ruleStr][m] = struct{}{}
-					}
-				}
-				aTags := tagMap[ancestorKey]
-				if aTags != "" {
-					tagMap[ruleStr] = appendJoinedValue(tagMap[ruleStr], aTags)
-				}
-				aSources := sourceMap[ancestorKey]
-				if aSources != "" {
-					sourceMap[ruleStr] = appendJoinedValue(sourceMap[ruleStr], aSources)
-				}
-			}
-
-			for {
-				nextDot := strings.Index(dName, ".")
-				if nextDot == -1 {
-					break
-				}
-				dName = dName[nextDot+1:]
-				ancestorKey := "domain:" + dName
-
-				if aMask, ok := fastMarkMap[ancestorKey]; ok {
-					fastMarkMap[ruleStr] |= aMask
-				}
-				if aMarks, ok := ctxMarkMap[ancestorKey]; ok {
-					if ctxMarkMap[ruleStr] == nil {
-						ctxMarkMap[ruleStr] = make(map[uint32]struct{})
-					}
-					for m := range aMarks {
-						ctxMarkMap[ruleStr][m] = struct{}{}
-					}
-				}
-				aTags := tagMap[ancestorKey]
-				if aTags != "" {
-					tagMap[ruleStr] = appendJoinedValue(tagMap[ruleStr], aTags)
-				}
-				aSources := sourceMap[ancestorKey]
-				if aSources != "" {
-					sourceMap[ruleStr] = appendJoinedValue(sourceMap[ruleStr], aSources)
-				}
+			if rustSnapshot != nil {
+				_ = rustSnapshot.Close()
+				rustSnapshot = nil
 			}
 		}
-
-		pool := make(map[string]*MatchResult)
-		domainRules := domain.NewMixMatcher[*MatchResult]()
-		overlapRules := make([]overlapRule, 0, 64)
-
-		type hotEntry struct {
-			name string
-			res  *MatchResult
-		}
-		var hotEntries []hotEntry
-
-		for _, ruleStr := range collectRuleKeys(fastMarkMap, ctxMarkMap, tagMap, sourceMap) {
-			fastMask := fastMarkMap[ruleStr]
-			tagsStr := tagMap[ruleStr]
-			sourcesStr := sourceMap[ruleStr]
-			ctxMarks := ctxMarkMap[ruleStr]
-			sig := fmt.Sprintf("%d-%v-%s-%s", fastMask, sortedCtxMarks(ctxMarks), tagsStr, sourcesStr)
-
-			res, exists := pool[sig]
-			if !exists {
-				res = &MatchResult{
-					JoinedTags:    tagsStr,
-					JoinedSources: sourcesStr,
-				}
-				for i := uint8(0); i < 64; i++ {
-					if fastMask&(1<<i) != 0 {
-						res.FastMarks = append(res.FastMarks, i+1)
-					}
-				}
-				res.CtxMarks = sortedCtxMarks(ctxMarks)
-				pool[sig] = res
-			}
-
-			switch {
-			case strings.HasPrefix(ruleStr, "full:"):
-				name := strings.TrimPrefix(ruleStr, "full:")
-				if !strings.HasSuffix(name, ".") {
-					name += "."
-				}
-				hotEntries = append(hotEntries, hotEntry{name: name, res: res})
-			case strings.HasPrefix(ruleStr, "keyword:"):
-				overlapRules = append(overlapRules, overlapRule{
-					keyword: domain.NormalizeDomain(strings.TrimPrefix(ruleStr, "keyword:")),
-					res:     res,
-				})
-			case strings.HasPrefix(ruleStr, "regexp:"):
-				pattern := strings.TrimPrefix(ruleStr, "regexp:")
-				compiled, err := regexp.Compile(pattern)
-				if err != nil {
-					dm.logger.Warn("skip invalid regexp rule",
-						zap.String("rule", ruleStr),
-						zap.Error(err),
-					)
-					continue
-				}
-				overlapRules = append(overlapRules, overlapRule{
-					regex: compiled,
-					res:   res,
-				})
-			default:
-				if err := domainRules.Add(ruleStr, res); err != nil {
-					dm.logger.Warn("skip invalid domain rule",
-						zap.String("rule", ruleStr),
-						zap.Error(err),
-					)
-				}
-			}
-		}
-
-		dm.matcher.Store(&compiledMatcher{
-			domainRules:  domainRules,
-			overlapRules: overlapRules,
-		})
-		dm.hotMap.Range(func(key, value any) bool {
-			dm.hotMap.Delete(key)
-			return true
-		})
-
-		for _, e := range hotEntries {
-			dm.hotMap.Store(e.name, e.res)
-		}
-
+		dm.publishGeneration(candidate, rustSnapshot)
 		dm.logger.Info("rebuild finished",
-			zap.Int("rules", totalRules),
-			zap.Int("pooled_results", len(pool)),
-			zap.Int("hot_entries", len(hotEntries)),
+			zap.Int("rules", agg.totalRules),
+			zap.Int("pooled_results", candidate.poolSize),
+			zap.Int("hot_entries", len(candidate.hotEntries)),
 			zap.Duration("duration", time.Since(start)))
-
-		fastMarkMap = nil
-		ctxMarkMap = nil
-		tagMap = nil
-		sourceMap = nil
-		pool = nil
-		hotEntries = nil
-
 		go func() {
 			time.Sleep(3 * time.Second)
 			coremain.ManualGC()
@@ -321,6 +188,9 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 	triggerUpdate := func() {
 		dm.updateMu.Lock()
 		defer dm.updateMu.Unlock()
+		if dm.closed.Load() {
+			return
+		}
 		if dm.updateTimer != nil {
 			dm.updateTimer.Stop()
 		}
@@ -337,6 +207,219 @@ func NewMapper(bp *coremain.BP, args any) (any, error) {
 
 	rebuild()
 	return dm, nil
+}
+
+// Close stops pending rebuilds and retires the selected Rust generation. It is
+// safe to call more than once and never closes a replacement generation.
+func (dm *DomainMapper) Close() error {
+	dm.updateMu.Lock()
+	if dm.closed.Load() {
+		dm.updateMu.Unlock()
+		return nil
+	}
+	dm.closed.Store(true)
+	if dm.updateTimer != nil {
+		dm.updateTimer.Stop()
+		dm.updateTimer = nil
+	}
+	dm.updateMu.Unlock()
+
+	dm.generationMu.Lock()
+	oldGeneration := dm.rustGeneration
+	dm.rustGeneration = nil
+	dm.generationMu.Unlock()
+	if oldGeneration == nil || oldGeneration.snapshot == nil {
+		return nil
+	}
+	return oldGeneration.snapshot.Close()
+}
+
+func (dm *DomainMapper) aggregateRules() ruleAggregation {
+	agg := ruleAggregation{
+		fastMarkMap: make(map[string]uint64),
+		ctxMarkMap:  make(map[string]map[uint32]struct{}),
+		tagMap:      make(map[string]string),
+		sourceMap:   make(map[string]string),
+		ruleOrder:   make([]string, 0),
+		valuedRules: make([]matcher_adapter.ValuedRule, 0),
+	}
+	ruleSeen := make(map[string]struct{})
+	for _, ruleCfg := range dm.ruleConfigs {
+		provider, ok := dm.providers[ruleCfg.Tag]
+		if !ok {
+			continue
+		}
+		ruleEntries, err := getRuleEntriesFromProvider(ruleCfg, provider)
+		if err != nil {
+			continue
+		}
+		targetTag := ruleCfg.OutputTag
+		if targetTag == "" {
+			targetTag = ruleCfg.Tag
+		}
+		for _, ruleEntry := range ruleEntries {
+			ruleStr := ruleEntry.Rule
+			sourceName := firstNonEmpty(ruleEntry.SourceName, ruleCfg.Tag)
+			if _, seen := ruleSeen[ruleStr]; !seen {
+				ruleSeen[ruleStr] = struct{}{}
+				agg.ruleOrder = append(agg.ruleOrder, ruleStr)
+			}
+			var fastMask uint64
+			if ruleCfg.Mark > 0 && ruleCfg.Mark <= 63 {
+				fastMask = 1 << (ruleCfg.Mark - 1)
+				agg.fastMarkMap[ruleStr] |= fastMask
+			}
+			if ruleCfg.CtxMark > 0 {
+				if agg.ctxMarkMap[ruleStr] == nil {
+					agg.ctxMarkMap[ruleStr] = make(map[uint32]struct{})
+				}
+				agg.ctxMarkMap[ruleStr][ruleCfg.CtxMark] = struct{}{}
+			}
+			agg.tagMap[ruleStr] = appendJoinedValue(agg.tagMap[ruleStr], targetTag)
+			agg.sourceMap[ruleStr] = appendJoinedValue(agg.sourceMap[ruleStr], sourceName)
+
+			var ctxMarks []uint32
+			if ruleCfg.CtxMark > 0 {
+				ctxMarks = []uint32{ruleCfg.CtxMark}
+			}
+			agg.valuedRules = append(agg.valuedRules, matcher_adapter.ValuedRule{
+				Rule:          ruleStr,
+				FastMarks:     fastMask,
+				CtxMarks:      ctxMarks,
+				JoinedTags:    targetTag,
+				JoinedSources: sourceName,
+			})
+		}
+		agg.totalRules += len(ruleEntries)
+	}
+	return agg
+}
+
+func (dm *DomainMapper) buildGoCandidate(agg ruleAggregation) goCandidate {
+	for _, ruleStr := range agg.ruleOrder {
+		dotPos := strings.Index(ruleStr, ":")
+		if dotPos == -1 {
+			continue
+		}
+		originalDName := ruleStr[dotPos+1:]
+		dName := originalDName
+
+		inherit := func(ancestorKey string) {
+			if aMask, ok := agg.fastMarkMap[ancestorKey]; ok {
+				agg.fastMarkMap[ruleStr] |= aMask
+			}
+			if aMarks, ok := agg.ctxMarkMap[ancestorKey]; ok {
+				if agg.ctxMarkMap[ruleStr] == nil {
+					agg.ctxMarkMap[ruleStr] = make(map[uint32]struct{})
+				}
+				for mark := range aMarks {
+					agg.ctxMarkMap[ruleStr][mark] = struct{}{}
+				}
+			}
+			agg.tagMap[ruleStr] = appendJoinedValue(agg.tagMap[ruleStr], agg.tagMap[ancestorKey])
+			agg.sourceMap[ruleStr] = appendJoinedValue(agg.sourceMap[ruleStr], agg.sourceMap[ancestorKey])
+		}
+
+		if strings.HasPrefix(ruleStr, "full:") {
+			inherit("domain:" + originalDName)
+		}
+		for {
+			nextDot := strings.Index(dName, ".")
+			if nextDot == -1 {
+				break
+			}
+			dName = dName[nextDot+1:]
+			inherit("domain:" + dName)
+		}
+	}
+
+	pool := make(map[string]*MatchResult)
+	domainRules := domain.NewMixMatcher[*MatchResult]()
+	overlapRules := make([]overlapRule, 0, 64)
+	hotEntries := make([]hotEntry, 0)
+	for _, ruleStr := range agg.ruleOrder {
+		fastMask := agg.fastMarkMap[ruleStr]
+		tagsStr := agg.tagMap[ruleStr]
+		sourcesStr := agg.sourceMap[ruleStr]
+		ctxMarks := agg.ctxMarkMap[ruleStr]
+		sig := fmt.Sprintf("%d-%v-%s-%s", fastMask, sortedCtxMarks(ctxMarks), tagsStr, sourcesStr)
+		res, exists := pool[sig]
+		if !exists {
+			res = &MatchResult{JoinedTags: tagsStr, JoinedSources: sourcesStr}
+			for i := uint8(0); i < 63; i++ {
+				if fastMask&(1<<i) != 0 {
+					res.FastMarks = append(res.FastMarks, i+1)
+				}
+			}
+			res.CtxMarks = sortedCtxMarks(ctxMarks)
+			pool[sig] = res
+		}
+
+		switch {
+		case strings.HasPrefix(ruleStr, "full:"):
+			name := strings.TrimPrefix(ruleStr, "full:")
+			if !strings.HasSuffix(name, ".") {
+				name += "."
+			}
+			hotEntries = append(hotEntries, hotEntry{name: name, res: res})
+		case strings.HasPrefix(ruleStr, "keyword:"):
+			overlapRules = append(overlapRules, overlapRule{
+				keyword: domain.NormalizeDomain(strings.TrimPrefix(ruleStr, "keyword:")),
+				res:     res,
+			})
+		case strings.HasPrefix(ruleStr, "regexp:"):
+			pattern := strings.TrimPrefix(ruleStr, "regexp:")
+			compiled, err := regexp.Compile(pattern)
+			if err != nil {
+				if dm.logger != nil {
+					dm.logger.Warn("skip invalid regexp rule", zap.String("rule", ruleStr), zap.Error(err))
+				}
+				continue
+			}
+			overlapRules = append(overlapRules, overlapRule{regex: compiled, res: res})
+		default:
+			if err := domainRules.Add(ruleStr, res); err != nil && dm.logger != nil {
+				dm.logger.Warn("skip invalid domain rule", zap.String("rule", ruleStr), zap.Error(err))
+			}
+		}
+	}
+	return goCandidate{
+		matcher:    &compiledMatcher{domainRules: domainRules, overlapRules: overlapRules},
+		hotEntries: hotEntries,
+		poolSize:   len(pool),
+	}
+}
+
+func (dm *DomainMapper) publishGeneration(candidate goCandidate, rustSnapshot matcher_adapter.ValuedSnapshot) {
+	dm.generationMu.Lock()
+	if dm.closed.Load() {
+		dm.generationMu.Unlock()
+		if rustSnapshot != nil {
+			_ = rustSnapshot.Close()
+		}
+		return
+	}
+	oldGeneration := dm.rustGeneration
+	dm.matcher.Store(candidate.matcher)
+	dm.hotMap.Range(func(key, value any) bool {
+		dm.hotMap.Delete(key)
+		return true
+	})
+	for _, entry := range candidate.hotEntries {
+		dm.hotMap.Store(entry.name, entry.res)
+	}
+	if rustSnapshot == nil {
+		dm.rustGeneration = nil
+	} else {
+		dm.rustGeneration = &valuedGeneration{snapshot: rustSnapshot}
+	}
+	dm.generationMu.Unlock()
+
+	if oldGeneration != nil && oldGeneration.snapshot != nil {
+		if err := oldGeneration.snapshot.Close(); err != nil && dm.logger != nil {
+			dm.logger.Warn("close retired Rust domain_mapper generation failed", zap.Error(err))
+		}
+	}
 }
 
 func sortedCtxMarks(m map[uint32]struct{}) []uint32 {
@@ -408,32 +491,6 @@ func hasJoinedValue(joined, target string) bool {
 		}
 	}
 	return false
-}
-
-func collectRuleKeys(
-	fastMarkMap map[string]uint64,
-	ctxMarkMap map[string]map[uint32]struct{},
-	tagMap map[string]string,
-	sourceMap map[string]string,
-) []string {
-	keys := make(map[string]struct{}, len(fastMarkMap)+len(ctxMarkMap)+len(tagMap)+len(sourceMap))
-	for rule := range fastMarkMap {
-		keys[rule] = struct{}{}
-	}
-	for rule := range ctxMarkMap {
-		keys[rule] = struct{}{}
-	}
-	for rule := range tagMap {
-		keys[rule] = struct{}{}
-	}
-	for rule := range sourceMap {
-		keys[rule] = struct{}{}
-	}
-	out := make([]string, 0, len(keys))
-	for rule := range keys {
-		out = append(out, rule)
-	}
-	return out
 }
 
 func cloneMatchResult(res *MatchResult) *MatchResult {
@@ -508,18 +565,58 @@ func (cm *compiledMatcher) match(name string) (*MatchResult, bool) {
 }
 
 func (dm *DomainMapper) lookupMatchResult(name string) (*MatchResult, bool) {
-	matcher := dm.matcher.Load().(*compiledMatcher)
+	dm.generationMu.RLock()
+	defer dm.generationMu.RUnlock()
+	return dm.lookupMatchResultLocked(name)
+}
+
+func (dm *DomainMapper) lookupMatchResultLocked(name string) (*MatchResult, bool) {
+	var matcher *compiledMatcher
+	if value := dm.matcher.Load(); value != nil {
+		matcher, _ = value.(*compiledMatcher)
+	}
 	var merged *MatchResult
 	if val, ok := dm.hotMap.Load(name); ok {
 		merged = cloneMatchResult(val.(*MatchResult))
 	}
-	if res, ok := matcher.match(name); ok {
-		merged = mergeMatchResult(merged, res)
+
+	usedRust := false
+	if generation := dm.rustGeneration; generation != nil && generation.snapshot != nil && !generation.disabled.Load() {
+		valued, err := generation.snapshot.Match(name)
+		if err != nil {
+			if generation.disabled.CompareAndSwap(false, true) && dm.logger != nil {
+				dm.logger.Warn("disable failed Rust domain_mapper generation; using Go fallback",
+					zap.String("plugin", PluginType),
+					zap.Error(err))
+			}
+		} else {
+			usedRust = true
+			if valued.Matched {
+				merged = mergeMatchResult(merged, valuedResultToMatchResult(valued))
+			}
+		}
+	}
+	if !usedRust && matcher != nil {
+		if res, ok := matcher.match(name); ok {
+			merged = mergeMatchResult(merged, res)
+		}
 	}
 	return merged, merged != nil
 }
 
+func valuedResultToMatchResult(result matcher_adapter.ValuedResult) *MatchResult {
+	return &MatchResult{
+		FastMarks:     append([]uint8(nil), result.FastMarks...),
+		CtxMarks:      append([]uint32(nil), result.CtxMarks...),
+		JoinedTags:    result.JoinedTags,
+		JoinedSources: result.JoinedSources,
+	}
+}
+
 func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags string) {
+	dm.generationMu.Lock()
+	defer dm.generationMu.Unlock()
+
 	key := domainName
 	if !strings.HasSuffix(key, ".") {
 		key = key + "."
@@ -533,7 +630,7 @@ func (dm *DomainMapper) QuickAdd(domainName string, marks []uint8, joinedTags st
 			newTags := joinedTags
 			var newSources string
 
-			if res, matchOk := dm.lookupMatchResult(key); matchOk && res != nil {
+			if res, matchOk := dm.lookupMatchResultLocked(key); matchOk && res != nil {
 				for _, m := range res.FastMarks {
 					found := false
 					for _, existingM := range newMarks {

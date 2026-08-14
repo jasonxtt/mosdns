@@ -30,6 +30,8 @@ jobs:
           go test -count=1
           ./pkg/matcher/domain ./pkg/matcher/netlist
           ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
+          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
+          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
           ./plugin/matcher/base_domain ./plugin/matcher/base_ip
 
       - name: Focused matcher race tests
@@ -37,6 +39,8 @@ jobs:
           go test -race -count=1
           ./pkg/matcher/domain ./pkg/matcher/netlist
           ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
+          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
+          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
           ./plugin/matcher/base_domain ./plugin/matcher/base_ip
 
   rust-runtime-experimental:
@@ -63,6 +67,7 @@ jobs:
           cargo fmt --manifest-path rust/Cargo.toml --all --check
           cargo test --manifest-path rust/Cargo.toml --all-targets --locked
           cargo test --manifest-path rust/Cargo.toml -p mosdns-runtime --test abi_contract --locked checked_in_header_matches_abi_constants_and_entrypoints
+          cargo test --manifest-path rust/Cargo.toml -p mosdns-runtime --test valued_abi --locked
           cargo clippy --manifest-path rust/Cargo.toml --all-targets --locked -- -D warnings
       - name: Build unified Rust runtime static library
         run: scripts/build-rust-cache.sh
@@ -74,12 +79,22 @@ jobs:
         env:
           CGO_ENABLED: '1'
           MOSDNS_MATCHER_BACKEND: rust
-        run: go test -tags mosdns_rust ./plugin/data_provider/domain_set/... ./plugin/data_provider/ip_set/... ./plugin/matcher/... -count=1
+        run: >-
+          go test -tags mosdns_rust
+          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
+          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
+          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
+          ./plugin/matcher/... -count=1
       - name: Test Linux matcher cgo bridge with race detector
         env:
           CGO_ENABLED: '1'
           MOSDNS_MATCHER_BACKEND: rust
-        run: go test -race -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1
+        run: >-
+          go test -race -tags mosdns_rust
+          ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
+          ./plugin/data_provider/sd_set ./plugin/data_provider/si_set
+          ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
+          ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1
       - name: Benchmark Linux matcher cgo bridge
         env:
           CGO_ENABLED: '1'
@@ -94,3 +109,15 @@ jobs:
         env:
           OUTPUT: ./dist/mosdns-rust-runtime
         run: scripts/build-rust-experimental.sh
+      - name: Build default Go-only fallback binary
+        env:
+          CGO_ENABLED: '0'
+          OUTPUT: ./dist/mosdns-go-only
+        run: SKIP_UI_BUILD=1 scripts/build-local.sh
+      - name: Install isolated smoke dependencies
+        run: sudo apt-get update && sudo apt-get install -y dnsutils
+      - name: Run isolated mos-test matcher smoke
+        env:
+          MOSDNS_RUST_BINARY: ./dist/mosdns-rust-runtime
+          MOSDNS_GO_ONLY_BINARY: ./dist/mosdns-go-only
+        run: scripts/smoke-rust-matcher-mos-test.sh

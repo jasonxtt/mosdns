@@ -2,9 +2,15 @@
 set -euo pipefail
 
 BINARY=${MOSDNS_RUST_BINARY:?set MOSDNS_RUST_BINARY to the experimental Linux binary}
+RUST_BINARY="${BINARY}"
+GO_ONLY_BINARY=${MOSDNS_GO_ONLY_BINARY:-}
 
 if [[ ! -x "${BINARY}" ]]; then
 	echo "experimental binary is not executable: ${BINARY}" >&2
+	exit 1
+fi
+if [[ -n "${GO_ONLY_BINARY}" && ! -x "${GO_ONLY_BINARY}" ]]; then
+	echo "Go-only fallback binary is not executable: ${GO_ONLY_BINARY}" >&2
 	exit 1
 fi
 for command_name in curl dig python3; do
@@ -56,10 +62,14 @@ PY
 
 DOMAIN_FILE="${ROOT}/domain.txt"
 IP_FILE="${ROOT}/ip.txt"
+MAPPER_BASE_FILE="${ROOT}/mapper-base.txt"
+MAPPER_OVERLAP_FILE="${ROOT}/mapper-overlap.txt"
 CONFIG="${ROOT}/mosdns.yaml"
 LOG="${ROOT}/mosdns.log"
 printf 'full:old.example\n' >"${DOMAIN_FILE}"
 printf '127.0.0.0/8\n' >"${IP_FILE}"
+printf 'domain:mapper.example\n' >"${MAPPER_BASE_FILE}"
+printf 'keyword:overlap\n' >"${MAPPER_OVERLAP_FILE}"
 cat >"${CONFIG}" <<EOF
 log:
   level: warn
@@ -80,9 +90,47 @@ plugins:
       files:
         - "${IP_FILE}"
 
+  - tag: smoke_mapper_base
+    type: domain_set
+    args:
+      files:
+        - "${MAPPER_BASE_FILE}"
+
+  - tag: smoke_mapper_overlap
+    type: domain_set
+    args:
+      files:
+        - "${MAPPER_OVERLAP_FILE}"
+
+  - tag: smoke_mapper
+    type: domain_mapper
+    args:
+      rules:
+        - tag: smoke_mapper_base
+          mark: 3
+          output_tag: mapper-base
+        - tag: smoke_mapper_overlap
+          mark: 7
+          output_tag: mapper-overlap
+
   - tag: smoke_sequence
     type: sequence
     args:
+      - exec: "\$smoke_mapper"
+      - matches:
+          - fast_mark 3
+          - fast_mark 7
+        exec:
+          - "black_hole 192.0.2.4"
+          - "exit"
+      - matches: fast_mark 3
+        exec:
+          - "black_hole 192.0.2.5"
+          - "exit"
+      - matches: fast_mark 7
+        exec:
+          - "black_hole 192.0.2.6"
+          - "exit"
       - matches:
           - "qname \$smoke_domain"
         exec:
@@ -100,6 +148,7 @@ plugins:
     type: udp_server
     args:
       entry: smoke_sequence
+      enable_audit: true
       listen: "127.0.0.1:${DNS_PORT}"
 EOF
 
@@ -143,14 +192,57 @@ expect_answer() {
 	fi
 }
 
+audit_has_mapper_sources() {
+	python3 - "$1" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    logs = json.load(handle)
+for log in logs:
+    query_name = str(log.get("query_name", "")).rstrip(".").lower()
+    sources = str(log.get("matched_rule_source", ""))
+    if query_name == "overlap.mapper.example" and "smoke_mapper_base" in sources and "smoke_mapper_overlap" in sources:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 start_server rust
 expect_answer old.example. 192.0.2.1
 expect_answer initial-miss.example. 192.0.2.3
 expect_answer ip-hit.example. 192.0.2.2
+expect_answer overlap.mapper.example. 192.0.2.4
+expect_answer mapper.example. 192.0.2.5
+
+curl --max-time 5 -fsS -X POST "${API_URL}/api/v1/audit/clear" >/dev/null
+expect_answer overlap.mapper.example. 192.0.2.4
+for _ in $(seq 1 30); do
+	if curl --max-time 5 -fsS "${API_URL}/api/v1/audit/logs" >"${ROOT}/audit.json" && audit_has_mapper_sources "${ROOT}/audit.json"
+	then
+		break
+	fi
+	sleep 0.1
+done
+if ! audit_has_mapper_sources "${ROOT}/audit.json"
+then
+	echo "mapper source metadata was not observed in the audit log" >&2
+	exit 1
+fi
 
 post_json smoke_domain '{"values":["full:new.example"]}'
 expect_answer new.example. 192.0.2.1
 expect_answer old.example. 192.0.2.3
+
+post_json smoke_mapper_base '{"values":["domain:new-mapper.example"]}'
+for _ in $(seq 1 30); do
+	if expect_answer overlap.new-mapper.example. 192.0.2.4 2>/dev/null && expect_answer overlap.mapper.example. 192.0.2.6 2>/dev/null; then
+		break
+	fi
+	sleep 0.1
+done
+expect_answer overlap.new-mapper.example. 192.0.2.4
+expect_answer overlap.mapper.example. 192.0.2.6
 
 post_json smoke_ip '{"values":[]}'
 expect_answer ip-hit.example. 192.0.2.3
@@ -164,6 +256,15 @@ if [[ "${invalid_status}" != "400" ]]; then
 	exit 1
 fi
 expect_answer new.example. 192.0.2.1
+
+if [[ -n "${GO_ONLY_BINARY}" ]]; then
+	BINARY="${GO_ONLY_BINARY}"
+	start_server rust
+	expect_answer new.example. 192.0.2.1
+	expect_answer ip-hit.example. 192.0.2.2
+	expect_answer overlap.new-mapper.example. 192.0.2.4
+	BINARY="${RUST_BINARY}"
+fi
 
 query_failures="${ROOT}/query_failures"
 : >"${query_failures}"
@@ -187,10 +288,12 @@ fi
 start_server go
 expect_answer new.example. 192.0.2.1
 expect_answer ip-hit.example. 192.0.2.2
+expect_answer overlap.new-mapper.example. 192.0.2.4
 
 start_server rust
 expect_answer new.example. 192.0.2.1
 expect_answer ip-hit.example. 192.0.2.2
+expect_answer overlap.new-mapper.example. 192.0.2.4
 
 if grep -Eq '(^|[^0-9])(:|[[:space:]])53([^0-9]|$)' "${CONFIG}"; then
 	echo "smoke config unexpectedly references port 53" >&2
@@ -202,4 +305,4 @@ if grep -Eqi 'panic|fatal error' "${LOG}"; then
 	exit 1
 fi
 
-echo "mos-test matcher smoke passed: backend=rust/go/rust, api=${API_PORT}, dns=${DNS_PORT}, root=${ROOT}"
+echo "mos-test matcher smoke passed: backend=rust/go-only-fallback/go/rust, api=${API_PORT}, dns=${DNS_PORT}, root=${ROOT}"

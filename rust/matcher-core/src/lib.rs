@@ -16,6 +16,7 @@ mod mix;
 mod normalize;
 mod regex;
 mod trie;
+mod valued;
 
 pub use full::FullMatcher;
 pub use ipnet::IpPrefixList;
@@ -24,6 +25,11 @@ pub use mix::MixMatcher;
 pub use normalize::normalize;
 pub use regex::RegexMatcher;
 pub use trie::DomainSuffixMatcher;
+pub use valued::{
+    ValuedBuildError, ValuedDomainMatcher, ValuedEncodingError, ValuedMatchResult, ValuedRule,
+    decode_valued_match_result, decode_valued_rule_batch, encode_valued_match_result,
+    encode_valued_rule_batch,
+};
 
 /// Domain matcher trait, generic over the result value.
 ///

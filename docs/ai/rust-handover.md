@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-08-13`
+Last verified: `2026-08-14`
 
 This is the canonical cross-session entrypoint for Rust migration work. It
 records task state and worktree ownership; architecture remains authoritative
@@ -11,8 +11,8 @@ Trellis task's `prd.md`, `design.md`, and `implement.md`.
 
 A successor agent must:
 
-1. Read `AGENTS.md`, `docs/ai/project-context.md`,
-   `docs/ai/config-notes.md`, and `docs/ai/handover.md`.
+1. Read `AGENTS.md`, `docs/ai/project-context.md`, and
+   `docs/ai/config-notes.md`.
 2. Read this file and `docs/ai/rust-rewrite-plan.md`.
 3. Run `git branch --show-current`, `git status --short --branch`, and
    `python3 ./.trellis/scripts/task.py list`.
@@ -20,8 +20,8 @@ A successor agent must:
 5. Run the `trellis-before-dev` skill before changing implementation code.
 6. Preserve unrelated dirty-worktree changes and keep Trellis auto-commit off.
 
-The repository directory is named `mosdns`, but this migration deliberately
-runs on branch `rust`. Do not switch back to `main` merely from the folder-name
+This migration deliberately runs in the dedicated `/Users/tom/github/mosdns-rust`
+worktree on branch `rust`. Do not switch back to `main` merely from a folder-name
 convention. The verified branch/base is:
 
 ```text
@@ -42,13 +42,14 @@ Go-only.
 | --- | --- | --- | --- |
 | `08-13-rust-cache-foundation` | **archived/completed** (`2026-08-13`) | All slices 0–6 complete; all three remaining gates (reproducible soak, Miri, extended mos-test verification) closed on `2026-08-13`. Rust stays experimental because the 10% QPS/latency gate is not met. | Do not redesign or micro-optimize it; preserve the implementation as-is while the matcher task extracts the single Rust runtime. |
 | `08-13-rust-matcher-foundation` | **archived/completed** (`2026-08-13`) | Approved `2026-08-13`; Slices 0–5 complete. Compatibility matrix, Go golden fixtures, real rule-set fixture, KixDNS matcher ledger, single Rust runtime extraction, pure Rust domain/IP matchers (`matcher-core`), transactional FFI with matcher ABI in runtime, C header, Go provider integration (`domain_set`/`ip_set` with `MOSDNS_MATCHER_BACKEND=rust` env-gated Rust backend and Go fallback), Linux+cgo tagged integration/race, fixed-fixture evidence, CI gates, and isolated `mos-test` reload/fallback/restart smoke are verified. | A–E work commits are completed and reviewed; F is the archive finish commit and G is a journal-only finish commit under the manifest's explicit `--no-commit` sequence; do not enable Rust by default. |
+| `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the opt-in boundary and Go fallback. Do not enable Rust by default or start Phase 3 without a separate approval. |
 
-The matcher task targets branch `rust`, is scoped to `rust/runtime`,
-`rust/matcher-core`, opt-in Go matcher adapters, CI/evidence scripts, and the
-task documents. “Complete handoff” is not approval to make Rust default.
-Provider fan-out (`sd_set`, `sd_set_light`, `domain_set_light`, `si_set`) and
-`domain_mapper` remain outside this task and require an independently approved
-continuation.
+The active matcher expansion targets branch `rust`, the opt-in Go provider
+adapters (`sd_set`, `si_set`), valued `domain_mapper` fan-out, shared matcher
+adapter, CI/evidence scripts, and task documents. “Complete handoff” is not
+approval to make Rust default. The light providers remain Go exporters with
+constant-false matcher behavior; no query, sequence, upstream, or server
+migration is included.
 
 ## Implemented cache foundation
 
@@ -141,10 +142,37 @@ The full next-task plan is located at:
 Slices 0–5 froze domain/IP behavior, extracted the single Rust runtime, added
 the pure Rust indexes and transactional FFI, integrated only direct
 `domain_set`, `ip_set`, `base_domain`, and `base_ip` adapters, and closed the
-CI/evidence/isolated-smoke gates. The default build remains Go-only and the
-Rust path remains opt-in. Do not treat this handover as approval for provider
-fan-out or `domain_mapper`; those need a separate PRD/design/implement task
-and explicit approval.
+foundation CI/evidence/isolated-smoke gates. That archived task remains
+Go-only and its Rust path remains opt-in; its continuation boundary was the
+separate Phase 2 expansion task described below.
+
+## Matcher Phase 2 expansion (completed)
+
+The completed Trellis task was:
+
+- `.trellis/tasks/08-13-rust-matcher-phase2-expansion/prd.md`
+- `.trellis/tasks/08-13-rust-matcher-phase2-expansion/design.md`
+- `.trellis/tasks/08-13-rust-matcher-phase2-expansion/implement.md`
+
+Slices 0–4 preserve Go control-plane parsing and fallback while publishing
+paired Rust/Go generations for `sd_set`, `si_set`, and valued `domain_mapper`.
+Slice 5 artifacts are:
+
+- CI default/focused/race, Rust ABI/header, Linux+cgo normal/race, benchmark,
+  and experimental-binary gates in `.github/workflows/test.yml`;
+- fixed-fixture provider and valued-mapper benchmarks in
+  `scripts/benchmark-rust-matchers.sh` and
+  `plugin/data_provider/domain_mapper/rust_benchmark_linux_test.go`;
+- isolated reload/fallback/restart smoke in
+  `scripts/smoke-rust-matcher-mos-test.sh`;
+- `docs/rust/benchmarks/matcher-phase2-expansion.md` and
+  `docs/rust/test-host-matcher-phase2-expansion.md`.
+
+Linux+cgo and host smoke evidence was collected on `mos-test` using an
+isolated `/tmp` source copy. The full embedded-UI experimental binary was
+also built and used for the final smoke. The task was archived after the root
+review and selective work commit; this does not authorize Phase 3 or a Rust
+default-backend switch.
 
 ## Worktree ownership boundary
 
@@ -214,7 +242,6 @@ Rust implementation and evidence scope:
 .github/workflows/test.yml
 docs/ai/rust-rewrite-plan.md
 docs/ai/rust-handover.md
-docs/ai/handover.md (Rust migration section only)
 docs/rust/
 rust/
 scripts/build-rust-cache.sh
@@ -245,6 +272,11 @@ pkg/server_handler/entry_handler.go and entry_handler_raw_test.go
 coremain/audit_raw_test.go
 scripts/benchmark-rust-matchers.sh
 scripts/smoke-rust-matcher-mos-test.sh
+plugin/data_provider/domain_mapper/slice5_benchmark_fixture_test.go
+plugin/data_provider/domain_mapper/rust_benchmark_linux_test.go
+plugin/data_provider/matcher_adapter/adapter_linux.go
+docs/rust/benchmarks/matcher-phase2-expansion.md
+docs/rust/test-host-matcher-phase2-expansion.md
 ```
 
 Known unrelated/user-owned changes that must not be overwritten, reverted, or
@@ -268,8 +300,8 @@ coremain/www/log1.html
 The embedded Vue assets may have been regenerated while verifying a default
 build and therefore contain the unrelated WebUI changes. Treat them as
 user-owned unless a later explicit release task requires a fresh asset commit.
-`.DS_Store`, `.codegraph/`, and `.superpowers/` are local/tool state. The
-listed `.codex` files are project integration and are included; no other
+`.DS_Store` and `.superpowers/` are local/tool state. The listed `.codex` files
+are project integration and are included; no other
 `.codex` path is implicitly included. `.trellis/.developer`,
 `.trellis/.runtime/`, Python `__pycache__/` and `*.pyc`, personal credentials,
 and local databases remain excluded.
@@ -312,6 +344,15 @@ files and random high loopback ports. The smoke process and temporary
 directory were cleaned up, with no port-53 or production-host change. Exact
 RSS for an individual Rust snapshot remains unmeasured at the current ABI
 boundary.
+
+Phase 2 expansion evidence was rerun on `2026-08-14` in an isolated source
+copy on the same host. The expanded provider/mapper normal and race suites,
+Rust fmt/test/clippy/header checks, fixed-fixture benchmarks, full embedded-UI
+Linux amd64 experimental binary build, and mapper-aware
+reload/fallback/restart smoke all passed. Measurements and exact commands are
+recorded in `docs/rust/benchmarks/matcher-phase2-expansion.md` and
+`docs/rust/test-host-matcher-phase2-expansion.md`. Rust remains opt-in and
+default builds remain Go-only.
 
 ## Non-negotiable constraints
 

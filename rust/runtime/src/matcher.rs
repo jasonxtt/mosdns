@@ -10,11 +10,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 
-use mosdns_cache_core::{BorrowedSlice, Status};
-use mosdns_matcher_core::{IpPrefixList, MixMatcher};
+use mosdns_cache_core::{BorrowedSlice, Status, WritableSlice};
+use mosdns_matcher_core::{IpPrefixList, MixMatcher, ValuedDomainMatcher};
 
 /// Capability bit indicating that matcher ABI functions are available.
 pub const CAPABILITY_MATCHER: u64 = 1 << 3;
+/// Capability bit indicating that the valued matcher ABI is available.
+pub const CAPABILITY_VALUED_MATCHER: u64 = 1 << 4;
 
 // --- Domain matcher handles ---
 
@@ -301,6 +303,200 @@ pub extern "C" fn ip_matcher_close(handle: u64) -> Status {
             Status::Closed
         }
     })
+}
+
+// --- Valued domain matcher handles ---
+
+const VALUED_HANDLE_BASE: u64 = 0x3000_0000_0000_0000;
+static NEXT_VALUED_HANDLE: AtomicU64 = AtomicU64::new(VALUED_HANDLE_BASE);
+
+fn valued_table() -> &'static RwLock<HashMap<u64, ValuedDomainMatcher>> {
+    static TABLE: OnceLock<RwLock<HashMap<u64, ValuedDomainMatcher>>> = OnceLock::new();
+    TABLE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Result metadata returned by one valued matcher lookup.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ValuedMatchResult {
+    pub status: Status,
+    pub matched: u32,
+    pub required_len: u64,
+}
+
+impl ValuedMatchResult {
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self {
+            status: Status::Internal,
+            matched: 0,
+            required_len: 0,
+        }
+    }
+}
+
+/// Creates a valued domain matcher from a versioned length-safe rule batch.
+///
+/// # Safety
+///
+/// `rules` must satisfy `BorrowedSlice`'s pointer contract and `out_handle`
+/// must point to writable `u64` storage for this call.
+#[must_use]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn valued_domain_matcher_create(
+    rules: BorrowedSlice,
+    out_handle: *mut u64,
+) -> Status {
+    boundary(|| {
+        if out_handle.is_null() {
+            return Status::InvalidArgument;
+        }
+        let Ok(rule_bytes) = (unsafe { rules.as_slice() }) else {
+            return Status::InvalidArgument;
+        };
+        let Ok(matcher) = ValuedDomainMatcher::build_encoded(rule_bytes) else {
+            return Status::InvalidArgument;
+        };
+
+        let handle = NEXT_VALUED_HANDLE.fetch_add(1, Ordering::Relaxed);
+        let Ok(mut table) = valued_table().write() else {
+            return Status::Internal;
+        };
+        table.insert(handle, matcher);
+        unsafe { out_handle.write(handle) };
+        Status::Ok
+    })
+}
+
+/// Matches a domain and writes the versioned result payload into caller-owned
+/// storage. A short output buffer returns `BufferTooSmall` and reports the
+/// exact required length without writing a partial payload.
+///
+/// # Safety
+///
+/// `domain` must satisfy `BorrowedSlice`'s pointer contract, `output` must
+/// satisfy `WritableSlice`'s pointer contract, and `out_result` must point to
+/// writable `ValuedMatchResult` storage for this call.
+#[must_use]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn valued_domain_matcher_match(
+    handle: u64,
+    domain: BorrowedSlice,
+    mut output: WritableSlice,
+    out_result: *mut ValuedMatchResult,
+) -> Status {
+    boundary(|| {
+        if out_result.is_null() {
+            return Status::InvalidArgument;
+        }
+        if handle == 0 {
+            write_valued_result(out_result, Status::InvalidArgument, 0, 0);
+            return Status::InvalidArgument;
+        }
+        let Ok(domain_bytes) = (unsafe { domain.as_slice() }) else {
+            write_valued_result(out_result, Status::InvalidArgument, 0, 0);
+            return Status::InvalidArgument;
+        };
+        let Ok(domain_str) = std::str::from_utf8(domain_bytes) else {
+            write_valued_result(out_result, Status::InvalidArgument, 0, 0);
+            return Status::InvalidArgument;
+        };
+        let Ok(output_bytes) = (unsafe { output.as_mut_slice() }) else {
+            write_valued_result(out_result, Status::InvalidArgument, 0, 0);
+            return Status::InvalidArgument;
+        };
+
+        let Ok(table) = valued_table().read() else {
+            write_valued_result(out_result, Status::Internal, 0, 0);
+            return Status::Internal;
+        };
+        let Some(matcher) = table.get(&handle) else {
+            write_valued_result(out_result, Status::Closed, 0, 0);
+            return Status::Closed;
+        };
+        let Some(result) = matcher.r#match(domain_str) else {
+            write_valued_result(out_result, Status::Ok, 0, 0);
+            return Status::Ok;
+        };
+
+        let Ok(encoded) = mosdns_matcher_core::encode_valued_match_result(&result) else {
+            write_valued_result(out_result, Status::Internal, 0, 0);
+            return Status::Internal;
+        };
+        let Ok(required_len) = u64::try_from(encoded.len()) else {
+            write_valued_result(out_result, Status::Internal, 0, 0);
+            return Status::Internal;
+        };
+        if output_bytes.len() < encoded.len() {
+            write_valued_result(out_result, Status::BufferTooSmall, 1, required_len);
+            return Status::BufferTooSmall;
+        }
+        output_bytes[..encoded.len()].copy_from_slice(&encoded);
+        write_valued_result(out_result, Status::Ok, 1, required_len);
+        Status::Ok
+    })
+}
+
+/// Returns the number of unique rule strings in a valued matcher.
+///
+/// # Safety
+///
+/// `out_len` must point to writable `u64` storage for this call.
+#[must_use]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn valued_domain_matcher_len(handle: u64, out_len: *mut u64) -> Status {
+    boundary(|| {
+        if out_len.is_null() {
+            return Status::InvalidArgument;
+        }
+        let Ok(table) = valued_table().read() else {
+            return Status::Internal;
+        };
+        let Some(matcher) = table.get(&handle) else {
+            return Status::Closed;
+        };
+        let Ok(len) = u64::try_from(matcher.len()) else {
+            return Status::Internal;
+        };
+        unsafe { out_len.write(len) };
+        Status::Ok
+    })
+}
+
+/// Destroys a valued domain matcher handle.
+#[must_use]
+#[unsafe(no_mangle)]
+pub extern "C" fn valued_domain_matcher_close(handle: u64) -> Status {
+    boundary(|| {
+        if handle == 0 {
+            return Status::InvalidArgument;
+        }
+        let Ok(mut table) = valued_table().write() else {
+            return Status::Internal;
+        };
+        if table.remove(&handle).is_some() {
+            Status::Ok
+        } else {
+            Status::Closed
+        }
+    })
+}
+
+fn write_valued_result(
+    out_result: *mut ValuedMatchResult,
+    status: Status,
+    matched: u32,
+    required_len: u64,
+) {
+    // SAFETY: The caller contract is checked by the public ABI function before
+    // this helper is called.
+    unsafe {
+        out_result.write(ValuedMatchResult {
+            status,
+            matched,
+            required_len,
+        });
+    }
 }
 
 // --- Panic boundary ---

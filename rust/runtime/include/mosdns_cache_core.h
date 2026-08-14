@@ -13,6 +13,9 @@ extern "C" {
 #define MOSDNS_CACHE_CAPABILITY_CACHE (UINT64_C(1) << 1)
 #define MOSDNS_CACHE_CAPABILITY_LOOKUP_INTO (UINT64_C(1) << 2)
 #define MOSDNS_CACHE_CAPABILITY_MATCHER (UINT64_C(1) << 3)
+#define MOSDNS_CACHE_CAPABILITY_VALUED_MATCHER (UINT64_C(1) << 4)
+#define MOSDNS_VALUED_RULE_BATCH_VERSION 1u
+#define MOSDNS_VALUED_RESULT_VERSION 1u
 
 typedef enum MosdnsCacheStatus {
   MOSDNS_CACHE_OK = 0,
@@ -43,6 +46,12 @@ typedef struct MosdnsCacheWritableSlice {
   uint8_t *ptr;
   uint64_t len;
 } MosdnsCacheWritableSlice;
+
+typedef struct MosdnsValuedMatchResult {
+  MosdnsCacheStatus status;
+  uint32_t matched;
+  uint64_t required_len;
+} MosdnsValuedMatchResult;
 
 typedef enum MosdnsCacheLookupState {
   MOSDNS_CACHE_MISS = 0,
@@ -112,6 +121,23 @@ MosdnsCacheStatus ip_matcher_match(uint64_t handle,
                                    bool *out_match);
 MosdnsCacheStatus ip_matcher_len(uint64_t handle, uint64_t *out_len);
 MosdnsCacheStatus ip_matcher_close(uint64_t handle);
+
+// --- Valued domain matcher API ---
+// The rule batch starts with one version byte and a little-endian uint32 rule
+// count. Each rule is length-prefixed UTF-8 text, a uint64 fast-mark mask, a
+// uint32 context-mark count followed by uint32 marks, then length-prefixed tag
+// and source strings. The result starts with one version byte, a uint64 mask,
+// a uint32 context-mark count followed by uint32 marks, then length-prefixed
+// tag/source strings.
+// Results are written only into caller-owned output storage.
+MosdnsCacheStatus valued_domain_matcher_create(MosdnsCacheBorrowedSlice rules,
+                                               uint64_t *out_handle);
+MosdnsCacheStatus valued_domain_matcher_match(uint64_t handle,
+                                              MosdnsCacheBorrowedSlice domain,
+                                              MosdnsCacheWritableSlice output,
+                                              MosdnsValuedMatchResult *out_result);
+MosdnsCacheStatus valued_domain_matcher_len(uint64_t handle, uint64_t *out_len);
+MosdnsCacheStatus valued_domain_matcher_close(uint64_t handle);
 
 #ifdef __cplusplus
 }

@@ -150,3 +150,70 @@ rule file, then publish fields one at a time.
 Correct: serialize the update with `updateMu`, build and persist immutable
 request-local candidates without the state lock, exchange the complete
 generation in one short critical section, then retire the exact old handle.
+
+## Scenario: matcher Phase 2 Linux gate and evidence harness
+
+### 1. Scope / Trigger
+
+The provider/mapper expansion crosses Go packages, the Rust static library,
+cgo build tags, CI, benchmark output, and an isolated process smoke. Keep the
+same opt-in and rollback contract at every boundary.
+
+### 2. Signatures
+
+- `scripts/benchmark-rust-matchers.sh` accepts `BENCHTIME` and `COUNT`, and
+  runs tagged Linux+cgo domain, IP, and valued-mapper benchmarks.
+- `scripts/smoke-rust-matcher-mos-test.sh` requires executable
+  `MOSDNS_RUST_BINARY` and optionally accepts `MOSDNS_GO_ONLY_BINARY`.
+- Rust selection remains `MOSDNS_MATCHER_BACKEND=rust`; an unset/other value
+  selects the Go path.
+
+### 3. Contracts
+
+- Default Go CI runs without Rust tags, a Rust toolchain, cgo, or the runtime
+  environment variable.
+- Linux matcher gates use `CGO_ENABLED=1`, `-tags mosdns_rust`, and the same
+  provider/mapper package list for normal and race tests.
+- Benchmarks report fixture bytes/rules or prefixes, build and lookup timing,
+  Go-observed allocations, logical valued-result bytes, and cgo calls/op.
+- Smoke uses temporary files, random high loopback ports, public audit output,
+  and process cleanup; it never uses port 53 or an installed service.
+
+### 4. Validation & Error Matrix
+
+- Missing/non-executable binary -> smoke exits before starting a process.
+- Rust static library or cgo build failure -> Linux gate fails; default Go job
+  remains independently runnable.
+- Rust-disabled/no-cgo binary with `MOSDNS_MATCHER_BACKEND=rust` -> provider
+  keeps the Go generation and smoke must observe identical answers.
+- Malformed reload -> HTTP 400 and previous valid generation remains active.
+- Leaked process/temp directory or port-53 reference -> smoke fails cleanup or
+  configuration checks.
+
+### 5. Good/Base/Bad Cases
+
+- Good: build the Rust artifact and a separate no-cgo Go-only fallback, then
+  run the same temporary config through both binaries and compare answers plus
+  mapper source metadata.
+- Base: macOS runs default/stub and pure Rust gates; Linux+cgo evidence comes
+  from CI or isolated `mos-test`.
+- Bad: run the smoke against the installed service, bind port 53, or report
+  `B/op` as Rust heap/RSS bytes.
+
+### 6. Tests Required
+
+- `go test ./...`, focused provider/mapper race, `go build ./...`, and
+  `go vet ./...` without Rust selection.
+- Rust fmt, all-target tests, checked-in header/valued ABI, clippy, and release
+  build; tagged Linux+cgo provider/mapper normal and race tests.
+- Three-run fixed-fixture benchmark and isolated smoke with reload, overlap,
+  audit source metadata, malformed input, fallback, concurrency, and restart.
+
+### 7. Wrong vs Correct
+
+Wrong: run only macOS stub tests and call the cgo/ABI or process smoke gates
+passed, or reuse a production config/port for the benchmark.
+
+Correct: run the explicit Linux+cgo commands and temporary-port smoke, record
+the transitional cgo/result-size limitations, and keep `MOSDNS_MATCHER_BACKEND`
+opt-in with the Go fallback available.
