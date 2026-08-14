@@ -26,25 +26,38 @@ const (
 )
 
 type SpecialGroup struct {
-	Slot           int    `json:"slot"`
-	Name           string `json:"name"`
-	ListenPort     int    `json:"listen_port,omitempty"`
-	CustomPortOnly bool   `json:"custom_port_only,omitempty"`
+	Slot            int                      `json:"slot"`
+	Name            string                   `json:"name"`
+	ListenPort      int                      `json:"listen_port,omitempty"`
+	CustomPortOnly  bool                     `json:"custom_port_only,omitempty"`
+	UpstreamSources []SpecialUpstreamSource  `json:"upstream_sources,omitempty"`
+	OwnedUpstreams  []UpstreamOverrideConfig `json:"owned_upstreams"`
+}
+
+type SpecialUpstreamSource struct {
+	Kind        string `json:"kind"`
+	PluginTag   string `json:"plugin_tag"`
+	UpstreamTag string `json:"upstream_tag,omitempty"`
 }
 
 type SpecialGroupView struct {
-	Slot                int    `json:"slot"`
-	Name                string `json:"name"`
-	ListenPort          int    `json:"listen_port,omitempty"`
-	CustomPortOnly      bool   `json:"custom_port_only,omitempty"`
-	PortMappingRequired bool   `json:"port_mapping_required,omitempty"`
-	Message             string `json:"message,omitempty"`
-	Key                 string `json:"key"`
-	UpstreamPluginTag   string `json:"upstream_plugin_tag"`
-	DiversionPluginTag  string `json:"diversion_plugin_tag"`
-	ManualPluginTag     string `json:"manual_plugin_tag"`
-	LocalConfig         string `json:"local_config"`
-	ManualRulePath      string `json:"manual_rule_path"`
+	Slot                   int                      `json:"slot"`
+	Name                   string                   `json:"name"`
+	ListenPort             int                      `json:"listen_port,omitempty"`
+	CustomPortOnly         bool                     `json:"custom_port_only,omitempty"`
+	PortMappingRequired    bool                     `json:"port_mapping_required,omitempty"`
+	Message                string                   `json:"message,omitempty"`
+	Key                    string                   `json:"key"`
+	UpstreamPluginTag      string                   `json:"upstream_plugin_tag"`
+	DiversionPluginTag     string                   `json:"diversion_plugin_tag"`
+	ManualPluginTag        string                   `json:"manual_plugin_tag"`
+	LocalConfig            string                   `json:"local_config"`
+	ManualRulePath         string                   `json:"manual_rule_path"`
+	UpstreamSources        []SpecialUpstreamSource  `json:"upstream_sources,omitempty"`
+	OwnedUpstreams         []UpstreamOverrideConfig `json:"owned_upstreams,omitempty"`
+	EffectiveUpstreamCount int                      `json:"effective_upstream_count"`
+	UpstreamActive         bool                     `json:"upstream_active"`
+	UpstreamWarnings       []string                 `json:"upstream_warnings,omitempty"`
 }
 
 var (
@@ -86,10 +99,12 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Slot           int    `json:"slot"`
-		Name           string `json:"name"`
-		ListenPort     int    `json:"listen_port"`
-		CustomPortOnly bool   `json:"custom_port_only"`
+		Slot            int                       `json:"slot"`
+		Name            string                    `json:"name"`
+		ListenPort      int                       `json:"listen_port"`
+		CustomPortOnly  bool                      `json:"custom_port_only"`
+		UpstreamSources *[]SpecialUpstreamSource  `json:"upstream_sources"`
+		Upstreams       *[]UpstreamOverrideConfig `json:"upstreams"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
@@ -107,13 +122,29 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	customPortOnly := payload.CustomPortOnly && listenPort != 0
+	var upstreamSources []SpecialUpstreamSource
+	var ownedUpstreams []UpstreamOverrideConfig
+	if payload.UpstreamSources != nil {
+		upstreamSources, err = normalizeSpecialUpstreamSources(*payload.UpstreamSources)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+	}
+	if payload.Upstreams != nil {
+		ownedUpstreams = normalizeOwnedSpecialUpstreams(*payload.Upstreams)
+		if err := validateOwnedSpecialUpstreams(ownedUpstreams); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+	}
 
 	specialGroupsLock.Lock()
 	defer specialGroupsLock.Unlock()
 
 	oldState := cloneSpecialGroups(specialGroups)
+	oldOverrides := rawUpstreamOverridesSnapshot()
 	slot := payload.Slot
-	needsConfigSync := false
 	needsRestart := false
 
 	if slot == 0 {
@@ -143,8 +174,16 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 			specialGroups[i].Name = payload.Name
 			specialGroups[i].ListenPort = listenPort
 			specialGroups[i].CustomPortOnly = customPortOnly
+			if payload.UpstreamSources != nil {
+				specialGroups[i].UpstreamSources = append([]SpecialUpstreamSource(nil), upstreamSources...)
+			}
+			if payload.Upstreams != nil {
+				specialGroups[i].OwnedUpstreams = cloneUpstreamEntries(ownedUpstreams)
+			}
 			if previousPort != listenPort || previousCustomPortOnly != customPortOnly {
-				needsConfigSync = true
+				needsRestart = true
+			}
+			if payload.UpstreamSources != nil || payload.Upstreams != nil {
 				needsRestart = true
 			}
 			updated = true
@@ -152,13 +191,18 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !updated {
+		newOwnedUpstreams := ownedUpstreams
+		if payload.Upstreams == nil {
+			newOwnedUpstreams = []UpstreamOverrideConfig{}
+		}
 		specialGroups = append(specialGroups, SpecialGroup{
-			Slot:           slot,
-			Name:           payload.Name,
-			ListenPort:     listenPort,
-			CustomPortOnly: customPortOnly,
+			Slot:            slot,
+			Name:            payload.Name,
+			ListenPort:      listenPort,
+			CustomPortOnly:  customPortOnly,
+			UpstreamSources: append([]SpecialUpstreamSource(nil), upstreamSources...),
+			OwnedUpstreams:  cloneUpstreamEntries(newOwnedUpstreams),
 		})
-		needsConfigSync = true
 		needsRestart = true
 	}
 	sort.Slice(specialGroups, func(i, j int) bool { return specialGroups[i].Slot < specialGroups[j].Slot })
@@ -180,24 +224,28 @@ func handleSaveSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if needsConfigSync {
-		if err := syncSpecialGroupsConfigLocked(); err != nil {
-			rollbackSpecialGroupsLocked(oldState)
-			http.Error(w, `{"error":"failed to update special groups config"}`, http.StatusInternalServerError)
-			return
-		}
+	if _, err := refreshSpecialGroupRuntimeState(specialGroups); err != nil {
+		restoreSpecialGroupTransactionLocked(oldState, oldOverrides)
+		http.Error(w, `{"error":"failed to refresh special upstream bindings"}`, http.StatusInternalServerError)
+		return
+	}
+	if err := syncSpecialGroupsConfigLocked(); err != nil {
+		restoreSpecialGroupTransactionLocked(oldState, oldOverrides)
+		http.Error(w, `{"error":"failed to update special groups config"}`, http.StatusInternalServerError)
+		return
 	}
 	if needsRestart {
 		_ = scheduleSelfRestart(GetCurrentMosdns(), specialGroupRestartDelayMs)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(buildSpecialGroupView(SpecialGroup{
-		Slot:           slot,
-		Name:           payload.Name,
-		ListenPort:     listenPort,
-		CustomPortOnly: customPortOnly,
-	}))
+	for _, group := range specialGroups {
+		if group.Slot == slot {
+			_ = json.NewEncoder(w).Encode(buildSpecialGroupView(group))
+			return
+		}
+	}
+	http.Error(w, `{"error":"special group not found after save"}`, http.StatusInternalServerError)
 }
 
 func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +268,7 @@ func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
 	defer specialGroupsLock.Unlock()
 
 	oldState := cloneSpecialGroups(specialGroups)
+	oldOverrides := rawUpstreamOverridesSnapshot()
 	next := make([]SpecialGroup, 0, len(specialGroups))
 	found := false
 	for _, g := range specialGroups {
@@ -240,8 +289,22 @@ func handleDeleteSpecialGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to save special groups"}`, http.StatusInternalServerError)
 		return
 	}
+	upstreamOverridesLock.Lock()
+	delete(upstreamOverrides, specialUpstreamPluginTag(slot))
+	deleteErr := saveUpstreamOverrides()
+	upstreamOverridesLock.Unlock()
+	if deleteErr != nil {
+		restoreSpecialGroupTransactionLocked(oldState, oldOverrides)
+		http.Error(w, `{"error":"failed to remove special upstream state"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, err := refreshSpecialGroupRuntimeState(specialGroups); err != nil {
+		restoreSpecialGroupTransactionLocked(oldState, oldOverrides)
+		http.Error(w, `{"error":"failed to refresh special upstream bindings"}`, http.StatusInternalServerError)
+		return
+	}
 	if err := syncSpecialGroupsConfigLocked(); err != nil {
-		rollbackSpecialGroupsLocked(oldState)
+		restoreSpecialGroupTransactionLocked(oldState, oldOverrides)
 		http.Error(w, `{"error":"failed to update special groups config"}`, http.StatusInternalServerError)
 		return
 	}
@@ -269,7 +332,7 @@ func loadSpecialGroups() error {
 	if err != nil {
 		return err
 	}
-	specialGroups = groups
+	specialGroups = migrateSpecialGroupOwnedUpstreams(groups)
 	return nil
 }
 
@@ -294,7 +357,7 @@ func loadSpecialGroupsFromDir(dir string) ([]SpecialGroup, error) {
 	if err := json.Unmarshal(data, &groups); err != nil {
 		return nil, err
 	}
-	return normalizeSpecialGroups(groups), nil
+	return migrateSpecialGroupOwnedUpstreams(normalizeSpecialGroups(groups)), nil
 }
 
 func normalizeSpecialGroups(groups []SpecialGroup) []SpecialGroup {
@@ -314,6 +377,12 @@ func normalizeSpecialGroups(groups []SpecialGroup) []SpecialGroup {
 		if g.ListenPort == 0 {
 			g.CustomPortOnly = false
 		}
+		if sources, err := normalizeSpecialUpstreamSources(g.UpstreamSources); err == nil {
+			g.UpstreamSources = sources
+		} else {
+			g.UpstreamSources = []SpecialUpstreamSource{}
+		}
+		g.OwnedUpstreams = cloneUpstreamEntries(g.OwnedUpstreams)
 		if _, ok := seen[g.Slot]; ok {
 			continue
 		}
@@ -330,6 +399,20 @@ func normalizeSpecialGroups(groups []SpecialGroup) []SpecialGroup {
 	}
 	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Slot < filtered[j].Slot })
 	return filtered
+}
+
+func migrateSpecialGroupOwnedUpstreams(groups []SpecialGroup) []SpecialGroup {
+	rawOverrides := rawUpstreamOverridesSnapshot()
+	for i := range groups {
+		if groups[i].OwnedUpstreams != nil {
+			continue
+		}
+		groups[i].OwnedUpstreams = cloneUpstreamEntries(rawOverrides[specialUpstreamPluginTag(groups[i].Slot)])
+		if groups[i].OwnedUpstreams == nil {
+			groups[i].OwnedUpstreams = []UpstreamOverrideConfig{}
+		}
+	}
+	return groups
 }
 
 func saveSpecialGroupsLocked() error {
@@ -374,13 +457,22 @@ func saveSpecialGroupsLocked() error {
 
 func cloneSpecialGroups(groups []SpecialGroup) []SpecialGroup {
 	cloned := make([]SpecialGroup, len(groups))
-	copy(cloned, groups)
+	for i, group := range groups {
+		cloned[i] = group
+		cloned[i].UpstreamSources = append([]SpecialUpstreamSource(nil), group.UpstreamSources...)
+		cloned[i].OwnedUpstreams = cloneUpstreamEntries(group.OwnedUpstreams)
+	}
 	return cloned
 }
 
-func rollbackSpecialGroupsLocked(oldState []SpecialGroup) {
-	specialGroups = cloneSpecialGroups(oldState)
+func restoreSpecialGroupTransactionLocked(oldGroups []SpecialGroup, oldOverrides GlobalUpstreamOverrides) {
+	specialGroups = cloneSpecialGroups(oldGroups)
 	_ = saveSpecialGroupsLocked()
+
+	upstreamOverridesLock.Lock()
+	upstreamOverrides = cloneGlobalUpstreamOverrides(oldOverrides)
+	_ = saveUpstreamOverrides()
+	upstreamOverridesLock.Unlock()
 	_ = syncSpecialGroupsConfigLocked()
 }
 
@@ -397,28 +489,30 @@ func firstFreeSpecialSlot(groups []SpecialGroup) int {
 }
 
 func buildSpecialGroupView(g SpecialGroup) SpecialGroupView {
+	resolution := resolveSpecialGroup(g)
 	view := SpecialGroupView{
-		Slot:               g.Slot,
-		Name:               g.Name,
-		ListenPort:         g.ListenPort,
-		CustomPortOnly:     g.CustomPortOnly,
-		Key:                specialGroupKey(g.Slot),
-		UpstreamPluginTag:  specialUpstreamPluginTag(g.Slot),
-		DiversionPluginTag: specialDiversionPluginTag(g.Slot),
-		ManualPluginTag:    specialManualPluginTag(g.Slot),
-		LocalConfig:        fmt.Sprintf("srs/special_%d.json", g.Slot),
-		ManualRulePath:     specialManualRulePath(g.Slot),
+		Slot:                   g.Slot,
+		Name:                   g.Name,
+		ListenPort:             g.ListenPort,
+		CustomPortOnly:         g.CustomPortOnly,
+		Key:                    specialGroupKey(g.Slot),
+		UpstreamPluginTag:      specialUpstreamPluginTag(g.Slot),
+		DiversionPluginTag:     specialDiversionPluginTag(g.Slot),
+		ManualPluginTag:        specialManualPluginTag(g.Slot),
+		LocalConfig:            fmt.Sprintf("srs/special_%d.json", g.Slot),
+		ManualRulePath:         specialManualRulePath(g.Slot),
+		UpstreamSources:        append([]SpecialUpstreamSource(nil), g.UpstreamSources...),
+		OwnedUpstreams:         cloneUpstreamEntries(g.OwnedUpstreams),
+		EffectiveUpstreamCount: len(resolution.Effective),
+		UpstreamActive:         len(resolution.Effective) > 0,
+		UpstreamWarnings:       append([]string(nil), resolution.Warnings...),
 	}
 	applySpecialGroupRuntimeHints(&view)
 	return view
 }
 
 func applySpecialGroupRuntimeHints(view *SpecialGroupView) {
-	if view == nil {
-		return
-	}
-
-	if !specialGroupPortMappingRequired(view.ListenPort) {
+	if view == nil || !specialGroupPortMappingRequired(view.ListenPort) {
 		return
 	}
 
@@ -549,6 +643,7 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 	b.WriteString("# 由 special_groups API 自动生成。不要手动编辑。\n")
 	for _, g := range groups {
 		slot := g.Slot
+		runtimeEnabled := specialGroupRuntimeEnabled(g)
 		b.WriteString(fmt.Sprintf("  - tag: special_route_%d\n", slot))
 		b.WriteString("    type: sd_set_light\n")
 		b.WriteString("    args:\n")
@@ -585,7 +680,7 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 		b.WriteString(fmt.Sprintf("      - exec: $special_upstream_%d\n", slot))
 		b.WriteString("      - exec: cname_remover\n\n")
 
-		if g.ListenPort != 0 {
+		if runtimeEnabled && g.ListenPort != 0 {
 			listenAddr := net.JoinHostPort("", strconv.Itoa(g.ListenPort))
 
 			b.WriteString(fmt.Sprintf("  - tag: %s\n", specialListenUDPServerTag(slot)))
@@ -611,7 +706,7 @@ func renderSpecialGroupsConfig(groups []SpecialGroup) []byte {
 	b.WriteString("      default_tag: \"\"\n")
 	mainFlowGroups := make([]SpecialGroup, 0, len(groups))
 	for _, g := range groups {
-		if specialGroupEnabledOn53(g) {
+		if specialGroupRuntimeEnabled(g) && specialGroupEnabledOn53(g) {
 			mainFlowGroups = append(mainFlowGroups, g)
 		}
 	}

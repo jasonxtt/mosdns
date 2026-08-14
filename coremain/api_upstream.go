@@ -89,6 +89,7 @@ func RegisterUpstreamAPI(router *chi.Mux, m *Mosdns) {
 	upstreamAPIHost = m
 	router.Route("/api/v1/upstream", func(r chi.Router) {
 		r.Get("/tags", handleGetAliAPITags)
+		r.Get("/sources", handleGetUpstreamSources)
 		r.Get("/config", handleGetUpstreamConfig)
 		r.Get("/runtime/{tag}", handleGetUpstreamRuntimeState)
 		r.Post("/config", handleSetUpstreamConfig)
@@ -362,6 +363,11 @@ func handleGetAliAPITags(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(tags)
 }
 
+func handleGetUpstreamSources(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(buildUpstreamSourceCatalog())
+}
+
 // handleGetUpstreamConfig 获取当前所有配置
 func handleGetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 	if upstreamOverrides == nil {
@@ -376,6 +382,38 @@ func handleGetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(safeData)
+}
+
+func validateUpstreamOverrideEntries(pluginTag string, entries []UpstreamOverrideConfig) error {
+	for i := range entries {
+		u := &entries[i]
+		if u.UseSocksProxy == nil {
+			useSocks := inferUseSocksProxy(pluginTag, *u)
+			u.UseSocksProxy = boolPtr(useSocks)
+		}
+
+		if u.Tag == "" {
+			return fmt.Errorf("Item #%d: tag (name) is required", i+1)
+		}
+
+		if u.Protocol != "aliapi" {
+			if u.Addr == "" {
+				return fmt.Errorf("Item #%d (%s): addr is required for DNS types", i+1, u.Tag)
+			}
+			if err := validateProtocolAddrCompatibility(u.Protocol, u.Addr); err != nil {
+				return fmt.Errorf("Item #%d (%s): %s", i+1, u.Tag, err.Error())
+			}
+		}
+
+		if !u.Enabled {
+			continue
+		}
+
+		if u.Protocol == "aliapi" && (u.AccountID == "" || u.AccessKeyID == "" || u.AccessKeySecret == "") {
+			return fmt.Errorf("Item #%d (%s): AliAPI requires account_id, access_key_id, and access_key_secret", i+1, u.Tag)
+		}
+	}
+	return nil
 }
 
 func handleGetUpstreamRuntimeState(w http.ResponseWriter, r *http.Request) {
@@ -431,49 +469,21 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 		zap.String("plugin_tag", payload.PluginTag),
 		zap.Int("items_count", len(payload.Upstreams)))
 
+	payload.PluginTag = strings.TrimSpace(payload.PluginTag)
 	if payload.PluginTag == "" {
 		http.Error(w, `{"error": "plugin_tag is required"}`, http.StatusBadRequest)
 		return
 	}
-
-	for i, u := range payload.Upstreams {
-		if u.UseSocksProxy == nil {
-			useSocks := inferUseSocksProxy(payload.PluginTag, u)
-			u.UseSocksProxy = boolPtr(useSocks)
-			payload.Upstreams[i].UseSocksProxy = u.UseSocksProxy
-		}
-
-		if u.Tag == "" {
-			msg := fmt.Sprintf(`{"error": "Item #%d: tag (name) is required"}`, i+1)
-			http.Error(w, msg, http.StatusBadRequest)
-			return
-		}
-
-		if u.Protocol != "aliapi" {
-			if u.Addr == "" {
-				msg := fmt.Sprintf(`{"error": "Item #%d (%s): addr is required for DNS types"}`, i+1, u.Tag)
-				http.Error(w, msg, http.StatusBadRequest)
-				return
-			}
-			if err := validateProtocolAddrCompatibility(u.Protocol, u.Addr); err != nil {
-				msg := fmt.Sprintf(`{"error": "Item #%d (%s): %s"}`, i+1, u.Tag, err.Error())
-				http.Error(w, msg, http.StatusBadRequest)
-				return
-			}
-		}
-
-		if !u.Enabled {
-			continue
-		}
-
-		if u.Protocol == "aliapi" {
-			if u.AccountID == "" || u.AccessKeyID == "" || u.AccessKeySecret == "" {
-				msg := fmt.Sprintf(`{"error": "Item #%d (%s): AliAPI requires account_id, access_key_id, and access_key_secret"}`, i+1, u.Tag)
-				http.Error(w, msg, http.StatusBadRequest)
-				return
-			}
-		}
+	if isSpecialUpstreamTag(payload.PluginTag) {
+		http.Error(w, `{"error":"专属分流组上游只能在专属分流组设置中维护"}`, http.StatusBadRequest)
+		return
 	}
+
+	if err := validateUpstreamOverrideEntries(payload.PluginTag, payload.Upstreams); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+	oldSpecialActive := snapshotSpecialGroupActiveState()
 
 	if upstreamOverrides == nil {
 		_ = loadUpstreamOverrides()
@@ -550,6 +560,13 @@ func handleSetUpstreamConfig(w http.ResponseWriter, r *http.Request) {
 			zap.String("plugin_tag", payload.PluginTag),
 			zap.Int("slot", slot))
 	}
+	if err := refreshDependentSpecialGroups(payload.PluginTag, oldSpecialActive); err != nil {
+		mlog.L().Error("[Debug UpstreamAPI] Dependent special group refresh failed",
+			zap.String("plugin_tag", payload.PluginTag),
+			zap.Error(err))
+		http.Error(w, `{"error": "Saved, but dependent special groups failed to refresh"}`, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, `{"message": "Upstream configuration saved."}`)
@@ -564,10 +581,15 @@ func parseSpecialUpstreamSlot(pluginTag string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if slot < 50 || slot > 59 {
+	if slot < specialSlotMin {
 		return 0, false
 	}
 	return slot, true
+}
+
+func isSpecialUpstreamTag(pluginTag string) bool {
+	_, ok := parseSpecialUpstreamSlot(strings.TrimSpace(pluginTag))
+	return ok
 }
 
 func flushDedicatedCaches(slot int) error {
