@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.7.3
+
+### Added
+
+- allow dedicated-group editors to reference an existing upstream group or a
+  single upstream identified within that group
+- allow dedicated groups to manage ordinary upstreams owned exclusively by the
+  current group
+- refresh referenced upstream state when the source is enabled, disabled,
+  deleted, or otherwise changed, with warnings for references that no longer
+  resolve
+
+### Changed
+
+- reorganized the dedicated-group upstream editor with compact responsive
+  layout, inherited glass/transparent surfaces, and clearer action hierarchy
+
+### Notes
+
+- binary/UI and runtime-state update only; configuration schema remains `4`
+  with package ID `main-config-schema-4`, so no `config_up` / `config_all`
+  changes are required
+
 ## v0.7.2
 
 ### Fixed
