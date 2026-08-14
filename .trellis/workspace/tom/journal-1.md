@@ -33,3 +33,24 @@ A-E Rust cache and matcher foundation work committed; F archived the task; G rec
 ### Next Steps
 
 - Await independent follow-up after the Trellis finish gate.
+
+
+## Session 2: Complete Rust matcher Phase 2
+
+**Date**: 2026-08-14
+**Task**: Complete Rust matcher Phase 2
+**Branch**: `rust`
+
+### Summary
+
+Completed and reviewed Rust matcher Phase 2: shared adapter, sd_set/si_set generation-safe fallback, valued domain_mapper, CI/benchmarks, Linux+cgo gates, full embedded-UI experimental build, and isolated mos-test smoke. Archived the Trellis task; Rust remains experimental and default Go-only.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `943d4c7` | (see git log) |
+
+### Status
+
+[OK] **Completed**
