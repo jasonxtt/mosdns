@@ -22,8 +22,10 @@ cd "${PROJECT_ROOT}"
 CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test \
 	-tags mosdns_rust \
 	-run '^$' \
-	-bench '^BenchmarkRust(Domain|IP)' \
+	-bench '^BenchmarkRust(Domain|IP|Mapper)' \
 	-benchmem \
 	-benchtime="${BENCHTIME}" \
 	-count="${COUNT}" \
-	./plugin/data_provider/domain_set ./plugin/data_provider/ip_set
+	./plugin/data_provider/domain_set \
+	./plugin/data_provider/ip_set \
+	./plugin/data_provider/domain_mapper

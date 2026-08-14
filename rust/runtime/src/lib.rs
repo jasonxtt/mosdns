@@ -2,11 +2,10 @@
 
 #![allow(clippy::pedantic)]
 //!
-//! This is the only `staticlib` in the workspace. It re-exports `cache-core`'s
-//! ABI symbols as `extern "C"` functions and will host matcher-core ABI symbols
-//! once that module is added. The crate itself is a thin delegation layer; the
-//! implementation lives in the internal libraries (`cache-core` and, later,
-//! `matcher-core`).
+//! This is the only `staticlib` in the workspace. It exposes cache and matcher
+//! ABI symbols as `extern "C"` functions through a thin delegation layer; the
+//! implementation lives in the internal `cache-core` and `matcher-core`
+//! libraries.
 
 mod matcher;
 
@@ -31,6 +30,7 @@ pub extern "C" fn cache_abi_capabilities() -> u64 {
         | mosdns_cache_core::CAPABILITY_CACHE
         | mosdns_cache_core::CAPABILITY_LOOKUP_INTO
         | matcher::CAPABILITY_MATCHER
+        | matcher::CAPABILITY_VALUED_MATCHER
 }
 
 // --- Lifecycle ---

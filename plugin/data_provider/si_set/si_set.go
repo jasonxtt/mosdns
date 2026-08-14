@@ -44,6 +44,7 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
+	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/matcher_adapter"
 	"github.com/go-chi/chi/v5"
 	"github.com/sagernet/sing/common/varbin"
 	"go4.org/netipx"
@@ -83,13 +84,14 @@ type IPReceiver interface {
 	Add(netip.Prefix)
 }
 
-// [新增] 规则列表接收器 (用于 reloadAllRules)
-type listCollector struct {
-	l *netlist.List
+type acceptedPrefixCollector struct {
+	list     *netlist.List
+	prefixes *[]string
 }
 
-func (c *listCollector) Add(p netip.Prefix) {
-	c.l.Append(p)
+func (c *acceptedPrefixCollector) Add(p netip.Prefix) {
+	c.list.Append(p)
+	*c.prefixes = append(*c.prefixes, p.String())
 }
 
 // [新增] 计数收集器 (用于校验，不存数据，省内存)
@@ -104,6 +106,12 @@ func (c *counterCollector) Add(_ netip.Prefix) {
 // SiSet implements IPMatcherProvider and holds the state for the plugin.
 type SiSet struct {
 	matcher atomic.Value // Stores a netlist.Matcher for concurrent-safe access.
+
+	generationMu sync.RWMutex
+	generation   *siGeneration
+	updateMu     sync.Mutex
+	closed       bool
+	closeErr     error
 
 	mu      sync.RWMutex // Protects the sources map and related file I/O.
 	sources map[string]*RuleSource
@@ -192,7 +200,9 @@ func (p *SiSet) GetIPMatcher() netlist.Matcher {
 // This ensures any update via API or auto-update is immediately effective
 // without restarting the service.
 func (p *SiSet) Match(addr netip.Addr) bool {
-	// Atomic Load: Extremely fast (nanosecond scale) and thread-safe.
+	if matched, ok := p.matchGeneration(addr); ok {
+		return matched
+	}
 	m, ok := p.matcher.Load().(netlist.Matcher)
 	if !ok || m == nil {
 		return false
@@ -202,9 +212,27 @@ func (p *SiSet) Match(addr netip.Addr) bool {
 
 // Close gracefully shuts down the plugin.
 func (p *SiSet) Close() error {
+	p.updateMu.Lock()
+	defer p.updateMu.Unlock()
+
+	if p.closed {
+		return p.closeErr
+	}
+	p.closed = true
 	log.Printf("[%s] closing...", PluginType)
 	p.cancel()
-	return nil
+
+	p.generationMu.Lock()
+	var retired matcher_adapter.IPSnapshot
+	if p.generation != nil && p.generation.rustMatcher != nil {
+		retired = p.generation.rustMatcher
+		p.generation.rustMatcher = nil
+	}
+	p.generationMu.Unlock()
+	if retired != nil {
+		p.closeErr = retired.Close()
+	}
+	return p.closeErr
 }
 
 // loadConfig reads the rule source configuration from the local JSON file.
@@ -276,23 +304,26 @@ func (p *SiSet) saveConfig() error {
 	return nil
 }
 
-
 // reloadAllRules re-parses all enabled local SRS files into a new matcher.
 func (p *SiSet) reloadAllRules() error {
+	p.updateMu.Lock()
+	defer p.updateMu.Unlock()
+
 	log.Printf("[%s] starting to reload all rules (optimized memory mode)...", PluginType)
 
 	p.mu.RLock()
 	// Create a snapshot of enabled sources to process.
-	enabledSources := make([]*RuleSource, 0, len(p.sources))
+	enabledSources := make([]RuleSource, 0, len(p.sources))
 	for _, src := range p.sources {
 		if src.Enabled {
-			enabledSources = append(enabledSources, src)
+			enabledSources = append(enabledSources, *src)
 		}
 	}
 	p.mu.RUnlock()
 
 	newList := netlist.NewList()
-	collector := &listCollector{l: newList} // [优化] 使用收集器
+	rustPrefixes := make([]string, 0)
+	collector := &acceptedPrefixCollector{list: newList, prefixes: &rustPrefixes}
 	totalRules := 0
 	configChanged := false
 
@@ -337,7 +368,19 @@ func (p *SiSet) reloadAllRules() error {
 	}
 
 	newList.Sort()
-	p.matcher.Store(newList) // Atomically swap the matcher
+	var rustMatcher matcher_adapter.IPSnapshot
+	if !p.closed {
+		var err error
+		rustMatcher, err = rustIPSnapshotBuilder(rustPrefixes)
+		if err != nil {
+			if rustMatcher != nil {
+				_ = rustMatcher.Close()
+			}
+			log.Printf("[%s] WARN: Rust matcher build failed; using the new Go generation: %v", PluginType, err)
+			rustMatcher = nil
+		}
+	}
+	p.publishGeneration(newSiGeneration(newList, rustMatcher))
 	log.Printf("[%s] finished reloading. Total active rules: %d", PluginType, totalRules)
 
 	if configChanged {

@@ -1,6 +1,6 @@
 # MosDNS Rust 渐进重写方案
 
-最后更新：`2026-08-13`
+最后更新：`2026-08-14`
 
 ## 1. 目标与边界
 
@@ -90,7 +90,7 @@ plugin/.../rust_bridge_*.go
 
 ### 不能直接整仓搬入的原因
 
-- 旧仓库基线是 `2026-05-27`，当前 `main` 是 `2026-07-19` 的 v0.7.1；
+- 旧仓库基线是 `2026-05-27`；`rust` 分支基于 `main` 的 v0.7.1，后续同步必须以明确的 main commit 为准，不要把该基线当作当前 main 版本；
 - 旧仓库最后一批 L1、Mutex 和 CI 变更仍是未提交工作树内容，不能只 cherry-pick 一个稳定提交；
 - raw response 快路径还依赖 `pkg/query_context` 和 `pkg/server_handler` 的配套改动，不能只复制 cache 目录；
 - 当前发布 workflow 已增加 Vue 预构建和更新 manifest，旧 workflow 不能覆盖复制；
@@ -214,18 +214,15 @@ plugin/.../rust_bridge_*.go
 
 完成标准：规则语法、优先级、匹配结果、`special_groups` 路由标签全部一致。
 
-当前 foundation 状态（`2026-08-13`）：matcher foundation task 的 Slice 0–5
-已完成实现和验证，independent review passed on 2026-08-13，task 已归档/完成；
-A–E exact-scope work commits 已完成并复核，F 是 task archive finish commit，G
-是 journal-only finish commit；整体 Rust rewrite 仍在进行，默认仍为
-Go-only。唯一 Rust `staticlib`、domain/IP 不可变
-index、事务式 Go adapter、ABI/header gate、Linux+cgo 普通与 race gate、
-固定 fixture 性能证据和隔离 `mos-test` smoke 已记录在
-`docs/rust/matcher-compatibility.md` 与
-`docs/rust/benchmarks/matcher-foundation.md`。Rust 仍是
-`MOSDNS_MATCHER_BACKEND=rust` opt-in 实验路径；provider fan-out
-（`sd_set`、`sd_set_light`、`domain_set_light`、`si_set`）以及
-`domain_mapper` 不属于本 task，必须由独立批准的后续任务处理。
+foundation 状态（`2026-08-13`）：matcher foundation task 的 Slice 0–5
+已完成实现和验证，independent review passed on 2026-08-13，task 已归档/完成。
+Phase 2 expansion task 的 Slices 0–5 也已完成实现、root review 和验证；
+`sd_set`、`si_set` 与 valued `domain_mapper` 仍通过
+`MOSDNS_MATCHER_BACKEND=rust` opt-in，Go fallback 和默认 Go-only 不变。
+扩展证据记录在 `docs/rust/matcher-compatibility.md`、
+`docs/rust/benchmarks/matcher-phase2-expansion.md` 和
+`docs/rust/test-host-matcher-phase2-expansion.md`。这些门禁不授权默认切换、
+生产部署或阶段 3。
 
 ### 阶段 3：建立 Rust DNS/query 执行核心
 
@@ -293,10 +290,7 @@ Vue 源码无需因后端语言变化而重写。只有当 Rust host 覆盖当�
 replay/soak、sanitizer/Miri 和扩展测试机验证门槛，且不得成为默认后端。
 
 `.trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation/` 的 Slice 0–5
-已在 `rust` 分支完成，independent review passed on 2026-08-13，A–E
-exact-scope work commits 已完成并复核；F 是 task archive finish commit，G 是
-journal-only finish commit。本 task 的归档不结束或归档整个 Rust 重写计划。
-下一步若要扩展 matcher，必须先为 provider fan-out 或
-`domain_mapper` 创建并独立批准后续任务；不得顺手迁移 sequence、upstream
-或 server。只有 matcher foundation 经过 review 和后续批准，才进入阶段 3
-的 Rust query/sequence core。
+已在 `rust` 分支完成，independent review passed on 2026-08-13；其归档不
+结束或归档整个 Rust 重写计划。Phase 2 expansion 也已归档完成；这不等于
+阶段 3 获得授权，不得顺手迁移 sequence、upstream 或 server。Rust 仍保持
+实验性，默认后端保持 Go-only。

@@ -664,6 +664,9 @@ fn checked_in_header_matches_abi_constants_and_entrypoints() {
         "#define MOSDNS_CACHE_ABI_VERSION 1u",
         "MOSDNS_CACHE_CAPABILITY_LIFECYCLE",
         "MOSDNS_CACHE_CAPABILITY_LOOKUP_INTO",
+        "MOSDNS_CACHE_CAPABILITY_VALUED_MATCHER",
+        "#define MOSDNS_VALUED_RULE_BATCH_VERSION 1u",
+        "#define MOSDNS_VALUED_RESULT_VERSION 1u",
         "uint32_t cache_abi_version(void);",
         "uint64_t cache_abi_capabilities(void);",
         "MosdnsCacheStatus cache_create(",
@@ -674,6 +677,10 @@ fn checked_in_header_matches_abi_constants_and_entrypoints() {
         "MosdnsCacheStatus cache_lookup_into(",
         "MosdnsCacheStatus cache_flush(uint64_t handle);",
         "MosdnsCacheStatus cache_buffer_release(MosdnsCacheOwnedBuffer buffer);",
+        "MosdnsCacheStatus valued_domain_matcher_create(",
+        "MosdnsCacheStatus valued_domain_matcher_match(",
+        "MosdnsCacheStatus valued_domain_matcher_len(uint64_t handle, uint64_t *out_len);",
+        "MosdnsCacheStatus valued_domain_matcher_close(uint64_t handle);",
     ] {
         assert!(header.contains(expected), "header is missing {expected:?}");
     }

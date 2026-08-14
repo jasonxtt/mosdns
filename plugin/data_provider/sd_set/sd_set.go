@@ -23,6 +23,7 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
+	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/matcher_adapter"
 	"github.com/go-chi/chi/v5"
 	scdomain "github.com/sagernet/sing/common/domain"
 	"github.com/sagernet/sing/common/varbin"
@@ -58,6 +59,12 @@ type RuleSource struct {
 
 type SdSet struct {
 	matcher atomic.Value // 使用 atomic.Value 来安全地读写 matcher 指针
+
+	generationMu sync.RWMutex
+	generation   *sdGeneration
+	updateMu     sync.Mutex
+	closed       bool
+	closeErr     error
 
 	mu      sync.RWMutex // mu 保护 sources map 和相关的配置文件写入
 	sources map[string]*RuleSource
@@ -100,6 +107,19 @@ type ruleEntryCollector struct {
 	sourceType string
 	sourceFile string
 	sourceURL  string
+}
+
+type acceptedRuleCollector struct {
+	matcher *domain.MixMatcher[struct{}]
+	rules   *[]string
+}
+
+func (c *acceptedRuleCollector) Add(s string, value struct{}) error {
+	if err := c.matcher.Add(s, value); err != nil {
+		return err
+	}
+	*c.rules = append(*c.rules, s)
+	return nil
 }
 
 func (c *ruleEntryCollector) Add(s string, _ struct{}) error {
@@ -253,9 +273,27 @@ func newSdSet(bp *coremain.BP, args any) (any, error) {
 }
 
 func (p *SdSet) Close() error {
+	p.updateMu.Lock()
+	defer p.updateMu.Unlock()
+
+	if p.closed {
+		return p.closeErr
+	}
+	p.closed = true
 	log.Printf("[%s] closing...", PluginType)
 	p.cancel()
-	return nil
+
+	p.generationMu.Lock()
+	var retired matcher_adapter.DomainSnapshot
+	if p.generation != nil && p.generation.rustMatcher != nil {
+		retired = p.generation.rustMatcher
+		p.generation.rustMatcher = nil
+	}
+	p.generationMu.Unlock()
+	if retired != nil {
+		p.closeErr = retired.Close()
+	}
+	return p.closeErr
 }
 
 func (p *SdSet) GetDomainMatcher() domain.Matcher[struct{}] {
@@ -263,7 +301,13 @@ func (p *SdSet) GetDomainMatcher() domain.Matcher[struct{}] {
 }
 
 func (p *SdSet) Match(domainStr string) (value struct{}, ok bool) {
-	m := p.matcher.Load().(*domain.MixMatcher[struct{}])
+	if matched, ok := p.matchGeneration(domainStr); ok {
+		return struct{}{}, matched
+	}
+	m, ok := p.matcher.Load().(*domain.MixMatcher[struct{}])
+	if !ok || m == nil {
+		return struct{}{}, false
+	}
 	return m.Match(domainStr)
 }
 
@@ -340,18 +384,23 @@ func (p *SdSet) saveConfig() error {
 }
 
 func (p *SdSet) reloadAllRules() error {
+	p.updateMu.Lock()
+	defer p.updateMu.Unlock()
+
 	log.Printf("[%s] starting to reload all rules...", PluginType)
 
 	p.mu.RLock()
-	sourcesSnapshot := make([]*RuleSource, 0, len(p.sources))
+	sourcesSnapshot := make([]RuleSource, 0, len(p.sources))
 	for _, src := range p.sources {
 		if src.Enabled {
-			sourcesSnapshot = append(sourcesSnapshot, src)
+			sourcesSnapshot = append(sourcesSnapshot, *src)
 		}
 	}
 	p.mu.RUnlock()
 
 	newMatcher := domain.NewDomainMixMatcher()
+	rustRules := make([]string, 0)
+	collector := &acceptedRuleCollector{matcher: newMatcher, rules: &rustRules}
 	totalRules := 0
 	rulesCountUpdated := false
 
@@ -374,7 +423,7 @@ func (p *SdSet) reloadAllRules() error {
 		}
 
 		// Modified: pass src.EnableRegexp
-		ok, count, lastRule := tryLoadSRS(b, newMatcher, src.EnableRegexp)
+		ok, count, lastRule := tryLoadSRS(b, collector, src.EnableRegexp)
 		if !ok {
 			log.Printf("[%s] ERROR: failed to load SRS file for source '%s' from %s", PluginType, src.Name, src.Files)
 			continue
@@ -390,7 +439,19 @@ func (p *SdSet) reloadAllRules() error {
 		p.mu.Unlock()
 	}
 
-	p.matcher.Store(newMatcher)
+	var rustMatcher matcher_adapter.DomainSnapshot
+	if !p.closed {
+		var err error
+		rustMatcher, err = rustDomainSnapshotBuilder(rustRules)
+		if err != nil {
+			if rustMatcher != nil {
+				_ = rustMatcher.Close()
+			}
+			log.Printf("[%s] WARN: Rust matcher build failed; using the new Go generation: %v", PluginType, err)
+			rustMatcher = nil
+		}
+	}
+	p.publishGeneration(newSdGeneration(newMatcher, rustMatcher))
 	log.Printf("[%s] finished reloading. Total active rules: %d", PluginType, totalRules)
 	newMatcher = nil
 

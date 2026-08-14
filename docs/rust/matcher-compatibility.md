@@ -1,15 +1,15 @@
 # Rust matcher compatibility matrix
 
-Status: Slice 0 contract freeze for `08-13-rust-matcher-phase2-expansion` is
-complete; Rust remains experimental and default builds remain Go-only. The
-archived matcher foundation is implemented, while provider fan-out and
-`domain_mapper` Rust integration are not yet implemented.
+Status: Slices 0–5 of `08-13-rust-matcher-phase2-expansion` are implemented,
+reviewed, and verified. Rust remains experimental and default builds remain
+Go-only. Linux+cgo and isolated `mos-test` results are recorded separately and
+are not inferred from macOS arm64 builds.
 This is the authoritative contract record for the current Phase 2 expansion.
 It maps every matcher behavior and consumer to a fixture owner and an exact
 migration state. MosDNS semantics are authoritative; KixDNS tests are only
 supplementary.
 
-Last verified against working tree on `2026-08-13`.
+Last verified against working tree on `2026-08-14`.
 
 ## 1. Interface contracts
 
@@ -108,11 +108,11 @@ Rust adapter or valued snapshot.
 | `client_ip` | inherited via `base_ip` | netlist | — | bool | inherited | — |
 | `resp_ip` | inherited via `base_ip` | netlist | — | bool | inherited | — |
 | `ptr_ip` | inherited via `base_ip` | netlist | — | bool | inherited | — |
-| `sd_set` | provider+matcher | domain | domain | `struct{}` | Go contract frozen (Slice 0); Rust adapter pending Slice 2 | `sd_set/slice0_contract_test.go` |
-| `sd_set_light` | provider/exporter | domain | domain | `struct{}` | Go constant-false/export contract frozen (Slice 0); mapper fan-out pending Slice 4 | `sd_set_light/slice0_contract_test.go` |
-| `domain_set_light` | provider/exporter | domain | domain | `struct{}` | Go constant-false/export contract frozen (Slice 0); mapper fan-out pending Slice 4 | `domain_set_light/slice0_contract_test.go` |
-| `si_set` | provider+matcher | netlist | — | bool | Go contract frozen (Slice 0); Rust adapter pending Slice 2 | `si_set/slice0_contract_test.go` |
-| `domain_mapper` | aggregator (consumes `RuleExporter`, compiles results) | domain | domain | valued | Go aggregation contract frozen (Slice 0); valued Rust snapshot pending Slices 3–4 | `domain_mapper/slice0_contract_test.go` |
+| `sd_set` | provider+matcher | domain | domain | `struct{}` | Rust generation/fallback implemented (Slice 2); Linux+cgo gate passed on `mos-test` | `sd_set/slice2_generation_test.go` |
+| `sd_set_light` | provider/exporter | domain | domain | `struct{}` | constant-false exporter; fan-out remains Go-only by design | `sd_set_light/slice0_contract_test.go` |
+| `domain_set_light` | provider/exporter | domain | domain | `struct{}` | constant-false exporter; fan-out remains Go-only by design | `domain_set_light/slice0_contract_test.go` |
+| `si_set` | provider+matcher | netlist | — | bool | Rust generation/fallback implemented (Slice 2); Linux+cgo gate passed on `mos-test` | `si_set/slice2_generation_test.go` |
+| `domain_mapper` | aggregator (consumes `RuleExporter`, compiles results) | domain | domain | valued | valued Rust generation/fallback implemented (Slice 4); Linux+cgo gate passed on `mos-test` | `domain_mapper/slice4_generation_test.go` |
 | `rewrite` | executable | domain | **full** | `*rewriteTarget` | deferred | — |
 | `redirect` | executable | domain | **full** | `string` | deferred | — |
 | `adguard` | executable | domain | domain | `struct{}` | deferred | — |
@@ -185,7 +185,7 @@ Linux+cgo adapter).
 | `sd_set_light` SRS export, regexp gating, constant-false match, reload, subscription, online validation, and close | `TestSlice0SdSetLightExportsRulesButNeverMatches`, `TestSlice0SdSetLightOnlineInvalidSourceDoesNotOverwriteFile` | `plugin/data_provider/sd_set_light` |
 | `domain_set_light` expression/text/SRS composition, missing-source behavior, POST persistence, subscription, and constant-false match | `TestSlice0DomainSetLightComposesSourcesAndStaysConstantFalse` | `plugin/data_provider/domain_set_light` |
 | `si_set` SRS composition, atomic reload, online validation, and close | `TestSlice0SiSetSRSCompositionReloadAndClose`, `TestSlice0SiSetOnlineInvalidSourceDoesNotOverwriteFile` | `plugin/data_provider/si_set` |
-| `domain_mapper` ancestor inheritance, overlap merge, mark/tag/source deduplication, defaults, `QuickAdd`, detailed metadata, and concurrent rebuild/lookup | `TestSlice0DomainMapperInheritanceOverlapMetadataAndDefaults`, `TestSlice0DomainMapperQuickAddAndConcurrentRebuildLookup` | `plugin/data_provider/domain_mapper` |
+| `domain_mapper` ancestor inheritance, overlap merge, mark/tag/source deduplication, defaults, `QuickAdd`, detailed metadata, and concurrent rebuild/lookup | `TestSlice0DomainMapperInheritanceOverlapMetadataAndDefaults`, `TestSlice0DomainMapperQuickAddAndConcurrentRebuildLookup`, `TestSlice4ValuedMapperUsesOneGenerationAndMergesQuickAdd` | `plugin/data_provider/domain_mapper` |
 
 ## 5. Migration boundary reminders
 
@@ -200,15 +200,33 @@ Linux+cgo adapter).
   must select Go, never silently reinterpret a rule.
 - Reload must be transactional; no partial snapshot may be published.
 
-## 6. Slice 0 evidence boundary
+## 6. Slice 5 verification boundary
+
+- CI covers default Go full/focused/race tests, Rust fmt/test/clippy/header,
+  Linux+cgo provider/mapper normal and race tests, fixed-fixture benchmarks,
+  and the experimental binary build.
+- `scripts/benchmark-rust-matchers.sh` reports fixture size, build and lookup
+  timing, Go allocations via `-benchmem`, logical valued-result size, and
+  transitional cgo calls. Rust index length is an entry count, not heap bytes.
+- `scripts/smoke-rust-matcher-mos-test.sh` uses temporary rules/configuration,
+  random high loopback ports, and an isolated process. It exercises provider
+  reload, mapper overlap/source metadata through the audit API, concurrent
+  query/reload, Rust-selected startup with a no-cgo Go-only fallback binary,
+  and restart; it never targets port 53 or an installed service.
+- The local macOS arm64 session can run default/stub paths only. Linux+cgo
+  provider/mapper tests, benchmark measurements, experimental binary, and the
+  isolated host smoke are host/CI evidence gates; the 2026-08-14 `mos-test`
+  rerun is recorded in the test-host document.
+
+## 7. Earlier contract evidence
 
 - The current Go fixtures directly exercise accepted SRS/text input,
   expression/source composition, source metadata, rule counts, subscription
   callbacks, online validation, invalid-source retention, close idempotence,
   constant-false light-provider behavior, mapper inheritance/overlap/defaults,
   `QuickAdd`, and concurrent rebuild/lookup.
-- No Slice 1 shared adapter, Slice 2 online-provider Rust handle, Slice 3 valued
-  Rust ABI, or Slice 4 mapper fan-out is authorized by these fixtures alone.
+- The Slice 0 fixtures remain the Go compatibility baseline; Slice 2 and Slice
+  4 tests add the opt-in Rust generation and lifecycle contracts.
 - Later Linux+cgo tests must call the real Rust symbols directly and retain the
   same Go fallback and lifecycle assertions; Rust remains opt-in through
   `MOSDNS_MATCHER_BACKEND=rust`.
