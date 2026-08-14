@@ -29,6 +29,7 @@ const sortState = reactive({
 
 const upstreamTags = ref([])
 const upstreamConfig = ref({})
+const upstreamSources = ref([])
 const specialGroups = ref([])
 const globalSocks5 = ref('')
 const specialGroupsManagerOpen = ref(false)
@@ -38,9 +39,16 @@ const specialEditor = reactive({
   slot: 0,
   name: '',
   listenPort: '',
-  customPortOnly: false
+  customPortOnly: false,
+  upstreamSources: [],
+  ownedUpstreams: []
 })
-const editingCtx = ref({ group: '', index: -1 })
+const specialSourceDraft = reactive({
+  pluginTag: '',
+  kind: 'group',
+  upstreamTag: ''
+})
+const editingCtx = ref({ group: '', index: -1, specialOwned: false })
 
 const form = reactive({
   group: '',
@@ -127,13 +135,26 @@ const groupOptions = computed(() => {
       options.add(group.trim())
     }
   })
-  ;(specialGroups.value || []).forEach((group) => {
-    if (group?.upstream_plugin_tag) {
-      options.add(String(group.upstream_plugin_tag))
-    }
-  })
   return orderUpstreamGroups(Array.from(options), specialGroups.value)
 })
+
+const sourceDraftGroup = computed(() => {
+  return (upstreamSources.value || []).find((group) => group?.plugin_tag === specialSourceDraft.pluginTag) || null
+})
+
+const sourceDraftUpstreams = computed(() => {
+  return Array.isArray(sourceDraftGroup.value?.upstreams) ? sourceDraftGroup.value.upstreams : []
+})
+
+const specialGroupSourceRows = computed(() => {
+  return Array.isArray(specialEditor.upstreamSources) ? specialEditor.upstreamSources : []
+})
+
+const specialGroupOwnedRows = computed(() => {
+  return Array.isArray(specialEditor.ownedUpstreams) ? specialEditor.ownedUpstreams : []
+})
+
+const isSpecialOwnedEditing = computed(() => Boolean(editingCtx.value.specialOwned))
 
 const hideDisabledLabel = computed(() => (hideDisabled.value ? '显示全部上游' : '隐藏未启用上游'))
 const isRealIpRoutingMode = computed(() => dnsRoutingMode.value === 'B')
@@ -163,12 +184,20 @@ const specialGroupCards = computed(() => {
     return {
       ...group,
       portLabel: group?.listen_port ? `监听端口 ${group.listen_port}` : '未设置专属端口',
-      routeLabel: group?.listen_port
-        ? (group?.custom_port_only ? '仅自定义端口生效' : '53端口 + 自定义端口')
-        : '53端口生效',
-      upstreamCountLabel: `已绑定 ${upstreamCount} 个上游`
+      routeLabel: group?.upstream_active
+        ? (group?.listen_port
+            ? (group?.custom_port_only ? '仅自定义端口生效' : '53端口 + 自定义端口')
+            : '53端口生效')
+        : '当前不参与分流',
+      upstreamCountLabel: group?.upstream_active
+        ? `当前生效 ${group.effective_upstream_count || upstreamCount} 个上游`
+        : '当前无生效上游'
     }
   })
+})
+
+const activeSpecialEditorGroup = computed(() => {
+  return (specialGroups.value || []).find((group) => Number(group?.slot) === Number(specialEditor.slot)) || null
 })
 
 const summarySpecialGroups = computed(() => specialGroupCards.value.slice(0, 2))
@@ -195,6 +224,9 @@ const rows = computed(() => {
   const all = []
   let originalOrder = 0
   Object.entries(upstreamConfig.value || {}).forEach(([group, upstreams]) => {
+    if (isSpecialUpstreamTag(group)) {
+      return
+    }
     if (filterGroup.value !== 'all' && group !== filterGroup.value) {
       return
     }
@@ -317,22 +349,24 @@ async function loadData() {
   loading.value = true
   resetMessage()
   try {
-    const [tagsRes, configRes, groupsRes, overridesRes, dnsModeRes] = await Promise.allSettled([
+    const [tagsRes, configRes, sourcesRes, groupsRes, overridesRes, dnsModeRes] = await Promise.allSettled([
       getJSON('/api/v1/upstream/tags'),
       getJSON('/api/v1/upstream/config'),
+      getJSON('/api/v1/upstream/sources'),
       getJSON('/api/v1/special-groups'),
       getJSON('/api/v1/overrides'),
       getText(`/plugins/${DNS_ROUTING_SWITCH_TAG}/show`)
     ])
     upstreamTags.value = tagsRes.status === 'fulfilled' && Array.isArray(tagsRes.value) ? tagsRes.value : []
     upstreamConfig.value = configRes.status === 'fulfilled' && configRes.value ? configRes.value : {}
+    upstreamSources.value = sourcesRes.status === 'fulfilled' && Array.isArray(sourcesRes.value) ? sourcesRes.value : []
     specialGroups.value = groupsRes.status === 'fulfilled' && Array.isArray(groupsRes.value) ? groupsRes.value : []
     globalSocks5.value = overridesRes.status === 'fulfilled'
       ? String(overridesRes.value?.socks5 || '').trim()
       : ''
     dnsRoutingMode.value = dnsModeRes.status === 'fulfilled' ? String(dnsModeRes.value || '').trim() : ''
 
-    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || groupsRes.status === 'rejected' || overridesRes.status === 'rejected' || dnsModeRes.status === 'rejected') {
+    if (tagsRes.status === 'rejected' || configRes.status === 'rejected' || sourcesRes.status === 'rejected' || groupsRes.status === 'rejected' || overridesRes.status === 'rejected' || dnsModeRes.status === 'rejected') {
       setError('部分数据加载失败，已使用可用数据渲染页面。')
     }
   } catch (error) {
@@ -344,10 +378,37 @@ async function loadData() {
 
 function beginAdd() {
   resetMessage()
-  editingCtx.value = { group: '', index: -1 }
+  editingCtx.value = { group: '', index: -1, specialOwned: false }
   resetForm()
   form.group = groupOptions.value[0] || ''
   showEditor.value = true
+}
+
+function fillUpstreamForm(item, group) {
+  const data = item || {}
+  resetForm()
+  form.group = group
+  form.tag = String(data.tag || '')
+  form.protocol = normalizeProtocolAlias(data.protocol || 'udp')
+  form.addr = String(data.addr || '')
+  form.dial_addr = String(data.dial_addr || '')
+  form.socks5 = String(data.socks5 || '')
+  form.use_socks_proxy = Boolean(data.use_socks_proxy)
+  form.bootstrap = String(data.bootstrap || '')
+  form.bootstrap_version = toInt(data.bootstrap_version, 0)
+  form.enable_pipeline = Boolean(data.enable_pipeline)
+  form.enable_http3 = Boolean(data.enable_http3)
+  form.insecure_skip_verify = Boolean(data.insecure_skip_verify)
+  form.idle_timeout = toInt(data.idle_timeout, 0)
+  form.upstream_query_timeout = toInt(data.upstream_query_timeout, 0)
+  form.bind_to_device = String(data.bind_to_device || '')
+  form.so_mark = toInt(data.so_mark, 0)
+  form.account_id = String(data.account_id || '')
+  form.access_key_id = String(data.access_key_id || '')
+  form.access_key_secret = String(data.access_key_secret || '')
+  form.server_addr = String(data.server_addr || '223.5.5.5')
+  form.ecs_client_ip = String(data.ecs_client_ip || '')
+  form.ecs_client_mask = toInt(data.ecs_client_mask, 0)
 }
 
 function beginEdit(row) {
@@ -356,31 +417,8 @@ function beginEdit(row) {
     return
   }
   const item = row.data || {}
-  editingCtx.value = { group: row.group, index: row.index }
-  resetForm()
-
-  form.group = row.group
-  form.tag = String(item.tag || '')
-  form.protocol = normalizeProtocolAlias(item.protocol || 'udp')
-  form.addr = String(item.addr || '')
-  form.dial_addr = String(item.dial_addr || '')
-  form.socks5 = String(item.socks5 || '')
-  form.use_socks_proxy = Boolean(item.use_socks_proxy)
-  form.bootstrap = String(item.bootstrap || '')
-  form.bootstrap_version = toInt(item.bootstrap_version, 0)
-  form.enable_pipeline = Boolean(item.enable_pipeline)
-  form.enable_http3 = Boolean(item.enable_http3)
-  form.insecure_skip_verify = Boolean(item.insecure_skip_verify)
-  form.idle_timeout = toInt(item.idle_timeout, 0)
-  form.upstream_query_timeout = toInt(item.upstream_query_timeout, 0)
-  form.bind_to_device = String(item.bind_to_device || '')
-  form.so_mark = toInt(item.so_mark, 0)
-  form.account_id = String(item.account_id || '')
-  form.access_key_id = String(item.access_key_id || '')
-  form.access_key_secret = String(item.access_key_secret || '')
-  form.server_addr = String(item.server_addr || '223.5.5.5')
-  form.ecs_client_ip = String(item.ecs_client_ip || '')
-  form.ecs_client_mask = toInt(item.ecs_client_mask, 0)
+  editingCtx.value = { group: row.group, index: row.index, specialOwned: false }
+  fillUpstreamForm(item, row.group)
   showEditor.value = true
 }
 
@@ -394,6 +432,9 @@ function openCreateSpecialGroup() {
   specialEditor.name = ''
   specialEditor.listenPort = ''
   specialEditor.customPortOnly = false
+  specialEditor.upstreamSources = []
+  specialEditor.ownedUpstreams = []
+  resetSpecialSourceDraft()
   specialModalOpen.value = true
 }
 
@@ -408,6 +449,13 @@ function openEditSpecialGroup(group) {
   specialEditor.name = String(group?.name || '')
   specialEditor.listenPort = group?.listen_port ? String(group.listen_port) : ''
   specialEditor.customPortOnly = Boolean(group?.custom_port_only && group?.listen_port)
+  specialEditor.upstreamSources = Array.isArray(group?.upstream_sources)
+    ? group.upstream_sources.map((source) => ({ ...source }))
+    : []
+  specialEditor.ownedUpstreams = Array.isArray(group?.owned_upstreams)
+    ? group.owned_upstreams.map((item) => ({ ...item }))
+    : []
+  resetSpecialSourceDraft()
   specialModalOpen.value = true
 }
 
@@ -417,6 +465,97 @@ function closeSpecialGroupModal() {
 
 function closeSpecialGroupsManager() {
   specialGroupsManagerOpen.value = false
+}
+
+function resetSpecialSourceDraft() {
+  specialSourceDraft.pluginTag = ''
+  specialSourceDraft.kind = 'group'
+  specialSourceDraft.upstreamTag = ''
+}
+
+function specialSourceLabel(source) {
+  if (source?.kind === 'group') {
+    const group = (upstreamSources.value || []).find((item) => item?.plugin_tag === source.plugin_tag)
+    const count = Array.isArray(group?.upstreams) ? group.upstreams.length : 0
+    return `${source.plugin_tag}（整个组，当前 ${count} 个上游）`
+  }
+  return `${source?.plugin_tag || '-'} / ${source?.upstream_tag || '-'}`
+}
+
+function specialSourceStatus(source) {
+  const group = (upstreamSources.value || []).find((item) => item?.plugin_tag === source?.plugin_tag)
+  if (!group) {
+    return '源上游组不存在'
+  }
+  if (source?.kind === 'group') {
+    const enabled = (group.upstreams || []).filter((item) => item?.enabled).length
+    return enabled > 0 ? `${enabled} 个上游当前启用` : '源组没有启用中的上游'
+  }
+  const entry = (group.upstreams || []).find((item) => item?.tag === source?.upstream_tag)
+  if (!entry) {
+    return '源上游不存在'
+  }
+  return entry.enabled ? '当前启用' : '源上游已关闭'
+}
+
+function addSpecialSource() {
+  const pluginTag = String(specialSourceDraft.pluginTag || '').trim()
+  const kind = specialSourceDraft.kind === 'upstream' ? 'upstream' : 'group'
+  const upstreamTag = String(specialSourceDraft.upstreamTag || '').trim()
+  if (!pluginTag) {
+    setError('请选择要引用的上游组')
+    return
+  }
+  if (kind === 'upstream' && !upstreamTag) {
+    setError('请选择要引用的上游标识')
+    return
+  }
+  const duplicate = specialGroupSourceRows.value.some((source) => (
+    source.kind === kind && source.plugin_tag === pluginTag && source.upstream_tag === upstreamTag
+  ))
+  if (duplicate) {
+    setError('该上游引用已经添加')
+    return
+  }
+  specialEditor.upstreamSources.push({
+    kind,
+    plugin_tag: pluginTag,
+    ...(kind === 'upstream' ? { upstream_tag: upstreamTag } : {})
+  })
+  specialSourceDraft.upstreamTag = ''
+  setSuccess('上游引用已加入，点击专属组保存后生效')
+}
+
+function removeSpecialSource(index) {
+  specialEditor.upstreamSources.splice(index, 1)
+}
+
+function beginAddSpecialOwned(group) {
+  resetMessage()
+  editingCtx.value = {
+    group: String(group?.upstream_plugin_tag || ''),
+    index: -1,
+    specialOwned: true
+  }
+  resetForm()
+  form.group = editingCtx.value.group
+  showEditor.value = true
+}
+
+function beginEditSpecialOwned(group, index) {
+  resetMessage()
+  const item = specialGroupOwnedRows.value[index] || {}
+  editingCtx.value = {
+    group: String(group?.upstream_plugin_tag || ''),
+    index,
+    specialOwned: true
+  }
+  fillUpstreamForm(item, editingCtx.value.group)
+  showEditor.value = true
+}
+
+function removeSpecialOwned(index) {
+  specialEditor.ownedUpstreams.splice(index, 1)
 }
 
 async function saveSpecialGroup() {
@@ -448,7 +587,9 @@ async function saveSpecialGroup() {
       slot: Number(specialEditor.slot) || 0,
       name,
       listen_port: listenPort,
-      custom_port_only: customPortOnly
+      custom_port_only: customPortOnly,
+      upstream_sources: specialGroupSourceRows.value.map((source) => ({ ...source })),
+      upstreams: specialGroupOwnedRows.value.map((item) => ({ ...item }))
     })
     closeSpecialGroupModal()
     await loadData()
@@ -514,6 +655,35 @@ async function saveUpstream() {
   const group = String(form.group || '').trim()
   const tag = String(form.tag || '').trim()
   const protocol = protocolValue.value
+
+  if (isSpecialOwnedEditing.value) {
+    if (!tag) {
+      setError('上游标识不能为空')
+      return
+    }
+    if (!protocol) {
+      setError('协议不能为空')
+      return
+    }
+    const list = Array.isArray(specialEditor.ownedUpstreams) ? [...specialEditor.ownedUpstreams] : []
+    const currentIndex = editingCtx.value.index
+    const current = currentIndex >= 0 ? list[currentIndex] || {} : {}
+    const next = buildUpstreamObject(currentIndex < 0 ? true : Boolean(current.enabled))
+    const duplicate = list.some((item, index) => index !== currentIndex && String(item?.tag || '').trim() === tag)
+    if (duplicate) {
+      setError(`专属自有上游标识重复：${tag}`)
+      return
+    }
+    if (currentIndex >= 0) {
+      list[currentIndex] = next
+    } else {
+      list.push(next)
+    }
+    specialEditor.ownedUpstreams = list
+    showEditor.value = false
+    setSuccess('自有上游已加入，点击专属组保存后生效')
+    return
+  }
 
   if (!group) {
     setError('请选择所属组')
@@ -615,6 +785,14 @@ watch(() => specialEditor.listenPort, (value) => {
   }
 })
 
+watch(() => specialSourceDraft.pluginTag, () => {
+  specialSourceDraft.upstreamTag = ''
+})
+
+watch(() => specialSourceDraft.kind, () => {
+  specialSourceDraft.upstreamTag = ''
+})
+
 onMounted(() => {
   hideDisabled.value = localStorage.getItem(HIDE_DISABLED_KEY) === '1'
   loadData()
@@ -654,7 +832,7 @@ onBeforeUnmount(() => {
         <header class="panel-header special-groups-manager-header">
           <div class="special-groups-panel-copy">
             <h3>专属分流组管理</h3>
-            <p class="muted">管理组名、监听端口和删除操作</p>
+            <p class="muted">管理组名、上游来源、监听端口和删除操作</p>
           </div>
           <button class="btn tiny secondary" type="button" @click="closeSpecialGroupsManager" aria-label="Close">✕</button>
         </header>
@@ -678,6 +856,9 @@ onBeforeUnmount(() => {
                 </span>
               </div>
               <p class="special-group-meta">{{ group.routeLabel }} · {{ group.upstreamCountLabel }}</p>
+              <p v-if="group.upstream_warnings?.length" class="special-group-warning">
+                {{ group.upstream_warnings[0] }}
+              </p>
             </div>
             <div class="special-group-actions special-group-card-actions">
               <button class="btn tiny secondary" type="button" @click="openEditSpecialGroup(group)">编辑</button>
@@ -698,7 +879,7 @@ onBeforeUnmount(() => {
         <div class="upstream-editor-modal-body">
         <div class="form-grid">
           <label>所属组</label>
-          <input v-if="editingCtx.index >= 0" v-model="form.group" disabled />
+          <input v-if="editingCtx.index >= 0 || isSpecialOwnedEditing" :value="isSpecialOwnedEditing ? (specialEditor.name || '当前专属分流组') : form.group" disabled />
           <select v-else v-model="form.group">
             <option value="" disabled>请选择所属组</option>
             <option v-for="group in groupOptions" :key="group" :value="group">
@@ -881,30 +1062,141 @@ onBeforeUnmount(() => {
             placeholder="例如：移动上游 / CMCC"
             @keyup.enter="saveSpecialGroup"
           />
-          <label for="special-group-port-vue">监听端口</label>
-          <input
-            id="special-group-port-vue"
-            v-model="specialEditor.listenPort"
-            type="number"
-            min="1"
-            max="65535"
-            placeholder="留空则沿用原逻辑"
-            @keyup.enter="saveSpecialGroup"
-          />
-          <label for="special-group-port-only-vue">仅自定义端口生效</label>
-          <label class="switch-inline">
-            <input
-              id="special-group-port-only-vue"
-              v-model="specialEditor.customPortOnly"
-              type="checkbox"
-              :disabled="!String(specialEditor.listenPort || '').trim()"
-            />
-          </label>
         </div>
-        <p class="muted">1.未勾选则53端口及自定义端口均生效</p>
-        <p class="muted">2.保存后可在上游设置中维护该组上游，并在在线分流中直接选择该组。</p>
-        <div class="actions">
-          <button class="btn secondary" type="button" @click="closeSpecialGroupModal">取消</button>
+
+        <section class="special-upstream-settings">
+          <div class="special-upstream-settings-header">
+            <div>
+              <h4>上游设置</h4>
+              <p class="muted">可引用现有上游，也可以添加仅属于本组的上游。</p>
+            </div>
+            <span class="special-upstream-count">
+              生效 {{ activeSpecialEditorGroup?.effective_upstream_count || 0 }} 个
+            </span>
+          </div>
+
+          <div class="special-source-section">
+            <div class="special-source-section-header">
+              <h5>
+                引用已有上游
+                <span
+                  class="special-source-help"
+                  role="img"
+                  aria-label="引用关系说明"
+                  title="引用关系会实时跟随来源上游组的修改、禁用和删除。"
+                >ⓘ</span>
+              </h5>
+            </div>
+
+            <div
+              class="special-source-add-row"
+              :class="{ 'has-upstream-tag': specialSourceDraft.kind === 'upstream' }"
+            >
+              <label class="special-source-field">
+                <span>来源上游组</span>
+                <select v-model="specialSourceDraft.pluginTag">
+                  <option value="" disabled>选择上游组</option>
+                  <option v-for="group in upstreamSources" :key="group.plugin_tag" :value="group.plugin_tag">
+                    {{ groupDisplayName(group.plugin_tag) }}（{{ group.plugin_tag }}）
+                  </option>
+                </select>
+              </label>
+              <label class="special-source-field">
+                <span>引用范围</span>
+                <select v-model="specialSourceDraft.kind">
+                  <option value="group">整个上游组</option>
+                  <option value="upstream">组内单个上游</option>
+                </select>
+              </label>
+              <label v-if="specialSourceDraft.kind === 'upstream'" class="special-source-field">
+                <span>上游标识</span>
+                <select v-model="specialSourceDraft.upstreamTag">
+                  <option value="" disabled>选择上游标识</option>
+                  <option v-for="item in sourceDraftUpstreams" :key="item.tag" :value="item.tag">
+                    {{ item.tag || '未设置标识' }}{{ item.enabled ? '' : '（已关闭）' }}
+                  </option>
+                </select>
+              </label>
+              <button class="btn tiny secondary" type="button" @click="addSpecialSource">＋ 添加</button>
+            </div>
+
+            <div v-if="specialGroupSourceRows.length > 0" class="special-source-list">
+              <div v-for="(source, index) in specialGroupSourceRows" :key="`${source.kind}-${source.plugin_tag}-${source.upstream_tag || 'group'}`" class="special-source-row">
+                <div class="special-source-row-copy">
+                  <strong>{{ specialSourceLabel(source) }}</strong>
+                  <span class="muted">{{ specialSourceStatus(source) }}</span>
+                </div>
+                <button class="btn tiny secondary" type="button" @click="removeSpecialSource(index)">解绑</button>
+              </div>
+            </div>
+            <p v-else class="special-source-empty">暂无引用</p>
+          </div>
+
+          <div class="special-owned-section">
+            <div class="special-owned-header">
+              <div>
+                <h4>本组专属上游</h4>
+                <p class="muted">仅供当前分流组使用，删除分流组时同步删除。</p>
+              </div>
+              <button class="btn tiny secondary" type="button" @click="beginAddSpecialOwned({ upstream_plugin_tag: specialEditor.slot ? `special_upstream_${specialEditor.slot}` : '' })">
+                ＋ 新增上游
+              </button>
+            </div>
+
+            <div v-if="specialGroupOwnedRows.length > 0" class="special-owned-list">
+              <div v-for="(item, index) in specialGroupOwnedRows" :key="`${item.tag || 'owned'}-${index}`" class="special-owned-row">
+                <div class="special-source-row-copy">
+                  <strong>{{ item.tag || '未设置标识' }}</strong>
+                  <span class="muted">{{ item.protocol || '-' }} · {{ rowAddress(item) }} · {{ item.enabled ? '已启用' : '已关闭' }}</span>
+                </div>
+                <div class="special-group-actions">
+                  <button class="btn tiny secondary" type="button" @click="beginEditSpecialOwned({ upstream_plugin_tag: specialEditor.slot ? `special_upstream_${specialEditor.slot}` : '' }, index)">编辑</button>
+                  <button class="btn tiny danger" type="button" @click="removeSpecialOwned(index)">删除</button>
+                </div>
+              </div>
+            </div>
+            <p v-else class="special-source-empty">暂无专属上游</p>
+          </div>
+
+          <div v-if="activeSpecialEditorGroup?.upstream_warnings?.length" class="special-upstream-warning-box">
+            <strong>当前存在告警</strong>
+            <p v-for="warning in activeSpecialEditorGroup.upstream_warnings" :key="warning">{{ warning }}</p>
+          </div>
+        </section>
+
+        <section class="special-port-settings" aria-label="专属组端口设置">
+          <div class="form-grid special-group-form-grid special-port-field">
+            <label for="special-group-port-vue">监听端口</label>
+            <input
+              id="special-group-port-vue"
+              v-model="specialEditor.listenPort"
+              type="number"
+              min="1"
+              max="65535"
+              placeholder="留空则沿用原逻辑"
+              @keyup.enter="saveSpecialGroup"
+            />
+          </div>
+          <label class="special-port-toggle-row">
+            <span class="special-port-toggle-copy">
+              <span class="special-port-toggle-title">仅自定义端口生效</span>
+              <span id="special-group-port-only-hint-vue" class="special-port-toggle-hint">关闭时，53 端口和自定义端口均生效</span>
+            </span>
+            <span class="switch special-port-switch">
+              <input
+                id="special-group-port-only-vue"
+                v-model="specialEditor.customPortOnly"
+                type="checkbox"
+                aria-describedby="special-group-port-only-hint-vue"
+                :disabled="!String(specialEditor.listenPort || '').trim()"
+              />
+              <span class="slider"></span>
+            </span>
+          </label>
+        </section>
+
+        <div class="actions special-group-modal-actions">
+          <button class="btn no-frame-btn" type="button" @click="closeSpecialGroupModal">取消</button>
           <button class="btn primary" type="button" :disabled="specialSaving" @click="saveSpecialGroup">
             {{ specialSaving ? '保存中...' : '保存' }}
           </button>
