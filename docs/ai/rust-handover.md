@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-08-14`
+Last verified: `2026-08-17`
 
 This is the canonical cross-session entrypoint for Rust migration work. It
 records task state and worktree ownership; architecture remains authoritative
@@ -42,14 +42,20 @@ Go-only.
 | --- | --- | --- | --- |
 | `08-13-rust-cache-foundation` | **archived/completed** (`2026-08-13`) | All slices 0–6 complete; all three remaining gates (reproducible soak, Miri, extended mos-test verification) closed on `2026-08-13`. Rust stays experimental because the 10% QPS/latency gate is not met. | Do not redesign or micro-optimize it; preserve the implementation as-is while the matcher task extracts the single Rust runtime. |
 | `08-13-rust-matcher-foundation` | **archived/completed** (`2026-08-13`) | Approved `2026-08-13`; Slices 0–5 complete. Compatibility matrix, Go golden fixtures, real rule-set fixture, KixDNS matcher ledger, single Rust runtime extraction, pure Rust domain/IP matchers (`matcher-core`), transactional FFI with matcher ABI in runtime, C header, Go provider integration (`domain_set`/`ip_set` with `MOSDNS_MATCHER_BACKEND=rust` env-gated Rust backend and Go fallback), Linux+cgo tagged integration/race, fixed-fixture evidence, CI gates, and isolated `mos-test` reload/fallback/restart smoke are verified. | A–E work commits are completed and reviewed; F is the archive finish commit and G is a journal-only finish commit under the manifest's explicit `--no-commit` sequence; do not enable Rust by default. |
-| `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the opt-in boundary and Go fallback. Do not enable Rust by default or start Phase 3 without a separate approval. |
+| `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the opt-in boundary and Go fallback; do not enable Rust by default. Phase 3 authorization is recorded by the active task below. |
+| `08-15-rust-phase3-query-execution-core` | **in_progress** | Slices 0–4 root-reviewed; Slice 4 final review approved **2026-08-17** after the three Rust wire/parity remediation items. Rust/Go regression coverage, targeted query ABI Miri evidence (11/11), Linux+cgo real-staticlib normal/race, and fixed-fixture evidence are recorded. The high-port host check remains a full-binary compatibility smoke (adapter is not yet wired into `EntryHandler`/sequence), not adapter-boundary execution. | Preserve the opt-in `MOSDNS_QUERY_BACKEND=rust` boundary and Go fallback. Do not wire the adapter into `EntryHandler`/sequence yet, do not enable Rust by default, and do not start Phase 4. Linux real cgo integration tests remain the query adapter boundary evidence. |
 
-The active matcher expansion targets branch `rust`, the opt-in Go provider
-adapters (`sd_set`, `si_set`), valued `domain_mapper` fan-out, shared matcher
-adapter, CI/evidence scripts, and task documents. “Complete handoff” is not
-approval to make Rust default. The light providers remain Go exporters with
-constant-false matcher behavior; no query, sequence, upstream, or server
-migration is included.
+Active work is **Phase 3 query execution core** on branch `rust` (task
+`08-15-rust-phase3-query-execution-core`, state `in_progress`): Slices 0–4
+are root-reviewed; Slice 4 final review was approved on 2026-08-17 after
+three Rust wire/parity gaps were remediated. The query adapter remains experimental / opt-in
+(`MOSDNS_QUERY_BACKEND=rust`), the default backend stays Go-only, and the
+adapter is not wired into `EntryHandler`/sequence; the high-port host smoke
+does not prove the production query Rust path, while the Linux real cgo
+integration tests are the current query adapter boundary evidence. Phase 4
+must not start. The matcher tasks (`08-13-rust-matcher-foundation`,
+`08-13-rust-matcher-phase2-expansion`) are archived/completed and are no
+longer active work; their historical records are unchanged.
 
 ## Implemented cache foundation
 
@@ -171,8 +177,9 @@ Slice 5 artifacts are:
 Linux+cgo and host smoke evidence was collected on `mos-test` using an
 isolated `/tmp` source copy. The full embedded-UI experimental binary was
 also built and used for the final smoke. The task was archived after the root
-review and selective work commit; this does not authorize Phase 3 or a Rust
-default-backend switch.
+review and selective work commit; at that time it did not authorize Phase 3 or
+a Rust default-backend switch. Phase 3 authorization is now recorded by the
+active task row above; the default backend remains Go-only.
 
 ## Worktree ownership boundary
 

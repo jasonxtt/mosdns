@@ -217,3 +217,87 @@ passed, or reuse a production config/port for the benchmark.
 Correct: run the explicit Linux+cgo commands and temporary-port smoke, record
 the transitional cgo/result-size limitations, and keep `MOSDNS_MATCHER_BACKEND`
 opt-in with the Go fallback available.
+
+## Scenario: query wire foundation parity and fail-safe fallback
+
+### 1. Scope / Trigger
+
+The Phase 3 query foundation parses DNS names and additional records in Rust
+before the opt-in adapter compares the result with the Go oracle. These rules
+prevent compression-base mistakes and prevent malformed additional data from
+being published as a valid snapshot.
+
+### 2. Signatures
+
+- `parse_query(packet: &[u8]) -> Result<(QueryHeader, QuestionInfo), QueryError>`
+- `extract_edns_at(packet: &[u8], extra_offset: usize) -> Result<Option<EdnsInfo>, EdnsParseError>`
+- Go selection remains `MOSDNS_QUERY_BACKEND=rust`; the adapter exposes a Go
+  oracle result plus typed `FallbackError` on Rust failure.
+
+### 3. Contracts
+
+- Query-name walking follows compression pointers with a 255-byte expanded
+  wire-name budget; labels remain at most 63 bytes and pointer cycles are
+  rejected before a handle is published.
+- Additional-record owner pointers are resolved against the complete DNS
+  packet and the absolute record offset. The standalone `extract_edns` helper
+  is only for a relative standalone buffer and must not parse a real message.
+- A non-OPT additional record is accepted only after owner, fixed fields,
+  declared RDLENGTH, and body bounds are valid; then Rust returns typed
+  `UnsupportedRecord`, and the opt-in adapter returns the same Go-oracle
+  result rather than publishing a partial Rust result.
+- Rust remains opt-in and default Go-only; the live Go query context is never
+  mutated by a failed Rust attempt.
+
+### 4. Validation & Error Matrix
+
+- Expanded name >255 bytes or a compression cycle -> typed malformed query
+  error; no snapshot handle or output is published.
+- Pointer target outside the full packet -> typed malformed EDNS error; no
+  partial EDNS result.
+- Malformed non-OPT owner/fixed/body bounds -> malformed error, not
+  `UnsupportedRecord` and not successful EDNS absence.
+- Well-bounded non-OPT additional RR -> `UnsupportedRecord` in Rust and
+  deterministic Go fallback in the adapter.
+- Rust parser/ABI/runtime failure or result mismatch -> `FallbackError` and
+  the same-generation Go oracle result.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `extract_edns_at(full_packet, absolute_extra_offset)` resolves an
+  in-message compressed owner and extracts a valid OPT record.
+- Base: a standalone extra-record buffer uses `extract_edns(extra)` with
+  relative pointers only.
+- Bad: pass a subslice from a real packet to the standalone helper, accept an
+  overlong expanded name, or treat an out-of-bounds non-OPT RDATA as EDNS
+  absence.
+
+### 6. Tests Required
+
+- Rust tests assert overlong expanded names and multi-pointer cycles are
+  rejected, full-packet additional-owner offsets are honored, and malformed
+  non-OPT records produce no partial output.
+- Query ABI regression tests exercise the compressed additional-owner fixture
+  and handle creation failure on malformed wire.
+- Go adapter tests assert typed fallback and Go-oracle parity for unsupported
+  or malformed Rust input; Linux+cgo tests repeat the real boundary.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+extract_edns(&packet[extra_offset..])
+```
+
+for a real packet whose compression pointer targets bytes before the subslice,
+or silently returning EDNS-absent for an unchecked non-OPT record.
+
+#### Correct
+
+```rust
+extract_edns_at(&packet, extra_offset)
+```
+
+validate all declared bounds, return `UnsupportedRecord` only for a bounded
+non-OPT record, and let the Go adapter publish the oracle fallback.
