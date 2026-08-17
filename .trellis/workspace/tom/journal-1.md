@@ -89,3 +89,25 @@ Completed and root-approved Phase 3 Slices 0-4: Go oracle, pure Rust dns-core, v
 ### Next Steps
 
 - Keep Rust experimental and Go-only by default; obtain separate authorization before Phase 4.
+
+
+## Session 4: Complete Phase 2 matcher correctness remediation
+
+**Date**: 2026-08-18
+**Task**: Complete Phase 2 matcher correctness remediation
+**Branch**: `rust`
+
+### Summary
+
+Completed Rust Phase 2 matcher correctness remediation: final root approval recorded, full Go/Rust validation passed, task-specific files committed, and task archived. Preserved unrelated dirty files; Phase 3B and Phase 4 remain planning.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `88af8f1` | (see git log) |
+| `02b40de` | (see git log) |
+
+### Status
+
+[OK] **Completed**
