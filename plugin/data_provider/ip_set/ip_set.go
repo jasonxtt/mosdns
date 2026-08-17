@@ -35,10 +35,12 @@ import (
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
+	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/go-chi/chi/v5"
 	"github.com/sagernet/sing/common/varbin"
+	"go.uber.org/zap"
 	"go4.org/netipx"
 )
 
@@ -269,8 +271,12 @@ func (d *IPSet) api() *chi.Mux {
 		tmpList.Sort()
 		rb, err := BuildRustIPMatcher(prefixStrings(tmpList))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			mlog.L().Warn("ip_set Rust matcher build failed; using Go-only generation",
+				zap.Error(err), zap.Int("prefixes", tmpList.Len()))
+			if rb != nil {
+				_ = rb.Close()
+				rb = nil
+			}
 		}
 		if err := d.saveListToFiles(tmpList); err != nil {
 			if rb != nil {
@@ -316,8 +322,12 @@ func (d *IPSet) api() *chi.Mux {
 
 		rb, err := BuildRustIPMatcher(prefixStrings(tmpList))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			mlog.L().Warn("ip_set Rust matcher build failed; using Go-only generation",
+				zap.Error(err), zap.Int("prefixes", tmpList.Len()))
+			if rb != nil {
+				_ = rb.Close()
+				rb = nil
+			}
 		}
 		if err := d.saveListToFiles(tmpList); err != nil {
 			if rb != nil {

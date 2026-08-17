@@ -15,11 +15,14 @@ import (
 	"sync"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
+	"github.com/IrineSistiana/mosdns/v5/mlog"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
+	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/matcher_adapter"
 	"github.com/go-chi/chi/v5"
 	scdomain "github.com/sagernet/sing/common/domain"
 	"github.com/sagernet/sing/common/varbin"
+	"go.uber.org/zap"
 )
 
 const PluginType = "domain_set"
@@ -254,7 +257,7 @@ func (d *DomainSet) Match(domainStr string) (value struct{}, ok bool) {
 	d.mu.RLock()
 	rb := d.rustMatcher
 	var rustErr error
-	if rb != nil {
+	if rb != nil && matcher_adapter.RustDomainInputSupported(domainStr) {
 		var matched bool
 		matched, rustErr = rb.Match(domainStr)
 		if rustErr == nil && matched {
@@ -349,12 +352,16 @@ func (d *DomainSet) api() *chi.Mux {
 		}
 
 		// Build the request's immutable Rust candidate before publishing any
-		// part of the new generation. An enabled-backend failure keeps the
-		// complete previous generation active.
+		// part of the new generation. A Rust-only failure keeps the Go
+		// candidate eligible for publication.
 		rb, err := BuildRustDomainMatcher(tmpRules)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			mlog.L().Warn("domain_set Rust matcher build failed; using Go-only generation",
+				zap.Error(err), zap.Int("rules", len(tmpRules)))
+			if rb != nil {
+				_ = rb.Close()
+				rb = nil
+			}
 		}
 
 		if err := writeRulesToFile(d.ruleFile, tmpRules); err != nil {

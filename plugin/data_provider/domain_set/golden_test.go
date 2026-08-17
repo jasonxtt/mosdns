@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -209,11 +210,14 @@ func TestGoldenDomainSetSRSLoad(t *testing.T) {
 }
 
 type fakeRustDomainMatcher struct {
-	pattern string
-	closed  atomic.Int32
+	pattern   string
+	closed    atomic.Int32
+	calls     atomic.Int32
+	closeHook func()
 }
 
 func (m *fakeRustDomainMatcher) Match(s string) (bool, error) {
+	m.calls.Add(1)
 	if m.closed.Load() != 0 {
 		return false, errors.New("fake matcher closed")
 	}
@@ -221,6 +225,9 @@ func (m *fakeRustDomainMatcher) Match(s string) (bool, error) {
 }
 
 func (m *fakeRustDomainMatcher) Close() error {
+	if m.closeHook != nil {
+		m.closeHook()
+	}
 	m.closed.Add(1)
 	return nil
 }
@@ -236,7 +243,7 @@ func postDomainSet(t *testing.T, d *DomainSet, values ...string) *httptest.Respo
 	return r
 }
 
-func TestDomainSetPostBuildFailureRetainsPreviousGeneration(t *testing.T) {
+func TestDomainSetPostRustBuildFailurePublishesGoOnlyGeneration(t *testing.T) {
 	oldBuilder := rustDomainMatcherBuilder
 	t.Cleanup(func() { rustDomainMatcherBuilder = oldBuilder })
 	rustDomainMatcherBuilder = func([]string) (RustMatcher, error) {
@@ -256,6 +263,136 @@ func TestDomainSetPostBuildFailureRetainsPreviousGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldRust := &fakeRustDomainMatcher{pattern: "old.example"}
+	oldRust.closeHook = func() {
+		d.mu.RLock()
+		published := d.rustMatcher == nil && len(d.rules) == 1 && d.rules[0] == "full:new.example"
+		d.mu.RUnlock()
+		if !published {
+			t.Errorf("old Rust handle closed before the new Go-only generation was visible")
+		}
+	}
+	d.rustMatcher = oldRust
+
+	r := postDomainSet(t, d, "full:new.example")
+	if r.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want %d, body=%s", r.Code, http.StatusOK, r.Body.String())
+	}
+	if _, ok := d.Match("new.example"); !ok {
+		t.Fatal("the new Go generation must be active after a Rust build failure")
+	}
+	if _, ok := d.Match("old.example"); ok {
+		t.Fatal("the old Rust snapshot must not be mixed with the new Go generation")
+	}
+	rules, err := d.GetRules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(rules) != "[full:new.example]" {
+		t.Fatalf("rules after Rust build failure = %v", rules)
+	}
+	d.mu.RLock()
+	rustNil := d.rustMatcher == nil
+	d.mu.RUnlock()
+	if !rustNil {
+		t.Fatal("Rust build failure must publish a Go-only generation")
+	}
+	if oldRust.closed.Load() != 1 {
+		t.Fatalf("old Rust handle close count = %d, want 1", oldRust.closed.Load())
+	}
+	disk, err := os.ReadFile(ruleFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(disk) != "full:new.example\n" {
+		t.Fatalf("persisted rules = %q, want new generation", disk)
+	}
+}
+
+func TestDomainSetPostBuildDoesNotBlockMatch(t *testing.T) {
+	oldBuilder := rustDomainMatcherBuilder
+	t.Cleanup(func() { rustDomainMatcherBuilder = oldBuilder })
+
+	buildStarted := make(chan struct{})
+	releaseBuild := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseBuild) }) }
+	t.Cleanup(release)
+	rustDomainMatcherBuilder = func([]string) (RustMatcher, error) {
+		close(buildStarted)
+		<-releaseBuild
+		return nil, errors.New("injected Rust build failure")
+	}
+
+	d := newTestDomainSet(nil)
+	d.ruleFile = filepath.Join(t.TempDir(), "rules.txt")
+	if err := os.WriteFile(d.ruleFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.rules = []string{"full:go-only.example"}
+	d.rustRules = append([]string(nil), d.rules...)
+	if err := d.mixM.Add("full:go-only.example", struct{}{}); err != nil {
+		t.Fatal(err)
+	}
+	oldRust := &fakeRustDomainMatcher{pattern: "old.example"}
+	d.rustMatcher = oldRust
+
+	postDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { postDone <- postDomainSet(t, d, "full:new.example") }()
+	select {
+	case <-buildStarted:
+	case <-time.After(time.Second):
+		t.Fatal("POST did not reach the Rust candidate build")
+	}
+
+	matchDone := make(chan bool, 1)
+	go func() {
+		_, matched := d.Match("old.example")
+		matchDone <- matched
+	}()
+	select {
+	case matched := <-matchDone:
+		if !matched {
+			t.Fatal("the old generation must remain available during candidate build")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Rust candidate build must not hold the domain match state lock")
+	}
+
+	release()
+	select {
+	case r := <-postDone:
+		if r.Code != http.StatusOK {
+			t.Fatalf("POST status = %d, body=%s", r.Code, r.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("POST did not publish after candidate build completed")
+	}
+	if _, matched := d.Match("new.example"); !matched {
+		t.Fatal("new Go-only generation must match after publication")
+	}
+	if _, matched := d.Match("old.example"); matched {
+		t.Fatal("old generation must be replaced after publication")
+	}
+	if oldRust.closed.Load() != 1 {
+		t.Fatalf("old Rust handle close count = %d, want 1", oldRust.closed.Load())
+	}
+}
+
+func TestDomainSetPostPersistenceFailureRetainsGenerationAndClosesCandidate(t *testing.T) {
+	oldBuilder := rustDomainMatcherBuilder
+	t.Cleanup(func() { rustDomainMatcherBuilder = oldBuilder })
+	candidate := &fakeRustDomainMatcher{pattern: "new.example"}
+	rustDomainMatcherBuilder = func([]string) (RustMatcher, error) {
+		return candidate, nil
+	}
+
+	d := newTestDomainSet(nil)
+	d.ruleFile = filepath.Join(t.TempDir(), "missing", "rules.txt")
+	if err := d.mixM.Add("full:old.example", struct{}{}); err != nil {
+		t.Fatal(err)
+	}
+	d.rules = []string{"full:old.example"}
+	oldRust := &fakeRustDomainMatcher{pattern: "old.example"}
 	d.rustMatcher = oldRust
 
 	r := postDomainSet(t, d, "full:new.example")
@@ -263,20 +400,75 @@ func TestDomainSetPostBuildFailureRetainsPreviousGeneration(t *testing.T) {
 		t.Fatalf("POST status = %d, want %d", r.Code, http.StatusInternalServerError)
 	}
 	if _, ok := d.Match("old.example"); !ok {
-		t.Fatal("the previous Go/Rust generation must remain active")
+		t.Fatal("persistence failure must retain the old Go/Rust generation")
 	}
 	if _, ok := d.Match("new.example"); ok {
-		t.Fatal("failed Rust build must not publish the new Go generation")
+		t.Fatal("persistence failure must not publish the new generation")
 	}
-	rules, err := d.GetRules()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fmt.Sprint(rules) != "[full:old.example]" {
-		t.Fatalf("rules after failed build = %v", rules)
+	if candidate.closed.Load() != 1 {
+		t.Fatalf("new Rust candidate close count = %d, want 1", candidate.closed.Load())
 	}
 	if oldRust.closed.Load() != 0 {
-		t.Fatal("failed reload must not close the active Rust handle")
+		t.Fatalf("old Rust handle close count = %d, want 0", oldRust.closed.Load())
+	}
+}
+
+func TestDomainSetPostInvalidJSONRetainsGeneration(t *testing.T) {
+	oldBuilder := rustDomainMatcherBuilder
+	t.Cleanup(func() { rustDomainMatcherBuilder = oldBuilder })
+	var buildCalls atomic.Int32
+	rustDomainMatcherBuilder = func([]string) (RustMatcher, error) {
+		buildCalls.Add(1)
+		return nil, errors.New("Rust builder must not run for invalid JSON")
+	}
+
+	d := newTestDomainSet(nil)
+	d.ruleFile = filepath.Join(t.TempDir(), "rules.txt")
+	if err := d.mixM.Add("full:old.example", struct{}{}); err != nil {
+		t.Fatal(err)
+	}
+	d.rules = []string{"full:old.example"}
+	oldRust := &fakeRustDomainMatcher{pattern: "old.example"}
+	d.rustMatcher = oldRust
+
+	r := httptest.NewRecorder()
+	d.api().ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/post", strings.NewReader("{")))
+	if r.Code != http.StatusBadRequest {
+		t.Fatalf("POST status = %d, want %d", r.Code, http.StatusBadRequest)
+	}
+	if buildCalls.Load() != 0 {
+		t.Fatalf("Rust builder calls = %d, want 0", buildCalls.Load())
+	}
+	if _, ok := d.Match("old.example"); !ok {
+		t.Fatal("invalid JSON must retain the old generation")
+	}
+	if oldRust.closed.Load() != 0 {
+		t.Fatalf("old Rust handle close count = %d, want 0", oldRust.closed.Load())
+	}
+}
+
+func TestDomainSetNonASCIIQueryUsesGoWithoutDisablingRust(t *testing.T) {
+	d := newTestDomainSet(nil)
+	if err := d.mixM.Add("full:例.example", struct{}{}); err != nil {
+		t.Fatal(err)
+	}
+	rust := &fakeRustDomainMatcher{pattern: "ascii.example"}
+	d.rustMatcher = rust
+
+	if _, ok := d.Match("例.example."); !ok {
+		t.Fatal("non-ASCII query did not use the paired Go matcher")
+	}
+	if got := rust.calls.Load(); got != 0 {
+		t.Fatalf("Rust calls for non-ASCII query = %d, want 0", got)
+	}
+	if _, ok := d.Match("ascii.example."); !ok {
+		t.Fatal("ASCII query did not use Rust after the Go fallback")
+	}
+	if got := rust.calls.Load(); got != 1 {
+		t.Fatalf("Rust calls after ASCII query = %d, want 1", got)
+	}
+	if got := rust.closed.Load(); got != 0 {
+		t.Fatalf("non-ASCII query disabled Rust handle, close count = %d", got)
 	}
 }
 

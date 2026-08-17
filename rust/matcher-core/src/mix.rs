@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use crate::normalize;
+use crate::normalize::{NonAsciiRule, normalize};
+use crate::regex::compile_go_compatible;
 use crate::trie::DomainSuffixMatcher;
 
 const MATCHER_FULL: &str = "full";
@@ -77,8 +78,14 @@ impl<V> MixMatcher<V> {
         };
         let pattern = if type_name.as_str() != MATCHER_REGEXP {
             // full/domain/keyword patterns are normalised.
+            if !pattern.is_ascii() {
+                return Err(Box::new(NonAsciiRule));
+            }
             normalize(&pattern)
         } else {
+            if !pattern.is_ascii() {
+                return Err(Box::new(NonAsciiRule));
+            }
             pattern
         };
         if type_name == MATCHER_FULL {
@@ -91,7 +98,7 @@ impl<V> MixMatcher<V> {
             self.keyword.push((pattern, value));
             Ok(())
         } else if type_name == MATCHER_REGEXP {
-            let re = regex::Regex::new(&pattern)?;
+            let re = compile_go_compatible(&pattern)?;
             self.regex.push((re, value));
             Ok(())
         } else {
@@ -103,6 +110,9 @@ impl<V> MixMatcher<V> {
     /// Returns `Some(&V)` from the first sub-matcher that matches.
     #[must_use]
     pub fn r#match(&self, domain: &str) -> Option<&V> {
+        if !domain.is_ascii() {
+            return None;
+        }
         let d = normalize(domain);
         // 1. Full
         if let Some(v) = self.full.get(&d) {
@@ -261,6 +271,19 @@ mod tests {
     fn bad_regexp_returns_error() {
         let mut mix = m();
         assert!(mix.add("regexp:[", 1).is_err());
+    }
+
+    #[test]
+    fn non_ascii_domain_rules_are_rejected_before_snapshot_build() {
+        for rule in [
+            "full:例.example",
+            "domain:例.example",
+            "keyword:例",
+            "regexp:^例$",
+        ] {
+            let mut mix = m();
+            assert!(mix.add(rule, 1).is_err(), "rule {rule:?} must be rejected");
+        }
     }
 
     #[test]

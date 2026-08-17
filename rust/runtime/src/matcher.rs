@@ -108,6 +108,9 @@ pub unsafe extern "C" fn domain_matcher_match(
         let Ok(domain_str) = std::str::from_utf8(domain_bytes) else {
             return Status::InvalidArgument;
         };
+        if !domain_str.is_ascii() {
+            return Status::InvalidArgument;
+        }
         let table = domain_table().read().unwrap();
         let Some(matcher) = table.get(&handle) else {
             return Status::Closed;
@@ -401,6 +404,10 @@ pub unsafe extern "C" fn valued_domain_matcher_match(
             write_valued_result(out_result, Status::InvalidArgument, 0, 0);
             return Status::InvalidArgument;
         };
+        if !domain_str.is_ascii() {
+            write_valued_result(out_result, Status::InvalidArgument, 0, 0);
+            return Status::InvalidArgument;
+        }
         let Ok(output_bytes) = (unsafe { output.as_mut_slice() }) else {
             write_valued_result(out_result, Status::InvalidArgument, 0, 0);
             return Status::InvalidArgument;

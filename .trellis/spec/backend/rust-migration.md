@@ -105,17 +105,23 @@ serialization.
   generation: Go list/mix, published Go snapshot, and Rust handle.
 - Readers hold the state read lock through the Rust match call. Close the old
   handle only after releasing the write lock, so prior readers have exited.
-- Build or persistence failure publishes nothing and leaves the complete old
-  generation active. A match error may disable only the handle that returned
-  the error; it must not close a concurrently published generation.
+- A Go parse or persistence failure publishes nothing and leaves the complete
+  old generation active; any unpublished Rust candidate is closed. A Rust-only
+  build failure after a valid Go candidate and successful persistence publishes
+  the new Go-only generation, returns the established success response, and
+  retires the old Rust handle only after the replacement is visible. A match
+  error may disable only the handle that returned the error; it must not close
+  a concurrently published generation.
 - Rust selection is opt-in; the default Go path and matcher order remain
   unchanged.
 
 ### 4. Validation & Error Matrix
 
-- Rust build error -> update error, old Go/Rust generation remains active.
-- File write error -> update error, candidate is closed, old generation remains
-  active.
+- Rust-only build error with a valid Go candidate and successful persistence ->
+  warning, new Go-only generation published, established success response, and
+  retired Rust handle closed after publication.
+- Go parse or file write error -> existing update error, unpublished candidate
+  closed, old complete Go/Rust generation remains active.
 - Concurrent update -> updates are serialized and each response publishes one
   whole generation; no cross-generation Go/Rust combination is observable.
 - Match during candidate build/write -> old snapshot can complete without
@@ -136,8 +142,9 @@ serialization.
 
 - A controllably blocked builder proves an old `Match` completes during the
   candidate build and that the new generation is published afterward.
-- Build/persistence failure tests assert both Go and Rust old-generation
-  behavior and no partial file/state publication.
+- Rust-only build-failure tests assert Go-only publication and the established
+  success response; Go parse/persistence-failure tests assert both old Go/Rust
+  generation retention and no partial file/state publication.
 - Race tests cover concurrent match, update, and repeated close.
 - Linux+cgo tests directly assert Rust positive and negative results, while
   separate whole-matcher tests retain fallback and consumer semantics.

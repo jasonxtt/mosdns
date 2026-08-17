@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use regex::Regex;
 
-use crate::{DomainSuffixMatcher, normalize};
+use crate::DomainSuffixMatcher;
+use crate::normalize::{NonAsciiRule, normalize};
+use crate::regex::compile_go_compatible;
 
 /// One domain rule and the result metadata associated with it.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -84,6 +86,7 @@ impl std::error::Error for ValuedEncodingError {}
 pub enum ValuedBuildError {
     InvalidRule(String),
     InvalidRegex { rule: String, error: String },
+    UnsupportedRule { rule: String, error: String },
 }
 
 impl Display for ValuedBuildError {
@@ -92,6 +95,9 @@ impl Display for ValuedBuildError {
             Self::InvalidRule(rule) => write!(f, "invalid valued domain rule: {rule}"),
             Self::InvalidRegex { rule, error } => {
                 write!(f, "invalid valued domain regexp {rule:?}: {error}")
+            }
+            Self::UnsupportedRule { rule, error } => {
+                write!(f, "unsupported valued domain rule {rule:?}: {error}")
             }
         }
     }
@@ -175,7 +181,13 @@ impl ValuedDomainMatcher {
     pub fn build(rules: &[ValuedRule]) -> Result<Self, ValuedBuildError> {
         let mut aggregated: HashMap<String, AggregatedRule> = HashMap::new();
         for (order, rule) in rules.iter().enumerate() {
-            parse_rule(&rule.rule)?;
+            let (_, pattern) = parse_rule(&rule.rule)?;
+            if !pattern.is_ascii() {
+                return Err(ValuedBuildError::UnsupportedRule {
+                    rule: rule.rule.clone(),
+                    error: NonAsciiRule.to_string(),
+                });
+            }
             let entry = aggregated
                 .entry(rule.rule.clone())
                 .or_insert_with(|| AggregatedRule {
@@ -211,11 +223,18 @@ impl ValuedDomainMatcher {
                     result,
                 }),
                 RuleKind::Regexp => {
-                    let matcher =
-                        Regex::new(pattern).map_err(|error| ValuedBuildError::InvalidRegex {
+                    let matcher = compile_go_compatible(pattern).map_err(|error| match error {
+                        crate::RegexBuildError::Unsupported { .. } => {
+                            ValuedBuildError::UnsupportedRule {
+                                rule: key.clone(),
+                                error: error.to_string(),
+                            }
+                        }
+                        crate::RegexBuildError::Compile(error) => ValuedBuildError::InvalidRegex {
                             rule: key.clone(),
                             error: error.to_string(),
-                        })?;
+                        },
+                    })?;
                     overlaps.push(OverlapRule::Regexp { matcher, result });
                 }
             }
@@ -257,6 +276,9 @@ impl ValuedDomainMatcher {
     /// Matches a query and merges full, domain, keyword, and regexp results.
     #[must_use]
     pub fn r#match(&self, name: &str) -> Option<ValuedMatchResult> {
+        if !name.is_ascii() {
+            return None;
+        }
         let normalized = normalize(name);
         let mut merged = self
             .full
@@ -604,6 +626,23 @@ mod tests {
             ValuedDomainMatcher::build(&invalid_regex),
             Err(ValuedBuildError::InvalidRegex { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_non_ascii_rules_and_unsafe_regexps_before_build() {
+        for rule in [
+            "full:例.example",
+            "domain:例.example",
+            "keyword:例",
+            "regexp:^例$",
+            r"regexp:^\w+$",
+        ] {
+            let rules = [ValuedRule::new(rule, 0, [], "", "")];
+            assert!(
+                ValuedDomainMatcher::build(&rules).is_err(),
+                "rule {rule:?} must not build a Rust valued matcher"
+            );
+        }
     }
 
     #[test]
