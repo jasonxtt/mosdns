@@ -54,3 +54,38 @@ Completed and reviewed Rust matcher Phase 2: shared adapter, sd_set/si_set gener
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Complete Rust Phase 3 query execution core
+
+**Date**: 2026-08-17
+**Task**: Complete Rust Phase 3 query execution core
+**Branch**: `rust`
+
+### Summary
+
+Completed and root-approved Phase 3 Slices 0-4: Go oracle, pure Rust dns-core, versioned query ABI, opt-in Go adapter/fallback, Linux cgo evidence, and final parity remediation. Added query wire parity/fail-safe fallback rules to the backend spec, preserved default Go-only behavior, and archived the Trellis task. Phase 4 remains unauthorized.
+
+### Main Changes
+
+- Added the Phase 3 query wire/ABI/adapter foundation and regression coverage.
+- Recorded expanded-name, full-packet compression-base, and unsupported-additional fallback contracts.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ef85592` | (see git log) |
+| `d8b630e` | (see git log) |
+
+### Testing
+
+- [OK] Full Go default/CGO=0/tagged gates and Rust fmt/test/clippy/release gates passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Keep Rust experimental and Go-only by default; obtain separate authorization before Phase 4.
