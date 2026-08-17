@@ -8,12 +8,14 @@
 //! libraries.
 
 mod matcher;
+mod query;
 
 use mosdns_cache_core::{
     BorrowedSlice, CacheConfig, LookupIntoResult, LookupResult, OwnedBuffer, Status, WritableSlice,
 };
 
 pub use matcher::*;
+pub use query::*;
 
 // --- ABI version / capabilities ---
 
@@ -31,6 +33,8 @@ pub extern "C" fn cache_abi_capabilities() -> u64 {
         | mosdns_cache_core::CAPABILITY_LOOKUP_INTO
         | matcher::CAPABILITY_MATCHER
         | matcher::CAPABILITY_VALUED_MATCHER
+        | query::CAPABILITY_QUERY_SNAPSHOT
+        | query::CAPABILITY_QUERY_INSPECT
 }
 
 // --- Lifecycle ---

@@ -97,6 +97,9 @@ impl BorrowedSlice {
         if self.len == 0 {
             return Err(Status::InvalidArgument);
         }
+        if self.len > isize::MAX as u64 {
+            return Err(Status::InvalidArgument);
+        }
         let len = usize::try_from(self.len).map_err(|_| Status::InvalidArgument)?;
         // SAFETY: The caller upholds the pointer/length contract.
         Ok(unsafe { std::slice::from_raw_parts(self.ptr, len) })
@@ -145,6 +148,9 @@ impl WritableSlice {
             };
         }
         if self.len == 0 {
+            return Err(Status::InvalidArgument);
+        }
+        if self.len > isize::MAX as u64 {
             return Err(Status::InvalidArgument);
         }
         let len = usize::try_from(self.len).map_err(|_| Status::InvalidArgument)?;
