@@ -179,6 +179,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosdns-dns-core"
+version = "0.1.0"
+dependencies = [
+ "mosdns-cache-core",
+]
+
+[[package]]
 name = "mosdns-matcher-core"
 version = "0.1.0"
 dependencies = [
@@ -190,6 +197,7 @@ name = "mosdns-runtime"
 version = "0.1.0"
 dependencies = [
  "mosdns-cache-core",
+ "mosdns-dns-core",
  "mosdns-matcher-core",
 ]
 

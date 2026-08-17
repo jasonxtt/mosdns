@@ -14,6 +14,13 @@ extern "C" {
 #define MOSDNS_CACHE_CAPABILITY_LOOKUP_INTO (UINT64_C(1) << 2)
 #define MOSDNS_CACHE_CAPABILITY_MATCHER (UINT64_C(1) << 3)
 #define MOSDNS_CACHE_CAPABILITY_VALUED_MATCHER (UINT64_C(1) << 4)
+#define MOSDNS_QUERY_ABI_VERSION 1u
+#define MOSDNS_QUERY_RESULT_VERSION 1u
+#define MOSDNS_QUERY_CAPABILITY_SNAPSHOT (UINT64_C(1) << 5)
+#define MOSDNS_QUERY_CAPABILITY_INSPECT (UINT64_C(1) << 6)
+#define MOSDNS_QUERY_TRANSPORT_UDP 0u
+#define MOSDNS_QUERY_TRANSPORT_STREAM 1u
+#define MOSDNS_QUERY_TRANSPORT_HTTP 2u
 #define MOSDNS_VALUED_RULE_BATCH_VERSION 1u
 #define MOSDNS_VALUED_RESULT_VERSION 1u
 
@@ -77,8 +84,56 @@ typedef struct MosdnsCacheLookupIntoResult {
   uint64_t domain_set_len;
 } MosdnsCacheLookupIntoResult;
 
+typedef struct MosdnsQuerySnapshotInput {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint32_t reserved;
+  MosdnsCacheBorrowedSlice query_wire;
+  uint8_t from_udp;
+  uint8_t transport_mode;
+  uint16_t advertised_udp_size;
+  uint32_t reserved_tail;
+  uint64_t pre_fast_flags;
+} MosdnsQuerySnapshotInput;
+
+typedef struct MosdnsQueryInspectResult {
+  MosdnsCacheStatus status;
+  uint32_t version;
+  uint32_t flags;
+  uint16_t id;
+  uint16_t qtype;
+  uint16_t qclass;
+  uint16_t advertised_udp_size;
+  uint16_t edns_udp_size;
+  uint16_t ecs_family;
+  uint8_t ecs_source_netmask;
+  uint8_t ecs_source_scope;
+  uint8_t from_udp;
+  uint8_t transport_mode;
+  uint8_t has_opt;
+  uint8_t do_bit;
+  uint8_t ecs_present;
+  uint8_t reserved;
+  uint64_t qname_len;
+  uint64_t pre_fast_flags;
+  uint64_t required_len;
+  uint64_t written_len;
+  uint8_t ecs_address[16];
+} MosdnsQueryInspectResult;
+
 uint32_t cache_abi_version(void);
 uint64_t cache_abi_capabilities(void);
+uint32_t query_abi_version(void);
+uint64_t query_abi_capabilities(void);
+MosdnsCacheStatus query_snapshot_create(MosdnsQuerySnapshotInput input,
+                                         uint64_t *out_handle);
+MosdnsCacheStatus query_snapshot_required_len(uint64_t handle,
+                                               uint64_t *out_len);
+MosdnsCacheStatus query_snapshot_inspect(uint64_t handle,
+                                         MosdnsCacheWritableSlice output,
+                                         MosdnsQueryInspectResult *out_result);
+MosdnsCacheStatus query_snapshot_close(uint64_t handle);
 MosdnsCacheStatus cache_create(const MosdnsCacheConfig *config,
                                uint64_t *out_handle);
 MosdnsCacheStatus cache_close(uint64_t handle);

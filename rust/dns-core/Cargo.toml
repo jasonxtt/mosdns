@@ -1,0 +1,18 @@
+[package]
+name = "mosdns-dns-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "mosdns_dns_core"
+crate-type = ["rlib"]
+
+[dependencies]
+
+[dev-dependencies]
+mosdns-cache-core = { path = "../cache-core" }
+
+[lints]
+workspace = true

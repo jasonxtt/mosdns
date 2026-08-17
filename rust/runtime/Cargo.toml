@@ -11,6 +11,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 mosdns-cache-core = { path = "../cache-core" }
+mosdns-dns-core = { path = "../dns-core" }
 mosdns-matcher-core = { path = "../matcher-core" }
 
 [lints]
