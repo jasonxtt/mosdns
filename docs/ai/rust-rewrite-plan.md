@@ -1,6 +1,6 @@
 # MosDNS Rust 渐进重写方案
 
-最后更新：`2026-08-14`
+最后更新：`2026-08-17`
 
 ## 1. 目标与边界
 
@@ -284,13 +284,20 @@ Vue 源码无需因后端语言变化而重写。只有当 Rust host 覆盖当�
 - 不从 KixDNS 整仓 merge；按固定 commit、模块和许可证记录抽取，后续同步逐次审查；
 - 旧仓库保留只读，直到 cache 移植完成并核对所有未提交差异。
 
-## 9. 当前 matcher foundation 状态
+## 9. 当前 Rust migration 状态
 
-阶段 0 与阶段 1 的 cache 基础实现已经完成；cache 仍保留独立的
+阶段 1 的 cache 基础实现已经完成；cache 仍保留独立的
 replay/soak、sanitizer/Miri 和扩展测试机验证门槛，且不得成为默认后端。
 
 `.trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation/` 的 Slice 0–5
 已在 `rust` 分支完成，independent review passed on 2026-08-13；其归档不
-结束或归档整个 Rust 重写计划。Phase 2 expansion 也已归档完成；这不等于
-阶段 3 获得授权，不得顺手迁移 sequence、upstream 或 server。Rust 仍保持
-实验性，默认后端保持 Go-only。
+结束或归档整个 Rust 重写计划。Phase 2 expansion 也已归档完成。
+
+Phase 3 已获得授权并处于进行中。当前 active task 是
+`08-15-rust-phase3-query-execution-core`，task state 为 `in_progress`；Slice
+0–4 已 root-reviewed；Slice 4 于 2026-08-17 在三个 Rust wire/parity 边界缺口
+完成窄范围修复后通过最终 root review。当前已完成的边界包括 Go oracle、Rust
+dns/query core、query ABI、Go opt-in adapter、Go fallback，以及 Linux real
+cgo evidence；query adapter 尚未接入 `EntryHandler`、`sequence`、`upstream`
+或 `server/listener`。Rust 仍保持 experimental / opt-in，默认后端保持
+Go-only；Phase 4 尚未开始且未获授权。
