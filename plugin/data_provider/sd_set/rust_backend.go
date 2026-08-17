@@ -46,7 +46,7 @@ func (p *SdSet) matchGeneration(domainStr string) (bool, bool) {
 		return false, false
 	}
 
-	if rustMatcher := generation.rustMatcher; rustMatcher != nil {
+	if rustMatcher := generation.rustMatcher; rustMatcher != nil && matcher_adapter.RustDomainInputSupported(domainStr) {
 		matched, err := rustMatcher.Match(domainStr)
 		p.generationMu.RUnlock()
 		if err == nil {

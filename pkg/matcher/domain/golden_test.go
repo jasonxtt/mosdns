@@ -25,6 +25,9 @@ func TestGoldenNormalizeDomain(t *testing.T) {
 		{"GOOGLE.com.", "google.com"},
 		{"Google.COM", "google.com"},
 		{"a.b.C.", "a.b.c"},
+		{"例.EXAMPLE.", "例.example"},
+		{"Ä.EXAMPLE.", "ä.example"},
+		{"İ.EXAMPLE.", "i.example"},
 		{"", ""},
 		{".", ""},
 		{"..", "."}, // TrimDot removes exactly one trailing dot

@@ -581,7 +581,7 @@ func (dm *DomainMapper) lookupMatchResultLocked(name string) (*MatchResult, bool
 	}
 
 	usedRust := false
-	if generation := dm.rustGeneration; generation != nil && generation.snapshot != nil && !generation.disabled.Load() {
+	if generation := dm.rustGeneration; generation != nil && generation.snapshot != nil && !generation.disabled.Load() && matcher_adapter.RustDomainInputSupported(name) {
 		valued, err := generation.snapshot.Match(name)
 		if err != nil {
 			if generation.disabled.CompareAndSwap(false, true) && dm.logger != nil {

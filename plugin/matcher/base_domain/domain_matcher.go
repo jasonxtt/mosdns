@@ -29,6 +29,7 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set"
+	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/matcher_adapter"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 )
 
@@ -51,6 +52,9 @@ type rustDomainWrapper struct {
 
 func (w *rustDomainWrapper) Match(s string) (struct{}, bool) {
 	if w.disabled.Load() {
+		return struct{}{}, false
+	}
+	if !matcher_adapter.RustDomainInputSupported(s) {
 		return struct{}{}, false
 	}
 	matched, err := w.backend.Match(s)

@@ -99,6 +99,31 @@ fn valued_matcher_rejects_malformed_batches_and_keeps_typed_handles() {
 }
 
 #[test]
+fn valued_matcher_rejects_non_ascii_query_without_match_result() {
+    let batch = sample_batch();
+    let mut handle = 0;
+    assert_eq!(
+        unsafe { valued_domain_matcher_create(BorrowedSlice::from_slice(&batch), &raw mut handle) },
+        Status::Ok
+    );
+
+    let mut result = ValuedMatchResult::empty();
+    assert_eq!(
+        unsafe {
+            valued_domain_matcher_match(
+                handle,
+                BorrowedSlice::from_slice("例.example.com".as_bytes()),
+                WritableSlice::empty(),
+                &raw mut result,
+            )
+        },
+        Status::InvalidArgument
+    );
+    assert_eq!(result.status, Status::InvalidArgument);
+    assert_eq!(valued_domain_matcher_close(handle), Status::Ok);
+}
+
+#[test]
 fn valued_matcher_handles_empty_miss_invalid_output_and_wrong_namespace() {
     assert_eq!(
         unsafe {

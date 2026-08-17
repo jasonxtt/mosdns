@@ -164,6 +164,35 @@ regexp:[
 }
 
 #[test]
+fn matcher_domain_rejects_non_ascii_query_without_match_result() {
+    let mut handle = 0;
+    assert_eq!(
+        unsafe {
+            domain_matcher_create(
+                BorrowedSlice::from_slice(b"full:example.com"),
+                0,
+                &raw mut handle,
+            )
+        },
+        Status::Ok
+    );
+
+    let mut matched = true;
+    assert_eq!(
+        unsafe {
+            domain_matcher_match(
+                handle,
+                BorrowedSlice::from_slice("例.example".as_bytes()),
+                &raw mut matched,
+            )
+        },
+        Status::InvalidArgument
+    );
+    assert!(matched, "invalid input must not write a match result");
+    assert_eq!(domain_matcher_close(handle), Status::Ok);
+}
+
+#[test]
 fn matcher_empty_batches_create_zero_length_handles() {
     let mut domain_handle = 0;
     assert_eq!(

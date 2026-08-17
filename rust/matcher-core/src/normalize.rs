@@ -1,3 +1,17 @@
+use std::fmt::{Display, Formatter};
+
+/// Error returned when a matcher rule is outside the ASCII-only Rust boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NonAsciiRule;
+
+impl Display for NonAsciiRule {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("non-ASCII matcher rules are Go-only")
+    }
+}
+
+impl std::error::Error for NonAsciiRule {}
+
 /// Normalise a domain string to match Go's `NormalizeDomain`:
 /// lowercase + strip a single trailing dot.
 ///

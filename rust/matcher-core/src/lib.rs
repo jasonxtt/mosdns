@@ -23,7 +23,7 @@ pub use ipnet::IpPrefixList;
 pub use keyword::KeywordMatcher;
 pub use mix::MixMatcher;
 pub use normalize::normalize;
-pub use regex::RegexMatcher;
+pub use regex::{RegexBuildError, RegexMatcher};
 pub use trie::DomainSuffixMatcher;
 pub use valued::{
     ValuedBuildError, ValuedDomainMatcher, ValuedEncodingError, ValuedMatchResult, ValuedRule,

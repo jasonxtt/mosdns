@@ -182,8 +182,9 @@ func (s stubIPMatcher) Match(addr netip.Addr) bool {
 }
 
 type fakeRustIPMatcher struct {
-	prefix netip.Prefix
-	closed atomic.Int32
+	prefix    netip.Prefix
+	closed    atomic.Int32
+	closeHook func()
 }
 
 func (m *fakeRustIPMatcher) Match(s string) (bool, error) {
@@ -194,10 +195,16 @@ func (m *fakeRustIPMatcher) Match(s string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if !m.prefix.IsValid() {
+		return false, nil
+	}
 	return m.prefix.Contains(addr), nil
 }
 
 func (m *fakeRustIPMatcher) Close() error {
+	if m.closeHook != nil {
+		m.closeHook()
+	}
 	m.closed.Add(1)
 	return nil
 }
@@ -267,6 +274,275 @@ func TestIPSetPostBuildDoesNotBlockMatch(t *testing.T) {
 	}
 	if p.Match(mustAddr(t, "10.1.2.3")) {
 		t.Fatal("new generation must replace the old Go/Rust snapshot")
+	}
+}
+
+func TestIPSetPostRustBuildFailurePublishesGoOnlyGeneration(t *testing.T) {
+	oldBuilder := rustIPMatcherBuilder
+	t.Cleanup(func() { rustIPMatcherBuilder = oldBuilder })
+	rustIPMatcherBuilder = func([]string) (RustMatcher, error) {
+		return nil, errors.New("injected Rust build failure")
+	}
+
+	p := newTestIPSet()
+	p.list.Append(netip.MustParsePrefix("10.0.0.0/8"))
+	p.list.Sort()
+	p.rebuildSnapshot()
+	p.files = []string{filepath.Join(t.TempDir(), "ips.txt")}
+	oldRust := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("10.0.0.0/8")}
+	oldRust.closeHook = func() {
+		p.mutex.RLock()
+		rustNil := p.rustMatcher == nil
+		p.mutex.RUnlock()
+		if !rustNil || !p.Match(mustAddr(t, "192.0.2.1")) {
+			t.Errorf("old Rust handle closed before the new Go-only generation was visible")
+		}
+	}
+	p.rustMatcher = oldRust
+
+	r := httptest.NewRecorder()
+	p.api().ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/post", bytes.NewBufferString(`{"values":["192.0.2.0/24"]}`)))
+	if r.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want %d, body=%s", r.Code, http.StatusOK, r.Body.String())
+	}
+	if !p.Match(mustAddr(t, "192.0.2.1")) {
+		t.Fatal("the new Go generation must be active after a Rust build failure")
+	}
+	if p.Match(mustAddr(t, "10.1.2.3")) {
+		t.Fatal("the old Rust snapshot must not be mixed with the new Go generation")
+	}
+	p.mutex.RLock()
+	rustNil := p.rustMatcher == nil
+	p.mutex.RUnlock()
+	if !rustNil {
+		t.Fatal("Rust build failure must publish a Go-only generation")
+	}
+	if oldRust.closed.Load() != 1 {
+		t.Fatalf("old Rust handle close count = %d, want 1", oldRust.closed.Load())
+	}
+	disk, err := os.ReadFile(p.files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(disk) != "192.0.2.0/24\n" {
+		t.Fatalf("persisted prefixes = %q, want new generation", disk)
+	}
+}
+
+func TestIPSetFlushRustBuildFailurePublishesGoOnlyGeneration(t *testing.T) {
+	oldBuilder := rustIPMatcherBuilder
+	t.Cleanup(func() { rustIPMatcherBuilder = oldBuilder })
+	rustIPMatcherBuilder = func([]string) (RustMatcher, error) {
+		return nil, errors.New("injected Rust build failure")
+	}
+
+	p := newTestIPSet()
+	p.list.Append(netip.MustParsePrefix("10.0.0.0/8"))
+	p.list.Sort()
+	p.rebuildSnapshot()
+	p.files = []string{filepath.Join(t.TempDir(), "ips.txt")}
+	oldRust := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("10.0.0.0/8")}
+	oldRust.closeHook = func() {
+		p.mutex.RLock()
+		rustNil := p.rustMatcher == nil
+		empty := p.list.Len() == 0
+		p.mutex.RUnlock()
+		if !rustNil || !empty {
+			t.Errorf("old Rust handle closed before the empty Go generation was visible")
+		}
+	}
+	p.rustMatcher = oldRust
+
+	r := httptest.NewRecorder()
+	p.api().ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/flush", nil))
+	if r.Code != http.StatusOK {
+		t.Fatalf("flush status = %d, want %d, body=%s", r.Code, http.StatusOK, r.Body.String())
+	}
+	if p.Match(mustAddr(t, "10.1.2.3")) {
+		t.Fatal("flush must publish an empty Go generation after a Rust build failure")
+	}
+	p.mutex.RLock()
+	rustNil := p.rustMatcher == nil
+	empty := p.list.Len() == 0
+	p.mutex.RUnlock()
+	if !rustNil || !empty {
+		t.Fatalf("published state = rustNil:%v empty:%v, want Go-only empty generation", rustNil, empty)
+	}
+	if oldRust.closed.Load() != 1 {
+		t.Fatalf("old Rust handle close count = %d, want 1", oldRust.closed.Load())
+	}
+	disk, err := os.ReadFile(p.files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(disk) != 0 {
+		t.Fatalf("persisted prefixes after flush = %q, want empty", disk)
+	}
+}
+
+func TestIPSetFlushBuildDoesNotBlockMatch(t *testing.T) {
+	oldBuilder := rustIPMatcherBuilder
+	t.Cleanup(func() { rustIPMatcherBuilder = oldBuilder })
+
+	buildStarted := make(chan struct{})
+	releaseBuild := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseBuild) }) }
+	t.Cleanup(release)
+	rustIPMatcherBuilder = func([]string) (RustMatcher, error) {
+		close(buildStarted)
+		<-releaseBuild
+		return &fakeRustIPMatcher{}, nil
+	}
+
+	p := newTestIPSet()
+	p.list.Append(netip.MustParsePrefix("10.0.0.0/8"))
+	p.list.Sort()
+	p.rebuildSnapshot()
+	p.files = []string{filepath.Join(t.TempDir(), "ips.txt")}
+	oldRust := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("192.0.2.0/24")}
+	p.rustMatcher = oldRust
+
+	flushDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		r := httptest.NewRecorder()
+		p.api().ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/flush", nil))
+		flushDone <- r
+	}()
+	select {
+	case <-buildStarted:
+	case <-time.After(time.Second):
+		t.Fatal("flush did not reach the Rust candidate build")
+	}
+
+	matchDone := make(chan bool, 1)
+	go func() { matchDone <- p.Match(netip.MustParseAddr("192.0.2.1")) }()
+	select {
+	case matched := <-matchDone:
+		if !matched {
+			t.Fatal("the old generation must remain available during candidate build")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Rust candidate build must not hold the IP match state lock")
+	}
+
+	release()
+	select {
+	case r := <-flushDone:
+		if r.Code != http.StatusOK {
+			t.Fatalf("flush status = %d, body=%s", r.Code, r.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("flush did not publish after candidate build completed")
+	}
+	if p.Match(netip.MustParseAddr("192.0.2.1")) {
+		t.Fatal("flushed generation must replace the old generation")
+	}
+	if oldRust.closed.Load() != 1 {
+		t.Fatalf("old Rust handle close count = %d, want 1", oldRust.closed.Load())
+	}
+}
+
+func TestIPSetFlushPersistenceFailureRetainsGenerationAndClosesCandidate(t *testing.T) {
+	oldBuilder := rustIPMatcherBuilder
+	t.Cleanup(func() { rustIPMatcherBuilder = oldBuilder })
+	candidate := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("192.0.2.0/24")}
+	rustIPMatcherBuilder = func([]string) (RustMatcher, error) {
+		return candidate, nil
+	}
+
+	p := newTestIPSet()
+	p.list.Append(netip.MustParsePrefix("10.0.0.0/8"))
+	p.list.Sort()
+	p.rebuildSnapshot()
+	p.files = []string{filepath.Join(t.TempDir(), "missing", "ips.txt")}
+	oldRust := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("10.0.0.0/8")}
+	p.rustMatcher = oldRust
+
+	r := httptest.NewRecorder()
+	p.api().ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/flush", nil))
+	if r.Code != http.StatusInternalServerError {
+		t.Fatalf("flush status = %d, want %d", r.Code, http.StatusInternalServerError)
+	}
+	if !p.Match(mustAddr(t, "10.1.2.3")) {
+		t.Fatal("persistence failure must retain the old Go/Rust generation")
+	}
+	if p.Match(mustAddr(t, "192.0.2.1")) {
+		t.Fatal("persistence failure must not publish the empty generation")
+	}
+	if candidate.closed.Load() != 1 {
+		t.Fatalf("new Rust candidate close count = %d, want 1", candidate.closed.Load())
+	}
+	if oldRust.closed.Load() != 0 {
+		t.Fatalf("old Rust handle close count = %d, want 0", oldRust.closed.Load())
+	}
+}
+
+func TestIPSetPostPersistenceFailureRetainsGenerationAndClosesCandidate(t *testing.T) {
+	oldBuilder := rustIPMatcherBuilder
+	t.Cleanup(func() { rustIPMatcherBuilder = oldBuilder })
+	candidate := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("192.0.2.0/24")}
+	rustIPMatcherBuilder = func([]string) (RustMatcher, error) {
+		return candidate, nil
+	}
+
+	p := newTestIPSet()
+	p.list.Append(netip.MustParsePrefix("10.0.0.0/8"))
+	p.list.Sort()
+	p.rebuildSnapshot()
+	p.files = []string{filepath.Join(t.TempDir(), "missing", "ips.txt")}
+	oldRust := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("10.0.0.0/8")}
+	p.rustMatcher = oldRust
+
+	r := httptest.NewRecorder()
+	p.api().ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/post", bytes.NewBufferString(`{"values":["192.0.2.0/24"]}`)))
+	if r.Code != http.StatusInternalServerError {
+		t.Fatalf("POST status = %d, want %d", r.Code, http.StatusInternalServerError)
+	}
+	if !p.Match(mustAddr(t, "10.1.2.3")) {
+		t.Fatal("persistence failure must retain the old Go/Rust generation")
+	}
+	if p.Match(mustAddr(t, "192.0.2.1")) {
+		t.Fatal("persistence failure must not publish the new generation")
+	}
+	if candidate.closed.Load() != 1 {
+		t.Fatalf("new Rust candidate close count = %d, want 1", candidate.closed.Load())
+	}
+	if oldRust.closed.Load() != 0 {
+		t.Fatalf("old Rust handle close count = %d, want 0", oldRust.closed.Load())
+	}
+}
+
+func TestIPSetPostInvalidJSONRetainsGeneration(t *testing.T) {
+	oldBuilder := rustIPMatcherBuilder
+	t.Cleanup(func() { rustIPMatcherBuilder = oldBuilder })
+	var buildCalls atomic.Int32
+	rustIPMatcherBuilder = func([]string) (RustMatcher, error) {
+		buildCalls.Add(1)
+		return nil, errors.New("Rust builder must not run for invalid JSON")
+	}
+
+	p := newTestIPSet()
+	p.list.Append(netip.MustParsePrefix("10.0.0.0/8"))
+	p.list.Sort()
+	p.rebuildSnapshot()
+	p.files = []string{filepath.Join(t.TempDir(), "ips.txt")}
+	oldRust := &fakeRustIPMatcher{prefix: netip.MustParsePrefix("10.0.0.0/8")}
+	p.rustMatcher = oldRust
+
+	r := httptest.NewRecorder()
+	p.api().ServeHTTP(r, httptest.NewRequest(http.MethodPost, "/post", bytes.NewBufferString("{")))
+	if r.Code != http.StatusBadRequest {
+		t.Fatalf("POST status = %d, want %d", r.Code, http.StatusBadRequest)
+	}
+	if buildCalls.Load() != 0 {
+		t.Fatalf("Rust builder calls = %d, want 0", buildCalls.Load())
+	}
+	if !p.Match(mustAddr(t, "10.1.2.3")) {
+		t.Fatal("invalid JSON must retain the old generation")
+	}
+	if oldRust.closed.Load() != 0 {
+		t.Fatalf("old Rust handle close count = %d, want 0", oldRust.closed.Load())
 	}
 }
 
