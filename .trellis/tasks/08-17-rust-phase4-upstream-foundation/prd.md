@@ -1,9 +1,10 @@
 # Rust Phase 4 upstream transport foundation
 
-> **Planning hold (revised 2026-08-18):** do not run `task.py start` or write
-> implementation code from this task yet. Phase 3B must be implemented,
-> root-reviewed, and archived first. This PRD has been realigned with the final
-> goal: a pure Rust-native MosDNS host, not a permanent Go/Rust hybrid runtime.
+> **Planning gate (revised 2026-09-16):** Phase 3B is implemented, root-reviewed,
+> and archived. Do not run `task.py start` or write implementation code from
+> this task until the Phase4 `design.md`, `implement.md`, compatibility matrix,
+> and KixDNS transport ledger pass root review. This task remains planning-only
+> and targets a pure Rust-native MosDNS host, not a permanent Go/Rust hybrid.
 
 ## Goal
 
@@ -22,8 +23,9 @@ and other implementation details.
 - Phase 3A query/wire foundation is archived and provides reusable pure Rust
   DNS/query types; its query C ABI is transitional and is not a template for
   Phase4.
-- Phase 3B is the prerequisite Rust-native sequence/execution foundation and
-  must complete before this task starts.
+- Phase 3B is the prerequisite Rust-native sequence/execution foundation. Its
+  implementation commit is `0c53c7d` and its archive commit is `a18fd89`; that
+  prerequisite is satisfied, but it does not authorize Phase4 implementation.
 - The current live path remains Go-owned only because the Rust-native host does
   not exist yet. The `rust` branch is not intended for actual use before the
   full replacement is complete.
@@ -113,7 +115,9 @@ The first implementation subset should remain narrow:
 - plain TCP;
 - DNS response validation/demultiplexing;
 - cancellation/deadline;
-- connection reuse needed for the preserved behavior;
+- one fresh TCP connection per exchange in the first bounded slice; pooling,
+  reuse, and pipelining require characterization before they can be treated
+  as preserved behavior;
 - UDP truncation -> TCP fallback when configured by the preserved contract.
 
 `SoMark`, `BindToDevice`, SOCKS5, hostname/bootstrap resolution, TLS/HTTPS,
@@ -122,8 +126,9 @@ work or required product contract before coding. Do not silently absorb them.
 
 ### Ownership
 
-- Rust transport owns its sockets, connection pool/runtime state and any bytes
-  it retains beyond a call boundary.
+- Rust transport owns its sockets, exchange/connection runtime state and any
+  bytes it retains beyond a call boundary; a future pool needs a separate
+  lifecycle review.
 - Query input ownership/borrowing and returned response ownership must be
   explicit in Rust types.
 - No Go pointer, `pkg/pool` buffer, cgo handle or Go callback appears in the
@@ -170,8 +175,9 @@ implementation-only.
 
 Rust tests must cover query non-mutation, original response ID, concurrent
 response isolation, UDP TC -> TCP fallback, correct TCP framing,
-cancellation/deadline, connection recovery/reuse where required, and
-predictable close/shutdown.
+cancellation/deadline, fresh-connection recovery/cleanup, and predictable
+close/shutdown. If characterization proves pooling or reuse is product
+contract, that behavior requires a separately reviewed lifecycle design.
 
 ### R3 — Pure Rust ownership and cancellation
 
@@ -221,11 +227,16 @@ UDP/TCP foundation unless a separately reviewed scope change authorizes it.
 
 ## Planning gate status
 
-This PRD remains **NO-GO/deferred** until Phase3B is completed and archived.
-After that, create/review `design.md`, `implement.md`, and the KixDNS transport
-research ledger. Planning must freeze the Rust async runtime, cancellation and
-retry state machine, protocol/socket compatibility matrix, byte ownership,
-connection lifecycle, and test strategy before start.
+Phase3B completion and archival are **satisfied**. Phase4 implementation remains
+**NO-GO** while the planning gate is open. The current blockers are the
+root-reviewed `design.md`, `implement.md`, compatibility/deviation matrix, and
+KixDNS transport research ledger. Planning must freeze the Rust async runtime,
+cancellation and retry state machine, protocol/socket compatibility matrix,
+byte ownership, connection lifecycle, and test strategy before `task.py start`.
+
+The task must remain `status = planning` until a root reviewer explicitly gives
+PASS. A planning PASS authorizes only `task.py start` and Slice0; it does not
+authorize later slices, production wiring, or a production release.
 
 No transport ABI, Go adapter or production selector is expected in the future
 design. If a later task ever proposes one, it requires a separate explicit

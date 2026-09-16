@@ -1,1 +1,3 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":"docs/ai/rust-rewrite-plan.md","reason":"Defines the pure Rust-native migration target, phase ordering, and the prohibition on extending transitional FFI or hybrid transport patterns."}
+{"file":".trellis/spec/backend/rust-migration.md","reason":"Provides the repository-specific Rust migration quality and ownership conventions that every Phase 4 implementation slice must follow."}
+{"file":"docs/rust/kixdns-reuse.md","reason":"Records the existing pinned KixDNS cache/matcher audit and explicitly identifies upstream transports as deferred, so the new transport ledger can remain scoped and non-duplicative."}
