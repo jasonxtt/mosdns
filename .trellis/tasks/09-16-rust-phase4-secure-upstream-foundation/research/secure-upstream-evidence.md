@@ -301,13 +301,20 @@ The generator is `rcgen`, declared **dev-dependency only** in
 
   1. **Manifest declarations** (published `rcgen 0.14.7` manifest): the
      `[dependencies.x509-parser]` entry is `version = "0.18"`, `optional =
-     true`. Every mention inside rcgen's `[features]` table is a *weak* optional
+     true`. Because that dependency is optional, Cargo also creates an
+     **implicit feature with the same name**, `x509-parser = ["dep:x509-parser"]`;
+     the implicit *feature* therefore exists and is exactly what would activate
+     the dependency. It is simply **not selected** in this workspace, which
+     enables only `ring` (and its `crypto` dependency). Every *declared*
+     reference to it inside rcgen's own `[features]` table is a *weak* optional
      reference — `ring = ["crypto", "dep:ring", "x509-parser?/verify"]` and the
-     two `x509-parser?/verify-aws` entries in `aws_lc_rs`/
-     `aws_lc_rs_unstable`. No feature ever writes `dep:x509-parser`, and no
-     feature named `x509-parser` exists. The only non-weak mentions are
-     `required-features` on the `sign-leaf-with-ca` and `sign-leaf-with-pem-files`
-     *examples*, which are not built by this workspace.
+     two `x509-parser?/verify-aws` entries in `aws_lc_rs`/`aws_lc_rs_unstable` —
+     and a weak reference does not activate the dependency on its own.
+     `cargo metadata` confirms `rcgen.features["x509-parser"] = ["dep:x509-parser"]`
+     while the enabled-feature view of this build shows only `ring` and
+     `crypto`. The remaining non-weak mentions are `required-features` on the
+     `sign-leaf-with-ca` and `sign-leaf-with-pem-files` *examples*, which this
+     workspace does not build.
   2. **Lockfile resolution superset**: `rust/Cargo.lock` lists `x509-parser`
      in `rcgen`'s package `dependencies` array, together with every package it
      would pull in (`asn1-rs`, `asn1-rs-derive`, `asn1-rs-impl`, `der-parser`,

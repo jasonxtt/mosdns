@@ -375,10 +375,13 @@ Dependency record (test-only, corrected in the third review):
 the distinction that matters is between three layers:
 
 1. **Manifest**: in the published rcgen 0.14.7 manifest, `x509-parser` is
-   declared `optional = true`, and every reference to it in rcgen's feature
-   table is weak (`x509-parser?/verify` under the `ring` feature,
-   `x509-parser?/verify-aws` under the aws-lc-rs features). No feature enables
-   `dep:x509-parser`.
+   declared `optional = true`, so Cargo creates an implicit same-named feature
+   `x509-parser = ["dep:x509-parser"]` that would activate it — but that feature
+   is **not selected** here (only `ring` is). Every *declared* reference to it in
+   rcgen's own feature table is a weak reference (`x509-parser?/verify` under
+   the `ring` feature, `x509-parser?/verify-aws` under the aws-lc-rs features),
+   and a weak reference never activates the dependency by itself. In other
+   words: no **enabled** rcgen feature activates `dep:x509-parser`.
 2. **Lockfile resolution superset**: `rust/Cargo.lock` lists `x509-parser`
    under rcgen's `dependencies`, which is why a lock-only audit sees it. The
    lock records candidate packages for optional dependencies and is not
