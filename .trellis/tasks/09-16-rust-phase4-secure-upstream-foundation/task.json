@@ -2,10 +2,10 @@
   "id": "rust-phase4-secure-upstream-foundation",
   "name": "rust-phase4-secure-upstream-foundation",
   "title": "Rust Phase 4 TLS/HTTPS upstream foundation",
-  "description": "Planning only: bounded pure Rust DoT/DoH upstream foundation after the accepted UDP/TCP foundation; implementation explicitly not authorized.",
+  "description": "Bounded pure Rust DoT/DoH upstream foundation after the accepted UDP/TCP foundation; Slice0 implementation active, later slices separately gated.",
   "status": "in_progress",
   "dev_type": null,
-  "scope": "Pure Rust DoT/DoH foundation — planning only",
+  "scope": "Pure Rust DoT/DoH foundation — Slice0 active",
   "package": null,
   "priority": "P2",
   "creator": "tom",
@@ -25,6 +25,6 @@
     "docs/ai/rust-handover.md",
     "docs/ai/rust-rewrite-plan.md"
   ],
-  "notes": "User authorized wrap-up and next planning only on 2026-09-16. Do not start implementation. Planning proposal requires review and a subsequent explicit activation authorization.",
+  "notes": "User explicitly authorized Slice0 implementation, commit/push, and review through rust0916 on 2026-09-16. Slice1+ and production wiring remain gated; stop at the scoped review boundary.",
   "meta": {}
 }

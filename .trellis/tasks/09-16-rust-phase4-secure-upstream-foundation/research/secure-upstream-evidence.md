@@ -82,3 +82,100 @@ new fixed-revision secure-transport audit and attribution before scope approval.
 5. Full protocol performance/soak -> later composed data-plane/host gates.
 
 No deferred item is a reason to claim full Phase4 or production readiness.
+
+## Slice0 dependency/MSRV resolution record — 2026-09-16
+
+Baseline revision `0cd9f4b` (rust worktree). Slice0 authorization covers exactly
+`resolver 3` + the reviewed HTTP/TLS dependency graph; no network/TLS/HTTP runtime
+code was written and no Slice1+ work was started.
+
+### RED baseline (before this change)
+
+- `rust/Cargo.toml` declared `resolver = "2"`.
+- `cargo metadata --manifest-path rust/Cargo.toml --locked --no-deps` passed and
+  listed only the six workspace packages.
+- `cargo tree --manifest-path rust/Cargo.toml -p mosdns-upstream-core -e features
+  --locked` contained no `hyper`, `hyper-util`, `http-body-util` or
+  `tokio-rustls`; `Cargo.lock` had zero `[[package]]` entries for all four.
+  `rustls 0.23.45` and `ring 0.17.14` were already present.
+
+### GREEN change
+
+- Workspace resolver raised to `3`, the MSRV-aware resolver supported by the
+  actual 1.85 workspace (`rust-version = "1.85"`). Resolution reported
+  "Locking 18 packages to latest Rust 1.85 compatible versions".
+- `rust/upstream-core/Cargo.toml` now declares exactly:
+  `hyper = { version = "=1.11.0", default-features = false, features = ["client", "http1", "http2"] }`,
+  `hyper-util = { version = "=0.1.20", default-features = false, features = ["tokio"] }`,
+  `http-body-util = { version = "=0.1.3", default-features = false }`,
+  `tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }`.
+  Existing `rustls` stays `default-features = false, features = ["ring", "std", "tls12"]`.
+  No reqwest, hyper-rustls, tower client/pool feature, aws-lc-rs or OpenSSL is
+  added and no second runtime is introduced.
+
+### Resolved direct-dependency ledger (exact, from Cargo.lock/metadata)
+
+| Crate | Version | Selected features | rust-version | License |
+| --- | --- | --- | --- | --- |
+| hyper | 1.11.0 | client, http1, http2 | 1.63 | MIT |
+| hyper-util | 0.1.20 | tokio | 1.64 | MIT |
+| http-body-util | 0.1.3 | none (default-features = false) | 1.61 | MIT |
+| tokio-rustls | 0.26.4 | ring, tls12 | 1.71 | MIT OR Apache-2.0 |
+| rustls (existing) | 0.23.45 | ring, std, tls12 | 1.71 | Apache-2.0 OR ISC OR MIT |
+| ring (existing) | 0.17.14 | default | 1.66.0 | Apache-2.0 AND ISC |
+
+Key transitive additions: h2 0.4.19 (MIT, MSRV 1.63), http 1.5.0
+(MIT OR Apache-2.0, MSRV 1.57.0), http-body 1.1.0 (MIT, MSRV 1.61), httparse
+1.10.1 (MIT OR Apache-2.0), atomic-waker 1.1.2 (Apache-2.0 OR MIT, MSRV 1.36),
+futures-channel/-util 0.3.34 (MIT OR Apache-2.0, MSRV 1.71), futures-core
+0.3.34 (MSRV 1.36), want 0.3.1 (MIT), try-lock 0.2.5 (MIT), fnv 1.0.7
+(Apache-2.0 / MIT), itoa 1.0.18 (MIT OR Apache-2.0, MSRV 1.68), tracing 0.1.44
+and tracing-core 0.1.36 (MIT, MSRV 1.65.0), indexmap 2.14.2 / hashbrown 0.17.1.
+No resolved registry package declares a rust-version above 1.85.0; the highest
+are hashbrown 0.17.1 and uuid 1.24.0 at exactly 1.85.0. `aws-lc-rs`/`aws-lc-sys`
+appear only as unused feature names of rustls/tokio-rustls, never as resolved
+packages; `ring` remains the sole crypto provider.
+
+### Resolver-2 fresh-resolve MSRV risk (reproduced)
+
+In a throwaway copy of the workspace with `resolver = "2"` and no `Cargo.lock`,
+a fresh resolve selected `idna_adapter 1.2.2` (rust-version 1.86) plus ICU
+`icu_normalizer`/`icu_properties`/`icu_provider`/`icu_collections`/
+`icu_locale_core`/`*_data` 2.3.x (rust-version 1.88). Those exceed the declared
+1.85 MSRV, so a resolver-2 fresh resolve would silently produce a graph this
+workspace promises not to need. Resolver 3 keeps the reviewed `idna_adapter
+1.1.0` (rust-version 1.57) and the previously locked graph. This is why the
+resolver was changed and why `Cargo.lock` must be regenerated under resolver 3
+rather than left to a resolver-2 update.
+
+### Hyper 1.11.0 HTTP/2 ownership source locations
+
+- `src/client/conn/http2.rs:77` `pub async fn handshake(exec, io) ->
+  (SendRequest<B>, Connection<T, B, E>)`.
+- `src/client/conn/http2.rs:50` `pub struct Connection<T, B, E>` wraps
+  `proto::h2::ClientTask` and is only a dispatcher.
+- `src/client/conn/http2.rs:150` `Connection::send_request` calls
+  `self.dispatch.send(req)` and awaits a channel; it does not drive the socket.
+- `src/proto/h2/client.rs:192` `exec.execute_h2_future(H2ClientFuture::Task {
+  task: ConnTask::new(..) })` submits the connection driver to the supplied
+  executor.
+- `src/proto/h2/client.rs:556` (body pipe) and `:566` (send/response) submit
+  per-request futures through that same executor.
+- `src/rt/bounds.rs:73`-`75` adapts any `Executor` into `Http2ClientConnExec`.
+- `src/rt/mod.rs:45` `pub trait Executor<Fut> { fn execute(&self, fut: Fut); }`.
+- hyper-util 0.1.20 `src/rt/tokio.rs:75`/`:105` `TokioExecutor` implements
+  `execute` with `tokio::spawn` (detached); this slice does not use it.
+
+Conclusion: the connection driver and every per-request future flow through the
+caller-supplied `Executor`; Hyper 1.11.0 cannot hand the driver back for inline
+polling. Slice3 must select and prove the tracked/queued executor described in
+`design.md` section 5.
+
+### Limits of this evidence
+
+No runtime/TLS/HTTP code, handshake, executor or protocol behavior was tested,
+because Slice0 is limited to the dependency graph and source inspection. The
+workspace was resolved and `cargo check`ed with the installed toolchain
+(cargo/rustc 1.95.0); Rust 1.85.0 is not installed here, so MSRV compatibility
+is evidenced by resolved `rust-version` metadata and resolver-3 selection, not
+by a 1.85 build.

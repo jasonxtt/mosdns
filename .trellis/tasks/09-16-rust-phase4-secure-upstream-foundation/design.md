@@ -1,8 +1,9 @@
 # Secure upstream architecture proposal
 
-Status: planning only, 2026-09-16. No implementation or planning-review PASS is
-claimed. This design must be reviewed before activation; `implement.md` defines
-slice gates. Requirements live in `prd.md`, source evidence in
+Status: Slice0 implementation active, 2026-09-16. No planning/root-review PASS
+is claimed; `implement.md` defines the remaining slice gates. Slice0 contracts,
+TLS policy, and dependency/API evidence are implemented or recorded below.
+Requirements live in `prd.md`, source evidence in
 `research/secure-upstream-evidence.md`.
 
 ## 1. Dependency boundary and API shape
@@ -124,13 +125,25 @@ owner cancels all scopes and waits for their registrations and child work.
 No lock may be held over network I/O or a task join.
 
 Preferred driver structure is a pinned connection future polled alongside the
-request/body in the exchange, rather than a detached spawned driver. HTTP2 may
-ask its executor to spawn additional futures: supply a per-exchange tracked
-executor, not an untracked TokioExecutor. Every spawn must hold the exchange
-scope's liveness registration and observe its cancellation token. The scope
-seals spawning during termination; after seal, execute() drops incoming work.
-Track a child before spawning so there is no admission gap. Never create a
-second runtime or use spawn_blocking for resolver/certificate work.
+request/body in the exchange, rather than a detached spawned driver. Slice0
+source inspection of the selected Hyper 1.11.0 low-level client shows this is
+not wholly caller-driven: `hyper::client::conn::http2::handshake(exec, io)`
+(`src/client/conn/http2.rs:77`) submits its connection driver through the
+supplied `Executor` and returns a `Connection` that is only a dispatcher.
+Internally `src/proto/h2/client.rs:192` calls
+`exec.execute_h2_future(H2ClientFuture::Task { .. })` for the connection task,
+`:556` and `:566` submit the body-pipe and send/response futures the same way,
+and `Connection::send_request` (`src/client/conn/http2.rs:150`) merely
+dispatches into a channel. `Executor::execute` (`src/rt/mod.rs:45`) therefore
+observes every child. No detached TokioExecutor is allowed.
+Slice3 must choose and prove, before implementation, either a re-entrancy-safe
+queued executor (execute() only enqueues; the exchange's own driver polls the
+queue and never recurses under a held borrow) or a tracked/abortable
+child-task executor. Either way every spawn must hold the exchange scope's
+liveness registration and observe its cancellation token. The scope seals
+spawning during termination; after seal, execute() drops incoming work. Track a
+child before spawning so there is no admission gap. Never create a second
+runtime or use spawn_blocking for resolver/certificate work.
 
 On normal completion/error: seal, cancel internal scope work, abort if needed,
 join/drain child tasks, drop connection and sender, then release registration.
@@ -140,10 +153,12 @@ are actually dropped. Owner close therefore cannot report Closed early. No
 untracked async cleanup is spawned by Drop. Runtime shutdown is owned by the
 future host and must follow upstream close/drain.
 
-Slice0 must establish from the selected Hyper API/source that this executor
-can account for all children; Slice3 tests prove it with task counters/barriers.
-If the selected version cannot meet this design, stop and revise the plan;
-do not quietly detach tasks or widen pooling/runtime scope.
+Slice0 established from the Hyper 1.11.0 API/source that the supplied Executor
+sees every child (connection driver plus per-request send/pipe futures), so a
+tracked executor can account for them. Slice3 tests must still prove that with
+task counters/barriers after selecting the executor above; if the selected
+version cannot meet this design, stop and revise the plan; do not quietly
+detach tasks or widen pooling/runtime scope.
 
 ## 6. Error and side-effect matrix
 
