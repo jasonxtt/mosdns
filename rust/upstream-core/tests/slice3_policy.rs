@@ -31,6 +31,18 @@
 //! typed TCP cause is retained without discarding the TC context or the
 //! overall prior UDP side-effect state.
 //!
+//! The composite lifecycle group freezes the public close/drain boundary:
+//!
+//!     UdpTcpPolicy::close() -> CloseResult
+//!     UdpTcpPolicy::in_flight_exchanges() -> usize
+//!
+//! `close()` is awaitable and idempotent: it cancels and drains either leg of
+//! an in-flight composite exchange, returns `CloseResult::Closed`, and reports
+//! a zero registration count afterwards. A later close returns
+//! `CloseResult::AlreadyClosed`, and a new exchange after close is rejected
+//! with `Closed(NotSent)` before any socket work. Every lifecycle ordering
+//! proof uses an explicit server handshake, never an equal-sleep assumption.
+//!
 //! Every server is bounded: the UDP fixture sets a socket read timeout, TCP
 //! accepts use a nonblocking deadline, and accepted TCP streams carry read and
 //! write timeouts. A missing or broken client therefore fails a test rather
@@ -39,12 +51,14 @@
 use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use mosdns_upstream_core::{
-    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, SideEffectState,
+    CloseResult, Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, SideEffectState,
     TcpFallbackContext, Transport, TransportCancellation, UdpTcpPolicy, UpstreamError,
 };
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 /// The largest legal IPv4 UDP payload; the UDP fixtures use the production
@@ -262,6 +276,67 @@ fn tcp_truncating_fallback_server(listener: TcpListener) -> std::thread::JoinHan
     })
 }
 
+/// Receives exactly one UDP datagram, signals that it arrived, and deliberately
+/// never answers, so the UDP leg stays parked in receive until an owner close
+/// wakes it. The read is bounded, so an absent client cannot park the thread.
+fn udp_receive_without_reply(
+    socket: UdpSocket,
+) -> (std::thread::JoinHandle<()>, oneshot::Receiver<()>) {
+    let (seen_tx, seen_rx) = oneshot::channel::<()>();
+    let handle = std::thread::spawn(move || {
+        socket
+            .set_read_timeout(Some(TEST_TIMEOUT))
+            .expect("bounded udp server read");
+        let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+        let _ = socket.recv_from(&mut buffer).expect("receive query");
+        seen_tx.send(()).expect("signal receipt");
+    });
+    (handle, seen_rx)
+}
+
+/// Reports whether any UDP datagram arrives within the bounded no-send window.
+/// The read is bounded, so an absent client cannot park the thread.
+fn udp_datagram_watchdog(socket: UdpSocket) -> std::thread::JoinHandle<bool> {
+    std::thread::spawn(move || {
+        socket
+            .set_read_timeout(Some(NO_TCP_CONNECTION_WINDOW))
+            .expect("bounded udp watchdog read");
+        let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+        socket.recv_from(&mut buffer).is_ok()
+    })
+}
+
+/// Accepts exactly one TCP fallback connection, reads the framed query, signals
+/// that the fallback is genuinely in flight, then holds the connection open
+/// without writing any response until the test releases it.
+///
+/// The accept and the framed read are bounded by `TEST_TIMEOUT`, and the hold is
+/// bounded by the same timeout, so a test that fails before releasing the
+/// connection still lets the thread terminate.
+fn tcp_holding_fallback_server(
+    listener: TcpListener,
+) -> (
+    std::thread::JoinHandle<Vec<u8>>,
+    oneshot::Receiver<()>,
+    mpsc::Sender<()>,
+) {
+    let (read_tx, read_rx) = oneshot::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let handle = std::thread::spawn(move || {
+        let mut stream = accept_within(&listener, TEST_TIMEOUT)
+            .expect("the TC header must trigger exactly one TCP fallback");
+        let received = read_framed(&mut stream);
+        read_tx
+            .send(())
+            .expect("signal the framed fallback query was read");
+        release_rx
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("the test must release the held fallback connection");
+        received
+    });
+    (handle, read_rx, release_tx)
+}
+
 /// Runs one exchange through the reviewed composite-policy entry point with a
 /// bound, mirroring the primitive helpers in `slice1_udp.rs`/`slice2_tcp.rs`.
 async fn policy_exchange_bounded(
@@ -270,6 +345,19 @@ async fn policy_exchange_bounded(
     context: ExchangeContext,
 ) -> Result<ExchangeResponse, UpstreamError> {
     let policy = UdpTcpPolicy::new(udp_endpoint(address));
+    let request = ExchangeRequest::new(query).expect("valid query");
+    timeout(TEST_TIMEOUT, policy.exchange(request, context))
+        .await
+        .expect("policy exchange must finish within the bounded test timeout")
+}
+
+/// Runs one bounded exchange through an already-constructed composite policy,
+/// which the lifecycle tests need in order to observe and close that policy.
+async fn policy_exchange_on(
+    policy: &UdpTcpPolicy,
+    query: &[u8],
+    context: ExchangeContext,
+) -> Result<ExchangeResponse, UpstreamError> {
     let request = ExchangeRequest::new(query).expect("valid query");
     timeout(TEST_TIMEOUT, policy.exchange(request, context))
         .await
@@ -454,5 +542,210 @@ fn tcp_fallback_failure_preserves_prior_truncated_udp_context() {
             query,
             "the TCP fallback must have carried the byte-identical original query"
         );
+    });
+}
+
+#[test]
+fn close_cancels_in_flight_udp_exchange_with_closed_sent() {
+    block_on(async {
+        let (udp, _listener, address) = bind_udp_and_tcp();
+        let id = 0x3b01;
+        let query = query_wire(id);
+
+        // The server receives the query and deliberately never answers, so the
+        // UDP leg stays parked in receive until the owner close wakes it.
+        let (server, query_seen) = udp_receive_without_reply(udp);
+        let policy = Arc::new(UdpTcpPolicy::new(udp_endpoint(address)));
+        let exchange_task = {
+            let policy = Arc::clone(&policy);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                policy.exchange(request, open_context()).await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, query_seen)
+            .await
+            .expect("query observed bounded")
+            .expect("query observed");
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            1,
+            "the in-flight UDP leg must be reported by the composite policy"
+        );
+
+        // Awaitable close cancels the owner scope and drains the registration;
+        // the parked exchange returns the typed owner-close error.
+        let close_result = timeout(TEST_TIMEOUT, policy.close())
+            .await
+            .expect("composite close must be awaitable and bounded");
+        assert_eq!(close_result, CloseResult::Closed);
+
+        let error = timeout(TEST_TIMEOUT, exchange_task)
+            .await
+            .expect("exchange bounded after owner close")
+            .expect("exchange joined")
+            .err()
+            .expect("owner close terminates the in-flight exchange");
+        assert_eq!(error, UpstreamError::Closed(SideEffectState::Sent));
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            0,
+            "close must drain every in-flight composite exchange"
+        );
+
+        // A second close observes the existing terminal state instead of
+        // starting a new drain.
+        let second_close = timeout(TEST_TIMEOUT, policy.close())
+            .await
+            .expect("second close bounded");
+        assert_eq!(second_close, CloseResult::AlreadyClosed);
+        assert_eq!(policy.in_flight_exchanges(), 0);
+
+        server.join().expect("udp server joined");
+    });
+}
+
+#[test]
+fn exchange_after_composite_close_is_rejected_without_udp_send() {
+    block_on(async {
+        let (udp, listener, address) = bind_udp_and_tcp();
+        let id = 0x3b02;
+        let query = query_wire(id);
+
+        let policy = UdpTcpPolicy::new(udp_endpoint(address));
+        assert_eq!(policy.close().await, CloseResult::Closed);
+        assert_eq!(policy.in_flight_exchanges(), 0);
+
+        // Bounded negative observations started before the rejected exchange:
+        // no datagram may be sent and the TCP fallback must never be reached.
+        let udp_watchdog = udp_datagram_watchdog(udp);
+        let tcp_watchdog = tcp_connection_watchdog(listener);
+
+        let error = policy_exchange_on(&policy, &query, open_context())
+            .await
+            .err()
+            .expect("a closed composite policy rejects new work");
+        assert_eq!(error, UpstreamError::Closed(SideEffectState::NotSent));
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            0,
+            "a rejected exchange must never register"
+        );
+
+        assert!(
+            !udp_watchdog.join().expect("udp watchdog joined"),
+            "a closed composite policy must not send another UDP query"
+        );
+        assert!(
+            !tcp_watchdog.join().expect("tcp watchdog joined"),
+            "a rejected exchange must not reach the TCP fallback"
+        );
+    });
+}
+
+#[test]
+fn close_drains_in_flight_tcp_fallback_with_nested_closed_sent() {
+    block_on(async {
+        let (udp, listener, address) = bind_udp_and_tcp();
+        let id = 0x3b03;
+        let query = query_wire(id);
+
+        // The UDP leg serves a valid TC observation, which routes the exchange
+        // into exactly one TCP fallback whose server reads the framed query and
+        // then holds the connection open without responding.
+        let udp_server = udp_reply_once(udp, truncated_response_wire(id));
+        let (tcp_server, fallback_read, release_fallback) = tcp_holding_fallback_server(listener);
+
+        let policy = Arc::new(UdpTcpPolicy::new(udp_endpoint(address)));
+        let exchange_task = {
+            let policy = Arc::clone(&policy);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                policy.exchange(request, open_context()).await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, fallback_read)
+            .await
+            .expect("fallback query read bounded")
+            .expect("the TCP fallback must read the framed query");
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            1,
+            "the in-flight TCP fallback must be reported by the composite policy"
+        );
+
+        let close_result = timeout(TEST_TIMEOUT, policy.close())
+            .await
+            .expect("close must return within the bounded test timeout");
+        assert_eq!(close_result, CloseResult::Closed);
+
+        let error = timeout(TEST_TIMEOUT, exchange_task)
+            .await
+            .expect("fallback exchange bounded after close")
+            .expect("fallback exchange joined")
+            .err()
+            .expect("owner close terminates the in-flight fallback");
+        match &error {
+            UpstreamError::TcpFallback { prior, cause } => {
+                let prior: &TcpFallbackContext = prior;
+                assert_eq!(prior.request_id(), id);
+                assert_eq!(prior.response_id(), id);
+                assert!(prior.truncated());
+                assert_eq!(
+                    prior.side_effect(),
+                    SideEffectState::Sent,
+                    "the UDP query had already crossed the network"
+                );
+                assert_eq!(
+                    **cause,
+                    UpstreamError::Closed(SideEffectState::Sent),
+                    "the nested TCP cause must remain the typed owner-close error"
+                );
+            }
+            other => panic!("expected UpstreamError::TcpFallback, got {other:?}"),
+        }
+        assert_eq!(
+            error.side_effect(),
+            SideEffectState::Sent,
+            "the composite error must retain the overall Sent state"
+        );
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            0,
+            "close must drain the fallback registration"
+        );
+
+        release_fallback
+            .send(())
+            .expect("release the held fallback connection");
+        assert_eq!(
+            tcp_server.join().expect("tcp server joined"),
+            query,
+            "the TCP fallback must have carried the byte-identical original query"
+        );
+        assert_eq!(
+            udp_server.join().expect("udp server joined").as_deref(),
+            Some(query.as_slice()),
+            "the UDP leg must have carried the caller's unchanged query"
+        );
+    });
+}
+
+#[test]
+fn composite_close_is_idempotent_on_an_unused_policy() {
+    block_on(async {
+        let address = SocketAddr::from((Ipv4Addr::LOCALHOST, 9));
+        let policy = UdpTcpPolicy::new(udp_endpoint(address));
+
+        assert_eq!(policy.close().await, CloseResult::Closed);
+        assert_eq!(policy.in_flight_exchanges(), 0);
+
+        assert_eq!(policy.close().await, CloseResult::AlreadyClosed);
+        assert_eq!(policy.close().await, CloseResult::AlreadyClosed);
+        assert_eq!(policy.in_flight_exchanges(), 0);
     });
 }
