@@ -23,6 +23,12 @@ tokio-util = { version = "0.7.16", features = ["rt"] }
 # the transitive `idna_adapter` at 1.1.0 because the ICU-backed 1.2.x line
 # declares a 1.86+ MSRV, above this workspace's 1.85.
 url = "2"
+# Slice0 pure DoH GET request-target encoding. Default features are disabled so
+# the crate brings in no `std`-only surface beyond the reviewed `alloc` string
+# encoder; only `general_purpose::URL_SAFE_NO_PAD` is used and no decode path is
+# compiled for production. Resolved lock: base64 0.22.1 (MIT OR Apache-2.0,
+# MSRV 1.48.0), below the workspace MSRV of 1.85.
+base64 = { version = "=0.22.1", default-features = false, features = ["alloc"] }
 # Slice0 secure TLS policy preflight. Only the client policy type is needed, so
 # the TLS engine is added without its aws-lc-rs/post-quantum/logging defaults.
 # `ring` is the reviewed safe provider, `std` enables std integration, and

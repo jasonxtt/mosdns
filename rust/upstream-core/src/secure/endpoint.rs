@@ -4,9 +4,18 @@
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use url::{Host, Url};
 
-use super::error::{IdentityError, SecureError, ServiceUrlError};
+use crate::ExchangeRequest;
+
+use super::error::{DohRequestError, IdentityError, SecureError, ServiceUrlError};
+
+/// The largest DNS wire message a DoH GET may carry in its `dns` parameter.
+const MAX_DOH_QUERY_LEN: usize = 65_535;
+/// The largest origin-form request target this contract will produce: 96 KiB.
+const MAX_DOH_TARGET_LEN: usize = 96 * 1024;
 
 /// A validated DNS name or IP literal used as a secure upstream's TLS service
 /// identity.
@@ -283,6 +292,68 @@ impl DohEndpoint {
     #[must_use]
     pub fn query(&self) -> Option<&str> {
         self.service.query()
+    }
+
+    /// Builds the origin-form HTTP GET request target for a DoH query.
+    ///
+    /// The target is the endpoint's normalized path plus a single query: every
+    /// existing pair whose decoded key is `dns` is removed with `url`'s
+    /// structured query-pairs API, all unrelated pairs and the path's escaping
+    /// are preserved, and exactly one generated `dns` pair is appended. The
+    /// generated value is the unpadded URL-safe base64 of an owned copy of the
+    /// caller's query whose first two ID bytes are zeroed; the borrowed
+    /// [`ExchangeRequest::query`] bytes are never modified.
+    ///
+    /// The returned string contains no scheme, authority, userinfo, fragment,
+    /// or numeric dial address, so the service identity and dial override
+    /// exposed by the endpoint are unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SecureError::DohRequest`] with
+    /// [`DohRequestError::QueryTooLarge`] before encoding when the DNS message
+    /// exceeds 65535 bytes, or with [`DohRequestError::TargetTooLarge`] when the
+    /// encoded target exceeds 96 KiB.
+    pub fn get_request_target(&self, request: ExchangeRequest<'_>) -> Result<String, SecureError> {
+        let query = request.query();
+        if query.len() > MAX_DOH_QUERY_LEN {
+            return Err(SecureError::DohRequest(DohRequestError::QueryTooLarge));
+        }
+        // Only the owned outbound copy is rewritten. `ExchangeRequest::new`
+        // validates the wire, so a 12-byte header and its ID are always present.
+        let mut outbound = query.to_vec();
+        outbound[0] = 0;
+        outbound[1] = 0;
+        let encoded = URL_SAFE_NO_PAD.encode(&outbound);
+
+        // Rebuild the query through the structured pairs API so a decoded key
+        // such as `dn%73` is recognized as `dns`, while unrelated pairs keep
+        // their decoded value and the serializer re-applies form encoding.
+        let mut service = self.service.clone();
+        let preserved: Vec<(String, String)> = service
+            .query_pairs()
+            .filter(|(key, _)| key.as_ref() != "dns")
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        {
+            let mut pairs = service.query_pairs_mut();
+            pairs.clear();
+            for (key, value) in &preserved {
+                pairs.append_pair(key, value);
+            }
+            pairs.append_pair("dns", &encoded);
+        }
+
+        let mut target = String::with_capacity(service.path().len() + encoded.len() + 8);
+        target.push_str(service.path());
+        target.push('?');
+        if let Some(query) = service.query() {
+            target.push_str(query);
+        }
+        if target.len() > MAX_DOH_TARGET_LEN {
+            return Err(SecureError::DohRequest(DohRequestError::TargetTooLarge));
+        }
+        Ok(target)
     }
 }
 

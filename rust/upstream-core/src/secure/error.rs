@@ -77,6 +77,33 @@ impl fmt::Display for TlsConfigError {
 
 impl Error for TlsConfigError {}
 
+/// Why a DoH GET request target was rejected by
+/// [`DohEndpoint::get_request_target`].
+///
+/// Both variants are pre-I/O request defects; neither borrows or formats the
+/// service URL, its query, or the encoded DNS message, so their `Display` and
+/// `Debug` output cannot leak endpoint or query material.
+///
+/// [`DohEndpoint::get_request_target`]: super::DohEndpoint::get_request_target
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DohRequestError {
+    /// The outbound DNS message is longer than the 65535-byte DNS limit.
+    QueryTooLarge,
+    /// The encoded origin-form request target is longer than 96 KiB.
+    TargetTooLarge,
+}
+
+impl fmt::Display for DohRequestError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::QueryTooLarge => "DNS query exceeds the 65535-byte limit",
+            Self::TargetTooLarge => "request target exceeds the 96 KiB limit",
+        })
+    }
+}
+
+impl Error for DohRequestError {}
+
 /// A typed failure raised while constructing a secure endpoint.
 ///
 /// Every variant is a pre-I/O construction defect, so the DNS side-effect state
@@ -94,6 +121,8 @@ pub enum SecureError {
     InvalidServiceUrl(ServiceUrlError),
     /// The explicit TLS policy was rejected before any I/O.
     TlsConfig(TlsConfigError),
+    /// The DoH GET request target was rejected before any I/O.
+    DohRequest(DohRequestError),
 }
 
 impl SecureError {
@@ -116,6 +145,7 @@ impl fmt::Display for SecureError {
                 write!(formatter, "invalid DoH service URL: {reason}")
             }
             Self::TlsConfig(reason) => write!(formatter, "invalid TLS policy: {reason}"),
+            Self::DohRequest(reason) => write!(formatter, "invalid DoH GET request: {reason}"),
         }
     }
 }
@@ -127,6 +157,7 @@ impl Error for SecureError {
             Self::InvalidIdentity(reason) => Some(reason),
             Self::InvalidServiceUrl(reason) => Some(reason),
             Self::TlsConfig(reason) => Some(reason),
+            Self::DohRequest(reason) => Some(reason),
         }
     }
 }

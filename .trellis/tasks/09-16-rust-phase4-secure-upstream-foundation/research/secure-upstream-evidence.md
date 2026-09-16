@@ -179,3 +179,37 @@ workspace was resolved and `cargo check`ed with the installed toolchain
 (cargo/rustc 1.95.0); Rust 1.85.0 is not installed here, so MSRV compatibility
 is evidenced by resolved `rust-version` metadata and resolver-3 selection, not
 by a 1.85 build.
+
+## Slice0 pure DoH request-target record — 2026-09-17
+
+The RED focused test failed before implementation with unresolved
+`DohRequestError`, missing `DohEndpoint::get_request_target`, and the missing
+`SecureError::DohRequest` variant. The GREEN implementation adds only pure
+pre-I/O construction; it does not create a URI, socket, TLS stream, Hyper
+driver, retry, pool, or runtime task.
+
+- Direct dependency: `base64 = "=0.22.1"`, `default-features = false`,
+  feature `alloc` only. License is MIT OR Apache-2.0 and declared MSRV is
+  1.48.0. The feature is required for the allocating `Engine::encode` API;
+  no `std` default feature is enabled.
+- `DohEndpoint::get_request_target(ExchangeRequest<'_>)` checks the DNS wire
+  length before copying/encoding, copies only the outbound bytes, zeroes the
+  copied transaction ID, and uses `URL_SAFE_NO_PAD`.
+- Existing decoded `dns` query keys, including percent-encoded key spellings,
+  are removed through `url`'s structured `query_pairs` API. Unrelated pairs
+  and the escaped path are retained at decoded-pair/path semantics; one new
+  `dns` pair is appended. The return is origin-form path plus query only, so
+  authority, credentials, fragment, and numeric dial address cannot leak into
+  the request target.
+- `DohRequestError::{QueryTooLarge,TargetTooLarge}` carry no URL, query, or
+  encoded-message data. Query lengths above 65535 fail before encoding; target
+  lengths above 96 KiB fail after construction and before I/O. Both remain
+  `SideEffectState::NotSent`.
+- `tests/slice0_secure.rs` now has 24 passing tests, including unchanged caller
+  bytes/ID, duplicate decoded-key removal, URL-safe/unpadded output, IPv6 and
+  escaped path behavior, both bounds, and Display/Debug redaction. Parent
+  reran the full upstream-core suite (125 tests) and clippy/workspace checks.
+
+The structured query API may normalize raw query escaping (for example a
+valueless pair can serialize with `=`); byte-for-byte raw query preservation is
+not claimed, while decoded pair semantics and escaped path preservation are.

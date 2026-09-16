@@ -4,9 +4,8 @@
 bounded dependency/MSRV and Hyper API-inspection scope only. This supersedes
 the earlier planning-only boundary for Slice0; it does not authorize Slice1+,
 CI mutation or deployment, and each later slice still needs its own review and
-explicit go-ahead. Slice0 remains open: dependency/MSRV and Hyper API inspection
-are done, while the rustls policy review and the RED/GREEN request-construction
-contracts are not. No external/root-review PASS is claimed by this document.
+explicit go-ahead. Slice0's technical checklist is now complete; its scoped
+external/root review is still pending and no PASS is claimed by this document.
 
 ## Planning package review checklist
 
@@ -60,13 +59,15 @@ Goal: freeze public types, helper reuse and selected libraries before TLS I/O.
 - [x] RED/GREEN constructor and pure request-building contracts: identity/dial
   separation, IPv4/IPv6, invalid roots/identity/port/URL, query/path normalization,
   maximum DNS/URL size and explicit insecure option.
-  Evidence: `src/secure/{endpoint,error,tls}.rs` plus 17 focused secure tests;
+  Evidence: `src/secure/{endpoint,error,tls}.rs` plus 24 focused secure tests;
   endpoint construction is pre-I/O and preserves dial/identity separation,
-  URL authority/path/query and explicit TLS mode.
+  URL authority/path/query and explicit TLS mode. `DohEndpoint::get_request_target`
+  adds the pure ID-zeroed, unpadded URL-safe GET encoder, decoded `dns` removal,
+  and 65535-byte DNS/96 KiB target limits.
 - [x] Introduce only reviewed secure types/helper access and dependencies;
   preserve existing UDP/TCP public types and default behavior.
   Evidence: secure module re-exports are additive; locked dependency and Hyper
-  API evidence is in `research/secure-upstream-evidence.md`; parent reran 118
+  API evidence is in `research/secure-upstream-evidence.md`; parent reran 125
   upstream-core tests and workspace checks without changing UDP/TCP modules.
 
 Allowed: upstream-core secure contract skeleton/tests, minimal lib.rs/tcp.rs
@@ -189,8 +190,8 @@ UDP/TCP evidence and unrelated work, never add Go fallback as rollback machinery
 - The preceding bullets are a historical planning-only snapshot. They predate
   the later user authorization and must not be read as the current task state.
 - Current Slice0 implementation evidence is recorded in the dependency/MSRV
-  resolution record below and in the secure contract tests; Slice0 remains open
-  only until its scoped root review returns an explicit PASS or FAIL.
+  and request-target records below and in the secure contract tests. The
+  technical checklist is complete; the task stops at its scoped root review.
 
 ## Implementation authorization — 2026-09-16
 
