@@ -22,7 +22,7 @@
 use std::time::Instant;
 
 use crate::{
-    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, SideEffectState,
+    CloseResult, Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, SideEffectState,
     TcpFallbackContext, Transport, Upstream, UpstreamError,
 };
 
@@ -51,6 +51,40 @@ impl UdpTcpPolicy {
         Self {
             udp: Upstream::new(udp_endpoint),
             tcp: Upstream::new(tcp_endpoint),
+        }
+    }
+
+    /// Aggregate number of in-flight exchange registrations across both legs.
+    ///
+    /// This is the exact sum of the existing UDP and TCP owner registration
+    /// counts. The policy keeps no registration state of its own, so the value
+    /// is zero exactly when every owned exchange has drained.
+    #[must_use]
+    pub fn in_flight_exchanges(&self) -> usize {
+        self.udp.in_flight_exchanges() + self.tcp.in_flight_exchanges()
+    }
+
+    /// Closes both underlying upstream owners on the caller's runtime.
+    ///
+    /// Each leg performs the existing awaitable [`Upstream::close`]: it changes
+    /// `Open -> Closing`, cancels that owner's scope so a parked exchange wakes,
+    /// awaits the registration drain, and then performs the guarded
+    /// `Closing -> Closed` transition. Both legs are polled concurrently on the
+    /// caller's runtime; this creates no runtime, executor, blocking wait, or
+    /// detached task, and holds no policy lock across the awaits.
+    ///
+    /// The result is [`CloseResult::Closed`] when either leg observed the
+    /// `Closing -> Closed` transition during this call, otherwise
+    /// [`CloseResult::AlreadyClosing`] or [`CloseResult::AlreadyClosed`] as
+    /// reported by the legs.
+    pub async fn close(&self) -> CloseResult {
+        let (udp, tcp) = tokio::join!(self.udp.close(), self.tcp.close());
+        if udp == CloseResult::Closed || tcp == CloseResult::Closed {
+            CloseResult::Closed
+        } else if udp == CloseResult::AlreadyClosing || tcp == CloseResult::AlreadyClosing {
+            CloseResult::AlreadyClosing
+        } else {
+            CloseResult::AlreadyClosed
         }
     }
 
