@@ -113,10 +113,16 @@ pub(crate) async fn exchange(
         return Err(UpstreamError::MalformedResponse);
     }
 
-    // Validation is complete; the commit gate is the single linearization
-    // point against owner close, immediately before the owned response.
+    // Validation is complete. The final control-aware commit is the single
+    // linearization point against owner close, caller cancellation, and the
+    // exchange's original absolute deadline, immediately before the owned
+    // response. Owner close is checked first, then caller cancellation, then
+    // the already-established deadline; a success can never be reversed by a
+    // later close, cancellation, or deadline. The commit starts no timer and
+    // resets no deadline.
+    let caller_cancellation = prepared.context().cancellation();
     commit.before_commit().await;
-    commit.commit()?;
+    commit.commit_final(&caller_cancellation, deadline, SideEffectState::Sent)?;
     Ok(ExchangeResponse::new(
         body,
         request_id,
@@ -286,8 +292,10 @@ where
 #[cfg(test)]
 mod tests {
     use std::future::Future;
-    use std::net::{Ipv4Addr, SocketAddr};
+    use std::io::{Read, Write};
+    use std::net::{Ipv4Addr, SocketAddr, TcpListener};
     use std::pin::Pin;
+    use std::sync::Arc;
     use std::task::{Context, Poll};
     use std::time::{Duration, Instant};
 
@@ -295,8 +303,9 @@ mod tests {
     use tokio::time::timeout;
 
     use crate::{
-        CloseTransition, Endpoint, ExchangeContext, ExchangeRequest, PreparedExchange,
-        RequestError, SideEffectState, Transport, TransportCancellation, Upstream, UpstreamError,
+        CloseResult, CloseTransition, CommitPause, Endpoint, ExchangeContext, ExchangeRequest,
+        LifecycleState, PreparedExchange, RequestError, SideEffectState, Transport,
+        TransportCancellation, Upstream, UpstreamError,
     };
 
     /// Bounds every control race so a broken helper cannot hang the test.
@@ -678,6 +687,11 @@ mod tests {
             .expect("numeric tcp endpoint")
     }
 
+    /// A numeric TCP endpoint for a bound loopback port.
+    fn tcp_endpoint_at(address: SocketAddr) -> Endpoint {
+        Endpoint::new(address, Transport::Tcp).expect("numeric tcp endpoint")
+    }
+
     /// Prepares one exchange borrowing `query` while the owner is still open.
     fn prepare<'q>(
         upstream: &Upstream,
@@ -688,6 +702,109 @@ mod tests {
         upstream
             .prepare_exchange(request, context)
             .expect("an open owner prepares the exchange")
+    }
+
+    /// A complete, dns-core-valid response with a one-byte answer marker.
+    fn response_wire(id: u16, marker: u8) -> Vec<u8> {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&id.to_be_bytes());
+        wire.extend_from_slice(&[0x81, 0x80]); // QR=1, RD=1, RA=1
+        wire.extend_from_slice(&1u16.to_be_bytes()); // QDCOUNT
+        wire.extend_from_slice(&1u16.to_be_bytes()); // ANCOUNT
+        wire.extend_from_slice(&0u16.to_be_bytes()); // NSCOUNT
+        wire.extend_from_slice(&0u16.to_be_bytes()); // ARCOUNT
+        wire.extend_from_slice(&[0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e']);
+        wire.extend_from_slice(&[0x03, b'o', b'r', b'g', 0x00]);
+        wire.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // A IN
+        wire.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01]); // owner ptr, A IN
+        wire.extend_from_slice(&60u32.to_be_bytes());
+        wire.extend_from_slice(&[0x00, 0x04, 192, 0, 2, marker]);
+        wire
+    }
+
+    /// The shared far-future context used by the commit-gate tests whose
+    /// control is not the deadline.
+    fn open_context() -> ExchangeContext {
+        ExchangeContext::new(
+            Instant::now() + Duration::from_secs(30),
+            TransportCancellation::new(),
+        )
+    }
+
+    /// Accepts at most one connection within `budget`, or reports that none
+    /// arrived.
+    ///
+    /// The listener is non-blocking so a regression that never opens a fresh
+    /// connection fails the test instead of hanging the server thread.
+    fn accept_within(listener: &TcpListener, budget: Duration) -> Option<std::net::TcpStream> {
+        listener
+            .set_nonblocking(true)
+            .expect("switch listener to non-blocking");
+        let deadline = Instant::now() + budget;
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream
+                        .set_nonblocking(false)
+                        .expect("accepted stream is blocking");
+                    return Some(stream);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        }
+    }
+
+    /// One-connection loopback server: reads exactly one framed query, writes
+    /// exactly one complete framed response, then drops the stream.
+    ///
+    /// The server runs on a plain OS thread so the bounded current-thread test
+    /// runtime only has to poll the exchange under test.
+    fn reply_server(reply: Vec<u8>) -> (SocketAddr, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind tcp loopback");
+        let address = listener.local_addr().expect("local address");
+        let handle = std::thread::spawn(move || {
+            let mut stream =
+                accept_within(&listener, TEST_TIMEOUT).expect("exactly one fresh connection");
+            let mut prefix = [0u8; super::PREFIX_BYTES];
+            stream.read_exact(&mut prefix).expect("read query prefix");
+            let length = usize::from(u16::from_be_bytes(prefix));
+            let mut body = vec![0u8; length];
+            stream.read_exact(&mut body).expect("read query body");
+            let length = u16::try_from(reply.len()).expect("reply body fits the u16 prefix");
+            let mut frame = Vec::with_capacity(reply.len() + super::PREFIX_BYTES);
+            frame.extend_from_slice(&length.to_be_bytes());
+            frame.extend_from_slice(&reply);
+            stream.write_all(&frame).expect("write response frame");
+            stream.flush().expect("flush response frame");
+        });
+        (address, handle)
+    }
+
+    /// Installs the deterministic pre-commit pause seam and returns the test's
+    /// handle to it.
+    fn install_pause(upstream: &Upstream) -> Arc<CommitPause> {
+        let pause = Arc::new(CommitPause::new());
+        upstream.install_commit_pause(Arc::clone(&pause));
+        pause
+    }
+
+    /// Spawns one full `Upstream::exchange` on the current-thread runtime.
+    fn spawn_exchange(
+        upstream: &Arc<Upstream>,
+        query: Vec<u8>,
+        context: ExchangeContext,
+    ) -> tokio::task::JoinHandle<Result<crate::ExchangeResponse, UpstreamError>> {
+        let upstream = Arc::clone(upstream);
+        tokio::spawn(async move {
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            upstream.exchange(request, context).await
+        })
     }
 
     /// An I/O future that never becomes ready on its own.
@@ -824,6 +941,169 @@ mod tests {
             .await
             .expect("failing I/O completes without waiting for a control");
             assert_eq!(outcome, Err(UpstreamError::Receive(SideEffectState::Sent)));
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Final control-aware response commit gate
+    //
+    // Each test drives the real `tcp::exchange` path against one bounded
+    // loopback connection and parks it on the shared `CommitPause` seam after
+    // the complete frame has been read, header/ID checked, and dns-core
+    // validated. The test then makes exactly one control effective before
+    // releasing the gate, so the outcome is decided by control precedence and
+    // never by a sleep-only race guess.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn owner_close_at_the_final_commit_gate_is_closed_with_sent() {
+        block_on(async {
+            let id = 0x7101;
+            let (address, server) = reply_server(response_wire(id, 11));
+            let upstream = Arc::new(Upstream::new(tcp_endpoint_at(address)));
+            let pause = install_pause(&upstream);
+            let exchange = spawn_exchange(&upstream, query_wire(id), open_context());
+
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("exchange reaches the final commit gate");
+            assert_eq!(upstream.in_flight_exchanges(), 1);
+
+            // Owner close reaches the shared gate first while the exchange is
+            // parked with a fully read and validated response.
+            assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+            assert_eq!(upstream.lifecycle_state(), LifecycleState::Closing);
+
+            pause.release();
+            let outcome = timeout(TEST_TIMEOUT, exchange)
+                .await
+                .expect("exchange bounded")
+                .expect("exchange joined");
+            assert_eq!(
+                outcome
+                    .err()
+                    .expect("owner close wins the final commit gate"),
+                UpstreamError::Closed(SideEffectState::Sent)
+            );
+
+            assert_eq!(upstream.close().await, CloseResult::Closed);
+            assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join().expect("server thread joined");
+        });
+    }
+
+    #[test]
+    fn caller_cancellation_at_the_final_commit_gate_is_cancelled_with_sent() {
+        block_on(async {
+            let id = 0x7102;
+            let (address, server) = reply_server(response_wire(id, 12));
+            let upstream = Arc::new(Upstream::new(tcp_endpoint_at(address)));
+            let pause = install_pause(&upstream);
+            let cancellation = TransportCancellation::new();
+            // The deadline stays far in the future so only caller cancellation
+            // can win the gate.
+            let context = ExchangeContext::new(
+                Instant::now() + Duration::from_secs(30),
+                cancellation.clone(),
+            );
+            let exchange = spawn_exchange(&upstream, query_wire(id), context);
+
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("exchange reaches the final commit gate");
+            // The complete frame was read and validated; cancellation becomes
+            // effective only now, after validation and before the commit.
+            cancellation.cancel();
+            pause.release();
+
+            let outcome = timeout(TEST_TIMEOUT, exchange)
+                .await
+                .expect("exchange bounded")
+                .expect("exchange joined");
+            assert_eq!(
+                outcome
+                    .err()
+                    .expect("caller cancellation wins the final commit gate"),
+                UpstreamError::Cancelled(SideEffectState::Sent)
+            );
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join().expect("server thread joined");
+        });
+    }
+
+    #[test]
+    fn absolute_deadline_at_the_final_commit_gate_is_deadline_exceeded_with_sent() {
+        block_on(async {
+            let id = 0x7103;
+            let (address, server) = reply_server(response_wire(id, 13));
+            let upstream = Arc::new(Upstream::new(tcp_endpoint_at(address)));
+            let pause = install_pause(&upstream);
+            // The exact original absolute deadline for the whole exchange.
+            // Loopback connect, write, and read complete far below it, so the
+            // deadline can only become effective after validation, while the
+            // exchange is parked at the final commit gate.
+            let deadline = Instant::now() + Duration::from_millis(500);
+            let context = ExchangeContext::new(deadline, TransportCancellation::new());
+            let exchange = spawn_exchange(&upstream, query_wire(id), context);
+
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("exchange reaches the final commit gate before the deadline");
+            // Wait for the exact original deadline instant, then release the
+            // gate; no arbitrary sleep stands in for the deadline.
+            tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+            pause.release();
+
+            let outcome = timeout(TEST_TIMEOUT, exchange)
+                .await
+                .expect("exchange bounded")
+                .expect("exchange joined");
+            assert_eq!(
+                outcome
+                    .err()
+                    .expect("the original absolute deadline wins the final commit gate"),
+                UpstreamError::DeadlineExceeded(SideEffectState::Sent)
+            );
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join().expect("server thread joined");
+        });
+    }
+
+    #[test]
+    fn response_commit_at_the_final_gate_before_owner_close_is_not_reversed() {
+        block_on(async {
+            let id = 0x7104;
+            let expected = response_wire(id, 14);
+            let (address, server) = reply_server(expected.clone());
+            let upstream = Arc::new(Upstream::new(tcp_endpoint_at(address)));
+            let pause = install_pause(&upstream);
+            let exchange = spawn_exchange(&upstream, query_wire(id), open_context());
+
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("exchange reaches the final commit gate");
+            assert_eq!(upstream.lifecycle_state(), LifecycleState::Open);
+
+            // The commit wins while the owner is Open and no control is
+            // effective; the complete validated response is returned.
+            pause.release();
+            let response = timeout(TEST_TIMEOUT, exchange)
+                .await
+                .expect("exchange bounded")
+                .expect("exchange joined")
+                .expect("the response commits while the owner is Open and quiet");
+            assert_eq!(response.transport(), Transport::Tcp);
+            assert_eq!(response.response_id(), id);
+            assert_eq!(response.wire(), expected.as_slice());
+            assert!(!response.truncated());
+
+            // A close that starts afterwards cannot reverse the committed
+            // response and still drains the released registration to Closed.
+            assert_eq!(upstream.close().await, CloseResult::Closed);
+            assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join().expect("server thread joined");
         });
     }
 }

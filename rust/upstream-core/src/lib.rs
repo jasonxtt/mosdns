@@ -562,6 +562,38 @@ impl Lifecycle {
         }
     }
 
+    /// The single final control-aware response-commit operation.
+    ///
+    /// It shares the same short-lived mutex as [`Self::register`],
+    /// [`Self::begin_close`], and [`Self::commit_response`], so the final
+    /// decision has exactly one linearization point against owner close. Under
+    /// that one lock the priority is fixed: owner state/owner close first,
+    /// caller cancellation second, the exchange's original absolute deadline
+    /// third, and a successful commit last.
+    ///
+    /// A success means the response is committed and a later close, caller
+    /// cancellation, or deadline can never reverse it. A failure reports the
+    /// winner with the supplied `side_effect` state, because a transport that
+    /// has already read and validated a reply has sent its query.
+    fn commit_final_response(
+        &self,
+        caller_cancellation: &TransportCancellation,
+        deadline: Instant,
+        side_effect: SideEffectState,
+    ) -> Result<(), UpstreamError> {
+        let inner = self.lock();
+        if inner.state != LifecycleState::Open {
+            return Err(UpstreamError::Closed(side_effect));
+        }
+        if caller_cancellation.is_cancelled() {
+            return Err(UpstreamError::Cancelled(side_effect));
+        }
+        if Instant::now() >= deadline {
+            return Err(UpstreamError::DeadlineExceeded(side_effect));
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn finish_close(&self) -> CloseCompletion {
         let mut inner = self.lock();
@@ -763,6 +795,25 @@ impl<'a> ResponseCommit<'a> {
     /// committed success can never be reversed by a later close.
     fn commit(&self) -> Result<(), UpstreamError> {
         self.lifecycle.commit_response()
+    }
+
+    /// The final control-aware commit for a transport that has already read and
+    /// validated its complete response.
+    ///
+    /// Unlike [`Self::commit`], which only races the owner lifecycle, this
+    /// operation also observes caller cancellation and the exchange's original
+    /// absolute deadline under the same lifecycle lock. The fixed priority is
+    /// owner state/owner close, then caller cancellation, then the original
+    /// absolute deadline, then a successful commit. It starts no timer and
+    /// resets no deadline.
+    fn commit_final(
+        &self,
+        caller_cancellation: &TransportCancellation,
+        deadline: Instant,
+        side_effect: SideEffectState,
+    ) -> Result<(), UpstreamError> {
+        self.lifecycle
+            .commit_final_response(caller_cancellation, deadline, side_effect)
     }
 }
 
@@ -978,8 +1029,11 @@ impl<'q> PreparedExchange<'q> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::{
-        CloseCompletion, CloseTransition, Lifecycle, LifecycleState, SideEffectState, UpstreamError,
+        CloseCompletion, CloseTransition, Lifecycle, LifecycleState, SideEffectState,
+        TransportCancellation, UpstreamError,
     };
 
     /// The commit gate is the single linearization point between response
@@ -1023,5 +1077,77 @@ mod tests {
             lifecycle.commit_response(),
             Err(UpstreamError::Closed(SideEffectState::Sent))
         );
+    }
+
+    /// The final control-aware commit has one fixed precedence under the shared
+    /// lifecycle lock: owner close, then caller cancellation, then the original
+    /// absolute deadline, then success.
+    #[test]
+    fn final_commit_priority_is_owner_then_cancellation_then_deadline_then_success() {
+        let now = Instant::now();
+        let future = now + Duration::from_secs(30);
+        let past = now - Duration::from_secs(1);
+        let quiet = TransportCancellation::new();
+        let cancelled = TransportCancellation::new();
+        cancelled.cancel();
+
+        // Open, uncancelled, before the original deadline: the response commits.
+        let lifecycle = Lifecycle::new();
+        assert_eq!(
+            lifecycle.commit_final_response(&quiet, future, SideEffectState::Sent),
+            Ok(())
+        );
+
+        // Open and cancelled wins over a still-future deadline.
+        let lifecycle = Lifecycle::new();
+        assert_eq!(
+            lifecycle.commit_final_response(&cancelled, future, SideEffectState::Sent),
+            Err(UpstreamError::Cancelled(SideEffectState::Sent))
+        );
+
+        // Open and uncancelled but past the original absolute deadline.
+        let lifecycle = Lifecycle::new();
+        assert_eq!(
+            lifecycle.commit_final_response(&quiet, past, SideEffectState::Sent),
+            Err(UpstreamError::DeadlineExceeded(SideEffectState::Sent))
+        );
+
+        // Caller cancellation wins the tie with an already-passed deadline.
+        let lifecycle = Lifecycle::new();
+        assert_eq!(
+            lifecycle.commit_final_response(&cancelled, past, SideEffectState::Sent),
+            Err(UpstreamError::Cancelled(SideEffectState::Sent))
+        );
+
+        // Owner close outranks both caller cancellation and the deadline.
+        let lifecycle = Lifecycle::new();
+        assert_eq!(lifecycle.begin_close(), CloseTransition::BeganClosing);
+        assert_eq!(
+            lifecycle.commit_final_response(&cancelled, past, SideEffectState::Sent),
+            Err(UpstreamError::Closed(SideEffectState::Sent))
+        );
+    }
+
+    /// A successful final commit can never be reversed by a later owner close.
+    #[test]
+    fn final_commit_success_is_not_reversed_by_a_later_close() {
+        let lifecycle = Lifecycle::new();
+        let quiet = TransportCancellation::new();
+        let future = Instant::now() + Duration::from_secs(30);
+
+        assert_eq!(
+            lifecycle.commit_final_response(&quiet, future, SideEffectState::Sent),
+            Ok(())
+        );
+
+        // A later owner close still performs the observable transition but can
+        // never reverse the committed response.
+        assert_eq!(lifecycle.begin_close(), CloseTransition::BeganClosing);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
+        assert_eq!(
+            lifecycle.commit_final_response(&quiet, future, SideEffectState::Sent),
+            Err(UpstreamError::Closed(SideEffectState::Sent))
+        );
+        assert_eq!(lifecycle.finish_close(), CloseCompletion::Closed);
     }
 }
