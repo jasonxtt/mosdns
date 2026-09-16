@@ -4,6 +4,8 @@
 
 #![allow(clippy::pedantic)]
 
+mod udp;
+
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -451,8 +453,9 @@ pub enum CloseResult {
     AlreadyClosed,
 }
 
-/// Pure Rust upstream owner. Slice0 validates and prepares exchanges only; it
-/// intentionally performs no socket, runtime, or network operation.
+/// Pure Rust upstream owner. Slice1 performs only the reviewed UDP exchange
+/// primitive on the caller's runtime; TCP and all production wiring remain
+/// outside the current slice.
 pub struct Upstream {
     endpoint: Endpoint,
     lifecycle: Lifecycle,
@@ -524,9 +527,32 @@ impl Upstream {
             control: ExchangeControl::new(context, self.cancellation.clone()),
         })
     }
+
+    /// Performs one bounded exchange over the configured numeric endpoint.
+    ///
+    /// Slice1 implements the reviewed one-exchange/one-socket UDP primitive in
+    /// [`udp::exchange`]. Plain TCP is intentionally not implemented in this
+    /// entry point: it returns the explicit minimal `Runtime(NotSent)`
+    /// placeholder so no TCP path can be reached silently before Slice2.
+    ///
+    /// # Errors
+    ///
+    /// Returns the explicit typed transport error for the exchange. The query
+    /// is borrowed and never mutated, and any returned response owns its wire.
+    pub async fn exchange<'q>(
+        &self,
+        request: ExchangeRequest<'q>,
+        context: ExchangeContext,
+    ) -> Result<ExchangeResponse, UpstreamError> {
+        let prepared = self.prepare_exchange(request, context)?;
+        match prepared.endpoint().transport() {
+            Transport::Udp => udp::exchange(&prepared).await,
+            Transport::Tcp => Err(UpstreamError::Runtime(SideEffectState::NotSent)),
+        }
+    }
 }
 
-/// Validated exchange inputs held until a later slice adds actual transport I/O.
+/// Validated exchange inputs held until the selected transport primitive runs.
 pub struct PreparedExchange<'q> {
     endpoint: Endpoint,
     request: ExchangeRequest<'q>,

@@ -336,12 +336,13 @@ Phase 3A（query/wire foundation）已获得授权并完成；其 task
 -> Go upstream`，Phase 3A 的 query ABI/adapter 仍只是 experimental opt-in
 旁路，默认后端保持 Go-only。
 
-Phase 3B 是下一项工作，必须先完成并 root-review/归档后才能进入 upstream
-transport。`08-17-rust-phase4-upstream-foundation` 目前只有 planning PRD，已
-明确 NO-GO/deferred；它不能 `task.py start`，也不授权任何 Phase 4 实现。Phase
-3B 起执行新的 Rust-native policy：Go 只用于产品契约取证，不再新增 Go
-fallback/cgo/runtime selector。Phase 4 将采用纯 Rust transport foundation，
-冻结 cancellation、post-side-effect failure、协议/socket 产品语义和共享 async
-runtime，而不是设计 Go pool ownership、transport C ABI 或新的 hybrid handle
-namespace。Phase 5 建立完整 Rust host，Phase 6 再统一删除 Phase 1/2/3A 的 hybrid
-scaffolding。
+Phase 3B 已完成并 root-review/归档；当前工作是
+`08-17-rust-phase4-upstream-foundation`。Phase4 planning gate 已 PASS，Slice0
+已通过 root review，用户已明确授权 Slice1 UDP；task 保持 `in_progress`，当前
+只实现纯 Rust one-exchange/one-socket UDP primitive。Slice2/TCP、TC fallback、
+production wiring 和后续 host 仍需新的 root-review authorization。Rust-native
+policy 继续要求 Go 只用于产品契约取证，不再新增 Go fallback/cgo/runtime
+selector。Phase 4 冻结 cancellation、post-side-effect failure、协议/socket
+产品语义和共享 async runtime，而不是设计 Go pool ownership、transport C ABI
+或新的 hybrid handle namespace。Phase 5 建立完整 Rust host，Phase 6 再统一删除
+Phase 1/2/3A 的 hybrid scaffolding。

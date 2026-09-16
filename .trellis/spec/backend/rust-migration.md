@@ -470,9 +470,9 @@ crate depends on `mosdns-dns-core` only and must not depend on
 
 - Request input is borrowed and read-only; `ExchangeRequest` validates through
   `mosdns-dns-core::parse_query` and records the original transaction ID.
-- Slice0 prepares exchange state only. It performs no socket, runtime, or
-  network operation; later slices own UDP/TCP I/O and use one host-owned
-  runtime.
+- Slice0 prepares exchange state only. Slice1 now owns only the reviewed
+  one-exchange/one-socket UDP I/O; it runs on the caller's host-owned runtime,
+  never creates a runtime, and does not implement TCP or TC fallback.
 - `ExchangeResponse` owns its complete returned wire. No Go pool or FFI
   release is part of the API.
 - A prepared exchange keeps caller cancellation and upstream-owner shutdown
@@ -488,6 +488,12 @@ crate depends on `mosdns-dns-core` only and must not depend on
   repeated close is harmless.
 - `dns-core` header inspection reads only the 12-byte header's QR, TXID, and
   TC; complete response/RR/OPT semantics remain in `dns-core` validation.
+- Slice1 UDP binds one fresh ephemeral socket per exchange, sends the borrowed
+  query exactly once, validates the configured peer and response ID, ignores
+  wrong-peer/wrong-ID datagrams, and returns an owned response. It uses the
+  full legal datagram capacity rather than the Go 4095-byte buffer; no shared
+  demux, retransmission, retry, pool, reuse, pipeline, TCP, or production
+  wiring is part of this slice.
 
 ### 4. Validation & Error Matrix
 

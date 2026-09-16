@@ -1,9 +1,10 @@
 # Phase 4 upstream transport implementation plan
 
 > The Phase4 planning gate passed at `16192ea`; the user authorized
-> `task.py start` on 2026-09-16. The task is `in_progress` and this round is
-> limited to Slice0. Do not start Slice1, add network code, or add production
-> wiring without another explicit root-review authorization.
+> `task.py start` on 2026-09-16. The task is `in_progress`; Slice0 passed root
+> review and the user explicitly authorized this Slice1 UDP round. Do not start
+> Slice2/TCP, add fallback, or add production wiring without another explicit
+> root-review authorization.
 
 ## Execution rules
 
@@ -178,6 +179,25 @@ evidence.
   `Upstream` or to `PreparedExchange` before implementation.
 - Stop condition active: no attempt was made to make the tests pass, and all
   changes remain uncommitted.
+
+### Slice 1 implementation record — 2026-09-16
+
+- The user explicitly authorized Slice1 after the Slice0 root-review PASS.
+- RED-first evidence is preserved in local commit `3a04a2c`: the new
+  `slice1_udp` target failed with exactly six missing-`Upstream::exchange`
+  compiler errors before production implementation.
+- DSH implemented the bounded one-exchange/one-ephemeral-socket UDP primitive
+  in `rust/upstream-core/src/udp.rs` and the smallest public API wiring in
+  `src/lib.rs`. Production Tokio uses only `macros`, `net`, `rt`, and `time`;
+  the crate still creates no runtime.
+- Main-worktree verification reproduced GREEN: Slice1 19/19, Slice0 12/12,
+  `cargo check --locked`, and `cargo fmt --all -- --check` pass. The DSH
+  implementation also passed three repeated Slice1 runs and the focused
+  clippy check. Full workspace and root review remain before completion.
+- Scope remains UDP only: no TCP, TC-to-TCP fallback, retransmission, generic
+  retry, pool, reuse, pipeline, listener, Go/cgo/ABI/selector/fallback, or
+  production wiring. Task status remains `in_progress`; stop here for root
+  review before Slice2.
 
 ## Slice 2 — TCP framing primitive
 

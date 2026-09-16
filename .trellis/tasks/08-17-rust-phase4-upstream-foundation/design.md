@@ -1,15 +1,15 @@
 # Phase 4 upstream transport architecture
 
-> Planning artifact plus Slice0 contract. The architecture and compatibility
-> questions were root-reviewed before implementation. Slice0 is authorized;
-> this document does not authorize Slice1, network code, or production wiring.
+> Planning artifact plus Slice0/Slice1 contract. The architecture and
+> compatibility questions were root-reviewed before implementation. Slice0
+> passed root review and the user explicitly authorized Slice1 UDP; this
+> document does not authorize Slice2+, TCP fallback, or production wiring.
 
 ## 1. Boundary and dependency direction
 
-Phase 4 will eventually add a pure Rust library crate named
-rust/upstream-core. It is not a workspace member yet. The first implementation
-may add it only after the root reviewer gives planning PASS and authorizes
-Slice 0.
+Phase 4 adds a pure Rust library crate named rust/upstream-core. Slice0
+registered it as a workspace member; Slice1 is the currently authorized UDP
+implementation scope after the Slice0 root-review PASS.
 
 The intended crate relationship is:
 
@@ -521,7 +521,7 @@ Explicitly out of scope for this task:
 
 This architecture is complete only when the root reviewer accepts the decisions,
 the compatibility matrix, the KixDNS ledger, and the implementation slices.
-The planning gate is closed and Slice0 is the only authorized implementation
-scope in the current `in_progress` task. Each implementation slice stops for
-another root review before the next slice, and nothing in this document
-authorizes production wiring or a release.
+The planning gate and Slice0 gate are closed; the user explicitly authorized
+Slice1 UDP in the current `in_progress` task. Slice1 must stop for another root
+review before Slice2, and nothing in this document authorizes production wiring
+or a release.
