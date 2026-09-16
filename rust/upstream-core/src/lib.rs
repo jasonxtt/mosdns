@@ -4,6 +4,7 @@
 
 #![allow(clippy::pedantic)]
 
+mod tcp;
 mod udp;
 
 use std::fmt;
