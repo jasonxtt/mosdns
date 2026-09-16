@@ -60,13 +60,16 @@ tokio-rustls = { version = "=0.26.4", default-features = false, features = ["rin
 # OpenSSL backend and no `pem` encoder is pulled in.
 #
 # Do not read `x509-parser` out of `Cargo.lock`. In the published rcgen 0.14.7
-# manifest `x509-parser` is `optional = true`, and the only references to it in
-# rcgen's feature list are weak (`x509-parser?/verify`, `x509-parser?/verify-aws`).
-# Because this workspace enables just `ring` (not `x509-parser`), that optional
-# dependency is NOT activated: `cargo tree -p rcgen -e features` lists only
-# `ring`, `rustls-pki-types`, `time` and `yasna` under rcgen. The lockfile still
-# records it as a resolution superset, which is why the lock-only license/MSRV
-# audit below covers it.
+# manifest `x509-parser` is `optional = true`, so Cargo also creates an implicit
+# same-named feature (`x509-parser = ["dep:x509-parser"]`) that would activate
+# it; that feature is simply not selected here, since this crate enables only
+# `ring`. Every *declared* reference to it in rcgen's own feature table is a weak
+# reference (`x509-parser?/verify`, `x509-parser?/verify-aws`), and a weak
+# reference does not activate the dependency by itself. So no enabled rcgen
+# feature activates `dep:x509-parser`: `cargo tree -p rcgen -e features` lists
+# only `ring`, `rustls-pki-types`, `time` and `yasna` under rcgen. The lockfile
+# still records it as a resolution superset, which is why the lock-only
+# license/MSRV audit below covers it.
 #
 # Activated graph: rcgen 0.14.7 (MIT OR Apache-2.0, MSRV 1.71) plus ring,
 # rustls-pki-types, yasna, and the `time` family, with resolver 3 holding
