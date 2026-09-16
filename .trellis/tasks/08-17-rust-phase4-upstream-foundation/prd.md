@@ -4,11 +4,14 @@
 > `16192ea83c8c54be1d3ce644e606682956084fee`):** Phase 3B is implemented,
 > root-reviewed, and archived; the Phase4 planning package was root-reviewed.
 > The user authorized `task.py start` on 2026-09-16, explicitly authorized
-> Slice1 after the Slice0 root-review PASS, and now explicitly authorizes
-> Slice2 after the Slice1 root-review PASS. Slice2 was implemented and received
-> formal same-thread root-review PASS/CLOSED at `b83dbb4`. The task remains
-> `in_progress`; the next stage is not authorized automatically. Slice3/fallback,
-> production wiring, and a permanent Go/Rust hybrid remain unauthorized.
+> Slice1 after the Slice0 root-review PASS, then authorized Slice2 after the
+> Slice1 root-review PASS, and on 2026-09-16 explicitly authorized Slice3 after
+> the Slice2 formal same-thread root-review PASS/CLOSED at `b83dbb4`. Slice0,
+> Slice1, and Slice2 remain historical reviewed facts. Slice3's UDP TC-to-TCP
+> composite policy implementation is now present and is pending same-thread
+> root review. The task remains `in_progress`; Slice4, production wiring,
+> Go/cgo/ABI/selector/Go-fallback, live integration, and a permanent Go/Rust
+> hybrid remain unauthorized.
 
 ## Goal
 
@@ -245,11 +248,15 @@ runtime, cancellation and retry state machine, protocol/socket compatibility
 matrix, byte ownership, connection lifecycle, and test strategy.
 
 Phase4 implementation is authorized and the task is currently
-`status = in_progress`. Slice1 UDP and its four scoped root-review fixes are
-complete and passed root review. Slice2's fresh plain-TCP framing primitive is
+`status = in_progress`. Slice0's contract skeleton passed root review at
+`3108305`; Slice1 UDP and its scoped root-review remediations are complete and
+passed root review at `7c65a17`. Slice2's fresh plain-TCP framing primitive is
 complete and formally `PASS / CLOSED` at same-thread root review commit
-`b83dbb4`. The task must stop here until the user explicitly decides whether to
-authorize a later phase; Slice3, TC-to-TCP fallback, and any production wiring
+`b83dbb4`. The user explicitly authorized Slice3 on 2026-09-16 after that
+Slice2 PASS/CLOSED, and the Slice3 UDP TC-to-TCP composite policy is now
+implemented and pending same-thread root review. The task remains `in_progress`
+and must stop for that review; Slice4, production wiring,
+Go/cgo/ABI/selector/Go-fallback, live integration, and any permanent hybrid
 remain unauthorized.
 
 No transport ABI, Go adapter or production selector is expected in the future
