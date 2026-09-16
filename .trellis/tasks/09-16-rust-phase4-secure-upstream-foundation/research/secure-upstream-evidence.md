@@ -393,10 +393,16 @@ The generator is `rcgen`, declared **dev-dependency only** in
   normal edges), `cargo tree --workspace -e features` (no x509-parser line
   anywhere), `cargo tree -p mosdns-upstream-core -e dev,features`, and
   `cargo metadata` for the version/license/rust-version tables.
-- Test-only isolation (re-audited): `cargo tree` with `-e normal` shows
-  **zero** `rcgen` and **zero** `x509-parser` entries for `mosdns-upstream-core`
-  and for the whole workspace; both appear only on dev edges. No production
-  module imports rcgen, and the fixture module is compiled only into `tests/`.
+- Test-only isolation (re-audited, wording corrected in the fourth pass): the
+  two packages are absent for **different** reasons and must not be described
+  together. `cargo tree` with `-e normal` shows **zero** `rcgen` and **zero**
+  `x509-parser` entries for `mosdns-upstream-core` and for the whole workspace.
+  `rcgen` is a real dev-dependency, so it appears on the **dev edges** (and only
+  there). `x509-parser` is **not** on any edge of the activated graph at all: it
+  is inactive under the selected features and is present only as a
+  `Cargo.lock`-recorded resolution superset, so it is absent from both the
+  normal tree and the active dev/feature tree. No production module imports
+  rcgen, and the fixture module is compiled only into `tests/`.
 - No network or external `openssl` dependency: generation is in-process and
   offline. The earlier one-off OpenSSL 3.6.4 provenance note is superseded; no
   certificate bytes remain in the repository.

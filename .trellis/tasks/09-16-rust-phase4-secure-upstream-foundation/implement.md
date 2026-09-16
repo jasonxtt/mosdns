@@ -403,11 +403,16 @@ in `research/secure-upstream-evidence.md`. Its binding MSRV constraints sit
 exactly at the ceiling: `deranged 0.5.8` and `zeroize 1.9.0` declare 1.85,
 `time`/`time-core` declare 1.83.0; a `cargo metadata --locked` audit of the
 full resolved graph reports no package above the workspace MSRV of 1.85.
-Re-audited isolation: `cargo tree -e normal` shows **zero** `rcgen` and
-**zero** `x509-parser` entries for both `mosdns-upstream-core` and the whole
-workspace; both appear only on dev edges. No aws-lc-rs, OpenSSL, network, or
-external `openssl` dependency is involved. `rust/Cargo.lock` was updated for
-this test-only graph.
+Re-audited isolation (wording corrected in the fourth pass): the two packages
+are absent from the normal tree for **different** reasons and must not be
+described together. `cargo tree -e normal` shows **zero** `rcgen` and **zero**
+`x509-parser` entries for both `mosdns-upstream-core` and the whole workspace.
+`rcgen` appears only on the **dev edges**, where it is a genuine
+dev-dependency; `x509-parser` and its transitives are **lockfile-only** and
+absent from the active dev/feature tree too, because they are not activated by
+the selected features. No aws-lc-rs, OpenSSL, network, or external `openssl`
+dependency is involved. `rust/Cargo.lock` was updated for this test-only
+graph.
 Residue proof: `git ls-files rust/upstream-core/tests/fixtures/` lists only
 `mod.rs`; no `.der`/`.pem`/`.key`/`.crt` file is tracked anywhere; and a
 `git grep` for private-key constants finds only prose in documentation comments.
