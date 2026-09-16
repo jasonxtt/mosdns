@@ -9,11 +9,15 @@
 > `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread
 > root-review `PASS / CLOSED`, and Actions run `35084388223` is success (build
 > success, rust-foundation success, historical rust-runtime-experimental
-> skipped). The user then explicitly authorized Slice4 on 2026-09-16. Slice4 is
-> the verification/evidence-only final quality gate recorded below: it starts no
-> implementation or production wiring, keeps the task `in_progress`, and stops
-> for the external same-thread root reviewer's final acceptance of the evidence
-> commit. No Slice4 `PASS / CLOSED` is claimed yet.
+> skipped). The user then explicitly authorized Slice4 on 2026-09-16. Slice4 was
+> the verification/evidence-only final quality gate recorded below: it started
+> no implementation or production wiring, and the external same-thread root
+> review has now formally returned Slice4 `PASS / CLOSED` at review commit
+> `9d43e9fca09a24ad35399838c00299f7cc898301` (Actions run `35090514316`
+> success), closing the Phase4 foundation final quality gate. The task remains
+> `in_progress` and current execution is STOP; nothing here automatically
+> authorizes Rust-native host wiring, production/default selection, hybrid
+> retirement, release, or any deferred/research-unresolved scope.
 
 ## Execution rules
 
@@ -596,12 +600,19 @@ hybrid scaffolding, or release. Those require later tasks and gates.
   this evidence commit is pushed; that job runs fmt, the `mosdns-dns-core`/
   `mosdns-upstream-core` tests, and warnings-denied clippy on `ubuntu-latest`.
   No Slice4 Actions run exists at record time.
-- `task.json` remains `status = in_progress`; current execution stops here for
-  the external same-thread root reviewer's final acceptance. This record claims
-  no Slice4 `PASS / CLOSED`, does not wire the foundation into production, and
-  does not authorize pooling, reuse, pipeline, generic retry, TLS/HTTPS/QUIC,
-  listeners, configuration/WebUI/API, selectors, cgo/ABI, Go fallback,
-  runtime-ownership changes, or a release.
+- Post-PASS status update: the external same-thread root review has now
+  formally returned **Slice4 `PASS / CLOSED`** at review commit
+  `9d43e9fca09a24ad35399838c00299f7cc898301`, and Actions run `35090514316` is
+  success (Ubuntu `rust-foundation` success, Go build success, historical
+  `rust-runtime-experimental` skipped). The Phase4 foundation final quality gate
+  is CLOSED, all Slice0–3 records and every Slice4 evidence fact above are
+  preserved unchanged, and `task.json` remains `status = in_progress` with
+  current execution STOP. Nothing here automatically authorizes Rust-native host
+  wiring, production/default selection, hybrid retirement, release, or any
+  deferred/research-unresolved scope, and it does not authorize wiring the
+  foundation into production, pooling, reuse, pipeline, generic retry,
+  TLS/HTTPS/QUIC, listeners, configuration/WebUI/API, selectors, cgo/ABI, Go
+  fallback, runtime-ownership changes, or a release.
 
 ## Review handoff checklist
 

@@ -12,14 +12,19 @@
 > `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread root-review
 > `PASS / CLOSED`, with Actions run `35084388223` success (build success,
 > rust-foundation success, historical rust-runtime-experimental skipped). The
-> user explicitly authorized Slice4 on 2026-09-16, and the Slice4 final quality
-> gate and evidence run is complete and recorded in this evidence commit. Slice4
-> is verification/evidence only: no implementation, production wiring,
-> Go/cgo/ABI/selector/Go-fallback, live integration, TLS/HTTPS/QUIC, listener,
-> pooling, retry, runtime-ownership, or permanent Go/Rust hybrid work is being
-> started. The task remains `in_progress`, and current execution stops for the
-> external same-thread root reviewer's final acceptance of this evidence commit;
-> no Slice4 root-review `PASS / CLOSED` is claimed yet.
+> user explicitly authorized Slice4 on 2026-09-16, the Slice4 final quality gate
+> and evidence run completed at evidence commit `db374df`, and the external
+> same-thread root review has now formally returned Slice4 `PASS / CLOSED` at
+> review commit `9d43e9fca09a24ad35399838c00299f7cc898301` (Actions run
+> `35090514316` success: Ubuntu `rust-foundation` success, Go build success,
+> historical `rust-runtime-experimental` skipped). The Phase4 foundation final
+> quality gate is CLOSED. Slice4 was verification/evidence only: no
+> implementation, production wiring, Go/cgo/ABI/selector/Go-fallback, live
+> integration, TLS/HTTPS/QUIC, listener, pooling, retry, runtime-ownership, or
+> permanent Go/Rust hybrid work was started. The task remains `in_progress`, and
+> current execution is STOP; nothing here automatically authorizes Rust-native
+> host wiring, production/default selection, hybrid retirement, release, or any
+> deferred/research-unresolved scope.
 
 ## Goal
 
@@ -265,17 +270,19 @@ Slice2 PASS/CLOSED, and the Slice3 UDP TC-to-TCP composite policy implementation
 at `21bff19212637c47df632a29dd4b3380cac7a4cc` is now formally `PASS / CLOSED`
 at same-thread root review, with Actions run `35084388223` success (build
 success, rust-foundation success, historical rust-runtime-experimental
-skipped). The user then explicitly authorized Slice4 on 2026-09-16. The Slice4
-final quality gate and evidence run completed in this evidence commit with all
-repository-executable checks green; Linux loopback network evidence is expected
-from the repository's Ubuntu GitHub Actions `rust-foundation` run for this
-commit when it is pushed, and local macOS execution is not counted as Linux
-evidence. The task remains `in_progress`, and current execution stops for the
-external same-thread root reviewer's final acceptance; no Slice4 root-review
-`PASS / CLOSED` is claimed yet. Slice4 is evidence-only, so production wiring,
-Go/cgo/ABI/selector/Go-fallback, live integration, secure transports,
-listeners, pooling, retry, runtime ownership, and any permanent hybrid remain
-unauthorized.
+skipped). The user then explicitly authorized Slice4 on 2026-09-16. The Slice4 final
+quality gate and evidence run completed at evidence commit `db374df` with all
+repository-executable checks green, and the external same-thread root review has
+now formally returned Slice4 `PASS / CLOSED` at review commit
+`9d43e9fca09a24ad35399838c00299f7cc898301`; Actions run `35090514316` is
+success (Ubuntu `rust-foundation` success, Go build success, historical
+`rust-runtime-experimental` skipped). The Phase4 foundation final quality gate
+is CLOSED. The task remains `in_progress`, and current execution is STOP.
+Slice4 was evidence-only, so production wiring, Go/cgo/ABI/selector/Go-fallback,
+live integration, secure transports, listeners, pooling, retry, runtime
+ownership, and any permanent hybrid remain unauthorized, and nothing here
+automatically authorizes Rust-native host wiring, production/default selection,
+hybrid retirement, release, or any deferred/research-unresolved scope.
 
 No transport ABI, Go adapter or production selector is expected in the future
 design. If a later task ever proposes one, it requires a separate explicit
