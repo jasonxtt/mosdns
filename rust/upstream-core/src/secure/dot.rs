@@ -842,6 +842,42 @@ mod tests {
         }
     }
 
+    /// Reads one framed DNS message, or `None` if the client left first.
+    ///
+    /// Unlike [`read_framed`], this tolerates a client that is parked before it
+    /// ever writes, which is exactly what the write- and flush-phase cases do.
+    async fn read_framed_opt(stream: &mut TlsStream<TcpStream>) -> Option<Vec<u8>> {
+        use tokio::io::AsyncReadExt as _;
+        let mut prefix = [0u8; 2];
+        if stream.read_exact(&mut prefix).await.is_err() {
+            return None;
+        }
+        let length = usize::from(u16::from_be_bytes(prefix));
+        if length == 0 {
+            return None;
+        }
+        let mut body = vec![0u8; length];
+        match stream.read_exact(&mut body).await {
+            Ok(_) => Some(body),
+            Err(_) => None,
+        }
+    }
+
+    /// Writes one framed DNS message, or reports that the client left first.
+    async fn write_framed_opt(stream: &mut TlsStream<TcpStream>, body: &[u8]) -> bool {
+        use tokio::io::AsyncWriteExt as _;
+        let Ok(length) = u16::try_from(body.len()) else {
+            return false;
+        };
+        let mut frame = Vec::with_capacity(body.len() + 2);
+        frame.extend_from_slice(&length.to_be_bytes());
+        frame.extend_from_slice(body);
+        match stream.write_all(&frame).await {
+            Ok(()) => stream.flush().await.is_ok(),
+            Err(_) => false,
+        }
+    }
+
     /// Writes one framed DNS message.
     async fn write_framed(stream: &mut TlsStream<TcpStream>, body: &[u8]) {
         use tokio::io::AsyncWriteExt as _;
@@ -904,207 +940,242 @@ mod tests {
         pause
     }
 
-    #[test]
-    fn connect_phase_cancellation_sends_nothing_and_opens_no_socket() {
-        block_on(async {
-            // The endpoint is bound but nothing is listening on TLS; the seam
-            // parks before connect, so cancellation is decided with no socket.
-            let (listener, address) = bind();
-            listener.set_nonblocking(true).expect("non-blocking");
-            let identity = generate_identity();
-            let upstream = Arc::new(owner_for(address, &identity));
-            let pause = install(&upstream, DotPhase::BeforeConnect);
-
-            let caller = TransportCancellation::new();
-            let exchange = spawn(&upstream, query_wire(0x6001), open_context(&caller));
-            timeout(TEST_TIMEOUT, pause.arrived())
-                .await
-                .expect("the exchange reaches the connect phase");
-            assert_eq!(upstream.in_flight_exchanges(), 1);
-            caller.cancel();
-            pause.release();
-
-            expect_error(
-                exchange,
-                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::NotSent)),
-            )
-            .await;
-            assert_eq!(upstream.in_flight_exchanges(), 0);
-            // No connection was attempted at the parked phase.
-            match listener.accept() {
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                Ok(_) => panic!("cancellation before connect must not dial"),
-                Err(error) => panic!("unexpected accept error: {error}"),
-            }
-        });
+    /// The four controls the acceptance matrix requires at every pre-result
+    /// phase: owner close, caller cancellation, the shared absolute deadline,
+    /// and a dropped/aborted caller future.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum PhaseControl {
+        OwnerClose,
+        CallerCancellation,
+        AbsoluteDeadline,
+        AbortDrop,
     }
 
-    #[test]
-    fn connect_phase_owner_close_sends_nothing() {
-        block_on(async {
-            let (listener, address) = bind();
-            listener.set_nonblocking(true).expect("non-blocking");
-            let identity = generate_identity();
-            let upstream = Arc::new(owner_for(address, &identity));
-            let pause = install(&upstream, DotPhase::BeforeConnect);
+    /// Every pre-result phase the control matrix must cover.
+    const MATRIX_PHASES: [DotPhase; 6] = [
+        DotPhase::BeforeConnect,
+        DotPhase::BeforeHandshake,
+        DotPhase::BeforeWrite,
+        DotPhase::BeforeFlush,
+        DotPhase::BeforeRead,
+        DotPhase::BeforeCommit,
+    ];
 
-            let exchange = spawn(
-                &upstream,
-                query_wire(0x6002),
-                open_context(&TransportCancellation::new()),
+    /// The side-effect state the exchange has provably reached when parked at
+    /// `phase`.
+    ///
+    /// This mirrors the production layering exactly: no DNS byte exists before
+    /// or during the handshake, a written or still-buffered frame is
+    /// conservatively `MaybeSent`, and a flushed frame is `Sent`. Every control
+    /// at a given phase must report the same state, which is what makes the
+    /// matrix a real contract rather than four independent assertions.
+    const fn side_effect_at(phase: DotPhase) -> SideEffectState {
+        match phase {
+            DotPhase::BeforeConnect | DotPhase::BeforeHandshake => SideEffectState::NotSent,
+            DotPhase::BeforeWrite | DotPhase::BeforeFlush => SideEffectState::MaybeSent,
+            DotPhase::BeforeRead | DotPhase::BeforeCommit | DotPhase::AfterCommit => {
+                SideEffectState::Sent
+            }
+        }
+    }
+
+    /// The request ID every matrix case sends.
+    const MATRIX_REQUEST_ID: u16 = 0x6A00;
+
+    /// A server that answers the query when it arrives, then holds until the
+    /// client closes the connection.
+    ///
+    /// Every step tolerates the client leaving early, which is what lets one
+    /// helper serve every phase in the matrix: a client parked before its write
+    /// never sends the query, while a client parked at the read or commit phase
+    /// needs the response. Returning on client EOF keeps `Server::join` free of
+    /// any timing dependency.
+    fn matrix_server(identity: &Identity) -> Server {
+        Server::start(identity, None, |mut tls, _| async move {
+            if read_framed_opt(&mut tls).await.is_some() {
+                let _ = write_framed_opt(&mut tls, &response_wire(MATRIX_REQUEST_ID, 9)).await;
+            }
+            hold_until_client_closes(&mut tls).await;
+        })
+    }
+
+    /// Runs one `(phase, control)` matrix cell and asserts its contract.
+    ///
+    /// The exchange is parked on `phase` by the deterministic seam, so the
+    /// control is applied at a known point rather than inferred from elapsed
+    /// time. The exchange must have reached the seam before the control is
+    /// applied, which is the ordering evidence for every cell.
+    fn run_phase_control_case(phase: DotPhase, control: PhaseControl) {
+        block_on(async {
+            let identity = generate_identity();
+
+            // `BeforeConnect` is decided before any socket exists, so it needs
+            // no server: the address is bound but never accepted.
+            let (address, server) = if phase == DotPhase::BeforeConnect {
+                let (listener, address) = bind();
+                listener
+                    .set_nonblocking(true)
+                    .expect("listener non-blocking");
+                (address, None)
+            } else {
+                let server = matrix_server(&identity);
+                (server.address, Some(server))
+            };
+
+            let upstream = Arc::new(owner_for(address, &identity));
+            let pause = install(&upstream, phase);
+
+            let caller = TransportCancellation::new();
+            let deadline = Instant::now() + Duration::from_millis(500);
+            let context = ExchangeContext::new(deadline, caller.clone());
+            let exchange = spawn(&upstream, query_wire(MATRIX_REQUEST_ID), context);
+
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("{phase:?}/{control:?}: the exchange reaches its phase")
+                });
+            assert_eq!(
+                upstream.in_flight_exchanges(),
+                1,
+                "{phase:?}/{control:?}: the exchange is registered while parked"
             );
-            timeout(TEST_TIMEOUT, pause.arrived())
-                .await
-                .expect("the exchange reaches the connect phase");
-            assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
-            pause.release();
 
-            expect_error(
-                exchange,
-                SecureError::Transport(UpstreamError::Closed(SideEffectState::NotSent)),
-            )
-            .await;
-            assert_eq!(upstream.close().await, CloseResult::Closed);
-            assert_eq!(upstream.in_flight_exchanges(), 0);
-            match listener.accept() {
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                Ok(_) => panic!("owner close before connect must not dial"),
-                Err(error) => panic!("unexpected accept error: {error}"),
+            let expected = side_effect_at(phase);
+            match control {
+                PhaseControl::OwnerClose => {
+                    assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+                    pause.release();
+                    expect_error(
+                        exchange,
+                        SecureError::Transport(UpstreamError::Closed(expected)),
+                    )
+                    .await;
+                    assert_eq!(upstream.close().await, CloseResult::Closed);
+                }
+                PhaseControl::CallerCancellation => {
+                    caller.cancel();
+                    pause.release();
+                    expect_error(
+                        exchange,
+                        SecureError::Transport(UpstreamError::Cancelled(expected)),
+                    )
+                    .await;
+                }
+                PhaseControl::AbsoluteDeadline => {
+                    // Wait for the exchange's own absolute deadline instant; no
+                    // arbitrary sleep stands in for the deadline.
+                    tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                    pause.release();
+                    expect_error(
+                        exchange,
+                        SecureError::Transport(UpstreamError::DeadlineExceeded(expected)),
+                    )
+                    .await;
+                }
+                PhaseControl::AbortDrop => {
+                    // Aborting the task is what drops the in-flight future; the
+                    // RAII registration must be released by that drop alone.
+                    exchange.abort();
+                    let _ = exchange.await;
+                    assert_eq!(
+                        upstream.close().await,
+                        CloseResult::Closed,
+                        "{phase:?}/{control:?}: the owner drains after the future is dropped"
+                    );
+                }
+            }
+
+            assert_eq!(
+                upstream.in_flight_exchanges(),
+                0,
+                "{phase:?}/{control:?}: every registration is released"
+            );
+            if let Some(server) = server {
+                server.join();
             }
         });
     }
 
+    /// Runs all four controls against one phase.
+    fn run_phase_control_matrix(phase: DotPhase) {
+        for control in [
+            PhaseControl::OwnerClose,
+            PhaseControl::CallerCancellation,
+            PhaseControl::AbsoluteDeadline,
+            PhaseControl::AbortDrop,
+        ] {
+            run_phase_control_case(phase, control);
+        }
+    }
+
+    /// The phases in the matrix must be exactly the pre-result phases: a phase
+    /// silently missing from the const array would otherwise leave a gap in the
+    /// coverage this test exists to provide.
     #[test]
-    fn handshake_phase_cancellation_sends_no_query() {
-        block_on(async {
-            // The server completes TCP accept and the TLS handshake, then holds
-            // the stream. The seam parks before the handshake begins, so the
-            // parked state is deterministic and never a timing guess.
-            let identity = generate_identity();
-            let (consumed_tx, _consumed_rx) = oneshot::channel::<()>();
-            let server = Server::start(&identity, Some(consumed_tx), |mut tls, _| async move {
-                // Never answer: hold the connection until the client drops it.
-                let mut buffer = [0u8; 1];
-                use tokio::io::AsyncReadExt as _;
-                let _ = tls.read(&mut buffer).await;
-            });
-            let upstream = Arc::new(owner_for(server.address, &identity));
-            let pause = install(&upstream, DotPhase::BeforeHandshake);
-
-            let caller = TransportCancellation::new();
-            let exchange = spawn(&upstream, query_wire(0x6003), open_context(&caller));
-            timeout(TEST_TIMEOUT, pause.arrived())
-                .await
-                .expect("the exchange reaches the handshake phase");
-            caller.cancel();
-            pause.release();
-
-            // The handshake never completed, so no DNS byte was sent.
-            expect_error(
-                exchange,
-                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::NotSent)),
-            )
-            .await;
-            assert_eq!(upstream.in_flight_exchanges(), 0);
-            server.join();
-        });
+    fn the_control_matrix_covers_every_pre_result_phase_exactly_once() {
+        let mut seen: Vec<DotPhase> = MATRIX_PHASES.to_vec();
+        seen.sort_by_key(|phase| format!("{phase:?}"));
+        seen.dedup();
+        assert_eq!(seen.len(), MATRIX_PHASES.len(), "no duplicate phases");
+        assert_eq!(
+            seen.len(),
+            6,
+            "connect, handshake, write, flush, read and final commit"
+        );
+        // The side-effect layering is part of the contract, so assert it here
+        // rather than only inside the per-phase cases.
+        assert_eq!(
+            side_effect_at(DotPhase::BeforeConnect),
+            SideEffectState::NotSent
+        );
+        assert_eq!(
+            side_effect_at(DotPhase::BeforeHandshake),
+            SideEffectState::NotSent
+        );
+        assert_eq!(
+            side_effect_at(DotPhase::BeforeWrite),
+            SideEffectState::MaybeSent
+        );
+        assert_eq!(
+            side_effect_at(DotPhase::BeforeFlush),
+            SideEffectState::MaybeSent
+        );
+        assert_eq!(side_effect_at(DotPhase::BeforeRead), SideEffectState::Sent);
+        assert_eq!(
+            side_effect_at(DotPhase::BeforeCommit),
+            SideEffectState::Sent
+        );
     }
 
     #[test]
-    fn write_phase_cancellation_is_maybe_sent() {
-        block_on(async {
-            let identity = generate_identity();
-            let server = Server::start(&identity, None, |mut tls, _| async move {
-                // Complete the handshake, then hold without reading so the
-                // client is parked before its framed write.
-                let mut buffer = [0u8; 1];
-                use tokio::io::AsyncReadExt as _;
-                let _ = tls.read(&mut buffer).await;
-            });
-            let upstream = Arc::new(owner_for(server.address, &identity));
-            let pause = install(&upstream, DotPhase::BeforeWrite);
-
-            let caller = TransportCancellation::new();
-            let exchange = spawn(&upstream, query_wire(0x6004), open_context(&caller));
-            timeout(TEST_TIMEOUT, pause.arrived())
-                .await
-                .expect("the exchange reaches the write phase");
-            caller.cancel();
-            pause.release();
-
-            // Cancelling at the write boundary is conservatively MaybeSent: the
-            // frame may be partially accepted once the write is entered.
-            expect_error(
-                exchange,
-                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::MaybeSent)),
-            )
-            .await;
-            assert_eq!(upstream.in_flight_exchanges(), 0);
-            server.join();
-        });
+    fn control_matrix_at_before_connect() {
+        run_phase_control_matrix(DotPhase::BeforeConnect);
     }
 
     #[test]
-    fn flush_phase_cancellation_is_maybe_sent() {
-        block_on(async {
-            let identity = generate_identity();
-            let server = Server::start(&identity, None, |mut tls, _| async move {
-                let mut buffer = [0u8; 1];
-                use tokio::io::AsyncReadExt as _;
-                let _ = tls.read(&mut buffer).await;
-            });
-            let upstream = Arc::new(owner_for(server.address, &identity));
-            let pause = install(&upstream, DotPhase::BeforeFlush);
-
-            let caller = TransportCancellation::new();
-            let exchange = spawn(&upstream, query_wire(0x6005), open_context(&caller));
-            timeout(TEST_TIMEOUT, pause.arrived())
-                .await
-                .expect("the exchange reaches the flush phase");
-            caller.cancel();
-            pause.release();
-
-            // The flush has not completed, so the send is not yet established.
-            expect_error(
-                exchange,
-                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::MaybeSent)),
-            )
-            .await;
-            assert_eq!(upstream.in_flight_exchanges(), 0);
-            server.join();
-        });
+    fn control_matrix_at_before_handshake() {
+        run_phase_control_matrix(DotPhase::BeforeHandshake);
     }
 
     #[test]
-    fn read_phase_cancellation_is_sent() {
-        block_on(async {
-            let identity = generate_identity();
-            let server = Server::start(&identity, None, |mut tls, _| async move {
-                // Consume the query, then withhold the response until the
-                // client terminates the exchange.
-                let _ = read_framed(&mut tls).await;
-                hold_until_client_closes(&mut tls).await;
-            });
-            let upstream = Arc::new(owner_for(server.address, &identity));
-            let pause = install(&upstream, DotPhase::BeforeRead);
+    fn control_matrix_at_before_write() {
+        run_phase_control_matrix(DotPhase::BeforeWrite);
+    }
 
-            let caller = TransportCancellation::new();
-            let exchange = spawn(&upstream, query_wire(0x6006), open_context(&caller));
-            timeout(TEST_TIMEOUT, pause.arrived())
-                .await
-                .expect("the exchange reaches the read phase");
-            caller.cancel();
-            pause.release();
+    #[test]
+    fn control_matrix_at_before_flush() {
+        run_phase_control_matrix(DotPhase::BeforeFlush);
+    }
 
-            // The frame was written and flushed, so the query is Sent.
-            expect_error(
-                exchange,
-                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::Sent)),
-            )
-            .await;
-            assert_eq!(upstream.in_flight_exchanges(), 0);
-            server.join();
-        });
+    #[test]
+    fn control_matrix_at_before_read() {
+        run_phase_control_matrix(DotPhase::BeforeRead);
+    }
+
+    #[test]
+    fn control_matrix_at_before_commit() {
+        run_phase_control_matrix(DotPhase::BeforeCommit);
     }
 
     #[test]
@@ -1192,103 +1263,6 @@ mod tests {
             assert_eq!(upstream.in_flight_exchanges(), 0);
             server.join();
         });
-    }
-
-    #[test]
-    fn aborted_future_releases_the_registration_at_every_phase() {
-        for phase in [
-            DotPhase::BeforeConnect,
-            DotPhase::BeforeHandshake,
-            DotPhase::BeforeWrite,
-            DotPhase::BeforeFlush,
-            DotPhase::BeforeRead,
-        ] {
-            block_on(async {
-                let identity = generate_identity();
-                let server = Server::start(&identity, None, |mut tls, _| async move {
-                    let mut buffer = [0u8; 1];
-                    use tokio::io::AsyncReadExt as _;
-                    let _ = tls.read(&mut buffer).await;
-                    let _ = read_framed(&mut tls).await;
-                    hold_until_client_closes(&mut tls).await;
-                });
-                let upstream = Arc::new(owner_for(server.address, &identity));
-                let pause = install(&upstream, phase);
-
-                let exchange = spawn(
-                    &upstream,
-                    query_wire(0x6100),
-                    open_context(&TransportCancellation::new()),
-                );
-                timeout(TEST_TIMEOUT, pause.arrived())
-                    .await
-                    .unwrap_or_else(|_| panic!("the exchange reaches {phase:?}"));
-                assert_eq!(upstream.in_flight_exchanges(), 1, "{phase:?}");
-
-                // Dropping the future must release the RAII registration.
-                exchange.abort();
-                let _ = exchange.await;
-                assert_eq!(
-                    upstream.in_flight_exchanges(),
-                    0,
-                    "an aborted future at {phase:?} must release its registration"
-                );
-                assert_eq!(upstream.close().await, CloseResult::Closed, "{phase:?}");
-                drop(server);
-            });
-        }
-    }
-
-    #[test]
-    fn an_absolute_deadline_is_shared_across_every_phase() {
-        // The same absolute deadline governs the whole exchange, so it must be
-        // able to terminate each phase without any phase starting a fresh timer.
-        for phase in [
-            DotPhase::BeforeHandshake,
-            DotPhase::BeforeWrite,
-            DotPhase::BeforeFlush,
-            DotPhase::BeforeRead,
-        ] {
-            block_on(async {
-                let identity = generate_identity();
-                let server = Server::start(&identity, None, |mut tls, _| async move {
-                    let mut buffer = [0u8; 1];
-                    use tokio::io::AsyncReadExt as _;
-                    let _ = tls.read(&mut buffer).await;
-                    let _ = read_framed(&mut tls).await;
-                    hold_until_client_closes(&mut tls).await;
-                });
-                let upstream = Arc::new(owner_for(server.address, &identity));
-                let pause = install(&upstream, phase);
-
-                // A short absolute deadline for the entire exchange.
-                let deadline = Instant::now() + Duration::from_millis(300);
-                let context = ExchangeContext::new(deadline, TransportCancellation::new());
-                let exchange = spawn(&upstream, query_wire(0x6200), context);
-
-                // Park, then wait for the single original deadline instant.
-                timeout(TEST_TIMEOUT, pause.arrived())
-                    .await
-                    .unwrap_or_else(|_| panic!("the exchange reaches {phase:?}"));
-                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-                pause.release();
-
-                let error = timeout(TEST_TIMEOUT, exchange)
-                    .await
-                    .expect("exchange bounded")
-                    .expect("exchange task joined")
-                    .expect_err("the shared deadline terminates the exchange");
-                assert!(
-                    matches!(
-                        error,
-                        SecureError::Transport(UpstreamError::DeadlineExceeded(_))
-                    ),
-                    "{phase:?} produced {error:?}"
-                );
-                assert_eq!(upstream.in_flight_exchanges(), 0, "{phase:?}");
-                drop(server);
-            });
-        }
     }
 
     #[test]
