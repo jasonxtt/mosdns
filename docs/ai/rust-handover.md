@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-08-18`
+Last verified: `2026-09-16`
 
 This is the canonical cross-session entrypoint for Rust migration work. It
 records task state and worktree ownership; architecture remains authoritative
@@ -53,20 +53,18 @@ used as an intermediate production runtime.
 | `08-13-rust-matcher-foundation` | **archived/completed** (`2026-08-13`) | Approved `2026-08-13`; Slices 0–5 complete. Compatibility matrix, Go golden fixtures, real rule-set fixture, KixDNS matcher ledger, single Rust runtime extraction, pure Rust domain/IP matchers (`matcher-core`), transactional FFI with matcher ABI in runtime, C header, Go provider integration (`domain_set`/`ip_set` with `MOSDNS_MATCHER_BACKEND=rust` env-gated Rust backend and Go fallback), Linux+cgo tagged integration/race, fixed-fixture evidence, CI gates, and isolated `mos-test` reload/fallback/restart smoke are verified. | Preserve the pure matcher core and the product-facing rule evidence; do not expand the FFI/provider fallback. Existing bridge artifacts remain historical scaffolding until the post-host retirement gate. |
 | `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the existing opt-in/fallback scaffolding without expanding it. Its pure matcher core and product-contract evidence remain useful; the Go/Rust bridge is scheduled for retirement only after the Rust-native host is complete. |
 | `08-15-rust-phase3-query-execution-core` | **archived/completed** (`2026-08-17`) | Phase 3A query/wire foundation complete: Slices 0–4 root-reviewed, including Rust dns/query core, query ABI, Go opt-in adapter/fallback, Linux+cgo real-staticlib normal/race, and final wire/parity remediation. Overall Phase 3 remains incomplete because sequence control flow, matcher dispatch, no-network executable ownership, and query execution ownership are still Go-owned. | The next task is Phase 3B sequence/execution ownership. Reuse the pure Rust dns/query types, but do not extend the query ABI/Go fallback pattern into sequence-core. Keep the existing adapter untouched until the later retirement gate. |
-| `08-17-rust-phase3b-sequence-execution-foundation` | **planning** (`2026-08-18` policy revision) | Planning artifacts now target pure `rust/sequence-core`: typed owned execution state, validated program model, explicit continuation stack, product-contract/deviation classification, fuel/cancellation, and no Go adapter/ABI/selector. | Finish root planning review, then start only this task. Go is discovery evidence; Rust tests follow the reviewed product contract/deviation matrix. |
-| `08-17-rust-phase4-upstream-foundation` | **planning/deferred** (`2026-08-17`) | Must wait for Phase 3B and still needs design/implement artifacts plus transport research. Under the 2026-08-18 policy, this is a pure Rust transport foundation for the future Rust host; Go is only behavior-discovery evidence. No transport C ABI, Go pool ownership, `MOSDNS_UPSTREAM_BACKEND`, or Go fallback is planned. | Do not run `task.py start`. Complete/archive Phase 3B first, then re-review the revised Phase 4 PRD under the Rust-native compatibility policy. |
+| `08-17-rust-phase3b-sequence-execution-foundation` | **archived/completed** (`2026-08-18`) | Pure `rust/sequence-core` foundation complete: typed owned execution state, validated program model, explicit continuation stack, product-contract/deviation classification, fuel/cancellation, and no Go adapter/ABI/selector. Implementation commit `0c53c7d`; archive commit `a18fd89`. | Preserve the reviewed sequence contract. Do not reopen Phase3B while planning or implementing Phase4. |
+| `08-17-rust-phase4-upstream-foundation` | **planning — root review FAIL** (`2026-09-16`) | Phase3B prerequisite is satisfied. Phase4 remains planning-only while `design.md`, `implement.md`, the compatibility/deviation matrix, and the pinned KixDNS transport audit are reviewed. It targets a pure Rust transport foundation with no new C ABI, Go ownership, selector, or fallback. | Complete the planning remediation, keep `status = planning`, then request another root review. Do not run `task.py start` before explicit PASS. |
 
-Active migration state is **Phase 3B pending** on branch `rust`: the Phase 3A
-query/wire foundation task is archived/completed, but the overall Phase 3
-sequence/execution-ownership work is not complete. The next task must cover
-Rust matcher dispatch, no-network executables, `jump`/`goto`/`return`/`exit`/
-`try`, and the query-context ownership continuation before upstream transport
-work begins. The Phase 4 upstream task is planning-only and deferred; its revised PRD
-requires a shared Rust async runtime/cancellation model, post-side-effect failure
-matrix, product-contract protocol/socket classification, and KixDNS transport
-audit before implementation. It must not add a transport C ABI, Go pool-buffer
-ownership, selector, or fallback. The existing `main` release remains Go-only
-while this incomplete `rust` branch is not a production target.
+Active migration state is **Phase 4 planning remediation** on branch `rust`:
+Phase3B is archived/completed, while the Phase4 upstream task is still planning
+and has not started implementation. Its root-review remediation must freeze a
+shared Rust async-runtime ownership model, cancellation/deadline boundary,
+post-side-effect failure matrix, product-contract protocol/socket
+classification, byte ownership, connection lifecycle, and KixDNS transport
+audit. It must not add a transport C ABI, Go pool-buffer ownership, selector,
+or fallback. The existing `main` release remains Go-only and this incomplete
+`rust` branch is not a production target.
 The matcher tasks (`08-13-rust-matcher-foundation`,
 `08-13-rust-matcher-phase2-expansion`) are archived/completed and are no
 longer active work; their historical records are unchanged.
