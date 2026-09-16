@@ -525,3 +525,312 @@ fn owner_close_while_waiting_for_the_response_is_closed_with_sent() {
         );
     });
 }
+
+// ---------------------------------------------------------------------------
+// Deterministic full-exchange terminal error/side-effect matrix
+//
+// Every test below drives the public `Upstream::exchange` entry point against a
+// scripted one-connection loopback server. Each case asserts the typed terminal
+// category, the `SideEffectState`, that the caller's borrowed query bytes are
+// unchanged, that the in-flight registration was released, and (through the
+// shared `scripted_server` probe) that the terminal error never reconnects or
+// retries. No case depends on a sleep-only timing guess.
+// ---------------------------------------------------------------------------
+
+/// A query one byte larger than the two-byte DNS-over-TCP length prefix can
+/// encode, but still a wire-legal request for the `dns-core` query boundary.
+///
+/// `dns-core`'s query oracle validates the header and exactly one question and
+/// does not descend into the single permitted additional record, so declaring
+/// `ARCOUNT = 1` and padding the wire lets the request boundary accept it while
+/// the outbound frame gate must reject it.
+fn oversized_query(id: u16) -> Vec<u8> {
+    let mut wire = query_wire(id);
+    wire[10..12].copy_from_slice(&1u16.to_be_bytes()); // ARCOUNT = 1
+    wire.resize(usize::from(u16::MAX) + 1, 0);
+    wire
+}
+
+/// A complete frame with QR set and the request ID, but an invalid `dns-core`
+/// wire: the header declares one question and then ends.
+fn invalid_dns_response_wire(id: u16) -> Vec<u8> {
+    let mut wire = Vec::new();
+    wire.extend_from_slice(&id.to_be_bytes());
+    wire.extend_from_slice(&[0x81, 0x80]); // QR=1, RD=1, RA=1
+    wire.extend_from_slice(&1u16.to_be_bytes()); // QDCOUNT claims a question
+    wire.extend_from_slice(&0u16.to_be_bytes()); // ANCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // NSCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // ARCOUNT
+    wire
+}
+
+/// Accepts exactly one fresh connection, runs `handle`, drops the stream, then
+/// proves with one bounded accept probe that the terminal error never retried
+/// or reconnected.
+fn scripted_server<F>(listener: TcpListener, handle: F) -> JoinHandle<()>
+where
+    F: FnOnce(&mut TcpStream) + Send + 'static,
+{
+    spawn_blocking(move || {
+        let mut stream =
+            accept_within(&listener, TEST_TIMEOUT).expect("exactly one fresh connection");
+        handle(&mut stream);
+        drop(stream);
+        assert!(
+            accept_within(&listener, NO_RETRY_WINDOW).is_none(),
+            "a terminal tcp error must not retry or reconnect"
+        );
+    })
+}
+
+/// Drives exactly one bounded full exchange and returns its terminal error.
+///
+/// Every error-matrix case asserts the same two caller-visible invariants: the
+/// borrowed query bytes are unchanged and the in-flight registration is
+/// released regardless of the error category.
+async fn exchange_error(upstream: &Upstream, query: &[u8], expected_query: &[u8]) -> UpstreamError {
+    let request = ExchangeRequest::new(query).expect("valid query");
+    let error = timeout(TEST_TIMEOUT, upstream.exchange(request, open_context()))
+        .await
+        .expect("tcp exchange bounded")
+        .err()
+        .expect("the exchange must terminate with an error");
+    assert_eq!(
+        query, expected_query,
+        "the caller query bytes must not change"
+    );
+    assert_eq!(
+        upstream.in_flight_exchanges(),
+        0,
+        "every terminal error path must release its in-flight registration"
+    );
+    error
+}
+
+/// One EOF-before-a-complete-prefix sub-case: the server reads the query, writes
+/// `prefix` (fewer than two bytes), then drops the stream.
+async fn eof_prefix_case(id: u16, prefix: &[u8]) {
+    assert!(prefix.len() < 2, "the prefix must remain incomplete");
+    let (listener, address) = bind_listener();
+    let query = query_wire(id);
+    let expected_query = query.clone();
+    let server_query = expected_query.clone();
+    let prefix = prefix.to_vec();
+    let server = scripted_server(listener, move |stream| {
+        let received = read_framed(stream);
+        assert_eq!(received, server_query, "the exact query frame arrives");
+        if !prefix.is_empty() {
+            stream.write_all(&prefix).expect("write partial prefix");
+            stream.flush().expect("flush partial prefix");
+        }
+        // Returning drops the stream, so the peer observes EOF.
+    });
+
+    let upstream = Upstream::new(tcp_endpoint(address));
+    let error = exchange_error(&upstream, &query, &expected_query).await;
+    assert_eq!(error, UpstreamError::TruncatedFrame);
+    assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+    server.await.expect("server task joined");
+}
+
+#[test]
+fn outbound_query_over_u16_max_is_frame_too_large_before_any_connection() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let query = oversized_query(0x3a01);
+        assert_eq!(query.len(), usize::from(u16::MAX) + 1);
+        let expected_query = query.clone();
+
+        let upstream = Upstream::new(tcp_endpoint(address));
+        // The request boundary accepts the padded wire, so the rejection under
+        // test is the outbound frame-size gate, not query validation.
+        let request = ExchangeRequest::new(&query).expect("padded query is wire-legal");
+        let error = timeout(TEST_TIMEOUT, upstream.exchange(request, open_context()))
+            .await
+            .expect("oversize exchange bounded")
+            .err()
+            .expect("an unframeable query must fail");
+        assert_eq!(error, UpstreamError::FrameTooLarge);
+        assert_eq!(error.side_effect(), SideEffectState::NotSent);
+        assert_eq!(
+            query, expected_query,
+            "the caller query bytes must not change"
+        );
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        // One bounded accept probe: the size gate must reject before connect.
+        assert!(
+            accept_within(&listener, NO_RETRY_WINDOW).is_none(),
+            "an oversize query must never open a TCP connection"
+        );
+    });
+}
+
+#[test]
+fn zero_length_inbound_prefix_is_malformed_response_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let id = 0x3a02;
+        let query = query_wire(id);
+        let expected_query = query.clone();
+        let server_query = expected_query.clone();
+        let server = scripted_server(listener, move |stream| {
+            let received = read_framed(stream);
+            assert_eq!(received, server_query, "the exact query frame arrives");
+            stream.write_all(&[0x00, 0x00]).expect("write zero prefix");
+            stream.flush().expect("flush zero prefix");
+        });
+
+        let upstream = Upstream::new(tcp_endpoint(address));
+        let error = exchange_error(&upstream, &query, &expected_query).await;
+        assert_eq!(error, UpstreamError::MalformedResponse);
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+        server.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn eof_during_the_prefix_is_truncated_frame_with_sent() {
+    block_on(async {
+        // Zero prefix bytes (immediate EOF) and exactly one prefix byte.
+        eof_prefix_case(0x3a03, &[]).await;
+        eof_prefix_case(0x3a04, &[0x00]).await;
+    });
+}
+
+#[test]
+fn eof_during_the_declared_body_is_truncated_frame_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let id = 0x3a05;
+        let query = query_wire(id);
+        let expected_query = query.clone();
+        let server_query = expected_query.clone();
+        let server = scripted_server(listener, move |stream| {
+            let received = read_framed(stream);
+            assert_eq!(received, server_query, "the exact query frame arrives");
+            // Declare eight body bytes but send only three, then close.
+            stream
+                .write_all(&[0x00, 0x08, 0x01, 0x02, 0x03])
+                .expect("write partial body");
+            stream.flush().expect("flush partial body");
+        });
+
+        let upstream = Upstream::new(tcp_endpoint(address));
+        let error = exchange_error(&upstream, &query, &expected_query).await;
+        assert_eq!(error, UpstreamError::TruncatedFrame);
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+        server.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn complete_qr_clear_response_is_malformed_response_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let id = 0x3a06;
+        let query = query_wire(id);
+        let expected_query = query.clone();
+        // A complete, correctly framed message whose QR bit is clear: it is a
+        // query, not a response, so header inspection must reject it.
+        let reply = query_wire(id);
+        let server_query = expected_query.clone();
+        let server = scripted_server(listener, move |stream| {
+            let received = read_framed(stream);
+            assert_eq!(received, server_query, "the exact query frame arrives");
+            write_framed_in_chunks(stream, &reply, 2);
+        });
+
+        let upstream = Upstream::new(tcp_endpoint(address));
+        let error = exchange_error(&upstream, &query, &expected_query).await;
+        assert_eq!(error, UpstreamError::MalformedResponse);
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+        server.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn complete_invalid_dns_wire_is_malformed_response_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let id = 0x3a07;
+        let query = query_wire(id);
+        let expected_query = query.clone();
+        let reply = invalid_dns_response_wire(id);
+        let server_query = expected_query.clone();
+        let server = scripted_server(listener, move |stream| {
+            let received = read_framed(stream);
+            assert_eq!(received, server_query, "the exact query frame arrives");
+            write_framed_in_chunks(stream, &reply, 3);
+        });
+
+        let upstream = Upstream::new(tcp_endpoint(address));
+        let error = exchange_error(&upstream, &query, &expected_query).await;
+        assert_eq!(error, UpstreamError::MalformedResponse);
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+        server.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn complete_wrong_transaction_id_response_is_response_mismatch_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let request_id = 0x3a08;
+        let wrong_id = 0x9999;
+        let query = query_wire(request_id);
+        let expected_query = query.clone();
+        // A complete, dns-core-valid response that answers a different query.
+        let reply = response_wire(wrong_id, 7);
+        let server_query = expected_query.clone();
+        let server = scripted_server(listener, move |stream| {
+            let received = read_framed(stream);
+            assert_eq!(received, server_query, "the exact query frame arrives");
+            write_framed_in_chunks(stream, &reply, 1);
+        });
+
+        let upstream = Upstream::new(tcp_endpoint(address));
+        let error = exchange_error(&upstream, &query, &expected_query).await;
+        assert_eq!(error, UpstreamError::ResponseMismatch);
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+        server.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn refused_connect_is_connect_with_not_sent_and_releases_registration() {
+    block_on(async {
+        // Bind then immediately release an ephemeral loopback port so the TCP
+        // connect is refused deterministically instead of depending on a
+        // well-known port being closed.
+        let probe = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind ephemeral probe");
+        let address = probe.local_addr().expect("probe address");
+        drop(probe);
+
+        let upstream = Upstream::new(tcp_endpoint(address));
+        let query = query_wire(0x3a09);
+        let expected_query = query.clone();
+        let error = exchange_error(&upstream, &query, &expected_query).await;
+        assert_eq!(error, UpstreamError::Connect);
+        assert_eq!(error.side_effect(), SideEffectState::NotSent);
+    });
+}
+
+// The remaining matrix row — a non-EOF response read failure staying
+// `Receive(Sent)` — is not exposed at this integration level. A stable
+// `SO_LINGER` is unavailable (`TcpStream::set_linger` is still unstable), so a
+// loopback peer can only end the stream with FIN, which the framing reader
+// correctly reports as `TruncatedFrame`; forcing an RST would depend on an
+// unread-data race rather than a deterministic fixture. The deterministic proof
+// is the in-crate unit test
+// `tcp::tests::read_frame_maps_non_eof_read_failure_to_receive_with_sent_state`,
+// which drives the framing reader with a `ConnectionReset` error and asserts
+// `Receive(Sent)`. At the full-exchange level the same `Sent` state is
+// guaranteed because the response read runs only after the complete framed
+// write, exactly as the matrix requires.
