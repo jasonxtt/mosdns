@@ -496,6 +496,10 @@ crate depends on `mosdns-dns-core` only and must not depend on
   failure, the terminal typed error retains minimal structured diagnostic flags
   without relabeling the primary cause. A later valid response succeeds
   without diagnostic state.
+- After the expected-peer and response-ID checks, both valid TC observations
+  and fully validated non-TC responses pass one synchronous response-commit
+  gate under the same lifecycle lock as registration and `Open -> Closing`.
+  Commit-before-close wins; close-before-commit returns `Closed(Sent)`.
 - `dns-core` header inspection reads only the 12-byte header's QR, TXID, and
   TC; complete response/RR/OPT semantics remain in `dns-core` validation.
 - Slice1 UDP binds one fresh ephemeral socket per exchange, sends the borrowed

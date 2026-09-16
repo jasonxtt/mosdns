@@ -84,6 +84,19 @@ fn response_wire(id: u16, marker: u8) -> Vec<u8> {
     wire
 }
 
+/// A truncated (TC=1) response header that is a valid UDP observation without
+/// a complete verified body. Slice1 returns it without a TCP fallback.
+fn truncated_response_wire(id: u16) -> Vec<u8> {
+    let mut wire = Vec::new();
+    wire.extend_from_slice(&id.to_be_bytes());
+    wire.extend_from_slice(&[0x83, 0x80]); // QR=1, TC=1, RD=1, RA=1
+    wire.extend_from_slice(&0u16.to_be_bytes()); // QDCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // ANCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // NSCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // ARCOUNT
+    wire
+}
+
 /// A complete, dns-core-valid response padded to exactly `target_len` bytes.
 fn large_response_wire(id: u16, target_len: usize) -> Vec<u8> {
     const QUESTION: &[u8] = &[
@@ -1324,5 +1337,60 @@ fn owner_close_after_wrong_peer_retains_diagnostics() {
 
         server_task.await.expect("server task joined");
         spoof_task.await.expect("spoof task joined");
+    });
+}
+
+#[test]
+fn truncated_udp_response_is_returned_as_a_committed_observation() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let id = 0xe004;
+        let expected = truncated_response_wire(id);
+        let server_task = reply_once(server, expected.clone());
+
+        let query = query_wire(id);
+        let response = exchange_bounded(address, &query, open_context())
+            .await
+            .expect("a matching TC header is a committed UDP observation");
+
+        assert_eq!(response.transport(), Transport::Udp);
+        assert_eq!(response.request_id(), id);
+        assert_eq!(response.response_id(), id);
+        assert!(response.truncated());
+        assert_eq!(
+            response.wire(),
+            expected.as_slice(),
+            "the TC observation owns the exact received wire"
+        );
+
+        server_task.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn committed_udp_response_survives_a_later_owner_close() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let id = 0xe005;
+        let expected = response_wire(id, 42);
+        let server_task = reply_once(server, expected.clone());
+
+        let upstream = Upstream::new(udp_endpoint(address));
+        let query = query_wire(id);
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        let response = timeout(TEST_TIMEOUT, upstream.exchange(request, open_context()))
+            .await
+            .expect("exchange bounded")
+            .expect("valid response commits while the owner is Open");
+        assert_eq!(response.response_id(), id);
+        assert_eq!(response.wire(), expected.as_slice());
+
+        // A close that starts only after the committed return must never
+        // reverse the committed response; it drains to Closed.
+        assert_eq!(upstream.close().await, CloseResult::Closed);
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        server_task.await.expect("server task joined");
     });
 }

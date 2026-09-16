@@ -236,6 +236,55 @@ evidence.
   retransmission, retry, pool, reuse, pipeline, listener, Go/cgo/ABI/selector/
   fallback, or production wiring was added. STOP for root review before Slice2.
 
+### Slice 1 response-commit linearization remediation record — 2026-09-16
+
+- Formal review of baseline `9e30bd2` left exactly one Slice1 blocker: after a
+  datagram passed expected-peer, header/ID, and (for non-TC) dns-core
+  `validate_response`, both UDP success paths returned the owned response
+  without an atomic response-commit decision against the owner lifecycle
+  `Open -> Closing`. A concurrent owner close could therefore race a successful
+  response return. The frozen contract is that a completed response commit
+  beats a later close, while a close that enters `Closing` first wins and the
+  exchange returns `Closed(Sent)`.
+- RED evidence: the focused tests were added before production changes. The
+  deterministic seam and lifecycle-gate tests referenced a still-missing
+  `crate::CommitPause`, `Upstream::install_commit_pause`, and
+  `Lifecycle::commit_response`. `cargo test -p mosdns-upstream-core --lib
+  --locked` exited 101 with exactly six errors and no other error kind: one
+  `E0432` unresolved `crate::CommitPause` import, one `E0599` missing
+  `install_commit_pause`, and four `E0599` missing `Lifecycle::commit_response`.
+- Minimum implementation: `Lifecycle::commit_response` is one synchronous
+  operation that takes the same short-lived mutex as `register` and
+  `begin_close`. It returns `Ok(())` only while the owner is `Open`, so a later
+  `begin_close` cannot reverse a committed success, and returns
+  `Closed(Sent)` from `Closing`/`Closed`. A `ResponseCommit` handle carries only
+  the lifecycle borrow (and, under `cfg(test)`, an optional pause) into
+  `udp::exchange`; it owns no response bytes, socket, or parser state. Both the
+  valid TC path and the validated non-TC path call the gate immediately after
+  their required header/ID/validation steps and immediately before constructing
+  the owned response. The commit error is mapped through the existing
+  `diagnosed` helper so retained wrong-peer/wrong-ID diagnostics survive a
+  close-wins commit, while a committed success still carries none.
+- Deterministic ordering proof: a private `#[cfg(test)]` `CommitPause` seam
+  parks the transport immediately before the gate and is released by the test;
+  it is not a public API, and no sleep or second `check_at` poll is the proof.
+  The in-flight registration guard is untouched and remains held through the
+  commit and response return, so async close still drains it.
+- Coverage: two lifecycle ordered-outcome unit tests (commit-before-close and
+  close-before-commit), three in-crate transport seam tests (non-TC
+  close-before-commit, TC close-before-commit, and commit-before-close), and two
+  public-API integration tests (a truncated response is a committed observation;
+  a committed response survives a later `close().await`). Slice1 is 35/35,
+  Slice0 12/12, the upstream-core lib target 6/6, the commit/close race tests
+  passed 20 consecutive runs, and `cargo fmt --check`, warnings-denied clippy,
+  `cargo check --all-targets`, and `--locked` all pass.
+- Scope remains strictly the Slice1 UDP response-commit gate. No TCP,
+  TC-to-TCP fallback, retransmission, retry, pool, reuse, pipeline, listener,
+  generalized transport trait/factory, new dependency, hidden runtime,
+  `block_on`, `spawn`, Go/cgo/ABI/selector/fallback, or production wiring was
+  added. `#![forbid(unsafe_code)]` remains. Task status stays `in_progress`;
+  STOP for root review before Slice2.
+
 ## Slice 2 — TCP framing primitive
 
 Goal: implement one fresh plain TCP connection per exchange with exact DNS

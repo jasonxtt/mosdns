@@ -539,6 +539,28 @@ impl Lifecycle {
         }
     }
 
+    /// Atomically decides whether a fully validated response may commit.
+    ///
+    /// This is the response-commit linearization point. It shares the same
+    /// short-lived mutex as [`Self::register`] and [`Self::begin_close`], so a
+    /// response commit and the `Open -> Closing` transition cannot interleave:
+    /// whichever side acquires the mutex first wins, and the loser observes the
+    /// winner's state.
+    ///
+    /// A success means the response is committed and a later
+    /// [`Self::begin_close`] can never reverse it. A failure is
+    /// [`UpstreamError::Closed`] with the recorded `Sent` side-effect state,
+    /// because the exchange has already sent its query and received a
+    /// validated response.
+    fn commit_response(&self) -> Result<(), UpstreamError> {
+        let inner = self.lock();
+        if inner.state == LifecycleState::Open {
+            Ok(())
+        } else {
+            Err(UpstreamError::Closed(SideEffectState::Sent))
+        }
+    }
+
     #[must_use]
     pub fn finish_close(&self) -> CloseCompletion {
         let mut inner = self.lock();
@@ -657,6 +679,92 @@ pub enum CloseResult {
     AlreadyClosed,
 }
 
+/// Deterministic test seam that parks a transport immediately before the
+/// response-commit gate.
+///
+/// This is compiled only for in-crate tests and is not part of the crate's
+/// public API. It carries no response bytes, socket, or parser state; it exists
+/// solely so ordering tests can prove both commit-gate outcomes without sleeps.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct CommitPause {
+    arrived: Notify,
+    released: Notify,
+}
+
+#[cfg(test)]
+impl CommitPause {
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Signals that the transport reached the gate, then waits until the test
+    /// releases it. Interest in `released` is registered before the arrival is
+    /// announced, so a release cannot be missed.
+    async fn pause(&self) {
+        let released = self.released.notified();
+        tokio::pin!(released);
+        released.as_mut().enable();
+        self.arrived.notify_one();
+        released.await;
+    }
+
+    /// Waits until an exchange has parked on this pause.
+    pub(crate) async fn arrived(&self) {
+        self.arrived.notified().await;
+    }
+
+    /// Releases a parked exchange past the commit gate.
+    pub(crate) fn release(&self) {
+        self.released.notify_one();
+    }
+}
+
+/// The response-commit linearization handle passed to a transport primitive.
+///
+/// It borrows the owner's lifecycle gate and, in `cfg(test)` builds, an
+/// optional deterministic pause. It owns no response bytes, socket, or parser
+/// state; [`Self::commit`] is the only operation that races `Open -> Closing`.
+pub(crate) struct ResponseCommit<'a> {
+    lifecycle: &'a Lifecycle,
+    #[cfg(test)]
+    pause: Option<std::sync::Arc<CommitPause>>,
+}
+
+impl<'a> ResponseCommit<'a> {
+    #[cfg(test)]
+    fn with_pause(lifecycle: &'a Lifecycle, pause: Option<std::sync::Arc<CommitPause>>) -> Self {
+        Self { lifecycle, pause }
+    }
+
+    #[cfg(not(test))]
+    fn without_pause(lifecycle: &'a Lifecycle) -> Self {
+        Self { lifecycle }
+    }
+
+    /// A deterministic test pause immediately before the commit gate. It is a
+    /// no-op outside `cfg(test)`.
+    async fn before_commit(&self) {
+        #[cfg(test)]
+        {
+            if let Some(pause) = &self.pause {
+                pause.pause().await;
+            }
+        }
+    }
+
+    /// Atomically decides whether the validated response may be committed.
+    ///
+    /// The decision shares the lifecycle mutex with registration and
+    /// `begin_close`: `Open` commits, while `Closing`/`Closed` loses with
+    /// [`UpstreamError::Closed`] carrying the `Sent` side-effect state. A
+    /// committed success can never be reversed by a later close.
+    fn commit(&self) -> Result<(), UpstreamError> {
+        self.lifecycle.commit_response()
+    }
+}
+
 /// Pure Rust upstream owner. Slice1 performs only the reviewed UDP exchange
 /// primitive on the caller's runtime; TCP and all production wiring remain
 /// outside the current slice.
@@ -664,6 +772,8 @@ pub struct Upstream {
     endpoint: Endpoint,
     lifecycle: Lifecycle,
     cancellation: TransportCancellation,
+    #[cfg(test)]
+    commit_pause: Mutex<Option<std::sync::Arc<CommitPause>>>,
 }
 
 impl Upstream {
@@ -673,6 +783,34 @@ impl Upstream {
             endpoint,
             lifecycle: Lifecycle::new(),
             cancellation: TransportCancellation::new(),
+            #[cfg(test)]
+            commit_pause: Mutex::new(None),
+        }
+    }
+
+    /// Installs the deterministic pre-commit pause seam for in-crate tests.
+    #[cfg(test)]
+    pub(crate) fn install_commit_pause(&self, pause: std::sync::Arc<CommitPause>) {
+        *self
+            .commit_pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pause);
+    }
+
+    /// Builds the response-commit handle for one transport exchange.
+    fn response_commit(&self) -> ResponseCommit<'_> {
+        #[cfg(test)]
+        {
+            let pause = self
+                .commit_pause
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            ResponseCommit::with_pause(&self.lifecycle, pause)
+        }
+        #[cfg(not(test))]
+        {
+            ResponseCommit::without_pause(&self.lifecycle)
         }
     }
 
@@ -786,8 +924,12 @@ impl Upstream {
         // ownership and is released on every return/drop path by RAII.
         let _in_flight = self.lifecycle.register()?;
         let prepared = self.prepare_exchange(request, context)?;
+        // The transport receives the single response-commit linearization
+        // handle; the registration guard above stays held through the commit
+        // and the response return, so close still waits for its drop.
+        let commit = self.response_commit();
         match prepared.endpoint().transport() {
-            Transport::Udp => udp::exchange(&prepared).await,
+            Transport::Udp => udp::exchange(&prepared, &commit).await,
             Transport::Tcp => Err(UpstreamError::Runtime(SideEffectState::NotSent)),
         }
     }
@@ -829,5 +971,55 @@ impl<'q> PreparedExchange<'q> {
         side_effect: SideEffectState,
     ) -> Result<(), UpstreamError> {
         self.control.check_at(now, side_effect)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CloseCompletion, CloseTransition, Lifecycle, LifecycleState, SideEffectState, UpstreamError,
+    };
+
+    /// The commit gate is the single linearization point between response
+    /// commit and owner close. Whichever side acquires the shared mutex first
+    /// determines the outcome, and the loser cannot reverse it.
+    #[test]
+    fn commit_gate_orders_response_commit_before_close() {
+        let lifecycle = Lifecycle::new();
+
+        // The commit wins the gate while the owner is still Open.
+        assert_eq!(lifecycle.commit_response(), Ok(()));
+        assert_eq!(lifecycle.state(), LifecycleState::Open);
+
+        // A close that starts afterwards cannot reverse the committed outcome;
+        // it still performs the observable Closing -> Closed transition.
+        assert_eq!(lifecycle.begin_close(), CloseTransition::BeganClosing);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
+        assert_eq!(lifecycle.finish_close(), CloseCompletion::Closed);
+        assert_eq!(lifecycle.state(), LifecycleState::Closed);
+    }
+
+    #[test]
+    fn commit_gate_orders_close_before_response_commit() {
+        let lifecycle = Lifecycle::new();
+
+        assert_eq!(lifecycle.begin_close(), CloseTransition::BeganClosing);
+        assert_eq!(lifecycle.state(), LifecycleState::Closing);
+
+        // The commit loses the gate and reports the recorded Sent side effect.
+        assert_eq!(
+            lifecycle.commit_response(),
+            Err(UpstreamError::Closed(SideEffectState::Sent))
+        );
+        assert_eq!(
+            lifecycle.commit_response(),
+            Err(UpstreamError::Closed(SideEffectState::Sent))
+        );
+
+        assert_eq!(lifecycle.finish_close(), CloseCompletion::Closed);
+        assert_eq!(
+            lifecycle.commit_response(),
+            Err(UpstreamError::Closed(SideEffectState::Sent))
+        );
     }
 }
