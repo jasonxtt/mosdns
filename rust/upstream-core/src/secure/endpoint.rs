@@ -84,14 +84,19 @@ impl ServerIdentity {
         })
     }
 
-    pub(crate) fn from_url_host(host: Host<&str>) -> Self {
+    /// Validates a host taken from a parsed URL, reusing the single DNS-name
+    /// contract in [`Self::from_dns_name`] so URL-derived and directly supplied
+    /// identities cannot disagree. IP literals are accepted unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SecureError::InvalidIdentity`] when a URL-derived domain host
+    /// violates [`validate_dns_name`].
+    pub(crate) fn from_url_host(host: Host<&str>) -> Result<Self, SecureError> {
         match host {
-            Host::Domain(name) => Self {
-                normalized: name.to_owned(),
-                kind: IdentityKind::DnsName,
-            },
-            Host::Ipv4(addr) => Self::from_ip(IpAddr::V4(addr)),
-            Host::Ipv6(addr) => Self::from_ip(IpAddr::V6(addr)),
+            Host::Domain(name) => Self::from_dns_name(name),
+            Host::Ipv4(addr) => Ok(Self::from_ip(IpAddr::V4(addr))),
+            Host::Ipv6(addr) => Ok(Self::from_ip(IpAddr::V6(addr))),
         }
     }
 
@@ -214,11 +219,21 @@ impl DohEndpoint {
     ///
     /// # Errors
     ///
-    /// Returns [`SecureError::ZeroDialPort`] when `dial` has port zero, or
-    /// [`SecureError::InvalidServiceUrl`] when `service_url` is not a valid
-    /// HTTPS URL, has no host, or carries userinfo or a fragment.
+    /// Returns [`SecureError::ZeroDialPort`] when `dial` has port zero,
+    /// [`SecureError::InvalidIdentity`] when the URL host is not a valid DNS
+    /// name or IP literal, or [`SecureError::InvalidServiceUrl`] when
+    /// `service_url` contains a raw CR/LF, is not a valid HTTPS URL, has no
+    /// host, or carries userinfo or a fragment.
     pub fn new(service_url: &str, dial: SocketAddr) -> Result<Self, SecureError> {
         reject_zero_port(dial)?;
+        // `url` removes raw ASCII CR/LF before parsing, so a URL such as
+        // `/dns\r-query` would otherwise be silently accepted as `/dns-query`.
+        // Reject those bytes up front; this check never formats the URL text.
+        if service_url.contains('\r') || service_url.contains('\n') {
+            return Err(SecureError::InvalidServiceUrl(
+                ServiceUrlError::ControlCharacter,
+            ));
+        }
         let mut service = Url::parse(service_url).map_err(map_parse_error)?;
         if service.scheme() != "https" {
             return Err(SecureError::InvalidServiceUrl(
@@ -235,7 +250,7 @@ impl DohEndpoint {
             Some(host) => host,
             None => return Err(SecureError::InvalidServiceUrl(ServiceUrlError::EmptyHost)),
         };
-        let identity = ServerIdentity::from_url_host(host);
+        let identity = ServerIdentity::from_url_host(host)?;
         // A parsed special URL normally already has `/`; keep the invariant
         // explicit so an empty path can never reach a later request encoder.
         if service.path().is_empty() {

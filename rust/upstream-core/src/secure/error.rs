@@ -42,6 +42,12 @@ pub enum ServiceUrlError {
     UserInfo,
     /// The URL contains a fragment.
     Fragment,
+    /// The raw URL text contains a carriage return or line feed.
+    ///
+    /// The WHATWG URL parser strips raw ASCII CR/LF before parsing, so this is
+    /// checked before parsing rather than left to become a silently accepted
+    /// path, query, or host byte.
+    ControlCharacter,
 }
 
 impl fmt::Display for ServiceUrlError {
@@ -52,6 +58,7 @@ impl fmt::Display for ServiceUrlError {
             Self::EmptyHost => "empty host",
             Self::UserInfo => "userinfo is not allowed",
             Self::Fragment => "fragment is not allowed",
+            Self::ControlCharacter => "raw control character is not allowed",
         })
     }
 }
