@@ -447,3 +447,94 @@ fn run(next: &mut ChainWalker, values: &mut HashMap<u32, Box<dyn Any>>) { /* ...
 let result = execute(&program, entry, &mut state, &mut control);
 // State stays borrowed and observable; nested try shares the root control.
 ```
+
+## Scenario: pure Rust Phase 4 upstream contract boundary
+
+### 1. Scope / Trigger
+
+Phase 4 transport foundations use `rust/upstream-core` as a pure Rust sibling
+of `rust/sequence-core`. The future host composes both crates; the transport
+crate depends on `mosdns-dns-core` only and must not depend on
+`sequence-core`, `mosdns-runtime`, Go, cgo, selectors, or fallback paths.
+
+### 2. Signatures
+
+- `Endpoint::new(SocketAddr, Transport) -> Result<Endpoint, UpstreamError>`
+- `ExchangeRequest::new(&[u8]) -> Result<ExchangeRequest<'_>, UpstreamError>`
+- `Upstream::prepare_exchange(ExchangeRequest<'_>, ExchangeContext) -> Result<PreparedExchange<'_>, UpstreamError>`
+- `ExchangeContext::check_at(Instant, SideEffectState) -> Result<(), UpstreamError>`
+- `ExchangeResponse { wire: Vec<u8>, request_id, response_id, transport, truncated }`
+- `inspect_response_header(&[u8]) -> Result<ResponseHeader, HeaderError>`
+
+### 3. Contracts
+
+- Request input is borrowed and read-only; `ExchangeRequest` validates through
+  `mosdns-dns-core::parse_query` and records the original transaction ID.
+- Slice0 prepares exchange state only. It performs no socket, runtime, or
+  network operation; later slices own UDP/TCP I/O and use one host-owned
+  runtime.
+- `ExchangeResponse` owns its complete returned wire. No Go pool or FFI
+  release is part of the API.
+- `SideEffectState` is closed: `NotSent`, `MaybeSent`, `Sent`. Connect/setup,
+  invalid request/endpoint, and outbound frame-too-large are `NotSent`;
+  runtime errors retain the last tracked state.
+- Cancellation is checked before the absolute deadline, so it wins a tie.
+  `Open -> Closing -> Closed` rejects new exchanges after Closing begins and
+  repeated close is harmless.
+- `dns-core` header inspection reads only the 12-byte header's QR, TXID, and
+  TC; complete response/RR/OPT semantics remain in `dns-core` validation.
+
+### 4. Validation & Error Matrix
+
+- Empty/malformed query -> `InvalidRequest`, before exchange preparation.
+- TCP query longer than `u16::MAX` -> `FrameTooLarge`, before any send.
+- Port zero -> `InvalidEndpoint`; TCP connect/setup -> `Connect` with
+  `NotSent`.
+- Cancellation at any tracked state -> `Cancelled(state)`; an expired
+  uncancelled context -> `DeadlineExceeded(state)`.
+- Owner Closing/Closed -> `Closed(state)`; `Runtime(state)` never introduces
+  an `Unknown` marker.
+- Header shorter than 12 bytes -> `HeaderError::TooShort`; QR clear ->
+  `HeaderError::NotResponse`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: validate a borrowed query, retain its original ID, then return an
+  owned response wire; use the same absolute deadline for every later phase.
+- Base: use `inspect_response_header` for TC routing, then pass only a complete
+  non-TC wire to full DNS validation.
+- Bad: import `sequence-core::CancellationToken`, create a per-upstream Tokio
+  runtime, mutate the caller query, add a second RR/OPT parser, or treat a
+  post-send error as safely retryable by default.
+
+### 6. Tests Required
+
+- Public contract tests reject empty/malformed/unframeable queries before any
+  socket boundary, assert query nonmutation and original ID, and verify owned
+  response bytes.
+- Error tests assert the closed side-effect enum, Connect=`NotSent`, runtime
+  state preservation, distinct cancellation/deadline errors, and cancellation
+  precedence at a deadline tie.
+- Lifecycle tests assert Open/Closing/Closed, idempotent close, and rejection
+  of new exchanges after Closing and Closed.
+- `dns-core` tests assert minimum header validity, QR, TXID, TC, and no RR/OPT
+  parsing in the helper. Manifest/tree checks assert the sibling dependency
+  direction and absence of sequence/runtime/FFI dependencies.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Transport imports sequence policy or a transitional runtime to obtain
+// cancellation and starts a hidden executor before validating the query.
+```
+
+#### Correct
+
+```rust
+let request = ExchangeRequest::new(query)?;
+let context = ExchangeContext::new(deadline, transport_cancellation);
+let prepared = upstream.prepare_exchange(request, context)?;
+// Slice0 has performed only pure validation; later slices own socket I/O.
+```

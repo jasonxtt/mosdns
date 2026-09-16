@@ -3,7 +3,7 @@
   "name": "rust-phase4-upstream-foundation",
   "title": "Rust Phase 4 upstream transport foundation",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "Phase 4 pure Rust UDP/TCP upstream foundation",
   "package": null,

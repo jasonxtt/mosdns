@@ -36,7 +36,10 @@ pub mod response;
 // crate, not on module paths, when the wire layer is later consumed by the ABI
 // slice.
 pub use edns::{EcsInfo, EdnsInfo, EdnsParseError, OPT_RDLEN, extract_edns, extract_edns_at};
-pub use header::{FrameMode, FramingError, HeaderError, frame_response, patch_response_id_ra};
+pub use header::{
+    FrameMode, FramingError, HeaderError, ResponseHeader, frame_response, inspect_response_header,
+    patch_response_id_ra,
+};
 pub use query::{
     QueryError, QueryHeader, QueryParseError, QueryUnsupportedError, QuestionInfo, parse_query,
     parse_question,

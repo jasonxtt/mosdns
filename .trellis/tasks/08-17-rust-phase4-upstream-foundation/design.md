@@ -1,9 +1,8 @@
 # Phase 4 upstream transport architecture
 
-> Planning artifact only. This document freezes the architecture and the
-> compatibility questions that must be root-reviewed before implementation.
-> It does not authorize task start, workspace-member creation, dependency
-> changes, or network code.
+> Planning artifact plus Slice0 contract. The architecture and compatibility
+> questions were root-reviewed before implementation. Slice0 is authorized;
+> this document does not authorize Slice1, network code, or production wiring.
 
 ## 1. Boundary and dependency direction
 
@@ -505,7 +504,7 @@ Explicitly out of scope for this task:
 
 This architecture is complete only when the root reviewer accepts the decisions,
 the compatibility matrix, the KixDNS ledger, and the implementation slices.
-Until then the task remains planning and no Rust workspace or network file may
-be added. A planning PASS authorizes task.py start and Slice 0 only. Each
-implementation slice stops for another root review before the next slice, and
-nothing in this document authorizes production wiring or a release.
+The planning gate is closed and Slice0 is the only authorized implementation
+scope in the current `in_progress` task. Each implementation slice stops for
+another root review before the next slice, and nothing in this document
+authorizes production wiring or a release.
