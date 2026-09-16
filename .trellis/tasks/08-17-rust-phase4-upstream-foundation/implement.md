@@ -41,8 +41,12 @@ Red tests and fixtures first:
   in-flight cleanup;
 - the DNS header inspection contract distinguishes QR, TXID, TC, and
   undersized headers without duplicating RR parsing;
-- the future crate dependency graph has no sequence-core/upstream-core cycle
-  and no dependency on rust/runtime FFI.
+- the future crate dependency graph has no sequence-core/upstream-core cycle;
+  the host composes the two sibling crates and upstream-core does not import
+  sequence-core or rust/runtime FFI;
+- SideEffectState is a closed NotSent/MaybeSent/Sent enum, TCP connect failure
+  is NotSent, and Runtime/Internal preserves the last tracked state without an
+  Unknown variant;
 
 Minimum implementation after the red tests:
 
@@ -120,7 +124,8 @@ framing, without pooling or pipelining.
 Red tests and fixtures first:
 
 - two-byte big-endian length encoding;
-- partial prefix reads, partial body reads, zero length, and oversized frame;
+- partial prefix reads, partial body reads, zero length, and an outbound query
+  larger than u16::MAX;
 - full write semantics when the test stream accepts short writes;
 - EOF before prefix/body completion maps to TruncatedFrame;
 - response ID, QR, and DNS validation are enforced after a complete frame;
@@ -135,7 +140,9 @@ Minimum implementation:
 - connect to the numeric TCP endpoint;
 - encode one non-zero u16 big-endian prefix and the query;
 - perform complete writes and exact prefix/body reads;
-- reject zero, oversized, partial, and mismatched frames with typed errors;
+- reject a zero inbound prefix, partial/mismatched frames, and an outbound
+  oversize query with typed errors; a non-zero two-byte inbound prefix is
+  inherently at most u16::MAX;
 - close the connection on every failure or cancellation;
 - pass only a complete response wire to dns-core.
 

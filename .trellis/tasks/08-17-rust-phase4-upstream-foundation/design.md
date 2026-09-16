@@ -155,11 +155,17 @@ error contract below defines the distinction.
 
 ## 4. DNS validation boundary
 
-upstream-core reuses mosdns-dns-core for query and response wire knowledge. It
-must not add a second RR parser, OPT parser, TTL walker, or TCP framing parser.
-The relevant existing boundary is parse_query for request validation and
-validate_response for complete response validation. dns-core also owns the
-existing DNS stream-prefix/framing primitives.
+upstream-core reuses mosdns-dns-core for DNS message and response wire
+semantics. It must not add a second RR parser, OPT parser, TTL walker, or DNS
+message parser. The relevant existing boundary is parse_query for request
+validation and validate_response for complete response validation.
+
+dns-core also provides the existing outbound frame_response(Stream) helper for
+writing a two-byte DNS-over-TCP length prefix. It does not currently provide
+an inbound TCP prefix/body reader. upstream-core owns that transport-level I/O:
+read exactly two bytes, decode the big-endian u16, then read exactly the
+declared body length. This is stream framing and lifecycle, not a second
+DNS/RR/OPT parser.
 
 Before full response validation, the transport performs a minimal header
 inspection that is safe for both complete and TC responses:
@@ -185,9 +191,9 @@ semantics remain in dns-core.
 
 The minimum validation failures are typed as malformed or mismatch errors.
 TCP framing is validated before the resulting DNS wire is passed to dns-core:
-a zero-length or oversized frame is rejected, a partial prefix/body is a
-truncated frame, and stream chunks are never treated as separate DNS
-messages.
+a zero-length inbound frame is rejected, an outbound query over u16::MAX is
+rejected before send, a partial prefix/body is a truncated frame, and stream
+chunks are never treated as separate DNS messages.
 
 ## 5. UDP architecture: one exchange, one socket
 
@@ -293,16 +299,19 @@ Every DNS-over-TCP message is encoded as exactly:
     two-byte unsigned big-endian payload length
     payload bytes
 
-The payload length must be non-zero and fit in u16. The request payload is
+The payload length must be non-zero and fit in u16. An outbound query larger
+than u16::MAX is FrameTooLarge before socket send; the two-byte inbound prefix
+can never encode a value larger than u16::MAX. The request payload is
 validated before framing. The implementation must use full write semantics:
 partial writes are progress, not message boundaries. A write failure closes
 the connection and returns Send/Write with side-effect state; it never leaves
 a possibly poisoned stream for reuse.
 
 The reader first reads exactly two prefix bytes. EOF before both bytes is
-TruncatedFrame. A zero length is malformed. A length greater than the
-configured safe maximum is FrameTooLarge. The reader then reads exactly the
-declared payload length; EOF after only part of the body is TruncatedFrame.
+TruncatedFrame. A zero length is a malformed frame. There is no smaller
+configured inbound maximum in the first slice: every non-zero two-byte prefix
+is at most u16::MAX. The reader then reads exactly the declared payload
+length; EOF after only part of the body is TruncatedFrame.
 Only the complete body is handed to the DNS validation boundary. Stream
 chunks, read calls, and prefix/body boundaries are never treated as separate
 responses.
@@ -340,22 +349,26 @@ The planned typed error taxonomy is:
 | InvalidEndpoint | Endpoint is unsupported or not numeric in Phase 4 | NotSent |
 | Cancelled | Caller transport cancellation won | NotSent, MaybeSent, or Sent |
 | DeadlineExceeded | Absolute deadline won | NotSent, MaybeSent, or Sent |
-| Connect | TCP connect or socket setup failure | NotSent or MaybeSent |
+| Connect | TCP connect or local socket setup failure; no DNS payload has been sent | NotSent |
 | Send/Write | UDP send or TCP write failure | MaybeSent or Sent |
 | Receive/Read | Non-framing receive/read failure | Sent or MaybeSent |
 | MalformedResponse | Header/RR/wire validation failed | Sent |
 | UnexpectedPeer | A terminal peer-policy failure was selected | Sent |
 | ResponseMismatch | Expected response ID or request association failed | Sent |
 | TruncatedFrame | TCP prefix/body ended before completion | Sent |
-| FrameTooLarge | TCP frame exceeds the reviewed maximum | Sent |
+| FrameTooLarge | Outbound query exceeds u16::MAX before send | NotSent |
 | Closed | Owner close terminated or rejected work | NotSent, MaybeSent, or Sent |
-| Runtime/Internal | Invariant, join, or runtime failure | Unknown or recorded state |
+| Runtime/Internal | Invariant, join, or runtime failure | Last tracked state: NotSent, MaybeSent, or Sent |
 
-The concrete Rust error should include transport, endpoint, phase, and a
-side-effect marker with at least NotSent, MaybeSent, and Sent. A failed write
-cannot always prove whether the kernel accepted bytes, so it must not be
-treated as safely retryable. Error equality and user-facing text are not
-compatibility contracts; structured classification is.
+SideEffectState is a closed three-state enum: NotSent, MaybeSent, or Sent.
+Runtime/Internal preserves the last tracked state rather than introducing an
+Unknown state. Before any send/write attempt the state is NotSent; once a
+send/write begins it is at least MaybeSent; after a confirmed complete send it
+is Sent. A failed write cannot always prove whether the kernel accepted bytes,
+so it must not be treated as safely retryable. The concrete Rust error should
+include transport, endpoint, phase, and this side-effect marker. Error
+equality and user-facing text are not compatibility contracts; structured
+classification is.
 
 ## 9. Side-effect and retry matrix
 
@@ -381,7 +394,8 @@ initial policy. The matrix is normative for the first implementation:
 | TCP write completes | Sent | Read one complete framed response | No |
 | TCP read timeout after full write | Sent | DeadlineExceeded with Sent | No |
 | TCP EOF before full prefix/body | Sent | TruncatedFrame, close connection | No |
-| TCP frame is zero/oversized | Sent | MalformedResponse or FrameTooLarge, close | No |
+| TCP inbound frame has zero length | Sent | MalformedResponse, close connection | No |
+| TCP outbound query exceeds u16::MAX | NotSent | FrameTooLarge before connect/send | No |
 | TCP response ID mismatches | Sent | ResponseMismatch, close connection | No |
 | Cancellation during TCP connect/write/read | NotSent, MaybeSent, or Sent | Cancelled, close connection | No |
 | Owner Close during any phase | Recorded state | Closed, cancel and reap exchange | No |
@@ -434,7 +448,7 @@ are not yet implementation.
 | Cancellation | Go upstream/context tests; sequence-core token | Preserve | Transport token stops I/O and prevents fallback/retry | Cancel before/after send and during TCP | Product-visible lifecycle |
 | UDP receive size and EDNS | Go 4095-byte pool buffer; DNS wire/EDNS behavior | Intentional Rust deviation | Receive legal full wire; never silently truncate; do not rewrite EDNS | Large EDNS/TC/truncation tests | Go buffer is implementation detail |
 | UDP TC to TCP | pkg/upstream/upstream.go forward path and tests | Preserve | Composite policy uses same query and absolute deadline | TC fallback and cancellation-before-fallback | Product/protocol |
-| TCP two-byte framing | rust/dns-core framing helpers; Go upstream tests | Preserve | Big-endian non-zero u16 prefix; exact read/write | Prefix, partial I/O, zero/oversize | Protocol |
+| TCP two-byte framing | rust/dns-core outbound framing helper; Go upstream tests | Preserve | Big-endian non-zero u16 prefix; upstream-core owns exact inbound read/write | Prefix, partial I/O, zero inbound, outbound oversize | Protocol |
 | TCP connection reuse | pkg/upstream/transport/reuse.go | Implementation-only/defer | New connection per exchange in first slice | Recovery/close tests for non-reused streams | Go resource optimization until audited |
 | TCP pipelining and pending demux | pkg/upstream/transport/pipeline.go | Implementation-only/defer | No pipeline in first slice; one request per connection | Concurrency without shared stream | Go implementation, not yet product contract |
 | Idle timeout and recovery | reuse.go idle close/retry paths | Implementation-only/defer | No idle pool; connection closes at exchange end | Close-after-exchange and error cleanup | Depends on future pool scope |
