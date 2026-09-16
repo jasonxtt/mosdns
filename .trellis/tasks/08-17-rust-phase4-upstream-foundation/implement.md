@@ -341,7 +341,7 @@ Focused verification:
 STOP: root review of TCP framing, side-effect classification, and fresh
 connection lifecycle.
 
-### Slice 2 implementation record — 2026-09-16 (awaiting root review)
+### Slice 2 implementation record — 2026-09-16 (root review PASS / CLOSED)
 
 - The implementation was executed through bounded, isolated DSH jobs. The
   parent inspected each complete patch before applying it; DSH did not commit,
@@ -364,6 +364,10 @@ connection lifecycle.
   DNS validation, with owner close > caller cancellation > deadline > success
   precedence. Deterministic real-TCP gate tests cover cancellation,
   deadline, owner close, and commit-before-close success.
+- The same-thread final root review of `b83dbb4` formally returned
+  **Slice2 PASS / CLOSED**. It accepted the final validation-control gate and
+  all previously reviewed framing, lifecycle, ownership, dependency, and
+  error-matrix contracts.
 - The focused control RED run initially failed with three bounded elapsed
   results before `race_io` was wired; the error-matrix additions were
   tests-only and all passed against the existing implementation, so no
@@ -375,9 +379,9 @@ connection lifecycle.
   `mosdns-runtime`, Go, C ABI, selector, fallback, or production wiring
   change was made. The implementation commits are `8c1ce5b`, `3bf63a2`,
   `d0ca321`, and `95a7aa1`.
-- `task.json` remains `status = in_progress`. STOP here for the same-thread
-  root review; Slice3, TC-to-TCP composite fallback, and all later phases are
-  not authorized.
+- `task.json` remains `status = in_progress`. STOP here after the closed root
+  review and wait for the user's decision; Slice3, TC-to-TCP composite
+  fallback, and all later phases are not authorized.
 
 ## Slice 3 — UDP TC to TCP composite policy
 
