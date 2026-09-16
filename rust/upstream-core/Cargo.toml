@@ -55,19 +55,26 @@ tokio-rustls = { version = "=0.26.4", default-features = false, features = ["rin
 [dev-dependencies]
 # Slice1 synthetic certificate fixtures. Declared as a dev-dependency only, so
 # it never enters the library's normal graph and cannot reach the production
-# secure modules. The default feature set is disabled and only `ring` is
-# enabled, reusing the same crypto provider the client already uses, so no
-# aws-lc-rs/OpenSSL backend or `pem` encoder is pulled in. Note that rcgen's
-# mandatory `x509-parser` dependency is NOT removed by disabling default
-# features: 0.14.7 always depends on it (plus `ring`, `rustls-pki-types`,
-# `time` and `yasna`) and it brings asn1-rs/der-parser/oid-registry/nom into
-# the dev graph. Resolved as rcgen 0.14.7 (MIT OR Apache-2.0, MSRV 1.71) with
-# x509-parser 0.18.1 (MIT OR Apache-2.0, MSRV 1.67.1); resolver 3 holds the
-# `time` family at 0.3.45/0.1.7/0.2.25 (MSRV 1.83.0) rather than the
-# 1.88-requiring newer releases, so the whole resolved graph stays at or below
-# the workspace MSRV of 1.85. This crate is used only by `tests/`; no
-# production code imports it, and `cargo tree -e normal` shows neither rcgen
-# nor x509-parser.
+# secure modules. Default features are disabled and only `ring` is enabled,
+# reusing the same crypto provider the client already uses, so no aws-lc-rs or
+# OpenSSL backend and no `pem` encoder is pulled in.
+#
+# Do not read `x509-parser` out of `Cargo.lock`. In the published rcgen 0.14.7
+# manifest `x509-parser` is `optional = true`, and the only references to it in
+# rcgen's feature list are weak (`x509-parser?/verify`, `x509-parser?/verify-aws`).
+# Because this workspace enables just `ring` (not `x509-parser`), that optional
+# dependency is NOT activated: `cargo tree -p rcgen -e features` lists only
+# `ring`, `rustls-pki-types`, `time` and `yasna` under rcgen. The lockfile still
+# records it as a resolution superset, which is why the lock-only license/MSRV
+# audit below covers it.
+#
+# Activated graph: rcgen 0.14.7 (MIT OR Apache-2.0, MSRV 1.71) plus ring,
+# rustls-pki-types, yasna, and the `time` family, with resolver 3 holding
+# time/time-core at 0.3.45/0.1.7 (MSRV 1.83.0) and deranged at 0.5.8 (MSRV
+# 1.85.0) rather than the 1.88-requiring newer lines. Nothing activated by this
+# dev-dependency is above the workspace MSRV of 1.85. This crate is used only by
+# `tests/`; no production code imports it, and `cargo tree -e normal` shows
+# neither rcgen nor x509-parser for the crate or the workspace.
 rcgen = { version = "=0.14.7", default-features = false, features = ["ring"] }
 # Test-only driver for the Slice1 UDP contract tests: a bounded current-thread
 # runtime plus async wake/timeout primitives. Mock servers use blocking

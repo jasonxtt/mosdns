@@ -369,24 +369,45 @@ unchanged: valid, wrong-name, expired, unknown-issuer, untrusted-root positive
 control, and bad handshake signature are all still exercised; provenance is
 recorded in the module documentation and in
 `research/secure-upstream-evidence.md` instead of as committed bytes.
-Dependency record (test-only, corrected in the second review):
+Dependency record (test-only, corrected in the third review):
 `rcgen = { version = "=0.14.7", default-features = false, features = ["ring"] }`,
-`MIT OR Apache-2.0`, MSRV 1.71. An earlier version of this record claimed the
-feature trimming removed `x509-parser`; that was wrong. Disabling rcgen's
-default features removes `pem`/`aws_lc_rs`/`zeroize`, but `x509-parser` is a
-mandatory rcgen dependency and remains in the dev graph at 0.18.1
-(`MIT OR Apache-2.0`, MSRV 1.67.1), bringing `asn1-rs` 0.7.2,
-`der-parser` 10.0.0, `oid-registry` 0.8.1, `nom` 7.1.3, `rusticata-macros`,
-`data-encoding`, `lazy_static`, `displaydoc`, `num-bigint`, `num-traits` and
-`thiserror` with it. The exact ledger with versions, licenses and rust-version
-per package is in `research/secure-upstream-evidence.md`. Resolver 3 holds the
-`time` family at 0.3.45/0.1.7/0.2.25 (MSRV 1.83.0), and a
-`cargo metadata --locked` audit of the full graph reports no package above the
-workspace MSRV of 1.85. Re-audited isolation: `cargo tree -e normal` shows
-**zero** `rcgen` and **zero** `x509-parser` entries for both
-`mosdns-upstream-core` and the whole workspace; both appear only in the dev
-graph. No aws-lc-rs, OpenSSL, network, or external `openssl` dependency is
-involved. `rust/Cargo.lock` was updated for this test-only graph.
+`MIT OR Apache-2.0`, MSRV 1.71. This record has now been corrected twice, and
+the distinction that matters is between three layers:
+
+1. **Manifest**: in the published rcgen 0.14.7 manifest, `x509-parser` is
+   declared `optional = true`, and every reference to it in rcgen's feature
+   table is weak (`x509-parser?/verify` under the `ring` feature,
+   `x509-parser?/verify-aws` under the aws-lc-rs features). No feature enables
+   `dep:x509-parser`.
+2. **Lockfile resolution superset**: `rust/Cargo.lock` lists `x509-parser`
+   under rcgen's `dependencies`, which is why a lock-only audit sees it. The
+   lock records candidate packages for optional dependencies and is not
+   evidence of compilation.
+3. **Activated build graph**: with only `ring` enabled, rcgen's real edges are
+   `ring`, `rustls-pki-types`, `time` and `yasna`.
+   `cargo tree -p rcgen -e features --locked` lists exactly those, and a
+   workspace-wide `cargo tree --workspace -e features --locked` contains no
+   `x509-parser` line at all.
+
+So the second review's claim that `x509-parser` is a *mandatory* rcgen
+dependency and an active member of the dev build graph was **wrong**;
+`x509-parser`, `asn1-rs`, `der-parser`, `oid-registry`, `nom`,
+`rusticata-macros`, `data-encoding`, `lazy_static`, `displaydoc`,
+`num-bigint`, `num-traits` and `thiserror` are **not compiled** under the
+selected features. They are retained in `research/secure-upstream-evidence.md`
+only as a lockfile-only conservative license/MSRV audit, in case a future
+feature change activates them.
+
+The activated graph's exact ledger (versions, licenses, rust-version) is also
+in `research/secure-upstream-evidence.md`. Its binding MSRV constraints sit
+exactly at the ceiling: `deranged 0.5.8` and `zeroize 1.9.0` declare 1.85,
+`time`/`time-core` declare 1.83.0; a `cargo metadata --locked` audit of the
+full resolved graph reports no package above the workspace MSRV of 1.85.
+Re-audited isolation: `cargo tree -e normal` shows **zero** `rcgen` and
+**zero** `x509-parser` entries for both `mosdns-upstream-core` and the whole
+workspace; both appear only on dev edges. No aws-lc-rs, OpenSSL, network, or
+external `openssl` dependency is involved. `rust/Cargo.lock` was updated for
+this test-only graph.
 Residue proof: `git ls-files rust/upstream-core/tests/fixtures/` lists only
 `mod.rs`; no `.der`/`.pem`/`.key`/`.crt` file is tracked anywhere; and a
 `git grep` for private-key constants finds only prose in documentation comments.
