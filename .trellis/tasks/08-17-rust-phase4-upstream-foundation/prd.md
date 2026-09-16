@@ -113,7 +113,7 @@ The first implementation subset should remain narrow:
 
 - direct numeric-IP UDP;
 - plain TCP;
-- DNS response validation/demultiplexing;
+- DNS response validation, response association, and concurrent isolation;
 - cancellation/deadline;
 - one fresh TCP connection per exchange in the first bounded slice; pooling,
   reuse, and pipelining require characterization before they can be treated
@@ -145,22 +145,27 @@ MosDNS product contract rather than Go internals.
 
 ## Initial Rust-native boundary
 
-The intended dependency shape is conceptually:
+The intended dependency shape is sibling composition:
 
 ```text
-rust/dns-core
-     |
-rust/sequence-core
-     |
-rust/upstream-core  -> shared Rust async runtime
-     |
-future Rust server/host
+             rust/dns-core
+              /        \
+             /          \
+rust/sequence-core    rust/upstream-core
+             \          /
+              \        /
+          future Rust host
 ```
 
-`upstream-core` exposes a pure Rust request/response/cancellation API. It does
-not export C symbols and does not integrate with `pkg/upstream.NewUpstream`.
-The future Rust host will construct/configure these transports directly after
-configuration ownership moves to Rust.
+`dns-core` is the low-level DNS/wire dependency. `sequence-core` owns
+execution and policy, while future `upstream-core` owns transport. The
+future Rust host/orchestration layer composes the two siblings and maps
+sequence cancellation into transport cancellation; `upstream-core` must
+not import `sequence-core`. Phase4 consumes only the low-level DNS/wire
+abstractions it needs from `dns-core`, not the sequence execution crate.
+`upstream-core` exposes a pure Rust request/response/cancellation API. It
+does not export C symbols and does not integrate with
+`pkg/upstream.NewUpstream`.
 
 ## Requirements
 
@@ -194,8 +199,10 @@ second request path. Cancellation has priority over starting new retry work.
 ### R5 — Complete Phase 3B first
 
 This task cannot start until Phase 3B sequence/execution ownership is
-implemented, root-reviewed and archived. Phase4 should consume the Rust-native
-execution/query abstractions rather than add another hybrid bridge.
+implemented, root-reviewed and archived. Phase4 should compose with the future
+Rust host at the orchestration boundary and consume only the low-level
+DNS/wire abstractions it needs from dns-core; it must not add another hybrid
+bridge or import sequence-core.
 
 ### R6 — Keep Phase 4 bounded
 
@@ -210,8 +217,9 @@ UDP/TCP foundation unless a separately reviewed scope change authorizes it.
 - [ ] A reviewed compatibility/deviation matrix separates MosDNS
       product/protocol contracts from Go implementation details.
 - [ ] A pure Rust upstream core passes malformed-input, ownership,
-      demultiplexing, concurrency, cancellation/deadline, retry/fallback-to-TCP,
-      connection lifecycle and deterministic-close tests.
+      response-association, expected-peer, concurrent-isolation,
+      cancellation/deadline, retry/fallback-to-TCP, connection lifecycle and
+      deterministic-close tests.
 - [ ] Query input is not mutated and returned responses expose the correct
       original request ID under concurrent UDP/TCP traffic.
 - [ ] UDP `TC=1` -> TCP behavior and TCP DNS framing match the frozen product

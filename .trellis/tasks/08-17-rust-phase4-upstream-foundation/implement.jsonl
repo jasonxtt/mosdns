@@ -1,3 +1,4 @@
 {"file":"docs/ai/rust-rewrite-plan.md","reason":"Defines the pure Rust-native migration target, phase ordering, and the prohibition on extending transitional FFI or hybrid transport patterns."}
 {"file":".trellis/spec/backend/rust-migration.md","reason":"Provides the repository-specific Rust migration quality and ownership conventions that every Phase 4 implementation slice must follow."}
-{"file":"docs/rust/kixdns-reuse.md","reason":"Records the existing pinned KixDNS cache/matcher audit and explicitly identifies upstream transports as deferred, so the new transport ledger can remain scoped and non-duplicative."}
+{"file":"docs/rust/kixdns-reuse.md","reason":"Records the existing pinned KixDNS cache/matcher audit and identifies upstream transports as deferred, while the dedicated transport ledger supplies the Phase 4 evidence."}
+{"file":"docs/rust/kixdns-upstream-transport.md","reason":"Pinned Phase 4 KixDNS transport audit covering Tokio/task ownership, UDP/TCP framing and ownership, cancellation, timeout, retry, recovery, and close; prevents treating KixDNS defaults as the MosDNS contract."}

@@ -1,3 +1,4 @@
 {"file":".trellis/spec/backend/quality-guidelines.md","reason":"Defines the repository quality gate, focused verification expectations, and review discipline for the future Rust slices."}
 {"file":".trellis/spec/backend/rust-migration.md","reason":"Checks the Phase 4 pure-Rust ownership boundary, transitional-runtime prohibition, and migration-specific acceptance rules."}
 {"file":"docs/ai/config-notes.md","reason":"Captures frozen configuration and switch-bit compatibility constraints that must not be changed while classifying deferred upstream options."}
+{"file":"docs/rust/kixdns-upstream-transport.md","reason":"Supplies the pinned KixDNS transport research evidence for implementation/check agents and keeps runtime, UDP/TCP, cancellation, retry, and license classifications explicit."}
