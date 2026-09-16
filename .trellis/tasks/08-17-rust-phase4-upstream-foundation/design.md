@@ -455,8 +455,16 @@ that performs cancellation and drain without blocking or creating a runtime.
 An exchange observes close before starting bind/connect/send, while awaiting
 receive/read, and before committing a response. A response that has already
 passed DNS validation before close wins and is returned; otherwise owner close
-returns Closed with the recorded side-effect state. No detached receiver,
-timer, stream, pool entry, pending-map entry, or task may survive Closed.
+returns Closed with the recorded side-effect state. The pre-commit observation
+is not a second poll: it is one synchronous `Lifecycle::commit_response`
+operation that shares the same short-lived mutex as registration and
+`Open -> Closing`. Whichever side acquires that mutex first decides the
+outcome, so the commit and `begin_close` have exactly one linearization point
+and the loser cannot reverse it. The commit operation owns no response bytes,
+socket, or parser state; the in-flight registration guard stays held through
+the commit and the response return, so close still drains it. No detached
+receiver, timer, stream, pool entry, pending-map entry, or task may survive
+Closed.
 
 Although the first implementation has no pool or shared receiver, this state
 machine intentionally names those resources because a future pooled transport
