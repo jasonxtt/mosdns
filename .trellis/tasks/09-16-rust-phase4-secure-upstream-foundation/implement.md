@@ -1,9 +1,12 @@
-# Secure upstream implementation plan — NOT STARTED
+# Secure upstream implementation plan — Slice0 active
 
-2026-09-16 authorization is planning only. All checkboxes below are prospective.
-Do not run activation, dependency edits, RED tests, implementation, CI mutation,
-commit/push or deployment until the user separately authorizes the reviewed
-planning package. No external/root-review PASS is claimed by this document.
+2026-09-16: implementation is now authorized and Slice0 is active for the
+bounded dependency/MSRV and Hyper API-inspection scope only. This supersedes
+the earlier planning-only boundary for Slice0; it does not authorize Slice1+,
+CI mutation or deployment, and each later slice still needs its own review and
+explicit go-ahead. Slice0 remains open: dependency/MSRV and Hyper API inspection
+are done, while the rustls policy review and the RED/GREEN request-construction
+contracts are not. No external/root-review PASS is claimed by this document.
 
 ## Planning package review checklist
 
@@ -18,30 +21,53 @@ planning package. No external/root-review PASS is claimed by this document.
   rules made testable; per-slice stop boundaries written.
 - [ ] Planning package independently/root reviewed if required by the agreed
   execution workflow; record reviewer, exact revision and disposition.
-- [ ] Subsequent explicit user authorization for activation and Slice0.
+- [x] Subsequent explicit user authorization for activation and Slice0.
+  Evidence: the 2026-09-16 user request explicitly authorizes implementation
+  according to this plan and the bounded review loop through `rust0916`.
 
-`codex.dispatch_mode=inline` currently applies. Curated JSONL context is included
-for future reviews but does not authorize dispatch. If the user later selects a
-DSH/external-review workflow, follow the relevant quality spec and confirmed
-review destination; do not invent a review thread or send messages now.
+`codex.dispatch_mode=inline` remains the task setting; the user explicitly
+selected MCP DSH as the bounded executor and `rust0916` as the review
+destination for this implementation turn. Follow the quality spec and do not
+invent another review thread or send work to a different destination.
 
 ## Slice0 — contracts, dependency and lifecycle preflight
 
 Goal: freeze public types, helper reuse and selected libraries before TLS I/O.
 
-- [ ] Re-read approved planning and trellis-before-dev; inspect current git state.
-- [ ] Resolve candidate dependencies under the actual workspace MSRV (1.85),
+- [x] Re-read approved planning and trellis-before-dev; inspect current git state.
+  Evidence: parent session re-read the task package/specs and verified branch,
+  remote, dirty paths, and preserved unrelated `.DS_Store` files before each
+  clean DSH dispatch.
+- [x] Resolve candidate dependencies under the actual workspace MSRV (1.85),
   record exact version/features/license graph; do not silently bump MSRV.
-- [ ] Inspect selected Hyper HTTP1/2/Hyper-util APIs and sources for retries,
+  Evidence: `research/secure-upstream-evidence.md` → "Slice0 dependency/MSRV
+  resolution record" (resolver 3; hyper 1.11.0 / hyper-util 0.1.20 /
+  http-body-util 0.1.3 / tokio-rustls 0.26.4; no resolved package above 1.85.0).
+- [x] Inspect selected Hyper HTTP1/2/Hyper-util APIs and sources for retries,
   executor spawns, header bounds and drop semantics; document every owned child.
   Prove feasibility of sealed tracked executor and in-flight accounting.
-- [ ] Review rustls provider/root/config and insecure verifier interfaces;
+  Evidence: same research record → "Hyper 1.11.0 HTTP/2 ownership source
+  locations": the connection driver and per-request futures all flow through the
+  caller-supplied `Executor`. Slice0 API/source feasibility is established; the
+  executor itself is selected and proven with task counters/barriers in Slice3,
+  so no working executor or in-flight accounting is claimed here.
+- [x] Review rustls provider/root/config and insecure verifier interfaces;
   ensure handshake signature checks stay enabled and no 0-RTT/resumption.
-- [ ] RED/GREEN constructor and pure request-building contracts: identity/dial
+  Evidence: `rust/upstream-core/src/secure/tls.rs` and `tests/slice0_secure.rs`;
+  `TlsPolicy::verified` requires a non-empty caller root store, while
+  `insecure_skip_verify` is explicit. No ClientConfig, verifier override, I/O,
+  0-RTT or resumption is constructed in Slice0.
+- [x] RED/GREEN constructor and pure request-building contracts: identity/dial
   separation, IPv4/IPv6, invalid roots/identity/port/URL, query/path normalization,
   maximum DNS/URL size and explicit insecure option.
-- [ ] Introduce only reviewed secure types/helper access and dependencies;
+  Evidence: `src/secure/{endpoint,error,tls}.rs` plus 17 focused secure tests;
+  endpoint construction is pre-I/O and preserves dial/identity separation,
+  URL authority/path/query and explicit TLS mode.
+- [x] Introduce only reviewed secure types/helper access and dependencies;
   preserve existing UDP/TCP public types and default behavior.
+  Evidence: secure module re-exports are additive; locked dependency and Hyper
+  API evidence is in `research/secure-upstream-evidence.md`; parent reran 118
+  upstream-core tests and workspace checks without changing UDP/TCP modules.
 
 Allowed: upstream-core secure contract skeleton/tests, minimal lib.rs/tcp.rs
 private sharing, upstream manifest/lockfile, task evidence. No TLS/HTTP socket
@@ -160,11 +186,15 @@ UDP/TCP evidence and unrelated work, never add Go fallback as rollback machinery
   no Rust/Go/Cargo/CI/config/WebUI file changed. `git diff --check`: PASS.
 - Runtime tests above have NOT run for a secure implementation, because none
   exists. Predecessor PASS/CI evidence remains historical and was not rerun.
-- No task activation, dependency installation, implementation, commit or push.
-  The new task is planning, with final proposal delivered for later review.
+- The preceding bullets are a historical planning-only snapshot. They predate
+  the later user authorization and must not be read as the current task state.
+- Current Slice0 implementation evidence is recorded in the dependency/MSRV
+  resolution record below and in the secure contract tests; Slice0 remains open
+  only until its scoped root review returns an explicit PASS or FAIL.
 
-## Publication authorization — 2026-09-16
+## Implementation authorization — 2026-09-16
 
-The user subsequently authorized committing and pushing the wrap-up and planning
-artifacts to GitHub. This supersedes the original no-commit/push boundary only;
-task status remains planning and every implementation gate remains closed.
+The user subsequently authorized activation, bounded Slice0 implementation,
+commit/push, and formal review through `rust0916`. This supersedes the original
+planning-only boundary for Slice0. Slice1+ implementation, production wiring,
+deployment, and automatic progression after review remain unauthorized.

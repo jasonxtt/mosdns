@@ -29,8 +29,22 @@ url = "2"
 # `tls12` keeps TLS 1.2 available under rustls' safe defaults. Resolved lock:
 # rustls 0.23.45 (Apache-2.0 OR ISC OR MIT, MSRV 1.71), ring 0.17.14
 # (Apache-2.0 AND ISC, MSRV 1.66.0) - both below the workspace MSRV of 1.85.
-# No tokio-rustls or HTTP crate is introduced; no TLS socket I/O happens here.
+# Slice0 adds only the reviewed dependency graph; no TLS socket I/O is
+# implemented by this slice.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Slice0 secure endpoint/HTTP dependency review. Exact pins preserve the
+# reviewed lock: hyper 1.11.0 (MIT, MSRV 1.63), hyper-util 0.1.20 (MIT, MSRV
+# 1.64), http-body-util 0.1.3 (MIT, MSRV 1.61), tokio-rustls 0.26.4
+# (MIT OR Apache-2.0, MSRV 1.71) - all below the workspace MSRV of 1.85.
+# hyper exposes the low-level HTTP/1.1+HTTP/2 client connection APIs; hyper-util
+# contributes only the `tokio` IO/executor adapter. No `client`,
+# `client-legacy` or `client-pool` feature is enabled, so no high-level pooled
+# or retrying client is pulled in. tokio-rustls reuses the same `ring`/`tls12`
+# rustls selection as above and never enables aws-lc-rs.
+hyper = { version = "=1.11.0", default-features = false, features = ["client", "http1", "http2"] }
+hyper-util = { version = "=0.1.20", default-features = false, features = ["tokio"] }
+http-body-util = { version = "=0.1.3", default-features = false }
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 
 [dev-dependencies]
 # Test-only driver for the Slice1 UDP contract tests: a bounded current-thread

@@ -2,16 +2,17 @@
 
 ## Authorization and status
 
-2026-09-16: the user authorized closing the accepted UDP/TCP foundation and
-planning its successor, explicitly saying **do not begin execution**. This task
-is `planning`; the package is a proposal for review, not an accepted planning
-gate or implementation authorization. Do not run `task.py start`, add crate
-code/tests/dependencies, dispatch implementation, deploy, commit or push as part
-of this planning request.
+2026-09-16: the initial user message authorized closing the accepted UDP/TCP
+foundation and planning its successor, explicitly saying **do not begin
+execution**. That historical planning boundary has been superseded by the
+user's later explicit request to start implementation according to this plan.
+The task is now `in_progress`; Slice0 is active and Slice1+ remain separately
+gated. No planning/root-review PASS is inferred from activation or local checks.
 
-Subsequent authorization on 2026-09-16 permits committing and pushing all
-wrap-up and planning artifacts to GitHub. It does not authorize activation or
-implementation.
+The later authorization permits the bounded Slice0 dependency, endpoint and TLS
+policy work, its commits/push, and review through the confirmed `rust0916`
+conversation. It does not authorize later slices, production wiring, or
+deployment.
 
 ## Goal and value
 
