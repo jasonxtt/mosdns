@@ -1,6 +1,6 @@
 # MosDNS Rust 渐进重写方案
 
-最后更新：`2026-08-18`
+最后更新：`2026-09-16`
 
 ## 1. 目标与边界
 
@@ -321,28 +321,28 @@ Phase 5-6（Rust-native host 与清理）
 
 ## 9. 当前 Rust migration 状态
 
-阶段 1 的 cache 基础实现已经完成；cache 仍保留独立的
-replay/soak、sanitizer/Miri 和扩展测试机验证门槛，且不得成为默认后端。
+截至 2026-09-16：
 
-`.trellis/tasks/archive/2026-08/08-13-rust-matcher-foundation/` 的 Slice 0–5
-已在 `rust` 分支完成，independent review passed on 2026-08-13；其归档不
-结束或归档整个 Rust 重写计划。Phase 2 expansion 也已归档完成。
+- Phase 1 cache、Phase 2 matcher 及扩展、Phase 3A query/wire、Phase 3B
+  sequence/execution foundation 均已完成并归档。Cache 的 soak、Miri 和
+  扩展测试机门禁已关闭；早期 hybrid bridge 性能未达默认切换要求，不应
+  继续优化 cgo 边界来替代 Rust-native host 工作。
+- Phase 4 UDP/TCP upstream foundation 的 Slice0–4 已全部验收。
+  Slice4 在 `9d43e9f` 获得 `PASS / CLOSED`，Actions `35090514316` 成功，
+  `cb15361` 记录最终门禁关闭。任务于 2026-09-16 收尾归档至
+  `.trellis/tasks/archive/2026-09/08-17-rust-phase4-upstream-foundation/`。
+- 已实现的 transport 范围是数字 IP UDP、每次新建连接的 plain TCP、
+  UDP TC→TCP 组合策略，以及对应的取消、deadline、关闭与错误契约。
+  这不代表整个 Phase 4 完成，也不代表独立 Rust host 已存在。
+- 下一任务为 `.trellis/tasks/09-16-rust-phase4-secure-upstream-foundation/`：
+  TLS/HTTPS（DoT/DoH）基础规划。用户仅授权规划，状态必须保持 `planning`；
+  不得运行 `task.py start`、实现协议、修改依赖或进行 host/生产接线。
+  规划将服务身份与数字拨号地址分离，bootstrap/resolver、连接复用与
+  pipeline、QUIC/HTTP3、listeners 保留为后续独立范围。
 
-Phase 3A（query/wire foundation）已获得授权并完成；其 task
-`08-15-rust-phase3-query-execution-core` 已于 2026-08-17 归档。整体 Phase 3
-尚未完成：Rust matcher dispatch、无网络 executable、sequence 控制流
-（`jump`/`goto`/`return`/`exit`/`try`）以及 query-context 执行所有权仍由 Go
-持有。当前请求路径仍是 `Go EntryHandler -> Go query_context -> Go sequence
--> Go upstream`，Phase 3A 的 query ABI/adapter 仍只是 experimental opt-in
-旁路，默认后端保持 Go-only。
-
-Phase 3B 已完成并 root-review/归档；当前工作是
-`08-17-rust-phase4-upstream-foundation`。Phase4 planning gate 已 PASS，Slice0
-已通过 root review，用户已明确授权 Slice1 UDP；task 保持 `in_progress`，当前
-只实现纯 Rust one-exchange/one-socket UDP primitive。Slice2/TCP、TC fallback、
-production wiring 和后续 host 仍需新的 root-review authorization。Rust-native
-policy 继续要求 Go 只用于产品契约取证，不再新增 Go fallback/cgo/runtime
-selector。Phase 4 冻结 cancellation、post-side-effect failure、协议/socket
-产品语义和共享 async runtime，而不是设计 Go pool ownership、transport C ABI
-或新的 hybrid handle namespace。Phase 5 建立完整 Rust host，Phase 6 再统一删除
-Phase 1/2/3A 的 hybrid scaffolding。
+后续顺序仍是安全上游协议 → QUIC/HTTP3 及相关解析/连接生命周期补齐 →
+server listeners → Phase 5 Rust-native host/控制面与完整 E2E → Phase 6
+hybrid scaffolding retirement。各项依赖与验收门禁必须在任务中明确。
+现有 Go live path 保持不变；Rust foundation 使用纯 Rust crate 组合，不新增
+Go fallback、cgo adapter 或 backend selector。最终发布仍需完整 native
+E2E、性能/长期运行及 retirement gate。
