@@ -23,6 +23,14 @@ tokio-util = { version = "0.7.16", features = ["rt"] }
 # the transitive `idna_adapter` at 1.1.0 because the ICU-backed 1.2.x line
 # declares a 1.86+ MSRV, above this workspace's 1.85.
 url = "2"
+# Slice0 secure TLS policy preflight. Only the client policy type is needed, so
+# the TLS engine is added without its aws-lc-rs/post-quantum/logging defaults.
+# `ring` is the reviewed safe provider, `std` enables std integration, and
+# `tls12` keeps TLS 1.2 available under rustls' safe defaults. Resolved lock:
+# rustls 0.23.45 (Apache-2.0 OR ISC OR MIT, MSRV 1.71), ring 0.17.14
+# (Apache-2.0 AND ISC, MSRV 1.66.0) - both below the workspace MSRV of 1.85.
+# No tokio-rustls or HTTP crate is introduced; no TLS socket I/O happens here.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [dev-dependencies]
 # Test-only driver for the Slice1 UDP contract tests: a bounded current-thread
