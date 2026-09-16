@@ -18,8 +18,9 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use mosdns_upstream_core::{
-    CloseResult, CloseTransition, Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse,
-    SideEffectState, Transport, TransportCancellation, Upstream, UpstreamError,
+    CloseCompletion, CloseResult, CloseTransition, Endpoint, ExchangeContext, ExchangeRequest,
+    ExchangeResponse, LifecycleState, SideEffectState, Transport, TransportCancellation, Upstream,
+    UpstreamError,
 };
 use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, spawn_blocking};
@@ -736,7 +737,7 @@ fn closed_upstream_rejects_exchange_without_socket_work() {
     block_on(async {
         let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
         let upstream = Upstream::new(udp_endpoint(address));
-        assert_eq!(upstream.close(), CloseResult::Closed);
+        assert_eq!(upstream.close().await, CloseResult::Closed);
 
         let query = query_wire(0xeeee);
         let request = ExchangeRequest::new(&query).expect("valid query");
@@ -746,5 +747,343 @@ fn closed_upstream_rejects_exchange_without_socket_work() {
             .err()
             .expect("a closed upstream rejects new work");
         assert_eq!(error, UpstreamError::Closed(SideEffectState::NotSent));
+    });
+}
+
+#[test]
+fn async_close_drains_an_in_flight_udp_exchange_before_closed() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (seen_tx, seen_rx) = oneshot::channel::<()>();
+        // The server receives the query and deliberately never replies, so the
+        // exchange stays parked in receive until owner close wakes it.
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let _ = server.recv_from(&mut buffer).expect("receive query");
+            seen_tx.send(()).expect("signal receipt");
+        });
+
+        let query = query_wire(0xd101);
+        let upstream = Arc::new(Upstream::new(udp_endpoint(address)));
+        let exchange_task = {
+            let upstream = Arc::clone(&upstream);
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, open_context()).await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, seen_rx)
+            .await
+            .expect("query observed bounded")
+            .expect("query observed");
+        assert_eq!(upstream.in_flight_exchanges(), 1);
+
+        // Close admission begins synchronously and must not complete while the
+        // exchange still holds a registration.
+        assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closing);
+        assert_eq!(upstream.finish_close(), CloseCompletion::InFlight);
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closing);
+
+        // The async drain is pending on that same registration. Poll it once
+        // without yielding so the in-flight exchange cannot run first.
+        let mut drain = Box::pin(upstream.close());
+        let pending =
+            std::future::poll_fn(|cx| std::task::Poll::Ready(drain.as_mut().poll(cx).is_pending()))
+                .await;
+        assert!(
+            pending,
+            "close must stay pending until the registration count reaches zero"
+        );
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closing);
+        assert_eq!(upstream.in_flight_exchanges(), 1);
+
+        // Owner close cancels the token and wakes the parked receive; the
+        // exchange returns Closed(Sent) and releases its registration.
+        let outcome = timeout(TEST_TIMEOUT, exchange_task)
+            .await
+            .expect("exchange bounded")
+            .expect("exchange joined");
+        assert_eq!(
+            outcome.err().expect("owner close terminates the exchange"),
+            UpstreamError::Closed(SideEffectState::Sent)
+        );
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        let close_result = timeout(TEST_TIMEOUT, drain).await.expect("close bounded");
+        assert_eq!(close_result, CloseResult::Closed);
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        server_task.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn async_close_is_idempotent_on_an_open_upstream() {
+    block_on(async {
+        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
+        let upstream = Upstream::new(udp_endpoint(address));
+
+        assert_eq!(upstream.close().await, CloseResult::Closed);
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        assert_eq!(upstream.close().await, CloseResult::AlreadyClosed);
+        assert_eq!(upstream.close().await, CloseResult::AlreadyClosed);
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+    });
+}
+
+#[test]
+fn concurrent_async_close_calls_converge_without_deadlock() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (seen_tx, seen_rx) = oneshot::channel::<()>();
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let _ = server.recv_from(&mut buffer).expect("receive query");
+            seen_tx.send(()).expect("signal receipt");
+        });
+
+        let query = query_wire(0xd102);
+        let upstream = Arc::new(Upstream::new(udp_endpoint(address)));
+        let exchange_task = {
+            let upstream = Arc::clone(&upstream);
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, open_context()).await
+            })
+        };
+        timeout(TEST_TIMEOUT, seen_rx)
+            .await
+            .expect("query observed bounded")
+            .expect("query observed");
+        assert_eq!(upstream.in_flight_exchanges(), 1);
+
+        let first_close = {
+            let upstream = Arc::clone(&upstream);
+            tokio::spawn(async move { upstream.close().await })
+        };
+        let second_close = {
+            let upstream = Arc::clone(&upstream);
+            tokio::spawn(async move { upstream.close().await })
+        };
+
+        let outcome = timeout(TEST_TIMEOUT, exchange_task)
+            .await
+            .expect("exchange bounded")
+            .expect("exchange joined");
+        assert_eq!(
+            outcome.err().expect("owner close terminates the exchange"),
+            UpstreamError::Closed(SideEffectState::Sent)
+        );
+
+        let first_result = timeout(TEST_TIMEOUT, first_close)
+            .await
+            .expect("first close bounded")
+            .expect("first close joined");
+        let second_result = timeout(TEST_TIMEOUT, second_close)
+            .await
+            .expect("second close bounded")
+            .expect("second close joined");
+        assert_eq!(first_result, CloseResult::Closed);
+        assert_eq!(second_result, CloseResult::Closed);
+        assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        server_task.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn exchange_after_async_close_is_rejected_without_registration() {
+    block_on(async {
+        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
+        let upstream = Upstream::new(udp_endpoint(address));
+        assert_eq!(upstream.close().await, CloseResult::Closed);
+
+        let query = query_wire(0xd103);
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        let error = timeout(TEST_TIMEOUT, upstream.exchange(request, open_context()))
+            .await
+            .expect("closed exchange bounded")
+            .err()
+            .expect("a closed upstream rejects new work");
+        assert_eq!(error, UpstreamError::Closed(SideEffectState::NotSent));
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+    });
+}
+
+#[test]
+fn exchange_after_begin_close_is_rejected_without_registration() {
+    block_on(async {
+        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
+        let upstream = Upstream::new(udp_endpoint(address));
+        assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+
+        let query = query_wire(0xd104);
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        let error = upstream
+            .exchange(request, open_context())
+            .await
+            .err()
+            .expect("a closing upstream rejects new work");
+        assert_eq!(error, UpstreamError::Closed(SideEffectState::NotSent));
+        assert_eq!(
+            upstream.in_flight_exchanges(),
+            0,
+            "a rejected exchange must never register"
+        );
+        assert_eq!(upstream.close().await, CloseResult::Closed);
+    });
+}
+
+#[test]
+fn aborting_an_in_flight_exchange_releases_its_registration() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (seen_tx, seen_rx) = oneshot::channel::<()>();
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let _ = server.recv_from(&mut buffer).expect("receive query");
+            seen_tx.send(()).expect("signal receipt");
+        });
+
+        let query = query_wire(0xd105);
+        let upstream = Arc::new(Upstream::new(udp_endpoint(address)));
+        let exchange_task = {
+            let upstream = Arc::clone(&upstream);
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, open_context()).await
+            })
+        };
+        timeout(TEST_TIMEOUT, seen_rx)
+            .await
+            .expect("query observed bounded")
+            .expect("query observed");
+        assert_eq!(upstream.in_flight_exchanges(), 1);
+
+        // Dropping/aborting the future must release its RAII registration.
+        exchange_task.abort();
+        let aborted = exchange_task.await;
+        assert!(aborted.is_err(), "the exchange task was aborted");
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        server_task.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn completed_and_failed_exchanges_release_their_registration() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let id = 0xd106;
+        let expected = response_wire(id, 13);
+        let reply = expected.clone();
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let (_, peer) = server.recv_from(&mut buffer).expect("receive query");
+            server.send_to(&reply, peer).expect("send reply");
+        });
+
+        let upstream = Upstream::new(udp_endpoint(address));
+        let query = query_wire(id);
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        upstream
+            .exchange(request, open_context())
+            .await
+            .expect("udp exchange succeeds");
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        server_task.await.expect("server task joined");
+
+        // A malformed response is a terminal error path that must also release.
+        let (bad_server, bad_address) = bind_ipv4();
+        let bad_id = 0xd107;
+        let bad_server_task = reply_once(bad_server, query_wire(bad_id)); // QR clear
+        let bad_upstream = Upstream::new(udp_endpoint(bad_address));
+        let bad_query = query_wire(bad_id);
+        let bad_request = ExchangeRequest::new(&bad_query).expect("valid query");
+        let error = bad_upstream
+            .exchange(bad_request, open_context())
+            .await
+            .err()
+            .expect("a QR-clear datagram is terminal");
+        assert_eq!(error, UpstreamError::MalformedResponse);
+        assert_eq!(bad_upstream.in_flight_exchanges(), 0);
+        bad_server_task.await.expect("bad server joined");
+    });
+}
+
+#[test]
+fn caller_cancelled_exchange_releases_its_registration() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (seen_tx, seen_rx) = oneshot::channel::<()>();
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let _ = server.recv_from(&mut buffer).expect("receive query");
+            seen_tx.send(()).expect("signal receipt");
+        });
+
+        let query = query_wire(0xd108);
+        let cancellation = TransportCancellation::new();
+        let upstream = Arc::new(Upstream::new(udp_endpoint(address)));
+        let exchange_task = {
+            let upstream = Arc::clone(&upstream);
+            let cancellation = cancellation.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream
+                    .exchange(
+                        request,
+                        ExchangeContext::new(
+                            Instant::now() + Duration::from_secs(30),
+                            cancellation,
+                        ),
+                    )
+                    .await
+            })
+        };
+        timeout(TEST_TIMEOUT, seen_rx)
+            .await
+            .expect("query observed bounded")
+            .expect("query observed");
+        assert_eq!(upstream.in_flight_exchanges(), 1);
+
+        cancellation.cancel();
+        let outcome = timeout(TEST_TIMEOUT, exchange_task)
+            .await
+            .expect("exchange bounded")
+            .expect("exchange joined");
+        assert_eq!(
+            outcome
+                .err()
+                .expect("caller cancellation terminates the exchange"),
+            UpstreamError::Cancelled(SideEffectState::Sent)
+        );
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+
+        server_task.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn tcp_placeholder_releases_its_registration() {
+    block_on(async {
+        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
+        let upstream =
+            Upstream::new(Endpoint::new(address, Transport::Tcp).expect("numeric tcp endpoint"));
+        let query = query_wire(0xd109);
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        let error = upstream
+            .exchange(request, open_context())
+            .await
+            .err()
+            .expect("the TCP placeholder is an explicit error");
+        assert_eq!(error, UpstreamError::Runtime(SideEffectState::NotSent));
+        assert_eq!(upstream.in_flight_exchanges(), 0);
     });
 }

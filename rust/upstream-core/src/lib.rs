@@ -8,10 +8,11 @@ mod udp;
 
 use std::fmt;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use mosdns_dns_core::parse_query;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 /// The direct transport kinds covered by the first Phase 4 boundary.
@@ -355,10 +356,6 @@ impl ExchangeResponse {
     }
 }
 
-const OPEN: u8 = 0;
-const CLOSING: u8 = 1;
-const CLOSED: u8 = 2;
-
 /// Lifecycle state for an upstream owner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LifecycleState {
@@ -367,49 +364,80 @@ pub enum LifecycleState {
     Closed,
 }
 
+/// Serialized owner state plus the in-flight exchange registration count.
+///
+/// A single `std::sync::Mutex` protects both the `Open -> Closing` admission
+/// transition and exchange registration, so close can never observe a zero
+/// registration count while a new exchange is registering. The lock is only
+/// ever held for short synchronous critical sections; no await happens while
+/// it is held.
+#[derive(Debug)]
+struct LifecycleInner {
+    state: LifecycleState,
+    in_flight: usize,
+}
+
+/// Lifecycle gate for an upstream owner.
+///
+/// The owner state machine and the in-flight registration count share one
+/// mutex so admission (`Open -> Closing`) is atomic with registration. The
+/// paired [`Notify`] wakes async drain waiters on the caller's runtime when the
+/// registration count reaches zero.
 #[derive(Debug)]
 pub struct Lifecycle {
-    state: AtomicU8,
+    inner: Mutex<LifecycleInner>,
+    drained: Notify,
 }
 
 impl Lifecycle {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            state: AtomicU8::new(OPEN),
+            inner: Mutex::new(LifecycleInner {
+                state: LifecycleState::Open,
+                in_flight: 0,
+            }),
+            drained: Notify::const_new(),
         }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, LifecycleInner> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[must_use]
     pub fn state(&self) -> LifecycleState {
-        match self.state.load(Ordering::Acquire) {
-            OPEN => LifecycleState::Open,
-            CLOSING => LifecycleState::Closing,
-            _ => LifecycleState::Closed,
-        }
+        self.lock().state
     }
 
     #[must_use]
     pub fn begin_close(&self) -> CloseTransition {
-        match self
-            .state
-            .compare_exchange(OPEN, CLOSING, Ordering::AcqRel, Ordering::Acquire)
-        {
-            Ok(_) => CloseTransition::BeganClosing,
-            Err(CLOSING) => CloseTransition::AlreadyClosing,
-            Err(_) => CloseTransition::AlreadyClosed,
+        let mut inner = self.lock();
+        match inner.state {
+            LifecycleState::Open => {
+                inner.state = LifecycleState::Closing;
+                CloseTransition::BeganClosing
+            }
+            LifecycleState::Closing => CloseTransition::AlreadyClosing,
+            LifecycleState::Closed => CloseTransition::AlreadyClosed,
         }
     }
 
     #[must_use]
     pub fn finish_close(&self) -> CloseCompletion {
-        match self
-            .state
-            .compare_exchange(CLOSING, CLOSED, Ordering::AcqRel, Ordering::Acquire)
-        {
-            Ok(_) => CloseCompletion::Closed,
-            Err(OPEN) | Err(CLOSING) => CloseCompletion::NotClosing,
-            Err(_) => CloseCompletion::AlreadyClosed,
+        let mut inner = self.lock();
+        match inner.state {
+            LifecycleState::Open => CloseCompletion::NotClosing,
+            LifecycleState::Closed => CloseCompletion::AlreadyClosed,
+            // The lifecycle must never expose `Closed` while any exchange is
+            // still registered.
+            LifecycleState::Closing if inner.in_flight > 0 => CloseCompletion::InFlight,
+            LifecycleState::Closing => {
+                inner.state = LifecycleState::Closed;
+                CloseCompletion::Closed
+            }
         }
     }
 
@@ -420,11 +448,68 @@ impl Lifecycle {
             Err(UpstreamError::Closed(SideEffectState::NotSent))
         }
     }
+
+    /// Registers one in-flight exchange under the same lock that gates
+    /// `Open -> Closing`. A rejected registration leaves the count untouched.
+    fn register(&self) -> Result<InFlightGuard<'_>, UpstreamError> {
+        let mut inner = self.lock();
+        if inner.state != LifecycleState::Open {
+            return Err(UpstreamError::Closed(SideEffectState::NotSent));
+        }
+        inner.in_flight += 1;
+        Ok(InFlightGuard { lifecycle: self })
+    }
+
+    /// Releases one registration. The matching guard calls this exactly once.
+    fn release(&self) {
+        let mut inner = self.lock();
+        debug_assert!(inner.in_flight > 0, "in-flight registration underflow");
+        inner.in_flight -= 1;
+        let drained = inner.in_flight == 0;
+        drop(inner);
+        if drained {
+            self.drained.notify_waiters();
+        }
+    }
+
+    #[must_use]
+    fn in_flight(&self) -> usize {
+        self.lock().in_flight
+    }
+
+    /// Awaits the registration count reaching zero on the caller's runtime.
+    ///
+    /// Interest is registered with the [`Notify`] before the count is checked,
+    /// so a release between the check and the await cannot be missed.
+    async fn drain(&self) {
+        loop {
+            let notified = self.drained.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.in_flight() == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
 }
 
 impl Default for Lifecycle {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// RAII registration guard. Any exchange that holds one exposes the owner as
+/// draining until the guard is dropped, on every success, error, cancellation,
+/// or aborted-future path.
+struct InFlightGuard<'a> {
+    lifecycle: &'a Lifecycle,
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.lifecycle.release();
     }
 }
 
@@ -437,15 +522,20 @@ pub enum CloseTransition {
 }
 
 /// Result of attempting to complete owner shutdown. Completion only succeeds
-/// from `Closing`; an open owner cannot skip the observable Closing state.
+/// from `Closing` after the in-flight registration count has reached zero; an
+/// open owner cannot skip the observable Closing state, and a draining owner
+/// reports `InFlight` instead of `Closed`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CloseCompletion {
     Closed,
     NotClosing,
+    InFlight,
     AlreadyClosed,
 }
 
-/// Result of a complete synchronous close in the Slice0 lifecycle skeleton.
+/// Result of a complete awaitable close. `Closed` means this call observed the
+/// owner reach `Closed` after draining; `AlreadyClosed` means it was already
+/// `Closed` when the call began.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CloseResult {
     Closed,
@@ -482,6 +572,20 @@ impl Upstream {
         self.lifecycle.state()
     }
 
+    /// Number of exchanges currently registered as in-flight.
+    ///
+    /// This is a deterministic observability hook for the close/drain contract;
+    /// it never blocks on socket I/O.
+    #[must_use]
+    pub fn in_flight_exchanges(&self) -> usize {
+        self.lifecycle.in_flight()
+    }
+
+    /// Begins owner shutdown and cancels the owner token.
+    ///
+    /// The `Open -> Closing` admission transition is serialized with exchange
+    /// registration, so after this returns no new exchange can register. An
+    /// already-registered exchange keeps draining until its RAII guard drops.
     #[must_use]
     pub fn begin_close(&self) -> CloseTransition {
         let transition = self.lifecycle.begin_close();
@@ -491,21 +595,34 @@ impl Upstream {
         transition
     }
 
+    /// Performs only the guarded `Closing -> Closed` transition.
+    ///
+    /// Returns [`CloseCompletion::InFlight`] while any registration is
+    /// outstanding, so the lifecycle never exposes `Closed` with a non-zero
+    /// registration count.
     #[must_use]
     pub fn finish_close(&self) -> CloseCompletion {
         self.lifecycle.finish_close()
     }
 
-    #[must_use]
-    pub fn close(&self) -> CloseResult {
+    /// Begins close, drains every in-flight exchange on the caller's runtime,
+    /// then performs the guarded `Closing -> Closed` transition.
+    ///
+    /// No lock is held across the drain await; repeated and concurrent calls
+    /// converge on the same `Closed` owner without deadlock. No runtime,
+    /// executor, task, or blocking wait is created here.
+    pub async fn close(&self) -> CloseResult {
         match self.begin_close() {
-            CloseTransition::BeganClosing => match self.finish_close() {
-                CloseCompletion::Closed => CloseResult::Closed,
-                CloseCompletion::NotClosing => CloseResult::AlreadyClosing,
-                CloseCompletion::AlreadyClosed => CloseResult::AlreadyClosed,
-            },
-            CloseTransition::AlreadyClosing => CloseResult::AlreadyClosing,
-            CloseTransition::AlreadyClosed => CloseResult::AlreadyClosed,
+            // Already terminal when the call began.
+            CloseTransition::AlreadyClosed => return CloseResult::AlreadyClosed,
+            CloseTransition::BeganClosing | CloseTransition::AlreadyClosing => {}
+        }
+        self.lifecycle.drain().await;
+        match self.finish_close() {
+            // Another close call may have completed the guarded transition
+            // while this call was draining; either way the owner is `Closed`.
+            CloseCompletion::Closed | CloseCompletion::AlreadyClosed => CloseResult::Closed,
+            CloseCompletion::NotClosing | CloseCompletion::InFlight => CloseResult::AlreadyClosing,
         }
     }
 
@@ -530,6 +647,13 @@ impl Upstream {
 
     /// Performs one bounded exchange over the configured numeric endpoint.
     ///
+    /// The exchange registers as in-flight under the same gate that serializes
+    /// `Open -> Closing`, so close can never observe a zero registration count
+    /// while this exchange is admitting itself. The RAII guard is held until
+    /// this future returns or is dropped, covering success, every terminal
+    /// error, cancellation/deadline, owner close, the TCP placeholder, and an
+    /// aborted future.
+    ///
     /// Slice1 implements the reviewed one-exchange/one-socket UDP primitive in
     /// [`udp::exchange`]. Plain TCP is intentionally not implemented in this
     /// entry point: it returns the explicit minimal `Runtime(NotSent)`
@@ -544,6 +668,9 @@ impl Upstream {
         request: ExchangeRequest<'q>,
         context: ExchangeContext,
     ) -> Result<ExchangeResponse, UpstreamError> {
+        // Registration is the admission step: it happens before any transport
+        // ownership and is released on every return/drop path by RAII.
+        let _in_flight = self.lifecycle.register()?;
         let prepared = self.prepare_exchange(request, context)?;
         match prepared.endpoint().transport() {
             Transport::Udp => udp::exchange(&prepared).await,

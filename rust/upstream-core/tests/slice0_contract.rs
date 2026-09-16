@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -7,6 +8,15 @@ use mosdns_upstream_core::{
     ExchangeResponse, LifecycleState, SideEffectState, Transport, TransportCancellation, Upstream,
     UpstreamError,
 };
+
+/// Drives a bounded current-thread runtime for a single `close()` await.
+fn block_on<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build current-thread test runtime")
+        .block_on(future)
+}
 
 fn endpoint(transport: Transport) -> mosdns_upstream_core::Endpoint {
     mosdns_upstream_core::Endpoint::new(
@@ -189,7 +199,7 @@ fn lifecycle_is_open_closing_closed_and_close_is_idempotent() {
     assert_eq!(upstream.begin_close(), CloseTransition::AlreadyClosing);
     assert_eq!(upstream.finish_close(), CloseCompletion::Closed);
     assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
-    assert_eq!(upstream.close(), CloseResult::AlreadyClosed);
+    assert_eq!(block_on(upstream.close()), CloseResult::AlreadyClosed);
 
     let query = valid_query();
     let request = ExchangeRequest::new(&query).expect("valid query");
