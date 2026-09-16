@@ -3,11 +3,12 @@
 > **Planning gate (PASS 2026-09-16, review commit
 > `16192ea83c8c54be1d3ce644e606682956084fee`):** Phase 3B is implemented,
 > root-reviewed, and archived; the Phase4 planning package was root-reviewed.
-> The user authorized `task.py start` on 2026-09-16 and explicitly authorized
-> Slice1 after the Slice0 root-review PASS. The task is `in_progress`, and this
-> implementation round is limited to the Slice1 UDP primitive and its narrow
-> root-review remediation. Slice2+, TCP, production wiring, and a permanent
-> Go/Rust hybrid remain unauthorized.
+> The user authorized `task.py start` on 2026-09-16, explicitly authorized
+> Slice1 after the Slice0 root-review PASS, and now explicitly authorizes
+> Slice2 after the Slice1 root-review PASS. The task is `in_progress`, and this
+> implementation round is limited to the Slice2 TCP framing primitive.
+> Slice3/fallback, production wiring, and a permanent Go/Rust hybrid remain
+> unauthorized.
 
 ## Goal
 
@@ -244,9 +245,10 @@ runtime, cancellation and retry state machine, protocol/socket compatibility
 matrix, byte ownership, connection lifecycle, and test strategy.
 
 Phase4 implementation is authorized and the task is currently
-`status = in_progress`. Slice1 UDP and the three scoped root-review fixes are
-the only authorized implementation scope in this round. It must stop and return
-to root review before Slice2 or any later phase begins; no production wiring or
+`status = in_progress`. Slice1 UDP and its four scoped root-review fixes are
+complete and passed root review. The user now authorizes only Slice2's fresh
+plain-TCP framing primitive; it must stop and return to root review before
+Slice3, TC-to-TCP fallback, or any later phase begins. No production wiring or
 release is authorized.
 
 No transport ABI, Go adapter or production selector is expected in the future

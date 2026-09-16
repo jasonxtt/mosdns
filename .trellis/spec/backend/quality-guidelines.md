@@ -163,3 +163,70 @@ Correct: ask the user to confirm the destination conversation, push the exact
 scoped commit, send its GitHub evidence, read the explicit reviewer result,
 repeat bounded fixes until PASS, then stop and wait for the user's next-phase
 decision.
+
+## MCP DSH controlled execution
+
+Use this protocol when the user authorizes MCP DSH as the implementation
+executor. DSH is a bounded worker, not an authority to widen scope, commit,
+push, start a later slice, or change the project's review destination.
+
+### Safety and ownership
+
+- The parent Codex verifies repository path, branch, status, remote, and
+  worktree state before dispatch. It preserves unrelated dirty files and
+  requires a clean isolated worktree for normal DSH execution.
+- Prefer `workspace_mode: clean`; use `snapshot` only when the user explicitly
+  requires current uncommitted or ignored state to be included.
+- Every dispatch prompt names the active task, one behavior/blocker/slice, an
+  exact allowed-file list, required checks, and forbidden paths/actions.
+- DSH must not use destructive broad commands, `git add -A`, commit, push,
+  production wiring, or files outside the repository. The parent inspects the
+  complete DSH diff and calls `dsh_apply` explicitly; a DSH summary is never
+  sufficient evidence for applying changes.
+- If the DSH changed-file list, base, patch, or scope check is unexpected, do
+  not apply it. End the session, preserve the main tree, and investigate the
+  exact discrepancy.
+
+### Dispatch and timeout contract
+
+- Use read-only `dsh_investigate` only when the implementation choice or
+  repository state is genuinely ambiguous. Otherwise use one focused execute
+  job directly.
+- One job handles one behavior or one narrowly related blocker. Do not send a
+  whole phase or several independent remediation families to one job.
+- For work that may take longer than one MCP request, use asynchronous
+  `dsh_start`, then bounded `dsh_wait` calls of at most about 60 seconds. A
+  still-running result is not a failure and must not cause a duplicate job.
+- After an idle execute session, call `dsh_diff` once, inspect changed paths
+  and the complete patch, apply only the reviewed whitelist, then run checks in
+  the parent worktree and call `dsh_end`.
+- Keep prompts and reports concise: return changed paths, diff summary,
+  commands, exit status, and failures; do not dump unrelated source or ignored
+  build output. Do not assume DSH is free or outside Codex usage accounting;
+  verify actual usage in the product billing/usage view when cost matters.
+
+### Verification and review loop
+
+- DSH first writes the RED test for the selected behavior and records the real
+  focused failure. It then implements the minimum GREEN change and runs only
+  the focused checks needed for that behavior.
+- The parent reruns focused tests after apply, then runs the full workspace
+  checks only at the final slice boundary: tests, warnings-denied clippy,
+  format, manifest/tree inspection, task validation, and diff checks as
+  applicable.
+- Before commit, stage exact reviewed paths only. After push, send one compact
+  review request containing the full commit, diff scope, evidence, status, and
+  forbidden follow-on scope to the same confirmed ChatGPT conversation.
+- Wait/read that review at approximately one-minute intervals. Active,
+  pending, unchanged, or timed-out reads are not PASS. A scoped FAIL starts a
+  new clean DSH job for only that remediation; a scope-changing FAIL requires
+  user input; an explicit PASS closes the current slice and stops.
+
+### Good / bad examples
+
+- Good: `dsh_start(clean)` for one TCP framing behavior, bounded waits, one
+  complete diff inspection, exact apply, focused test, final full checks, and
+  root review before stopping.
+- Bad: a single monolithic DSH job for all Phase4 slices, a synchronous MCP
+  call held for many minutes, applying a patch without reading it, or letting
+  DSH continue from Slice1 into Slice2 without a new user authorization.

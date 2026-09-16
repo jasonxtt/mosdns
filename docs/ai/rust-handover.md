@@ -54,20 +54,21 @@ used as an intermediate production runtime.
 | `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the existing opt-in/fallback scaffolding without expanding it. Its pure matcher core and product-contract evidence remain useful; the Go/Rust bridge is scheduled for retirement only after the Rust-native host is complete. |
 | `08-15-rust-phase3-query-execution-core` | **archived/completed** (`2026-08-17`) | Phase 3A query/wire foundation complete: Slices 0–4 root-reviewed, including Rust dns/query core, query ABI, Go opt-in adapter/fallback, Linux+cgo real-staticlib normal/race, and final wire/parity remediation. Overall Phase 3 remains incomplete because sequence control flow, matcher dispatch, no-network executable ownership, and query execution ownership are still Go-owned. | The next task is Phase 3B sequence/execution ownership. Reuse the pure Rust dns/query types, but do not extend the query ABI/Go fallback pattern into sequence-core. Keep the existing adapter untouched until the later retirement gate. |
 | `08-17-rust-phase3b-sequence-execution-foundation` | **archived/completed** (`2026-08-18`) | Pure `rust/sequence-core` foundation complete: typed owned execution state, validated program model, explicit continuation stack, product-contract/deviation classification, fuel/cancellation, and no Go adapter/ABI/selector. Implementation commit `0c53c7d`; archive commit `a18fd89`. | Preserve the reviewed sequence contract. Do not reopen Phase3B while planning or implementing Phase4. |
-| `08-17-rust-phase4-upstream-foundation` | **in_progress — Slice1 response-commit linearization implemented, awaiting root review** (`2026-09-16`, planning PASS `16192ea`, Slice0 PASS `3108305`) | Phase3B prerequisite, the Phase4 planning package, and Slice0 are root-reviewed. Slice1 UDP and its narrow remediation are implemented: deterministic in-flight close drain, `Connect(NotSent)` local setup classification, retained wrong-peer/wrong-ID diagnostics, and one response-commit linearization gate sharing the registration/`begin_close` mutex for both the valid TC and validated non-TC paths. No TCP, fallback, C ABI, Go ownership, selector, or production wiring was added. | Review the Slice1 commit-gate evidence; do not start Slice2/TCP or later work until a new explicit root-review authorization. |
+| `08-17-rust-phase4-upstream-foundation` | **in_progress — Slice2 TCP framing authorized** (`2026-09-16`, planning PASS `16192ea`, Slice0 PASS `3108305`, Slice1 PASS `7c65a17`) | Phase3B prerequisite, the Phase4 planning package, Slice0, and Slice1 are root-reviewed. Slice2 is now explicitly authorized by the user for one fresh plain-TCP connection per exchange with exact framing, cancellation/deadline, validation, close, and concurrent stream isolation. No TC fallback, pooling, reuse, pipeline, retry, C ABI, Go ownership, selector, or production wiring is authorized. | Implement only Slice2, then stop and request root review before Slice3 or composite fallback. |
 
-Active migration state is **Phase 4 Slice1 response-commit linearization implemented;
-awaiting root review** on branch `rust`: Phase3B is archived/completed, the Phase4
-planning package passed root review at `16192ea`, the Slice0 remediation passed at
-`3108305`, and the user explicitly authorized Slice1. Slice0 provides the pure
-Rust contract skeleton and dns-core header helper; Slice1 adds only the
-one-exchange/one-socket UDP primitive plus the narrow close-drain, setup-error,
-mismatch-diagnostic remediation, and the single `Lifecycle::commit_response`
-linearization gate that both UDP response paths use after validation. The task
-remains `in_progress` and must stop for another root review. It must not start
-Slice2, TCP/fallback, add a transport C ABI, Go pool-buffer ownership, selector,
-or production wiring. The existing `main` release remains Go-only and this
-incomplete `rust` branch is not a production target.
+Active migration state is **Phase 4 Slice2 TCP framing authorized** on branch
+`rust`: Phase3B is archived/completed, the Phase4 planning package passed root
+review at `16192ea`, Slice0 passed at `3108305`, and Slice1 passed at
+`7c65a17`. The user explicitly authorized Slice2. Slice0 provides the pure Rust
+contract skeleton and dns-core header helper; Slice1 provides the one-exchange/
+one-socket UDP primitive, deterministic close drain, setup-error taxonomy,
+mismatch diagnostics, and response-commit linearization. Slice2 may add only
+the fresh plain-TCP framing primitive and its tests. The task remains
+`in_progress` and must stop for another root review before Slice3 or
+TC-to-TCP fallback. It must not add a transport C ABI, Go pool-buffer
+ownership, selector, production wiring, or later protocol work. The existing
+`main` release remains Go-only and this incomplete `rust` branch is not a
+production target.
 The matcher tasks (`08-13-rust-matcher-foundation`,
 `08-13-rust-matcher-phase2-expansion`) are archived/completed and are no
 longer active work; their historical records are unchanged.
