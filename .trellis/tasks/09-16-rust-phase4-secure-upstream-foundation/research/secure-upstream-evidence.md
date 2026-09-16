@@ -213,3 +213,29 @@ driver, retry, pool, or runtime task.
 The structured query API may normalize raw query escaping (for example a
 valueless pair can serialize with `=`); byte-for-byte raw query preservation is
 not claimed, while decoded pair semantics and escaped path preservation are.
+
+## Slice0 root-review remediation — 2026-09-17
+
+The first formal review of remote commit `7ebc86d08a20d07ed0d8087c7ea048e83bbf6dc2`
+returned `FAIL / Slice0 remains OPEN` with two scoped P1 findings. The reviewer
+confirmed the TLS policy, dependency boundary, pure DoH target, Hyper source
+evidence, and Slice1+ scope boundary; only these endpoint pre-I/O contracts
+blocked closure.
+
+1. `DohEndpoint::new` now rejects raw carriage-return and line-feed bytes in the
+   original URL before calling `url::Url::parse`. The parser can otherwise
+   discard those bytes as a non-fatal syntax normalization. The new data-free
+   `ServiceUrlError::ControlCharacter` remains `NotSent` and cannot echo URL or
+   query material.
+2. URL-derived domain hosts now call the existing
+   `ServerIdentity::from_dns_name` path through `from_url_host`, so underscore,
+   overlong-label, and leading/trailing-hyphen rules are identical for direct
+   and URL-derived identities. IP URL hosts remain unchanged.
+
+The DSH remediation first reproduced the shared-validation defect (URL host
+accepted where `ServerIdentity::new` rejected it) and the missing CR/LF error
+contract, then turned both tests green. Parent verification now reports 27
+focused secure tests and 125 upstream-core tests passing, with fmt, clippy,
+workspace check, and diff check passing. The corrected commit is sent back to
+the same `rust0916` conversation for another formal review; Slice1 remains
+unauthorized.

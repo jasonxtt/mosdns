@@ -308,6 +308,108 @@ fn doh_endpoint_rejects_userinfo_and_fragments_without_leaking_them() {
 }
 
 #[test]
+fn doh_endpoint_reuses_shared_identity_validation_for_url_hosts() {
+    // A URL-derived DNS host must obey the exact same identity contract as
+    // `ServerIdentity::new`; no second, looser hostname rule is introduced.
+    for host in ["exa_mple.example", "-leading.example", "trailing-.example"] {
+        let url = format!("https://{host}/dns-query?token=topsecret");
+        let from_url = DohEndpoint::new(&url, v4(443))
+            .expect_err("a URL host must fail the shared identity validation");
+        let direct =
+            ServerIdentity::new(host).expect_err("the shared validator rejects this DNS name");
+        assert_eq!(from_url, direct, "host {host:?}");
+        assert_eq!(
+            from_url,
+            SecureError::InvalidIdentity(IdentityError::Malformed)
+        );
+        assert_eq!(from_url.side_effect(), SideEffectState::NotSent);
+
+        let display = from_url.to_string();
+        let debug = format!("{from_url:?}");
+        for leaked in ["https://", host, "dns-query", "token", "topsecret"] {
+            assert!(
+                !display.contains(leaked),
+                "Display leaked {leaked:?}: {display}"
+            );
+            assert!(!debug.contains(leaked), "Debug leaked {leaked:?}: {debug}");
+        }
+    }
+
+    // A label longer than 63 bytes is accepted by the URL parser but rejected
+    // by the shared validator.
+    let overlong = format!("{}.example", "a".repeat(64));
+    let url = format!("https://{overlong}/dns-query");
+    let from_url =
+        DohEndpoint::new(&url, v4(443)).expect_err("an overlong URL host label must be rejected");
+    assert_eq!(
+        from_url,
+        ServerIdentity::new(&overlong).expect_err("the shared validator rejects this label")
+    );
+    assert_eq!(
+        from_url,
+        SecureError::InvalidIdentity(IdentityError::Malformed)
+    );
+}
+
+#[test]
+fn doh_endpoint_keeps_ip_url_hosts_successful_after_identity_reuse() {
+    let v4_endpoint = DohEndpoint::new("https://192.0.2.1/dns-query", v4(443))
+        .expect("an IPv4 URL host still constructs");
+    assert!(v4_endpoint.identity().is_ip());
+    assert_eq!(v4_endpoint.identity().as_str(), "192.0.2.1");
+
+    let v6_endpoint = DohEndpoint::new("https://[2001:db8::53]/dns-query", v6(443))
+        .expect("an IPv6 URL host still constructs");
+    assert!(v6_endpoint.identity().is_ip());
+    assert_eq!(v6_endpoint.identity().as_str(), "2001:db8::53");
+}
+
+#[test]
+fn doh_endpoint_rejects_raw_cr_and_lf_before_url_parsing() {
+    // The WHATWG URL parser strips raw ASCII CR/LF before parsing, so without
+    // an explicit scan these inputs would be silently accepted; a CR/LF in a
+    // path or query is a request-smuggling vector. The host spellings here are
+    // also accepted by `url`, so the rejection must precede `Url::parse`.
+    for input in [
+        "https://dns.example/dns\r-query?token=topsecret",
+        "https://dns.example/dns\n-query?token=topsecret",
+        "https://dns.example/dns-query?token=top\rsecret",
+        "https://dns.example/dns-query?token=top\nsecret",
+        "https://dns.example/dns-query?token=topsecret\r",
+        "https://exa\r_mple.example/dns-query?token=topsecret",
+        "https://exa\n_mple.example/dns-query?token=topsecret",
+    ] {
+        let error = DohEndpoint::new(input, v4(443))
+            .expect_err("a raw CR or LF must be rejected before URL parsing");
+        assert_eq!(
+            error,
+            SecureError::InvalidServiceUrl(ServiceUrlError::ControlCharacter),
+            "input {input:?}"
+        );
+        assert_eq!(error.side_effect(), SideEffectState::NotSent);
+
+        // The data-free variant must not echo URL/query material or CR/LF.
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        for leaked in [
+            "https://",
+            "dns.example",
+            "dns-query",
+            "token",
+            "topsecret",
+            "\r",
+            "\n",
+        ] {
+            assert!(
+                !display.contains(leaked),
+                "Display leaked {leaked:?}: {display}"
+            );
+            assert!(!debug.contains(leaked), "Debug leaked {leaked:?}: {debug}");
+        }
+    }
+}
+
+#[test]
 fn doh_endpoint_rejects_zero_dial_port() {
     for dial in [v4(0), v6(0)] {
         assert_eq!(
