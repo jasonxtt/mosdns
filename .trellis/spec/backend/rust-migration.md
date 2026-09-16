@@ -454,7 +454,7 @@ let result = execute(&program, entry, &mut state, &mut control);
 
 Phase 4 transport foundations use `rust/upstream-core` as a pure Rust sibling
 of `rust/sequence-core`. The future host composes both crates; the transport
-crate depends on `mosdns-dns-core` only and must not depend on
+crate uses `mosdns-dns-core` as its only MosDNS crate dependency and must not depend on
 `sequence-core`, `mosdns-runtime`, Go, cgo, selectors, or fallback paths.
 
 ### 2. Signatures
@@ -473,9 +473,9 @@ crate depends on `mosdns-dns-core` only and must not depend on
 
 - Request input is borrowed and read-only; `ExchangeRequest` validates through
   `mosdns-dns-core::parse_query` and records the original transaction ID.
-- Slice0 prepares exchange state only. Slice1 now owns only the reviewed
-  one-exchange/one-socket UDP I/O; it runs on the caller's host-owned runtime,
-  never creates a runtime, and does not implement TCP or TC fallback.
+- The accepted foundation includes per-exchange UDP, fresh plain TCP and
+  `UdpTcpPolicy`. All run on the caller's host-owned runtime; no runtime is
+  created by an upstream. The secure-upstream successor is planning only.
 - `ExchangeResponse` owns its complete returned wire. No Go pool or FFI
   release is part of the API.
 - A prepared exchange keeps caller cancellation and upstream-owner shutdown
@@ -506,8 +506,22 @@ crate depends on `mosdns-dns-core` only and must not depend on
   query exactly once, validates the configured peer and response ID, ignores
   wrong-peer/wrong-ID datagrams, and returns an owned response. It uses the
   full legal datagram capacity rather than the Go 4095-byte buffer; no shared
-  demux, retransmission, retry, pool, reuse, pipeline, TCP, or production
-  wiring is part of this slice.
+  demux, retransmission, generic retry, pool, reuse, pipeline or production
+  wiring is part of this primitive.
+- TCP opens one stream per exchange; `tcp::write_frame` / `read_frame` own
+  exact two-byte framing and partial I/O. It validates QR, original ID and the
+  complete DNS response, including TCP TC responses, before final commit.
+- `UdpTcpPolicy::new(Endpoint)` expects a UDP endpoint and uses the same
+  numeric address/port for TCP. `exchange(ExchangeRequest, ExchangeContext)`
+  permits exactly one TCP attempt after a valid UDP TC observation, with the
+  same borrowed query, original ID and absolute deadline. UDP errors never
+  trigger fallback. Its `close().await` drains both owners.
+- A TCP-leg error retains `UpstreamError::TcpFallback { prior, cause }`;
+  prior records the UDP TC observation and overall Sent state. Pre-fallback
+  cancellation/deadline remains a direct typed control error with Sent state.
+- TCP final response commit checks owner close, caller cancellation, original
+  deadline, then success under the lifecycle lock. These checks also apply to
+  the final TCP leg of the composite; do not reset the deadline on fallback.
 
 ### 4. Validation & Error Matrix
 
@@ -523,6 +537,11 @@ crate depends on `mosdns-dns-core` only and must not depend on
   from `Open` returns an explicit no-op result and leaves the owner `Open`.
 - Header shorter than 12 bytes -> `HeaderError::TooShort`; QR clear ->
   `HeaderError::NotResponse`.
+- TCP zero prefix/EOF/partial frame/wrong ID/malformed DNS -> typed terminal
+  error; never reuse or retry the stream. Partial writes are conservatively
+  MaybeSent; complete write followed by read failure is Sent.
+- A valid non-TC UDP response returns with zero TCP connections; valid TC
+  permits at most one; malformed UDP permits zero.
 
 ### 5. Good/Base/Bad Cases
 
@@ -547,6 +566,13 @@ crate depends on `mosdns-dns-core` only and must not depend on
 - `dns-core` tests assert minimum header validity, QR, TXID, TC, and no RR/OPT
   parsing in the helper. Manifest/tree checks assert the sibling dependency
   direction and absence of sequence/runtime/FFI dependencies.
+- `slice2_tcp.rs` verifies exact framing, partial I/O, EOF, size, ID,
+  cancellation and fresh-stream isolation. `slice3_policy.rs` verifies the
+  TCP connection count, unchanged query/deadline, prior TC errors, cancellation
+  between legs and deterministic close/drain.
+- Race tests use explicit server/client handshakes and bounded waits, not
+  equal sleeps as evidence of ordering. Foundation acceptance is recorded in
+  `.trellis/tasks/archive/2026-09/08-17-rust-phase4-upstream-foundation/implement.md`.
 
 ### 7. Wrong vs Correct
 
