@@ -2,9 +2,12 @@
 
 > The Phase4 planning gate passed at `16192ea`; the user authorized
 > `task.py start` on 2026-09-16. The task is `in_progress`; Slice0 passed root
-> review and the user explicitly authorized the Slice2 fresh plain-TCP framing
-> round after the Slice1 root-review PASS. Do not start Slice3/TC fallback or
-> add production wiring without another explicit root-review authorization.
+> review, the user explicitly authorized the Slice2 fresh plain-TCP framing
+> round after the Slice1 root-review PASS, and the user explicitly authorized
+> Slice3 on 2026-09-16 after the Slice2 formal PASS/CLOSED. Slice3's UDP
+> TC-to-TCP composite policy is now implemented and pending same-thread root
+> review. Do not start Slice4 or add production wiring without another explicit
+> root-review authorization.
 
 ## Execution rules
 
@@ -449,6 +452,52 @@ Focused verification:
 
 STOP: root review of protocol fallback, retry safety, and deadline/cancel
 precedence.
+
+### Slice 3 implementation record — 2026-09-16
+
+- The user explicitly authorized Slice3 on 2026-09-16, after the Slice2 formal
+  same-thread root-review `PASS / CLOSED` at `b83dbb4`. The authorized scope is
+  only the reviewed UDP TC-to-TCP composite policy; Slice4, production wiring,
+  Go/cgo/ABI/selector/Go-fallback, live integration, and later phases remain
+  unauthorized.
+- RED-first evidence: commit `78b4311` added the Slice3 contract target
+  `rust/upstream-core/tests/slice3_policy.rs` before any composite production
+  API existed, so the target failed to compile against the missing
+  `UdpTcpPolicy`/`TcpFallbackContext` public boundary and the fallback error
+  shape. The minimum production API was added only afterward in
+  `rust/upstream-core/src/composite.rs` plus the smallest `src/lib.rs`
+  re-exports (commits `a0bdfdf` and `74e729c`).
+- Minimum composite behavior: one UDP-first exchange; a complete UDP response is
+  returned unchanged with no TCP work; only a validated TC=1 observation may
+  trigger exactly one fresh TCP fallback on the same numeric endpoint carrying
+  the same borrowed query bytes, the same original DNS ID, and the same cloned
+  absolute deadline/cancellation context. A malformed or undersized UDP error is
+  terminal and is never reclassified as TC. There is no generic retry,
+  retransmission, pooling, reuse, pipelining, hidden runtime, or Go re-entry. A
+  failed fallback returns `UpstreamError::TcpFallback { prior, cause }` so the
+  prior TC/ID/`Sent` observation is retained, and the composite close path
+  (`UdpTcpPolicy::close`) cancels and drains both legs through the existing
+  awaitable owner close.
+- Focused coverage: `slice3_policy.rs` has 10 handshake-driven integration
+  tests. They cover the exactly-one-fallback trigger with the original query, a
+  complete response opening no TCP connection, terminal undersized/malformed TC
+  handling, retained prior TC context on fallback failure, close before/after an
+  in-flight UDP exchange, exchange rejection after close with no UDP send,
+  nested close/drain of an in-flight TCP fallback, idempotent close of an unused
+  policy, cancellation before the TC observation preventing all TCP work, and
+  the remaining-portion absolute-deadline budget for the single fallback. Every
+  ordering proof uses explicit server handshakes and a bounded no-TCP-connection
+  window rather than equal sleeps, and the no-retry assertions confirm a failed
+  fallback is terminal.
+- No new dependency was added: the policy composes the existing reviewed UDP and
+  TCP owners and reuses the Tokio/tokio-util features already declared for
+  `mosdns-upstream-core`. Slice3 changes no Cargo manifest or lockfile.
+- Scope boundary: the composite policy is a pure Rust library boundary only; no
+  Go/cgo/ABI/selector/Go-fallback, public production wiring, server listener,
+  configuration, or Slice4 work is present. `task.json` remains
+  `status = in_progress`. STOP for same-thread root review; no root-review PASS
+  is claimed here, and no final commit SHA is recorded before final
+  verification.
 
 ## Slice 4 — final quality gate and evidence
 
