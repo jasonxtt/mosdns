@@ -475,6 +475,11 @@ crate depends on `mosdns-dns-core` only and must not depend on
   runtime.
 - `ExchangeResponse` owns its complete returned wire. No Go pool or FFI
   release is part of the API.
+- A prepared exchange keeps caller cancellation and upstream-owner shutdown
+  as separate wakeable tokens. Owner shutdown wins the terminal check and
+  returns `Closed(state)`; caller cancellation returns `Cancelled(state)`.
+  The transport crate may expose async cancellation futures for later socket
+  selection, but it must not create a hidden Tokio runtime.
 - `SideEffectState` is closed: `NotSent`, `MaybeSent`, `Sent`. Connect/setup,
   invalid request/endpoint, and outbound frame-too-large are `NotSent`;
   runtime errors retain the last tracked state.
@@ -494,6 +499,8 @@ crate depends on `mosdns-dns-core` only and must not depend on
   uncancelled context -> `DeadlineExceeded(state)`.
 - Owner Closing/Closed -> `Closed(state)`; `Runtime(state)` never introduces
   an `Unknown` marker.
+- Close completion is guarded to `Closing -> Closed`; a public completion call
+  from `Open` returns an explicit no-op result and leaves the owner `Open`.
 - Header shorter than 12 bytes -> `HeaderError::TooShort`; QR clear ->
   `HeaderError::NotResponse`.
 

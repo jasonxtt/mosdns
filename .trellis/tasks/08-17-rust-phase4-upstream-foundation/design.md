@@ -112,6 +112,11 @@ The following is a contract sketch, not code to add during planning:
         cancellation: TransportCancellation,
     }
 
+    ExchangeControl {
+        context: ExchangeContext,
+        owner_cancellation: TransportCancellation,
+    }
+
     ExchangeResponse {
         wire: Bytes,                 // fully owned response wire
         request_id: u16,
@@ -146,6 +151,12 @@ ExchangeContext carries one absolute deadline, not separate timeout values for
 UDP and TCP. A composite UDP/TCP policy passes the same deadline into the TCP
 fallback. The context also carries cancellation; it does not carry Go
 context.Context, a pointer, or a C handle.
+
+A prepared exchange retains caller cancellation and owner shutdown as separate
+tokens in `ExchangeControl`. Owner shutdown is checked before caller
+cancellation and reports `Closed`; caller cancellation reports `Cancelled`.
+Both token types expose an async cancellation wake primitive for future I/O
+selection. Slice0 does not create a Tokio runtime or perform async I/O.
 
 The API must make close observable. New exchange calls after Closing begins
 return Closed. An in-flight call terminated by owner close returns Closed with
@@ -415,6 +426,12 @@ in-flight exchange to stop. It closes UDP sockets and TCP streams, cancels
 deadline timers, drops pending response ownership, and awaits exchange task
 joins. Once the in-flight set is empty, it enters Closed. Repeated Close calls
 are idempotent and await the same completion state.
+
+The Slice0 synchronous skeleton has no in-flight task set to drain. Its
+completion operation is nevertheless guarded: `finish_close` can transition
+only `Closing -> Closed`; calling it while `Open` returns `NotClosing` and
+leaves the owner open. Later async close work must preserve this gate while
+awaiting the same completion state.
 
 An exchange observes close before starting bind/connect/send, while awaiting
 receive/read, and before committing a response. A response that has already

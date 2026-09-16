@@ -3,8 +3,9 @@ use std::time::{Duration, Instant};
 
 use mosdns_dns_core::ResponseHeader;
 use mosdns_upstream_core::{
-    CloseResult, CloseTransition, ExchangeContext, ExchangeRequest, ExchangeResponse,
-    LifecycleState, SideEffectState, Transport, TransportCancellation, Upstream, UpstreamError,
+    CloseCompletion, CloseResult, CloseTransition, ExchangeContext, ExchangeRequest,
+    ExchangeResponse, LifecycleState, SideEffectState, Transport, TransportCancellation, Upstream,
+    UpstreamError,
 };
 
 fn endpoint(transport: Transport) -> mosdns_upstream_core::Endpoint {
@@ -120,6 +121,58 @@ fn cancellation_children_observe_parent_without_requiring_sequence_core() {
 }
 
 #[test]
+fn prepared_exchange_distinguishes_owner_close_from_caller_cancellation() {
+    let upstream = Upstream::new(endpoint(Transport::Udp));
+    let query = valid_query();
+    let caller_cancellation = TransportCancellation::new();
+    let prepared = upstream
+        .prepare_exchange(
+            ExchangeRequest::new(&query).expect("valid query"),
+            ExchangeContext::new(
+                Instant::now() + Duration::from_secs(30),
+                caller_cancellation.clone(),
+            ),
+        )
+        .expect("exchange is prepared while the owner is open");
+
+    assert!(!prepared.owner_cancellation().is_cancelled());
+    assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+    assert!(prepared.owner_cancellation().is_cancelled());
+    assert_eq!(
+        prepared.check_at(Instant::now(), SideEffectState::NotSent),
+        Err(UpstreamError::Closed(SideEffectState::NotSent))
+    );
+
+    let caller_upstream = Upstream::new(endpoint(Transport::Udp));
+    let caller_query = valid_query();
+    let caller_prepared = caller_upstream
+        .prepare_exchange(
+            ExchangeRequest::new(&caller_query).expect("valid query"),
+            ExchangeContext::new(
+                Instant::now() + Duration::from_secs(30),
+                caller_cancellation.clone(),
+            ),
+        )
+        .expect("exchange is prepared while the owner is open");
+    caller_cancellation.cancel();
+    assert_eq!(
+        caller_prepared.check_at(Instant::now(), SideEffectState::NotSent),
+        Err(UpstreamError::Cancelled(SideEffectState::NotSent))
+    );
+}
+
+#[test]
+fn close_completion_cannot_skip_the_closing_state() {
+    let upstream = Upstream::new(endpoint(Transport::Udp));
+    assert_eq!(upstream.finish_close(), CloseCompletion::NotClosing);
+    assert_eq!(upstream.lifecycle_state(), LifecycleState::Open);
+
+    assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+    assert_eq!(upstream.finish_close(), CloseCompletion::Closed);
+    assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
+}
+
+#[test]
 fn lifecycle_is_open_closing_closed_and_close_is_idempotent() {
     let upstream = Upstream::new(endpoint(Transport::Udp));
     assert_eq!(upstream.lifecycle_state(), LifecycleState::Open);
@@ -134,7 +187,7 @@ fn lifecycle_is_open_closing_closed_and_close_is_idempotent() {
     ));
 
     assert_eq!(upstream.begin_close(), CloseTransition::AlreadyClosing);
-    upstream.finish_close();
+    assert_eq!(upstream.finish_close(), CloseCompletion::Closed);
     assert_eq!(upstream.lifecycle_state(), LifecycleState::Closed);
     assert_eq!(upstream.close(), CloseResult::AlreadyClosed);
 

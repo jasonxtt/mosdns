@@ -21,9 +21,8 @@
   retry, a hidden runtime, a second implementation, or a Go fallback.
 - The implementation must use the decisions in design.md and the classifications
   in its compatibility matrix. Any new behavior or scope needs a new review.
-- Keep the task status planning until the root reviewer explicitly authorizes
-  task start. After authorization, each later slice still requires its own
-  acceptance decision.
+- Keep the task status `in_progress` after the authorized task start. Each
+  later slice still requires its own acceptance decision.
 
 ## Slice 0 — contract skeleton and dependency boundary
 
@@ -38,8 +37,12 @@ Red tests and fixtures first:
 - typed errors expose InvalidRequest, InvalidEndpoint, Cancelled,
   DeadlineExceeded, Closed, and side-effect state;
 - an absolute deadline and cancellation token have deterministic precedence;
+- a prepared exchange keeps caller cancellation distinct from owner close and
+  reports `Closed` versus `Cancelled` without polling-only ownership;
 - Open -> Closing -> Closed is idempotent, rejects new work, and describes
   in-flight cleanup;
+- close completion cannot skip `Closing` and turn an open owner directly into
+  `Closed`;
 - the DNS header inspection contract distinguishes QR, TXID, TC, and
   undersized headers without duplicating RR parsing;
 - the future crate dependency graph has no sequence-core/upstream-core cycle;
@@ -78,14 +81,27 @@ start Slice 1 without explicit approval.
 - `task.py start rust-phase4-upstream-foundation` completed successfully;
   `task.json.status = in_progress`.
 - RED evidence: the new contract test target initially failed to compile for
-  the missing upstream types and missing `dns-core` header helper.
-- GREEN evidence: the focused upstream contract suite has 10 passing tests;
+  the missing upstream types and missing `dns-core` header helper. The narrow
+  remediation test target then failed to compile for the missing
+  `CloseCompletion`, owner-cancellation access, and prepared-control checks.
+- GREEN evidence: the focused upstream contract suite has 12 passing tests;
   the dns-core header suite and affected clippy/format checks pass.
-- The workspace member is `rust/upstream-core`; its only normal dependency is
-  `mosdns-dns-core`. No Tokio/runtime, sequence-core, FFI, or Go dependency
-  was added.
+- The workspace member is `rust/upstream-core`; it depends on
+  `mosdns-dns-core` and `tokio-util` only. `tokio-util` supplies the
+  wakeable Rust cancellation token; Slice0 creates no Tokio runtime. No
+  sequence-core, FFI, or Go dependency was added.
 - The Slice0 stop condition is active: no UDP/TCP I/O, fallback, retry,
   listener, host wiring, or Slice1 work was started.
+
+### Slice 0 narrow remediation record — 2026-09-16
+
+- Root review found two scoped blockers: prepared exchanges did not observe
+  owner cancellation separately from caller cancellation, and public
+  `finish_close` could skip `Open -> Closing`.
+- The minimum repair adds a `tokio-util` cancellation token with an async wake
+  method, an `ExchangeControl` containing distinct caller/owner tokens, and a
+  compare-exchange guarded `finish_close` that returns `NotClosing` from
+  `Open`. It still performs no network I/O and does not add Slice1 scope.
 
 ## Slice 1 — UDP exchange primitive
 

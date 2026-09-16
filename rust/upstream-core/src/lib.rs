@@ -6,11 +6,11 @@
 
 use std::fmt;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Instant;
 
 use mosdns_dns_core::parse_query;
+use tokio_util::sync::CancellationToken;
 
 /// The direct transport kinds covered by the first Phase 4 boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,49 +92,35 @@ impl<'q> ExchangeRequest<'q> {
 
 /// A transport cancellation token owned by upstream-core rather than
 /// sequence-core. Child cancellation is local; parent cancellation propagates
-/// to all descendants.
+/// to all descendants. The token exposes an async wake primitive for future
+/// socket/timer select code; Slice0 never creates or owns a Tokio runtime.
 #[derive(Clone)]
-pub struct TransportCancellation(Arc<CancellationState>);
-
-struct CancellationState {
-    cancelled: AtomicBool,
-    parent: Option<Arc<CancellationState>>,
-}
+pub struct TransportCancellation(CancellationToken);
 
 impl TransportCancellation {
     #[must_use]
     pub fn new() -> Self {
-        Self(Arc::new(CancellationState {
-            cancelled: AtomicBool::new(false),
-            parent: None,
-        }))
+        Self(CancellationToken::new())
     }
 
     #[must_use]
     pub fn child_token(&self) -> Self {
-        Self(Arc::new(CancellationState {
-            cancelled: AtomicBool::new(false),
-            parent: Some(Arc::clone(&self.0)),
-        }))
+        Self(self.0.child_token())
     }
 
     pub fn cancel(&self) {
-        self.0.cancelled.store(true, Ordering::SeqCst);
+        self.0.cancel();
     }
 
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.0.is_cancelled()
     }
-}
 
-impl CancellationState {
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-            || self
-                .parent
-                .as_ref()
-                .is_some_and(|parent| parent.is_cancelled())
+    /// Waits until this token is cancelled. Future transport I/O can select
+    /// this future alongside the caller token, owner token, and deadline.
+    pub async fn cancelled(&self) {
+        self.0.cancelled().await;
     }
 }
 
@@ -184,6 +170,54 @@ impl ExchangeContext {
             return Err(UpstreamError::DeadlineExceeded(side_effect));
         }
         Ok(())
+    }
+}
+
+/// Distinguishes caller cancellation from owner shutdown for a prepared
+/// exchange. The two tokens remain separate so a future transport operation
+/// can select both wake futures and report the correct typed error.
+#[derive(Clone)]
+pub struct ExchangeControl {
+    context: ExchangeContext,
+    owner_cancellation: TransportCancellation,
+}
+
+impl ExchangeControl {
+    #[must_use]
+    pub fn new(context: ExchangeContext, owner_cancellation: TransportCancellation) -> Self {
+        Self {
+            context,
+            owner_cancellation,
+        }
+    }
+
+    #[must_use]
+    pub const fn context(&self) -> &ExchangeContext {
+        &self.context
+    }
+
+    #[must_use]
+    pub fn caller_cancellation(&self) -> TransportCancellation {
+        self.context.cancellation()
+    }
+
+    #[must_use]
+    pub fn owner_cancellation(&self) -> TransportCancellation {
+        self.owner_cancellation.clone()
+    }
+
+    /// Checks owner shutdown before caller cancellation, then the shared
+    /// absolute deadline. Owner shutdown is terminal `Closed`, while explicit
+    /// caller cancellation remains `Cancelled`.
+    pub fn check_at(
+        &self,
+        now: Instant,
+        side_effect: SideEffectState,
+    ) -> Result<(), UpstreamError> {
+        if self.owner_cancellation.is_cancelled() {
+            return Err(UpstreamError::Closed(side_effect));
+        }
+        self.context.check_at(now, side_effect)
     }
 }
 
@@ -365,8 +399,16 @@ impl Lifecycle {
         }
     }
 
-    pub fn finish_close(&self) {
-        self.state.store(CLOSED, Ordering::Release);
+    #[must_use]
+    pub fn finish_close(&self) -> CloseCompletion {
+        match self
+            .state
+            .compare_exchange(CLOSING, CLOSED, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => CloseCompletion::Closed,
+            Err(OPEN) | Err(CLOSING) => CloseCompletion::NotClosing,
+            Err(_) => CloseCompletion::AlreadyClosed,
+        }
     }
 
     pub fn ensure_open(&self) -> Result<(), UpstreamError> {
@@ -389,6 +431,15 @@ impl Default for Lifecycle {
 pub enum CloseTransition {
     BeganClosing,
     AlreadyClosing,
+    AlreadyClosed,
+}
+
+/// Result of attempting to complete owner shutdown. Completion only succeeds
+/// from `Closing`; an open owner cannot skip the observable Closing state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CloseCompletion {
+    Closed,
+    NotClosing,
     AlreadyClosed,
 }
 
@@ -437,17 +488,19 @@ impl Upstream {
         transition
     }
 
-    pub fn finish_close(&self) {
-        self.lifecycle.finish_close();
+    #[must_use]
+    pub fn finish_close(&self) -> CloseCompletion {
+        self.lifecycle.finish_close()
     }
 
     #[must_use]
     pub fn close(&self) -> CloseResult {
         match self.begin_close() {
-            CloseTransition::BeganClosing => {
-                self.finish_close();
-                CloseResult::Closed
-            }
+            CloseTransition::BeganClosing => match self.finish_close() {
+                CloseCompletion::Closed => CloseResult::Closed,
+                CloseCompletion::NotClosing => CloseResult::AlreadyClosing,
+                CloseCompletion::AlreadyClosed => CloseResult::AlreadyClosed,
+            },
             CloseTransition::AlreadyClosing => CloseResult::AlreadyClosing,
             CloseTransition::AlreadyClosed => CloseResult::AlreadyClosed,
         }
@@ -468,7 +521,7 @@ impl Upstream {
         Ok(PreparedExchange {
             endpoint: self.endpoint,
             request,
-            context,
+            control: ExchangeControl::new(context, self.cancellation.clone()),
         })
     }
 }
@@ -477,7 +530,7 @@ impl Upstream {
 pub struct PreparedExchange<'q> {
     endpoint: Endpoint,
     request: ExchangeRequest<'q>,
-    context: ExchangeContext,
+    control: ExchangeControl,
 }
 
 impl<'q> PreparedExchange<'q> {
@@ -493,6 +546,21 @@ impl<'q> PreparedExchange<'q> {
 
     #[must_use]
     pub const fn context(&self) -> &ExchangeContext {
-        &self.context
+        self.control.context()
+    }
+
+    #[must_use]
+    pub fn owner_cancellation(&self) -> TransportCancellation {
+        self.control.owner_cancellation()
+    }
+
+    /// Checks owner shutdown, caller cancellation, and the shared deadline in
+    /// the contractually defined order.
+    pub fn check_at(
+        &self,
+        now: Instant,
+        side_effect: SideEffectState,
+    ) -> Result<(), UpstreamError> {
+        self.control.check_at(now, side_effect)
     }
 }

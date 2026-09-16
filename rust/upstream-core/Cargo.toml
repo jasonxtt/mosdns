@@ -11,6 +11,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 mosdns-dns-core = { path = "../dns-core" }
+tokio-util = { version = "0.7.16", features = ["rt"] }
 
 [lints]
 workspace = true
