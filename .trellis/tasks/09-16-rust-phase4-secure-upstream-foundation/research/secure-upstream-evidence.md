@@ -289,21 +289,74 @@ The generator is `rcgen`, declared **dev-dependency only** in
   smallest reviewed option and reuses the `ring` provider already selected for
   the client, so no second crypto backend is introduced.
 - Features: rcgen's default features are disabled and only `ring` (which
-  implies `crypto`) is enabled. This turns off the optional `pem` encoder,
-  `aws_lc_rs`/`fips`, and `zeroize` features, so no `aws-lc-rs`/`aws-lc-sys` or
+  implies `crypto`) is enabled. This turns off the optional `pem` encoder and
+  the `aws_lc_rs`/`fips`/`zeroize` features, so no `aws-lc-rs`/`aws-lc-sys` or
   OpenSSL package enters the graph.
-  **Correction (2026-09-16, second review):** an earlier version of this record
-  also claimed "no `x509-parser`". That claim was wrong. Disabling default
-  features does not remove rcgen's *mandatory* `x509-parser` dependency: in the
-  resolved `rust/Cargo.lock`, `rcgen 0.14.7` declares dependencies
-  `ring`, `rustls-pki-types`, `time`, `x509-parser`, `yasna`. The real graph is
-  recorded below.
-- Resolved dev-graph additions introduced by rcgen (exact, from
-  `Cargo.lock` / `cargo metadata --locked`):
+- **x509-parser: optional, present in the lockfile, NOT activated.**
+  Two earlier revisions of this record got this wrong in opposite directions.
+  The first said the feature trimming meant "no `x509-parser`"; the second
+  corrected that by calling `x509-parser` a *mandatory* dependency and an
+  active member of the dev build graph. The second correction was also wrong.
+  The three layers must be kept distinct:
+
+  1. **Manifest declarations** (published `rcgen 0.14.7` manifest): the
+     `[dependencies.x509-parser]` entry is `version = "0.18"`, `optional =
+     true`. Every mention inside rcgen's `[features]` table is a *weak* optional
+     reference — `ring = ["crypto", "dep:ring", "x509-parser?/verify"]` and the
+     two `x509-parser?/verify-aws` entries in `aws_lc_rs`/
+     `aws_lc_rs_unstable`. No feature ever writes `dep:x509-parser`, and no
+     feature named `x509-parser` exists. The only non-weak mentions are
+     `required-features` on the `sign-leaf-with-ca` and `sign-leaf-with-pem-files`
+     *examples*, which are not built by this workspace.
+  2. **Lockfile resolution superset**: `rust/Cargo.lock` lists `x509-parser`
+     in `rcgen`'s package `dependencies` array, together with every package it
+     would pull in (`asn1-rs`, `asn1-rs-derive`, `asn1-rs-impl`, `der-parser`,
+     `oid-registry`, `nom`, `rusticata-macros`, `data-encoding`, `lazy_static`,
+     `displaydoc`, `num-bigint`, `num-traits`, `thiserror`/`-impl`). The lock
+     records resolved *candidate* packages for all optional dependencies of
+     every crate in the workspace; it is a superset and is **not** evidence of
+     what is compiled.
+  3. **Actually activated build graph**: with only `ring` enabled, rcgen's
+     activated edges are `ring`, `rustls-pki-types`, `time` and `yasna`.
+     `cargo tree -p rcgen -e features --locked` lists exactly those and never
+     `x509-parser`; a workspace-wide
+     `cargo tree --workspace -e features --locked` contains no `x509-parser`
+     line at all. `x509-parser` is therefore **not compiled** in this
+     workspace.
+
+  Consequences: the fixture generation path is rcgen + ring + time + yasna +
+  rustls-pki-types only. `x509-parser` and its transitives are retained below
+  purely as a **lockfile-only conservative license/MSRV audit** — they are
+  covered in case a future reviewer or feature change activates them, not
+  because they are currently built.
+- Activated graph introduced by the rcgen dev-dependency (exact, from
+  `cargo tree -p rcgen -e features --locked` and `cargo metadata --locked`):
 
   | Package | Version | rust-version | License |
   | --- | --- | --- | --- |
   | rcgen | 0.14.7 | 1.71 | MIT OR Apache-2.0 |
+  | ring | 0.17.14 | 1.66.0 | Apache-2.0 AND ISC |
+  | rustls-pki-types | 1.15.1 | 1.60 | MIT OR Apache-2.0 |
+  | yasna | 0.5.2 | (none) | MIT OR Apache-2.0 |
+  | time / time-core | 0.3.45 / 0.1.7 | 1.83.0 | MIT OR Apache-2.0 |
+  | deranged | 0.5.8 | 1.85.0 | MIT OR Apache-2.0 |
+  | num-conv | 0.1.0 | 1.57.0 | MIT OR Apache-2.0 |
+  | powerfmt | 0.2.0 | 1.67.0 | MIT OR Apache-2.0 |
+  | untrusted | 0.9.0 | (none) | ISC |
+  | zeroize | 1.9.0 | 1.85 | Apache-2.0 OR MIT |
+  | getrandom | 0.2.17 | (none) | MIT OR Apache-2.0 |
+  | cfg-if | 1.0.4 | 1.32 | MIT OR Apache-2.0 |
+  | libc | 0.2.189 | 1.65 | MIT OR Apache-2.0 |
+  | cc | 1.4.6 | 1.65.0 | MIT OR Apache-2.0 |
+  | shlex | 2.0.1 | 1.46.0 | MIT OR Apache-2.0 |
+  | find-msvc-tools | 0.1.12 | 1.65.0 | MIT OR Apache-2.0 |
+
+- Lockfile-only packages (present in `Cargo.lock` as a resolution superset for
+  rcgen's `x509-parser` optional dependency, **not activated** by the current
+  feature set; audited conservatively for license and MSRV):
+
+  | Package | Version | rust-version | License |
+  | --- | --- | --- | --- |
   | x509-parser | 0.18.1 | 1.67.1 | MIT OR Apache-2.0 |
   | asn1-rs | 0.7.2 | 1.68 | MIT OR Apache-2.0 |
   | asn1-rs-derive | 0.6.0 | (none) | MIT OR Apache-2.0 |
@@ -318,28 +371,32 @@ The generator is `rcgen`, declared **dev-dependency only** in
   | num-bigint | 0.4.8 | 1.60 | MIT OR Apache-2.0 |
   | num-traits | 0.2.19 | 1.60 | MIT OR Apache-2.0 |
   | thiserror / -impl | 2.0.20 | 1.71 | MIT OR Apache-2.0 |
-  | time / time-core / time-macros | 0.3.45 / 0.1.7 / 0.2.25 | 1.83.0 | MIT OR Apache-2.0 |
-  | deranged | 0.5.8 | 1.85.0 | MIT OR Apache-2.0 |
-  | num-conv | 0.1.0 | 1.57.0 | MIT OR Apache-2.0 |
-  | powerfmt | 0.2.0 | 1.67.0 | MIT OR Apache-2.0 |
-  | memchr | 2.8.3 | 1.61 | Unlicense OR MIT |
+  | time-macros | 0.2.25 | 1.83.0 | MIT OR Apache-2.0 |
   | minimal-lexical | 0.2.1 | (none) | MIT/Apache-2.0 |
   | serde_core | 1.0.229 | 1.56 | MIT OR Apache-2.0 |
 
-  These are all permissively licensed (MIT / Apache-2.0 / Unlicense, or the
-  `MIT OR Apache-2.0` dual grant), compatible with this GPL-3.0-only project's
-  dependency policy.
-- MSRV: `rcgen 0.14.7` declares 1.71; the binding constraints in its chain are
-  `time`/`time-core`/`time-macros` at 1.83.0 and `deranged` at 1.85.0. Resolver
-  3 selects the 0.3.45 time line rather than the 1.88-requiring 0.3.5x line, and
-  `cargo add` reported "ignoring rcgen@0.14.10 (requires rustc 1.88)" for the
-  same reason. A `cargo metadata --locked` audit of the complete graph reports
-  **no** package whose `rust-version` exceeds 1.85.
-- Test-only isolation (re-audited): `cargo tree -e normal` for
-  `mosdns-upstream-core` contains **zero** `rcgen` and **zero** `x509-parser`
-  entries, and the whole-workspace `cargo tree -e normal` is likewise zero for
-  both. They appear only under the dev graph. No production module imports
-  rcgen, and the fixture module is compiled only into `tests/`.
+  Every package in both tables is permissively licensed (MIT, ISC,
+  Apache-2.0, Unlicense, or an `MIT OR Apache-2.0` / `Apache-2.0 AND ISC`
+  grant), compatible with this GPL-3.0-only project's dependency policy.
+- MSRV: `rcgen 0.14.7` declares 1.71. In the *activated* set the binding
+  constraints sit exactly at the ceiling: `deranged 0.5.8` and `zeroize 1.9.0`
+  both declare 1.85, with `time`/`time-core` at 1.83.0. Resolver 3 selects the
+  0.3.45 time line rather than the 1.88-requiring 0.3.5x line, and `cargo add`
+  reported "ignoring rcgen@0.14.10 (requires rustc 1.88)" for the same reason.
+  A `cargo metadata --locked` audit of the complete resolved graph (including
+  lockfile-only entries) reports **no** package whose `rust-version` exceeds
+  1.85.
+- Feature-aware audit commands used for the record above (all `--locked`):
+  `cargo tree -p rcgen -e features` (rcgen's real activated edges),
+  `cargo tree -p mosdns-upstream-core -e features` and
+  `cargo tree -p mosdns-upstream-core -e normal` (zero rcgen/x509-parser on the
+  normal edges), `cargo tree --workspace -e features` (no x509-parser line
+  anywhere), `cargo tree -p mosdns-upstream-core -e dev,features`, and
+  `cargo metadata` for the version/license/rust-version tables.
+- Test-only isolation (re-audited): `cargo tree` with `-e normal` shows
+  **zero** `rcgen` and **zero** `x509-parser` entries for `mosdns-upstream-core`
+  and for the whole workspace; both appear only on dev edges. No production
+  module imports rcgen, and the fixture module is compiled only into `tests/`.
 - No network or external `openssl` dependency: generation is in-process and
   offline. The earlier one-off OpenSSL 3.6.4 provenance note is superseded; no
   certificate bytes remain in the repository.
