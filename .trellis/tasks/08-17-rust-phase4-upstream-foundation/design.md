@@ -1,12 +1,14 @@
 # Phase 4 upstream transport architecture
 
-> Planning artifact plus Slice0/Slice1/Slice2 contract. The architecture and
-> compatibility questions were root-reviewed before implementation. Slice0 and
-> Slice1 passed root review, and the user explicitly authorized Slice2's fresh
-> plain-TCP framing primitive, which then passed same-thread root review as
-> `PASS / CLOSED`. On 2026-09-16 the user explicitly authorized the Slice3 UDP
-> TC-to-TCP composite policy recorded in section 6; this document does not
-> authorize Slice4 or production wiring.
+> Planning artifact plus Slice0/Slice1/Slice2/Slice3 contract. The architecture
+> and compatibility questions were root-reviewed before implementation. Slice0
+> and Slice1 passed root review, and the user explicitly authorized Slice2's
+> fresh plain-TCP framing primitive, which then passed same-thread root review
+> as `PASS / CLOSED`. On 2026-09-16 the user explicitly authorized the Slice3 UDP
+> TC-to-TCP composite policy recorded in section 6; that implementation at
+> `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread
+> root-review `PASS / CLOSED` (Actions run `35084388223` success). This document
+> does not authorize Slice4 or production wiring.
 
 ## 1. Boundary and dependency direction
 
@@ -14,8 +16,9 @@ Phase 4 adds a pure Rust library crate named rust/upstream-core. Slice0
 registered it as a workspace member; Slice1's UDP implementation passed root
 review; Slice2's fresh plain-TCP framing primitive also passed root review and
 is closed. The user authorized the Slice3 UDP TC-to-TCP composite policy on
-2026-09-16, and its implementation is present and pending same-thread root
-review. This document does not authorize Slice4 or production wiring.
+2026-09-16, and its implementation at
+`21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread root-review
+`PASS / CLOSED`. This document does not authorize Slice4 or production wiring.
 
 The intended crate relationship is:
 
@@ -554,8 +557,10 @@ Explicitly out of scope for this task:
 
 This architecture is complete only when the root reviewer accepts the decisions,
 the compatibility matrix, the KixDNS ledger, and the implementation slices.
-The planning, Slice0, Slice1, and Slice2 gates are closed; the user explicitly
-authorized the Slice3 UDP TC-to-TCP composite policy on 2026-09-16 after
-Slice2's formal `PASS / CLOSED`, and that Slice3 implementation is now pending
-same-thread root review. The task must stop for that review; nothing in this
+The planning, Slice0, Slice1, Slice2, and Slice3 gates are closed; the user
+explicitly authorized the Slice3 UDP TC-to-TCP composite policy on 2026-09-16
+after Slice2's formal `PASS / CLOSED`, and that Slice3 implementation at
+`21bff19212637c47df632a29dd4b3380cac7a4cc` is now formally same-thread
+root-review `PASS / CLOSED`. The task remains `in_progress`; current execution
+is STOP and the task awaits the user's decision for Slice4. Nothing in this
 document authorizes Slice4, production wiring, or a release.

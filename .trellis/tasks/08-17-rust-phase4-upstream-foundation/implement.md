@@ -4,10 +4,14 @@
 > `task.py start` on 2026-09-16. The task is `in_progress`; Slice0 passed root
 > review, the user explicitly authorized the Slice2 fresh plain-TCP framing
 > round after the Slice1 root-review PASS, and the user explicitly authorized
-> Slice3 on 2026-09-16 after the Slice2 formal PASS/CLOSED. Slice3's UDP
-> TC-to-TCP composite policy is now implemented and pending same-thread root
-> review. Do not start Slice4 or add production wiring without another explicit
-> root-review authorization.
+> Slice3 on 2026-09-16 after the Slice2 formal PASS/CLOSED. The Slice3 UDP
+> TC-to-TCP composite policy implementation at
+> `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread
+> root-review `PASS / CLOSED`, and Actions run `35084388223` is success (build
+> success, rust-foundation success, historical rust-runtime-experimental
+> skipped). Current execution is STOP; awaiting the user's decision for Slice4.
+> Do not start Slice4 or add production wiring without another explicit
+> authorization.
 
 ## Execution rules
 
@@ -453,7 +457,7 @@ Focused verification:
 STOP: root review of protocol fallback, retry safety, and deadline/cancel
 precedence.
 
-### Slice 3 implementation record — 2026-09-16
+### Slice 3 implementation record — 2026-09-16 (root review PASS / CLOSED)
 
 - The user explicitly authorized Slice3 on 2026-09-16, after the Slice2 formal
   same-thread root-review `PASS / CLOSED` at `b83dbb4`. The authorized scope is
@@ -494,10 +498,18 @@ precedence.
   `mosdns-upstream-core`. Slice3 changes no Cargo manifest or lockfile.
 - Scope boundary: the composite policy is a pure Rust library boundary only; no
   Go/cgo/ABI/selector/Go-fallback, public production wiring, server listener,
-  configuration, or Slice4 work is present. `task.json` remains
-  `status = in_progress`. STOP for same-thread root review; no root-review PASS
-  is claimed here, and no final commit SHA is recorded before final
-  verification.
+  configuration, or Slice4 work is present.
+- Same-thread root review of implementation commit
+  `21bff19212637c47df632a29dd4b3380cac7a4cc` formally returned
+  **Slice3 PASS / CLOSED**. GitHub Actions run `35084388223` for that commit is
+  success: `build` success, the focused `rust-foundation` job success, and the
+  historical `rust-runtime-experimental` job skipped because it runs only on
+  explicit `workflow_dispatch`. This record changes none of the RED evidence,
+  test scope, no-new-dependency, or forbidden-boundary facts above.
+- `task.json` remains `status = in_progress`; current execution is STOP and the
+  task awaits the user's decision for Slice4. Slice4, production wiring,
+  production TC-to-TCP integration, and all later phases remain unauthorized,
+  and this record does not authorize, finish, or archive the task.
 
 ## Slice 4 — final quality gate and evidence
 
