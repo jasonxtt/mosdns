@@ -288,20 +288,58 @@ The generator is `rcgen`, declared **dev-dependency only** in
   bad-signature coverage without committing key material. `rcgen` is the
   smallest reviewed option and reuses the `ring` provider already selected for
   the client, so no second crypto backend is introduced.
-- Features: defaults are disabled (no `pem`, no `aws_lc_rs`, no `x509-parser`,
-  no `zeroize`); only `ring` (which implies `crypto`) is enabled. No
-  `aws-lc-rs`/`aws-lc-sys` or OpenSSL package enters the graph.
-- License: `MIT OR Apache-2.0`, compatible with this GPL-3.0-only project's
+- Features: rcgen's default features are disabled and only `ring` (which
+  implies `crypto`) is enabled. This turns off the optional `pem` encoder,
+  `aws_lc_rs`/`fips`, and `zeroize` features, so no `aws-lc-rs`/`aws-lc-sys` or
+  OpenSSL package enters the graph.
+  **Correction (2026-09-16, second review):** an earlier version of this record
+  also claimed "no `x509-parser`". That claim was wrong. Disabling default
+  features does not remove rcgen's *mandatory* `x509-parser` dependency: in the
+  resolved `rust/Cargo.lock`, `rcgen 0.14.7` declares dependencies
+  `ring`, `rustls-pki-types`, `time`, `x509-parser`, `yasna`. The real graph is
+  recorded below.
+- Resolved dev-graph additions introduced by rcgen (exact, from
+  `Cargo.lock` / `cargo metadata --locked`):
+
+  | Package | Version | rust-version | License |
+  | --- | --- | --- | --- |
+  | rcgen | 0.14.7 | 1.71 | MIT OR Apache-2.0 |
+  | x509-parser | 0.18.1 | 1.67.1 | MIT OR Apache-2.0 |
+  | asn1-rs | 0.7.2 | 1.68 | MIT OR Apache-2.0 |
+  | asn1-rs-derive | 0.6.0 | (none) | MIT OR Apache-2.0 |
+  | asn1-rs-impl | 0.2.0 | (none) | MIT/Apache-2.0 |
+  | der-parser | 10.0.0 | 1.63 | MIT OR Apache-2.0 |
+  | oid-registry | 0.8.1 | 1.63 | MIT OR Apache-2.0 |
+  | nom | 7.1.3 | 1.48 | MIT |
+  | rusticata-macros | 4.1.0 | (none) | MIT/Apache-2.0 |
+  | data-encoding | 2.11.1 | 1.48 | MIT |
+  | lazy_static | 1.5.0 | (none) | MIT OR Apache-2.0 |
+  | displaydoc | 0.2.7 | 1.71.0 | MIT OR Apache-2.0 |
+  | num-bigint | 0.4.8 | 1.60 | MIT OR Apache-2.0 |
+  | num-traits | 0.2.19 | 1.60 | MIT OR Apache-2.0 |
+  | thiserror / -impl | 2.0.20 | 1.71 | MIT OR Apache-2.0 |
+  | time / time-core / time-macros | 0.3.45 / 0.1.7 / 0.2.25 | 1.83.0 | MIT OR Apache-2.0 |
+  | deranged | 0.5.8 | 1.85.0 | MIT OR Apache-2.0 |
+  | num-conv | 0.1.0 | 1.57.0 | MIT OR Apache-2.0 |
+  | powerfmt | 0.2.0 | 1.67.0 | MIT OR Apache-2.0 |
+  | memchr | 2.8.3 | 1.61 | Unlicense OR MIT |
+  | minimal-lexical | 0.2.1 | (none) | MIT/Apache-2.0 |
+  | serde_core | 1.0.229 | 1.56 | MIT OR Apache-2.0 |
+
+  These are all permissively licensed (MIT / Apache-2.0 / Unlicense, or the
+  `MIT OR Apache-2.0` dual grant), compatible with this GPL-3.0-only project's
   dependency policy.
-- MSRV: `rcgen 0.14.7` declares 1.71. Its `time` transitives are the binding
-  constraint; resolver 3 selects `time 0.3.45` / `time-core 0.1.7` /
-  `time-macros 0.2.25`, all declaring 1.83.0, instead of the 1.88-requiring
-  0.3.5x line. `cargo add` reported "ignoring rcgen@0.14.10 (requires rustc
-  1.88)" for the same reason. A `cargo metadata` audit of the full locked graph
-  reports no package whose `rust-version` exceeds 1.85.
-- Test-only isolation: `cargo tree -e normal` for `mosdns-upstream-core`
-  contains no `rcgen`. It appears only under `--edges dev`. No production
-  module imports it, and the fixture module is compiled only into `tests/`.
+- MSRV: `rcgen 0.14.7` declares 1.71; the binding constraints in its chain are
+  `time`/`time-core`/`time-macros` at 1.83.0 and `deranged` at 1.85.0. Resolver
+  3 selects the 0.3.45 time line rather than the 1.88-requiring 0.3.5x line, and
+  `cargo add` reported "ignoring rcgen@0.14.10 (requires rustc 1.88)" for the
+  same reason. A `cargo metadata --locked` audit of the complete graph reports
+  **no** package whose `rust-version` exceeds 1.85.
+- Test-only isolation (re-audited): `cargo tree -e normal` for
+  `mosdns-upstream-core` contains **zero** `rcgen` and **zero** `x509-parser`
+  entries, and the whole-workspace `cargo tree -e normal` is likewise zero for
+  both. They appear only under the dev graph. No production module imports
+  rcgen, and the fixture module is compiled only into `tests/`.
 - No network or external `openssl` dependency: generation is in-process and
   offline. The earlier one-off OpenSSL 3.6.4 provenance note is superseded; no
   certificate bytes remain in the repository.

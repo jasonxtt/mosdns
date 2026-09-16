@@ -121,10 +121,11 @@ Produced behavior and contracts:
   final-commit linearization, and control race.
 
 Fixtures (`rust/upstream-core/tests/fixtures/`): synthetic EC P-256 roots A/B
-and four leaves generated with OpenSSL 3.6.4 into a throwaway directory outside
-the repository; only DER bytes were copied in. `mod.rs` records the exact
-generation commands, subjects, SANs, issuers, and validity windows. No real
-service certificate or private key is committed.
+and four leaves. **Superseded by the second remediation:** the original version
+of this paragraph described DER constants, including PKCS#8 private keys,
+generated once with OpenSSL 3.6.4 and checked in. All of that material has been
+removed; the fixtures are now generated in memory at test runtime and no
+certificate or key bytes are committed. See the P1-3 record below.
 
 RED/GREEN evidence (focused, macOS arm64, cargo/rustc 1.95.0):
 
@@ -308,31 +309,55 @@ registration is released, `close().await` reaches `Closed`, and nothing panics.
 RED evidence: re-adding the assertion makes that test fail with exactly the
 review's symptom (`left: Closing, right: Open`).
 
-**P1-2 (test/contract blocker) — deterministic phase coverage, no sleeps.**
-Added a per-exchange `DotPhase` seam (`BeforeConnect`, `BeforeHandshake`,
-`BeforeWrite`, `BeforeFlush`, `BeforeRead`, `BeforeCommit`, `AfterCommit`)
-modelled on the existing `CommitPause`: the exchange parks on the watched phase
-and the test releases it explicitly, so every case is a deterministic gate
-rather than a timing guess. New in-crate tests cover connect (cancellation and
-owner close, asserting no dial happened), handshake (cancellation, `NotSent`),
-write and flush (`MaybeSent`), read (`Sent`), the pre-commit gate
-(`Closed(Sent)`), the post-commit gate, aborted-future registration release at
-every phase, one shared absolute deadline terminating each phase, no plaintext
-query before the handshake (first-byte TLS-record assertion), and handshake
-authentication against the service identity rather than the dial address.
-The two `tokio::time::sleep(150ms)` ordering tests were replaced by a listener
-that signals the accepted TCP connection through a `oneshot` the test awaits, so
-the connect-then-control ordering is proven by the signal and no sleep
-establishes ordering. `git grep sleep` over the Slice1 tests now matches only
-comments explaining their absence. Server scripts that previously held a
-connection open forever now return on client EOF, so no test can hang on
-`join()`. RED evidence: removing the `BeforeFlush` phase marker makes the
-flush-phase test fail deterministically at `Elapsed`, proving the gate really
-observes the phase.
-The one Phase 4 Slice1 `#[test]` hook is in `< 10s` for every case and no test
-depends on wall-clock ordering. Scope note: the phase seam is `cfg(test)` only
-in its active form; in a non-test build the seam is absent and every phase
-marker is a no-op, so the production exchange path is unchanged.
+**P1-2 (test/contract blocker) — the acceptance matrix is now actually
+closed, with no sleeps.** The first remediation added a `DotPhase` seam but left
+the *claimed* matrix open: the abort/drop cases omitted `BeforeCommit`, the
+deadline cases omitted `BeforeConnect` and `BeforeCommit`, `BeforeCommit` had
+only an owner-close case, and write/flush were largely exercised through caller
+cancellation alone. The claim in this file therefore described coverage the
+tests did not have.
+
+The coverage is now a table-driven matrix rather than a set of ad-hoc tests:
+
+- Phases: `BeforeConnect`, `BeforeHandshake`, `BeforeWrite`, `BeforeFlush`,
+  `BeforeRead`, `BeforeCommit` — the six pre-result phases.
+- Controls at **every** phase: owner close, caller cancellation, the one shared
+  absolute deadline, and dropped/aborted future.
+- That is 6 x 4 = 24 deterministic cells, driven by the shared
+  `run_phase_control_matrix` / `run_phase_control_case` helpers, so no phase and
+  no control can be silently dropped: `MATRIX_PHASES` is asserted by
+  `the_control_matrix_covers_every_pre_result_phase_exactly_once` to contain
+  exactly the six distinct pre-result phases.
+- Side-effect layering is asserted per phase and must agree across all four
+  controls: `NotSent` before/at connect and handshake, `MaybeSent` at write and
+  flush, `Sent` at read and the final commit.
+- Each cell first observes the deterministic seam arrival and asserts the
+  in-flight registration is live, so the control is provably applied at the
+  intended phase and not guessed from elapsed time.
+- `AfterCommit` is deliberately **not** in this matrix; it exists only for the
+  commit-wins regression (`owner_close_immediately_after_a_winning_commit_still_returns_the_response`)
+  plus its pre-commit complement, because a post-commit control is a different
+  contract (the response is already committed) rather than a pre-result phase.
+
+Also in the module: no plaintext query may precede the handshake (first-byte
+TLS-record assertion) and the handshake authenticates the service identity
+rather than the dial address. The two `tokio::time::sleep(150ms)` ordering tests
+were replaced by a listener that signals the accepted TCP connection through a
+`oneshot` the test awaits, so connect-then-control ordering is proven by the
+signal; `git grep sleep` over the Slice1 tests matches only comments explaining
+their absence. Server scripts return on client EOF, so no test can hang on
+`join()`.
+
+RED evidence for the matrix: deleting the `BeforeRead` marker makes
+`control_matrix_at_before_read` fail at `Elapsed`, and weakening the flush
+phase's side-effect state to `NotSent` makes `control_matrix_at_before_flush`
+fail with `left: Transport(Closed(NotSent)) / right: Transport(Closed(MaybeSent))`.
+Both show the matrix observes the real phase and the real state rather than
+passing vacuously.
+
+Scope note: the phase seam is `cfg(test)` only in its active form; in a
+non-test build the seam is absent and every phase marker is a no-op, so the
+production exchange path is unchanged.
 
 **P1-3 (data-constraint blocker) — no private key material in the repository.**
 All committed DER constants, including the PKCS#8 private keys (`KEY_GOOD_A`,
@@ -344,13 +369,24 @@ unchanged: valid, wrong-name, expired, unknown-issuer, untrusted-root positive
 control, and bad handshake signature are all still exercised; provenance is
 recorded in the module documentation and in
 `research/secure-upstream-evidence.md` instead of as committed bytes.
-Dependency record (test-only): `rcgen = { version = "=0.14.7",
-default-features = false, features = ["ring"] }`, `MIT OR Apache-2.0`, MSRV
-1.71, with `time`/`time-core`/`time-macros` held at 0.3.45/0.1.7/0.2.25
-(MSRV 1.83.0) by resolver 3 so no resolved package exceeds the workspace MSRV of
-1.85. `cargo tree -e normal` for the crate contains no `rcgen`; it appears only
-under `--edges dev`. No aws-lc-rs, OpenSSL, network, or external `openssl`
-dependency is involved. `rust/Cargo.lock` was updated for this test-only graph.
+Dependency record (test-only, corrected in the second review):
+`rcgen = { version = "=0.14.7", default-features = false, features = ["ring"] }`,
+`MIT OR Apache-2.0`, MSRV 1.71. An earlier version of this record claimed the
+feature trimming removed `x509-parser`; that was wrong. Disabling rcgen's
+default features removes `pem`/`aws_lc_rs`/`zeroize`, but `x509-parser` is a
+mandatory rcgen dependency and remains in the dev graph at 0.18.1
+(`MIT OR Apache-2.0`, MSRV 1.67.1), bringing `asn1-rs` 0.7.2,
+`der-parser` 10.0.0, `oid-registry` 0.8.1, `nom` 7.1.3, `rusticata-macros`,
+`data-encoding`, `lazy_static`, `displaydoc`, `num-bigint`, `num-traits` and
+`thiserror` with it. The exact ledger with versions, licenses and rust-version
+per package is in `research/secure-upstream-evidence.md`. Resolver 3 holds the
+`time` family at 0.3.45/0.1.7/0.2.25 (MSRV 1.83.0), and a
+`cargo metadata --locked` audit of the full graph reports no package above the
+workspace MSRV of 1.85. Re-audited isolation: `cargo tree -e normal` shows
+**zero** `rcgen` and **zero** `x509-parser` entries for both
+`mosdns-upstream-core` and the whole workspace; both appear only in the dev
+graph. No aws-lc-rs, OpenSSL, network, or external `openssl` dependency is
+involved. `rust/Cargo.lock` was updated for this test-only graph.
 Residue proof: `git ls-files rust/upstream-core/tests/fixtures/` lists only
 `mod.rs`; no `.der`/`.pem`/`.key`/`.crt` file is tracked anywhere; and a
 `git grep` for private-key constants finds only prose in documentation comments.
@@ -361,7 +397,7 @@ Verification after remediation (macOS Darwin 25.5.0 arm64):
 | --- | --- |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
 | `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice1_dot --locked` | PASS, 27 tests |
-| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 168 tests (incl. 43 lib tests) |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 167 tests (incl. 42 lib tests, of which 24 are matrix cells across 6 phase tests) |
 | `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, 22 targets ok |
 | `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS, no warnings |
 | `python3 .trellis/scripts/task.py validate rust-phase4-secure-upstream-foundation` | PASS |
