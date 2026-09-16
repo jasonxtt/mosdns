@@ -14,13 +14,18 @@ use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
 use mosdns_upstream_core::{
-    Endpoint, ExchangeContext, ExchangeRequest, Transport, TransportCancellation, Upstream,
+    CloseResult, CloseTransition, Endpoint, ExchangeContext, ExchangeRequest, SideEffectState,
+    Transport, TransportCancellation, Upstream, UpstreamError,
 };
+use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, spawn_blocking};
 use tokio::time::timeout;
 
 /// Bounds every exchange so a missing or broken socket path cannot hang CI.
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Bounded window used to prove a terminal control error never reconnects.
+const NO_RETRY_WINDOW: Duration = Duration::from_millis(250);
 
 /// Runs one bounded current-thread runtime for a single test.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -300,5 +305,223 @@ fn concurrent_exchanges_use_separate_streams_and_owned_responses() {
         assert_eq!(second_response.wire(), second_expected.as_slice());
 
         server.await.expect("server task joined");
+    });
+}
+
+/// Accepts exactly one fresh connection, reads exactly one framed query,
+/// deterministically signals that the query was consumed, then withholds any
+/// response until the client closes the connection.
+///
+/// The returned flag is `true` only when the peer closed the stream (EOF)
+/// within the bounded wait, which is the observable proof that a terminated
+/// exchange dropped its fresh `TcpStream`. The server then also confirms, with
+/// a short bounded accept probe, that the terminal error was never retried or
+/// reconnected.
+fn holding_server(
+    listener: TcpListener,
+    expected_query: Vec<u8>,
+    consumed: oneshot::Sender<()>,
+) -> JoinHandle<bool> {
+    spawn_blocking(move || {
+        let mut stream =
+            accept_within(&listener, TEST_TIMEOUT).expect("exactly one fresh connection");
+        let received = read_framed(&mut stream);
+        assert_eq!(
+            received, expected_query,
+            "the server receives the exact, unchanged query frame"
+        );
+        consumed.send(()).expect("the test waits for consumption");
+
+        stream
+            .set_read_timeout(Some(TEST_TIMEOUT))
+            .expect("set read timeout");
+        let mut probe = [0u8; 1];
+        let closed_by_peer = loop {
+            match stream.read(&mut probe) {
+                Ok(0) => break true,
+                Ok(read) => panic!("unexpected {read} extra bytes after the query frame"),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break false;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => panic!("probe read failed: {error}"),
+            }
+        };
+
+        // A control-terminated exchange must never retry or reconnect.
+        assert!(
+            accept_within(&listener, NO_RETRY_WINDOW).is_none(),
+            "a control-terminated tcp exchange must not retry or reconnect"
+        );
+
+        closed_by_peer
+    })
+}
+
+#[test]
+fn caller_cancellation_while_waiting_for_the_response_is_cancelled_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let id = 0x2b01;
+        let query = query_wire(id);
+        let expected_query = query.clone();
+        let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
+        let server = holding_server(listener, expected_query.clone(), consumed_tx);
+
+        let cancellation = TransportCancellation::new();
+        let context = ExchangeContext::new(
+            Instant::now() + Duration::from_secs(30),
+            cancellation.clone(),
+        );
+        let upstream = Arc::new(Upstream::new(tcp_endpoint(address)));
+        let exchange = {
+            let upstream = Arc::clone(&upstream);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, context).await
+            })
+        };
+
+        // The server has consumed the complete query frame, so the full write
+        // already finished and the exchange is waiting for the framed response.
+        // Cancelling only after that deterministic ordering makes the expected
+        // side-effect state unambiguous (`Sent`, never `MaybeSent`).
+        timeout(TEST_TIMEOUT, consumed_rx)
+            .await
+            .expect("query consumption observed bounded")
+            .expect("query consumed");
+        cancellation.cancel();
+
+        let outcome = timeout(TEST_TIMEOUT, exchange)
+            .await
+            .expect("cancelled tcp exchange bounded")
+            .expect("exchange task joined");
+        let error = outcome
+            .err()
+            .expect("caller cancellation terminates the response wait");
+        assert_eq!(error, UpstreamError::Cancelled(SideEffectState::Sent));
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        assert_eq!(
+            query, expected_query,
+            "the caller query bytes must not change"
+        );
+
+        assert!(
+            server.await.expect("server task joined"),
+            "the cancelled exchange drops its fresh stream"
+        );
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+    });
+}
+
+#[test]
+fn absolute_deadline_while_waiting_for_the_response_is_deadline_exceeded_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let id = 0x2b02;
+        let query = query_wire(id);
+        let expected_query = query.clone();
+        let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
+        let server = holding_server(listener, expected_query.clone(), consumed_tx);
+
+        // One absolute deadline for the whole exchange. Local loopback connect
+        // and write finish far below it, so the deadline can only win while the
+        // response read is still waiting; that state is `Sent`.
+        let context = ExchangeContext::new(
+            Instant::now() + Duration::from_millis(500),
+            TransportCancellation::new(),
+        );
+        let upstream = Arc::new(Upstream::new(tcp_endpoint(address)));
+        let exchange = {
+            let upstream = Arc::clone(&upstream);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, context).await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, consumed_rx)
+            .await
+            .expect("query consumption observed bounded")
+            .expect("query consumed");
+
+        let outcome = timeout(TEST_TIMEOUT, exchange)
+            .await
+            .expect("deadline-terminated tcp exchange bounded")
+            .expect("exchange task joined");
+        let error = outcome
+            .err()
+            .expect("the absolute deadline terminates the response wait");
+        assert_eq!(
+            error,
+            UpstreamError::DeadlineExceeded(SideEffectState::Sent)
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        assert_eq!(
+            query, expected_query,
+            "the caller query bytes must not change"
+        );
+
+        assert!(
+            server.await.expect("server task joined"),
+            "the deadline-terminated exchange drops its fresh stream"
+        );
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+    });
+}
+
+#[test]
+fn owner_close_while_waiting_for_the_response_is_closed_with_sent() {
+    block_on(async {
+        let (listener, address) = bind_listener();
+        let id = 0x2b03;
+        let query = query_wire(id);
+        let expected_query = query.clone();
+        let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
+        let server = holding_server(listener, expected_query.clone(), consumed_tx);
+
+        let upstream = Arc::new(Upstream::new(tcp_endpoint(address)));
+        let exchange = {
+            let upstream = Arc::clone(&upstream);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, open_context()).await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, consumed_rx)
+            .await
+            .expect("query consumption observed bounded")
+            .expect("query consumed");
+        assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+
+        let outcome = timeout(TEST_TIMEOUT, exchange)
+            .await
+            .expect("closed tcp exchange bounded")
+            .expect("exchange task joined");
+        let error = outcome
+            .err()
+            .expect("owner close terminates the response wait");
+        assert_eq!(error, UpstreamError::Closed(SideEffectState::Sent));
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        assert_eq!(
+            query, expected_query,
+            "the caller query bytes must not change"
+        );
+
+        assert_eq!(upstream.close().await, CloseResult::Closed);
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        assert!(
+            server.await.expect("server task joined"),
+            "the closed exchange drops its fresh stream"
+        );
     });
 }

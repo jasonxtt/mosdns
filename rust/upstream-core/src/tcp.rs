@@ -9,8 +9,9 @@
 //! [`exchange`] composes those helpers with exactly one fresh `TcpStream` per
 //! call. It is deliberately independent of policy, fallback, pooling, reuse,
 //! pipelining, and retry: there is no second framing implementation, no
-//! connection is kept after the call, and deadline/cancellation racing is not
-//! part of this step.
+//! connection is kept after the call, and connect, the full framed write, and
+//! the exact prefix/body read all race the same absolute deadline against
+//! caller cancellation and owner close.
 
 use std::future::{Future, poll_fn};
 use std::pin::Pin;
@@ -37,7 +38,9 @@ const PREFIX_BYTES: usize = 2;
 /// new [`TcpStream`] to the configured numeric endpoint, writes exactly one
 /// unchanged query frame, reads exactly one complete response frame, and
 /// enforces QR, the original request ID, and full dns-core response validation
-/// before the response-commit gate. The stream is owned by this call and is
+/// before the response-commit gate. Connect, the full framed write, and the
+/// exact prefix/body read all race the same absolute deadline against owner
+/// close and caller cancellation. The stream is owned by this call and is
 /// dropped on every return path, so it is never pooled, reused, retried, or
 /// left open.
 pub(crate) async fn exchange(
@@ -52,22 +55,49 @@ pub(crate) async fn exchange(
     let endpoint = prepared.endpoint().address();
     let request_id = prepared.request().request_id();
     let query = prepared.request().query();
+    // One absolute deadline for the whole logical exchange: connect, the full
+    // framed write, and the exact prefix/body read all observe this same
+    // instant. No phase starts a fresh relative timeout or resets it.
+    let deadline = prepared.context().deadline();
 
     // One fresh connection per exchange. A connect/setup failure has sent no
-    // DNS payload, so it is `Connect` (`NotSent`).
-    let mut stream = TcpStream::connect(endpoint)
-        .await
-        .map_err(|_| UpstreamError::Connect)?;
+    // DNS payload, so it is `Connect` (`NotSent`). The connect itself races
+    // owner close, caller cancellation, and the shared absolute deadline.
+    let mut stream = race_io(prepared, SideEffectState::NotSent, deadline, async {
+        TcpStream::connect(endpoint)
+            .await
+            .map_err(|_| UpstreamError::Connect)
+    })
+    .await?;
+
+    // Connect is an async wake: re-apply the full control before the first
+    // write. Nothing has been written yet, so this check is still `NotSent`.
+    prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
 
     // Exactly one unchanged query frame, with full-write semantics. The
     // outbound-size gate runs before the first write here and again before
     // connect in `prepare_exchange`, so an unframeable query never reaches the
-    // socket.
-    write_frame(&mut stream, query).await?;
+    // socket. A control error during a potentially partial write is
+    // conservatively `MaybeSent`.
+    race_io(
+        prepared,
+        SideEffectState::MaybeSent,
+        deadline,
+        write_frame(&mut stream, query),
+    )
+    .await?;
 
     // Exactly one complete response frame: the two-byte prefix and only the
-    // declared body, with stream fragments reassembled into one message.
-    let body = read_frame(&mut stream).await?;
+    // declared body, with stream fragments reassembled into one message. The
+    // request frame was fully written, so a control error while waiting for
+    // the prefix or body is `Sent`.
+    let body = race_io(
+        prepared,
+        SideEffectState::Sent,
+        deadline,
+        read_frame(&mut stream),
+    )
+    .await?;
 
     // A response shorter than the header or with QR clear cannot be attributed
     // to this exchange as a response.
@@ -169,10 +199,6 @@ where
 /// `deadline` is the already-established absolute instant, so this helper
 /// never starts a second relative timeout and never resets the deadline. It
 /// creates no runtime, spawns no task, and owns no socket of its own.
-// Intentionally not wired into `exchange` yet: the next authorized TCP
-// integration step consumes it. The attribute keeps warnings-denied builds
-// clean while the helper is exercised only by the module tests.
-#[allow(dead_code)]
 pub(crate) async fn race_io<F, T>(
     prepared: &PreparedExchange<'_>,
     side_effect: SideEffectState,
