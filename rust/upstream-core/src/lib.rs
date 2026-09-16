@@ -232,6 +232,89 @@ pub enum SideEffectState {
     Sent,
 }
 
+/// Ignored UDP datagrams observed while an exchange was still waiting for an
+/// accepted response.
+///
+/// Both observations are diagnostic only: they never replace the terminal
+/// primary cause and never change the recorded side-effect state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct IgnoredDatagrams {
+    unexpected_peer: bool,
+    response_id_mismatch: bool,
+}
+
+impl IgnoredDatagrams {
+    /// No datagram was ignored before the exchange terminated.
+    pub const NONE: Self = Self {
+        unexpected_peer: false,
+        response_id_mismatch: false,
+    };
+
+    /// Whether a datagram from a peer other than the configured endpoint was
+    /// ignored.
+    #[must_use]
+    pub const fn unexpected_peer(self) -> bool {
+        self.unexpected_peer
+    }
+
+    /// Whether an expected-peer datagram whose header ID did not match the
+    /// request was ignored.
+    #[must_use]
+    pub const fn response_id_mismatch(self) -> bool {
+        self.response_id_mismatch
+    }
+
+    /// Whether at least one datagram was ignored.
+    #[must_use]
+    pub const fn any(self) -> bool {
+        self.unexpected_peer || self.response_id_mismatch
+    }
+
+    pub(crate) fn record_unexpected_peer(&mut self) {
+        self.unexpected_peer = true;
+    }
+
+    pub(crate) fn record_response_id_mismatch(&mut self) {
+        self.response_id_mismatch = true;
+    }
+}
+
+/// The truthful primary terminal cause of an exchange that also retained
+/// ignored-datagram diagnostics.
+///
+/// Keeping the cause separate from the plain [`UpstreamError`] variants ensures
+/// an ignored datagram can never relabel a deadline, cancellation, close, or
+/// receive failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalError {
+    DeadlineExceeded(SideEffectState),
+    Cancelled(SideEffectState),
+    Closed(SideEffectState),
+    Receive(SideEffectState),
+}
+
+impl TerminalError {
+    /// The recorded side-effect state of this terminal cause.
+    #[must_use]
+    pub const fn side_effect(self) -> SideEffectState {
+        match self {
+            Self::DeadlineExceeded(state)
+            | Self::Cancelled(state)
+            | Self::Closed(state)
+            | Self::Receive(state) => state,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::DeadlineExceeded(_) => "deadline exceeded",
+            Self::Cancelled(_) => "cancelled",
+            Self::Closed(_) => "closed",
+            Self::Receive(_) => "receive failure",
+        }
+    }
+}
+
 /// Typed transport failure categories. No error variant carries an unknown
 /// side-effect state; runtime failures retain the last tracked state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -250,6 +333,12 @@ pub enum UpstreamError {
     FrameTooLarge,
     Closed(SideEffectState),
     Runtime(SideEffectState),
+    /// A terminal failure that retained at least one ignored-datagram
+    /// diagnostic. `cause` is always the truthful primary terminal category.
+    Diagnosed {
+        cause: TerminalError,
+        ignored: IgnoredDatagrams,
+    },
 }
 
 impl UpstreamError {
@@ -270,6 +359,30 @@ impl UpstreamError {
             | Self::UnexpectedPeer
             | Self::ResponseMismatch
             | Self::TruncatedFrame => SideEffectState::Sent,
+            Self::Diagnosed { cause, .. } => cause.side_effect(),
+        }
+    }
+
+    /// The truthful primary terminal cause, when this error terminated an
+    /// exchange that had already sent its query.
+    #[must_use]
+    pub const fn terminal_cause(self) -> Option<TerminalError> {
+        match self {
+            Self::Cancelled(state) => Some(TerminalError::Cancelled(state)),
+            Self::DeadlineExceeded(state) => Some(TerminalError::DeadlineExceeded(state)),
+            Self::Receive(state) => Some(TerminalError::Receive(state)),
+            Self::Closed(state) => Some(TerminalError::Closed(state)),
+            Self::Diagnosed { cause, .. } => Some(cause),
+            _ => None,
+        }
+    }
+
+    /// The ignored datagrams retained with this error, if any.
+    #[must_use]
+    pub const fn ignored_datagrams(self) -> IgnoredDatagrams {
+        match self {
+            Self::Diagnosed { ignored, .. } => ignored,
+            _ => IgnoredDatagrams::NONE,
         }
     }
 }
@@ -291,6 +404,7 @@ impl fmt::Display for UpstreamError {
             Self::FrameTooLarge => "frame too large",
             Self::Closed(_) => "closed",
             Self::Runtime(_) => "runtime failure",
+            Self::Diagnosed { cause, .. } => cause.name(),
         };
         formatter.write_str(name)
     }

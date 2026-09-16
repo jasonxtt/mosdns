@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 
 use mosdns_upstream_core::{
     CloseCompletion, CloseResult, CloseTransition, Endpoint, ExchangeContext, ExchangeRequest,
-    ExchangeResponse, LifecycleState, SideEffectState, Transport, TransportCancellation, Upstream,
-    UpstreamError,
+    ExchangeResponse, LifecycleState, SideEffectState, TerminalError, Transport,
+    TransportCancellation, Upstream, UpstreamError,
 };
 use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, spawn_blocking};
@@ -1085,5 +1085,244 @@ fn tcp_placeholder_releases_its_registration() {
             .expect("the TCP placeholder is an explicit error");
         assert_eq!(error, UpstreamError::Runtime(SideEffectState::NotSent));
         assert_eq!(upstream.in_flight_exchanges(), 0);
+    });
+}
+
+/// A bounded deadline that is long enough for a loopback ignore datagram to be
+/// received and processed first, but short enough to keep the suite fast.
+fn ignore_then_deadline_context() -> ExchangeContext {
+    ExchangeContext::new(
+        Instant::now() + Duration::from_millis(300),
+        TransportCancellation::new(),
+    )
+}
+
+#[test]
+fn wrong_id_then_deadline_retains_mismatch_with_deadline_cause() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let request_id = 0x1a01;
+        let wrong = response_wire(0x9999, 20);
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let (_, peer) = server.recv_from(&mut buffer).expect("receive query");
+            server.send_to(&wrong, peer).expect("send wrong id");
+        });
+
+        let query = query_wire(request_id);
+        let error = exchange_bounded(address, &query, ignore_then_deadline_context())
+            .await
+            .err()
+            .expect("the deadline terminates the exchange");
+
+        // The primary terminal cause stays a deadline, never a mismatch, and
+        // the ignored datagram is retained only as a diagnostic.
+        assert_eq!(
+            error.terminal_cause(),
+            Some(TerminalError::DeadlineExceeded(SideEffectState::Sent))
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        let ignored = error.ignored_datagrams();
+        assert!(ignored.response_id_mismatch());
+        assert!(!ignored.unexpected_peer());
+        assert!(ignored.any());
+
+        server_task.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn wrong_peer_then_deadline_retains_unexpected_peer_with_deadline_cause() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (spoof, _spoof_address) = bind_ipv4();
+        let (peer_tx, peer_rx) = mpsc::channel::<SocketAddr>();
+        let request_id = 0x1a02;
+        let spoof_reply = response_wire(request_id, 21);
+        let spoof_task = spawn_blocking(move || {
+            let peer = peer_rx.recv().expect("client peer address");
+            spoof.send_to(&spoof_reply, peer).expect("send spoof reply");
+        });
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let (_, peer) = server.recv_from(&mut buffer).expect("receive query");
+            peer_tx.send(peer).expect("report client peer");
+            // No expected-peer reply: the exchange must terminate on deadline.
+        });
+
+        let query = query_wire(request_id);
+        let error = exchange_bounded(address, &query, ignore_then_deadline_context())
+            .await
+            .err()
+            .expect("the deadline terminates the exchange");
+
+        assert_eq!(
+            error.terminal_cause(),
+            Some(TerminalError::DeadlineExceeded(SideEffectState::Sent))
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        let ignored = error.ignored_datagrams();
+        assert!(ignored.unexpected_peer());
+        assert!(!ignored.response_id_mismatch());
+        assert!(ignored.any());
+
+        server_task.await.expect("server task joined");
+        spoof_task.await.expect("spoof task joined");
+    });
+}
+
+#[test]
+fn wrong_peer_and_wrong_id_are_both_retained_before_deadline() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (spoof, _spoof_address) = bind_ipv4();
+        let (peer_tx, peer_rx) = mpsc::channel::<SocketAddr>();
+        let request_id = 0x1a03;
+        let spoof_reply = response_wire(request_id, 22);
+        let wrong_id = response_wire(0x9999, 23);
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let (_, peer) = server.recv_from(&mut buffer).expect("receive query");
+            peer_tx.send(peer).expect("report client peer");
+            server.send_to(&wrong_id, peer).expect("send wrong id");
+        });
+        let spoof_task = spawn_blocking(move || {
+            let peer = peer_rx.recv().expect("client peer address");
+            spoof.send_to(&spoof_reply, peer).expect("send spoof reply");
+        });
+
+        let query = query_wire(request_id);
+        let error = exchange_bounded(address, &query, ignore_then_deadline_context())
+            .await
+            .err()
+            .expect("the deadline terminates the exchange");
+
+        assert_eq!(
+            error.terminal_cause(),
+            Some(TerminalError::DeadlineExceeded(SideEffectState::Sent))
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        let ignored = error.ignored_datagrams();
+        assert!(ignored.unexpected_peer());
+        assert!(ignored.response_id_mismatch());
+        assert!(ignored.any());
+
+        server_task.await.expect("server task joined");
+        spoof_task.await.expect("spoof task joined");
+    });
+}
+
+#[test]
+fn caller_cancellation_after_wrong_id_retains_diagnostics() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (seen_tx, seen_rx) = oneshot::channel::<()>();
+        let request_id = 0x1a04;
+        let wrong = response_wire(0x9999, 24);
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let (_, peer) = server.recv_from(&mut buffer).expect("receive query");
+            server.send_to(&wrong, peer).expect("send wrong id");
+            seen_tx.send(()).expect("signal receipt");
+        });
+
+        let query = query_wire(request_id);
+        let cancellation = TransportCancellation::new();
+        let upstream = Arc::new(Upstream::new(udp_endpoint(address)));
+        let client_task = {
+            let upstream = Arc::clone(&upstream);
+            let cancellation = cancellation.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream
+                    .exchange(
+                        request,
+                        ExchangeContext::new(
+                            Instant::now() + Duration::from_secs(30),
+                            cancellation,
+                        ),
+                    )
+                    .await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, seen_rx)
+            .await
+            .expect("wrong id observed bounded")
+            .expect("wrong id observed");
+        // Let the client process the ignored datagram before cancelling.
+        sleep(Duration::from_millis(50)).await;
+        cancellation.cancel();
+        let error = timeout(TEST_TIMEOUT, client_task)
+            .await
+            .expect("client bounded")
+            .expect("client joined")
+            .err()
+            .expect("caller cancellation terminates the exchange");
+
+        assert_eq!(
+            error.terminal_cause(),
+            Some(TerminalError::Cancelled(SideEffectState::Sent))
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        assert!(error.ignored_datagrams().response_id_mismatch());
+
+        server_task.await.expect("server task joined");
+    });
+}
+
+#[test]
+fn owner_close_after_wrong_peer_retains_diagnostics() {
+    block_on(async {
+        let (server, address) = bind_ipv4();
+        let (spoof, _spoof_address) = bind_ipv4();
+        let (peer_tx, peer_rx) = mpsc::channel::<SocketAddr>();
+        let (seen_tx, seen_rx) = oneshot::channel::<()>();
+        let request_id = 0x1a05;
+        let spoof_reply = response_wire(request_id, 25);
+        let server_task = spawn_blocking(move || {
+            let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+            let (_, peer) = server.recv_from(&mut buffer).expect("receive query");
+            peer_tx.send(peer).expect("report client peer");
+        });
+        let spoof_task = spawn_blocking(move || {
+            let peer = peer_rx.recv().expect("client peer address");
+            spoof.send_to(&spoof_reply, peer).expect("send spoof reply");
+            seen_tx.send(()).expect("signal spoof sent");
+        });
+
+        let query = query_wire(request_id);
+        let upstream = Arc::new(Upstream::new(udp_endpoint(address)));
+        let client_task = {
+            let upstream = Arc::clone(&upstream);
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, open_context()).await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, seen_rx)
+            .await
+            .expect("spoof observed bounded")
+            .expect("spoof observed");
+        // Let the client process the ignored datagram before closing.
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+        let error = timeout(TEST_TIMEOUT, client_task)
+            .await
+            .expect("client bounded")
+            .expect("client joined")
+            .err()
+            .expect("owner close terminates the exchange");
+
+        assert_eq!(
+            error.terminal_cause(),
+            Some(TerminalError::Closed(SideEffectState::Sent))
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        assert!(error.ignored_datagrams().unexpected_peer());
+
+        server_task.await.expect("server task joined");
+        spoof_task.await.expect("spoof task joined");
     });
 }

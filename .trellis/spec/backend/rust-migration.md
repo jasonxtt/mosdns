@@ -462,6 +462,9 @@ crate depends on `mosdns-dns-core` only and must not depend on
 - `Endpoint::new(SocketAddr, Transport) -> Result<Endpoint, UpstreamError>`
 - `ExchangeRequest::new(&[u8]) -> Result<ExchangeRequest<'_>, UpstreamError>`
 - `Upstream::prepare_exchange(ExchangeRequest<'_>, ExchangeContext) -> Result<PreparedExchange<'_>, UpstreamError>`
+- `Upstream::exchange(ExchangeRequest<'_>, ExchangeContext) -> impl Future<Output = Result<ExchangeResponse, UpstreamError>>`
+- `Upstream::close() -> impl Future<Output = CloseResult>`; the owner drains
+  registered exchanges before exposing `Closed`
 - `ExchangeContext::check_at(Instant, SideEffectState) -> Result<(), UpstreamError>`
 - `ExchangeResponse { wire: Vec<u8>, request_id, response_id, transport, truncated }`
 - `inspect_response_header(&[u8]) -> Result<ResponseHeader, HeaderError>`
@@ -484,8 +487,15 @@ crate depends on `mosdns-dns-core` only and must not depend on
   invalid request/endpoint, and outbound frame-too-large are `NotSent`;
   runtime errors retain the last tracked state.
 - Cancellation is checked before the absolute deadline, so it wins a tie.
-  `Open -> Closing -> Closed` rejects new exchanges after Closing begins and
-  repeated close is harmless.
+  `Open -> Closing -> Closed` rejects new exchanges after Closing begins.
+  Slice1 registration is serialized with the close admission transition;
+  `close().await` waits for every in-flight guard to drop and repeated close
+  calls converge without a hidden runtime or blocking wait.
+- Wrong-peer and wrong-ID datagrams remain ignored while waiting. If one was
+  observed before a deadline, caller cancellation, owner close, or receive
+  failure, the terminal typed error retains minimal structured diagnostic flags
+  without relabeling the primary cause. A later valid response succeeds
+  without diagnostic state.
 - `dns-core` header inspection reads only the 12-byte header's QR, TXID, and
   TC; complete response/RR/OPT semantics remain in `dns-core` validation.
 - Slice1 UDP binds one fresh ephemeral socket per exchange, sends the borrowed
@@ -499,8 +509,8 @@ crate depends on `mosdns-dns-core` only and must not depend on
 
 - Empty/malformed query -> `InvalidRequest`, before exchange preparation.
 - TCP query longer than `u16::MAX` -> `FrameTooLarge`, before any send.
-- Port zero -> `InvalidEndpoint`; TCP connect/setup -> `Connect` with
-  `NotSent`.
+- Port zero -> `InvalidEndpoint`; UDP local bind/setup and TCP connect/setup ->
+  `Connect` with `NotSent`.
 - Cancellation at any tracked state -> `Cancelled(state)`; an expired
   uncancelled context -> `DeadlineExceeded(state)`.
 - Owner Closing/Closed -> `Closed(state)`; `Runtime(state)` never introduces

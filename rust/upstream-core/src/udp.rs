@@ -17,12 +17,43 @@ use std::time::Instant;
 use mosdns_dns_core::{inspect_response_header, validate_response};
 use tokio::net::UdpSocket;
 
-use crate::{ExchangeResponse, PreparedExchange, SideEffectState, Transport, UpstreamError};
+use crate::{
+    ExchangeResponse, IgnoredDatagrams, PreparedExchange, SideEffectState, TerminalError,
+    Transport, UpstreamError,
+};
 
 /// The largest possible DNS wire size. Slice1 receives with this full legal
 /// datagram capacity and must never inherit Go's 4095-byte implementation
 /// buffer, which silently truncated legal UDP responses.
 const RECV_BUFFER_BYTES: usize = 65_535;
+
+/// Classifies an ordinary local socket bind/setup failure.
+///
+/// Local setup has not sent a DNS payload, so it maps to the settled `NotSent`
+/// [`UpstreamError::Connect`] category. This tiny seam keeps the mapping
+/// unit-testable without injecting a socket factory.
+fn bind_error(_error: &std::io::Error) -> UpstreamError {
+    UpstreamError::Connect
+}
+
+/// Attaches retained ignored-datagram diagnostics to a terminal transport
+/// error.
+///
+/// The primary cause is preserved verbatim and never relabelled; when nothing
+/// was ignored the plain error is returned unchanged.
+fn diagnosed(error: UpstreamError, ignored: IgnoredDatagrams) -> UpstreamError {
+    if !ignored.any() {
+        return error;
+    }
+    let cause = match error {
+        UpstreamError::DeadlineExceeded(state) => TerminalError::DeadlineExceeded(state),
+        UpstreamError::Cancelled(state) => TerminalError::Cancelled(state),
+        UpstreamError::Closed(state) => TerminalError::Closed(state),
+        UpstreamError::Receive(state) => TerminalError::Receive(state),
+        other => return other,
+    };
+    UpstreamError::Diagnosed { cause, ignored }
+}
 
 /// Runs the reviewed one-exchange/one-socket UDP primitive for a prepared
 /// exchange.
@@ -46,10 +77,11 @@ pub(crate) async fn exchange(
         SocketAddr::V4(_) => SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)),
         SocketAddr::V6(_) => SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)),
     };
-    // A local bind/setup failure is a runtime failure that has sent nothing.
+    // A local bind/setup failure is a `Connect` runtime failure that has sent
+    // nothing; `Connect.side_effect()` is already `NotSent`.
     let socket = UdpSocket::bind(bind_address)
         .await
-        .map_err(|_| UpstreamError::Runtime(SideEffectState::NotSent))?;
+        .map_err(|error| bind_error(&error))?;
 
     // Bind is an async wake: re-apply the full control before any send.
     prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
@@ -88,25 +120,39 @@ pub(crate) async fn exchange(
     }
 
     let mut buffer = vec![0u8; RECV_BUFFER_BYTES];
+    // Ignored datagrams are retained only as diagnostics on the terminal error;
+    // they never replace the primary cause or the side-effect state.
+    let mut ignored = IgnoredDatagrams::NONE;
     loop {
         // After every wake, re-apply owner close, caller cancellation, and the
         // shared absolute deadline before touching the socket again.
-        prepared.check_at(Instant::now(), SideEffectState::Sent)?;
+        prepared
+            .check_at(Instant::now(), SideEffectState::Sent)
+            .map_err(|error| diagnosed(error, ignored))?;
 
         let received = tokio::select! {
             biased;
-            () = &mut owner_cancelled => return Err(UpstreamError::Closed(SideEffectState::Sent)),
-            () = &mut caller_cancelled => return Err(UpstreamError::Cancelled(SideEffectState::Sent)),
+            () = &mut owner_cancelled => {
+                return Err(diagnosed(UpstreamError::Closed(SideEffectState::Sent), ignored))
+            }
+            () = &mut caller_cancelled => {
+                return Err(diagnosed(UpstreamError::Cancelled(SideEffectState::Sent), ignored))
+            }
             () = &mut deadline => {
-                return Err(UpstreamError::DeadlineExceeded(SideEffectState::Sent))
+                return Err(diagnosed(
+                    UpstreamError::DeadlineExceeded(SideEffectState::Sent),
+                    ignored,
+                ))
             }
             result = socket.recv_from(&mut buffer) => result,
         };
-        let (length, peer) = received.map_err(|_| UpstreamError::Receive(SideEffectState::Sent))?;
+        let (length, peer) = received
+            .map_err(|_| diagnosed(UpstreamError::Receive(SideEffectState::Sent), ignored))?;
 
         // Only the configured numeric peer address (including port) may supply
         // the response; other datagrams are ignored while the exchange lives.
         if peer != endpoint {
+            ignored.record_unexpected_peer();
             continue;
         }
 
@@ -120,6 +166,7 @@ pub(crate) async fn exchange(
         // A wrong-ID datagram from the expected peer is ignored until a
         // matching response arrives or the exchange terminates.
         if header.id != request_id {
+            ignored.record_response_id_mismatch();
             continue;
         }
         // A valid matching TC header is a successful UDP observation owned by
@@ -146,5 +193,20 @@ pub(crate) async fn exchange(
             Transport::Udp,
             false,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SideEffectState, UpstreamError, bind_error};
+
+    #[test]
+    fn local_bind_failure_maps_to_connect_without_side_effects() {
+        let error = bind_error(&std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "bind denied",
+        ));
+        assert_eq!(error, UpstreamError::Connect);
+        assert_eq!(error.side_effect(), SideEffectState::NotSent);
     }
 }
