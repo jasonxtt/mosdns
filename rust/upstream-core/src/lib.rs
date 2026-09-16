@@ -5,10 +5,14 @@
 #![allow(clippy::pedantic)]
 
 mod composite;
+pub mod secure;
 mod tcp;
 mod udp;
 
 pub use composite::UdpTcpPolicy;
+pub use secure::{
+    DohEndpoint, DotEndpoint, IdentityError, SecureError, ServerIdentity, ServiceUrlError,
+};
 
 use std::fmt;
 use std::net::SocketAddr;
