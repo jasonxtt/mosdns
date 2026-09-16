@@ -18,6 +18,11 @@ mosdns-dns-core = { path = "../dns-core" }
 # still creates no runtime, executor, or timer of its own.
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-util = { version = "0.7.16", features = ["rt"] }
+# Slice0 secure endpoint construction: only the structured URL parser is used;
+# no TLS/HTTP crate is introduced in this slice. The committed lock file holds
+# the transitive `idna_adapter` at 1.1.0 because the ICU-backed 1.2.x line
+# declares a 1.86+ MSRV, above this workspace's 1.85.
+url = "2"
 
 [dev-dependencies]
 # Test-only driver for the Slice1 UDP contract tests: a bounded current-thread
