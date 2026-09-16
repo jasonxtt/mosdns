@@ -58,6 +58,25 @@ impl fmt::Display for ServiceUrlError {
 
 impl Error for ServiceUrlError {}
 
+/// Why a TLS policy was rejected by [`TlsPolicy::verified`].
+///
+/// [`TlsPolicy::verified`]: super::TlsPolicy::verified
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TlsConfigError {
+    /// A verified policy was constructed with no trust anchors.
+    EmptyRootStore,
+}
+
+impl fmt::Display for TlsConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::EmptyRootStore => "empty verified TLS root store",
+        })
+    }
+}
+
+impl Error for TlsConfigError {}
+
 /// A typed failure raised while constructing a secure endpoint.
 ///
 /// Every variant is a pre-I/O construction defect, so the DNS side-effect state
@@ -73,6 +92,8 @@ pub enum SecureError {
     InvalidIdentity(IdentityError),
     /// The DoH service URL was rejected.
     InvalidServiceUrl(ServiceUrlError),
+    /// The explicit TLS policy was rejected before any I/O.
+    TlsConfig(TlsConfigError),
 }
 
 impl SecureError {
@@ -94,6 +115,7 @@ impl fmt::Display for SecureError {
             Self::InvalidServiceUrl(reason) => {
                 write!(formatter, "invalid DoH service URL: {reason}")
             }
+            Self::TlsConfig(reason) => write!(formatter, "invalid TLS policy: {reason}"),
         }
     }
 }
@@ -104,6 +126,7 @@ impl Error for SecureError {
             Self::ZeroDialPort => None,
             Self::InvalidIdentity(reason) => Some(reason),
             Self::InvalidServiceUrl(reason) => Some(reason),
+            Self::TlsConfig(reason) => Some(reason),
         }
     }
 }
