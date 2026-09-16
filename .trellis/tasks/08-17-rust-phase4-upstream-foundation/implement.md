@@ -1,8 +1,9 @@
 # Phase 4 upstream transport implementation plan
 
-> Future execution plan only. The task remains planning until the root reviewer
-> gives explicit PASS. Do not run task.py start, add a workspace member, add
-> dependencies, or implement network code while this gate is open.
+> The Phase4 planning gate passed at `16192ea`; the user authorized
+> `task.py start` on 2026-09-16. The task is `in_progress` and this round is
+> limited to Slice0. Do not start Slice1, add network code, or add production
+> wiring without another explicit root-review authorization.
 
 ## Execution rules
 
@@ -71,6 +72,20 @@ Focused verification:
 
 STOP: report the contract and dependency evidence to the root reviewer. Do not
 start Slice 1 without explicit approval.
+
+### Slice 0 completion record — 2026-09-16
+
+- `task.py start rust-phase4-upstream-foundation` completed successfully;
+  `task.json.status = in_progress`.
+- RED evidence: the new contract test target initially failed to compile for
+  the missing upstream types and missing `dns-core` header helper.
+- GREEN evidence: the focused upstream contract suite has 10 passing tests;
+  the dns-core header suite and affected clippy/format checks pass.
+- The workspace member is `rust/upstream-core`; its only normal dependency is
+  `mosdns-dns-core`. No Tokio/runtime, sequence-core, FFI, or Go dependency
+  was added.
+- The Slice0 stop condition is active: no UDP/TCP I/O, fallback, retry,
+  listener, host wiring, or Slice1 work was started.
 
 ## Slice 1 — UDP exchange primitive
 

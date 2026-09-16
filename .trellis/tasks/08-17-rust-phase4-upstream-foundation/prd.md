@@ -2,11 +2,11 @@
 
 > **Planning gate (PASS 2026-09-16, review commit
 > `16192ea83c8c54be1d3ce644e606682956084fee`):** Phase 3B is implemented,
-> root-reviewed, and archived; the Phase4 planning package is now root-reviewed.
-> The task remains planning-only until the user explicitly requests
-> `task.py start`. That authorization, when given, covers only Slice0 and
-> does not authorize Slice1, network implementation, production wiring, or a
-> permanent Go/Rust hybrid.
+> root-reviewed, and archived; the Phase4 planning package was root-reviewed.
+> The user authorized `task.py start` on 2026-09-16. The task is now
+> `in_progress`, and this implementation round is limited to Slice0. Slice1,
+> network implementation, production wiring, and a permanent Go/Rust hybrid
+> remain unauthorized.
 
 ## Goal
 
@@ -242,11 +242,10 @@ Phase3B completion and archival are **satisfied**. The Phase4 planning gate is
 runtime, cancellation and retry state machine, protocol/socket compatibility
 matrix, byte ownership, connection lifecycle, and test strategy.
 
-Phase4 implementation remains **NOT STARTED** and the task must remain
-`status = planning` until the user explicitly requests the authorized next
-step. The PASS authorizes only `task.py start` followed by Slice0; it does not
-authorize Slice1, later slices, production wiring, or a production release.
-Slice0 must stop and return to root review before any further phase begins.
+Phase4 implementation is authorized and the task is currently
+`status = in_progress`. Slice0 is the only authorized implementation scope in
+this round. It must stop and return to root review before Slice1 or any later
+phase begins; no production wiring or release is authorized.
 
 No transport ABI, Go adapter or production selector is expected in the future
 design. If a later task ever proposes one, it requires a separate explicit

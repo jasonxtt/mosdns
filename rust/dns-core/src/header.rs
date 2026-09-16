@@ -30,6 +30,15 @@ pub enum HeaderError {
     NotResponse,
 }
 
+/// The minimum response metadata needed by a transport before a full DNS
+/// record walk. This intentionally does not expose or parse RR/OPT sections.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResponseHeader {
+    pub id: u16,
+    pub qr: bool,
+    pub truncated: bool,
+}
+
 /// The transport framing for [`frame_response`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameMode {
@@ -52,6 +61,25 @@ impl FrameMode {
     }
 }
 
+/// Inspects only the fixed DNS response header.
+///
+/// The caller-owned wire is never modified. A complete response validator
+/// remains responsible for question and record semantics.
+pub fn inspect_response_header(packet: &[u8]) -> Result<ResponseHeader, HeaderError> {
+    if packet.len() < 12 {
+        return Err(HeaderError::TooShort);
+    }
+    let qr = packet[2] & 0x80 != 0;
+    if !qr {
+        return Err(HeaderError::NotResponse);
+    }
+    Ok(ResponseHeader {
+        id: u16::from_be_bytes([packet[0], packet[1]]),
+        qr,
+        truncated: packet[2] & 0x02 != 0,
+    })
+}
+
 /// Returns a caller-owned copy of `packet` with the ID written over bytes 0-1
 /// (big-endian) and the RA bit set in byte 3 bit 7. Every other byte is
 /// preserved verbatim, and the input is never modified.
@@ -66,12 +94,7 @@ impl FrameMode {
 /// Returns [`HeaderError::TooShort`] for a packet shorter than the header and
 /// [`HeaderError::NotResponse`] for a QR-clear packet.
 pub fn patch_response_id_ra(packet: &[u8], id: u16) -> Result<Vec<u8>, HeaderError> {
-    if packet.len() < 12 {
-        return Err(HeaderError::TooShort);
-    }
-    if packet[2] & 0x80 == 0 {
-        return Err(HeaderError::NotResponse);
-    }
+    inspect_response_header(packet)?;
     let mut out = packet.to_vec();
     out[0..2].copy_from_slice(&id.to_be_bytes());
     out[3] |= 0x80;

@@ -1,5 +1,12 @@
 [workspace]
-members = ["cache-core", "matcher-core", "dns-core", "sequence-core", "runtime"]
+members = [
+    "cache-core",
+    "matcher-core",
+    "dns-core",
+    "sequence-core",
+    "upstream-core",
+    "runtime",
+]
 resolver = "2"
 
 [workspace.package]
