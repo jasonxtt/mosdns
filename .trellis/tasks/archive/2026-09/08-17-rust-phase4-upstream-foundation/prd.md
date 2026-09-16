@@ -1,5 +1,11 @@
 # Rust Phase 4 upstream transport foundation
 
+> **Lifecycle closure — 2026-09-16:** The user authorized wrap-up and next-task
+> planning, explicitly excluding implementation. This foundation task is now
+> archived/completed. The PASS/CLOSED evidence below remains authoritative;
+> older `in_progress` / STOP statements describe the pre-archive review boundary.
+> Archival does not complete all of Phase 4 or authorize deferred scope.
+
 > **Planning gate (PASS 2026-09-16, review commit
 > `16192ea83c8c54be1d3ce644e606682956084fee`):** Phase 3B is implemented,
 > root-reviewed, and archived; the Phase4 planning package was root-reviewed.
@@ -233,24 +239,24 @@ UDP/TCP foundation unless a separately reviewed scope change authorizes it.
 
 ## Acceptance criteria
 
-- [ ] `design.md` and `implement.md` are root-reviewed before `task.py start`.
-- [ ] A reviewed compatibility/deviation matrix separates MosDNS
+- [x] `design.md` and `implement.md` are root-reviewed before `task.py start`.
+- [x] A reviewed compatibility/deviation matrix separates MosDNS
       product/protocol contracts from Go implementation details.
-- [ ] A pure Rust upstream core passes malformed-input, ownership,
+- [x] A pure Rust upstream core passes malformed-input, ownership,
       response-association, expected-peer, concurrent-isolation,
       cancellation/deadline, retry/fallback-to-TCP, connection lifecycle and
       deterministic-close tests.
-- [ ] Query input is not mutated and returned responses expose the correct
+- [x] Query input is not mutated and returned responses expose the correct
       original request ID under concurrent UDP/TCP traffic.
-- [ ] UDP `TC=1` -> TCP behavior and TCP DNS framing match the frozen product
+- [x] UDP `TC=1` -> TCP behavior and TCP DNS framing match the frozen product
       contract without requiring the Go transport implementation.
-- [ ] One shared Rust async runtime/lifecycle model is documented and tested;
+- [x] One shared Rust async runtime/lifecycle model is documented and tested;
       no transport C ABI/capability/handle namespace is added.
-- [ ] KixDNS transport research is pinned and classified before reuse.
-- [ ] Rust fmt/test/clippy/release and isolated Linux network tests pass; the
+- [x] KixDNS transport research is pinned and classified before reuse.
+- [x] Rust fmt/test/clippy/release and isolated Linux network tests pass; the
       existing Go repository tests/build remain green because Phase4 does not
       change Go production code.
-- [ ] No Go pool-buffer ownership, Go fallback/selector, server listener,
+- [x] No Go pool-buffer ownership, Go fallback/selector, server listener,
       configuration/WebUI, or production deployment change is introduced.
 
 ## Planning gate status
