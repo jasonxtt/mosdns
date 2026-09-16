@@ -1,11 +1,12 @@
-//! Slice 3 RED contract tests for the reviewed UDP TC-to-TCP composite policy.
+//! Slice 3 contract tests for the implemented UDP TC-to-TCP composite policy.
 //!
-//! These tests intentionally reference the public `UdpTcpPolicy` boundary named
-//! in `design.md` section 6 while only the Slice0-Slice2 primitives exist. This
-//! step adds tests only: the target is expected to fail (RED) on the missing
-//! production API imported below, not on a test assertion, until Slice3
-//! implements the composite policy. No production fallback, retry, pooling, or
-//! Go re-entry code is added here.
+//! These tests exercise the public `UdpTcpPolicy` boundary named in `design.md`
+//! section 6 as implemented by `composite.rs` over the reviewed Slice0-Slice2
+//! UDP and TCP primitives. The composite policy performs exactly one reviewed
+//! protocol fallback: a complete UDP response is returned unchanged, and a
+//! validated TC=1 UDP observation triggers at most one fresh TCP exchange that
+//! carries the caller's original query, ID, deadline, and cancellation. There
+//! is no retransmission, generic retry, pooling, reuse, or Go re-entry.
 //!
 //! Intended reviewed boundary frozen by this file:
 //!
