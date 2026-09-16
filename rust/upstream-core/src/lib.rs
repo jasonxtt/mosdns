@@ -766,8 +766,9 @@ impl<'a> ResponseCommit<'a> {
     }
 }
 
-/// Pure Rust upstream owner. Slice1 performs only the reviewed UDP exchange
-/// primitive on the caller's runtime; TCP and all production wiring remain
+/// Pure Rust upstream owner. Slice1 performs the reviewed UDP exchange
+/// primitive and Slice2 adds the fresh plain-TCP exchange primitive, both on
+/// the caller's runtime; TC-to-TCP policy and all production wiring remain
 /// outside the current slice.
 pub struct Upstream {
     endpoint: Endpoint,
@@ -904,13 +905,13 @@ impl Upstream {
     /// `Open -> Closing`, so close can never observe a zero registration count
     /// while this exchange is admitting itself. The RAII guard is held until
     /// this future returns or is dropped, covering success, every terminal
-    /// error, cancellation/deadline, owner close, the TCP placeholder, and an
-    /// aborted future.
+    /// error, cancellation/deadline, owner close, and an aborted future.
     ///
     /// Slice1 implements the reviewed one-exchange/one-socket UDP primitive in
-    /// [`udp::exchange`]. Plain TCP is intentionally not implemented in this
-    /// entry point: it returns the explicit minimal `Runtime(NotSent)`
-    /// placeholder so no TCP path can be reached silently before Slice2.
+    /// [`udp::exchange`]. Slice2 adds the reviewed fresh plain-TCP primitive in
+    /// [`tcp::exchange`], which opens one connection per exchange and reads one
+    /// complete framed response. TC-to-TCP fallback, pooling, and retries are
+    /// not part of this entry point.
     ///
     /// # Errors
     ///
@@ -931,7 +932,7 @@ impl Upstream {
         let commit = self.response_commit();
         match prepared.endpoint().transport() {
             Transport::Udp => udp::exchange(&prepared, &commit).await,
-            Transport::Tcp => Err(UpstreamError::Runtime(SideEffectState::NotSent)),
+            Transport::Tcp => tcp::exchange(&prepared, &commit).await,
         }
     }
 }
