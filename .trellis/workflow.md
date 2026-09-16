@@ -230,6 +230,12 @@ Sub-agent dispatch protocol applies to all platforms and all sub-agents, includi
 Flow: choose one behavior -> red test -> green implementation -> refactor while green -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
 Main-session default: dispatch implement/check sub-agents. Sub-agent self-exemption: if already running as `trellis-implement`, do NOT spawn another `trellis-implement` or `trellis-check`; if already running as `trellis-check`, do NOT spawn another `trellis-check` or `trellis-implement`. Dispatch is main session only.
 Dispatch prompt starts with `Active task: <task path from task.py current>`. Read context: jsonl entries -> `prd.md` -> `design.md if present` -> `implement.md if present`.
+When the user authorizes MCP DSH as the executor, follow the project-local
+MCP DSH controlled execution protocol in
+`.trellis/spec/backend/quality-guidelines.md`: clean isolated worktree,
+bounded asynchronous waits, one scoped behavior per job, complete diff review
+before explicit apply, parent-owned verification/commit, and the same-
+conversation one-minute root-review loop.
 [/workflow-state:in_progress]
 
 <!-- Per-turn breadcrumb: shown while status='in_progress' when
@@ -241,6 +247,10 @@ Dispatch prompt starts with `Active task: <task path from task.py current>`. Rea
 Flow: `trellis-before-dev` -> choose one behavior -> red test -> green implementation -> refactor while green -> `trellis-check` -> validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
 Do not dispatch implement/check sub-agents in inline mode.
 Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, plus relevant spec/research loaded by skills.
+When the user authorizes MCP DSH as the executor, the parent session remains
+responsible for clean-worktree safety, exact diff inspection/apply, verification,
+commit/push, and the bounded same-conversation root-review loop described in
+`.trellis/spec/backend/quality-guidelines.md`.
 [/workflow-state:in_progress-inline]
 
 ### Phase 3: Finish

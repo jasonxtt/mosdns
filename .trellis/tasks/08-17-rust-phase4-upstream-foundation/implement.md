@@ -2,9 +2,9 @@
 
 > The Phase4 planning gate passed at `16192ea`; the user authorized
 > `task.py start` on 2026-09-16. The task is `in_progress`; Slice0 passed root
-> review and the user explicitly authorized this Slice1 UDP round. Do not start
-> Slice2/TCP, add fallback, or add production wiring without another explicit
-> root-review authorization.
+> review and the user explicitly authorized the Slice2 fresh plain-TCP framing
+> round after the Slice1 root-review PASS. Do not start Slice3/TC fallback or
+> add production wiring without another explicit root-review authorization.
 
 ## Execution rules
 
@@ -284,6 +284,21 @@ evidence.
   `block_on`, `spawn`, Go/cgo/ABI/selector/fallback, or production wiring was
   added. `#![forbid(unsafe_code)]` remains. Task status stays `in_progress`;
   STOP for root review before Slice2.
+
+### Slice 2 authorization record — 2026-09-16
+
+- The Slice1 gate is formally `PASS / CLOSED` at root review commit
+  `7c65a1741601a22d61375c38c30932b34033eca3`. The user explicitly authorized
+  starting Slice2 in this task; `task.json` remains `in_progress` and no second
+  `task.py start` is required.
+- The authorized scope is only one fresh plain TCP connection per exchange,
+  exact two-byte DNS framing, complete writes, exact prefix/body reads, typed
+  malformed/truncated/oversize handling, deadline/cancellation, validation,
+  connection close, and concurrent stream isolation.
+- Slice3 TC-to-TCP composite policy, pooling, reuse, pipeline, retry,
+  retransmission, production wiring, Go/cgo/ABI/selector/fallback, and later
+  phases remain unauthorized. Slice2 must stop for root review when its
+  focused and full checks pass.
 
 ## Slice 2 — TCP framing primitive
 
