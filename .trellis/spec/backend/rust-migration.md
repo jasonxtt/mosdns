@@ -4,7 +4,20 @@ The complete architecture and phase gates are in `docs/ai/rust-rewrite-plan.md`.
 
 ## Architecture
 
-Use a strangler migration: Go continues to own YAML, plugin lifecycle, sequence hosting, WebUI/API, and unmigrated modules; Rust gradually owns bounded data-plane modules behind a versioned C ABI. The first module is cache, followed by matchers, DNS/query execution, sequence, transports, and servers only after the previous gates pass.
+The final target is a **pure Rust-native MosDNS binary and runtime**, not a permanently hybrid Go/Rust process. The migration still uses a strangler sequence, but the Go shell and C ABI are transitional scaffolding created by the completed cache/matcher/query-foundation phases. Phase 3B and later foundations should compose as Rust crates for the future Rust host and must not add a Go adapter, backend selector, mirror, or fallback unless a separately reviewed requirement proves one is needed.
+
+The module order remains cache -> matchers -> DNS/query execution -> sequence -> transports/servers -> Rust-native host -> retirement of the old hybrid scaffolding.
+
+## Compatibility policy
+
+Compatibility targets the MosDNS **product contract**, not the Go implementation:
+
+- Preserve user-facing YAML/config syntax, plugin/sequence semantics, final DNS behavior, routing/audit outputs, WebUI/API workflows, persistent formats, and other explicitly frozen external behavior.
+- Use current Go code/tests as behavior-discovery evidence when the product contract is unclear. Classify each discovered behavior as `preserve` or `intentional Rust deviation` before making it normative for Rust.
+- Do not carry Go implementation details forward by default: Go interfaces, `map[uint32]any`, `ChainWalker` recursion, error strings, internal pool/buffer layouts, naming tricks, cgo handles, selectors, Go mirrors/fallback, and same-generation publication are not final-architecture requirements.
+- Intentional Rust deviations are allowed for safety, determinism, correctness, or architectural quality when documented, tested, and shown not to break the frozen product contract.
+
+Phase 0 Go baselines and parity fixtures remain valuable discovery evidence; they do not require every Go/Rust internal difference to be zero.
 
 ## Reuse policy
 
@@ -12,6 +25,10 @@ Use a strangler migration: Go continues to own YAML, plugin lifecycle, sequence 
 - Prefer direct crates such as Moka when they provide the needed capability; otherwise classify KixDNS material as direct dependency, extracted code, adapted design, or rejected.
 - Preserve attribution and GPL-3.0 obligations for copied/adapted source. Pin reviewed upstream revisions and audit every update.
 - `/Users/tom/github/mosdns-rust-cache` is a compatibility reference for MosDNS bridge, dump, API, tests, and fallback—not a subtree to copy wholesale.
+
+## Existing hybrid foundation constraints
+
+The following constraints describe the already-built Phase 1/2/3A bridge and remain valid while that code exists. They are **not** a template for creating new Phase 3B+ Go/Rust boundaries.
 
 ## Cache foundation constraints
 
@@ -23,7 +40,13 @@ Use a strangler migration: Go continues to own YAML, plugin lifecycle, sequence 
 
 ## Phase gate
 
-Do not begin a later migration module merely because its Rust implementation is available upstream. Each module needs an approved Trellis task, frozen compatibility fixtures, parity results, performance evidence, and a rollback path.
+Do not begin a later migration module merely because its Rust implementation is available upstream. Each module needs an approved Trellis task, a frozen product-contract/deviation matrix, appropriate correctness/safety/performance evidence, and a rollback path. For Phase 3B+ pure Rust foundations, Go parity is optional discovery evidence rather than a mandatory runtime/fallback requirement.
+
+After a complete Rust-native host exists, run a dedicated hybrid-scaffolding retirement gate before final replacement/release. Remove the early `MOSDNS_*_BACKEND` selectors, Go mirrors/fallback, cgo adapters/FFI handles and bridge-only test/build paths that are no longer needed, but only after equivalent Rust-native product-contract coverage exists.
+
+## Historical transitional scenarios
+
+The scenarios below remain authoritative for the **existing** Phase 1/2/3A hybrid code until its retirement. Do not extend them into Phase 3B sequence-core, Phase 4 transport/server foundations, or the final Rust host unless an explicit future task says otherwise.
 
 ## Scenario: cgo borrowed byte slices
 
@@ -308,3 +331,119 @@ extract_edns_at(&packet, extra_offset)
 
 validate all declared bounds, return `UnsupportedRecord` only for a bounded
 non-OPT record, and let the Go adapter publish the oracle fallback.
+
+## Scenario: pure Rust sequence execution foundation
+
+### 1. Scope / Trigger
+
+Phase 3B sequence work uses `rust/sequence-core` as an isolated pure Rust
+library for the future Rust-native host. It is not a Go adapter, runtime
+export, backend selector, or production request-path switch. The crate may
+reuse typed `mosdns-dns-core` query/response atoms, but it must not depend on
+Go, cgo, plugin registries, listeners, upstreams, or network I/O.
+
+### 2. Signatures
+
+- `ExecutionState::new(QueryHeader, QuestionInfo) -> ExecutionState`
+- `ProgramSpec::validate(self) -> Result<ValidatedProgram, ProgramError>`
+- `execute(&ValidatedProgram, SequenceId, &mut ExecutionState, &mut ExecutionControl) -> Result<ExecutionCompletion, ExecutionError>`
+- `Matcher::evaluate(&self, &ExecutionState) -> Result<MatchOutcome, MatcherError>`
+- `Executor::execute(&self, &mut ExecutionState) -> Result<ExecutorOutcome, ExecutorError>`
+- `ExecutionState::inspect_response(&self, &impl ResponseInspector) -> Result<Option<ResponseInspection>, ResponseError>`
+
+### 3. Contracts
+
+- `ExecutionState` is closed and caller-owned: owned query/question data,
+  deterministic `BTreeSet<u32>` marks, `u64` fast flags, `None`/`Raw`/
+  `Synthesized` response state, and typed optional routing/audit strings.
+  There is no `map[uint32]any`, generic values field, Go pointer, or callback
+  escape hatch.
+- Raw responses retain the complete owned wire. Valid inspection returns only
+  the existing `dns-core` TTL observation and does not consume the wire.
+  Malformed raw wire returns `MalformedRawResponse` and remains owned as
+  `Raw` until explicitly cleared. Synthesized reject RCODEs accept
+  `0..=0x0fff`, with the default reject value `REFUSED` (`5`).
+- `ProgramSpec` is the only unvalidated input. Validation assigns stable IDs,
+  rejects duplicate names/unknown kinds/missing targets/invalid RCODEs, and
+  resolves `goto`/`jump`/`try` before execution. Missing and empty executable
+  lists are legal no-ops; multi-exec lists become explicit synthetic
+  `Inline(SequenceId)` scopes. Synthetic inline sequences are not direct
+  symbolic targets.
+- Matchers are immutable readers with one typed `StateMutation` channel. The
+  dispatcher applies mutation, reverses only the boolean, then applies
+  positive typed metadata. Metadata writes `domain_set` once for anonymous
+  qname, `switch6`/AAAA, and `switch5`/SOA/PTR/HTTPS; reversed matches never
+  claim the positive label.
+- The engine uses an explicit continuation/scope stack. `jump` pushes a
+  continuation, `goto` replaces the current scope continuation, `return`
+  resumes or completes the current scope, and `accept`/`reject` complete only
+  the current scope. Inline fall-through/return/accept/reject resume the outer
+  next rule; inline `exit` propagates unless a nested `try` catches it.
+- One root `ExecutionControl` owns shared fuel and cancellation. Every
+  matcher/executable dispatch checks cancellation before fuel; nested `try`
+  never resets either. The observable priority is
+  `Cancelled > BudgetExceeded > ordinary matcher/executor error > Exit`.
+  `try` converts only `Exit` into normal continuation; all other errors
+  propagate, and caller-owned state remains observable on every result.
+
+### 4. Validation & Error Matrix
+
+- Duplicate sequence/fixture name -> `ProgramError::Duplicate*Name`; no
+  program is exposed to execution.
+- Missing `goto`/`jump` sequence or `try`/fixture target -> typed missing-target
+  error; no partial state mutation occurs during validation.
+- Unknown matcher/executable or reject RCODE above `0x0fff` -> typed program
+  error before execution.
+- Malformed raw response -> `ResponseError::MalformedRawResponse`; raw bytes
+  remain in the state.
+- Cancellation at a dispatch boundary -> `ExecutionError::Cancelled`, taking
+  priority over exhausted fuel.
+- Cyclic `goto`/`jump`/nested `try` with exhausted shared fuel ->
+  `ExecutionError::BudgetExceeded`, never recursion overflow or hang.
+- Matcher/executor failure -> typed `ExecutionError` with mutations from
+  earlier completed dispatches retained; `try` does not swallow it.
+
+### 5. Good/Base/Bad Cases
+
+- Good: validate a multi-exec rule, observe `Inline(SequenceId)`, run a
+  `jump`/`return`, and see the outer rule continue in declaration order.
+- Base: a no-matcher/no-exec rule is a legal no-op; repeated matcher and
+  fixture kinds remain ordered and can reuse one fixture target.
+- Bad: parse Go matcher-name strings, copy `ChainWalker` recursion, add a
+  generic state map, or create a cgo/ABI/selector/fallback seam in
+  `sequence-core`.
+
+### 6. Tests Required
+
+- State tests assert owned query data, sorted marks, closed routing fields,
+  exact response replacement/clear transitions, complete-wire retention,
+  TTL-only non-consuming inspection, malformed-wire retention, and RCODE
+  boundaries.
+- Program tests assert no-op/multi-exec normalization, inline target
+  isolation, duplicate-name/unknown-kind/target validation, repeated kinds,
+  and no state mutation before successful validation.
+- Dispatcher tests assert declaration order, false/error short-circuit,
+  mutation ordering, reverse semantics, write-once metadata, and qtype labels.
+- Control tests assert accept/reject/return/exit, goto/jump continuations,
+  inline scope behavior, `try` sequence/fixture targets, and propagation of
+  ordinary errors/cancellation/budget exhaustion.
+- Safety tests assert cyclic termination, shared nested fuel/cancellation,
+  cancellation priority, caller-owned state after every completion/error, and
+  no ABI/live-wiring surface. Run the Rust workspace gates and the unchanged
+  Go default/race/vet/build plus `CGO_ENABLED=0` gates.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// A recursive Go-style walker or a generic plugin-value escape hatch.
+fn run(next: &mut ChainWalker, values: &mut HashMap<u32, Box<dyn Any>>) { /* ... */ }
+```
+
+#### Correct
+
+```rust
+let result = execute(&program, entry, &mut state, &mut control);
+// State stays borrowed and observable; nested try shares the root control.
+```
