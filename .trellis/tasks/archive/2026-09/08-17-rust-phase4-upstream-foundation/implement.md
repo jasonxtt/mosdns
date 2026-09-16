@@ -1,5 +1,11 @@
 # Phase 4 upstream transport implementation plan
 
+> **Lifecycle closure — 2026-09-16:** The user authorized wrap-up and next-task
+> planning, explicitly excluding implementation. This foundation task is now
+> archived/completed. The PASS/CLOSED evidence below remains authoritative;
+> older `in_progress` / STOP statements describe the pre-archive review boundary.
+> Archival does not complete all of Phase 4 or authorize deferred scope.
+
 > The Phase4 planning gate passed at `16192ea`; the user authorized
 > `task.py start` on 2026-09-16. The task is `in_progress`; Slice0 passed root
 > review, the user explicitly authorized the Slice2 fresh plain-TCP framing
@@ -626,3 +632,18 @@ Before each root-review stop, report:
 - unresolved research questions;
 - explicit confirmation that no unapproved code path, Go fallback, ABI,
   selector, production wiring, stage, commit, or archive action was taken.
+
+## Administrative closeout — 2026-09-16
+
+- User authorized archival and planning of the next task, not implementation.
+- All nine PRD acceptance items are marked complete against the existing
+  planning PASS and Slice0–4 records; no new test result is claimed.
+- AC evidence: planning/matrix/reuse = planning PASS `16192ea` and design §11;
+  ownership/association/lifecycle = Slice1–3 records; shared runtime = Slice0
+  and dependency inspection; fmt/test/clippy/release/Linux/Go = Slice4 record
+  and successful Actions `35090514316`; scope = Slice4 file/dependency review.
+- Source-backed spec closeout updates the existing upstream scenario for fresh
+  TCP and `UdpTcpPolicy`, without changing runtime behavior.
+- `task.py archive --no-commit` completed; auto-commit remains disabled.
+- Successor: `.trellis/tasks/09-16-rust-phase4-secure-upstream-foundation/`,
+  planning only. Historical research deferrals remain attached to their scope.

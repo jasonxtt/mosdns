@@ -1,5 +1,11 @@
 # Phase 4 upstream transport architecture
 
+> **Lifecycle closure — 2026-09-16:** The user authorized wrap-up and next-task
+> planning, explicitly excluding implementation. This foundation task is now
+> archived/completed. The PASS/CLOSED evidence below remains authoritative;
+> older `in_progress` / STOP statements describe the pre-archive review boundary.
+> Archival does not complete all of Phase 4 or authorize deferred scope.
+
 > Planning artifact plus Slice0/Slice1/Slice2/Slice3 contract. The architecture
 > and compatibility questions were root-reviewed before implementation. Slice0
 > and Slice1 passed root review, and the user explicitly authorized Slice2's
