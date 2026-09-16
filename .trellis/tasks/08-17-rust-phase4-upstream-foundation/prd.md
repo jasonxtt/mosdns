@@ -5,10 +5,10 @@
 > root-reviewed, and archived; the Phase4 planning package was root-reviewed.
 > The user authorized `task.py start` on 2026-09-16, explicitly authorized
 > Slice1 after the Slice0 root-review PASS, and now explicitly authorizes
-> Slice2 after the Slice1 root-review PASS. The task is `in_progress`, and this
-> implementation round is limited to the Slice2 TCP framing primitive.
-> Slice3/fallback, production wiring, and a permanent Go/Rust hybrid remain
-> unauthorized.
+> Slice2 after the Slice1 root-review PASS. Slice2 was implemented and received
+> formal same-thread root-review PASS/CLOSED at `b83dbb4`. The task remains
+> `in_progress`; the next stage is not authorized automatically. Slice3/fallback,
+> production wiring, and a permanent Go/Rust hybrid remain unauthorized.
 
 ## Goal
 
@@ -246,10 +246,11 @@ matrix, byte ownership, connection lifecycle, and test strategy.
 
 Phase4 implementation is authorized and the task is currently
 `status = in_progress`. Slice1 UDP and its four scoped root-review fixes are
-complete and passed root review. The user now authorizes only Slice2's fresh
-plain-TCP framing primitive; it must stop and return to root review before
-Slice3, TC-to-TCP fallback, or any later phase begins. No production wiring or
-release is authorized.
+complete and passed root review. Slice2's fresh plain-TCP framing primitive is
+complete and formally `PASS / CLOSED` at same-thread root review commit
+`b83dbb4`. The task must stop here until the user explicitly decides whether to
+authorize a later phase; Slice3, TC-to-TCP fallback, and any production wiring
+remain unauthorized.
 
 No transport ABI, Go adapter or production selector is expected in the future
 design. If a later task ever proposes one, it requires a separate explicit
