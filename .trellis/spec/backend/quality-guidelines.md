@@ -74,6 +74,30 @@ must not infer it from a successful push, a green local check, or silence. If
 the conversation requests user input, a different conversation, or missing
 evidence, Codex stops and asks the user before continuing.
 
+### 3.1 Pending review cadence and automatic remediation
+
+- After sending a review request, Codex must wait/read the selected
+  conversation at approximately one-minute intervals until it returns an
+  explicit `PASS`, an explicit `FAIL`, or requires user input. Do not busy-poll
+  and do not treat a queued user message, an active turn, or an unchanged
+  preview as a review result.
+- Use the platform's bounded wait primitive when it supports the selected
+  conversation. For a ChatGPT conversation that cannot be used as a wait
+  target, wait about 60 seconds and then call `read_thread` once; continue
+  this bounded cadence while the review remains active. Each read must use the
+  latest cursor when one is available.
+- A pending review is an expected wait state, not permission to speculate,
+  modify code, start another slice, archive the task, or claim acceptance.
+- When the reviewer returns a scoped `FAIL`, Codex automatically applies only
+  the requested remediation, runs the focused checks, inspects the exact diff,
+  stages exact paths, commits, pushes, and sends a new review request to the
+  same confirmed conversation. It then resumes the one-minute wait/read loop.
+- When the reviewer returns a `FAIL` that requires a scope change, missing
+  evidence, user choice, or a different conversation, Codex stops and asks the
+  user. It must not widen the diff or change review destinations on its own.
+- When the reviewer returns `PASS`, Codex records the result and stops at the
+  authorized boundary. `PASS` never automatically authorizes the next Slice.
+
 ### 4. Validation and error matrix
 
 | State or event | Required action |
@@ -98,10 +122,12 @@ The normal loop is:
 5. Stage exact files, commit with a descriptive message, and push the requested
    branch. Never use git add -A in this worktree.
 6. Send the full commit and evidence to the selected ChatGPT conversation.
-7. Read or poll the conversation until it returns PASS, FAIL, or requires user
-   input.
-8. On FAIL, return to step 1 and repeat only the bounded remediation loop.
-9. On PASS, stop. Do not automatically run task.py start, begin Slice 0,
+7. Wait/read the selected conversation at approximately one-minute intervals
+   until it returns explicit PASS, explicit FAIL, or requires user input.
+8. On a scoped FAIL, automatically return to step 1 and repeat only the
+   bounded remediation loop; on a scope-changing FAIL or user-input request,
+   stop and ask the user.
+9. On PASS, stop. Do not automatically run task.py start, begin a later Slice,
    advance the phase, wire production, or create a follow-up task.
 
 The user explicitly decides when a passed review should become the next phase.
