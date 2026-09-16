@@ -23,8 +23,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 
 use crate::{
-    ExchangeResponse, PreparedExchange, RequestError, ResponseCommit, SideEffectState, Transport,
-    UpstreamError,
+    ExchangeControl, ExchangeResponse, PreparedExchange, RequestError, ResponseCommit,
+    SideEffectState, Transport, UpstreamError,
 };
 
 /// The fixed width of the DNS-over-TCP payload length prefix.
@@ -167,6 +167,29 @@ where
         .map_err(|_| UpstreamError::Send(SideEffectState::MaybeSent))
 }
 
+/// Flushes every buffered byte of a framed message to the transport.
+///
+/// A plain `TcpStream` has no write buffer to drain, but a TLS stream does:
+/// `poll_write` may accept a whole frame into the session's record buffer
+/// without the bytes having reached the socket. A complete DoT send therefore
+/// requires an explicit flush, and `write_frame` alone is not sufficient
+/// evidence that the query reached the peer.
+///
+/// A flush failure is reported with the caller's `side_effect`, because the
+/// bytes preceding it were already accepted by the writer; the caller decides
+/// whether that is a conservative `MaybeSent` or an established `Sent`.
+pub(crate) async fn flush_bytes<W>(
+    writer: &mut W,
+    side_effect: SideEffectState,
+) -> Result<(), UpstreamError>
+where
+    W: AsyncWrite + Unpin,
+{
+    poll_fn(|cx| Pin::new(&mut *writer).poll_flush(cx))
+        .await
+        .map_err(|_| UpstreamError::Send(side_effect))
+}
+
 /// Reads exactly one framed DNS message, reassembling stream fragments.
 ///
 /// The reader consumes exactly two prefix bytes and then exactly the declared
@@ -205,17 +228,26 @@ where
 /// `deadline` is the already-established absolute instant, so this helper
 /// never starts a second relative timeout and never resets the deadline. It
 /// creates no runtime, spawns no task, and owns no socket of its own.
-pub(crate) async fn race_io<F, T>(
-    prepared: &PreparedExchange<'_>,
+///
+/// The control is taken as an [`ExchangeControl`] rather than a whole prepared
+/// exchange so the secure transports can reuse this exact race for their own
+/// connect/handshake/write/flush/read phases.
+///
+/// The error type is generic over `From<UpstreamError>` so the secure path can
+/// receive its typed control failures as `SecureError` while the plain
+/// transports keep receiving `UpstreamError`.
+pub(crate) async fn race_control<E, F, T>(
+    control: &ExchangeControl,
     side_effect: SideEffectState,
     deadline: Instant,
     io: F,
-) -> Result<T, UpstreamError>
+) -> Result<T, E>
 where
-    F: Future<Output = Result<T, UpstreamError>>,
+    E: From<UpstreamError>,
+    F: Future<Output = Result<T, E>>,
 {
-    let owner = prepared.owner_cancellation();
-    let caller = prepared.context().cancellation();
+    let owner = control.owner_cancellation();
+    let caller = control.caller_cancellation();
     let owner_cancelled = owner.cancelled();
     let caller_cancelled = caller.cancelled();
     tokio::pin!(owner_cancelled);
@@ -229,11 +261,26 @@ where
 
     tokio::select! {
         biased;
-        () = &mut owner_cancelled => Err(UpstreamError::Closed(side_effect)),
-        () = &mut caller_cancelled => Err(UpstreamError::Cancelled(side_effect)),
-        () = &mut deadline_timer => Err(UpstreamError::DeadlineExceeded(side_effect)),
+        () = &mut owner_cancelled => Err(UpstreamError::Closed(side_effect).into()),
+        () = &mut caller_cancelled => Err(UpstreamError::Cancelled(side_effect).into()),
+        () = &mut deadline_timer => Err(UpstreamError::DeadlineExceeded(side_effect).into()),
         result = &mut io => result,
     }
+}
+
+/// Races one transport I/O future for a prepared exchange.
+///
+/// A thin wrapper over [`race_control`] for the existing plain-TCP primitive.
+pub(crate) async fn race_io<F, T>(
+    prepared: &PreparedExchange<'_>,
+    side_effect: SideEffectState,
+    deadline: Instant,
+    io: F,
+) -> Result<T, UpstreamError>
+where
+    F: Future<Output = Result<T, UpstreamError>>,
+{
+    race_control(prepared.control(), side_effect, deadline, io).await
 }
 
 /// Writes every byte of `buffer`, retrying partial writes until the whole slice
