@@ -4,8 +4,11 @@
 
 #![allow(clippy::pedantic)]
 
+mod composite;
 mod tcp;
 mod udp;
+
+pub use composite::UdpTcpPolicy;
 
 use std::fmt;
 use std::net::SocketAddr;
@@ -64,6 +67,12 @@ pub enum RequestError {
 }
 
 /// A borrowed, read-only DNS query with its original transaction ID recorded.
+///
+/// `Copy` lets one validated request be handed to two transport primitive
+/// calls unchanged. It only copies the borrowed reference and the recorded
+/// original ID; the caller's query bytes are never copied, rewritten, or
+/// revalidated.
+#[derive(Clone, Copy)]
 pub struct ExchangeRequest<'q> {
     query: &'q [u8],
     request_id: u16,
@@ -819,7 +828,8 @@ impl<'a> ResponseCommit<'a> {
 
 /// Pure Rust upstream owner. Slice1 performs the reviewed UDP exchange
 /// primitive and Slice2 adds the fresh plain-TCP exchange primitive, both on
-/// the caller's runtime; TC-to-TCP policy and all production wiring remain
+/// the caller's runtime. This owner is single-transport by design; the TC-to-TCP
+/// composite policy lives in [`UdpTcpPolicy`] and all production wiring remains
 /// outside the current slice.
 pub struct Upstream {
     endpoint: Endpoint,
