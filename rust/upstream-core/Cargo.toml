@@ -11,13 +11,18 @@ crate-type = ["rlib"]
 
 [dependencies]
 mosdns-dns-core = { path = "../dns-core" }
+# Slice1 production async I/O: `net` for the per-exchange UdpSocket, `time`
+# for the one absolute-deadline sleep, `rt` for runtime-owned I/O/select
+# support, and `macros` for tokio::select!/tokio::pin!. upstream-core runs on
+# the caller's runtime and still creates no runtime, executor, or timer of its
+# own.
+tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
 tokio-util = { version = "0.7.16", features = ["rt"] }
 
 [dev-dependencies]
 # Test-only driver for the Slice1 UDP contract tests: a bounded current-thread
 # runtime plus async wake/timeout primitives. Mock servers use blocking
-# std::net::UdpSocket tasks, so no net/macros feature is declared here and the
-# library still creates no Tokio runtime.
+# std::net::UdpSocket tasks and the library still creates no Tokio runtime.
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 [lints]
