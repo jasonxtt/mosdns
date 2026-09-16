@@ -22,8 +22,8 @@
 use std::time::Instant;
 
 use crate::{
-    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, SideEffectState, Transport,
-    Upstream, UpstreamError,
+    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, SideEffectState,
+    TcpFallbackContext, Transport, Upstream, UpstreamError,
 };
 
 /// Reviewed UDP-first composite policy with at most one fresh TCP fallback.
@@ -69,7 +69,9 @@ impl UdpTcpPolicy {
     /// observation, the caller context is checked at the current instant with
     /// the overall [`SideEffectState::Sent`] state; an already-effective
     /// cancellation or deadline is returned as its typed error without
-    /// entering TCP. Otherwise the single TCP leg's typed error is returned.
+    /// entering TCP. Otherwise the single TCP leg runs exactly once, and its
+    /// typed failure is returned as [`UpstreamError::TcpFallback`] carrying the
+    /// prior [`TcpFallbackContext`] and the original nested cause.
     pub async fn exchange<'q>(
         &self,
         request: ExchangeRequest<'q>,
@@ -82,6 +84,17 @@ impl UdpTcpPolicy {
             return Ok(udp_response);
         }
 
+        // Retain the structured prior TC observation before the response is
+        // consumed and before the single TCP attempt can produce a typed
+        // failure. It records only the original request ID, the matching UDP
+        // response ID, the TC flag, and the overall prior Sent side effect.
+        let prior = TcpFallbackContext::new(
+            udp_response.request_id(),
+            udp_response.response_id(),
+            udp_response.truncated(),
+            SideEffectState::Sent,
+        );
+
         // A TC observation is not the final answer. Before any TCP work, the
         // already-existing caller context is re-checked at the current instant
         // with the overall Sent state; cancellation wins a tie with the
@@ -90,6 +103,14 @@ impl UdpTcpPolicy {
 
         // Exactly one fresh TCP exchange with the same borrowed request and the
         // same context clone (same absolute deadline, same cancellation token).
-        self.tcp.exchange(request, context).await
+        // A failure keeps the original typed TCP cause nested under the prior
+        // TC context; it is never stringified, relabelled, or retried.
+        match self.tcp.exchange(request, context).await {
+            Ok(response) => Ok(response),
+            Err(cause) => Err(UpstreamError::TcpFallback {
+                prior,
+                cause: Box::new(cause),
+            }),
+        }
     }
 }
