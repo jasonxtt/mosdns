@@ -145,3 +145,42 @@ Completed and reviewed Phase 3B sequence execution foundation across Slices 0-4,
 ### Next Steps
 
 - Keep Phase 4 deferred until separately authorized.
+
+
+## Session 6: Close UDP/TCP foundation and plan secure upstream
+
+**Date**: 2026-09-16
+**Task**: Close UDP/TCP foundation and plan secure upstream
+**Branch**: `rust`
+
+### Summary
+
+Archived accepted Phase4 UDP/TCP foundation; synchronized migration status and accepted transport specs; completed DoT/DoH planning package without implementation.
+
+### Main Changes
+
+- Archived 08-17-rust-phase4-upstream-foundation with all acceptance items mapped to existing PASS/CLOSED evidence; auto-commit disabled.
+- Created 09-16-rust-phase4-secure-upstream-foundation in planning with PRD/design/implement/research and curated manifests; no task.py start.
+- Updated rust-rewrite-plan, rust-handover and Rust migration spec to current accepted state.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `476cdb5` | docs(rust): plan secure upstream foundation |
+| `cb15361` | (see git log) |
+| `9d43e9f` | (see git log) |
+| `21bff19` | (see git log) |
+
+### Testing
+
+- [OK] Both predecessor archive and successor task context validation PASS; git diff --check PASS; no runtime/Cargo/CI changes.
+- [OK] Previous Rust/Go/Linux acceptance remains historical evidence; no new runtime tests claimed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Review secure-upstream planning proposal. Implementation requires later explicit user authorization; bootstrap, pooling, socket policy, HTTP3/listeners and host remain deferred.
