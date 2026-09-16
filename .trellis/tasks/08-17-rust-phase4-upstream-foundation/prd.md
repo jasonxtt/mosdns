@@ -5,8 +5,9 @@
 > root-reviewed, and archived; the Phase4 planning package was root-reviewed.
 > The user authorized `task.py start` on 2026-09-16 and explicitly authorized
 > Slice1 after the Slice0 root-review PASS. The task is `in_progress`, and this
-> implementation round is limited to the Slice1 UDP primitive. Slice2+, TCP,
-> production wiring, and a permanent Go/Rust hybrid remain unauthorized.
+> implementation round is limited to the Slice1 UDP primitive and its narrow
+> root-review remediation. Slice2+, TCP, production wiring, and a permanent
+> Go/Rust hybrid remain unauthorized.
 
 ## Goal
 
@@ -243,9 +244,10 @@ runtime, cancellation and retry state machine, protocol/socket compatibility
 matrix, byte ownership, connection lifecycle, and test strategy.
 
 Phase4 implementation is authorized and the task is currently
-`status = in_progress`. Slice1 UDP is the only authorized implementation scope
-in this round. It must stop and return to root review before Slice2 or any
-later phase begins; no production wiring or release is authorized.
+`status = in_progress`. Slice1 UDP and the three scoped root-review fixes are
+the only authorized implementation scope in this round. It must stop and return
+to root review before Slice2 or any later phase begins; no production wiring or
+release is authorized.
 
 No transport ABI, Go adapter or production selector is expected in the future
 design. If a later task ever proposes one, it requires a separate explicit

@@ -199,6 +199,42 @@ evidence.
   production wiring. Task status remains `in_progress`; stop here for root
   review before Slice2.
 
+### Slice 1 narrow root-review remediation record — 2026-09-16
+
+- Formal review of `276d847` returned a scoped FAIL with exactly three
+  blockers: synchronous close could expose `Closed` before a real UDP future
+  exited; local UDP bind/setup was classified as `Runtime(NotSent)` instead of
+  `Connect(NotSent)`; and ignored wrong-peer/wrong-ID observations were not
+  retained in terminal diagnostics.
+- DSH first attempted the complete scoped remediation in an isolated clean
+  worktree; that run timed out after 600 seconds with no applicable diff and
+  was safely discarded. The remediation was then split into two isolated DSH
+  executions. The blocker-A diff was inspected and applied only from the
+  explicit four-file whitelist, then committed locally as `45c7030`.
+- Blocker-A RED evidence: before production changes, focused Slice1 tests
+  exited 101 with 27 compile errors: nine `CloseResult is not a future`, 16
+  missing `in_flight_exchanges`, one missing `poll`, and one missing
+  `CloseCompletion::InFlight`. GREEN added nine tests and passed Slice1 28/28,
+  Slice0 12/12, focused clippy, and fmt.
+- Blocker-A implementation uses a mutex-serialized lifecycle/registration
+  gate, RAII in-flight guards, `Notify` drain wakeups, and caller-runtime
+  `Upstream::close().await`. It does not spawn exchange tasks or create a
+  runtime; `Closed` is exposed only after registrations reach zero.
+- Blockers-B/C RED evidence was then produced in the second isolated DSH
+  worktree: the bind helper import failed to compile, and diagnostic imports /
+  accessors were missing. GREEN adds the minimal `Connect` mapping seam and
+  `Diagnosed { cause, ignored }` typed wrapper with two boolean flags. Wrong
+  peer/ID remain ignored; deadline/cancellation/owner-close/receive retain the
+  primary cause and `Sent` state, while later valid responses succeed normally.
+- Main-worktree focused verification after both applies: Slice1 33/33 on the
+  first run and two additional repeated runs; Slice0 12/12; upstream-core lib
+  bind test passed; full workspace tests, dns-core tests, warnings-denied
+  clippy, fmt, cargo tree, task validate, and diff checks remain required
+  before the final commit/review. Task status remains `in_progress`.
+- Scope remains strictly Slice1 UDP remediation. No TCP, TC-to-TCP fallback,
+  retransmission, retry, pool, reuse, pipeline, listener, Go/cgo/ABI/selector/
+  fallback, or production wiring was added. STOP for root review before Slice2.
+
 ## Slice 2 — TCP framing primitive
 
 Goal: implement one fresh plain TCP connection per exchange with exact DNS

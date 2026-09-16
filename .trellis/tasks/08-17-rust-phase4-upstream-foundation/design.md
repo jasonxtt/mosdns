@@ -131,7 +131,7 @@ The following is a contract sketch, not code to add during planning:
         context: ExchangeContext,
     ) -> Result<ExchangeResponse, UpstreamError>
 
-    Upstream::close(&self) -> CloseResult
+    Upstream::close(&self) -> impl Future<Output = CloseResult>
 
 The final spelling may use Vec<u8> instead of Bytes, but the returned wire
 must be owned by the Rust response and must outlive the exchange call without a
@@ -155,13 +155,23 @@ context.Context, a pointer, or a C handle.
 A prepared exchange retains caller cancellation and owner shutdown as separate
 tokens in `ExchangeControl`. Owner shutdown is checked before caller
 cancellation and reports `Closed`; caller cancellation reports `Cancelled`.
-Both token types expose an async cancellation wake primitive for future I/O
-selection. Slice0 does not create a Tokio runtime or perform async I/O.
+Both token types expose an async cancellation wake primitive for I/O selection.
+The crate does not create a Tokio runtime. Slice1's exchange runs on the
+caller's runtime and registers an in-flight guard before any socket ownership.
 
 The API must make close observable. New exchange calls after Closing begins
 return Closed. An in-flight call terminated by owner close returns Closed with
 its side-effect state; an explicit caller cancellation returns Cancelled. The
 error contract below defines the distinction.
+
+The owner close operation is awaitable once real I/O exists. It changes
+`Open -> Closing`, rejects new registrations, cancels the owner scope, awaits
+the in-flight registration count reaching zero, and only then performs the
+guarded `Closing -> Closed` transition. The registration gate serializes
+admission with close, and the guard releases on success, every error, or a
+dropped exchange future. A direct `finish_close` while registrations remain
+returns `InFlight` and cannot expose `Closed` early. No lock is held across the
+drain await, and no exchange task is spawned by upstream-core.
 
 ## 4. DNS validation boundary
 
@@ -246,6 +256,12 @@ successful UDP observation, not a malformed response.
 
 A non-cancellation recv_from failure is terminal Receive/Read with Sent or
 MaybeSent state, closes the socket, and does not trigger a duplicate send.
+
+When an ignored wrong-peer or wrong-ID datagram has been observed, a terminal
+deadline, caller cancellation, owner close, or receive failure retains a small
+structured diagnostic alongside the truthful primary cause. It does not turn a
+timeout into `ResponseMismatch`, and a later valid response succeeds without
+carrying the diagnostic.
 
 A late or duplicate datagram cannot be delivered after the exchange returns:
 the socket owner is dropped and the kernel discards subsequent traffic for
@@ -369,6 +385,7 @@ The planned typed error taxonomy is:
 | FrameTooLarge | Outbound query exceeds u16::MAX before send | NotSent |
 | Closed | Owner close terminated or rejected work | NotSent, MaybeSent, or Sent |
 | Runtime/Internal | Invariant, join, or runtime failure | Last tracked state: NotSent, MaybeSent, or Sent |
+| Diagnosed | Deadline/cancellation/close/receive terminal with ignored UDP context | Primary cause state: NotSent, MaybeSent, or Sent |
 
 SideEffectState is a closed three-state enum: NotSent, MaybeSent, or Sent.
 Runtime/Internal preserves the last tracked state rather than introducing an
@@ -389,7 +406,7 @@ initial policy. The matrix is normative for the first implementation:
 | Event | Side effect | Required result/action | Automatic retry |
 | --- | --- | --- | --- |
 | Invalid query or unsupported endpoint | NotSent | InvalidRequest or InvalidEndpoint | No |
-| Local bind/setup failure | NotSent | Connect or setup error | No |
+| Local bind/setup failure | NotSent | Connect | No |
 | UDP send fails before completion | MaybeSent | Send/Write with uncertainty | No |
 | UDP send completes | Sent | Continue receive | No duplicate send |
 | UDP deadline after send | Sent | DeadlineExceeded with Sent | No |
@@ -408,7 +425,7 @@ initial policy. The matrix is normative for the first implementation:
 | TCP outbound query exceeds u16::MAX | NotSent | FrameTooLarge before connect/send | No |
 | TCP response ID mismatches | Sent | ResponseMismatch, close connection | No |
 | Cancellation during TCP connect/write/read | NotSent, MaybeSent, or Sent | Cancelled, close connection | No |
-| Owner Close during any phase | Recorded state | Closed, cancel and reap exchange | No |
+| Owner Close during any phase | Recorded state | Closed, cancel and await registration drain | No |
 
 A future UDP retransmission policy would be an explicit additional row and
 would require evidence that the product contract needs it. It cannot be
@@ -421,17 +438,19 @@ Each upstream object has the states Open, Closing, and Closed.
     Open -> Closing -> Closed
 
 Open accepts new exchanges. Close atomically changes Open to Closing, rejects
-new exchanges, cancels the upstream cancellation scope, and asks every
-in-flight exchange to stop. It closes UDP sockets and TCP streams, cancels
-deadline timers, drops pending response ownership, and awaits exchange task
-joins. Once the in-flight set is empty, it enters Closed. Repeated Close calls
-are idempotent and await the same completion state.
+new registrations, cancels the upstream cancellation scope, and asks every
+in-flight exchange to stop. Slice1 exchanges run in their caller tasks, so the
+owner awaits registration guards reaching zero rather than joining detached
+exchange tasks. The guard covers UDP sockets, timers, response ownership, and
+the TCP placeholder until the exchange future returns or is dropped. Once the
+in-flight count is empty, it enters Closed. Repeated close calls are
+idempotent and await the same completion state.
 
-The Slice0 synchronous skeleton has no in-flight task set to drain. Its
-completion operation is nevertheless guarded: `finish_close` can transition
-only `Closing -> Closed`; calling it while `Open` returns `NotClosing` and
-leaves the owner open. Later async close work must preserve this gate while
-awaiting the same completion state.
+The pre-I/O Slice0 contract still exposes `finish_close` for direct lifecycle
+inspection, but it can transition only `Closing -> Closed` after the count is
+zero; calling it while `Open` returns `NotClosing`, and calling it while work
+is registered returns `InFlight`. Slice1's `close().await` is the operation
+that performs cancellation and drain without blocking or creating a runtime.
 
 An exchange observes close before starting bind/connect/send, while awaiting
 receive/read, and before committing a response. A response that has already
