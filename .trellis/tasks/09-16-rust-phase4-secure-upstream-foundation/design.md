@@ -12,13 +12,14 @@ Extend `rust/upstream-core` rather than creating another runtime or copying the
 Go transport hierarchy. It remains a sibling of sequence-core; dns-core is its
 only MosDNS dependency. TLS/HTTP crates are ordinary library dependencies.
 
-Proposed types (design signatures, not implemented APIs):
+Slice0 public contract signatures:
 
 ```rust
 DotEndpoint::new(dial: SocketAddr, identity: ServerIdentity) -> Result<DotEndpoint, SecureError>
 DohEndpoint::new(service_url: &str, dial: SocketAddr) -> Result<DohEndpoint, SecureError>
 TlsPolicy::verified(roots: RootCertStore) -> Result<TlsPolicy, SecureError>
 TlsPolicy::insecure_skip_verify() -> TlsPolicy
+DohEndpoint::get_request_target(request: ExchangeRequest<'_>) -> Result<String, SecureError>
 DotUpstream::new(endpoint: DotEndpoint, tls: TlsPolicy) -> Result<DotUpstream, SecureError>
 DohUpstream::new(endpoint: DohEndpoint, tls: TlsPolicy) -> Result<DohUpstream, SecureError>
 // Both owners:
@@ -204,12 +205,13 @@ existing enum to Unknown. No error is used to automatically retry in this task.
 
 ## 8. Dependencies, files and verification boundaries
 
-Propose rustls 0.23/tokio-rustls 0.26, hyper 1/hyper-util 0.1 (Tokio IO only),
-http-body-util 0.1, bytes 1, base64 0.22, url 2. Precise compatible versions,
-Cargo features/licenses and transitive MSRV must pass Slice0 dependency review;
-no version is added or locked by this planning document. Keep unsafe forbidden
-in project code; third-party crypto's audited implementation is not a new local
-unsafe socket layer. Synthetic certificate fixtures can avoid a test generator
+Slice0 selected rustls 0.23.45/tokio-rustls 0.26.4, hyper 1.11.0/
+hyper-util 0.1.20 (Tokio IO only), http-body-util 0.1.3, base64 0.22.1 and
+url 2. Exact features/licenses and the transitive MSRV ledger are recorded in
+`research/secure-upstream-evidence.md` and locked in `rust/Cargo.lock`.
+Keep unsafe forbidden in project code; third-party crypto's audited
+implementation is not a new local unsafe socket layer. Synthetic certificate
+fixtures can avoid a test generator
 crate in the locked workspace; record generation commands and validity periods.
 
 Expected future files: `rust/upstream-core/src/secure/` (mod, endpoint, tls,

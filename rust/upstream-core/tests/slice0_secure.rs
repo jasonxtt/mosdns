@@ -7,10 +7,12 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
-use mosdns_upstream_core::secure::{TlsConfigError, TlsPolicy};
+use base64::Engine as _;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use mosdns_upstream_core::secure::{DohRequestError, TlsConfigError, TlsPolicy};
 use mosdns_upstream_core::{
-    DohEndpoint, DotEndpoint, IdentityError, SecureError, ServerIdentity, ServiceUrlError,
-    SideEffectState,
+    DohEndpoint, DotEndpoint, ExchangeRequest, IdentityError, SecureError, ServerIdentity,
+    ServiceUrlError, SideEffectState,
 };
 use rustls::RootCertStore;
 use rustls::pki_types::CertificateDer;
@@ -431,4 +433,292 @@ fn tls_policy_errors_and_debug_expose_no_sensitive_material() {
     let policy_debug = format!("{policy:?}");
     assert!(!policy_debug.contains("slice0-synthetic-root"));
     assert!(!policy_debug.contains("3082"));
+}
+
+/// A minimal, `dns-core`-valid query wire for the pure request-target contract.
+fn doh_query_wire(id: u16) -> Vec<u8> {
+    let mut wire = Vec::new();
+    wire.extend_from_slice(&id.to_be_bytes());
+    wire.extend_from_slice(&[0x01, 0x00]); // RD=1, QR=0, opcode QUERY
+    wire.extend_from_slice(&1u16.to_be_bytes()); // QDCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // ANCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // NSCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // ARCOUNT
+    wire.extend_from_slice(&[0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e']);
+    wire.extend_from_slice(&[0x03, b'o', b'r', b'g', 0x00]);
+    wire.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // A IN
+    wire
+}
+
+/// A wire-legal query whose label bytes make the standard base64 alphabet emit
+/// `+` and `/`, so the contract test can prove the URL-safe engine is used.
+fn alphabet_probe_query(id: u16) -> Vec<u8> {
+    let mut wire = Vec::new();
+    wire.extend_from_slice(&id.to_be_bytes());
+    wire.extend_from_slice(&[0x01, 0x00]);
+    wire.extend_from_slice(&1u16.to_be_bytes());
+    wire.extend_from_slice(&0u16.to_be_bytes());
+    wire.extend_from_slice(&0u16.to_be_bytes());
+    wire.extend_from_slice(&0u16.to_be_bytes());
+    wire.extend_from_slice(&[0x03, 0xFF, 0xC0, 0xFB]); // one 3-byte label
+    wire.push(0x00); // root label
+    wire.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]);
+    wire
+}
+
+/// The decoded query pairs of an origin-form request target.
+fn target_query_pairs(target: &str) -> Vec<(String, String)> {
+    let query = target
+        .split_once('?')
+        .expect("an origin-form target always carries a query")
+        .1;
+    url::form_urlencoded::parse(query.as_bytes())
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect()
+}
+
+/// The one generated `dns` value of an origin-form target.
+fn generated_dns_value(target: &str) -> String {
+    let mut values: Vec<String> = target_query_pairs(target)
+        .into_iter()
+        .filter(|(key, _)| key == "dns")
+        .map(|(_, value)| value)
+        .collect();
+    assert_eq!(values.len(), 1, "exactly one generated dns pair: {target}");
+    values.pop().expect("checked to hold exactly one value")
+}
+
+#[test]
+fn doh_get_request_target_borrows_the_query_and_replaces_only_dns() {
+    let id = 0xbeef;
+    let query = doh_query_wire(id);
+    let original = query.clone();
+
+    let service_url =
+        "https://dns.example:8443/resolve?foo=bar&dns=bogus&x=a%2Fb&dn%73=second&empty=";
+    let endpoint = DohEndpoint::new(service_url, v4(8443)).expect("valid DoH endpoint");
+
+    let target = endpoint
+        .get_request_target(ExchangeRequest::new(&query).expect("valid query"))
+        .expect("target builds");
+
+    // The caller's borrowed bytes and original transaction ID are never touched.
+    assert_eq!(query, original, "caller query bytes must not be mutated");
+    assert_eq!(&query[..2], &id.to_be_bytes(), "original ID is preserved");
+    assert_eq!(
+        endpoint.query(),
+        Some("foo=bar&dns=bogus&x=a%2Fb&dn%73=second&empty=")
+    );
+
+    // Origin-form: the endpoint path plus one query, with no scheme, authority,
+    // dial address, userinfo, or fragment.
+    assert!(target.starts_with("/resolve?"), "target: {target}");
+    for absent in ["https://", "dns.example", "8443", "#", "@", "//"] {
+        assert!(
+            !target.contains(absent),
+            "target leaked {absent:?}: {target}"
+        );
+    }
+
+    // Unrelated decoded pairs survive in order and every decoded `dns` key is
+    // replaced by exactly one generated pair appended at the end.
+    let pairs = target_query_pairs(&target);
+    assert_eq!(pairs.len(), 4, "pairs: {pairs:?}");
+    assert_eq!(pairs[0], ("foo".to_owned(), "bar".to_owned()));
+    assert_eq!(pairs[1], ("x".to_owned(), "a/b".to_owned()));
+    assert_eq!(pairs[2], ("empty".to_owned(), String::new()));
+    assert_eq!(pairs[3].0, "dns");
+    assert_eq!(pairs[3].1, generated_dns_value(&target));
+    for removed in ["bogus", "second"] {
+        assert!(
+            !target.contains(removed),
+            "removed dns value leaked: {target}"
+        );
+    }
+
+    // The generated value is the unpadded URL-safe base64 of the ID-zeroed copy.
+    let encoded = generated_dns_value(&target);
+    assert!(!encoded.contains('='), "padding is not allowed: {encoded}");
+    assert!(
+        !encoded.contains('+') && !encoded.contains('/'),
+        "not URL-safe: {encoded}"
+    );
+    let mut expected = original;
+    expected[..2].copy_from_slice(&[0, 0]);
+    assert_eq!(
+        URL_SAFE_NO_PAD
+            .decode(&encoded)
+            .expect("the dns value is valid URL-safe base64"),
+        expected,
+        "only the outbound copy's ID bytes are zeroed"
+    );
+}
+
+#[test]
+fn doh_get_request_target_uses_url_safe_unpadded_base64() {
+    let query = alphabet_probe_query(0x0102);
+    let mut expected = query.clone();
+    expected[..2].copy_from_slice(&[0, 0]);
+
+    let standard = STANDARD.encode(&expected);
+    assert!(
+        standard.contains('+') && standard.contains('/'),
+        "the probe must exercise the non-URL-safe alphabet: {standard}"
+    );
+
+    let endpoint = DohEndpoint::new("https://dns.example/dns-query", v4(443)).expect("endpoint");
+    let target = endpoint
+        .get_request_target(ExchangeRequest::new(&query).expect("valid query"))
+        .expect("target builds");
+    let encoded = generated_dns_value(&target);
+
+    assert_eq!(encoded, URL_SAFE_NO_PAD.encode(&expected));
+    assert!(
+        encoded.contains('-') && encoded.contains('_'),
+        "URL-safe alphabet expected: {encoded}"
+    );
+    assert!(!encoded.contains('+') && !encoded.contains('/') && !encoded.contains('='));
+
+    // A message whose length would carry standard padding also stays unpadded.
+    let padded = doh_query_wire(0x0103);
+    assert!(
+        STANDARD.encode(&padded).contains('='),
+        "the probe length must require standard padding"
+    );
+    let padded_target = endpoint
+        .get_request_target(ExchangeRequest::new(&padded).expect("valid query"))
+        .expect("target builds");
+    assert!(!generated_dns_value(&padded_target).contains('='));
+}
+
+#[test]
+fn doh_get_request_target_keeps_ipv6_path_and_dial_semantics() {
+    let query = doh_query_wire(0x2001);
+    let endpoint =
+        DohEndpoint::new("https://[2001:db8::53]/dns-query", v6(443)).expect("IPv6 endpoint");
+    let target = endpoint
+        .get_request_target(ExchangeRequest::new(&query).expect("valid query"))
+        .expect("target builds");
+
+    assert!(target.starts_with("/dns-query?dns="), "target: {target}");
+    assert!(
+        !target.contains("2001:db8"),
+        "service host leaked: {target}"
+    );
+    assert!(!target.contains('['), "authority leaked: {target}");
+    assert_eq!(endpoint.authority(), "[2001:db8::53]");
+    assert_eq!(endpoint.host(), "[2001:db8::53]");
+    assert_eq!(endpoint.identity().as_str(), "2001:db8::53");
+    assert_eq!(endpoint.dial(), v6(443));
+
+    // A service URL without a path still emits the normalized root path.
+    let root = DohEndpoint::new("https://dns.example", v4(443)).expect("endpoint");
+    let root_target = root
+        .get_request_target(ExchangeRequest::new(&query).expect("valid query"))
+        .expect("target builds");
+    assert!(root_target.starts_with("/?dns="), "target: {root_target}");
+}
+
+#[test]
+fn doh_get_request_target_preserves_escaped_path_and_ignores_dial() {
+    let endpoint =
+        DohEndpoint::new("https://dns.example/a%20b/c%2Fd?z=1", v4(8443)).expect("endpoint");
+    let query = doh_query_wire(0x0abc);
+    let target = endpoint
+        .get_request_target(ExchangeRequest::new(&query).expect("valid query"))
+        .expect("target builds");
+
+    assert!(target.starts_with("/a%20b/c%2Fd?"), "target: {target}");
+    assert_eq!(endpoint.path(), "/a%20b/c%2Fd");
+    assert_eq!(endpoint.dial(), v4(8443));
+    assert!(!target.contains("8443"), "dial port leaked: {target}");
+    assert_eq!(
+        target_query_pairs(&target),
+        vec![
+            ("z".to_owned(), "1".to_owned()),
+            ("dns".to_owned(), generated_dns_value(&target)),
+        ]
+    );
+}
+
+#[test]
+fn doh_get_request_target_rejects_an_oversized_dns_query_before_encoding() {
+    let mut query = doh_query_wire(0x4001);
+    query[10..12].copy_from_slice(&1u16.to_be_bytes()); // ARCOUNT = 1
+    query.resize(usize::from(u16::MAX) + 1, 0); // 65536 bytes
+    let original = query.clone();
+
+    // A path long enough that encoding this query would also break the 96 KiB
+    // target bound, so observing the query variant proves it ran first.
+    let long_path = format!("https://dns.example/{}", "a".repeat(20 * 1024));
+    let endpoint = DohEndpoint::new(&long_path, v4(443)).expect("valid endpoint");
+    let request = ExchangeRequest::new(&query).expect("the padded wire is a legal query");
+    let error = endpoint
+        .get_request_target(request)
+        .expect_err("a DNS message over 65535 bytes is rejected");
+    assert_eq!(
+        error,
+        SecureError::DohRequest(DohRequestError::QueryTooLarge)
+    );
+    assert_eq!(error.side_effect(), SideEffectState::NotSent);
+    assert_eq!(query, original, "caller query bytes must not be mutated");
+
+    // Exactly 65535 bytes remains accepted; a root-path endpoint keeps its
+    // encoded target under the separate 96 KiB target bound.
+    let mut at_limit = doh_query_wire(0x4002);
+    at_limit[10..12].copy_from_slice(&1u16.to_be_bytes());
+    at_limit.resize(usize::from(u16::MAX), 0);
+    let root = DohEndpoint::new("https://dns.example", v4(443)).expect("valid endpoint");
+    let limit_request = ExchangeRequest::new(&at_limit).expect("the padded wire is a legal query");
+    assert_eq!(at_limit.len(), usize::from(u16::MAX));
+    assert!(root.get_request_target(limit_request).is_ok());
+}
+
+#[test]
+fn doh_get_request_target_rejects_a_target_over_96_kib() {
+    let query = doh_query_wire(0x5001);
+    let padding = "p".repeat(100 * 1024);
+    let service_url = format!("https://dns.example/dns-query?pad={padding}");
+    let endpoint = DohEndpoint::new(&service_url, v4(443)).expect("valid endpoint");
+
+    let error = endpoint
+        .get_request_target(ExchangeRequest::new(&query).expect("valid query"))
+        .expect_err("a request target over 96 KiB is rejected");
+    assert_eq!(
+        error,
+        SecureError::DohRequest(DohRequestError::TargetTooLarge)
+    );
+    assert_eq!(error.side_effect(), SideEffectState::NotSent);
+
+    // The endpoint's URL material is still exposed unchanged after the failure.
+    assert_eq!(endpoint.path(), "/dns-query");
+    assert_eq!(endpoint.dial(), v4(443));
+}
+
+#[test]
+fn doh_get_request_target_errors_expose_no_url_or_query_material() {
+    for error in [
+        SecureError::DohRequest(DohRequestError::QueryTooLarge),
+        SecureError::DohRequest(DohRequestError::TargetTooLarge),
+    ] {
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        for leaked in [
+            "https://",
+            "dns.example",
+            "dns-query",
+            "dns=",
+            "token",
+            "topsecret",
+            "2001:db8",
+            "bogus",
+        ] {
+            assert!(
+                !display.contains(leaked),
+                "Display leaked {leaked:?}: {display}"
+            );
+            assert!(!debug.contains(leaked), "Debug leaked {leaked:?}: {debug}");
+        }
+        assert_ne!(error, SecureError::ZeroDialPort);
+    }
 }
