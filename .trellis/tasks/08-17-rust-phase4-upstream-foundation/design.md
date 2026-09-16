@@ -7,8 +7,11 @@
 > as `PASS / CLOSED`. On 2026-09-16 the user explicitly authorized the Slice3 UDP
 > TC-to-TCP composite policy recorded in section 6; that implementation at
 > `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread
-> root-review `PASS / CLOSED` (Actions run `35084388223` success). This document
-> does not authorize Slice4 or production wiring.
+> root-review `PASS / CLOSED` (Actions run `35084388223` success). On
+> 2026-09-16 the user then authorized Slice4, the final quality gate and
+> evidence run. Slice4 is verification/evidence only and this design remains the
+> frozen contract it verifies; production wiring and every deferred or
+> research-unresolved scope below remain unauthorized.
 
 ## 1. Boundary and dependency direction
 
@@ -18,7 +21,9 @@ review; Slice2's fresh plain-TCP framing primitive also passed root review and
 is closed. The user authorized the Slice3 UDP TC-to-TCP composite policy on
 2026-09-16, and its implementation at
 `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread root-review
-`PASS / CLOSED`. This document does not authorize Slice4 or production wiring.
+`PASS / CLOSED`. The user authorized the Slice4 final quality gate and evidence
+run on 2026-09-16; Slice4 verifies this contract and adds no new behavior.
+Production wiring remains unauthorized.
 
 The intended crate relationship is:
 
@@ -520,6 +525,16 @@ Any row classified Research unresolved blocks the related implementation scope.
 A later root review may move a row to Preserve or Intentional Rust deviation
 only with source/config evidence and a focused characterization test.
 
+Slice4 re-inspected this matrix at the final quality gate and reclassified no
+row. The four **Research unresolved** rows remain open deferrals and still block
+their named scope: SoMark/BindToDevice, local bind address/interface, SOCKS5
+proxy, and hostname/bootstrap resolution. `TCP connection reuse`, `TCP
+pipelining and pending demux`, and `idle timeout and recovery` remain
+Implementation-only/defer for a future pool lifecycle review; UDP retransmit
+timing/count remains Implementation-only/defer. No TLS/HTTPS/DoH/DoT,
+QUIC/HTTP3/DoQ, listener, configuration/WebUI/API/metrics, or production-wiring
+row changed classification.
+
 ## 12. Explicit scope
 
 In scope for the first future implementation:
@@ -561,6 +576,10 @@ The planning, Slice0, Slice1, Slice2, and Slice3 gates are closed; the user
 explicitly authorized the Slice3 UDP TC-to-TCP composite policy on 2026-09-16
 after Slice2's formal `PASS / CLOSED`, and that Slice3 implementation at
 `21bff19212637c47df632a29dd4b3380cac7a4cc` is now formally same-thread
-root-review `PASS / CLOSED`. The task remains `in_progress`; current execution
-is STOP and the task awaits the user's decision for Slice4. Nothing in this
-document authorizes Slice4, production wiring, or a release.
+root-review `PASS / CLOSED`. The user then authorized the Slice4 final quality
+gate and evidence run on 2026-09-16; that run is complete in the current
+evidence commit and awaits the external same-thread root reviewer's final
+acceptance. The task remains `in_progress`; current execution stops for that
+review, no Slice4 `PASS / CLOSED` is claimed yet, and nothing in this document
+authorizes production wiring, a release, or any deferred/research-unresolved
+scope.
