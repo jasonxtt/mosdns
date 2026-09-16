@@ -357,17 +357,24 @@ connection lifecycle.
   pre-connect rejection, refused connect, registration release, unchanged
   borrowed query bytes, and bounded no-retry observations. Non-EOF read
   failure remains covered by the deterministic in-crate framing unit test.
+- The same-thread root review found one narrow blocker: the synchronous
+  validation-to-commit boundary did not observe caller cancellation and the
+  original absolute deadline. Commit `95a7aa1` adds one final control-aware
+  decision under the existing lifecycle mutex, after complete frame read and
+  DNS validation, with owner close > caller cancellation > deadline > success
+  precedence. Deterministic real-TCP gate tests cover cancellation,
+  deadline, owner close, and commit-before-close success.
 - The focused control RED run initially failed with three bounded elapsed
   results before `race_io` was wired; the error-matrix additions were
   tests-only and all passed against the existing implementation, so no
   artificial production defect was introduced. GREEN is 14 Slice2 tests,
-  24 library/package tests, 12 Slice0 tests, and 35 Slice1 tests.
+  30 library tests, 12 Slice0 tests, and 35 Slice1 tests.
 - Verification passed with `cargo fmt --all -- --check`,
   warnings-denied `cargo clippy` for `mosdns-upstream-core`, `cargo tree`
   inspection, and `git diff --check`. No dependency, `sequence-core`,
   `mosdns-runtime`, Go, C ABI, selector, fallback, or production wiring
-  change was made. The implementation commits are `8c1ce5b`, `3bf63a2`, and
-  `d0ca321`.
+  change was made. The implementation commits are `8c1ce5b`, `3bf63a2`,
+  `d0ca321`, and `95a7aa1`.
 - `task.json` remains `status = in_progress`. STOP here for the same-thread
   root review; Slice3, TC-to-TCP composite fallback, and all later phases are
   not authorized.
