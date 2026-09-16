@@ -325,9 +325,66 @@ impl TerminalError {
     }
 }
 
+/// Structured metadata retained from an accepted truncated (`TC=1`) UDP
+/// observation when the single subsequent TCP fallback fails.
+///
+/// The context carries only the original request ID, the matching UDP response
+/// ID, the recorded truncated observation, and the overall prior UDP
+/// side-effect state. It owns no socket, stream, timer, parser, or response
+/// bytes, so reporting a failed fallback neither duplicates transport state nor
+/// re-labels or stringifies the nested typed cause.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TcpFallbackContext {
+    request_id: u16,
+    response_id: u16,
+    truncated: bool,
+    side_effect: SideEffectState,
+}
+
+impl TcpFallbackContext {
+    /// Captures the structured prior observation for a truncated UDP response.
+    pub(crate) const fn new(
+        request_id: u16,
+        response_id: u16,
+        truncated: bool,
+        side_effect: SideEffectState,
+    ) -> Self {
+        Self {
+            request_id,
+            response_id,
+            truncated,
+            side_effect,
+        }
+    }
+
+    /// The original request ID that was carried on both the UDP and TCP legs.
+    #[must_use]
+    pub const fn request_id(&self) -> u16 {
+        self.request_id
+    }
+
+    /// The matching response ID of the accepted truncated UDP observation.
+    #[must_use]
+    pub const fn response_id(&self) -> u16 {
+        self.response_id
+    }
+
+    /// Whether the prior UDP observation was truncated (`TC=1`).
+    #[must_use]
+    pub const fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    /// The overall side-effect state of the prior UDP exchange.
+    #[must_use]
+    pub const fn side_effect(&self) -> SideEffectState {
+        self.side_effect
+    }
+}
+
 /// Typed transport failure categories. No error variant carries an unknown
 /// side-effect state; runtime failures retain the last tracked state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UpstreamError {
     InvalidRequest(RequestError),
     InvalidEndpoint(EndpointError),
@@ -349,11 +406,19 @@ pub enum UpstreamError {
         cause: TerminalError,
         ignored: IgnoredDatagrams,
     },
+    /// A validated truncated UDP observation followed by a failed single TCP
+    /// fallback. `prior` retains the accepted UDP TC metadata, and `cause` is
+    /// the original typed TCP failure, retained verbatim rather than
+    /// stringified, re-labelled, or retried.
+    TcpFallback {
+        prior: TcpFallbackContext,
+        cause: Box<UpstreamError>,
+    },
 }
 
 impl UpstreamError {
     #[must_use]
-    pub const fn side_effect(self) -> SideEffectState {
+    pub const fn side_effect(&self) -> SideEffectState {
         match self {
             Self::InvalidRequest(_)
             | Self::InvalidEndpoint(_)
@@ -364,34 +429,35 @@ impl UpstreamError {
             | Self::Send(state)
             | Self::Receive(state)
             | Self::Closed(state)
-            | Self::Runtime(state) => state,
+            | Self::Runtime(state) => *state,
             Self::MalformedResponse
             | Self::UnexpectedPeer
             | Self::ResponseMismatch
             | Self::TruncatedFrame => SideEffectState::Sent,
             Self::Diagnosed { cause, .. } => cause.side_effect(),
+            Self::TcpFallback { prior, .. } => prior.side_effect(),
         }
     }
 
     /// The truthful primary terminal cause, when this error terminated an
     /// exchange that had already sent its query.
     #[must_use]
-    pub const fn terminal_cause(self) -> Option<TerminalError> {
+    pub const fn terminal_cause(&self) -> Option<TerminalError> {
         match self {
-            Self::Cancelled(state) => Some(TerminalError::Cancelled(state)),
-            Self::DeadlineExceeded(state) => Some(TerminalError::DeadlineExceeded(state)),
-            Self::Receive(state) => Some(TerminalError::Receive(state)),
-            Self::Closed(state) => Some(TerminalError::Closed(state)),
-            Self::Diagnosed { cause, .. } => Some(cause),
+            Self::Cancelled(state) => Some(TerminalError::Cancelled(*state)),
+            Self::DeadlineExceeded(state) => Some(TerminalError::DeadlineExceeded(*state)),
+            Self::Receive(state) => Some(TerminalError::Receive(*state)),
+            Self::Closed(state) => Some(TerminalError::Closed(*state)),
+            Self::Diagnosed { cause, .. } => Some(*cause),
             _ => None,
         }
     }
 
     /// The ignored datagrams retained with this error, if any.
     #[must_use]
-    pub const fn ignored_datagrams(self) -> IgnoredDatagrams {
+    pub const fn ignored_datagrams(&self) -> IgnoredDatagrams {
         match self {
-            Self::Diagnosed { ignored, .. } => ignored,
+            Self::Diagnosed { ignored, .. } => *ignored,
             _ => IgnoredDatagrams::NONE,
         }
     }
@@ -415,6 +481,7 @@ impl fmt::Display for UpstreamError {
             Self::Closed(_) => "closed",
             Self::Runtime(_) => "runtime failure",
             Self::Diagnosed { cause, .. } => cause.name(),
+            Self::TcpFallback { .. } => "tcp fallback failure",
         };
         formatter.write_str(name)
     }
