@@ -1,4 +1,4 @@
-//! Slice 2 plain-TCP DNS stream framing.
+//! Slice 2 fresh plain-TCP exchange and DNS stream framing.
 //!
 //! DNS-over-TCP carries every message as exactly a two-byte unsigned big-endian
 //! payload length prefix followed by the payload bytes. This module owns the
@@ -6,24 +6,95 @@
 //! write, the two-byte prefix, full-write semantics, and exact prefix/body
 //! reads that reassemble fragments into one message.
 //!
-//! It is deliberately independent of connection ownership, deadlines,
-//! cancellation, policy, fallback, pooling, and reuse. The later Slice2
-//! exchange step composes these helpers with a `TcpStream`; this file is the
-//! reviewed substrate for that step and is intentionally not wired into
-//! [`crate::Upstream::exchange`] yet.
-#![allow(dead_code)] // Consumed by the next authorized Slice2 step, not yet wired in.
+//! [`exchange`] composes those helpers with exactly one fresh `TcpStream` per
+//! call. It is deliberately independent of policy, fallback, pooling, reuse,
+//! pipelining, and retry: there is no second framing implementation, no
+//! connection is kept after the call, and deadline/cancellation racing is not
+//! part of this step.
 
 use std::future::poll_fn;
 use std::pin::Pin;
 use std::task::Poll;
+use std::time::Instant;
 
-use mosdns_dns_core::{FrameMode, frame_response};
+use mosdns_dns_core::{FrameMode, frame_response, inspect_response_header, validate_response};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::TcpStream;
 
-use crate::{RequestError, SideEffectState, UpstreamError};
+use crate::{
+    ExchangeResponse, PreparedExchange, RequestError, ResponseCommit, SideEffectState, Transport,
+    UpstreamError,
+};
 
 /// The fixed width of the DNS-over-TCP payload length prefix.
 const PREFIX_BYTES: usize = 2;
+
+/// Runs one fresh plain-TCP exchange for a prepared request.
+///
+/// The caller has already validated the request, transport, owner lifecycle,
+/// and the pre-connect outbound-size gate through
+/// [`crate::Upstream::prepare_exchange`]. This primitive connects exactly one
+/// new [`TcpStream`] to the configured numeric endpoint, writes exactly one
+/// unchanged query frame, reads exactly one complete response frame, and
+/// enforces QR, the original request ID, and full dns-core response validation
+/// before the response-commit gate. The stream is owned by this call and is
+/// dropped on every return path, so it is never pooled, reused, retried, or
+/// left open.
+pub(crate) async fn exchange(
+    prepared: &PreparedExchange<'_>,
+    commit: &ResponseCommit<'_>,
+) -> Result<ExchangeResponse, UpstreamError> {
+    debug_assert_eq!(prepared.endpoint().transport(), Transport::Tcp);
+
+    // Before connect: owner close, caller cancellation, then absolute deadline.
+    prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
+
+    let endpoint = prepared.endpoint().address();
+    let request_id = prepared.request().request_id();
+    let query = prepared.request().query();
+
+    // One fresh connection per exchange. A connect/setup failure has sent no
+    // DNS payload, so it is `Connect` (`NotSent`).
+    let mut stream = TcpStream::connect(endpoint)
+        .await
+        .map_err(|_| UpstreamError::Connect)?;
+
+    // Exactly one unchanged query frame, with full-write semantics. The
+    // outbound-size gate runs before the first write here and again before
+    // connect in `prepare_exchange`, so an unframeable query never reaches the
+    // socket.
+    write_frame(&mut stream, query).await?;
+
+    // Exactly one complete response frame: the two-byte prefix and only the
+    // declared body, with stream fragments reassembled into one message.
+    let body = read_frame(&mut stream).await?;
+
+    // A response shorter than the header or with QR clear cannot be attributed
+    // to this exchange as a response.
+    let header = inspect_response_header(&body).map_err(|_| UpstreamError::MalformedResponse)?;
+    // The accepted response must answer this request, preserving the caller's
+    // original DNS ID.
+    if header.id != request_id {
+        return Err(UpstreamError::ResponseMismatch);
+    }
+    // Only a complete, dns-core-valid response may be returned. A complete TCP
+    // frame is the authoritative response, not a UDP TC observation.
+    if validate_response(&body).is_err() {
+        return Err(UpstreamError::MalformedResponse);
+    }
+
+    // Validation is complete; the commit gate is the single linearization
+    // point against owner close, immediately before the owned response.
+    commit.before_commit().await;
+    commit.commit()?;
+    Ok(ExchangeResponse::new(
+        body,
+        request_id,
+        header.id,
+        Transport::Tcp,
+        false,
+    ))
+}
 
 /// Encodes one outbound DNS-over-TCP message.
 ///

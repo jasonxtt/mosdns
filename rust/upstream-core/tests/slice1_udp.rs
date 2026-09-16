@@ -1084,9 +1084,16 @@ fn caller_cancelled_exchange_releases_its_registration() {
 }
 
 #[test]
-fn tcp_placeholder_releases_its_registration() {
+fn tcp_connect_failure_releases_its_registration() {
     block_on(async {
-        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
+        // Bind then immediately release an ephemeral loopback port so the TCP
+        // connect is refused deterministically instead of depending on a
+        // well-known port being closed.
+        let probe =
+            std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind ephemeral probe");
+        let address = probe.local_addr().expect("probe address");
+        drop(probe);
+
         let upstream =
             Upstream::new(Endpoint::new(address, Transport::Tcp).expect("numeric tcp endpoint"));
         let query = query_wire(0xd109);
@@ -1095,9 +1102,11 @@ fn tcp_placeholder_releases_its_registration() {
             .exchange(request, open_context())
             .await
             .err()
-            .expect("the TCP placeholder is an explicit error");
-        assert_eq!(error, UpstreamError::Runtime(SideEffectState::NotSent));
+            .expect("a refused TCP connect is an explicit error");
+        assert_eq!(error, UpstreamError::Connect);
+        assert_eq!(error.side_effect(), SideEffectState::NotSent);
         assert_eq!(upstream.in_flight_exchanges(), 0);
+        assert_eq!(query, query_wire(0xd109), "the query bytes must not change");
     });
 }
 
