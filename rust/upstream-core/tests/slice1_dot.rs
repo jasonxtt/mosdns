@@ -19,7 +19,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fixtures::ServerIdentityFixture;
+use fixtures::{FixtureSet, ServerIdentityFixture};
 use mosdns_upstream_core::secure::{
     CertificateRejection, DotUpstream, SecureError, SecureResponse, SecureTransport,
     TlsHandshakeFailure, TlsPolicy,
@@ -29,7 +29,6 @@ use mosdns_upstream_core::{
     SideEffectState, TransportCancellation, UpstreamError,
 };
 use rustls::ServerConfig;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::{TcpListener as AsyncTcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -103,15 +102,15 @@ fn invalid_dns_response_wire(id: u16) -> Vec<u8> {
 }
 
 /// Builds a server configuration presenting `fixture`'s certificate and key.
-fn server_config(fixture: ServerIdentityFixture) -> Arc<ServerConfig> {
+///
+/// The fixture owns generated DER that is dropped with the test, so the config
+/// is built from clones of it.
+fn server_config(fixture: &ServerIdentityFixture) -> Arc<ServerConfig> {
     ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .with_safe_default_protocol_versions()
         .expect("ring provider supports the safe default protocol versions")
         .with_no_client_auth()
-        .with_single_cert(
-            vec![CertificateDer::from(fixture.cert)],
-            PrivateKeyDer::try_from(fixture.key).expect("synthetic key parses"),
-        )
+        .with_single_cert(vec![fixture.cert.clone()], fixture.key.clone_key())
         .map(Arc::new)
         .expect("synthetic certificate and key are consistent")
 }
@@ -128,14 +127,13 @@ fn server_config(fixture: ServerIdentityFixture) -> Arc<ServerConfig> {
 /// It uses the crate's own key loader (the same one `with_single_cert` uses) but
 /// skips that constructor's key/cert consistency check, which is what prevents
 /// this otherwise-invalid pairing from being constructed the usual way.
-fn mismatched_handshake_key_server_config() -> Arc<ServerConfig> {
+fn mismatched_handshake_key_server_config(set: &FixtureSet) -> Arc<ServerConfig> {
     use rustls::sign::CertifiedKey;
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     // The trusted leaf, paired with the private key of a different certificate.
-    let cert_chain = vec![CertificateDer::from(fixtures::GOOD.cert)];
-    let foreign_key =
-        PrivateKeyDer::try_from(fixtures::KEY_WRONG_NAME_A).expect("synthetic foreign key parses");
+    let cert_chain = vec![set.good.cert.clone()];
+    let foreign_key = set.wrong_name.key.clone_key();
     let signing_key = provider
         .key_provider
         .load_private_key(foreign_key)
@@ -167,10 +165,10 @@ fn dot_endpoint(address: SocketAddr, identity: &str) -> DotEndpoint {
 }
 
 /// A verified `DoT` owner dialing `address` as `identity` against root A.
-fn verified_owner(address: SocketAddr, identity: &str) -> DotUpstream {
+fn verified_owner(set: &FixtureSet, address: SocketAddr, identity: &str) -> DotUpstream {
     DotUpstream::new(
         dot_endpoint(address, identity),
-        TlsPolicy::verified(fixtures::root_store_a()).expect("verified policy"),
+        TlsPolicy::verified(set.root_store_a()).expect("verified policy"),
     )
     .expect("owner")
 }
@@ -222,7 +220,7 @@ struct TlsServer {
 impl TlsServer {
     /// Starts a server presenting `fixture` that runs `script` for each of
     /// `expected` connections.
-    fn start<F, Fut>(fixture: ServerIdentityFixture, expected: usize, script: F) -> Self
+    fn start<F, Fut>(fixture: &ServerIdentityFixture, expected: usize, script: F) -> Self
     where
         F: FnMut(TlsStream<TcpStream>, usize) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
@@ -274,13 +272,22 @@ impl TlsServer {
     }
 }
 
-/// Starts a raw (non-TLS) listener that accepts one connection, then stays
-/// silent so the client is parked inside the TLS handshake.
-fn silent_listener() -> (SocketAddr, std::thread::JoinHandle<()>) {
+/// Starts a raw (non-TLS) listener that accepts one connection and reports it.
+///
+/// The listener never speaks TLS, so the client stays parked inside its
+/// handshake. The accepted connection is signalled through the returned
+/// receiver, which is what lets a test order a control after the TCP connect
+/// without any sleep: the signal *is* the ordering evidence.
+fn silent_listener_signalled() -> (
+    SocketAddr,
+    oneshot::Receiver<()>,
+    std::thread::JoinHandle<()>,
+) {
     let (listener, address) = bind_listener();
     listener
         .set_nonblocking(true)
         .expect("listener non-blocking");
+    let (connected_tx, connected_rx) = oneshot::channel::<()>();
     let handle = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -288,16 +295,24 @@ fn silent_listener() -> (SocketAddr, std::thread::JoinHandle<()>) {
             .expect("build server runtime");
         runtime.block_on(async move {
             let listener = AsyncTcpListener::from_std(listener).expect("adopt listener");
-            let (stream, _) = timeout(TEST_TIMEOUT, listener.accept())
+            let (mut stream, _) = timeout(TEST_TIMEOUT, listener.accept())
                 .await
                 .expect("a connection arrives")
                 .expect("accept succeeds");
-            // Accept the TCP connection but never speak TLS.
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            drop(stream);
+            connected_tx
+                .send(())
+                .expect("the test observes the established connection");
+            // Read until the client goes away; returning on EOF keeps the
+            // server thread joinable without any timing dependency.
+            let mut scratch = [0u8; 64];
+            while let Ok(read) = stream.read(&mut scratch).await {
+                if read == 0 {
+                    return;
+                }
+            }
         });
     });
-    (address, handle)
+    (address, connected_rx, handle)
 }
 
 /// Runs one exchange for `query` and returns its typed outcome.
@@ -367,11 +382,14 @@ fn reply_script(reply: Vec<u8>, chunk: usize) -> impl FnMut(TlsStream<TcpStream>
 #[test]
 fn trusted_certificate_for_the_service_identity_completes_the_exchange() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5101;
         let expected = response_wire(id, 1);
-        let server = TlsServer::start(fixtures::GOOD, 1, reply_script(expected.clone(), 3));
+        let server = TlsServer::start(&set.good, 1, reply_script(expected.clone(), 3));
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let query = query_wire(id);
         let expected_query = query.clone();
         let response = exchange_owned(&upstream, &query, open_context())
@@ -393,12 +411,15 @@ fn trusted_certificate_for_the_service_identity_completes_the_exchange() {
 #[test]
 fn certificate_for_a_different_name_is_rejected_before_any_query() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5102;
         // The server presents a valid, trusted certificate covering only
         // `other.example`, so the service-name check must fail.
-        let server = TlsServer::start(fixtures::WRONG_NAME, 1, |_tls, _| async {});
+        let server = TlsServer::start(&set.wrong_name, 1, |_tls, _| async {});
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let query = query_wire(id);
         let expected_query = query.clone();
         let error = exchange_owned(&upstream, &query, open_context())
@@ -424,10 +445,13 @@ fn certificate_for_a_different_name_is_rejected_before_any_query() {
 #[test]
 fn expired_certificate_is_rejected_before_any_query() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5103;
-        let server = TlsServer::start(fixtures::EXPIRED, 1, |_tls, _| async {});
+        let server = TlsServer::start(&set.expired, 1, |_tls, _| async {});
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("an expired certificate must fail the handshake");
@@ -448,12 +472,15 @@ fn expired_certificate_is_rejected_before_any_query() {
 #[test]
 fn certificate_from_an_untrusted_issuer_is_rejected_before_any_query() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5104;
         // Valid for `dns.example` and unexpired, but issued by root B, which is
         // deliberately absent from the client's trust store.
-        let server = TlsServer::start(fixtures::UNKNOWN_ISSUER, 1, |_tls, _| async {});
+        let server = TlsServer::start(&set.unknown_issuer, 1, |_tls, _| async {});
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("an untrusted issuer must fail the handshake");
@@ -474,20 +501,19 @@ fn certificate_from_an_untrusted_issuer_is_rejected_before_any_query() {
 #[test]
 fn the_same_untrusted_certificate_verifies_under_its_own_root() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         // Proves the unknown-issuer case above is about the anchor set and not
         // an unparseable certificate: the same leaf authenticates when root B
         // is supplied as the trust anchor.
         let id = 0x5105;
         let expected = response_wire(id, 5);
-        let server = TlsServer::start(
-            fixtures::UNKNOWN_ISSUER,
-            1,
-            reply_script(expected.clone(), 4),
-        );
+        let server = TlsServer::start(&set.unknown_issuer, 1, reply_script(expected.clone(), 4));
 
         let upstream = DotUpstream::new(
             dot_endpoint(server.address, "dns.example"),
-            TlsPolicy::verified(fixtures::root_store_b()).expect("verified policy"),
+            TlsPolicy::verified(set.root_store_b()).expect("verified policy"),
         )
         .expect("owner");
 
@@ -503,13 +529,12 @@ fn the_same_untrusted_certificate_verifies_under_its_own_root() {
 #[test]
 fn insecure_policy_accepts_an_untrusted_certificate_only_when_explicitly_chosen() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5106;
         let expected = response_wire(id, 6);
-        let server = TlsServer::start(
-            fixtures::UNKNOWN_ISSUER,
-            1,
-            reply_script(expected.clone(), 8),
-        );
+        let server = TlsServer::start(&set.unknown_issuer, 1, reply_script(expected.clone(), 8));
 
         // The explicit opt-in policy is the only way to reach this outcome; the
         // verified policy for the same endpoint fails, as asserted above.
@@ -531,13 +556,16 @@ fn insecure_policy_accepts_an_untrusted_certificate_only_when_explicitly_chosen(
 #[test]
 fn a_verified_policy_never_retries_after_a_rejection() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5107;
         // The server accepts exactly one connection. A hidden insecure retry or
         // a second connection attempt would leave the client blocked and the
         // server waiting, so this test would time out instead.
-        let server = TlsServer::start(fixtures::UNKNOWN_ISSUER, 1, |_tls, _| async {});
+        let server = TlsServer::start(&set.unknown_issuer, 1, |_tls, _| async {});
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("verification failure is terminal");
@@ -552,11 +580,14 @@ fn a_verified_policy_never_retries_after_a_rejection() {
 #[test]
 fn a_bad_handshake_signature_fails_even_under_the_insecure_policy() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         // The chain is valid and the leaf is trusted, but the server signs the
         // handshake with a foreign key. An insecure policy skips chain, name and
         // time checks only; it must still reject the handshake signature, which
         // proves the provider's TLS1.2/1.3 signature verification stays enforced.
-        let config = mismatched_handshake_key_server_config();
+        let config = mismatched_handshake_key_server_config(&set);
         let server = TlsServer::start_with_config(config, 1, |_tls, _| async {});
 
         let upstream = DotUpstream::new(
@@ -588,10 +619,13 @@ fn a_bad_handshake_signature_fails_even_under_the_insecure_policy() {
 #[test]
 fn a_bad_handshake_signature_also_fails_under_the_verified_policy() {
     block_on(async {
-        let config = mismatched_handshake_key_server_config();
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
+        let config = mismatched_handshake_key_server_config(&set);
         let server = TlsServer::start_with_config(config, 1, |_tls, _| async {});
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(0x5109), open_context())
             .await
             .expect_err("a bad handshake signature must fail under verified TLS");
@@ -614,13 +648,16 @@ fn a_bad_handshake_signature_also_fails_under_the_verified_policy() {
 #[test]
 fn fragmented_response_frame_is_reassembled_across_tls_records() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5201;
         let expected = response_wire(id, 7);
         // One byte per record forces both the prefix and the body across many
         // TLS records and reads.
-        let server = TlsServer::start(fixtures::GOOD, 1, reply_script(expected.clone(), 1));
+        let server = TlsServer::start(&set.good, 1, reply_script(expected.clone(), 1));
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let response = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect("the exact frame is reassembled from fragments");
@@ -633,13 +670,16 @@ fn fragmented_response_frame_is_reassembled_across_tls_records() {
 #[test]
 fn a_complete_truncated_response_is_returned_without_plaintext_fallback() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5202;
         let expected = truncated_response_wire(id, 8);
         // One connection only: a TC response must never trigger a retry or a
         // plaintext TCP fallback.
-        let server = TlsServer::start(fixtures::GOOD, 1, reply_script(expected.clone(), 16));
+        let server = TlsServer::start(&set.good, 1, reply_script(expected.clone(), 16));
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let response = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect("a complete TC response is a valid DoT result");
@@ -655,15 +695,14 @@ fn a_complete_truncated_response_is_returned_without_plaintext_fallback() {
 #[test]
 fn a_response_with_a_different_transaction_id_is_a_mismatch() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5203;
         // The server answers with a different ID while the wire stays valid.
-        let server = TlsServer::start(
-            fixtures::GOOD,
-            1,
-            reply_script(response_wire(id ^ 1, 9), 16),
-        );
+        let server = TlsServer::start(&set.good, 1, reply_script(response_wire(id ^ 1, 9), 16));
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("a wrong response ID must be rejected");
@@ -681,14 +720,17 @@ fn a_response_with_a_different_transaction_id_is_a_mismatch() {
 #[test]
 fn a_complete_frame_with_invalid_dns_wire_is_a_malformed_response() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5204;
         let server = TlsServer::start(
-            fixtures::GOOD,
+            &set.good,
             1,
             reply_script(invalid_dns_response_wire(id), 16),
         );
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("an invalid DNS wire must be rejected");
@@ -705,16 +747,19 @@ fn a_complete_frame_with_invalid_dns_wire_is_a_malformed_response() {
 #[test]
 fn a_zero_length_inbound_prefix_is_a_malformed_response() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5205;
         // A zero-length DNS frame cannot be a response; the server writes a
         // bare 0x0000 prefix.
-        let server = TlsServer::start(fixtures::GOOD, 1, |mut tls, _| async move {
+        let server = TlsServer::start(&set.good, 1, |mut tls, _| async move {
             let _ = read_framed(&mut tls).await;
             tls.write_all(&[0x00, 0x00]).await.expect("write prefix");
             tls.flush().await.expect("flush prefix");
         });
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("a zero-length frame is malformed");
@@ -730,8 +775,11 @@ fn a_zero_length_inbound_prefix_is_a_malformed_response() {
 #[test]
 fn eof_before_a_complete_prefix_is_a_truncated_frame() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5206;
-        let server = TlsServer::start(fixtures::GOOD, 1, |mut tls, _| async move {
+        let server = TlsServer::start(&set.good, 1, |mut tls, _| async move {
             let _ = read_framed(&mut tls).await;
             // Half a length prefix, then close.
             tls.write_all(&[0x00]).await.expect("write half prefix");
@@ -739,7 +787,7 @@ fn eof_before_a_complete_prefix_is_a_truncated_frame() {
             tls.shutdown().await.expect("close the server stream");
         });
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("a partial prefix cannot complete a frame");
@@ -753,8 +801,11 @@ fn eof_before_a_complete_prefix_is_a_truncated_frame() {
 #[test]
 fn eof_during_the_declared_body_is_a_truncated_frame() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5207;
-        let server = TlsServer::start(fixtures::GOOD, 1, |mut tls, _| async move {
+        let server = TlsServer::start(&set.good, 1, |mut tls, _| async move {
             let _ = read_framed(&mut tls).await;
             // Declare 8 body bytes but send only 3.
             tls.write_all(&[0x00, 0x08, 0x01, 0x02, 0x03])
@@ -764,7 +815,7 @@ fn eof_during_the_declared_body_is_a_truncated_frame() {
             tls.shutdown().await.expect("close the server stream");
         });
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("a partial body cannot complete a frame");
@@ -777,6 +828,9 @@ fn eof_during_the_declared_body_is_a_truncated_frame() {
 #[test]
 fn an_oversized_outbound_query_is_rejected_before_any_connection() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         // A query over u16::MAX cannot be represented by the two-byte DoT
         // prefix, so it must fail before any socket work. The endpoint points at
         // a bound-but-unused loopback address, so a connection attempt would be
@@ -786,7 +840,7 @@ fn an_oversized_outbound_query_is_rejected_before_any_connection() {
             .set_nonblocking(true)
             .expect("listener non-blocking");
 
-        let upstream = verified_owner(address, "dns.example");
+        let upstream = verified_owner(&set, address, "dns.example");
         let mut query = query_wire(0x5208);
         query[10..12].copy_from_slice(&1u16.to_be_bytes()); // ARCOUNT
         query.resize(usize::from(u16::MAX) + 1, 0);
@@ -813,11 +867,14 @@ fn an_oversized_outbound_query_is_rejected_before_any_connection() {
 #[test]
 fn owner_close_while_waiting_for_the_response_is_closed_with_sent() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5301;
         let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
-        let server = TlsServer::start(fixtures::GOOD, 1, holding_script(consumed_tx));
+        let server = TlsServer::start(&set.good, 1, holding_script(consumed_tx));
 
-        let upstream = Arc::new(verified_owner(server.address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, server.address, "dns.example"));
         let exchange = spawn_exchange(&upstream, &query_wire(id), open_context());
 
         timeout(TEST_TIMEOUT, consumed_rx)
@@ -845,11 +902,14 @@ fn owner_close_while_waiting_for_the_response_is_closed_with_sent() {
 #[test]
 fn caller_cancellation_while_waiting_for_the_response_is_cancelled_with_sent() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5302;
         let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
-        let server = TlsServer::start(fixtures::GOOD, 1, holding_script(consumed_tx));
+        let server = TlsServer::start(&set.good, 1, holding_script(consumed_tx));
 
-        let upstream = Arc::new(verified_owner(server.address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, server.address, "dns.example"));
         let cancellation = TransportCancellation::new();
         let context = ExchangeContext::new(
             Instant::now() + Duration::from_secs(30),
@@ -880,11 +940,14 @@ fn caller_cancellation_while_waiting_for_the_response_is_cancelled_with_sent() {
 #[test]
 fn absolute_deadline_while_waiting_for_the_response_is_deadline_exceeded_with_sent() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let id = 0x5303;
         let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
-        let server = TlsServer::start(fixtures::GOOD, 1, holding_script(consumed_tx));
+        let server = TlsServer::start(&set.good, 1, holding_script(consumed_tx));
 
-        let upstream = Arc::new(verified_owner(server.address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, server.address, "dns.example"));
         // One absolute deadline for the whole exchange. Loopback connect,
         // handshake, write, and flush all finish far below it, so only the
         // response wait can be terminated by it.
@@ -914,13 +977,18 @@ fn absolute_deadline_while_waiting_for_the_response_is_deadline_exceeded_with_se
 }
 
 #[test]
-fn cancellation_during_the_handshake_sends_no_query() {
+fn cancellation_after_the_tcp_connect_sends_no_query() {
     block_on(async {
-        // The server accepts the TCP connection but never speaks TLS, so the
-        // client is parked in the handshake when cancellation arrives.
-        let (address, server) = silent_listener();
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
+        // The server accepts the TCP connection and signals the test; it never
+        // speaks TLS, so the client stays in its handshake. The test proceeds
+        // only on that explicit signal, so ordering is deterministic and no
+        // sleep stands in for "the client has connected".
+        let (address, connected_rx, server) = silent_listener_signalled();
 
-        let upstream = Arc::new(verified_owner(address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, address, "dns.example"));
         let cancellation = TransportCancellation::new();
         let context = ExchangeContext::new(
             Instant::now() + Duration::from_secs(30),
@@ -928,9 +996,10 @@ fn cancellation_during_the_handshake_sends_no_query() {
         );
         let exchange = spawn_exchange(&upstream, &query_wire(0x5304), context);
 
-        // Cancel after the TCP connection is established but before TLS
-        // completes; the connection is observable through the registration.
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        timeout(TEST_TIMEOUT, connected_rx)
+            .await
+            .expect("the client's TCP connection is established before cancellation")
+            .expect("the listener observed the connection");
         assert_eq!(upstream.in_flight_exchanges(), 1);
         cancellation.cancel();
 
@@ -939,7 +1008,7 @@ fn cancellation_during_the_handshake_sends_no_query() {
             .expect("cancelled handshake bounded")
             .expect("exchange task joined")
             .expect_err("cancellation terminates the handshake");
-        // No DNS byte was ever sent: the handshake never completed.
+        // The handshake never completed, so no DNS byte was ever sent.
         assert_eq!(
             error,
             SecureError::Transport(UpstreamError::Cancelled(SideEffectState::NotSent))
@@ -950,14 +1019,20 @@ fn cancellation_during_the_handshake_sends_no_query() {
 }
 
 #[test]
-fn owner_close_during_the_handshake_sends_no_query() {
+fn owner_close_after_the_tcp_connect_sends_no_query() {
     block_on(async {
-        let (address, server) = silent_listener();
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
+        let (address, connected_rx, server) = silent_listener_signalled();
 
-        let upstream = Arc::new(verified_owner(address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, address, "dns.example"));
         let exchange = spawn_exchange(&upstream, &query_wire(0x5305), open_context());
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        timeout(TEST_TIMEOUT, connected_rx)
+            .await
+            .expect("the client's TCP connection is established before close")
+            .expect("the listener observed the connection");
         assert_eq!(upstream.in_flight_exchanges(), 1);
         assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
 
@@ -980,10 +1055,13 @@ fn owner_close_during_the_handshake_sends_no_query() {
 #[test]
 fn a_dropped_exchange_future_releases_its_registration() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
-        let server = TlsServer::start(fixtures::GOOD, 1, holding_script(consumed_tx));
+        let server = TlsServer::start(&set.good, 1, holding_script(consumed_tx));
 
-        let upstream = Arc::new(verified_owner(server.address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, server.address, "dns.example"));
         let exchange = spawn_exchange(&upstream, &query_wire(0x5306), open_context());
 
         timeout(TEST_TIMEOUT, consumed_rx)
@@ -1011,12 +1089,15 @@ fn a_dropped_exchange_future_releases_its_registration() {
 #[test]
 fn exchanges_after_close_are_rejected_without_opening_a_connection() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let (listener, address) = bind_listener();
         listener
             .set_nonblocking(true)
             .expect("listener non-blocking");
 
-        let upstream = verified_owner(address, "dns.example");
+        let upstream = verified_owner(&set, address, "dns.example");
         assert_eq!(upstream.close().await, CloseResult::Closed);
 
         let error = exchange_owned(&upstream, &query_wire(0x5307), open_context())
@@ -1042,6 +1123,9 @@ fn exchanges_after_close_are_rejected_without_opening_a_connection() {
 #[test]
 fn sequential_exchanges_open_a_fresh_authenticated_connection_each_time() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let first_id = 0x5401;
         let second_id = 0x5402;
         let first_expected = response_wire(first_id, 21);
@@ -1050,7 +1134,7 @@ fn sequential_exchanges_open_a_fresh_authenticated_connection_each_time() {
         // Each connection is answered according to its index, and the ID the
         // server received must match that response, so a reused connection
         // carrying a stale exchange would be detected.
-        let server = TlsServer::start(fixtures::GOOD, 2, move |mut tls, index| {
+        let server = TlsServer::start(&set.good, 2, move |mut tls, index| {
             let reply = if index == 0 {
                 first_expected.clone()
             } else {
@@ -1066,7 +1150,7 @@ fn sequential_exchanges_open_a_fresh_authenticated_connection_each_time() {
             }
         });
 
-        let upstream = verified_owner(server.address, "dns.example");
+        let upstream = verified_owner(&set, server.address, "dns.example");
 
         let first = exchange_owned(&upstream, &query_wire(first_id), open_context())
             .await
@@ -1087,12 +1171,15 @@ fn sequential_exchanges_open_a_fresh_authenticated_connection_each_time() {
 #[test]
 fn concurrent_exchanges_use_separate_connections_and_owned_responses() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let first_id = 0x5403;
         let second_id = 0x5404;
         // Answer with the response matching the ID this connection received, so
         // cross-talk between the two connections is observable as an ID
         // mismatch instead of silently passing.
-        let server = TlsServer::start(fixtures::GOOD, 2, |mut tls, _| async move {
+        let server = TlsServer::start(&set.good, 2, |mut tls, _| async move {
             let received = read_framed(&mut tls).await;
             if u16::from_be_bytes([received[0], received[1]]) == 0x5403 {
                 write_framed_in_chunks(&mut tls, &response_wire(0x5403, 31), 5).await;
@@ -1101,7 +1188,7 @@ fn concurrent_exchanges_use_separate_connections_and_owned_responses() {
             }
         });
 
-        let upstream = Arc::new(verified_owner(server.address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, server.address, "dns.example"));
         let first = spawn_exchange(&upstream, &query_wire(first_id), open_context());
         let second = spawn_exchange(&upstream, &query_wire(second_id), open_context());
 
@@ -1132,10 +1219,13 @@ fn concurrent_exchanges_use_separate_connections_and_owned_responses() {
 #[test]
 fn owner_close_drains_a_concurrent_exchange_before_reporting_closed() {
     block_on(async {
+        // Every test generates its own fresh fixture material; no key is
+        // committed or shared between tests.
+        let set = FixtureSet::generate();
         let (consumed_tx, consumed_rx) = oneshot::channel::<()>();
-        let server = TlsServer::start(fixtures::GOOD, 1, holding_script(consumed_tx));
+        let server = TlsServer::start(&set.good, 1, holding_script(consumed_tx));
 
-        let upstream = Arc::new(verified_owner(server.address, "dns.example"));
+        let upstream = Arc::new(verified_owner(&set, server.address, "dns.example"));
         let exchange = spawn_exchange(&upstream, &query_wire(0x5405), open_context());
 
         timeout(TEST_TIMEOUT, consumed_rx)

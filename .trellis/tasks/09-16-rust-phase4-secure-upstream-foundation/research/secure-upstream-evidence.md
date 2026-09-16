@@ -271,3 +271,39 @@ is committed, and the fixture module records the exact commands and windows.
 
 No Cargo dependency was added for fixture generation; the certificates are
 checked-in constants, matching the Slice0 approach.
+
+## Slice1 remediation dependency record — 2026-09-16 (test-only certificate generator)
+
+The Slice1 review required removing committed private-key bytes from
+`tests/fixtures` and generating the synthetic material at test runtime instead.
+The generator is `rcgen`, declared **dev-dependency only** in
+`rust/upstream-core/Cargo.toml`.
+
+- Declaration: `rcgen = { version = "=0.14.7", default-features = false,
+  features = ["ring"] }`. The exact pin preserves the reviewed lock, as the
+  existing secure dependencies do.
+- Why an extra dependency was needed: the previous fixtures were checked-in
+  DER, which included PKCS#8 private keys. Generating certificates in memory is
+  the only way to keep valid / wrong-name / expired / unknown-issuer /
+  bad-signature coverage without committing key material. `rcgen` is the
+  smallest reviewed option and reuses the `ring` provider already selected for
+  the client, so no second crypto backend is introduced.
+- Features: defaults are disabled (no `pem`, no `aws_lc_rs`, no `x509-parser`,
+  no `zeroize`); only `ring` (which implies `crypto`) is enabled. No
+  `aws-lc-rs`/`aws-lc-sys` or OpenSSL package enters the graph.
+- License: `MIT OR Apache-2.0`, compatible with this GPL-3.0-only project's
+  dependency policy.
+- MSRV: `rcgen 0.14.7` declares 1.71. Its `time` transitives are the binding
+  constraint; resolver 3 selects `time 0.3.45` / `time-core 0.1.7` /
+  `time-macros 0.2.25`, all declaring 1.83.0, instead of the 1.88-requiring
+  0.3.5x line. `cargo add` reported "ignoring rcgen@0.14.10 (requires rustc
+  1.88)" for the same reason. A `cargo metadata` audit of the full locked graph
+  reports no package whose `rust-version` exceeds 1.85.
+- Test-only isolation: `cargo tree -e normal` for `mosdns-upstream-core`
+  contains no `rcgen`. It appears only under `--edges dev`. No production
+  module imports it, and the fixture module is compiled only into `tests/`.
+- No network or external `openssl` dependency: generation is in-process and
+  offline. The earlier one-off OpenSSL 3.6.4 provenance note is superseded; no
+  certificate bytes remain in the repository.
+- `rust/Cargo.lock` was updated for this graph; production feature sets and the
+  existing secure dependency pins are unchanged.

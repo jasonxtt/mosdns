@@ -53,6 +53,17 @@ http-body-util = { version = "=0.1.3", default-features = false }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 
 [dev-dependencies]
+# Slice1 synthetic certificate fixtures. Declared as a dev-dependency only, so
+# it never enters the library's normal graph and cannot reach the production
+# secure modules. The default feature set is disabled and only `ring` is
+# enabled, reusing the same crypto provider the client already uses, so no
+# aws-lc-rs/OpenSSL backend or `pem` encoder is pulled in. Resolved as
+# rcgen 0.14.7 (MIT OR Apache-2.0, MSRV 1.71); resolver 3 holds its
+# `time`/`time-core`/`time-macros` transitives at 0.3.45/0.1.7/0.2.25
+# (MSRV 1.83.0) rather than the 1.88-requiring newer releases, so the whole
+# resolved graph stays at or below the workspace MSRV of 1.85. This crate is
+# used only by `tests/`; no production code imports it.
+rcgen = { version = "=0.14.7", default-features = false, features = ["ring"] }
 # Test-only driver for the Slice1 UDP contract tests: a bounded current-thread
 # runtime plus async wake/timeout primitives. Mock servers use blocking
 # std::net::UdpSocket tasks and the library still creates no Tokio runtime.

@@ -131,6 +131,124 @@ pub struct DotUpstream {
     tls: TlsPolicy,
     lifecycle: Lifecycle,
     cancellation: TransportCancellation,
+    /// Test-only phase seam, absent from a production build.
+    #[cfg(test)]
+    pause: std::sync::Mutex<Option<std::sync::Arc<DotPause>>>,
+}
+
+/// A named phase of the DoT exchange.
+///
+/// The variants exist so a deterministic test can park an exchange at an exact
+/// boundary and prove which phase a control terminated, without relying on
+/// timing. The enum is always defined so the phase call sites compile in every
+/// build; only the test seam that acts on it is test-only, and in a production
+/// build every phase marker is a no-op.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DotPhase {
+    /// Immediately before the numeric connect is attempted.
+    BeforeConnect,
+    /// Immediately before the TLS handshake is attempted.
+    BeforeHandshake,
+    /// Immediately before the query frame is written.
+    BeforeWrite,
+    /// Immediately before the TLS output is flushed.
+    BeforeFlush,
+    /// Immediately before the response frame is read.
+    BeforeRead,
+    /// Immediately before the final control-aware commit.
+    BeforeCommit,
+    /// Immediately after the final commit has succeeded and before the owned
+    /// response is constructed.
+    ///
+    /// This is the window in which an owner close may legally begin after the
+    /// commit has already won; nothing in the exchange may assert that the
+    /// owner is still `Open` there.
+    AfterCommit,
+}
+
+/// Deterministic test seam that parks an exchange at one chosen phase.
+///
+/// This mirrors the existing `CommitPause` seam used by the plain transports.
+/// It carries no response bytes, socket, or parser state, and exists solely so
+/// phase-ordering tests can prove an outcome without sleeps. The phase it
+/// watches is fixed at construction.
+///
+/// It is compiled only for in-crate tests: [`DotUpstream::take_pause`] and the
+/// prepared-exchange field are `cfg(test)` as well, so a production build
+/// contains neither the seam nor a phase marker that could park an exchange.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct DotPause {
+    phase: std::sync::Mutex<Option<DotPhase>>,
+    arrived: tokio::sync::Notify,
+    released: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+impl DotPause {
+    #[must_use]
+    pub(crate) fn new(phase: DotPhase) -> Self {
+        Self {
+            arrived: tokio::sync::Notify::new(),
+            released: tokio::sync::Notify::new(),
+            phase: std::sync::Mutex::new(Some(phase)),
+        }
+    }
+
+    /// Parks if `phase` is the watched phase, then waits for [`Self::release`].
+    ///
+    /// Comparison must not consume the watched phase: the exchange visits every
+    /// phase in order, so a non-match (an earlier phase) has to leave the
+    /// watched phase armed for the call that does match.
+    async fn reach(&self, phase: DotPhase) {
+        if self.watched_phase() != Some(phase) {
+            return;
+        }
+        let released = self.released.notified();
+        tokio::pin!(released);
+        // Interest is registered before the arrival is announced, so a release
+        // that happens immediately afterwards cannot be missed.
+        released.as_mut().enable();
+        // `notify_one` stores a permit when no waiter is registered yet, so a
+        // test that awaits `arrived()` after the exchange parks still observes
+        // it; `notify_waiters` would drop that signal and make the handshake
+        // racy.
+        // The watched phase is cleared only after it has parked, so the first
+        // matching visit parks exactly once.
+        self.clear_phase();
+        self.arrived.notify_one();
+        released.await;
+    }
+
+    /// The phase this seam watches, if it has not already parked once.
+    fn watched_phase(&self) -> Option<DotPhase> {
+        *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Clears the watched phase once it has parked, so a later visit to the
+    /// same phase (which cannot happen for one exchange) would not park again.
+    fn clear_phase(&self) {
+        *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    /// Waits until an exchange has parked on this seam.
+    pub(crate) async fn arrived(&self) {
+        self.arrived.notified().await;
+    }
+
+    /// Releases a parked exchange past the seam.
+    ///
+    /// A permit is stored if the exchange has not yet awaited the release, so a
+    /// release that arrives early is never lost.
+    pub(crate) fn release(&self) {
+        self.released.notify_one();
+    }
 }
 
 impl DotUpstream {
@@ -150,7 +268,31 @@ impl DotUpstream {
             tls,
             lifecycle: Lifecycle::new(),
             cancellation: TransportCancellation::new(),
+            #[cfg(test)]
+            pause: std::sync::Mutex::new(None),
         })
+    }
+
+    /// Installs the deterministic phase seam for in-crate tests.
+    #[cfg(test)]
+    pub(crate) fn install_pause(&self, pause: std::sync::Arc<DotPause>) {
+        *self
+            .pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pause);
+    }
+
+    /// Takes the installed phase seam for one exchange, if any.
+    ///
+    /// The seam is claimed per exchange so a later exchange in the same owner
+    /// is unaffected, and the claimed handle is carried by the prepared
+    /// exchange rather than consulted from the owner on every phase.
+    #[cfg(test)]
+    fn take_pause(&self) -> Option<std::sync::Arc<DotPause>> {
+        self.pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
     #[must_use]
@@ -243,6 +385,8 @@ impl DotUpstream {
             deadline: context.deadline(),
             caller_cancellation: context.cancellation(),
             owner_cancellation: self.cancellation.clone(),
+            #[cfg(test)]
+            pause: self.take_pause(),
             _in_flight: in_flight,
         })
     }
@@ -261,6 +405,9 @@ struct PreparedDot<'a> {
     deadline: Instant,
     caller_cancellation: TransportCancellation,
     owner_cancellation: TransportCancellation,
+    /// The per-exchange deterministic phase seam, if a test installed one.
+    #[cfg(test)]
+    pause: Option<std::sync::Arc<DotPause>>,
     /// Held only for its RAII release; never read.
     _in_flight: crate::InFlightGuard<'a>,
 }
@@ -288,6 +435,23 @@ impl PreparedDot<'_> {
             self.owner_cancellation.clone(),
         )
     }
+
+    /// Parks at `phase` when this exchange carries a seam watching it.
+    ///
+    /// A no-op in production builds and for phases the seam does not watch, so
+    /// it cannot affect the transport's real ordering.
+    async fn reach(&self, phase: DotPhase) {
+        #[cfg(test)]
+        {
+            if let Some(pause) = &self.pause {
+                pause.reach(phase).await;
+            }
+        }
+        #[cfg(not(test))]
+        {
+            let _ = phase;
+        }
+    }
 }
 
 /// Runs one fresh authenticated DoT exchange for a prepared request.
@@ -314,6 +478,7 @@ async fn exchange_inner(prepared: &PreparedDot<'_>) -> Result<SecureResponse, Se
     // Phase 1: numeric dial. `TcpStream::connect` on a `SocketAddr` performs no
     // name resolution, so the service identity cannot influence the
     // destination. A connect failure has sent nothing.
+    prepared.reach(DotPhase::BeforeConnect).await;
     let stream: TcpStream = race_control(&control, SideEffectState::NotSent, deadline, async {
         TcpStream::connect(dial)
             .await
@@ -327,6 +492,7 @@ async fn exchange_inner(prepared: &PreparedDot<'_>) -> Result<SecureResponse, Se
     // verification can succeed or fail, and it completes before the first DNS
     // application byte. A verified policy's failure is terminal: no insecure
     // retry, no plaintext continuation, no second connection.
+    prepared.reach(DotPhase::BeforeHandshake).await;
     let connector = TlsConnector::from(config);
     let mut tls: TlsStream<TcpStream> =
         race_control(&control, SideEffectState::NotSent, deadline, async {
@@ -344,6 +510,7 @@ async fn exchange_inner(prepared: &PreparedDot<'_>) -> Result<SecureResponse, Se
     // Phase 3: exactly one unchanged query frame. `write_frame` reuses the
     // shared framing helper, including its size gate and its handling of a
     // partially accepted frame.
+    prepared.reach(DotPhase::BeforeWrite).await;
     race_control(&control, SideEffectState::MaybeSent, deadline, async {
         write_frame(&mut tls, query)
             .await
@@ -355,6 +522,7 @@ async fn exchange_inner(prepared: &PreparedDot<'_>) -> Result<SecureResponse, Se
     // a successful `write_frame` does not prove the query reached the socket.
     // The flush completes the send; a failure during it is conservatively
     // `MaybeSent` because part of the frame may already have crossed the wire.
+    prepared.reach(DotPhase::BeforeFlush).await;
     race_control(&control, SideEffectState::MaybeSent, deadline, async {
         flush_bytes(&mut tls, SideEffectState::MaybeSent)
             .await
@@ -365,6 +533,7 @@ async fn exchange_inner(prepared: &PreparedDot<'_>) -> Result<SecureResponse, Se
     // The full frame is flushed, so the query is now `Sent`. Every control
     // error from here is reported with `Sent`, because a transmitted request
     // cannot be un-sent.
+    prepared.reach(DotPhase::BeforeRead).await;
     let body = race_control(&control, SideEffectState::Sent, deadline, async {
         read_frame(&mut tls).await.map_err(SecureError::from)
     })
@@ -390,15 +559,24 @@ async fn exchange_inner(prepared: &PreparedDot<'_>) -> Result<SecureResponse, Se
     // against owner close, caller cancellation, and the original absolute
     // deadline. Priority is owner, then caller, then deadline, then success,
     // and a committed response can never be reversed by a later close.
+    //
+    // Nothing may be asserted about the owner's state after this call returns:
+    // the commit wins under the lifecycle mutex and an owner close may legally
+    // begin immediately afterwards, moving the owner to `Closing` while this
+    // response is still the committed outcome. The committed response is
+    // returned unchanged, and the registration guard keeps the owner draining
+    // until this call's frame drops.
+    prepared.reach(DotPhase::BeforeCommit).await;
     prepared.lifecycle.commit_final_response(
         &prepared.caller_cancellation,
         deadline,
         SideEffectState::Sent,
     )?;
 
-    // Owner close wins the admission gate over an in-flight registration, so a
-    // committed response keeps its registration until this guard drops.
-    debug_assert_eq!(prepared.lifecycle.state(), LifecycleState::Open);
+    // The commit has won. An owner close may begin at any instant from here on;
+    // this marker exists so a deterministic test can prove that outcome without
+    // asserting anything about the owner's state.
+    prepared.reach(DotPhase::AfterCommit).await;
 
     Ok(SecureResponse::new(
         body,
@@ -425,5 +603,844 @@ fn classify_handshake_io_error(error: &std::io::Error) -> TlsHandshakeFailure {
     match error.kind() {
         std::io::ErrorKind::UnexpectedEof => TlsHandshakeFailure::UnexpectedEof,
         _ => TlsHandshakeFailure::Protocol,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use rcgen::{
+        BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
+        KeyUsagePurpose, SanType, date_time_ymd,
+    };
+    use tokio::net::{TcpListener as AsyncTcpListener, TcpStream};
+    use tokio::sync::oneshot;
+    use tokio::time::timeout;
+    use tokio_rustls::TlsAcceptor;
+    use tokio_rustls::server::TlsStream;
+
+    use super::{DotPhase, DotUpstream};
+    use crate::secure::endpoint::{DotEndpoint, ServerIdentity};
+    use crate::secure::error::SecureError;
+    use crate::secure::tls::TlsPolicy;
+    use crate::{
+        CloseResult, CloseTransition, ExchangeContext, ExchangeRequest, SideEffectState,
+        TransportCancellation, UpstreamError,
+    };
+
+    /// Bounds every control wait so a broken path fails instead of hanging.
+    const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+    /// Runs one bounded current-thread runtime for a single test.
+    fn block_on<F: Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build current-thread test runtime")
+            .block_on(future)
+    }
+
+    /// A valid query with a caller-chosen ID.
+    fn query_wire(id: u16) -> Vec<u8> {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&id.to_be_bytes());
+        wire.extend_from_slice(&[0x01, 0x00]);
+        wire.extend_from_slice(&1u16.to_be_bytes());
+        wire.extend_from_slice(&0u16.to_be_bytes());
+        wire.extend_from_slice(&0u16.to_be_bytes());
+        wire.extend_from_slice(&0u16.to_be_bytes());
+        wire.extend_from_slice(&[0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e']);
+        wire.extend_from_slice(&[0x03, b'o', b'r', b'g', 0x00]);
+        wire.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]);
+        wire
+    }
+
+    /// A complete, dns-core-valid response with a one-byte answer marker.
+    fn response_wire(id: u16, marker: u8) -> Vec<u8> {
+        let mut wire = query_wire(id);
+        wire[2] = 0x81;
+        wire[3] = 0x80;
+        wire[6..8].copy_from_slice(&1u16.to_be_bytes());
+        wire.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01]);
+        wire.extend_from_slice(&60u32.to_be_bytes());
+        wire.extend_from_slice(&[0x00, 0x04, 192, 0, 2, marker]);
+        wire
+    }
+
+    /// A generated trust anchor plus a server leaf that chains to it.
+    ///
+    /// The keys exist only for this test process and are never written to disk,
+    /// matching the integration-test fixture contract. The leaf is genuinely a
+    /// `CA:FALSE` end entity with `serverAuth`, so a real handshake verifies it
+    /// rather than failing on a CA certificate used as a leaf.
+    struct Identity {
+        /// The trust anchor the client is configured with.
+        ca_der: rustls::pki_types::CertificateDer<'static>,
+        /// The server's leaf certificate.
+        leaf_der: rustls::pki_types::CertificateDer<'static>,
+        /// The leaf's private key.
+        leaf_key: KeyPair,
+    }
+
+    /// Generates a fresh CA and a `dns.example` leaf signed by it.
+    fn generate_identity() -> Identity {
+        let ca_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("generate a synthetic CA key");
+        let mut ca_params = CertificateParams::default();
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "mosdns-dot-test-root");
+        ca_params.not_before = date_time_ymd(2024, 1, 1);
+        ca_params.not_after = date_time_ymd(2036, 1, 1);
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+        let ca_cert = ca_params
+            .self_signed(&ca_key)
+            .expect("self-sign the synthetic CA");
+
+        let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("generate a synthetic leaf key");
+        let mut leaf_params = CertificateParams::default();
+        leaf_params
+            .distinguished_name
+            .push(DnType::CommonName, "dns.example");
+        leaf_params.subject_alt_names = vec![SanType::DnsName(
+            "dns.example".try_into().expect("valid synthetic DNS name"),
+        )];
+        leaf_params.not_before = date_time_ymd(2024, 1, 1);
+        leaf_params.not_after = date_time_ymd(2036, 1, 1);
+        leaf_params.is_ca = IsCa::ExplicitNoCa;
+        leaf_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        leaf_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+
+        let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+        let leaf_cert = leaf_params
+            .signed_by(&leaf_key, &issuer)
+            .expect("sign the synthetic leaf");
+
+        Identity {
+            ca_der: ca_cert.der().clone(),
+            leaf_der: leaf_cert.der().clone(),
+            leaf_key,
+        }
+    }
+
+    /// Builds the client policy trusting only the generated CA.
+    fn client_policy(identity: &Identity) -> TlsPolicy {
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(identity.ca_der.clone())
+            .expect("the generated CA parses as a trust anchor");
+        TlsPolicy::verified(roots).expect("verified policy")
+    }
+
+    /// Builds a server configuration presenting the leaf and its CA.
+    fn server_config(identity: &Identity) -> Arc<rustls::ServerConfig> {
+        rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("ring provider supports the default protocol versions")
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![identity.leaf_der.clone(), identity.ca_der.clone()],
+            rustls::pki_types::PrivateKeyDer::try_from(identity.leaf_key.serialize_der())
+                .expect("generated key is valid PKCS#8"),
+        )
+        .map(Arc::new)
+        .expect("generated certificate and key are consistent")
+    }
+
+    /// Binds a fresh loopback listener and returns its address.
+    fn bind() -> (TcpListener, SocketAddr) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind loopback");
+        let address = listener.local_addr().expect("local address");
+        (listener, address)
+    }
+
+    /// A scripted TLS server running on its own thread and runtime.
+    ///
+    /// `script` runs after a successful handshake; it receives the stream and
+    /// the test's `oneshot` sender so the test can gate on the real phase.
+    struct Server {
+        address: SocketAddr,
+        handle: std::thread::JoinHandle<()>,
+    }
+
+    impl Server {
+        fn start<F, Fut>(
+            identity: &Identity,
+            consumed: Option<oneshot::Sender<()>>,
+            script: F,
+        ) -> Self
+        where
+            F: FnOnce(TlsStream<TcpStream>, Option<oneshot::Sender<()>>) -> Fut + Send + 'static,
+            Fut: Future<Output = ()> + Send,
+        {
+            let (listener, address) = bind();
+            listener
+                .set_nonblocking(true)
+                .expect("listener non-blocking");
+            let config = server_config(identity);
+            let handle = std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build server runtime");
+                runtime.block_on(async move {
+                    let listener = AsyncTcpListener::from_std(listener).expect("adopt listener");
+                    let (stream, _) = timeout(TEST_TIMEOUT, listener.accept())
+                        .await
+                        .expect("a connection arrives")
+                        .expect("accept succeeds");
+                    let acceptor = TlsAcceptor::from(config);
+                    if let Ok(Ok(tls)) = timeout(TEST_TIMEOUT, acceptor.accept(stream)).await {
+                        script(tls, consumed).await;
+                    }
+                });
+            });
+            Self { address, handle }
+        }
+
+        fn join(self) {
+            self.handle.join().expect("server thread joined");
+        }
+    }
+
+    /// Reads exactly one framed DNS message.
+    async fn read_framed(stream: &mut TlsStream<TcpStream>) -> Vec<u8> {
+        use tokio::io::AsyncReadExt as _;
+        let mut prefix = [0u8; 2];
+        stream.read_exact(&mut prefix).await.expect("read prefix");
+        let length = usize::from(u16::from_be_bytes(prefix));
+        let mut body = vec![0u8; length];
+        stream.read_exact(&mut body).await.expect("read body");
+        body
+    }
+
+    /// Reads until the client closes the connection, then returns.
+    ///
+    /// This is the deterministic counterpart to a "hold the connection open"
+    /// sleep: the server returns as soon as the exchange under test drops its
+    /// stream, so joining the server thread can never hang, and nothing depends
+    /// on elapsed time.
+    async fn hold_until_client_closes(stream: &mut TlsStream<TcpStream>) {
+        use tokio::io::AsyncReadExt as _;
+        let mut scratch = [0u8; 64];
+        loop {
+            match stream.read(&mut scratch).await {
+                // EOF: the client dropped its stream.
+                Ok(0) => return,
+                Ok(_) => {}
+                // Any transport error is also the end of this server's interest.
+                Err(_) => return,
+            }
+        }
+    }
+
+    /// Writes one framed DNS message.
+    async fn write_framed(stream: &mut TlsStream<TcpStream>, body: &[u8]) {
+        use tokio::io::AsyncWriteExt as _;
+        let length = u16::try_from(body.len()).expect("response fits the u16 prefix");
+        let mut frame = Vec::with_capacity(body.len() + 2);
+        frame.extend_from_slice(&length.to_be_bytes());
+        frame.extend_from_slice(body);
+        stream.write_all(&frame).await.expect("write frame");
+        stream.flush().await.expect("flush frame");
+    }
+
+    /// Builds an owner plus the endpoint identity for the given server.
+    fn owner_for(address: SocketAddr, identity: &Identity) -> DotUpstream {
+        DotUpstream::new(
+            DotEndpoint::new(
+                address,
+                ServerIdentity::new("dns.example").expect("valid identity"),
+            )
+            .expect("valid endpoint"),
+            client_policy(identity),
+        )
+        .expect("owner")
+    }
+
+    /// Asserts the exchange failed with the expected typed control error.
+    async fn expect_error(
+        handle: tokio::task::JoinHandle<Result<super::SecureResponse, SecureError>>,
+        expected: SecureError,
+    ) {
+        let error = timeout(TEST_TIMEOUT, handle)
+            .await
+            .expect("exchange bounded")
+            .expect("exchange task joined")
+            .expect_err("the exchange must be terminated by its control");
+        assert_eq!(error, expected);
+    }
+
+    /// The owner/caller/deadline context used by most phase tests.
+    fn open_context(caller: &TransportCancellation) -> ExchangeContext {
+        ExchangeContext::new(Instant::now() + Duration::from_secs(30), caller.clone())
+    }
+
+    /// Spawns one exchange so the test can apply a control while it is parked.
+    fn spawn(
+        upstream: &Arc<DotUpstream>,
+        query: Vec<u8>,
+        context: ExchangeContext,
+    ) -> tokio::task::JoinHandle<Result<super::SecureResponse, SecureError>> {
+        let upstream = Arc::clone(upstream);
+        tokio::spawn(async move {
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            upstream.exchange(request, context).await
+        })
+    }
+
+    /// Installs a phase seam on the owner and returns it to the test.
+    fn install(upstream: &DotUpstream, phase: DotPhase) -> Arc<super::DotPause> {
+        let pause = Arc::new(super::DotPause::new(phase));
+        upstream.install_pause(Arc::clone(&pause));
+        pause
+    }
+
+    #[test]
+    fn connect_phase_cancellation_sends_nothing_and_opens_no_socket() {
+        block_on(async {
+            // The endpoint is bound but nothing is listening on TLS; the seam
+            // parks before connect, so cancellation is decided with no socket.
+            let (listener, address) = bind();
+            listener.set_nonblocking(true).expect("non-blocking");
+            let identity = generate_identity();
+            let upstream = Arc::new(owner_for(address, &identity));
+            let pause = install(&upstream, DotPhase::BeforeConnect);
+
+            let caller = TransportCancellation::new();
+            let exchange = spawn(&upstream, query_wire(0x6001), open_context(&caller));
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the connect phase");
+            assert_eq!(upstream.in_flight_exchanges(), 1);
+            caller.cancel();
+            pause.release();
+
+            expect_error(
+                exchange,
+                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::NotSent)),
+            )
+            .await;
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            // No connection was attempted at the parked phase.
+            match listener.accept() {
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Ok(_) => panic!("cancellation before connect must not dial"),
+                Err(error) => panic!("unexpected accept error: {error}"),
+            }
+        });
+    }
+
+    #[test]
+    fn connect_phase_owner_close_sends_nothing() {
+        block_on(async {
+            let (listener, address) = bind();
+            listener.set_nonblocking(true).expect("non-blocking");
+            let identity = generate_identity();
+            let upstream = Arc::new(owner_for(address, &identity));
+            let pause = install(&upstream, DotPhase::BeforeConnect);
+
+            let exchange = spawn(
+                &upstream,
+                query_wire(0x6002),
+                open_context(&TransportCancellation::new()),
+            );
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the connect phase");
+            assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+            pause.release();
+
+            expect_error(
+                exchange,
+                SecureError::Transport(UpstreamError::Closed(SideEffectState::NotSent)),
+            )
+            .await;
+            assert_eq!(upstream.close().await, CloseResult::Closed);
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            match listener.accept() {
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Ok(_) => panic!("owner close before connect must not dial"),
+                Err(error) => panic!("unexpected accept error: {error}"),
+            }
+        });
+    }
+
+    #[test]
+    fn handshake_phase_cancellation_sends_no_query() {
+        block_on(async {
+            // The server completes TCP accept and the TLS handshake, then holds
+            // the stream. The seam parks before the handshake begins, so the
+            // parked state is deterministic and never a timing guess.
+            let identity = generate_identity();
+            let (consumed_tx, _consumed_rx) = oneshot::channel::<()>();
+            let server = Server::start(&identity, Some(consumed_tx), |mut tls, _| async move {
+                // Never answer: hold the connection until the client drops it.
+                let mut buffer = [0u8; 1];
+                use tokio::io::AsyncReadExt as _;
+                let _ = tls.read(&mut buffer).await;
+            });
+            let upstream = Arc::new(owner_for(server.address, &identity));
+            let pause = install(&upstream, DotPhase::BeforeHandshake);
+
+            let caller = TransportCancellation::new();
+            let exchange = spawn(&upstream, query_wire(0x6003), open_context(&caller));
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the handshake phase");
+            caller.cancel();
+            pause.release();
+
+            // The handshake never completed, so no DNS byte was sent.
+            expect_error(
+                exchange,
+                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::NotSent)),
+            )
+            .await;
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
+    }
+
+    #[test]
+    fn write_phase_cancellation_is_maybe_sent() {
+        block_on(async {
+            let identity = generate_identity();
+            let server = Server::start(&identity, None, |mut tls, _| async move {
+                // Complete the handshake, then hold without reading so the
+                // client is parked before its framed write.
+                let mut buffer = [0u8; 1];
+                use tokio::io::AsyncReadExt as _;
+                let _ = tls.read(&mut buffer).await;
+            });
+            let upstream = Arc::new(owner_for(server.address, &identity));
+            let pause = install(&upstream, DotPhase::BeforeWrite);
+
+            let caller = TransportCancellation::new();
+            let exchange = spawn(&upstream, query_wire(0x6004), open_context(&caller));
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the write phase");
+            caller.cancel();
+            pause.release();
+
+            // Cancelling at the write boundary is conservatively MaybeSent: the
+            // frame may be partially accepted once the write is entered.
+            expect_error(
+                exchange,
+                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::MaybeSent)),
+            )
+            .await;
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
+    }
+
+    #[test]
+    fn flush_phase_cancellation_is_maybe_sent() {
+        block_on(async {
+            let identity = generate_identity();
+            let server = Server::start(&identity, None, |mut tls, _| async move {
+                let mut buffer = [0u8; 1];
+                use tokio::io::AsyncReadExt as _;
+                let _ = tls.read(&mut buffer).await;
+            });
+            let upstream = Arc::new(owner_for(server.address, &identity));
+            let pause = install(&upstream, DotPhase::BeforeFlush);
+
+            let caller = TransportCancellation::new();
+            let exchange = spawn(&upstream, query_wire(0x6005), open_context(&caller));
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the flush phase");
+            caller.cancel();
+            pause.release();
+
+            // The flush has not completed, so the send is not yet established.
+            expect_error(
+                exchange,
+                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::MaybeSent)),
+            )
+            .await;
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
+    }
+
+    #[test]
+    fn read_phase_cancellation_is_sent() {
+        block_on(async {
+            let identity = generate_identity();
+            let server = Server::start(&identity, None, |mut tls, _| async move {
+                // Consume the query, then withhold the response until the
+                // client terminates the exchange.
+                let _ = read_framed(&mut tls).await;
+                hold_until_client_closes(&mut tls).await;
+            });
+            let upstream = Arc::new(owner_for(server.address, &identity));
+            let pause = install(&upstream, DotPhase::BeforeRead);
+
+            let caller = TransportCancellation::new();
+            let exchange = spawn(&upstream, query_wire(0x6006), open_context(&caller));
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the read phase");
+            caller.cancel();
+            pause.release();
+
+            // The frame was written and flushed, so the query is Sent.
+            expect_error(
+                exchange,
+                SecureError::Transport(UpstreamError::Cancelled(SideEffectState::Sent)),
+            )
+            .await;
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
+    }
+
+    #[test]
+    fn owner_close_immediately_after_a_winning_commit_still_returns_the_response() {
+        block_on(async {
+            // P1-1 regression: the commit wins the lifecycle gate, and the owner
+            // may legally begin closing immediately afterwards. The exchange must
+            // return the committed response without panicking or late-failing.
+            let id = 0x6007;
+            let expected = response_wire(id, 7);
+            let reply = expected.clone();
+            let identity = generate_identity();
+            let server = Server::start(&identity, None, move |mut tls, _| async move {
+                let _ = read_framed(&mut tls).await;
+                write_framed(&mut tls, &reply).await;
+            });
+            let upstream = Arc::new(owner_for(server.address, &identity));
+            let pause = install(&upstream, DotPhase::AfterCommit);
+
+            let exchange = spawn(
+                &upstream,
+                query_wire(id),
+                open_context(&TransportCancellation::new()),
+            );
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the post-commit window");
+            // The commit has already won; close now, in the window that used to
+            // trip the removed assertion.
+            assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+            assert_eq!(
+                upstream.lifecycle_state(),
+                crate::LifecycleState::Closing,
+                "the owner is legally Closing after the commit won"
+            );
+            pause.release();
+
+            let response = timeout(TEST_TIMEOUT, exchange)
+                .await
+                .expect("exchange bounded")
+                .expect("exchange task joined")
+                .expect("a committed response is returned even though close followed");
+            assert_eq!(response.wire(), expected.as_slice());
+            assert_eq!(response.request_id(), id);
+
+            // The registration is released and the owner drains to Closed.
+            assert_eq!(upstream.close().await, CloseResult::Closed);
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
+    }
+
+    #[test]
+    fn pre_commit_phase_close_loses_the_gate_with_closed_sent() {
+        block_on(async {
+            // The complement of the regression above: when the close reaches the
+            // gate first, the commit loses and the exchange reports Closed.
+            let id = 0x6008;
+            let reply = response_wire(id, 8);
+            let identity = generate_identity();
+            let server = Server::start(&identity, None, move |mut tls, _| async move {
+                let _ = read_framed(&mut tls).await;
+                write_framed(&mut tls, &reply).await;
+            });
+            let upstream = Arc::new(owner_for(server.address, &identity));
+            let pause = install(&upstream, DotPhase::BeforeCommit);
+
+            let exchange = spawn(
+                &upstream,
+                query_wire(id),
+                open_context(&TransportCancellation::new()),
+            );
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the exchange reaches the pre-commit gate");
+            assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+            pause.release();
+
+            expect_error(
+                exchange,
+                SecureError::Transport(UpstreamError::Closed(SideEffectState::Sent)),
+            )
+            .await;
+            assert_eq!(upstream.close().await, CloseResult::Closed);
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
+    }
+
+    #[test]
+    fn aborted_future_releases_the_registration_at_every_phase() {
+        for phase in [
+            DotPhase::BeforeConnect,
+            DotPhase::BeforeHandshake,
+            DotPhase::BeforeWrite,
+            DotPhase::BeforeFlush,
+            DotPhase::BeforeRead,
+        ] {
+            block_on(async {
+                let identity = generate_identity();
+                let server = Server::start(&identity, None, |mut tls, _| async move {
+                    let mut buffer = [0u8; 1];
+                    use tokio::io::AsyncReadExt as _;
+                    let _ = tls.read(&mut buffer).await;
+                    let _ = read_framed(&mut tls).await;
+                    hold_until_client_closes(&mut tls).await;
+                });
+                let upstream = Arc::new(owner_for(server.address, &identity));
+                let pause = install(&upstream, phase);
+
+                let exchange = spawn(
+                    &upstream,
+                    query_wire(0x6100),
+                    open_context(&TransportCancellation::new()),
+                );
+                timeout(TEST_TIMEOUT, pause.arrived())
+                    .await
+                    .unwrap_or_else(|_| panic!("the exchange reaches {phase:?}"));
+                assert_eq!(upstream.in_flight_exchanges(), 1, "{phase:?}");
+
+                // Dropping the future must release the RAII registration.
+                exchange.abort();
+                let _ = exchange.await;
+                assert_eq!(
+                    upstream.in_flight_exchanges(),
+                    0,
+                    "an aborted future at {phase:?} must release its registration"
+                );
+                assert_eq!(upstream.close().await, CloseResult::Closed, "{phase:?}");
+                drop(server);
+            });
+        }
+    }
+
+    #[test]
+    fn an_absolute_deadline_is_shared_across_every_phase() {
+        // The same absolute deadline governs the whole exchange, so it must be
+        // able to terminate each phase without any phase starting a fresh timer.
+        for phase in [
+            DotPhase::BeforeHandshake,
+            DotPhase::BeforeWrite,
+            DotPhase::BeforeFlush,
+            DotPhase::BeforeRead,
+        ] {
+            block_on(async {
+                let identity = generate_identity();
+                let server = Server::start(&identity, None, |mut tls, _| async move {
+                    let mut buffer = [0u8; 1];
+                    use tokio::io::AsyncReadExt as _;
+                    let _ = tls.read(&mut buffer).await;
+                    let _ = read_framed(&mut tls).await;
+                    hold_until_client_closes(&mut tls).await;
+                });
+                let upstream = Arc::new(owner_for(server.address, &identity));
+                let pause = install(&upstream, phase);
+
+                // A short absolute deadline for the entire exchange.
+                let deadline = Instant::now() + Duration::from_millis(300);
+                let context = ExchangeContext::new(deadline, TransportCancellation::new());
+                let exchange = spawn(&upstream, query_wire(0x6200), context);
+
+                // Park, then wait for the single original deadline instant.
+                timeout(TEST_TIMEOUT, pause.arrived())
+                    .await
+                    .unwrap_or_else(|_| panic!("the exchange reaches {phase:?}"));
+                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                pause.release();
+
+                let error = timeout(TEST_TIMEOUT, exchange)
+                    .await
+                    .expect("exchange bounded")
+                    .expect("exchange task joined")
+                    .expect_err("the shared deadline terminates the exchange");
+                assert!(
+                    matches!(
+                        error,
+                        SecureError::Transport(UpstreamError::DeadlineExceeded(_))
+                    ),
+                    "{phase:?} produced {error:?}"
+                );
+                assert_eq!(upstream.in_flight_exchanges(), 0, "{phase:?}");
+                drop(server);
+            });
+        }
+    }
+
+    #[test]
+    fn the_first_bytes_a_peer_receives_are_tls_handshake_never_a_plaintext_query() {
+        block_on(async {
+            // Deterministic proof that no DNS query can precede the handshake.
+            // The peer is a raw TCP listener: whatever the client sends arrives
+            // uninspected, so the very first byte tells us whether the client
+            // started a TLS handshake (record type 0x16) or leaked the DNS query
+            // as plaintext. The query's own first byte is the high byte of its
+            // 16-bit length prefix, which is 0x00 for any realistic query, so the
+            // two cases cannot be confused.
+            let (listener, address) = bind();
+            listener.set_nonblocking(true).expect("non-blocking");
+            let identity = generate_identity();
+            let query = query_wire(0x6300);
+
+            let probe = {
+                let query = query.clone();
+                tokio::task::spawn_blocking(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("build probe runtime");
+                    runtime.block_on(async move {
+                        let listener =
+                            AsyncTcpListener::from_std(listener).expect("adopt listener");
+                        let (mut stream, _) = timeout(TEST_TIMEOUT, listener.accept())
+                            .await
+                            .expect("the client connects")
+                            .expect("accept succeeds");
+                        use tokio::io::AsyncReadExt as _;
+                        let mut buffer = [0u8; 64];
+                        // The client's first flight arrives promptly after
+                        // connecting; a bounded read just keeps a broken client
+                        // from hanging the test.
+                        let read = timeout(TEST_TIMEOUT, stream.read(&mut buffer))
+                            .await
+                            .expect("the client sends its first flight")
+                            .expect("read the client's first bytes");
+                        assert!(read > 0, "the client must send a TLS ClientHello");
+                        // A TLS handshake record, not the DNS query.
+                        assert_eq!(
+                            buffer[0], 0x16,
+                            "the first byte must be a TLS handshake record type"
+                        );
+                        assert_ne!(
+                            &buffer[..read.min(2)],
+                            &query[..read.min(2)],
+                            "the client must not send the DNS query frame before its handshake"
+                        );
+                    });
+                })
+            };
+
+            let upstream = owner_for(address, &identity);
+            let caller = TransportCancellation::new();
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            let error = timeout(
+                TEST_TIMEOUT,
+                upstream.exchange(request, open_context(&caller)),
+            )
+            .await
+            .expect("exchange bounded")
+            .expect_err("a peer that never completes TLS cannot carry a query");
+            // The handshake never completed, so nothing was sent as DNS.
+            assert_eq!(
+                error.side_effect(),
+                SideEffectState::NotSent,
+                "a stalled handshake must still report NotSent: {error:?}"
+            );
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+
+            probe.await.expect("probe task joined");
+        });
+    }
+
+    #[test]
+    fn the_handshake_authenticates_the_service_identity_not_the_dial_address() {
+        block_on(async {
+            // The server's certificate covers `dns.example` and the client dials
+            // a loopback address. A verified handshake can only succeed if the
+            // client validated the certificate name against the configured
+            // service identity, so a successful exchange proves the dial
+            // address did not stand in for the identity.
+            let identity = generate_identity();
+            let server = Server::start(&identity, None, |mut tls, _| async move {
+                let _ = read_framed(&mut tls).await;
+                write_framed(&mut tls, &response_wire(0x6400, 4)).await;
+            });
+
+            let upstream = owner_for(server.address, &identity);
+            assert_eq!(
+                upstream.endpoint().dial().ip(),
+                std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
+                "the dial destination is the numeric loopback address"
+            );
+            assert_eq!(upstream.endpoint().identity().as_str(), "dns.example");
+
+            let query = query_wire(0x6400);
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            let response = timeout(
+                TEST_TIMEOUT,
+                upstream.exchange(request, open_context(&TransportCancellation::new())),
+            )
+            .await
+            .expect("exchange bounded")
+            .expect("the certificate name matches the service identity, not the dial address");
+            assert_eq!(response.request_id(), 0x6400);
+            assert_eq!(response.response_id(), 0x6400);
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
+    }
+
+    #[test]
+    fn a_certificate_for_a_different_identity_is_rejected_at_handshake() {
+        block_on(async {
+            // The complement: the same server configured under a different
+            // service identity must fail the handshake, proving the identity is
+            // actually checked rather than accepted from the certificate.
+            let identity = generate_identity();
+            let server = Server::start(&identity, None, |_tls, _| async {});
+
+            let upstream = DotUpstream::new(
+                DotEndpoint::new(
+                    server.address,
+                    ServerIdentity::new("other.example").expect("valid identity"),
+                )
+                .expect("valid endpoint"),
+                client_policy(&identity),
+            )
+            .expect("owner");
+
+            let query = query_wire(0x6401);
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            let error = timeout(
+                TEST_TIMEOUT,
+                upstream.exchange(request, open_context(&TransportCancellation::new())),
+            )
+            .await
+            .expect("exchange bounded")
+            .expect_err("a name mismatch must fail the handshake");
+            assert_eq!(
+                error,
+                SecureError::Tls(crate::secure::error::TlsHandshakeFailure::Certificate(
+                    crate::secure::error::CertificateRejection::NotValidForName
+                ))
+            );
+            assert_eq!(error.side_effect(), SideEffectState::NotSent);
+            assert_eq!(upstream.in_flight_exchanges(), 0);
+            server.join();
+        });
     }
 }
