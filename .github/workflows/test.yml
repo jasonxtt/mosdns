@@ -3,10 +3,12 @@ name: Test mosdns
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
 
   build:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +45,23 @@ jobs:
           ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter
           ./plugin/matcher/base_domain ./plugin/matcher/base_ip
 
+  rust-foundation:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Check pure Rust foundation
+        run: |
+          cargo fmt --manifest-path rust/Cargo.toml --all --check
+          cargo test --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --locked
+          cargo clippy --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --locked -- -D warnings
+
   rust-runtime-experimental:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

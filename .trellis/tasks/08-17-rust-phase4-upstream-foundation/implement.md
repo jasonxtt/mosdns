@@ -383,6 +383,37 @@ connection lifecycle.
   review and wait for the user's decision; Slice3, TC-to-TCP composite
   fallback, and all later phases are not authorized.
 
+### Phase4 CI/test-boundary narrow remediation — 2026-09-16
+
+- After the Slice2 root-review PASS, the push-triggered GitHub Actions run for
+  docs-only commit `05275cd` exposed one existing Slice1 test defect:
+  `late_datagram_cannot_complete_a_later_exchange` used independent 50 ms
+  sleeps, so the server response could win before caller cancellation. The
+  first run failed at `rust/upstream-core/tests/slice1_udp.rs:715`, and the
+  unmodified test reproduced the race locally.
+- The test-only repair replaces timing guesses with explicit
+  `query-seen -> allow-late -> late-sent` handshakes. The first client cancels,
+  returns, and releases its in-flight registration before the server is
+  allowed to send the late datagram; production `rust/upstream-core/src/**`
+  is unchanged. The focused test passed 20 consecutive parent-worktree runs
+  after apply (DSH also observed 40/40), and the complete Slice1 suite passes
+  35/35.
+- Root review separately approved a CI boundary repair. `.github/workflows/test.yml`
+  now keeps the existing Go gate and adds a focused `rust-foundation` job for
+  ordinary `push`/`pull_request` events. The historical
+  `rust-runtime-experimental` job and all of its existing cgo/ABI/selector/
+  fallback/embedded-runtime/smoke commands are retained unchanged but run
+  only through explicit `workflow_dispatch`; normal events do not run that
+  integration gate. The Node.js deprecation warning was intentionally left as
+  a separate maintenance issue.
+- Allowed files for this remediation are limited to
+  `rust/upstream-core/tests/slice1_udp.rs`, `.github/workflows/test.yml`, this
+  record, and the handover record. No production Rust source, Cargo manifest
+  or lockfile, Go source, ABI, selector, fallback implementation, or Slice3
+  work was changed. The task remains `in_progress`; after push, the exact
+  commit must receive same-thread root review and then STOP. This remediation
+  does not authorize Slice3.
+
 ## Slice 3 — UDP TC to TCP composite policy
 
 Goal: add the reviewed protocol fallback without rerunning sequence policy or

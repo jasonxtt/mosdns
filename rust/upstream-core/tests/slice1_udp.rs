@@ -668,18 +668,31 @@ fn udp_wire_up_to_legal_datagram_capacity_is_not_truncated() {
 #[test]
 fn late_datagram_cannot_complete_a_later_exchange() {
     block_on(async {
+        // Explicit handshakes replace the old "both sides sleep 50ms" race:
+        //   query-seen : server -> client, the first query was observed
+        //   allow-late : client -> server, the first exchange fully returned
+        //   late-sent  : server -> client, the late datagram reached the OS
+        // Together they establish the happens-before the property needs: the
+        // cancelled exchange releases its socket before the late datagram is
+        // sent, and the late datagram is sent before the second exchange binds
+        // its own fresh socket. No sleep is used to guess the ordering.
         let (first_server, first_address) = bind_ipv4();
         let (seen_tx, seen_rx) = oneshot::channel::<()>();
+        let (allow_late_tx, allow_late_rx) = mpsc::channel::<()>();
+        let (late_sent_tx, late_sent_rx) = oneshot::channel::<()>();
         let first_task = spawn_blocking(move || {
             let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
             let (_, peer) = first_server
                 .recv_from(&mut buffer)
                 .expect("receive first query");
-            seen_tx.send(()).expect("signal receipt");
-            // Deliver an otherwise valid response only after the cancelled
-            // exchange has returned and released its socket.
-            std::thread::sleep(Duration::from_millis(50));
+            seen_tx.send(()).expect("signal first query receipt");
+            // Block until the cancelled exchange has returned and released its
+            // socket; the client only releases this after its own return.
+            allow_late_rx.recv().expect("allow-late-send released");
+            // Deliver an otherwise valid response only after the first socket
+            // is gone, so no live exchange can accept it.
             let _ = first_server.send_to(&response_wire(0x1111, 11), peer);
+            late_sent_tx.send(()).expect("signal late datagram sent");
         });
 
         let first_query = query_wire(0x1111);
@@ -706,7 +719,9 @@ fn late_datagram_cannot_complete_a_later_exchange() {
             .await
             .expect("first query observed bounded")
             .expect("first query observed");
-        sleep(Duration::from_millis(50)).await;
+        assert_eq!(first_upstream.in_flight_exchanges(), 1);
+        // Cancel immediately, then wait for the first exchange to fully return
+        // before allowing the late datagram out.
         first_cancellation.cancel();
         let first_outcome = timeout(TEST_TIMEOUT, first_client)
             .await
@@ -716,6 +731,16 @@ fn late_datagram_cannot_complete_a_later_exchange() {
             first_outcome.is_err(),
             "a cancelled exchange must not succeed"
         );
+        assert_eq!(
+            first_upstream.in_flight_exchanges(),
+            0,
+            "the first exchange must release its registration before the late datagram"
+        );
+        allow_late_tx.send(()).expect("release late datagram");
+        timeout(TEST_TIMEOUT, late_sent_rx)
+            .await
+            .expect("late datagram send bounded")
+            .expect("late datagram sent");
 
         // A later exchange on a fresh socket must only observe its own peer.
         let (second_server, second_address) = bind_ipv4();
@@ -727,7 +752,6 @@ fn late_datagram_cannot_complete_a_later_exchange() {
             let (_, peer) = second_server
                 .recv_from(&mut buffer)
                 .expect("receive second query");
-            std::thread::sleep(Duration::from_millis(50));
             second_server
                 .send_to(&second_reply, peer)
                 .expect("send second reply");
