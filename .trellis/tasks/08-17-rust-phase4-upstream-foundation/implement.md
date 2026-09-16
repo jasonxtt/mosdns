@@ -147,6 +147,38 @@ Focused verification:
 STOP: root review of UDP ownership, validation, error states, and concurrency
 evidence.
 
+### Slice 1 RED contract record — 2026-09-16
+
+- RED-test-only step: no UDP/TCP production code, TC fallback, pooling,
+  pipeline, retry, listener, TLS, Go/cgo/ABI/selector/fallback, or runtime
+  wiring was added.
+- Added `rust/upstream-core/tests/slice1_udp.rs` (19 tests) pinning the reviewed
+  one-exchange/one-socket UDP contract through the `Upstream::exchange` entry
+  point sketched in `design.md` section 3: numeric IPv4/IPv6 loopback exchange,
+  unchanged borrowed query/original ID, QR/TXID/source validation, wrong-peer
+  and wrong-ID handling, undersized/malformed expected-peer behavior,
+  concurrent isolation, cancellation/deadline/owner-close side-effect states,
+  legal full-datagram capacity (the full 65507-byte IPv4 payload on Linux; the
+  host UDP maximum elsewhere, because macOS caps `net.inet.udp.maxdgram` at
+  9216), no duplicate send, and late-datagram release isolation.
+- Added a test-only `tokio` dev-dependency (`rt`, `sync`, `time`). Mock servers
+  are blocking `std::net::UdpSocket` tasks on Tokio's blocking pool, so no
+  `net`/`macros` feature and no new package entered `Cargo.lock`; the only
+  lockfile change is `tokio` in the `mosdns-upstream-core` dependency list.
+- RED evidence: `cargo test -p mosdns-upstream-core --test slice1_udp` exits
+  101 with exactly six `E0599: no method named exchange` errors and no other
+  error kind. The existing `slice0_contract` target still passes 12/12, the
+  library still builds, and `cargo fmt -p mosdns-upstream-core -- --check` is
+  clean.
+- API/design blocker for review: `design.md` section 3 sketches
+  `Upstream::exchange(&self, ExchangeRequest<'_>, ExchangeContext)`, while the
+  Slice0 record materialized `prepare_exchange`/`PreparedExchange` as the
+  pre-I/O boundary. The RED tests pin the high-level `Upstream::exchange` shape;
+  the reviewer should confirm whether Slice 1 attaches the UDP I/O to
+  `Upstream` or to `PreparedExchange` before implementation.
+- Stop condition active: no attempt was made to make the tests pass, and all
+  changes remain uncommitted.
+
 ## Slice 2 — TCP framing primitive
 
 Goal: implement one fresh plain TCP connection per exchange with exact DNS
