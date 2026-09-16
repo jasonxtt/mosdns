@@ -341,6 +341,37 @@ Focused verification:
 STOP: root review of TCP framing, side-effect classification, and fresh
 connection lifecycle.
 
+### Slice 2 implementation record — 2026-09-16 (awaiting root review)
+
+- The implementation was executed through bounded, isolated DSH jobs. The
+  parent inspected each complete patch before applying it; DSH did not commit,
+  push, or modify files outside the allowlist.
+- `rust/upstream-core/src/tcp.rs` now owns the fresh plain-TCP exchange,
+  two-byte big-endian framing, complete writes, exact prefix/body reads, one
+  absolute deadline, owner/caller cancellation precedence, typed side-effect
+  errors, response validation, and the existing response-commit gate. The
+  stream is local to one exchange and is dropped on every return path.
+- `rust/upstream-core/tests/slice2_tcp.rs` covers fragmented framing, valid
+  sequential/concurrent exchanges, cancellation/deadline/owner close while
+  reading, zero/partial/EOF frames, QR/DNS/ID validation failures, oversize
+  pre-connect rejection, refused connect, registration release, unchanged
+  borrowed query bytes, and bounded no-retry observations. Non-EOF read
+  failure remains covered by the deterministic in-crate framing unit test.
+- The focused control RED run initially failed with three bounded elapsed
+  results before `race_io` was wired; the error-matrix additions were
+  tests-only and all passed against the existing implementation, so no
+  artificial production defect was introduced. GREEN is 14 Slice2 tests,
+  24 library/package tests, 12 Slice0 tests, and 35 Slice1 tests.
+- Verification passed with `cargo fmt --all -- --check`,
+  warnings-denied `cargo clippy` for `mosdns-upstream-core`, `cargo tree`
+  inspection, and `git diff --check`. No dependency, `sequence-core`,
+  `mosdns-runtime`, Go, C ABI, selector, fallback, or production wiring
+  change was made. The implementation commits are `8c1ce5b`, `3bf63a2`, and
+  `d0ca321`.
+- `task.json` remains `status = in_progress`. STOP here for the same-thread
+  root review; Slice3, TC-to-TCP composite fallback, and all later phases are
+  not authorized.
+
 ## Slice 3 — UDP TC to TCP composite policy
 
 Goal: add the reviewed protocol fallback without rerunning sequence policy or
