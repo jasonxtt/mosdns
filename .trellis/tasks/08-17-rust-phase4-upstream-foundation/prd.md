@@ -8,8 +8,12 @@
 > Slice1 root-review PASS, and on 2026-09-16 explicitly authorized Slice3 after
 > the Slice2 formal same-thread root-review PASS/CLOSED at `b83dbb4`. Slice0,
 > Slice1, and Slice2 remain historical reviewed facts. Slice3's UDP TC-to-TCP
-> composite policy implementation is now present and is pending same-thread
-> root review. The task remains `in_progress`; Slice4, production wiring,
+> composite policy implementation at
+> `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread root-review
+> `PASS / CLOSED`, with Actions run `35084388223` success (build success,
+> rust-foundation success, historical rust-runtime-experimental skipped). The
+> task remains `in_progress` and current execution is STOP, awaiting the user's
+> decision for Slice4; Slice4, production wiring,
 > Go/cgo/ABI/selector/Go-fallback, live integration, and a permanent Go/Rust
 > hybrid remain unauthorized.
 
@@ -253,9 +257,12 @@ Phase4 implementation is authorized and the task is currently
 passed root review at `7c65a17`. Slice2's fresh plain-TCP framing primitive is
 complete and formally `PASS / CLOSED` at same-thread root review commit
 `b83dbb4`. The user explicitly authorized Slice3 on 2026-09-16 after that
-Slice2 PASS/CLOSED, and the Slice3 UDP TC-to-TCP composite policy is now
-implemented and pending same-thread root review. The task remains `in_progress`
-and must stop for that review; Slice4, production wiring,
+Slice2 PASS/CLOSED, and the Slice3 UDP TC-to-TCP composite policy implementation
+at `21bff19212637c47df632a29dd4b3380cac7a4cc` is now formally `PASS / CLOSED`
+at same-thread root review, with Actions run `35084388223` success (build
+success, rust-foundation success, historical rust-runtime-experimental
+skipped). The task remains `in_progress`; current execution is STOP and the
+task awaits the user's decision for Slice4. Slice4, production wiring,
 Go/cgo/ABI/selector/Go-fallback, live integration, and any permanent hybrid
 remain unauthorized.
 
