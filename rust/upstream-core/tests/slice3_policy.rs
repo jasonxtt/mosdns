@@ -65,7 +65,7 @@ use mosdns_upstream_core::{
     TcpFallbackContext, Transport, TransportCancellation, UdpTcpPolicy, UpstreamError,
 };
 use tokio::sync::oneshot;
-use tokio::time::timeout;
+use tokio::time::{Instant as TokioInstant, sleep_until, timeout};
 
 /// The largest legal IPv4 UDP payload; the UDP fixtures use the production
 /// receive-buffer size so an unexpected large datagram is not silently cut.
@@ -79,12 +79,29 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// ordering proof based on equal sleeps.
 const NO_TCP_CONNECTION_WINDOW: Duration = Duration::from_millis(500);
 
-/// A short absolute deadline that only has to outlive a loopback UDP TC round
-/// trip and the fallback's framed read. It proves the single TCP fallback is
-/// governed by the caller's original absolute instant rather than a fresh
-/// relative timeout: the outer bounded assertion turns a reset or ignored
-/// deadline into a failure instead of a hang.
-const SHORT_ABSOLUTE_DEADLINE: Duration = Duration::from_millis(500);
+/// One original absolute deadline for the whole composite exchange. It is long
+/// enough to hold the timing test's explicit deadline-budget consumption and
+/// still leave [`DEADLINE_FALLBACK_RESERVE`] for the fallback, and short enough
+/// that a fresh relative timeout reset to this same total exchange budget
+/// finishes well past [`DEADLINE_COMPLETION_GRACE`].
+const SHORT_ABSOLUTE_DEADLINE: Duration = Duration::from_millis(800);
+
+/// The portion of [`SHORT_ABSOLUTE_DEADLINE`] deliberately left unconsumed when
+/// the timing test consumes the rest of the budget before releasing the UDP TC
+/// reply. Loopback TCP connect, the framed fallback query read, and the
+/// `fallback_read` handshake are sub-millisecond, so this is a generous reserve
+/// rather than an equal-sleep ordering guess.
+const DEADLINE_FALLBACK_RESERVE: Duration = Duration::from_millis(250);
+
+/// Documented generous grace past the original absolute deadline within which
+/// the composite exchange must complete. A correct single-deadline
+/// implementation finishes at the original instant plus timer/scheduling
+/// jitter. A buggy fresh relative timeout equal to the total exchange budget
+/// only starts after [`DEADLINE_FALLBACK_RESERVE`] has already been consumed,
+/// so it completes roughly
+/// `SHORT_ABSOLUTE_DEADLINE - DEADLINE_FALLBACK_RESERVE` late and must exceed
+/// this bound.
+const DEADLINE_COMPLETION_GRACE: Duration = Duration::from_millis(250);
 
 /// Runs one bounded current-thread runtime for a single test.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -891,22 +908,32 @@ fn cancellation_before_the_udp_tc_observation_prevents_any_tcp_fallback() {
 }
 
 #[test]
+// This single end-to-end timing proof keeps the whole handshake, the explicit
+// budget consumption, the timing record, and the cleanup in one place so the
+// ordering is auditable without indirection.
+#[allow(clippy::too_many_lines)]
 fn tcp_fallback_honors_the_remaining_original_absolute_deadline() {
     block_on(async {
         let (udp, listener, address) = bind_udp_and_tcp();
         let id = 0x3c02;
         let query = query_wire(id);
 
-        // The UDP leg serves a valid TC observation. The TCP fallback then
-        // accepts, reads the framed query, signals `fallback_read`, and holds
-        // the connection open without ever responding.
-        let udp_server = udp_reply_once(udp, truncated_response_wire(id));
+        // The UDP server receives the query, announces it with `query_seen`, and
+        // holds the valid TC reply until the test explicitly releases it. That
+        // two-phase handshake is what lets the test consume most of the original
+        // deadline strictly after the query is observed, with no equal-sleep
+        // ordering guess.
+        let (udp_server, query_seen, release_udp) =
+            udp_hold_then_reply(udp, truncated_response_wire(id));
+        // The TCP fallback then accepts, reads the framed query, signals
+        // `fallback_read`, and holds the connection open without ever
+        // responding.
         let (tcp_server, fallback_read, release_fallback) = tcp_holding_fallback_server(listener);
 
-        // One original absolute deadline for the whole composite exchange. It
-        // is short enough that the unanswered fallback must observe it, and the
-        // outer bounded assertion below fails instead of hanging if an
-        // implementation resets or ignores it.
+        // One original absolute deadline for the whole composite exchange. It is
+        // long enough to hold the explicit budget consumption and still leave
+        // the fallback reserve, and the outer bounded assertions below fail
+        // instead of hanging if an implementation resets or ignores it.
         let deadline = Instant::now() + SHORT_ABSOLUTE_DEADLINE;
         let context = ExchangeContext::new(deadline, TransportCancellation::new());
         let policy = Arc::new(UdpTcpPolicy::new(udp_endpoint(address)));
@@ -919,6 +946,28 @@ fn tcp_fallback_honors_the_remaining_original_absolute_deadline() {
             })
         };
 
+        timeout(TEST_TIMEOUT, query_seen)
+            .await
+            .expect("query observed bounded")
+            .expect("query observed");
+
+        // Consume all but `DEADLINE_FALLBACK_RESERVE` of the original absolute
+        // deadline with one explicit, bounded `sleep_until` target derived from
+        // that same deadline. Only after the budget is spent is the UDP TC reply
+        // released, so the TCP fallback begins with just the reserve remaining:
+        // enough for loopback connect and the framed-query read, but not enough
+        // for any fresh relative timeout reset to the total exchange budget.
+        let release_at = deadline
+            .checked_sub(DEADLINE_FALLBACK_RESERVE)
+            .expect("the original deadline must exceed the fallback reserve");
+        timeout(
+            TEST_TIMEOUT,
+            sleep_until(TokioInstant::from_std(release_at)),
+        )
+        .await
+        .expect("the explicit deadline-budget consumption must be bounded");
+        release_udp.send(()).expect("release the held UDP reply");
+
         // The fallback is genuinely in flight and has read the framed query, so
         // only the original absolute deadline can terminate the exchange.
         timeout(TEST_TIMEOUT, fallback_read)
@@ -926,12 +975,8 @@ fn tcp_fallback_honors_the_remaining_original_absolute_deadline() {
             .expect("fallback query read bounded")
             .expect("the TCP fallback must read the framed query");
 
-        let error = timeout(TEST_TIMEOUT, exchange_task)
-            .await
-            .expect("the fallback must observe the original bounded deadline instead of hanging")
-            .expect("exchange joined")
-            .err()
-            .expect("an unanswered held fallback must fail");
+        let outcome = timeout(TEST_TIMEOUT, exchange_task).await;
+        let completed_at = Instant::now();
 
         // Always release and join the held server immediately after the bounded
         // observation, before any assertion can panic, so no server thread is
@@ -942,10 +987,35 @@ fn tcp_fallback_honors_the_remaining_original_absolute_deadline() {
         let tcp_received = tcp_server.join().expect("tcp server joined");
         let udp_received = udp_server.join().expect("udp server joined");
 
+        let error = outcome
+            .expect("the fallback must observe the original bounded deadline instead of hanging")
+            .expect("exchange joined")
+            .err()
+            .expect("an unanswered held fallback must fail");
+
         assert!(
-            Instant::now() >= deadline,
+            completed_at >= deadline,
             "the exchange can only have ended by reaching the original absolute deadline"
         );
+
+        // The discriminating timing assertion: a single shared absolute deadline
+        // terminates the exchange at the original instant plus only a small
+        // scheduling grace. A buggy fresh relative timeout equal to the total
+        // exchange budget starts after `DEADLINE_FALLBACK_RESERVE` has already
+        // been consumed, so it completes about
+        // `SHORT_ABSOLUTE_DEADLINE - DEADLINE_FALLBACK_RESERVE` past the deadline
+        // and must fail this documented bound.
+        let completion_lateness = completed_at.saturating_duration_since(deadline);
+        assert!(
+            completion_lateness <= DEADLINE_COMPLETION_GRACE,
+            "the composite exchange must complete close to the original absolute deadline \
+             (completed {completion_lateness:?} after the deadline, grace \
+             {DEADLINE_COMPLETION_GRACE:?}); a fresh relative timeout reset to the total \
+             exchange budget ({SHORT_ABSOLUTE_DEADLINE:?}) must complete roughly \
+             {SHORT_ABSOLUTE_DEADLINE:?} - {DEADLINE_FALLBACK_RESERVE:?} past the deadline \
+             and fail this bound"
+        );
+
         assert_eq!(
             tcp_received, query,
             "the TCP fallback must have carried the byte-identical original query"
