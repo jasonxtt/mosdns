@@ -1,10 +1,12 @@
 # Rust Phase 4 upstream transport foundation
 
-> **Planning gate (revised 2026-09-16):** Phase 3B is implemented, root-reviewed,
-> and archived. Do not run `task.py start` or write implementation code from
-> this task until the Phase4 `design.md`, `implement.md`, compatibility matrix,
-> and KixDNS transport ledger pass root review. This task remains planning-only
-> and targets a pure Rust-native MosDNS host, not a permanent Go/Rust hybrid.
+> **Planning gate (PASS 2026-09-16, review commit
+> `16192ea83c8c54be1d3ce644e606682956084fee`):** Phase 3B is implemented,
+> root-reviewed, and archived; the Phase4 planning package is now root-reviewed.
+> The task remains planning-only until the user explicitly requests
+> `task.py start`. That authorization, when given, covers only Slice0 and
+> does not authorize Slice1, network implementation, production wiring, or a
+> permanent Go/Rust hybrid.
 
 ## Goal
 
@@ -235,16 +237,16 @@ UDP/TCP foundation unless a separately reviewed scope change authorizes it.
 
 ## Planning gate status
 
-Phase3B completion and archival are **satisfied**. Phase4 implementation remains
-**NO-GO** while the planning gate is open. The current blockers are the
-root-reviewed `design.md`, `implement.md`, compatibility/deviation matrix, and
-KixDNS transport research ledger. Planning must freeze the Rust async runtime,
-cancellation and retry state machine, protocol/socket compatibility matrix,
-byte ownership, connection lifecycle, and test strategy before `task.py start`.
+Phase3B completion and archival are **satisfied**. The Phase4 planning gate is
+**PASS** at review commit `16192ea`; the planning package froze the Rust async
+runtime, cancellation and retry state machine, protocol/socket compatibility
+matrix, byte ownership, connection lifecycle, and test strategy.
 
-The task must remain `status = planning` until a root reviewer explicitly gives
-PASS. A planning PASS authorizes only `task.py start` and Slice0; it does not
-authorize later slices, production wiring, or a production release.
+Phase4 implementation remains **NOT STARTED** and the task must remain
+`status = planning` until the user explicitly requests the authorized next
+step. The PASS authorizes only `task.py start` followed by Slice0; it does not
+authorize Slice1, later slices, production wiring, or a production release.
+Slice0 must stop and return to root review before any further phase begins.
 
 No transport ABI, Go adapter or production selector is expected in the future
 design. If a later task ever proposes one, it requires a separate explicit
