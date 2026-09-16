@@ -231,6 +231,7 @@ name = "mosdns-upstream-core"
 version = "0.1.0"
 dependencies = [
  "mosdns-dns-core",
+ "tokio",
  "tokio-util",
 ]
 
