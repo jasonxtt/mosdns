@@ -16,6 +16,6 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 ## Before development
 
 1. Read the project documents in the order defined by `AGENTS.md`.
-2. Use CodeGraph for call chains and impact analysis; verify exact details in source with `rg` and direct reads.
+2. Use `rg` and direct source reads for call chains and impact analysis.
 3. For Rust work, confirm the active Trellis task has reviewed `prd.md`, `design.md`, and `implement.md` before changing runtime code.
 4. Preserve unrelated dirty worktree changes and do not let task tooling auto-commit them.

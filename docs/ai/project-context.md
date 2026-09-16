@@ -1,142 +1,62 @@
 # Project Context
 
-## What this fork is
+## Stable model
 
-This repository is an enhanced fork of `yyysuo/mosdns`. The primary value is not a large rewrite of the core DNS engine. The value is the operator workflow built around:
+This repository is an enhanced fork of `yyysuo/mosdns`. Its main value is the
+operator workflow around:
 
 - dedicated routing groups (`special_groups`)
-- upstream group binding
-- online rule download and management
-- query/audit visibility
-- a maintained Vue-based WebUI
+- upstream-group binding
+- online rule management
+- query and audit visibility
+- the maintained Vue WebUI
 
-The fork keeps upstream structure where practical and extends the management layer around it.
+The Rust branch must preserve these **product contracts** while moving toward a
+pure Rust-native host. The opt-in/versioned Go↔Rust boundaries already present
+in cache, matcher, and query foundation are transitional migration scaffolding,
+not the final architecture and not a pattern to extend automatically into new
+Phase 3B+ modules.
 
 ## Repository map
 
-- `coremain/`
-  - main HTTP/API server code
-  - embedded web assets under `coremain/www/`
-  - audit APIs and dashboard endpoints
-- `plugin/`
-  - executable plugins and sequence logic
-  - response-path behavior should usually be added here, not hardcoded into unrelated UI code
-- `pkg/`
-  - shared DNS and query context utilities
-- `webui-log/`
-  - current maintained Vue frontend workspace
-  - despite the folder name, this is the main UI source used for the default dashboard workflow
-- `webui-blog/`
-  - experimental Bento-style UI workspace
-  - paused, not the active production UI
-- `docs/`
-  - fork notes and release docs
-- `docs/ai/`
-  - successor-agent context docs
+- `coremain/`: HTTP/API server, runtime state, audit endpoints, and embedded assets under `coremain/www/`
+- `plugin/`: executable plugins and sequence/routing behavior
+- `pkg/`: shared DNS and query-context utilities
+- `webui-log/`: active Vue frontend workspace; `src/` builds the maintained UI and `src-log1/` builds the compatibility UI
+- `rust/`: experimental Rust cores, runtime, ABI, and adapters
+- `.trellis/`: migration tasks, specs, and task runtime; use only within the active Trellis workflow
+- `docs/`: fork notes, release documentation, and Rust migration evidence
 
 ## UI topology
 
-Current route expectations:
+The normal route contract is:
 
-- `/` -> maintained Vue UI
-- `/log` -> legacy/original UI kept for compatibility
+- `/` → maintained Vue UI
+- `/log` → compatibility UI
 
-Important nuance:
+Do not infer the route from a directory name. Verify `coremain/mosdns.go`, the
+embedded HTML files, and the Vite configuration before changing UI behavior.
 
-- Directory names do not perfectly match served routes anymore.
-- Do not assume `webui-log/` means "the `/log` route source".
-- Always verify runtime route mapping before changing frontend behavior.
+## Compatibility contracts
 
-## Major fork-specific capabilities
+`special_groups`, online rules, local/manual lists, upstream-group binding,
+generated routing order, final DNS/routing behavior, query audit fields,
+metrics, runtime JSON state, persistent formats, and the existing WebUI/API are
+product-contract surfaces for the Rust migration. Current Go data structures,
+interfaces, fallback mechanisms, and incidental implementation quirks are not
+compatibility surfaces unless a reviewed contract explicitly elevates them.
 
-### 1. Dedicated routing groups
+Diagnostics should prefer the effective final routing label, final upstream
+group, and final upstream path. Intermediate matcher tags must not be shown as
+if they were all effective.
 
-The user-facing concept is a dedicated routing group. Backend naming uses `special_groups`.
+The `/` UI contains real operator workflows, including overview diagnostics,
+appearance persistence, and system settings. Changes to their save flows or CSS
+can change runtime behavior.
 
-A dedicated routing group is a custom domain-routing bucket that can bind to:
+## Source of truth
 
-- its own upstream group
-- its own list sources
-- its own cache behavior
-- its own rule entry in the generated routing flow
-
-This feature is already implemented and in use. It is not a draft idea.
-
-### 2. Rule-to-upstream-group binding
-
-Rules are not only classification metadata. They affect actual routing behavior.
-
-Current expectation:
-
-- a local/manual list can bind to one dedicated upstream group
-- an online URL-based list can bind to one dedicated upstream group
-- the selected group determines which upstream path is used after the rule matches
-
-### 3. Automatic online rule download
-
-The maintained WebUI behavior expects online rules to download after save. The user should not need a second manual step just to fetch a newly added subscription rule.
-
-### 4. Vue main UI
-
-The main UI was rewritten with Vue and promoted to `/`.
-
-Goals of the rewrite:
-
-- unify page structure
-- unify modal/edit flows
-- keep functional parity with the legacy dashboard
-- make future feature work easier than the old dashboard script structure
-
-The old dashboard still exists at `/log` as fallback and comparison target.
-
-### 5. Maintained system settings and overview workflow
-
-The maintained `/` UI is no longer just a basic dashboard shell. Recent work made it a real operator workflow surface for:
-
-- overview trend and ranking diagnostics
-- mobile-aware overview-card presentation
-- system appearance management
-- IP version preference toggles
-
-Important currently-shipped examples:
-
-- `IPv4优先` and `IPV6屏蔽` both exist in the maintained UI and are intentionally treated as mutually exclusive operator modes
-- the overview page includes custom ranking-card layout behavior and a trend-detail popover, so small CSS edits there can change real interaction behavior
-- appearance settings now persist server-side, including panel background, text color, and button color state
-
-## Naming history and common confusion
-
-- `special_groups` is the real feature name.
-- `route_group` was an earlier misunderstanding and should not be used as the canonical term.
-
-## Upstream sync policy
-
-- This fork is not trying to track every upstream change.
-- The `nft` / `eBPF` line is intentionally not followed.
-- Upstream changes on or before `2026-04-18` were already checked in prior work. Do not burn time re-auditing them unless explicitly asked.
-
-## Release posture
-
-The fork is already published and maintained as a real release branch, not just a local experiment.
-
-Do not maintain the current version number in this context file. Use Git tags and the changelogs as the source of truth for release history.
-
-## Code areas likely to matter for future feature work
-
-- frontend behavior and modal flows:
-  - `webui-log/src/components/`
-  - `webui-log/src/style.css`
-  - `webui-log/src/utils/appearanceTextColor.js`
-  - `webui-log/src/utils/appearanceButtonColor.js`
-- embedded static pages and legacy dashboard:
-  - `coremain/www/`
-- audit / query APIs:
-  - `coremain/api_audit.go`
-  - `coremain/api_audit_v2.go`
-  - `coremain/audit.go`
-- appearance persistence APIs:
-  - `coremain/api_appearance.go`
-- routing and response processing:
-  - `plugin/executable/`
-- DNS query context and response objects:
-  - `pkg/query_context/`
+- Configuration generation, runtime JSON, package boundaries, and switch-bit rules: `docs/ai/config-notes.md`
+- Rust migration state and worktree ownership: `docs/ai/rust-handover.md`
+- Rust architecture and acceptance gates: `docs/ai/rust-rewrite-plan.md`
+- Upstream cutoff and excluded upstream direction: `UPSTREAM_SYNC.md`

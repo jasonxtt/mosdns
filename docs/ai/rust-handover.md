@@ -1,11 +1,19 @@
 # Rust migration handover
 
-Last verified: `2026-08-17`
+Last verified: `2026-08-18`
 
 This is the canonical cross-session entrypoint for Rust migration work. It
 records task state and worktree ownership; architecture remains authoritative
 in `docs/ai/rust-rewrite-plan.md`, and executable requirements remain in each
 Trellis task's `prd.md`, `design.md`, and `implement.md`.
+
+As of `2026-08-18`, the migration target is explicitly a **pure Rust-native
+MosDNS host**. The cache/matcher/query cgo bridges, `MOSDNS_*_BACKEND`
+selectors, Go mirrors/fallback, paired generations, and FFI handle registries
+already built in Phase 1/2/3A are transitional validation scaffolding. Preserve
+them safely while they remain in-tree, but do not extend that hybrid pattern
+into Phase 3B+ by default. Go is now a behavior-discovery reference; only
+reviewed MosDNS product contracts are normative for new Rust modules.
 
 ## Resume protocol
 
@@ -33,27 +41,33 @@ base release: v0.7.1
 A-E Rust migration work commits are completed and reviewed (`A` governance,
 `B` cache, `C` unified runtime, `D` matcher adapters, and `E` CI/build/evidence).
 F is the task-archive finish commit and G is a journal-only finish commit; the
-overall Rust rewrite remains active and Rust remains experimental/default
-Go-only.
+overall Rust rewrite remains active. The production/main line remains Go-only;
+the `rust` branch now targets a future pure Rust-native replacement and is not
+used as an intermediate production runtime.
 
 ## Task state
 
 | Task | Trellis state | Implementation state | Successor action |
 | --- | --- | --- | --- |
-| `08-13-rust-cache-foundation` | **archived/completed** (`2026-08-13`) | All slices 0–6 complete; all three remaining gates (reproducible soak, Miri, extended mos-test verification) closed on `2026-08-13`. Rust stays experimental because the 10% QPS/latency gate is not met. | Do not redesign or micro-optimize it; preserve the implementation as-is while the matcher task extracts the single Rust runtime. |
-| `08-13-rust-matcher-foundation` | **archived/completed** (`2026-08-13`) | Approved `2026-08-13`; Slices 0–5 complete. Compatibility matrix, Go golden fixtures, real rule-set fixture, KixDNS matcher ledger, single Rust runtime extraction, pure Rust domain/IP matchers (`matcher-core`), transactional FFI with matcher ABI in runtime, C header, Go provider integration (`domain_set`/`ip_set` with `MOSDNS_MATCHER_BACKEND=rust` env-gated Rust backend and Go fallback), Linux+cgo tagged integration/race, fixed-fixture evidence, CI gates, and isolated `mos-test` reload/fallback/restart smoke are verified. | A–E work commits are completed and reviewed; F is the archive finish commit and G is a journal-only finish commit under the manifest's explicit `--no-commit` sequence; do not enable Rust by default. |
-| `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the opt-in boundary and Go fallback; do not enable Rust by default. Phase 3 authorization is recorded by the active task below. |
-| `08-15-rust-phase3-query-execution-core` | **in_progress** | Slices 0–4 root-reviewed; Slice 4 final review approved **2026-08-17** after the three Rust wire/parity remediation items. Rust/Go regression coverage, targeted query ABI Miri evidence (11/11), Linux+cgo real-staticlib normal/race, and fixed-fixture evidence are recorded. The high-port host check remains a full-binary compatibility smoke (adapter is not yet wired into `EntryHandler`/sequence), not adapter-boundary execution. | Preserve the opt-in `MOSDNS_QUERY_BACKEND=rust` boundary and Go fallback. Do not wire the adapter into `EntryHandler`/sequence yet, do not enable Rust by default, and do not start Phase 4. Linux real cgo integration tests remain the query adapter boundary evidence. |
+| `08-13-rust-cache-foundation` | **archived/completed** (`2026-08-13`) | All slices 0–6 complete; all three remaining gates (reproducible soak, Miri, extended mos-test verification) closed on `2026-08-13`. Rust stays experimental because the hybrid bridge missed the 10% QPS/latency gate. | Preserve the Rust cache core and its product-contract evidence. Do not spend Phase3B/4 optimizing the cgo bridge; that bridge/fallback is transitional and will be removed after the Rust-native host exists. |
+| `08-13-rust-matcher-foundation` | **archived/completed** (`2026-08-13`) | Approved `2026-08-13`; Slices 0–5 complete. Compatibility matrix, Go golden fixtures, real rule-set fixture, KixDNS matcher ledger, single Rust runtime extraction, pure Rust domain/IP matchers (`matcher-core`), transactional FFI with matcher ABI in runtime, C header, Go provider integration (`domain_set`/`ip_set` with `MOSDNS_MATCHER_BACKEND=rust` env-gated Rust backend and Go fallback), Linux+cgo tagged integration/race, fixed-fixture evidence, CI gates, and isolated `mos-test` reload/fallback/restart smoke are verified. | Preserve the pure matcher core and the product-facing rule evidence; do not expand the FFI/provider fallback. Existing bridge artifacts remain historical scaffolding until the post-host retirement gate. |
+| `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the existing opt-in/fallback scaffolding without expanding it. Its pure matcher core and product-contract evidence remain useful; the Go/Rust bridge is scheduled for retirement only after the Rust-native host is complete. |
+| `08-15-rust-phase3-query-execution-core` | **archived/completed** (`2026-08-17`) | Phase 3A query/wire foundation complete: Slices 0–4 root-reviewed, including Rust dns/query core, query ABI, Go opt-in adapter/fallback, Linux+cgo real-staticlib normal/race, and final wire/parity remediation. Overall Phase 3 remains incomplete because sequence control flow, matcher dispatch, no-network executable ownership, and query execution ownership are still Go-owned. | The next task is Phase 3B sequence/execution ownership. Reuse the pure Rust dns/query types, but do not extend the query ABI/Go fallback pattern into sequence-core. Keep the existing adapter untouched until the later retirement gate. |
+| `08-17-rust-phase3b-sequence-execution-foundation` | **planning** (`2026-08-18` policy revision) | Planning artifacts now target pure `rust/sequence-core`: typed owned execution state, validated program model, explicit continuation stack, product-contract/deviation classification, fuel/cancellation, and no Go adapter/ABI/selector. | Finish root planning review, then start only this task. Go is discovery evidence; Rust tests follow the reviewed product contract/deviation matrix. |
+| `08-17-rust-phase4-upstream-foundation` | **planning/deferred** (`2026-08-17`) | Must wait for Phase 3B and still needs design/implement artifacts plus transport research. Under the 2026-08-18 policy, this is a pure Rust transport foundation for the future Rust host; Go is only behavior-discovery evidence. No transport C ABI, Go pool ownership, `MOSDNS_UPSTREAM_BACKEND`, or Go fallback is planned. | Do not run `task.py start`. Complete/archive Phase 3B first, then re-review the revised Phase 4 PRD under the Rust-native compatibility policy. |
 
-Active work is **Phase 3 query execution core** on branch `rust` (task
-`08-15-rust-phase3-query-execution-core`, state `in_progress`): Slices 0–4
-are root-reviewed; Slice 4 final review was approved on 2026-08-17 after
-three Rust wire/parity gaps were remediated. The query adapter remains experimental / opt-in
-(`MOSDNS_QUERY_BACKEND=rust`), the default backend stays Go-only, and the
-adapter is not wired into `EntryHandler`/sequence; the high-port host smoke
-does not prove the production query Rust path, while the Linux real cgo
-integration tests are the current query adapter boundary evidence. Phase 4
-must not start. The matcher tasks (`08-13-rust-matcher-foundation`,
+Active migration state is **Phase 3B pending** on branch `rust`: the Phase 3A
+query/wire foundation task is archived/completed, but the overall Phase 3
+sequence/execution-ownership work is not complete. The next task must cover
+Rust matcher dispatch, no-network executables, `jump`/`goto`/`return`/`exit`/
+`try`, and the query-context ownership continuation before upstream transport
+work begins. The Phase 4 upstream task is planning-only and deferred; its revised PRD
+requires a shared Rust async runtime/cancellation model, post-side-effect failure
+matrix, product-contract protocol/socket classification, and KixDNS transport
+audit before implementation. It must not add a transport C ABI, Go pool-buffer
+ownership, selector, or fallback. The existing `main` release remains Go-only
+while this incomplete `rust` branch is not a production target.
+The matcher tasks (`08-13-rust-matcher-foundation`,
 `08-13-rust-matcher-phase2-expansion`) are archived/completed and are no
 longer active work; their historical records are unchanged.
 
@@ -117,7 +131,17 @@ separate explicit approval.
 
 ## Approved architecture direction
 
-The migration is a strangler sequence:
+The migration is a strangler sequence that ends in a pure Rust-native host; the
+existing Go/Rust bridge is temporary:
+
+```text
+Phase 0-3A: behavior discovery + hybrid validation scaffolding
+Phase 3B-4: pure Rust execution/transport/server foundations
+Phase 5: complete Rust-native host and end-to-end cutover evidence
+Phase 6: remove hybrid selectors/cgo adapters/Go mirrors/fallback and pass purity gate
+```
+
+The implementation sequence is:
 
 ```text
 cache foundation
@@ -127,9 +151,12 @@ cache foundation
     -> Rust-native host/control-plane replacement
 ```
 
-The second module is the point to form one Rust `staticlib` runtime. It must
-retain the existing cache ABI symbols while linking cache and matcher cores as
-Rust libraries. Do not link independent cache and matcher Rust runtimes.
+The second module formed the single transitional Rust `staticlib` runtime and
+retained existing cache ABI symbols while linking cache and matcher cores. That
+was appropriate for Phase 1/2/3A validation. New Phase 3B+ modules should not
+add ABI symbols merely to preserve the hybrid shape; they should compose as
+Rust libraries for the future native host. Do not create a second independent
+Rust runtime.
 
 The key performance conclusion is architectural: while Go owns each request,
 per-plugin cgo calls remain measurable. When Rust owns server → query context →
@@ -363,10 +390,15 @@ default builds remain Go-only.
 
 ## Non-negotiable constraints
 
-- Default Go build and runtime behavior remain unchanged until separate gates
-  and approval allow otherwise.
-- Preserve YAML, API, metrics, audit fields, rule/dump formats, and WebUI
-  workflows before performance cleanup.
+- The current Go/main release remains unchanged until the complete Rust-native
+  replacement passes its final gates; the incomplete `rust` branch is not used
+  as a production runtime.
+- Preserve the MosDNS product contract: YAML/config and sequence/plugin
+  semantics, final DNS/routing/audit behavior, API/WebUI workflows, metrics and
+  persistent formats. Go internal structures and accidental quirks are not
+  automatically part of that contract.
+- Existing Phase 1/2/3A hybrid adapters/fallback remain safe but frozen; do not
+  expand them into Phase 3B+. Remove them only in the post-host retirement gate.
 - KixDNS `2da3a2d` is a selective GPL-3.0 source/design reference, not a subtree
   merge or JSON-pipeline replacement.
 - `/Users/tom/github/mosdns-rust-cache` is a read-only prototype reference, not
