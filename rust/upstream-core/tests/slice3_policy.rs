@@ -43,6 +43,12 @@
 //! with `Closed(NotSent)` before any socket work. Every lifecycle ordering
 //! proof uses an explicit server handshake, never an equal-sleep assumption.
 //!
+//! Two further handshake-driven proofs bound the composite transition itself:
+//! a caller cancellation already effective before the UDP TC observation must
+//! terminate the exchange as `Cancelled(Sent)` without any TCP connect or send,
+//! and the single TCP fallback must observe only the remaining portion of the
+//! caller's one original absolute deadline.
+//!
 //! Every server is bounded: the UDP fixture sets a socket read timeout, TCP
 //! accepts use a nonblocking deadline, and accepted TCP streams carry read and
 //! write timeouts. A missing or broken client therefore fails a test rather
@@ -72,6 +78,13 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// to outlive a loopback UDP round trip; it is a negative bound, not an
 /// ordering proof based on equal sleeps.
 const NO_TCP_CONNECTION_WINDOW: Duration = Duration::from_millis(500);
+
+/// A short absolute deadline that only has to outlive a loopback UDP TC round
+/// trip and the fallback's framed read. It proves the single TCP fallback is
+/// governed by the caller's original absolute instant rather than a fresh
+/// relative timeout: the outer bounded assertion turns a reset or ignored
+/// deadline into a failure instead of a hang.
+const SHORT_ABSOLUTE_DEADLINE: Duration = Duration::from_millis(500);
 
 /// Runs one bounded current-thread runtime for a single test.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -292,6 +305,41 @@ fn udp_receive_without_reply(
         seen_tx.send(()).expect("signal receipt");
     });
     (handle, seen_rx)
+}
+
+/// Receives exactly one UDP datagram, signals that it arrived, waits for the
+/// test's explicit release, and only then answers with `reply`.
+///
+/// The two-phase handshake lets a test order a caller cancellation strictly
+/// before the valid TC response is sent, without an equal-sleep guess. The
+/// bounded read and the bounded hold both use `TEST_TIMEOUT`, so a test that
+/// fails before releasing the reply still lets the thread terminate.
+fn udp_hold_then_reply(
+    socket: UdpSocket,
+    reply: Vec<u8>,
+) -> (
+    std::thread::JoinHandle<Option<Vec<u8>>>,
+    oneshot::Receiver<()>,
+    mpsc::Sender<()>,
+) {
+    let (seen_tx, seen_rx) = oneshot::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let handle = std::thread::spawn(move || {
+        socket
+            .set_read_timeout(Some(TEST_TIMEOUT))
+            .expect("bounded udp server read");
+        let mut buffer = vec![0u8; LEGAL_UDP_PAYLOAD];
+        let Ok((read, peer)) = socket.recv_from(&mut buffer) else {
+            return None;
+        };
+        seen_tx.send(()).expect("signal receipt");
+        release_rx
+            .recv_timeout(TEST_TIMEOUT)
+            .expect("the test must release the held UDP reply");
+        socket.send_to(&reply, peer).expect("send udp reply");
+        Some(buffer[..read].to_vec())
+    });
+    (handle, seen_rx, release_tx)
 }
 
 /// Reports whether any UDP datagram arrives within the bounded no-send window.
@@ -747,5 +795,186 @@ fn composite_close_is_idempotent_on_an_unused_policy() {
         assert_eq!(policy.close().await, CloseResult::AlreadyClosed);
         assert_eq!(policy.close().await, CloseResult::AlreadyClosed);
         assert_eq!(policy.in_flight_exchanges(), 0);
+    });
+}
+
+#[test]
+fn cancellation_before_the_udp_tc_observation_prevents_any_tcp_fallback() {
+    block_on(async {
+        let (udp, listener, address) = bind_udp_and_tcp();
+        let id = 0x3c01;
+        let query = query_wire(id);
+
+        // The UDP server receives the query, announces it, and holds the valid
+        // TC response until the test explicitly releases it. That two-phase
+        // handshake lets caller cancellation become effective strictly before
+        // the TC observation, with no equal-sleep assumption.
+        let (udp_server, query_seen, release_udp) =
+            udp_hold_then_reply(udp, truncated_response_wire(id));
+        // The watchdog is the negative bound: a cancelled exchange must never
+        // reach the TCP fallback for the whole observation window.
+        let tcp_watchdog = tcp_connection_watchdog(listener);
+
+        let cancellation = TransportCancellation::new();
+        // The deadline stays far in the future, so only caller cancellation can
+        // terminate the exchange.
+        let context = ExchangeContext::new(
+            Instant::now() + Duration::from_secs(30),
+            cancellation.clone(),
+        );
+        let policy = Arc::new(UdpTcpPolicy::new(udp_endpoint(address)));
+        let exchange_task = {
+            let policy = Arc::clone(&policy);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                policy.exchange(request, context).await
+            })
+        };
+
+        timeout(TEST_TIMEOUT, query_seen)
+            .await
+            .expect("query observed bounded")
+            .expect("query observed");
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            1,
+            "the query has been sent, so the UDP leg is registered in flight"
+        );
+
+        // Cancellation is requested while the UDP leg is parked in receive and
+        // before the server is allowed to send the valid TC response. A later
+        // implementation that reads the TC observation first and then starts a
+        // fallback would fail here: cancellation must win before any TCP work.
+        cancellation.cancel();
+        release_udp.send(()).expect("release the held UDP reply");
+
+        let error = timeout(TEST_TIMEOUT, exchange_task)
+            .await
+            .expect("cancelled exchange bounded")
+            .expect("exchange joined")
+            .err()
+            .expect("cancellation before the TC observation terminates the exchange");
+        assert_eq!(
+            error,
+            UpstreamError::Cancelled(SideEffectState::Sent),
+            "the query was already sent, so cancellation reports Sent before any TCP work"
+        );
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            0,
+            "the cancelled exchange must drain its registration"
+        );
+
+        assert!(
+            !tcp_watchdog.join().expect("tcp watchdog joined"),
+            "cancellation before the TC observation must never open a TCP connection"
+        );
+        assert_eq!(
+            udp_server.join().expect("udp server joined").as_deref(),
+            Some(query.as_slice()),
+            "the UDP leg must have carried the caller's unchanged query"
+        );
+    });
+}
+
+#[test]
+fn tcp_fallback_honors_the_remaining_original_absolute_deadline() {
+    block_on(async {
+        let (udp, listener, address) = bind_udp_and_tcp();
+        let id = 0x3c02;
+        let query = query_wire(id);
+
+        // The UDP leg serves a valid TC observation. The TCP fallback then
+        // accepts, reads the framed query, signals `fallback_read`, and holds
+        // the connection open without ever responding.
+        let udp_server = udp_reply_once(udp, truncated_response_wire(id));
+        let (tcp_server, fallback_read, release_fallback) = tcp_holding_fallback_server(listener);
+
+        // One original absolute deadline for the whole composite exchange. It
+        // is short enough that the unanswered fallback must observe it, and the
+        // outer bounded assertion below fails instead of hanging if an
+        // implementation resets or ignores it.
+        let deadline = Instant::now() + SHORT_ABSOLUTE_DEADLINE;
+        let context = ExchangeContext::new(deadline, TransportCancellation::new());
+        let policy = Arc::new(UdpTcpPolicy::new(udp_endpoint(address)));
+        let exchange_task = {
+            let policy = Arc::clone(&policy);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                policy.exchange(request, context).await
+            })
+        };
+
+        // The fallback is genuinely in flight and has read the framed query, so
+        // only the original absolute deadline can terminate the exchange.
+        timeout(TEST_TIMEOUT, fallback_read)
+            .await
+            .expect("fallback query read bounded")
+            .expect("the TCP fallback must read the framed query");
+
+        let error = timeout(TEST_TIMEOUT, exchange_task)
+            .await
+            .expect("the fallback must observe the original bounded deadline instead of hanging")
+            .expect("exchange joined")
+            .err()
+            .expect("an unanswered held fallback must fail");
+
+        // Always release and join the held server immediately after the bounded
+        // observation, before any assertion can panic, so no server thread is
+        // left parked on a failing test.
+        release_fallback
+            .send(())
+            .expect("release the held fallback connection");
+        let tcp_received = tcp_server.join().expect("tcp server joined");
+        let udp_received = udp_server.join().expect("udp server joined");
+
+        assert!(
+            Instant::now() >= deadline,
+            "the exchange can only have ended by reaching the original absolute deadline"
+        );
+        assert_eq!(
+            tcp_received, query,
+            "the TCP fallback must have carried the byte-identical original query"
+        );
+        assert_eq!(
+            udp_received.as_deref(),
+            Some(query.as_slice()),
+            "the UDP leg must have carried the caller's unchanged query"
+        );
+
+        match &error {
+            UpstreamError::TcpFallback { prior, cause } => {
+                let prior: &TcpFallbackContext = prior;
+                assert_eq!(prior.request_id(), id);
+                assert_eq!(prior.response_id(), id);
+                assert!(
+                    prior.truncated(),
+                    "the prior context must record the UDP TC=1 observation"
+                );
+                assert_eq!(
+                    prior.side_effect(),
+                    SideEffectState::Sent,
+                    "the UDP query had already crossed the network"
+                );
+                assert_eq!(
+                    **cause,
+                    UpstreamError::DeadlineExceeded(SideEffectState::Sent),
+                    "the nested TCP cause must be the original absolute deadline, not a reset timeout"
+                );
+            }
+            other => panic!("expected UpstreamError::TcpFallback, got {other:?}"),
+        }
+        assert_eq!(
+            error.side_effect(),
+            SideEffectState::Sent,
+            "the composite error must retain the overall Sent state"
+        );
+        assert_eq!(
+            policy.in_flight_exchanges(),
+            0,
+            "the deadline-terminated fallback must drain its registration"
+        );
     });
 }
