@@ -9,9 +9,14 @@
 > `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread
 > root-review `PASS / CLOSED` (Actions run `35084388223` success). On
 > 2026-09-16 the user then authorized Slice4, the final quality gate and
-> evidence run. Slice4 is verification/evidence only and this design remains the
-> frozen contract it verifies; production wiring and every deferred or
-> research-unresolved scope below remain unauthorized.
+> evidence run; the external same-thread root review has now formally returned
+> Slice4 `PASS / CLOSED` at review commit
+> `9d43e9fca09a24ad35399838c00299f7cc898301` (Actions run `35090514316`
+> success), closing the Phase4 foundation final quality gate. Slice4 was
+> verification/evidence only and this design remains the frozen contract it
+> verifies; the task stays `in_progress`, current execution is STOP, and
+> production wiring and every deferred or research-unresolved scope below remain
+> unauthorized without new explicit approval.
 
 ## 1. Boundary and dependency direction
 
@@ -577,9 +582,11 @@ explicitly authorized the Slice3 UDP TC-to-TCP composite policy on 2026-09-16
 after Slice2's formal `PASS / CLOSED`, and that Slice3 implementation at
 `21bff19212637c47df632a29dd4b3380cac7a4cc` is now formally same-thread
 root-review `PASS / CLOSED`. The user then authorized the Slice4 final quality
-gate and evidence run on 2026-09-16; that run is complete in the current
-evidence commit and awaits the external same-thread root reviewer's final
-acceptance. The task remains `in_progress`; current execution stops for that
-review, no Slice4 `PASS / CLOSED` is claimed yet, and nothing in this document
-authorizes production wiring, a release, or any deferred/research-unresolved
-scope.
+gate and evidence run on 2026-09-16; that run completed at evidence commit
+`db374df`, and the external same-thread root review has now formally returned
+Slice4 `PASS / CLOSED` at review commit
+`9d43e9fca09a24ad35399838c00299f7cc898301` (Actions run `35090514316`
+success), so the Phase4 foundation final quality gate is CLOSED. The task
+remains `in_progress`; current execution is STOP, and nothing in this document
+automatically authorizes Rust-native host wiring, production/default selection,
+hybrid retirement, release, or any deferred/research-unresolved scope.
