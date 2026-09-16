@@ -19,6 +19,18 @@
 //! listener bound to the same numeric port, so "same numeric upstream" is
 //! mechanically exercised instead of assumed.
 //!
+//! A failed fallback is reported through the frozen public error contract:
+//!
+//!     UpstreamError::TcpFallback {
+//!         prior: TcpFallbackContext,
+//!         cause: Box<UpstreamError>,
+//!     }
+//!
+//! `TcpFallbackContext` exposes `request_id()`, `response_id()`,
+//! `truncated()`, and `side_effect()` for the prior UDP observation, so the
+//! typed TCP cause is retained without discarding the TC context or the
+//! overall prior UDP side-effect state.
+//!
 //! Every server is bounded: the UDP fixture sets a socket read timeout, TCP
 //! accepts use a nonblocking deadline, and accepted TCP streams carry read and
 //! write timeouts. A missing or broken client therefore fails a test rather
@@ -30,8 +42,8 @@ use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::time::{Duration, Instant};
 
 use mosdns_upstream_core::{
-    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, Transport, TransportCancellation,
-    UdpTcpPolicy, UpstreamError,
+    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, SideEffectState,
+    TcpFallbackContext, Transport, TransportCancellation, UdpTcpPolicy, UpstreamError,
 };
 use tokio::time::timeout;
 
@@ -230,6 +242,26 @@ fn tcp_connection_watchdog(listener: TcpListener) -> std::thread::JoinHandle<boo
     std::thread::spawn(move || accept_within(&listener, NO_TCP_CONNECTION_WINDOW).is_some())
 }
 
+/// Accepts exactly one TCP fallback connection, reads the framed query, then
+/// closes the stream's write half before emitting any response byte so the
+/// client deterministically observes [`UpstreamError::TruncatedFrame`] rather
+/// than a complete or malformed frame.
+///
+/// The accept and the framed read are both bounded by `TEST_TIMEOUT`, so a
+/// client that never falls back or never sends its query fails the test instead
+/// of parking this thread.
+fn tcp_truncating_fallback_server(listener: TcpListener) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut stream = accept_within(&listener, TEST_TIMEOUT)
+            .expect("the TC header must trigger exactly one TCP fallback");
+        let received = read_framed(&mut stream);
+        stream
+            .shutdown(std::net::Shutdown::Write)
+            .expect("close the TCP write half before a complete response");
+        received
+    })
+}
+
 /// Runs one exchange through the reviewed composite-policy entry point with a
 /// bound, mirroring the primitive helpers in `slice1_udp.rs`/`slice2_tcp.rs`.
 async fn policy_exchange_bounded(
@@ -355,6 +387,72 @@ fn undersized_tc_bit_datagram_is_terminal_malformed_without_tcp_fallback() {
         assert!(
             udp_server.join().expect("udp server joined").is_some(),
             "the UDP fixture must have served the query"
+        );
+    });
+}
+
+#[test]
+fn tcp_fallback_failure_preserves_prior_truncated_udp_context() {
+    block_on(async {
+        let (udp, listener, address) = bind_udp_and_tcp();
+        let id = 0x3a04;
+        let query = query_wire(id);
+
+        let udp_server = udp_reply_once(udp, truncated_response_wire(id));
+        let tcp_server = tcp_truncating_fallback_server(listener);
+
+        let error = policy_exchange_bounded(address, &query, open_context())
+            .await
+            .err()
+            .expect("a TCP fallback closed before a complete frame must fail");
+
+        match &error {
+            UpstreamError::TcpFallback { prior, cause } => {
+                let prior: &TcpFallbackContext = prior;
+                assert_eq!(
+                    prior.request_id(),
+                    id,
+                    "the prior context must record the original query ID"
+                );
+                assert_eq!(
+                    prior.response_id(),
+                    id,
+                    "the prior context must record the matching UDP response ID"
+                );
+                assert!(
+                    prior.truncated(),
+                    "the prior context must record the UDP TC=1 observation"
+                );
+                assert_eq!(
+                    prior.side_effect(),
+                    SideEffectState::Sent,
+                    "the UDP query had already crossed the network"
+                );
+                assert_eq!(
+                    **cause,
+                    UpstreamError::TruncatedFrame,
+                    "the nested cause must remain the typed TCP framing failure"
+                );
+            }
+            other => panic!("expected UpstreamError::TcpFallback, got {other:?}"),
+        }
+
+        assert_eq!(
+            error.side_effect(),
+            SideEffectState::Sent,
+            "the outer error must retain the prior UDP side-effect state"
+        );
+
+        let udp_seen = udp_server.join().expect("udp server joined");
+        assert_eq!(
+            udp_seen.as_deref(),
+            Some(query.as_slice()),
+            "the UDP leg must have carried the caller's unchanged query"
+        );
+        assert_eq!(
+            tcp_server.join().expect("tcp server joined"),
+            query,
+            "the TCP fallback must have carried the byte-identical original query"
         );
     });
 }
