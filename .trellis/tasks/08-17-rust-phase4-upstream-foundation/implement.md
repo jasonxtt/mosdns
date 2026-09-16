@@ -9,9 +9,11 @@
 > `21bff19212637c47df632a29dd4b3380cac7a4cc` is formally same-thread
 > root-review `PASS / CLOSED`, and Actions run `35084388223` is success (build
 > success, rust-foundation success, historical rust-runtime-experimental
-> skipped). Current execution is STOP; awaiting the user's decision for Slice4.
-> Do not start Slice4 or add production wiring without another explicit
-> authorization.
+> skipped). The user then explicitly authorized Slice4 on 2026-09-16. Slice4 is
+> the verification/evidence-only final quality gate recorded below: it starts no
+> implementation or production wiring, keeps the task `in_progress`, and stops
+> for the external same-thread root reviewer's final acceptance of the evidence
+> commit. No Slice4 `PASS / CLOSED` is claimed yet.
 
 ## Execution rules
 
@@ -539,6 +541,67 @@ Required verification plan:
 STOP: final root acceptance of the Phase4 foundation. This plan does not
 authorize Rust-native host wiring, production/default selection, retirement of
 hybrid scaffolding, or release. Those require later tasks and gates.
+
+### Slice 4 execution and evidence record — 2026-09-16
+
+- The user explicitly authorized Slice4 on 2026-09-16 as the bounded final
+  quality gate and evidence run. Slice4 is verification/evidence only: it starts
+  no implementation, production wiring, protocol, listener, pooling, retry,
+  runtime-ownership, selector, or Go/cgo/ABI/fallback change, and it changes
+  none of the Slice0–3 records above.
+- Verified revision: clean isolated worktree at
+  `db374dfff5c1c286de86c646e098ed78dd6e3e8b` (`rust` branch, remote baseline)
+  with no source modifications. This evidence commit changes only `prd.md`,
+  `design.md`, `implement.md`, and `docs/ai/rust-handover.md`.
+- Exact repository-executable results:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — PASS (exit 0).
+  - `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets
+    --all-features --locked` — PASS (exit 0); every workspace target is green,
+    including `mosdns-upstream-core` 30 library tests plus Slice0 12, Slice1 35,
+    Slice2 14, and Slice3 10.
+  - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets
+    --all-features --locked -- -D warnings` — PASS (exit 0).
+  - `cargo build --manifest-path rust/Cargo.toml --workspace --release --locked`
+    — PASS (exit 0).
+  - `cargo tree --manifest-path rust/Cargo.toml -p mosdns-upstream-core --depth
+    2 --locked` plus manifest/lockfile inspection — PASS (exit 0); the only
+    dependencies are `mosdns-dns-core`, `tokio`, and `tokio-util` (plus the
+    test-only `tokio` dev-dependency). There is no `mosdns-sequence-core`, no
+    `mosdns-runtime`, and no FFI/selector/pool/cgo edge; `src/lib.rs` keeps
+    `#![forbid(unsafe_code)]`.
+  - `go test ./...` — PASS (exit 0); `go vet ./...` — PASS (exit 0); `go build
+    ./...` — PASS (exit 0). No Go file changed. The Go gate ran with a
+    workspace-confined build cache (`GOCACHE`, `GOFLAGS=-mod=readonly`,
+    `GOPROXY=off`) because the macOS sandbox denied writes to the user-level Go
+    caches; no dependency was fetched.
+  - `python3 ./.trellis/scripts/task.py validate
+    rust-phase4-upstream-foundation` — PASS (exit 0; 4 `implement.jsonl` and 4
+    `check.jsonl` entries valid).
+  - `git diff --check` — PASS; final scope inspection shows only the four
+    authorized paths changed and no Rust/Cargo/Go/test/CI/config/WebUI file
+    touched.
+- Final matrix and research review: the `design.md` section 11
+  compatibility/deviation matrix was re-inspected and no row was reclassified.
+  The four `Research unresolved` rows (SoMark/BindToDevice, local bind
+  address/interface, SOCKS5 proxy, hostname/bootstrap resolution) and the
+  Implementation-only/defer rows (TCP reuse, pipelining/pending demux, idle
+  timeout/recovery, UDP retransmit timing/count) remain explicit deferrals that
+  still block their named scope. `docs/rust/kixdns-upstream-transport.md` was
+  re-read and still records no KixDNS direct dependency or extracted source;
+  its five open research questions remain planning blockers for the deferred
+  features only.
+- Environment constraint: local execution is macOS (`Darwin 25.5.0`, arm64) and
+  is **not** Linux evidence. Isolated Linux loopback UDP/TCP network evidence is
+  provided by the repository's Ubuntu GitHub Actions `rust-foundation` job when
+  this evidence commit is pushed; that job runs fmt, the `mosdns-dns-core`/
+  `mosdns-upstream-core` tests, and warnings-denied clippy on `ubuntu-latest`.
+  No Slice4 Actions run exists at record time.
+- `task.json` remains `status = in_progress`; current execution stops here for
+  the external same-thread root reviewer's final acceptance. This record claims
+  no Slice4 `PASS / CLOSED`, does not wire the foundation into production, and
+  does not authorize pooling, reuse, pipeline, generic retry, TLS/HTTPS/QUIC,
+  listeners, configuration/WebUI/API, selectors, cgo/ABI, Go fallback,
+  runtime-ownership changes, or a release.
 
 ## Review handoff checklist
 
