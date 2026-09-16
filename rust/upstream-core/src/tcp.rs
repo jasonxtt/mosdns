@@ -12,7 +12,7 @@
 //! connection is kept after the call, and deadline/cancellation racing is not
 //! part of this step.
 
-use std::future::poll_fn;
+use std::future::{Future, poll_fn};
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Instant;
@@ -155,6 +155,55 @@ where
     Ok(body)
 }
 
+/// Races one transport I/O future against owner close, caller cancellation, and
+/// the exchange's single absolute deadline.
+///
+/// The `biased` branch order is the contract: when more than one control is
+/// ready on the same poll, owner shutdown wins and reports
+/// [`UpstreamError::Closed`], caller cancellation is next and reports
+/// [`UpstreamError::Cancelled`], and the absolute deadline reports
+/// [`UpstreamError::DeadlineExceeded`]. `side_effect` is the caller's current
+/// state and is recorded on a control error only; a ready I/O future is
+/// returned unchanged.
+///
+/// `deadline` is the already-established absolute instant, so this helper
+/// never starts a second relative timeout and never resets the deadline. It
+/// creates no runtime, spawns no task, and owns no socket of its own.
+// Intentionally not wired into `exchange` yet: the next authorized TCP
+// integration step consumes it. The attribute keeps warnings-denied builds
+// clean while the helper is exercised only by the module tests.
+#[allow(dead_code)]
+pub(crate) async fn race_io<F, T>(
+    prepared: &PreparedExchange<'_>,
+    side_effect: SideEffectState,
+    deadline: Instant,
+    io: F,
+) -> Result<T, UpstreamError>
+where
+    F: Future<Output = Result<T, UpstreamError>>,
+{
+    let owner = prepared.owner_cancellation();
+    let caller = prepared.context().cancellation();
+    let owner_cancelled = owner.cancelled();
+    let caller_cancelled = caller.cancelled();
+    tokio::pin!(owner_cancelled);
+    tokio::pin!(caller_cancelled);
+
+    // One absolute deadline, converted once; every control shares this wait.
+    let deadline_timer = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline));
+    tokio::pin!(deadline_timer);
+
+    tokio::pin!(io);
+
+    tokio::select! {
+        biased;
+        () = &mut owner_cancelled => Err(UpstreamError::Closed(side_effect)),
+        () = &mut caller_cancelled => Err(UpstreamError::Cancelled(side_effect)),
+        () = &mut deadline_timer => Err(UpstreamError::DeadlineExceeded(side_effect)),
+        result = &mut io => result,
+    }
+}
+
 /// Writes every byte of `buffer`, retrying partial writes until the whole slice
 /// has been accepted. A zero-byte write is a distinct `WriteZero` failure
 /// rather than silent progress.
@@ -211,12 +260,21 @@ where
 #[cfg(test)]
 mod tests {
     use std::future::Future;
+    use std::net::{Ipv4Addr, SocketAddr};
     use std::pin::Pin;
     use std::task::{Context, Poll};
+    use std::time::{Duration, Instant};
 
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+    use tokio::time::timeout;
 
-    use crate::{RequestError, SideEffectState, UpstreamError};
+    use crate::{
+        CloseTransition, Endpoint, ExchangeContext, ExchangeRequest, PreparedExchange,
+        RequestError, SideEffectState, Transport, TransportCancellation, Upstream, UpstreamError,
+    };
+
+    /// Bounds every control race so a broken helper cannot hang the test.
+    const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 
     /// Runs one bounded current-thread runtime for a single framing test.
     ///
@@ -569,6 +627,177 @@ mod tests {
                 .expect_err("a non-EOF read failure is not a truncation");
 
             assert_eq!(error, UpstreamError::Receive(SideEffectState::Sent));
+        });
+    }
+
+    /// A valid query with a caller-chosen ID. Control races never open a
+    /// socket, so this only has to satisfy the request boundary.
+    fn query_wire(id: u16) -> Vec<u8> {
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&id.to_be_bytes());
+        wire.extend_from_slice(&[0x01, 0x00]); // RD=1, QR=0, opcode QUERY
+        wire.extend_from_slice(&1u16.to_be_bytes()); // QDCOUNT
+        wire.extend_from_slice(&0u16.to_be_bytes()); // ANCOUNT
+        wire.extend_from_slice(&0u16.to_be_bytes()); // NSCOUNT
+        wire.extend_from_slice(&0u16.to_be_bytes()); // ARCOUNT
+        wire.extend_from_slice(&[0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e']);
+        wire.extend_from_slice(&[0x03, b'o', b'r', b'g', 0x00]);
+        wire.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // A IN
+        wire
+    }
+
+    /// A numeric TCP endpoint; the control races below never dial it.
+    fn tcp_endpoint() -> Endpoint {
+        Endpoint::new(SocketAddr::from((Ipv4Addr::LOCALHOST, 1)), Transport::Tcp)
+            .expect("numeric tcp endpoint")
+    }
+
+    /// Prepares one exchange borrowing `query` while the owner is still open.
+    fn prepare<'q>(
+        upstream: &Upstream,
+        query: &'q [u8],
+        context: ExchangeContext,
+    ) -> PreparedExchange<'q> {
+        let request = ExchangeRequest::new(query).expect("valid query");
+        upstream
+            .prepare_exchange(request, context)
+            .expect("an open owner prepares the exchange")
+    }
+
+    /// An I/O future that never becomes ready on its own.
+    ///
+    /// Every control test uses it to prove that owner close, caller
+    /// cancellation, or the absolute deadline terminates the wait, never the
+    /// I/O completing.
+    struct PendingIo;
+
+    impl Future for PendingIo {
+        type Output = Result<u32, UpstreamError>;
+
+        fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    #[test]
+    fn race_io_owner_cancellation_wins_when_every_control_is_ready() {
+        block_on(async {
+            let upstream = Upstream::new(tcp_endpoint());
+            let query = query_wire(0x7001);
+            let caller = TransportCancellation::new();
+            // The prepared context deadline is far in the future, but the
+            // explicitly passed absolute deadline is already past, so owner
+            // close, caller cancellation, and the deadline are all ready on the
+            // first poll.
+            let context =
+                ExchangeContext::new(Instant::now() + Duration::from_secs(30), caller.clone());
+            let prepared = prepare(&upstream, &query, context);
+
+            assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+            caller.cancel();
+            let past = Instant::now() - Duration::from_secs(1);
+
+            let outcome = timeout(
+                TEST_TIMEOUT,
+                super::race_io(&prepared, SideEffectState::Sent, past, PendingIo),
+            )
+            .await
+            .expect("owner close interrupts the pending I/O immediately");
+
+            assert_eq!(outcome, Err(UpstreamError::Closed(SideEffectState::Sent)));
+        });
+    }
+
+    #[test]
+    fn race_io_caller_cancellation_wins_over_the_deadline() {
+        block_on(async {
+            let upstream = Upstream::new(tcp_endpoint());
+            let query = query_wire(0x7002);
+            let caller = TransportCancellation::new();
+            let context =
+                ExchangeContext::new(Instant::now() + Duration::from_secs(30), caller.clone());
+            let prepared = prepare(&upstream, &query, context);
+
+            // The owner stays open, so caller cancellation and the past
+            // absolute deadline are both ready and precedence decides.
+            caller.cancel();
+            let past = Instant::now() - Duration::from_secs(1);
+
+            let outcome = timeout(
+                TEST_TIMEOUT,
+                super::race_io(&prepared, SideEffectState::MaybeSent, past, PendingIo),
+            )
+            .await
+            .expect("caller cancellation interrupts the pending I/O immediately");
+
+            assert_eq!(
+                outcome,
+                Err(UpstreamError::Cancelled(SideEffectState::MaybeSent))
+            );
+        });
+    }
+
+    #[test]
+    fn race_io_uses_the_passed_absolute_deadline_without_resetting_it() {
+        block_on(async {
+            let upstream = Upstream::new(tcp_endpoint());
+            let query = query_wire(0x7003);
+            // The prepared context deadline is 30 seconds out; the helper must
+            // honor the separately passed absolute deadline instead of starting
+            // a fresh relative timeout or falling back to the context deadline.
+            let context = ExchangeContext::new(
+                Instant::now() + Duration::from_secs(30),
+                TransportCancellation::new(),
+            );
+            let prepared = prepare(&upstream, &query, context);
+
+            let past = Instant::now() - Duration::from_secs(1);
+
+            let outcome = timeout(
+                TEST_TIMEOUT,
+                super::race_io(&prepared, SideEffectState::NotSent, past, PendingIo),
+            )
+            .await
+            .expect("the past absolute deadline resolves immediately, not after 30s");
+
+            assert_eq!(
+                outcome,
+                Err(UpstreamError::DeadlineExceeded(SideEffectState::NotSent))
+            );
+        });
+    }
+
+    #[test]
+    fn race_io_returns_the_io_result_unchanged_when_no_control_is_ready() {
+        block_on(async {
+            let upstream = Upstream::new(tcp_endpoint());
+            let query = query_wire(0x7004);
+            let context = ExchangeContext::new(
+                Instant::now() + Duration::from_secs(30),
+                TransportCancellation::new(),
+            );
+            let prepared = prepare(&upstream, &query, context);
+            let deadline = Instant::now() + Duration::from_secs(30);
+
+            let ready = async { Ok::<_, UpstreamError>(0xABCD_u32) };
+            let outcome = timeout(
+                TEST_TIMEOUT,
+                super::race_io(&prepared, SideEffectState::NotSent, deadline, ready),
+            )
+            .await
+            .expect("ready I/O completes without waiting for a control");
+            assert_eq!(outcome, Ok(0xABCD));
+
+            // An I/O error is returned verbatim with its own typed category and
+            // side-effect state rather than being relabelled as a timeout.
+            let failing = async { Err::<u32, _>(UpstreamError::Receive(SideEffectState::Sent)) };
+            let outcome = timeout(
+                TEST_TIMEOUT,
+                super::race_io(&prepared, SideEffectState::Sent, deadline, failing),
+            )
+            .await
+            .expect("failing I/O completes without waiting for a control");
+            assert_eq!(outcome, Err(UpstreamError::Receive(SideEffectState::Sent)));
         });
     }
 }
