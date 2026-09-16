@@ -274,10 +274,17 @@ fn tcp_connection_watchdog(listener: TcpListener) -> std::thread::JoinHandle<boo
 /// client deterministically observes [`UpstreamError::TruncatedFrame`] rather
 /// than a complete or malformed frame.
 ///
+/// After that post-send framing failure the server keeps observing the listener
+/// for the bounded [`NO_TCP_CONNECTION_WINDOW`] and reports
+/// `(received_query, saw_second_connection)`. The framing failure is therefore
+/// proven terminal: a generic retry would open a second connection and fail it.
+///
 /// The accept and the framed read are both bounded by `TEST_TIMEOUT`, so a
 /// client that never falls back or never sends its query fails the test instead
 /// of parking this thread.
-fn tcp_truncating_fallback_server(listener: TcpListener) -> std::thread::JoinHandle<Vec<u8>> {
+fn tcp_truncating_fallback_server(
+    listener: TcpListener,
+) -> std::thread::JoinHandle<(Vec<u8>, bool)> {
     std::thread::spawn(move || {
         let mut stream = accept_within(&listener, TEST_TIMEOUT)
             .expect("the TC header must trigger exactly one TCP fallback");
@@ -285,7 +292,8 @@ fn tcp_truncating_fallback_server(listener: TcpListener) -> std::thread::JoinHan
         stream
             .shutdown(std::net::Shutdown::Write)
             .expect("close the TCP write half before a complete response");
-        received
+        let second_connection = accept_within(&listener, NO_TCP_CONNECTION_WINDOW).is_some();
+        (received, second_connection)
     })
 }
 
@@ -585,10 +593,14 @@ fn tcp_fallback_failure_preserves_prior_truncated_udp_context() {
             Some(query.as_slice()),
             "the UDP leg must have carried the caller's unchanged query"
         );
+        let (tcp_received, second_connection) = tcp_server.join().expect("tcp server joined");
         assert_eq!(
-            tcp_server.join().expect("tcp server joined"),
-            query,
+            tcp_received, query,
             "the TCP fallback must have carried the byte-identical original query"
+        );
+        assert!(
+            !second_connection,
+            "a post-send TCP framing failure must not trigger a generic retry"
         );
     });
 }
