@@ -229,8 +229,9 @@ evidence.
 - Main-worktree focused verification after both applies: Slice1 33/33 on the
   first run and two additional repeated runs; Slice0 12/12; upstream-core lib
   bind test passed; full workspace tests, dns-core tests, warnings-denied
-  clippy, fmt, cargo tree, task validate, and diff checks remain required
-  before the final commit/review. Task status remains `in_progress`.
+  clippy, fmt, cargo tree, task validate, and diff checks all pass. The final
+  remediation commit is `fda0455`; task status remains `in_progress` and the
+  result is awaiting root review.
 - Scope remains strictly Slice1 UDP remediation. No TCP, TC-to-TCP fallback,
   retransmission, retry, pool, reuse, pipeline, listener, Go/cgo/ABI/selector/
   fallback, or production wiring was added. STOP for root review before Slice2.
