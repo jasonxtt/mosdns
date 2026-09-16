@@ -77,19 +77,105 @@ STOP for scoped review; Slice1 requires new authorization.
 
 ## Slice1 — TLS and DoT one-exchange primitive
 
-- [ ] One RED -> GREEN behavior at a time; synthetic local CA/server fixtures
+- [x] One RED -> GREEN behavior at a time; synthetic local CA/server fixtures
   with documented provenance (valid, wrong name, expired and unknown issuer).
-- [ ] Numeric connect, authenticated handshake, shared context/deadline, explicit
+- [x] Numeric connect, authenticated handshake, shared context/deadline, explicit
   insecure path; no query before successful handshake and no plaintext fallback.
-- [ ] Reuse exact framing helpers; explicitly test TLS flush, partial writes,
+- [x] Reuse exact framing helpers; explicitly test TLS flush, partial writes,
   partial prefix/body, EOF, wrong ID, malformed/full-TC response and size limits.
-- [ ] Assert unchanged query/original ID, fresh connections per exchange,
+- [x] Assert unchanged query/original ID, fresh connections per exchange,
   concurrent isolation and typed TLS/send/receive/control error state.
-- [ ] Test owner close, caller cancellation, deadline and dropped/aborted future
+- [x] Test owner close, caller cancellation, deadline and dropped/aborted future
   during connect, handshake, frame write/flush/read and final commit; drain all.
 
 Allowed: secure TLS/DoT modules, tests/fixtures and minimal private helper changes.
 STOP for scoped review; no DoH implementation or connection reuse in this slice.
+
+### Slice1 execution and evidence record — 2026-09-16
+
+Implementation is complete and stops at the scoped review boundary. No DoH,
+HTTP, connection pooling/reuse, resolver/bootstrap, socket policy, listener,
+host composition, YAML/API/WebUI, or Go/cgo/selector/fallback work is included.
+
+Produced behavior and contracts:
+
+- `rust/upstream-core/src/secure/dot.rs`: `DotUpstream` (one fresh numeric
+  connection, authenticated handshake before any DNS byte, one framed
+  query/response exchange), `SecureResponse`, and `SecureTransport::Dot`.
+  Reuses the existing `tcp::{write_frame, read_frame, encode_frame}` framing and
+  the shared `tcp::race_control` control race; it adds only `tcp::flush_bytes`
+  for the TLS write-buffer flush that plain TCP does not need. No second framing
+  implementation and no duplicated TCP state machine.
+- `rust/upstream-core/src/secure/tls.rs`: per-exchange rustls client
+  configuration with an explicit `ring` provider and safe default protocol
+  versions; `server_name_for` derives the SNI/service name from the service
+  identity only; `classify_handshake_error` maps structured rustls outcomes to
+  typed reasons. The insecure mode skips chain/name/time checks but still runs
+  the provider's TLS1.2/1.3 handshake signature verification.
+- `rust/upstream-core/src/secure/error.rs`: `SecureError::{Tls, Transport}`,
+  `TlsHandshakeFailure`, `CertificateRejection`, and `TlsConfigError::Provider`.
+  A handshake failure is always `NotSent`; a transport cause keeps its own
+  tracked `SideEffectState`.
+- `rust/upstream-core/src/lib.rs` / `src/tcp.rs`: only visibility and generic
+  signature changes so the secure path shares the reviewed lifecycle gate,
+  final-commit linearization, and control race.
+
+Fixtures (`rust/upstream-core/tests/fixtures/`): synthetic EC P-256 roots A/B
+and four leaves generated with OpenSSL 3.6.4 into a throwaway directory outside
+the repository; only DER bytes were copied in. `mod.rs` records the exact
+generation commands, subjects, SANs, issuers, and validity windows. No real
+service certificate or private key is committed.
+
+RED/GREEN evidence (focused, macOS arm64, cargo/rustc 1.95.0):
+
+- `a_verified_policy_never_retries_after_a_rejection` and the four certificate
+  cases were proven to fail for the right reason by mutation A, which routed the
+  verified policy through the insecure verifier: `certificate_for_a_different_name`,
+  `expired_certificate`, `certificate_from_an_untrusted_issuer`, and
+  `a_verified_policy_never_retries_after_a_rejection` all FAILED, then passed
+  after restoring the source. `the_same_untrusted_certificate_verifies_under_its_own_root`
+  and `insecure_policy_...` stayed green, confirming the failures were caused by
+  verification and not by the fixture set.
+- Mutation C removed the response/request ID equality check:
+  `a_response_with_a_different_transaction_id_is_a_mismatch` FAILED, then
+  passed after restore.
+- Mutation D replaced the insecure verifier's delegated signature checks with an
+  unconditional success: `a_bad_handshake_signature_fails_even_under_the_insecure_policy`
+  FAILED, then passed after restore. This is the focused proof that the explicit
+  insecure mode skips only chain/name/time checks and still enforces the
+  provider's handshake signature verification. The paired test
+  `a_bad_handshake_signature_also_fails_under_the_verified_policy` asserts the
+  same typed `Certificate(BadSignature)` outcome under verified TLS; both
+  present the genuine trusted `dns.example` leaf with a foreign private key, so
+  the chain, name, and validity window all pass and only the handshake signature
+  is wrong.
+- Both mutations used a repo-local `mktemp target/slice1-*-backup.XXXXXX` copy
+  with a `trap`-guard that restored the source on every exit path; the temporary
+  copies were removed afterwards and `git diff --check` is clean.
+
+Verification commands and results in this environment:
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS (clean) |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 155 tests (slowest target `slice1_dot`: 27 passed) |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, all targets ok |
+| `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS (no warnings) |
+| `cargo build --manifest-path rust/Cargo.toml --workspace --release --locked` | PASS |
+| `python3 .trellis/scripts/task.py validate rust-phase4-secure-upstream-foundation` | PASS (4 + 4 entries) |
+| `git diff --check` | PASS (clean) |
+
+Toolchain limitation: the required `cargo +1.85.0 check` MSRV command could NOT
+run here because the 1.85.0 toolchain is not installed (`rustup toolchain list`
+shows only `stable-aarch64-apple-darwin` and `nightly-aarch64-apple-darwin`).
+Actual toolchain used was cargo/rustc 1.95.0. MSRV compatibility for this slice
+is therefore not re-proven by a 1.85 build; no new dependency or lockfile change
+was made in Slice1, so the Slice0 resolver-3 MSRV record still governs.
+
+Scope limitations: results are macOS arm64 loopback evidence only and are not
+Linux, production, throughput, or long-running deployment evidence. Covering
+stored (`root_count`) and `TlsPolicy` accessor behavior is unchanged Slice0
+contract. DoH, ALPN, HTTP, pooling, resolver, and host wiring remain Slice2+.
 
 ## Slice2 — bounded DoH over HTTP/1.1
 

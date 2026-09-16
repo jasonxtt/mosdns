@@ -655,7 +655,10 @@ impl Lifecycle {
     /// cancellation, or deadline can never reverse it. A failure reports the
     /// winner with the supplied `side_effect` state, because a transport that
     /// has already read and validated a reply has sent its query.
-    fn commit_final_response(
+    ///
+    /// Crate-private so the secure transports commit through this same
+    /// linearization point instead of adding a second one.
+    pub(crate) fn commit_final_response(
         &self,
         caller_cancellation: &TransportCancellation,
         deadline: Instant,
@@ -700,7 +703,10 @@ impl Lifecycle {
 
     /// Registers one in-flight exchange under the same lock that gates
     /// `Open -> Closing`. A rejected registration leaves the count untouched.
-    fn register(&self) -> Result<InFlightGuard<'_>, UpstreamError> {
+    ///
+    /// Crate-private so the secure transports register through the same
+    /// admission gate as the plain transports.
+    pub(crate) fn register(&self) -> Result<InFlightGuard<'_>, UpstreamError> {
         let mut inner = self.lock();
         if inner.state != LifecycleState::Open {
             return Err(UpstreamError::Closed(SideEffectState::NotSent));
@@ -722,7 +728,7 @@ impl Lifecycle {
     }
 
     #[must_use]
-    fn in_flight(&self) -> usize {
+    pub(crate) fn in_flight(&self) -> usize {
         self.lock().in_flight
     }
 
@@ -1090,6 +1096,16 @@ impl<'q> PreparedExchange<'q> {
     #[must_use]
     pub const fn context(&self) -> &ExchangeContext {
         self.control.context()
+    }
+
+    /// The prepared owner/caller/deadline control for this exchange.
+    ///
+    /// Crate-private so the secure transports can race the same absolute
+    /// deadline and control tokens as the plain UDP/TCP primitives without
+    /// duplicating the control vocabulary.
+    #[must_use]
+    pub(crate) const fn control(&self) -> &ExchangeControl {
+        &self.control
     }
 
     #[must_use]

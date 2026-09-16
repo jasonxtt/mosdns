@@ -27,9 +27,15 @@
 //! suites, or custom protocol versions. Later I/O slices must keep those off;
 //! enabling one needs a separate reviewed requirement.
 
-use rustls::RootCertStore;
+use std::sync::Arc;
 
-use super::error::{SecureError, TlsConfigError};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
+
+use super::endpoint::ServerIdentity;
+use super::error::{CertificateRejection, SecureError, TlsConfigError, TlsHandshakeFailure};
 
 /// A frozen TLS authentication policy.
 ///
@@ -99,5 +105,170 @@ impl TlsPolicy {
     #[must_use]
     pub fn root_count(&self) -> Option<usize> {
         self.roots().map(RootCertStore::len)
+    }
+
+    /// Builds the rustls client configuration for this policy.
+    ///
+    /// The configuration is built per exchange from the frozen policy, so a
+    /// verified policy always verifies against exactly the caller's anchors and
+    /// an insecure policy always uses the explicit no-verification verifier.
+    /// No constructor, setter, or error path can convert one into the other, so
+    /// an authentication failure can never downgrade to insecure verification.
+    ///
+    /// The `ring` provider is selected explicitly and the safe default protocol
+    /// versions are used, which keeps the provider's TLS1.2/TLS1.3 handshake
+    /// signature verification active. Client authentication, early data (0-RTT)
+    /// and session resumption are all disabled, matching the module contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SecureError::TlsConfig`] with [`TlsConfigError::Provider`] only
+    /// if the selected provider supports none of the safe default protocol
+    /// versions, which cannot happen for the reviewed `ring` feature set.
+    pub(crate) fn client_config(&self) -> Result<Arc<ClientConfig>, SecureError> {
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
+            .with_safe_default_protocol_versions()
+            .map_err(|_| SecureError::TlsConfig(TlsConfigError::Provider))?;
+
+        let mut config = match &self.mode {
+            TlsMode::Verified(roots) => builder
+                .with_root_certificates(roots.clone())
+                .with_no_client_auth(),
+            TlsMode::InsecureSkipVerify => builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(InsecureVerifier {
+                    algorithms: provider.signature_verification_algorithms,
+                }))
+                .with_no_client_auth(),
+        };
+
+        // No ALPN is advertised for DoT: RFC 7858 defines no ALPN protocol for
+        // DNS-over-TLS, and offering one could invite a peer to select a
+        // protocol this primitive does not speak.
+        config.alpn_protocols.clear();
+        // No 0-RTT early data and no session resumption in this foundation.
+        config.enable_early_data = false;
+        config.resumption = rustls::client::Resumption::disabled();
+        Ok(Arc::new(config))
+    }
+}
+
+/// The server name a handshake is authenticated against.
+///
+/// A DNS identity becomes a DNS `ServerName`, which is also what produces the
+/// SNI extension. An IP identity becomes an IP `ServerName`, which performs no
+/// SNI and validates the certificate's IP SANs instead. This is derived from
+/// the service identity and never from the numeric dial address.
+///
+/// # Errors
+///
+/// Returns [`SecureError::InvalidIdentity`] when the identity cannot be
+/// represented as a TLS server name.
+pub(crate) fn server_name_for(
+    identity: &ServerIdentity,
+) -> Result<ServerName<'static>, SecureError> {
+    match identity.dns_name() {
+        Some(name) => ServerName::try_from(name)
+            .map(|name| name.to_owned())
+            .map_err(|_| SecureError::InvalidIdentity(super::error::IdentityError::Malformed)),
+        None => identity
+            .ip()
+            .map(ServerName::from)
+            .ok_or(SecureError::InvalidIdentity(
+                super::error::IdentityError::Malformed,
+            )),
+    }
+}
+
+/// The explicit opt-in verifier used by [`TlsPolicy::insecure_skip_verify`].
+///
+/// It skips exactly the chain, service-name and validity-window checks. It
+/// deliberately does **not** skip the handshake signature checks: those are
+/// delegated to the selected provider's webpki helpers, so the peer must still
+/// prove possession of the private key for the certificate it presented. This
+/// mirrors the existing `insecure_skip_verify` configuration intent while
+/// keeping the cryptographic handshake proofs enforced.
+#[derive(Debug)]
+struct InsecureVerifier {
+    algorithms: WebPkiSupportedAlgorithms,
+}
+
+impl ServerCertVerifier for InsecureVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls12_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls13_signature(message, cert, dss, &self.algorithms)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.algorithms.supported_schemes()
+    }
+}
+
+/// Classifies a rustls handshake error into the typed secure-failure vocabulary.
+///
+/// Only structured library outcomes are inspected; the returned value never
+/// carries the peer's certificate, key material, or a raw error string.
+pub(crate) fn classify_handshake_error(error: &rustls::Error) -> TlsHandshakeFailure {
+    use rustls::Error as Tls;
+
+    match error {
+        Tls::InvalidCertificate(reason) => {
+            TlsHandshakeFailure::Certificate(classify_certificate_error(reason))
+        }
+        Tls::InvalidMessage(_) => TlsHandshakeFailure::Protocol,
+        Tls::AlertReceived(_) => TlsHandshakeFailure::Alert,
+        Tls::NoCertificatesPresented
+        | Tls::UnsupportedNameType
+        | Tls::InappropriateMessage { .. }
+        | Tls::InappropriateHandshakeMessage { .. }
+        | Tls::PeerIncompatible(_)
+        | Tls::PeerMisbehaved(_)
+        | Tls::InvalidEncryptedClientHello(_) => TlsHandshakeFailure::Protocol,
+        _ => TlsHandshakeFailure::Other,
+    }
+}
+
+/// Classifies a certificate-verification outcome without echoing certificate
+/// data.
+fn classify_certificate_error(error: &rustls::CertificateError) -> CertificateRejection {
+    use rustls::CertificateError as Certificate;
+
+    match error {
+        Certificate::Expired | Certificate::ExpiredContext { .. } => CertificateRejection::Expired,
+        Certificate::NotValidYet | Certificate::NotValidYetContext { .. } => {
+            CertificateRejection::NotValidYet
+        }
+        Certificate::NotValidForName | Certificate::NotValidForNameContext { .. } => {
+            CertificateRejection::NotValidForName
+        }
+        Certificate::UnknownIssuer => CertificateRejection::UnknownIssuer,
+        Certificate::BadSignature => CertificateRejection::BadSignature,
+        Certificate::BadEncoding => CertificateRejection::BadEncoding,
+        _ => CertificateRejection::Other,
     }
 }

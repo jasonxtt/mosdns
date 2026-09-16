@@ -239,3 +239,35 @@ focused secure tests and 125 upstream-core tests passing, with fmt, clippy,
 workspace check, and diff check passing. The corrected commit is sent back to
 the same `rust0916` conversation for another formal review; Slice1 remains
 unauthorized.
+
+## Slice1 synthetic certificate fixture record — 2026-09-16
+
+All Slice1 certificate material is synthetic and generated into a throwaway
+directory outside the repository; only DER bytes were copied into
+`rust/upstream-core/tests/fixtures/`. No real service certificate or private key
+is committed, and the fixture module records the exact commands and windows.
+
+- Generator: OpenSSL 3.6.4 (Homebrew, `/opt/homebrew/bin/openssl`). The
+  system-default `openssl` on this host is LibreSSL 3.3.6, whose `req`/`x509`
+  do not accept `-not_before`/`-not_after`; the Homebrew 3.6.4 binary was used
+  specifically so the expired fixture could be backdated deterministically
+  instead of relying on the wall clock.
+- Keys: EC P-256 (`prime256v1`) for both roots and all leaves. Certificates are
+  SHA-256. Leaves carry `basicConstraints=critical,CA:FALSE`,
+  `keyUsage=critical,digitalSignature`, `extendedKeyUsage=serverAuth`, and one
+  `subjectAltName=DNS:<name>`.
+- Roots: `mosdns-slice1-synthetic-root-a` (trusted in tests) and
+  `mosdns-slice1-synthetic-root-b` (deliberately never trusted), both
+  self-signed with `CA:TRUE`, valid 2024-01-01 to 2036-01-01 UTC.
+- Leaves: `dns.example` under A (valid), `other.example` under A (name
+  mismatch), `dns.example` under A valid 2020-01-01 to 2021-01-01 (expired),
+  and `dns.example` under B (unknown issuer). The expired leaf is expired
+  relative to any realistic run, so the expiry case needs no clock control; the
+  mismatch and unknown-issuer cases are time-independent.
+- `root_store_a()`/`root_store_b()` build single-anchor stores so the
+  unknown-issuer case is really about the anchor set. A positive control asserts
+  the same untrusted leaf verifies once its real issuer is supplied, which rules
+  out an unparseable fixture.
+
+No Cargo dependency was added for fixture generation; the certificates are
+checked-in constants, matching the Slice0 approach.
