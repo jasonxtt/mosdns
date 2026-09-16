@@ -285,3 +285,92 @@ The user subsequently authorized activation, bounded Slice0 implementation,
 commit/push, and formal review through `rust0916`. This supersedes the original
 planning-only boundary for Slice0. Slice1+ implementation, production wiring,
 deployment, and automatic progression after review remain unauthorized.
+
+### Slice1 root-review remediation — 2026-09-16
+
+The first formal review of remote `d781a5e` returned `BLOCKED / FAIL — Slice1
+remains OPEN` with P0=0 and three P1 findings. Only those three were addressed;
+no later slice, production wiring, or scope widening is included.
+
+**P1-1 (implementation blocker) — post-commit `Open` assertion removed.**
+`exchange_inner` asserted `debug_assert_eq!(prepared.lifecycle.state(),
+LifecycleState::Open)` after `commit_final_response` returned `Ok`. A commit
+that wins the lifecycle mutex may legally be followed immediately by another
+thread's `begin_close()`, which moves the owner to `Closing`; the assertion then
+panicked and violated "commit wins first, a later close cannot reverse the
+committed response". The assertion is deleted and replaced by a comment stating
+why nothing may be asserted about owner state after the commit. TLS/DoT I/O
+structure is unchanged.
+Deterministic regression: `owner_close_immediately_after_a_winning_commit_still_returns_the_response`
+parks the exchange on a new `DotPhase::AfterCommit` seam, calls `begin_close()`
+in that window, and asserts the committed response is still returned intact, the
+registration is released, `close().await` reaches `Closed`, and nothing panics.
+RED evidence: re-adding the assertion makes that test fail with exactly the
+review's symptom (`left: Closing, right: Open`).
+
+**P1-2 (test/contract blocker) — deterministic phase coverage, no sleeps.**
+Added a per-exchange `DotPhase` seam (`BeforeConnect`, `BeforeHandshake`,
+`BeforeWrite`, `BeforeFlush`, `BeforeRead`, `BeforeCommit`, `AfterCommit`)
+modelled on the existing `CommitPause`: the exchange parks on the watched phase
+and the test releases it explicitly, so every case is a deterministic gate
+rather than a timing guess. New in-crate tests cover connect (cancellation and
+owner close, asserting no dial happened), handshake (cancellation, `NotSent`),
+write and flush (`MaybeSent`), read (`Sent`), the pre-commit gate
+(`Closed(Sent)`), the post-commit gate, aborted-future registration release at
+every phase, one shared absolute deadline terminating each phase, no plaintext
+query before the handshake (first-byte TLS-record assertion), and handshake
+authentication against the service identity rather than the dial address.
+The two `tokio::time::sleep(150ms)` ordering tests were replaced by a listener
+that signals the accepted TCP connection through a `oneshot` the test awaits, so
+the connect-then-control ordering is proven by the signal and no sleep
+establishes ordering. `git grep sleep` over the Slice1 tests now matches only
+comments explaining their absence. Server scripts that previously held a
+connection open forever now return on client EOF, so no test can hang on
+`join()`. RED evidence: removing the `BeforeFlush` phase marker makes the
+flush-phase test fail deterministically at `Elapsed`, proving the gate really
+observes the phase.
+The one Phase 4 Slice1 `#[test]` hook is in `< 10s` for every case and no test
+depends on wall-clock ordering. Scope note: the phase seam is `cfg(test)` only
+in its active form; in a non-test build the seam is absent and every phase
+marker is a no-op, so the production exchange path is unchanged.
+
+**P1-3 (data-constraint blocker) — no private key material in the repository.**
+All committed DER constants, including the PKCS#8 private keys (`KEY_GOOD_A`,
+`KEY_WRONG_NAME_A`, `KEY_EXPIRED_A`, `KEY_UNKNOWN_ISSUER_B`) and the certificate
+constants, were removed. `tests/fixtures/mod.rs` now generates every root, leaf,
+and key in memory at test runtime with the test-only `rcgen` dev-dependency, and
+`tests/slice1_dot.rs` generates its own identity per test. Coverage is
+unchanged: valid, wrong-name, expired, unknown-issuer, untrusted-root positive
+control, and bad handshake signature are all still exercised; provenance is
+recorded in the module documentation and in
+`research/secure-upstream-evidence.md` instead of as committed bytes.
+Dependency record (test-only): `rcgen = { version = "=0.14.7",
+default-features = false, features = ["ring"] }`, `MIT OR Apache-2.0`, MSRV
+1.71, with `time`/`time-core`/`time-macros` held at 0.3.45/0.1.7/0.2.25
+(MSRV 1.83.0) by resolver 3 so no resolved package exceeds the workspace MSRV of
+1.85. `cargo tree -e normal` for the crate contains no `rcgen`; it appears only
+under `--edges dev`. No aws-lc-rs, OpenSSL, network, or external `openssl`
+dependency is involved. `rust/Cargo.lock` was updated for this test-only graph.
+Residue proof: `git ls-files rust/upstream-core/tests/fixtures/` lists only
+`mod.rs`; no `.der`/`.pem`/`.key`/`.crt` file is tracked anywhere; and a
+`git grep` for private-key constants finds only prose in documentation comments.
+
+Verification after remediation (macOS Darwin 25.5.0 arm64):
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice1_dot --locked` | PASS, 27 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 168 tests (incl. 43 lib tests) |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, 22 targets ok |
+| `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS, no warnings |
+| `python3 .trellis/scripts/task.py validate rust-phase4-secure-upstream-foundation` | PASS |
+| `git diff --check` | PASS |
+
+Toolchain limitation (unchanged): `cargo +1.85.0 check` still cannot run because
+Rust 1.85.0 is not installed (`rustup toolchain list` shows only
+`stable-aarch64-apple-darwin` and `nightly-aarch64-apple-darwin`). Actual
+toolchain is cargo/rustc 1.95.0; MSRV compatibility for the new test-only
+dependency is evidenced by resolver-3 selection plus a `cargo metadata` audit
+showing no resolved package declares `rust-version` above 1.85, not by a 1.85
+build.
