@@ -54,17 +54,16 @@ used as an intermediate production runtime.
 | `08-13-rust-matcher-phase2-expansion` | **archived/completed** (`2026-08-14`) | Slices 0–5 are implemented, reviewed, and verified. Linux+cgo provider/mapper normal and race gates, fixed-fixture benchmarks, the full embedded-UI experimental binary, and isolated reload/fallback/restart smoke passed on `mos-test`. | Preserve the existing opt-in/fallback scaffolding without expanding it. Its pure matcher core and product-contract evidence remain useful; the Go/Rust bridge is scheduled for retirement only after the Rust-native host is complete. |
 | `08-15-rust-phase3-query-execution-core` | **archived/completed** (`2026-08-17`) | Phase 3A query/wire foundation complete: Slices 0–4 root-reviewed, including Rust dns/query core, query ABI, Go opt-in adapter/fallback, Linux+cgo real-staticlib normal/race, and final wire/parity remediation. Overall Phase 3 remains incomplete because sequence control flow, matcher dispatch, no-network executable ownership, and query execution ownership are still Go-owned. | The next task is Phase 3B sequence/execution ownership. Reuse the pure Rust dns/query types, but do not extend the query ABI/Go fallback pattern into sequence-core. Keep the existing adapter untouched until the later retirement gate. |
 | `08-17-rust-phase3b-sequence-execution-foundation` | **archived/completed** (`2026-08-18`) | Pure `rust/sequence-core` foundation complete: typed owned execution state, validated program model, explicit continuation stack, product-contract/deviation classification, fuel/cancellation, and no Go adapter/ABI/selector. Implementation commit `0c53c7d`; archive commit `a18fd89`. | Preserve the reviewed sequence contract. Do not reopen Phase3B while planning or implementing Phase4. |
-| `08-17-rust-phase4-upstream-foundation` | **planning — root review FAIL** (`2026-09-16`) | Phase3B prerequisite is satisfied. After commit `8afab008`, the root reviewer returned a narrow planning-consistency FAIL: PRD sibling dependency graph, response-association wording, dns-core/TCP framing ownership, side-effect taxonomy, and transport-ledger manifests need synchronization. Phase4 remains planning-only with no new C ABI, Go ownership, selector, or fallback. | Apply only the narrow consistency fixes, keep `status = planning`, push the next planning commit, and request another root review. Do not run `task.py start` before explicit PASS. |
+| `08-17-rust-phase4-upstream-foundation` | **planning — root review PASS** (`2026-09-16`, `16192ea`) | Phase3B prerequisite and the Phase4 planning package are root-reviewed. Phase4 implementation has not started; the task remains planning-only with no new C ABI, Go ownership, selector, or fallback. | The user decides whether to run `task.py start`; if requested, implement only Slice0, then stop for another root review. Do not start Slice1 or later work automatically. |
 
-Active migration state is **Phase 4 narrow planning-consistency remediation** on
-branch `rust`: Phase3B is archived/completed, while the Phase4 upstream task
-is still planning and has not started implementation. The remaining root-review
-items are limited to the PRD sibling dependency graph, response-association
-acceptance wording, precise dns-core versus TCP stream-framing ownership,
-closed three-state side-effect semantics, and injection of the Phase4 transport
-ledger into both JSONL manifests. It must not add a transport C ABI, Go
-pool-buffer ownership, selector, or fallback. The existing `main` release
-remains Go-only and this incomplete `rust` branch is not a production target.
+Active migration state is **Phase 4 planning gate PASS; awaiting user decision**
+on branch `rust`: Phase3B is archived/completed, the Phase4 planning package
+passed root review at `16192ea`, and implementation has not started. If the
+user requests the authorized next step, the local agent may run `task.py start`
+and implement only Slice0, then must stop for another root review. It must not
+start Slice1 or later work, add a transport C ABI, Go pool-buffer ownership,
+selector, or fallback. The existing `main` release remains Go-only and this
+incomplete `rust` branch is not a production target.
 The matcher tasks (`08-13-rust-matcher-foundation`,
 `08-13-rust-matcher-phase2-expansion`) are archived/completed and are no
 longer active work; their historical records are unchanged.
