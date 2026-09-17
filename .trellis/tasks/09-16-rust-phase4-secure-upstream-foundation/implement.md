@@ -1,11 +1,18 @@
-# Secure upstream implementation plan — Slice0 active
+# Secure upstream implementation plan — Slice2 active
 
-2026-09-16: implementation is now authorized and Slice0 is active for the
-bounded dependency/MSRV and Hyper API-inspection scope only. This supersedes
-the earlier planning-only boundary for Slice0; it does not authorize Slice1+,
-CI mutation or deployment, and each later slice still needs its own review and
-explicit go-ahead. Slice0's technical checklist is now complete; its scoped
-external/root review is still pending and no PASS is claimed by this document.
+Historical record, 2026-09-16: implementation was first authorized for the
+bounded Slice0 dependency/MSRV and Hyper API-inspection scope only. That
+authorization superseded the earlier planning-only boundary for Slice0; it did
+not authorize Slice1+, CI mutation or deployment, and each later slice still
+needed its own review and explicit go-ahead. Slice0's technical checklist was
+then completed under its separate review boundary.
+
+2026-09-17: Slice1 was explicitly accepted by `rust0916` at
+`25c7c961453e15d7347d65bbc401026f813ff27c` (`PASS / Slice1 CLOSED`). The user
+then explicitly authorized Slice2. Slice2 is now the active bounded scope;
+Slice3+, production wiring, deployment, and automatic progression remain
+unauthorized. The executor routing and prompt-approval contract is recorded in
+`.trellis/spec/backend/quality-guidelines.md`.
 
 ## Planning package review checklist
 
@@ -24,10 +31,12 @@ external/root review is still pending and no PASS is claimed by this document.
   Evidence: the 2026-09-16 user request explicitly authorizes implementation
   according to this plan and the bounded review loop through `rust0916`.
 
-`codex.dispatch_mode=inline` remains the task setting; the user explicitly
-selected MCP DSH as the bounded executor and `rust0916` as the review
-destination for this implementation turn. Follow the quality spec and do not
-invent another review thread or send work to a different destination.
+The task's historical `codex.dispatch_mode=inline` setting does not override
+the current user-selected Herdr topology: when the quality-spec detection
+contract is satisfied, the adjacent Claude Code pane is the bounded executor
+and this Codex session remains controller. `rust0916` remains the review
+destination. Do not invent another review thread or send work to a different
+destination.
 
 ## Slice0 — contracts, dependency and lifecycle preflight
 

@@ -230,3 +230,129 @@ push, start a later slice, or change the project's review destination.
 - Bad: a single monolithic DSH job for all Phase4 slices, a synchronous MCP
   call held for many minutes, applying a patch without reading it, or letting
   DSH continue from Slice1 into Slice2 without a new user authorization.
+
+## Herdr-hosted Codex and Claude execution
+
+### 1. Scope / Trigger
+
+Use this routing contract when the current coding session is running through
+Herdr and the user has selected the adjacent Claude Code pane as executor.
+It prevents an ordinary local Codex session, an unrelated Claude pane, or an
+ambiguous terminal from being mistaken for the authorized execution topology.
+
+### 2. Detectable roles and routing contract
+
+At session start, inspect the Herdr inventory and detection evidence:
+
+```text
+herdr agent list
+herdr agent explain <current-pane>
+herdr agent explain <executor-pane>
+```
+
+Herdr mode is active only when all of these are true:
+
+- the current/focused pane is detected as `agent: codex`;
+- a pane in the same Herdr workspace is detected as `agent: claude`;
+- both panes have the repository as their working directory; and
+- the Claude pane is the user-selected adjacent/right executor pane.
+
+`herdr agent explain` is the authoritative detection evidence. A matching
+terminal title or the mere presence of the `herdr` executable is not enough.
+If any condition is missing or ambiguous, do not auto-route work or approve a
+prompt; ask the user to confirm the executor topology.
+
+When the contract is active:
+
+- Codex remains the dispatcher/controller: it owns scope, worktree safety,
+  exact diff inspection, validation, commit/push verification, and the root
+  review loop.
+- Claude Code in the selected right pane is the implementation executor. It
+  may edit only the authorized slice and must stop at that slice boundary.
+- The fixed `rust0916` ChatGPT conversation remains the reviewer/root gate.
+- Claude reports back through Herdr, and every report starts with `我是Claude`;
+  it includes changed paths, validation, exact commit/push state, and a review
+  request. A report without that marker is not treated as Claude's handoff.
+
+### 3. Prompt approval contract
+
+The Codex controller may automatically approve a visible Claude confirmation
+only after reading the exact command or action. Safe approval includes:
+
+- repository-local reads, searches, status/log/show/diff and metadata checks;
+- repository-local format, build, test, clippy, task validation and other
+  explicitly requested checks;
+- creating or removing unique temporary files under a task-scoped temporary
+  directory, with cleanup scoped to those exact paths; and
+- the authorized exact-path commit and push to the requested branch.
+
+The controller must reject or redirect a prompt when it contains any of the
+following:
+
+- broad or unresolved deletion, overwrite, or recursive cleanup;
+- `git reset`, rebase, force-push, branch switching, or history rewriting;
+- `git add -A` or staging unrelated dirty files;
+- secrets, credentials, private keys, or access outside the repository;
+- writes of marker/temp files at the repository root or other fixed paths that
+  can collide with user files; or
+- a command whose scope cannot be determined from the visible prompt.
+
+For a rejected fixed-path temporary write, redirect Claude to an explicit
+`mktemp -d` directory or a unique task-scoped path and a narrowly scoped
+cleanup trap. Never approve first and inspect the resulting damage later.
+
+The normal monitoring loop is:
+
+```text
+herdr agent wait <claude-pane> --until blocked --timeout 60000
+herdr agent read <claude-pane> --source visible --lines 20
+herdr agent send-keys <claude-pane> enter       # safe, reviewed prompt
+herdr agent send-keys <claude-pane> 2 enter     # reject/choose safe alternative
+```
+
+Use bounded waits rather than busy polling. An idle/finished Claude pane is a
+handoff state, not permission to start the next slice; the reviewer must still
+return an explicit PASS and the user must authorize the next slice.
+
+### 4. Validation and error matrix
+
+| Condition | Required action |
+|---|---|
+| Codex + same-workspace right Claude detected | Route the authorized slice to Claude and monitor Herdr |
+| Detection missing or panes/cwds disagree | Stop routing and ask the user |
+| Visible command is read/build/test/fmt/clippy/validate or exact scoped Git action | Inspect it, then approve if scope is exact |
+| Fixed-path write, broad delete, reset/rebase/force-push, secret access, or unknown command | Reject and request a bounded safe alternative |
+| Claude reports without `我是Claude` or omits commit/evidence | Treat as incomplete handoff and request a corrected report |
+| Reviewer active/pending or no explicit PASS | Wait; do not modify or begin another slice |
+| Reviewer explicit scoped FAIL | Apply only the requested remediation, then repeat review |
+
+### 5. Good / Base / Bad cases
+
+- Good: `agent explain` confirms Codex `w6:p1` and Claude `w6:p2` in the
+  same repository; a visible `cargo test --locked` prompt is inspected and
+  approved; a root-level marker write is rejected and replaced with a unique
+  temporary path.
+- Base: Claude is idle after pushing a scoped commit; Codex reads the pane,
+  independently verifies the commit, sends it to `rust0916`, and waits.
+- Bad: approve every Claude prompt because it is in a trusted pane, accept a
+  report without `我是Claude`, stage `.DS_Store` files, or start Slice2 merely
+  because Slice1 passed.
+
+### 6. Tests and evidence required
+
+- Record the Herdr detection evidence (`agent list`/`agent explain`) when this
+  routing is activated.
+- Before review, inspect `git status`, exact changed paths, complete diff,
+  `git diff --check`, focused/full required checks, branch and pushed commit.
+- Preserve unrelated dirty files and never claim a reviewer PASS from local
+  green output, an idle pane, or a successful push alone.
+
+### 7. Wrong vs Correct
+
+Wrong: see the `herdr` command, assume the right pane is Claude, press Enter
+on every confirmation, and let the executor continue into the next slice.
+
+Correct: verify both pane identities and matching cwd, inspect each visible
+command, approve only the bounded safe set, reject unsafe writes/history
+operations, require the `我是Claude` handoff, and stop at the explicit review
+and user-authorization boundary.
