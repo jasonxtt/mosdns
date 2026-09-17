@@ -564,10 +564,14 @@ claim.
   `c84d268c66b20ea6e339b4379674ccfb262211bf` succeeded; see "Linux Actions
   evidence" below. Still a library/loopback gate, not host E2E or deployment
   proof.
-- [ ] Final root acceptance, then STOP. Archive only after a later wrap-up
+- [x] Final root acceptance, then STOP. Archive only after a later wrap-up
   instruction; no implied next protocol/task activation.
-  NOT done: the Linux evidence above is complete, but the final root acceptance
-  from `rust0916` has not been returned. Awaiting that explicit review result.
+  DONE: reviewer `rust0916` returned explicit **PASS / Slice4 CLOSED** with P0=0
+  and P1=0 against the reviewed HEAD
+  `cb89974da4b5c3a85b115f9e8e9bf00d500e76e1`, following the quality-gate commit
+  `c84d268c66b20ea6e339b4379674ccfb262211bf`. See "Final root acceptance" below.
+  No later slice was started, and archiving remains a separate, unauthorized
+  step.
 
 Expected checks after implementation is separately authorized:
 
@@ -708,10 +712,14 @@ AC coverage re-inspection (PRD AC1–AC8):
   deployment or metrics-schema change; the only non-Rust edits are this task's
   evidence documents and the two CI flags. Covered by the scope check below.
 
-Scope check: `git status` shows only `.github/workflows/test.yml`, this task's
-`task.json` and `implement.md`, and `docs/ai/rust-handover.md`. No Rust runtime,
-Go, config, API/UI, dependency or later-scope file changed. The three untracked
-`.DS_Store` files are local tool state and are excluded from any commit.
+Scope check: `git status` for this documentation/CI change shows only
+`.github/workflows/test.yml`, this task's `task.json`, `implement.md` and
+`research/secure-upstream-evidence.md`, and `docs/ai/rust-handover.md`. The
+evidence file was touched only to mark its top section as planning-time baseline
+text that later records supersede; no evidence content, anchor or ledger was
+altered. No Rust runtime, Go, config, API/UI, dependency or later-scope file
+changed. The three untracked `.DS_Store` files are local tool state and are
+excluded from any commit.
 
 Explicit limitations of this record:
 
@@ -749,13 +757,38 @@ on Linux, and that the Go default gates pass. It does **not** claim native host
 end-to-end behavior, production throughput, deployment, or any host/production
 wiring, and it does not exercise the `workflow_dispatch`-only experimental path.
 
-Remaining: final root acceptance
+### Final root acceptance — 2026-09-17
 
-Both halves of the Slice4 gate (macOS local and Linux Actions) are now complete
-for `c84d268c66b20ea6e339b4379674ccfb262211bf`. The only outstanding item is the
-final root acceptance result from `rust0916`. Until that explicit `PASS` is
-returned, Slice4 is not closed, the task stays `in_progress`, and no later slice
-or production step is authorized.
+Reviewer `rust0916` returned an explicit **PASS / Slice4 CLOSED** with **P0=0**
+and **P1=0**.
+
+- Reviewed HEAD: `cb89974da4b5c3a85b115f9e8e9bf00d500e76e1`
+- Prior quality-gate commit: `c84d268c66b20ea6e339b4379674ccfb262211bf`
+- Actions run: `35181231182` —
+  <https://github.com/jasonxtt/mosdns/actions/runs/35181231182>
+
+Slices 0-4 are therefore root-reviewed and closed. Concretely: Slice1 `PASS` at
+`25c7c961453e15d7347d65bbc401026f813ff27c`; Slice3 `PASS / CLOSED` at
+`d3566bf105008e23c315536d6560b00d55250e55`; Slice4 `PASS / CLOSED` at the
+reviewed HEAD above.
+
+Two non-blocking notes recorded from the reviewer, neither of which is a defect
+in the delivered work:
+
+- Rust 1.85 was **not actually installed or run** on this host at any point in
+  Slices 0-4. MSRV remains evidenced indirectly, by resolver-3 selection plus a
+  `cargo metadata --locked` audit showing no resolved package above 1.85, and by
+  the Linux CI build on stable. No command in this task ever claimed a real
+  1.85 build.
+- `.trellis/tasks/09-16-rust-phase4-secure-upstream-foundation/research/secure-upstream-evidence.md`
+  is **evidence-only**. It documents source anchors, dependency rationale and
+  corrections; it is not normative for behavior, and `implement.md` plus the
+  reviewed code are authoritative.
+
+Boundary after closure: the task remains `in_progress`. Closing a slice is not
+the same as finishing a task — wrap-up and archiving are a **separate** step
+that still requires explicit user authorization. No later slice, production
+wiring, deployment or archive is authorized by this PASS.
 
 ## Slice handoff and rollback
 
