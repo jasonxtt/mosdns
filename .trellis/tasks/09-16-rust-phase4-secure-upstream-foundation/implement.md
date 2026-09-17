@@ -309,6 +309,79 @@ pooling/reuse, proxies, redirect handling, HTTP cache/TTL adjustment, h3, and
 host wiring. Results are macOS loopback evidence only, not production,
 throughput, or long-running deployment evidence.
 
+### Slice2 root-review remediation — 2026-09-17
+
+The root review of `3702998` returned `BLOCKED / FAIL` with P0=0 and three P1
+findings. Only those three were addressed; no later slice, production wiring,
+or scope widening is included.
+
+**P1-1 — side-effect semantics.**
+`SecureError::DohProtocol` previously reported `Sent` for every variant and for
+the whole error, which was wrong in two places:
+
+* `UnexpectedAlpn` is decided during the TLS handshake, before any HTTP request
+  exists, so it is now `NotSent`.
+* A connection that ended before any response head was observed was mapped to
+  `IncompleteBody`, i.e. `Sent`. Whether the request reached the peer is
+  unknowable at that point, so it now has its own variant,
+  `DohProtocolError::ResponseHeadNotReceived`, classified `MaybeSent`.
+
+Classification is now per-variant via `DohProtocolError::side_effect`, and every
+defect that can only be observed after a complete head (status, media type,
+encoding, head size, body size, incomplete body) remains `Sent`. The
+deterministic matrix grew from five to six pre-result phases — adding
+`AfterRequestSent`, the window where the request is with the driver but no head
+exists — so it is now 6 x 4 = 24 cells, each asserting the layering, the
+registration drain and at most one request.
+
+**P1-2 — response preservation.**
+The exchange used `dns_core::patch_response_id_ra`, which is the frozen
+server-response oracle and also sets RA. A DoH client must return the upstream's
+response with only the transaction ID rewritten, so it now uses a local
+`restore_request_id` that rewrites bytes 0-1 and preserves every other byte.
+Tests assert a real HTTP/1.1 response with RA clear stays RA clear, that
+`wire[2..]` matches the upstream byte for byte, that an RA-set control stays set,
+and that the reported metadata agrees with the returned wire.
+
+**P1-3 — response bounds.**
+Header bounding was a count (`max_headers(64)`) plus a transport buffer size,
+not the 16 KiB byte bound the design requires. `response_head_bytes` now measures
+the parsed head's byte size (status line plus every header line plus the
+terminating blank line) and rejects anything above 16 KiB, so a small number of
+very large headers can no longer exceed the contract. A declared
+`Content-Length` above 65535 is rejected at the head stage before any body byte
+is read, while the incremental body bound is retained. Tests cover a head one
+byte under the bound (accepted) and well over it (rejected), and a genuinely
+valid 65535-byte DNS response (accepted) against 65536 (rejected); the 65535-byte
+fixture is a real dns-core-valid response built to an exact length rather than
+filler.
+
+RED evidence (each mutation applied with a repo-local `mktemp target/*` copy and
+a `trap` restore; no backup remains):
+
+| Mutation | Result |
+| --- | --- |
+| Re-add the RA forcing | `a_ra_clear_response_keeps_ra_clear_and_only_rewrites_the_id` FAILED |
+| Restore `IncompleteBody` for an absent head | `an_absent_response_head_is_never_reported_as_sent` FAILED |
+| Force `UnexpectedAlpn` to `Sent` | `the_side_effect_classification_of_each_doh_defect_is_explicit` FAILED |
+| Remove the head byte bound | `a_response_head_over_the_byte_bound_is_rejected` FAILED |
+| Remove the head-stage `Content-Length` check | `a_declared_content_length_over_the_dns_maximum_fails_at_the_head` FAILED (`IncompleteBody` instead of `BodyTooLarge`) |
+
+Verification after remediation (macOS Darwin 25.5.0 arm64; cargo/rustc 1.95.0):
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice2_doh --locked` | PASS, 36 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 212 tests |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, 23 targets |
+| `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS, no warnings |
+| `python3 .trellis/scripts/task.py validate rust-phase4-secure-upstream-foundation` | PASS |
+| `git diff --check` | PASS |
+
+The toolchain limitation is unchanged: `cargo +1.85.0 check` cannot run because
+Rust 1.85.0 is not installed. This remediation adds no dependency.
+
 ## Slice3 — HTTP/2 and complete structured shutdown
 
 - [ ] Implement only reviewed ALPN dispatch and scoped HTTP2 executor/driver.
