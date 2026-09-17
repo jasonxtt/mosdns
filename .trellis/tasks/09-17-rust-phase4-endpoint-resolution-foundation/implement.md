@@ -736,3 +736,141 @@ Narrow scope only; no mutation sweep was run in this round.
 - Rust 1.85 is still not installed and was not run; MSRV evidence remains
   indirect. No Linux evidence: this round ran on macOS only, so the task's Linux
   loopback gate remains outstanding before closure.
+
+## Final gate remediation (2026-09-17)
+
+The reviewer's final full-task gate returned FAIL with P0=0, P1=3 against
+`5a184e8`. All three were addressed. Commits `c8c1a96` and `99a7418` (the
+second is a direct consequence of the Linux 1.85 evidence in P1-3).
+
+### P1-1 — admission must decide leadership and read the token in one observation
+
+`resolve()` called `SingleFlight::try_lead()` and then, after releasing the lock,
+called `current_generation()` for the token. Interleaving: generation 1 running →
+waiter sees `try_lead() == None` → generation 1 completes → another caller starts
+generation 2 and clears the old result → the waiter's `current_generation()`
+returns **generation 2's** token, so it waits on a generation it never observed.
+
+Fix: `SingleFlight::admit()` returns `Leader(token)` / `Waiter(token)` /
+`Result(outcome)` from **one** lock acquisition, so a token always names the
+generation the caller actually saw. `try_lead()` and `current_generation()` are
+gone.
+
+The reviewer also asked that both paths recheck the fresh publication so a
+just-completed success is not re-queried. The leader path re-reads
+`serve_fresh()` after admission and, if a value is fresh, completes its own
+generation with that value and returns — so a success landing in the window
+between the initial freshness read and admission is served, not re-queried, and
+concurrent waiters receive it too. The `Result` arm serves an unclaimed
+success without re-querying, but **only while it is genuinely fresh**: an
+expired value is never returned as success, and a failed generation's result is
+not returned, so a later caller can retry. That arm loops; the loop is bounded
+because `admit` consumes the result slot, so the next iteration yields `Leader`
+or `Waiter`.
+
+Naming the residual honestly: a leader already admitted still runs, so two
+leaders from *distinct* generations can overlap. Collapsing that (e.g. re-reading
+`serve_fresh` after the response arrives, and comparing TTLs) is a cache-policy
+decision about which of two fresh values wins, which this foundation deliberately
+does not make. Test coverage pins the two interleavings the reviewer named:
+`admission_binds_a_waiter_to_the_generation_it_observed` and
+`admission_serves_an_unclaimed_result_instead_of_requerying`.
+
+### P1-2 — the bootstrap peer's transport family is independent of the answer family
+
+`with_id_source()` returned `BootstrapFamilyMismatch` when the target's and
+bootstrap peer's families differed, wrongly tying the **A/AAAA answer type** to
+the **bootstrap server's UDP address family**. Per PRD/design, `bootstrap` is its
+own numeric UDP endpoint and `bootstrap_version` only selects A vs AAAA; an IPv4
+bootstrap may answer AAAA and an IPv6 bootstrap may answer A. The equality
+invariant is removed. The exchange already binds and connects in the peer's own
+family (`match peer { V4 => ... V6 => ... }`) and takes the target's answer family
+separately, so nothing else changed. Numeric endpoint / hostname / port
+validation is unchanged, and `BootstrapFamilyMismatch` is retained for API
+stability but is never returned.
+
+Tests: `an_ipv4_bootstrap_answers_an_aaaa_query` reads the **wire bytes** the
+fixture received and asserts `qtype == 28`, proving an AAAA question went out
+over an IPv4 transport peer and that the AAAA answer was selected;
+`a_numeric_target_accepts_a_different_family_bootstrap` proves a numeric IPv6
+target with an IPv4 bootstrap succeeds and sends no DNS;
+`bootstrap_and_target_families_are_independent` covers both directions.
+
+### P1-3 — required Linux loopback evidence (obtained)
+
+Environment survey: `mos-test` (10.0.0.91, the designated isolated test host) is
+**unreachable** (`connect to host 10.0.0.91 port 22: Operation timed out`). No
+Docker daemon was running, but `colima` had a configured VM, so an isolated
+Ubuntu 24.04 x86_64 container runtime was started (`colima start`). No production
+host, service, port 53, or system configuration was touched.
+
+The availability of `rust:1.85-slim` also closed the previously outstanding MSRV
+gap with **real** evidence rather than an indirect audit.
+
+**Host / toolchain**
+
+```text
+container: rust:1.85-slim on colima (Ubuntu 24.04.4 LTS, x86_64, kernel 6.8.0-117-generic)
+rustc 1.85.1 (4eb161250 2025-03-15)
+cargo 1.85.1 (d73d2caf9 2024-12-31)
+rustfmt 1.8.0-stable ; clippy 0.1.85 (added via rustup component add)
+```
+
+**Commands and results** — all against the working tree at `99a7418`
+
+| Command | Result |
+| --- | --- |
+| `cargo test … -p mosdns-upstream-core --test resolver_slice2 --locked` | 7 passed, 0 failed |
+| `… --test resolver_slice1 … slice3 … slice4 … slice5 …` | 17 / 10 / 7 / 6 passed, 0 failed |
+| `… --test resolver_remediation --locked` | 19 passed, 0 failed |
+| `… -p mosdns-upstream-core --lib --locked` | 69 passed, 0 failed |
+| `… -p mosdns-upstream-core --all-targets --all-features --locked` | 15 targets, all ok, 0 failed |
+| `… --workspace --all-targets --all-features --locked` | **31 suites ok, 0 failures** |
+| `cargo fmt --manifest-path rust/Cargo.toml --all --check` | clean (rustfmt 1.8.0) |
+
+The MSRV evidence **found a real defect**: the freshness check I had just written
+used a let-chain (`if let Ok(..) = .. && ..`), which is not stable until after
+1.85. macOS accepted it silently because the local toolchain is 1.95; Linux 1.85.1
+rejected it with `E0658`. Fixed in `99a7418` by rewriting it as an explicit
+`match`; behaviour is unchanged. This is exactly the class of defect the Linux
+MSRV gate exists to catch, and it would not have been found by any macOS run.
+
+**Linux clippy caveat.** `cargo clippy -D warnings` under clippy **0.1.85**
+reports 7 findings, and **all 7 are pre-existing, none from this task's diff**:
+
+- 4 in `rust/dns-core/` (`edns.rs`, `query.rs`, `resolver.rs`, `response.rs`) —
+  `operator precedence can trip the unwary`. `rust/dns-core` has been unchanged
+  since `e1339f1` and is not in this task's diff.
+- 3 `needless_lifetimes` — `upstream-core/src/composite.rs`, `upstream-core/src/lib.rs`,
+  and `upstream-core/src/resolver/owner.rs:595`. The `owner.rs` one is
+  `impl<'a> LeaderGuard<'a>`, which is **byte-identical at `5a184e8`** (line 555
+  before, 595 after); the other two files are untouched by this task.
+
+These were not fixed, because touching pre-existing `dns-core` API code or
+unrelated `composite.rs`/`lib.rs` would exceed this task's allowed scope, and the
+repo's clippy gate runs the workspace toolchain (1.95), where the workspace clippy
+gate is clean.
+
+**Known flake.** One run of
+`cargo test … --workspace …` on Linux reported
+`secure::doh::tests::control_matrix_at_before_body` FAILED (68 passed, 1 failed).
+It is in `secure/doh.rs`, which this task does not touch; it passes 3/3 in
+isolation and the immediately following full workspace run was 31 suites / 0
+failures. It is a pre-existing timing-sensitive DoH test under container CPU
+contention, not a regression from this task.
+
+### No mutation sweep
+
+Per instruction, **no mutation sweep was run** for this remediation round, and no
+mutation-kill results are claimed. The three fixes are evidenced by the
+deterministic interleaving tests, the wire-byte AAAA test, and the Linux 1.85 run
+above.
+
+### Checks (branch `rust`)
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all --check` | clean (macOS 1.95 and Linux 1.85/rustfmt 1.8.0) |
+| `cargo clippy --workspace … -- -D warnings` | clean (macOS 1.95, repo toolchain) |
+| `cargo test … --workspace --all-targets --all-features --locked` | 31 suites ok, 0 failures (macOS and Linux 1.85) |
+| task validate, `git diff --check` | passed / clean |
