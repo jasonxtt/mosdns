@@ -455,9 +455,13 @@ impl BootstrapResolver {
                     // returned as success. A failed generation's result is not
                     // returned either, so this caller may retry by leading a new
                     // generation.
-                    if let Ok(published) = &result
-                        && !published.is_expired(self.clock.now())
-                    {
+                    // Written without a let-chain so this stays valid on the
+                    // workspace MSRV: let-chains are not stable until later.
+                    let fresh = match &result {
+                        Ok(published) => !published.is_expired(self.clock.now()),
+                        Err(_) => false,
+                    };
+                    if fresh {
                         return result;
                     }
                 }
