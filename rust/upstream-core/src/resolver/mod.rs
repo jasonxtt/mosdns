@@ -346,12 +346,23 @@ pub struct ResolutionPolicy {
 impl ResolutionPolicy {
     /// Builds a policy, rejecting unusable bounds instead of clamping silently.
     ///
+    /// The bounds are second-granular DNS TTLs, so a bound that cannot be
+    /// expressed as a whole number of seconds within the wire's 32-bit field is
+    /// refused here rather than being truncated later at parse time. This is
+    /// what keeps `dns_core_policy` infallible for any constructed policy.
+    ///
     /// # Errors
     ///
-    /// Returns [`ResolverError::InvalidPolicy`] when `min_ttl` is zero or
-    /// exceeds `max_ttl`.
+    /// Returns [`ResolverError::InvalidPolicy`] when `min_ttl` is zero, when
+    /// `min_ttl` exceeds `max_ttl`, or when either bound does not fit the wire's
+    /// unsigned 32-bit second field exactly.
     pub fn new(min_ttl: Duration, max_ttl: Duration) -> Result<Self, ResolverError> {
         if min_ttl.is_zero() || min_ttl > max_ttl {
+            return Err(ResolverError::InvalidPolicy);
+        }
+        // Reject any bound the wire cannot carry verbatim.
+        let max_expressible = Duration::from_secs(u64::from(u32::MAX));
+        if min_ttl.subsec_nanos() != 0 || max_ttl.subsec_nanos() != 0 || max_ttl > max_expressible {
             return Err(ResolverError::InvalidPolicy);
         }
         Ok(Self {
@@ -387,10 +398,14 @@ impl ResolutionPolicy {
     /// bounds. The codec's CNAME link bound is not a resolver policy knob, so it
     /// keeps the reviewed default.
     ///
+    /// The constructor already guaranteed both bounds fit the wire's unsigned
+    /// 32-bit second field exactly, so this conversion cannot truncate.
+    ///
     /// # Errors
     ///
-    /// Returns [`ResolverError::InvalidPolicy`] when these bounds cannot be
-    /// expressed to `dns-core`, which the constructor already rejects.
+    /// Returns [`ResolverError::InvalidPolicy`] only if `dns-core` itself
+    /// rejects the derived bounds, which the constructor's ordering check makes
+    /// unreachable for a constructed policy.
     pub fn dns_core_policy(&self) -> Result<mosdns_dns_core::CnameChainPolicy, ResolverError> {
         let min_ttl =
             u32::try_from(self.min_ttl.as_secs()).map_err(|_| ResolverError::InvalidPolicy)?;
