@@ -174,6 +174,13 @@ impl FixtureSet {
         roots
     }
 
+    /// Root A's own certificate, for use as the chain sent by a server that
+    /// presents a leaf issued by root A.
+    #[must_use]
+    pub fn root_chain(&self) -> CertificateDer<'static> {
+        self.root_a.cert_der.clone()
+    }
+
     /// The trust-anchor store holding only root B.
     #[must_use]
     pub fn root_store_b(&self) -> RootCertStore {

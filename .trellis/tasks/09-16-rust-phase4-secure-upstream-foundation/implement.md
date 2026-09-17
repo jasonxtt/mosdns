@@ -189,21 +189,125 @@ contract. DoH, ALPN, HTTP, pooling, resolver, and host wiring remain Slice2+.
 
 ## Slice2 — bounded DoH over HTTP/1.1
 
-- [ ] Pure GET encoding tests precede I/O: zero outbound ID without mutation,
+- [x] Pure GET encoding tests precede I/O: zero outbound ID without mutation,
   unpadded base64url, path and unrelated query fields, duplicate dns replacement,
   service Host identity independent of numeric dial address.
-- [ ] Low-level Hyper HTTP1 driver with no pooling/retry/redirect/proxy, served
+- [x] Low-level Hyper HTTP1 driver with no pooling/retry/redirect/proxy, served
   by local TLS fixture; missing ALPN and negotiated HTTP1 are both covered.
-- [ ] Incremental body/header limits and full DNS response validation: 200,
+- [x] Incremental body/header limits and full DNS response validation: 200,
   MIME parameters/case, missing/wrong MIME, 3xx/4xx/5xx, Content-Encoding,
   Content-Length mismatch, chunked body, 65535 vs 65536 bytes and early EOF.
-- [ ] Restore caller ID regardless of remote DNS ID; assert owned response
+- [x] Restore caller ID regardless of remote DNS ID; assert owned response
   metadata agrees with wire. No implicit cache/TTL adjustment.
-- [ ] One absolute deadline and drop/close coverage across header/body/commit;
+- [x] One absolute deadline and drop/close coverage across header/body/commit;
   request counter proves at most one GET on failure, never a second connection.
 
 Allowed: secure DoH module/request builder and HTTP1 tests/fixtures.
 STOP for scoped review; no HTTP2 executor/pool in this slice.
+
+### Slice2 execution and evidence record — 2026-09-17
+
+Implementation is complete and stops at the scoped review boundary. No HTTP/2,
+pooling/reuse, proxy, resolver/bootstrap, socket policy, listener, host
+composition, YAML/API/WebUI, or Go/cgo/selector/fallback work is included.
+
+Produced behavior and contracts:
+
+- `rust/upstream-core/src/secure/doh.rs`: `DohUpstream` (one fresh numeric
+  connection, authenticated handshake against the service URL identity, exactly
+  one HTTPS `GET`), plus the in-crate deterministic `DohPhase` seam.
+- `rust/upstream-core/src/secure/error.rs`: `DohProtocolError` and
+  `SecureError::DohProtocol`. The variant is `Sent`, never `NotSent`, because it
+  can only be observed after the request was transmitted.
+- `rust/upstream-core/src/secure/dot.rs`: `SecureTransport::Doh` and a DoH
+  `SecureResponse` constructor that restores the caller ID and reports response
+  metadata that agrees with the returned wire.
+- `rust/upstream-core/src/secure/tls.rs`: `client_config_with_alpn`, which
+  builds the same reviewed policy with an explicit ALPN list.
+- `rust/upstream-core/tests/fixtures/mod.rs`: `root_chain()` for a server that
+  must present its issuer.
+
+Design points that the review should confirm:
+
+- **Low-level Hyper HTTP/1.1 only.** `hyper::client::conn::http1` is used; no
+  `client-legacy`, `client-pool`, or `hyper-util` legacy client is involved. The
+  `http1::Connection` is itself a `Future` that the exchange polls inline, so no
+  background task or executor owns any part of the exchange and there is no
+  detached driver to reap.
+- **ALPN.** Exactly `http/1.1` is offered. `h2` is deliberately **not**
+  advertised, because a negotiated protocol this client cannot drive would be a
+  silent fallback; Slice3 adds `h2` with its scoped HTTP/2 driver. Absent ALPN
+  is accepted (HTTP/1.1 on the established stream) and any other negotiated
+  protocol is a typed terminal `UnexpectedAlpn`.
+- **One GET.** A terminal failure never retries, follows a redirect, or opens a
+  second connection. This is proven by a server-side request counter.
+- **Request shape.** No body (`EmptyBody` is a closed type with a zero
+  exact-size hint), no `User-Agent`, no request `Content-Encoding`; `Host` is
+  the service authority from the URL, never the numeric dial address.
+- **Response validation.** Status must be 200; the media type must be
+  `application/dns-message` case-insensitively with parameters allowed; a
+  `Content-Encoding` other than `identity` is rejected; the body is bounded
+  incrementally at 65535 bytes and must reach a complete end. The caller's
+  original ID is restored into the owned wire, and the upstream's own DNS ID is
+  not used as a routing key.
+
+RED/GREEN evidence (focused, macOS arm64; every mutation used a repo-local
+`mktemp target/*` copy with a `trap` restore, and no backup remains):
+
+| Mutation | Result |
+| --- | --- |
+| Remove the media-type check | `a_missing_or_wrong_media_type_is_rejected` FAILED |
+| Remove the incremental body-size bound | `a_body_larger_than_the_dns_maximum_is_rejected` FAILED |
+| Remove the status check | `a_non_200_status_is_a_typed_protocol_error` FAILED |
+| Accept 3xx as success | `a_redirect_is_not_followed` FAILED |
+| Ignore `Content-Encoding` | `a_non_identity_content_encoding_is_rejected` FAILED |
+| Remove caller-ID restoration | `the_outbound_query_id_is_zeroed_while_the_caller_id_is_restored` FAILED |
+| Treat early EOF as end-of-body | both incomplete-body tests FAILED |
+| Add a `User-Agent` header | `a_successful_exchange_sends_a_get_with_no_body_and_no_user_agent` FAILED |
+| Send the dial address as `Host` | `the_authority_is_the_service_host_not_the_numeric_dial_address` FAILED |
+| Retry once on failure | `a_terminal_protocol_failure_never_sends_a_second_request` FAILED (request count 2 vs 1) |
+
+Two of these mutations initially passed, and the tests were strengthened rather
+than the mutations relaxed: the status/redirect cases now carry a *valid* DNS
+body so only the status can cause rejection, and the no-retry case now uses a
+fast peer-driven failure (503) because a deadline failure cannot reconnect and
+therefore could never detect a retry.
+
+Deterministic control matrix (no sleeps):
+
+- Five pre-result phases (`BeforeConnect`, `BeforeHandshake`, `BeforeRequest`,
+  `BeforeBody`, `BeforeCommit`) crossed with four controls (owner close, caller
+  cancellation, the one shared absolute deadline, and dropped/aborted future) =
+  20 deterministic cells sharing one helper. Each cell first observes the seam
+  and the live registration, so the control is proven to land at the intended
+  phase.
+- Side-effect layering is asserted per phase and must agree across all four
+  controls, mirroring the reviewed table: `NotSent` before connect, handshake,
+  and before the request is handed to the driver; `Sent` once response headers
+  have been observed (body and commit phases).
+- A dedicated test asserts the phase array contains exactly the five distinct
+  pre-result phases, so a phase cannot be silently dropped.
+- No test uses a sleep to establish ordering; `BeforeBody`/`BeforeCommit` tests
+  are also bounded by a short deadline so a missing response cannot stall CI.
+
+Verification commands and results in this environment:
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice2_doh --locked` | PASS, 26 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 201 tests |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, 23 targets |
+| `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS, no warnings |
+
+Toolchain limitation (unchanged): `cargo +1.85.0 check` still cannot run because
+Rust 1.85.0 is not installed; actual toolchain is cargo/rustc 1.95.0. Slice2 adds
+no dependency, so the MSRV position does not change.
+
+Deferred beyond this slice (explicit, not silently dropped): HTTP/2 (Slice3),
+pooling/reuse, proxies, redirect handling, HTTP cache/TTL adjustment, h3, and
+host wiring. Results are macOS loopback evidence only, not production,
+throughput, or long-running deployment evidence.
 
 ## Slice3 — HTTP/2 and complete structured shutdown
 
