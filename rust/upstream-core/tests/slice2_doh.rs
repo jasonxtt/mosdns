@@ -1039,6 +1039,370 @@ fn a_truncated_chunked_body_is_an_incomplete_body() {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Response preservation: the caller must receive the upstream's response with
+// only the transaction ID rewritten
+// ---------------------------------------------------------------------------
+
+/// A valid response with RA explicitly cleared.
+///
+/// A real recursive resolver sets `RA`, but the `DoH` contract is that the caller
+/// receives the upstream's response with only the ID fixed up, so clearing RA
+/// exercises flag preservation directly.
+fn response_wire_ra_clear(id: u16, marker: u8) -> Vec<u8> {
+    let mut wire = response_wire(id, marker);
+    wire[3] &= 0x7f; // clear RA
+    wire
+}
+
+#[test]
+fn a_ra_clear_response_keeps_ra_clear_and_only_rewrites_the_id() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let caller_id = 0x7300;
+        let upstream_wire = response_wire_ra_clear(0, 21);
+        assert_eq!(
+            upstream_wire[3] & 0x80,
+            0,
+            "the fixture must have RA clear before the exchange"
+        );
+
+        let server = HttpsServer::start(&set, ScriptedResponse::ok_dns(upstream_wire.clone()));
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let response = exchange_owned(&upstream, &query_wire(caller_id), open_context())
+            .await
+            .expect("a well-formed response succeeds");
+
+        // RA must still be clear: the client restores the ID only.
+        assert_eq!(
+            response.wire()[3] & 0x80,
+            0,
+            "restoring the caller ID must not set RA"
+        );
+        // The ID is the caller's.
+        assert_eq!(
+            u16::from_be_bytes([response.wire()[0], response.wire()[1]]),
+            caller_id
+        );
+        // Every other byte is exactly what the upstream sent.
+        assert_eq!(&response.wire()[2..], &upstream_wire[2..]);
+        // Metadata agrees with the returned wire.
+        assert_eq!(response.request_id(), caller_id);
+        assert_eq!(response.response_id(), caller_id);
+        assert_eq!(
+            u16::from_be_bytes([response.wire()[0], response.wire()[1]]),
+            response.response_id(),
+            "the reported response_id must equal the ID actually in the wire"
+        );
+        server.join();
+    });
+}
+
+#[test]
+fn an_ra_set_response_keeps_ra_set() {
+    block_on(async {
+        // The complement, so the assertion cannot pass by clearing flags.
+        let set = FixtureSet::generate();
+        let caller_id = 0x7301;
+        let mut upstream_wire = response_wire(0, 22);
+        upstream_wire[3] |= 0x80; // RA set
+        let server = HttpsServer::start(&set, ScriptedResponse::ok_dns(upstream_wire.clone()));
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let response = exchange_owned(&upstream, &query_wire(caller_id), open_context())
+            .await
+            .expect("a well-formed response succeeds");
+
+        assert_eq!(response.wire()[3] & 0x80, 0x80, "RA must stay set");
+        assert_eq!(&response.wire()[2..], &upstream_wire[2..]);
+        assert_eq!(response.response_id(), caller_id);
+        server.join();
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Response head and body bounds
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_response_head_just_under_the_byte_bound_is_accepted() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let id = 0x7400;
+        let expected = response_wire(id, 31);
+        // Size one header so the measured head lands one byte under 16 KiB.
+        let mut response = ScriptedResponse::ok_dns(expected.clone());
+        let base = "HTTP/1.1 200 OK\r\n".len()
+            + "Content-Type: application/dns-message\r\n".len()
+            + format!("Content-Length: {}\r\n", expected.len()).len()
+            + 2; // terminating blank line
+        let pad = MAX_HEAD_BYTES_FOR_TEST - base - "X-Pad: \r\n".len() - 1;
+        response
+            .extra_headers
+            .push(("X-Pad".to_owned(), "a".repeat(pad)));
+        let server = HttpsServer::start(&set, response);
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let result = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect("a head just under the byte bound must be accepted");
+        assert_eq!(result.wire(), expected.as_slice());
+        server.join();
+    });
+}
+
+#[test]
+fn a_response_head_over_the_byte_bound_is_rejected() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let id = 0x7401;
+        // One header large enough to push the head past 16 KiB; a header-count
+        // limit alone would not catch this.
+        let mut response = ScriptedResponse::ok_dns(response_wire(id, 32));
+        response
+            .extra_headers
+            .push(("X-Pad".to_owned(), "a".repeat(20 * 1024)));
+        let server = HttpsServer::start(&set, response);
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect_err("a head over the byte bound must be rejected");
+        assert!(
+            matches!(
+                error,
+                SecureError::DohProtocol(DohProtocolError::ResponseHeadTooLarge)
+                    | SecureError::Transport(_)
+            ),
+            "got {error:?}"
+        );
+        server.join();
+    });
+}
+
+#[test]
+fn a_declared_content_length_over_the_dns_maximum_fails_at_the_head() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let id = 0x7402;
+        let response = ScriptedResponse::ok_dns(response_wire(id, 33));
+        let body = response.body.clone();
+        let server = HttpsServer::start_with(&set, move |_head, _body| {
+            // Declare 65536 while sending only a small body: the declared value
+            // alone must be rejected, before any body byte is read.
+            let mut bytes = b"HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: 65536\r\n\r\n"
+                .to_vec();
+            bytes.extend_from_slice(&body);
+            Reply::WriteThenClose(bytes)
+        });
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect_err("a declared body over the DNS maximum must be rejected");
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::BodyTooLarge),
+            "the declared length must fail at the head stage"
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        server.join();
+    });
+}
+
+#[test]
+fn a_body_of_exactly_the_dns_maximum_is_accepted() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let id = 0x7403;
+        let wire = dns_response_of_exact_len(id, 65_535);
+        assert_eq!(wire.len(), 65_535);
+        let server = HttpsServer::start(&set, ScriptedResponse::ok_dns(wire.clone()));
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let response = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect("a body of exactly the DNS maximum must be accepted");
+        assert_eq!(response.wire().len(), 65_535);
+        assert_eq!(&response.wire()[0..2], &wire[0..2]);
+        server.join();
+    });
+}
+
+#[test]
+fn a_body_of_one_byte_over_the_dns_maximum_is_rejected() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let id = 0x7404;
+        let wire = dns_response_of_exact_len(id, 65_536);
+        assert_eq!(wire.len(), 65_536);
+        let server = HttpsServer::start(&set, ScriptedResponse::ok_dns(wire));
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect_err("one byte over the maximum must be rejected");
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::BodyTooLarge)
+        );
+        server.join();
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Side-effect classification: an absent response head, and ALPN
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_absent_response_head_is_never_reported_as_sent() {
+    block_on(async {
+        // The server accepts TLS, reads the request, then closes without writing
+        // any response head. Whether the request reached the peer is unknown, so
+        // claiming Sent would be false.
+        let set = FixtureSet::generate();
+        let server = HttpsServer::start_with(&set, |_head, _body| Reply::CloseImmediately);
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(0x7410), open_context())
+            .await
+            .expect_err("a closed connection before a head is a failure");
+        assert!(
+            matches!(
+                error,
+                SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived)
+                    | SecureError::Transport(_)
+            ),
+            "got {error:?}"
+        );
+        assert_ne!(
+            error.side_effect(),
+            SideEffectState::Sent,
+            "an absent response head must never be reported as Sent: {error:?}"
+        );
+        server.join();
+    });
+}
+
+#[test]
+fn a_peer_that_cannot_speak_http11_fails_before_any_request() {
+    block_on(async {
+        // The server offers only h2, which this client does not implement. A
+        // conformant peer with no ALPN overlap refuses the handshake, so no
+        // request is ever sent.
+        let set = FixtureSet::generate();
+        let (address, handle) = alpn_server(
+            &set,
+            Some(vec![b"h2".to_vec()]),
+            ScriptedResponse::ok_dns(response_wire(0, 41)),
+        );
+        let upstream = verified_owner(&set, address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(0x7411), open_context())
+            .await
+            .expect_err("a peer that cannot speak HTTP/1.1 must not be used");
+        assert!(
+            matches!(
+                error,
+                SecureError::Tls(_) | SecureError::DohProtocol(DohProtocolError::UnexpectedAlpn)
+            ),
+            "expected a handshake or ALPN rejection, got {error:?}"
+        );
+        assert_eq!(
+            error.side_effect(),
+            SideEffectState::NotSent,
+            "no request exists before the handshake completes, so this is never Sent"
+        );
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        let _ = handle.join();
+    });
+}
+
+#[test]
+fn the_side_effect_classification_of_each_doh_defect_is_explicit() {
+    // The classification is part of the contract, so it is asserted directly
+    // rather than only through exchanges that happen to reach it.
+    assert_eq!(
+        DohProtocolError::UnexpectedAlpn.side_effect(),
+        SideEffectState::NotSent,
+        "ALPN is decided during the handshake, before any request exists"
+    );
+    assert_eq!(
+        DohProtocolError::ResponseHeadNotReceived.side_effect(),
+        SideEffectState::MaybeSent,
+        "without a response head, delivery is unknowable"
+    );
+    for error in [
+        DohProtocolError::UnexpectedStatus { status: 500 },
+        DohProtocolError::WrongMediaType,
+        DohProtocolError::MissingMediaType,
+        DohProtocolError::ContentEncoding,
+        DohProtocolError::ResponseHeadTooLarge,
+        DohProtocolError::BodyTooLarge,
+        DohProtocolError::IncompleteBody,
+    ] {
+        assert_eq!(
+            error.side_effect(),
+            SideEffectState::Sent,
+            "{error:?} can only occur after a complete head arrived"
+        );
+    }
+}
+
+/// The response-head byte bound the tests size their fixtures against.
+///
+/// Kept in the test crate so a change to the production bound is caught by the
+/// just-under/over pair rather than silently widening what they exercise.
+const MAX_HEAD_BYTES_FOR_TEST: usize = 16 * 1024;
+
+/// Builds a valid DNS response whose wire is exactly `len` bytes.
+///
+/// The response is padded with additional A records plus one padding label in
+/// the question, chosen so the total is exactly `len`. The result is a genuinely
+/// dns-core-valid response of a chosen size, which is what makes a 65535-byte
+/// success and a 65536-byte rejection meaningful rather than a test of filler.
+fn dns_response_of_exact_len(id: u16, len: usize) -> Vec<u8> {
+    // Fixed per-record cost of a compressed-owner A record.
+    const RECORD: usize = 16;
+    // Header (12) + "example" (8) + "org" (4) + terminator (1) + type/class (4).
+    const FIXED: usize = 12 + 8 + 4 + 1 + 4;
+
+    // A padding label of `1 + p` bytes makes the remainder divide evenly by
+    // RECORD. Searching for the smallest workable `p` keeps every label legal
+    // (1..=63 bytes) and the arithmetic exact for any requested length.
+    let (pad_len, answers) = (1..=63u8)
+        .find_map(|p| {
+            let used = FIXED + 1 + usize::from(p);
+            let remaining = len.checked_sub(used)?;
+            (remaining % RECORD == 0).then_some((p, remaining / RECORD))
+        })
+        .expect("a padding label exists for this length");
+    let answers = u16::try_from(answers).expect("answer count fits u16");
+
+    let mut wire = Vec::with_capacity(len);
+    wire.extend_from_slice(&id.to_be_bytes());
+    wire.extend_from_slice(&[0x81, 0x80]);
+    wire.extend_from_slice(&1u16.to_be_bytes()); // QDCOUNT
+    wire.extend_from_slice(&answers.to_be_bytes()); // ANCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // NSCOUNT
+    wire.extend_from_slice(&0u16.to_be_bytes()); // ARCOUNT
+    wire.extend_from_slice(&[0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e']);
+    wire.extend_from_slice(&[0x03, b'o', b'r', b'g']);
+    wire.push(pad_len);
+    wire.extend(std::iter::repeat_n(b'p', usize::from(pad_len)));
+    wire.push(0x00);
+    wire.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]);
+    for index in 0..answers {
+        wire.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01]); // ptr, A IN
+        wire.extend_from_slice(&60u32.to_be_bytes());
+        let octet = u8::try_from(index % 256).expect("index mod 256 fits in a byte");
+        wire.extend_from_slice(&[0x00, 0x04, 198, 51, 100, octet]);
+    }
+    assert_eq!(wire.len(), len, "the builder must hit the exact length");
+    wire
+}
+
 /// A server that reads the request, then holds the connection without
 /// answering.
 ///

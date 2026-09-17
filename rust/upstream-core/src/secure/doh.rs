@@ -35,10 +35,10 @@ use std::time::Instant;
 
 use hyper::body::Incoming;
 use hyper::client::conn::http1::SendRequest;
-use hyper::header::{ACCEPT, CONTENT_ENCODING, CONTENT_TYPE, HOST};
+use hyper::header::{ACCEPT, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, HOST};
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
-use mosdns_dns_core::{inspect_response_header, patch_response_id_ra, validate_response};
+use mosdns_dns_core::{inspect_response_header, validate_response};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
@@ -60,11 +60,20 @@ const DNS_MEDIA_TYPE: &str = "application/dns-message";
 /// The largest DNS message a DoH response may carry: 65535 bytes.
 const MAX_DNS_BODY: usize = 65_535;
 
-/// The largest response header block this client will read.
+/// The largest response header block this client will accept: 16 KiB.
 ///
-/// The DNS contract needs only `Content-Type`, `Content-Encoding`,
-/// `Content-Length` and a few framing headers, so a generous but fixed ceiling
-/// keeps a hostile peer from making the client buffer an unbounded header set.
+/// This is a bound on the *bytes* of the response head, not on the number of
+/// headers. A peer could otherwise send a small number of enormous headers, or
+/// many small ones, and still make the client hold far more than the DNS
+/// contract needs. The bound is applied to the parsed head, so it holds however
+/// the peer chose to distribute those bytes across headers.
+const MAX_RESPONSE_HEADER_BYTES: usize = 16 * 1024;
+
+/// The largest number of individual response headers this client will accept.
+///
+/// This complements the byte bound: it stops a peer from making the client
+/// allocate a huge number of tiny header entries that individually stay well
+/// under the byte ceiling. The DNS contract needs only a handful.
 const MAX_RESPONSE_HEADERS: usize = 64;
 
 /// The HTTP/1.1 read-buffer ceiling.
@@ -249,6 +258,12 @@ pub(crate) enum DohPhase {
     BeforeHandshake,
     /// Immediately before the request is handed to the connection driver.
     BeforeRequest,
+    /// After the request has been handed to the connection driver and before
+    /// any response head has been observed.
+    ///
+    /// This is the window in which a request may or may not have reached the
+    /// peer, so the side-effect state is conservatively `MaybeSent`.
+    AfterRequestSent,
     /// Immediately before the response body is read to its end.
     BeforeBody,
     /// Immediately before the final control-aware commit.
@@ -460,6 +475,8 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
 
     tokio::pin!(connection);
 
+    // The request is now with the driver but no response head exists yet.
+    prepared.reach(DohPhase::AfterRequestSent).await;
     let response = send_request(&control, deadline, &mut sender, &mut connection, request).await?;
 
     // Phase 4: read the response body to a complete end under the same control.
@@ -473,10 +490,15 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
     let header = inspect_response_header(&body)
         .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
     // The DoH contract associates a response with its HTTP stream, not with a
-    // DNS transaction ID, so a remote ID of 0 is normal. The caller's original
-    // ID is restored into the owned wire before it is returned.
-    let restored = patch_response_id_ra(&body, request_id)
-        .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
+    // DNS transaction ID, so a remote ID of 0 is normal. Only the caller's
+    // original ID is restored into the owned wire; every other header byte,
+    // including the response's own flags, is preserved verbatim.
+    //
+    // This deliberately does not use `dns_core::patch_response_id_ra`: that
+    // helper is the frozen server-path oracle and also sets RA, which would
+    // rewrite a flag the upstream chose. A DoH client must return the upstream's
+    // response with just the transaction ID fixed up.
+    let restored = restore_request_id(&body, request_id)?;
     // Only a complete, dns-core-valid response may be returned. A DoH response
     // with TC set is still returned to the caller rather than retried.
     if validate_response(&restored).is_err() {
@@ -499,6 +521,30 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
     prepared.reach(DohPhase::AfterCommit).await;
 
     Ok(SecureResponse::doh(restored, request_id, header.truncated))
+}
+
+/// Returns a copy of `body` with only the DNS transaction ID replaced.
+///
+/// The packet must already be a well-formed response header: at least 12 bytes
+/// with QR set. Every other byte — including the RA, TC, RD and RCODE fields —
+/// is preserved exactly as the upstream sent it, so the returned wire differs
+/// from the upstream's only in bytes 0 and 1.
+///
+/// This is intentionally narrower than `dns_core::patch_response_id_ra`, which
+/// also sets RA for the server response path.
+///
+/// # Errors
+///
+/// Returns [`UpstreamError::MalformedResponse`] when the packet is shorter than
+/// a DNS header or has QR clear, so a non-response can never be returned to the
+/// caller as if it were one.
+fn restore_request_id(body: &[u8], request_id: u16) -> Result<Vec<u8>, SecureError> {
+    // Validation only: this rejects a short or QR-clear packet before copying.
+    inspect_response_header(body)
+        .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
+    let mut restored = body.to_vec();
+    restored[0..2].copy_from_slice(&request_id.to_be_bytes());
+    Ok(restored)
 }
 
 /// Rejects a negotiated ALPN protocol other than HTTP/1.1.
@@ -566,9 +612,10 @@ async fn send_request(
                 SecureError::Transport(UpstreamError::Send(SideEffectState::MaybeSent))
             }),
             result = connection.as_mut() => Err(match result {
-                // The connection ended before a response arrived, so no
-                // response headers were ever observed.
-                Ok(()) => SecureError::DohProtocol(DohProtocolError::IncompleteBody),
+                // The connection ended before any response head was observed.
+                // Nothing proves the request reached the peer, so this is
+                // conservatively MaybeSent rather than a Sent body defect.
+                Ok(()) => SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
                 Err(_) => SecureError::Transport(UpstreamError::Receive(
                     SideEffectState::MaybeSent,
                 )),
@@ -581,7 +628,35 @@ async fn send_request(
     Ok(response)
 }
 
-/// Validates the status and the headers this contract depends on.
+/// Measures the byte size of the parsed response head.
+///
+/// Hyper decodes the head into a status and a header map, so the original bytes
+/// are no longer available; this reconstructs the equivalent wire size from the
+/// parsed form. It is therefore a faithful measure of the head's logical size
+/// (status line plus every header line plus the terminating blank line), which
+/// is what the 16 KiB contract bounds.
+fn response_head_bytes(response: &Response<Incoming>) -> usize {
+    // "HTTP/1.1 200 OK\r\n" — the version is fixed and the reason phrase is not
+    // preserved by the parser, so the status line is measured conservatively
+    // from the parts that are.
+    let version = match response.version() {
+        hyper::Version::HTTP_09 => "HTTP/0.9 ",
+        hyper::Version::HTTP_10 => "HTTP/1.0 ",
+        _ => "HTTP/1.1 ",
+    };
+    let mut total = version.len()
+        + 3 // status code
+        + 1 // SP
+        + response.status().canonical_reason().map_or(0, str::len)
+        + 2; // CRLF
+    for (name, value) in response.headers() {
+        // "<name>: <value>\r\n"
+        total = total.saturating_add(name.as_str().len() + 2 + value.as_bytes().len() + 2);
+    }
+    total.saturating_add(2) // the blank line ending the head
+}
+
+/// Validates the status, size and headers this contract depends on.
 fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureError> {
     if response.status() != hyper::StatusCode::OK {
         return Err(SecureError::DohProtocol(
@@ -589,6 +664,33 @@ fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureErr
                 status: response.status().as_u16(),
             },
         ));
+    }
+
+    // Bound the response head by bytes, not just by header count: a peer must
+    // not be able to make the client hold far more head bytes than the DNS
+    // contract needs.
+    let head_bytes = response_head_bytes(response);
+    if head_bytes > MAX_RESPONSE_HEADER_BYTES {
+        return Err(SecureError::DohProtocol(
+            DohProtocolError::ResponseHeadTooLarge,
+        ));
+    }
+
+    // A declared body larger than the DNS maximum is rejected here, at the
+    // head, before any body byte is read. The incremental bound in `read_body`
+    // still applies, so a peer cannot evade the limit by omitting or
+    // understating `Content-Length`.
+    if let Some(length) = response.headers().get(CONTENT_LENGTH) {
+        let length = length
+            .to_str()
+            .map_err(|_| SecureError::DohProtocol(DohProtocolError::BodyTooLarge))?;
+        let declared = length
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| SecureError::DohProtocol(DohProtocolError::BodyTooLarge))?;
+        if declared > MAX_DNS_BODY as u64 {
+            return Err(SecureError::DohProtocol(DohProtocolError::BodyTooLarge));
+        }
     }
 
     // Content-Encoding must be absent or `identity`; the body is never
@@ -1024,10 +1126,11 @@ mod tests {
     }
 
     /// Every pre-result phase the control matrix must cover.
-    const MATRIX_PHASES: [DohPhase; 5] = [
+    const MATRIX_PHASES: [DohPhase; 6] = [
         DohPhase::BeforeConnect,
         DohPhase::BeforeHandshake,
         DohPhase::BeforeRequest,
+        DohPhase::AfterRequestSent,
         DohPhase::BeforeBody,
         DohPhase::BeforeCommit,
     ];
@@ -1046,6 +1149,9 @@ mod tests {
             DohPhase::BeforeConnect | DohPhase::BeforeHandshake | DohPhase::BeforeRequest => {
                 SideEffectState::NotSent
             }
+            // The request is with the driver but no response head exists yet,
+            // so delivery is unknowable: this is the conservative state.
+            DohPhase::AfterRequestSent => SideEffectState::MaybeSent,
             DohPhase::BeforeBody | DohPhase::BeforeCommit | DohPhase::AfterCommit => {
                 SideEffectState::Sent
             }
@@ -1094,7 +1200,9 @@ mod tests {
                 }
                 // Reached once the handshake is complete, but before any
                 // response exists: the server holds without answering.
-                DohPhase::BeforeHandshake | DohPhase::BeforeRequest => {
+                DohPhase::BeforeHandshake
+                | DohPhase::BeforeRequest
+                | DohPhase::AfterRequestSent => {
                     let server = CountingServer::start_with(&identity, false);
                     (server.address, Some(server))
                 }
@@ -1220,7 +1328,11 @@ mod tests {
         seen.sort_by_key(|phase| format!("{phase:?}"));
         seen.dedup();
         assert_eq!(seen.len(), MATRIX_PHASES.len(), "no duplicate phases");
-        assert_eq!(seen.len(), 5, "connect, handshake, request, body, commit");
+        assert_eq!(
+            seen.len(),
+            6,
+            "connect, handshake, request, request-sent, body, commit"
+        );
         assert_eq!(
             side_effect_at(DohPhase::BeforeConnect),
             SideEffectState::NotSent
@@ -1232,6 +1344,10 @@ mod tests {
         assert_eq!(
             side_effect_at(DohPhase::BeforeRequest),
             SideEffectState::NotSent
+        );
+        assert_eq!(
+            side_effect_at(DohPhase::AfterRequestSent),
+            SideEffectState::MaybeSent
         );
         assert_eq!(side_effect_at(DohPhase::BeforeBody), SideEffectState::Sent);
         assert_eq!(
@@ -1253,6 +1369,11 @@ mod tests {
     #[test]
     fn control_matrix_at_before_request() {
         run_phase_control_matrix(DohPhase::BeforeRequest);
+    }
+
+    #[test]
+    fn control_matrix_at_after_request_sent() {
+        run_phase_control_matrix(DohPhase::AfterRequestSent);
     }
 
     #[test]
