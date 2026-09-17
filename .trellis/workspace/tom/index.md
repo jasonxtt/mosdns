@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
-- **Last Active**: 2026-09-16
+- **Total Sessions**: 7
+- **Last Active**: 2026-09-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~186 | Active |
+| `journal-1.md` | ~207 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-09-17 | Add Herdr routing mode | `9f6f1ae` | `rust` |
 | 6 | 2026-09-16 | Close UDP/TCP foundation and plan secure upstream | `476cdb5`, `cb15361`, `9d43e9f`, `21bff19` | `rust` |
 | 5 | 2026-08-18 | Phase 3B sequence execution foundation completed | `0c53c7d` | `rust` |
 | 4 | 2026-08-18 | Complete Phase 2 matcher correctness remediation | `88af8f1`, `02b40de` | `rust` |

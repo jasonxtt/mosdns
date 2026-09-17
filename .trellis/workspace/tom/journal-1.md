@@ -184,3 +184,24 @@ Archived accepted Phase4 UDP/TCP foundation; synchronized migration status and a
 ### Next Steps
 
 - Review secure-upstream planning proposal. Implementation requires later explicit user authorization; bootstrap, pooling, socket policy, HTTP3/listeners and host remain deferred.
+
+
+## Session 7: Add Herdr routing mode
+
+**Date**: 2026-09-17
+**Task**: Add Herdr routing mode
+**Branch**: `rust`
+
+### Summary
+
+Added conversation-scoped Herdr executor and ChatGPT reviewer selection, fail-closed validation, workflow integration, project guidance, and focused tests.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9f6f1ae` | (see git log) |
+
+### Status
+
+[OK] **Completed**
