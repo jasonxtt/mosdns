@@ -284,6 +284,8 @@ only after reading the exact command or action. Safe approval includes:
   dependency sources when needed to verify an API or ownership contract;
 - repository-local format, build, test, clippy, task validation and other
   explicitly requested checks;
+- edits confined to the user-authorized source, test, fixture, and task-evidence
+  whitelist for the active slice;
 - creating or removing unique temporary files under a task-scoped temporary
   directory, with cleanup scoped to those exact paths; and
 - the authorized exact-path commit and push to the requested branch.
