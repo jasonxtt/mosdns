@@ -657,3 +657,82 @@ being byte-identical to the original query. No real transport was weakened.
 | `cargo clippy … --workspace --all-targets --all-features --locked -- -D warnings` | clean |
 | `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | passed |
 | `git diff --check` | clean |
+
+## Controller audit remediation — follow-up contract review (2026-09-17)
+
+A narrow contract review of the ID-source and policy surface found three real
+gap. All three were fixed with RED tests first. No mutation sweep was run for
+this round, and none is claimed below.
+
+### Point 1 — the injectable ID-source API was an accidental public contract
+
+`BootstrapResolver::with_id_source` was `pub` while its parameter is the
+`ResolutionIdSource` trait, and that trait lives in the **private**
+`resolver::bootstrap` module with no re-export. An external caller could
+therefore see a `pub` constructor whose argument type it had no way to name: the
+API was unusable from outside and simultaneously looked like a supported
+contract.
+
+`with_id_source` is now `pub(crate)`, matching the module-private trait. The two
+test constructors stay public because integration tests are external to the
+crate, but they are marked `#[doc(hidden)]` and named for their single legitimate
+caller (`with_deterministic_ids_for_tests`, `with_failing_ids_for_tests`), so they
+are not presented as contract. Nothing in the crate's public surface now
+mentions `ResolutionIdSource`.
+
+### Point 2 — `ResolutionPolicy::new` accepted inexpressible bounds
+
+The constructor only checked zero and ordering, so a sub-second `min_ttl` or
+`max_ttl`, or a `max_ttl` above `u32::MAX` seconds, was accepted and then
+truncated by `as_secs()` inside `dns_core_policy()`. `ResolutionPolicy::new` now
+rejects a bound that is not a whole number of seconds or that exceeds the wire's
+unsigned 32-bit second field, with the typed `InvalidPolicy`. Because the
+constructor is now the gate, `dns_core_policy()` cannot truncate for any
+constructed policy, and its only remaining error path is `dns-core` itself
+rejecting derived bounds, which the ordering check makes unreachable.
+Test: `a_policy_bound_that_cannot_be_expressed_is_rejected_at_construction`,
+which also asserts the largest expressible bound is still accepted.
+
+### Point 3 — a failed OS draw was papered over as pseudo-randomness
+
+`OsIdSource::next_id()` fell back to a `RandomState` + `SystemTime` hash when the
+`getrandom` call failed, while `is_unpredictable()` kept reporting `true`. That
+did not satisfy the task's "production IDs unpredictable" contract: the fallback
+is not a cryptographic source, and reporting `true` for it was inaccurate.
+
+The trait now draws fallibly — `ResolutionIdSource::next_id(&self) ->
+Result<u16, ResolverError>` — and `OsIdSource` **fails closed**: a failed draw
+returns `UnpredictableIdsUnavailable` instead of a guessed identifier. The
+hash/clock fallback is deleted entirely. The exchange resolves the ID before
+encoding anything and returns the typed error, so a query is never built around
+a value it could not correlate. `#[doc(hidden)]`
+`with_failing_ids_for_tests` plus `FailingIdSource` make the failure path
+testable without an entropy-free host. Tests:
+`a_failing_id_source_is_a_typed_error_not_a_guessed_id`.
+
+### Checks (branch `rust`, `/Users/tom/github/mosdns-rust`)
+
+Narrow scope only; no mutation sweep was run in this round.
+
+| Command | Result |
+| --- | --- |
+| `cargo test … -p mosdns-upstream-core --test resolver_remediation --locked` | 17 passed, 0 failed |
+| `cargo test … --test resolver_slice1 .. resolver_slice5 --locked` | 17 / 7 / 10 / 7 / 6 passed, 0 failed |
+| `cargo test … -p mosdns-upstream-core --lib --locked` | 69 passed, 0 failed |
+| `cargo test … --workspace --all-targets --all-features --locked` | 31 suites ok, 0 failures |
+| `cargo fmt --manifest-path rust/Cargo.toml --all --check` | clean |
+| `cargo clippy … -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings` | clean |
+| `cargo clippy … --workspace … -- -D warnings` | clean |
+| `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | passed |
+| `git diff --check` | clean |
+
+### Limitations
+
+- No mutation/verification sweep was run for this round; the three fixes are
+  evidenced by the tests above rather than by mutation-kill results.
+- Points 1 and 3 change a crate-private API and a trait signature. Both are
+  internal to `mosdns-upstream-core`; no re-exported public item changed, so no
+  consumer outside the crate is affected.
+- Rust 1.85 is still not installed and was not run; MSRV evidence remains
+  indirect. No Linux evidence: this round ran on macOS only, so the task's Linux
+  loopback gate remains outstanding before closure.

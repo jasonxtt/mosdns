@@ -34,8 +34,12 @@ const RECV_BUFFER_BYTES: usize = 65_535;
 /// cryptographically unpredictable implementation without changing this
 /// module, and tests can pin an ID without touching the exchange.
 pub trait ResolutionIdSource: Send + Sync {
-    /// Returns the transaction ID for the next bootstrap query.
-    fn next_id(&self) -> u16;
+    /// Draws the transaction ID for the next bootstrap query.
+    ///
+    /// A source that cannot produce an unpredictable ID returns a typed error
+    /// rather than substituting a guess, so a failed draw can never be mistaken
+    /// for a valid correlation value.
+    fn next_id(&self) -> Result<u16, ResolverError>;
 
     /// Whether this source's IDs are unpredictable.
     ///
@@ -66,15 +70,16 @@ impl OsIdSource {
 }
 
 impl ResolutionIdSource for OsIdSource {
-    fn next_id(&self) -> u16 {
-        // `is_available` proved the call succeeds on this host; a later failure
-        // is still handled by drawing a fresh unpredictable fallback rather than
-        // a predictable sequence.
+    fn next_id(&self) -> Result<u16, ResolverError> {
+        // A failed draw is surfaced, never papered over. Substituting a value
+        // derived from clock or hash state would silently weaken the RFC 5452
+        // correlation this ID exists to provide, so the exchange instead fails
+        // closed with a typed error.
         let mut bytes = [0u8; 2];
-        if getrandom::fill(&mut bytes).is_ok() {
-            return u16::from_ne_bytes(bytes);
+        match getrandom::fill(&mut bytes) {
+            Ok(()) => Ok(u16::from_ne_bytes(bytes)),
+            Err(_) => Err(ResolverError::UnpredictableIdsUnavailable),
         }
-        fallback_random_u16()
     }
 
     fn is_unpredictable(&self) -> bool {
@@ -82,23 +87,21 @@ impl ResolutionIdSource for OsIdSource {
     }
 }
 
-/// A last-resort unpredictable value, used only when the operating-system call
-/// fails mid-flight.
+/// An ID source that never draws, used only to prove the failure contract.
 ///
-/// It is seeded from the standard library's per-process `RandomState` hash
-/// entropy plus the current time, so it never degrades into a predictable
-/// sequence. It is deliberately documented as not being a cryptographic
-/// guarantee; [`OsIdSource::is_available`] is what gates the production path.
-fn fallback_random_u16() -> u16 {
-    use std::hash::{BuildHasher, Hasher};
-    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_nanos())
-            .unwrap_or(0),
-    );
-    hasher.finish() as u16
+/// It exists so the exchange's typed handling of an undrawable source is
+/// testable without an entropy-free host.
+#[derive(Debug, Default)]
+pub struct FailingIdSource;
+
+impl ResolutionIdSource for FailingIdSource {
+    fn next_id(&self) -> Result<u16, ResolverError> {
+        Err(ResolverError::UnpredictableIdsUnavailable)
+    }
+
+    fn is_unpredictable(&self) -> bool {
+        false
+    }
 }
 
 /// A monotonically stepping, non-cryptographic ID source.
@@ -119,8 +122,8 @@ impl SteppingIdSource {
 }
 
 impl ResolutionIdSource for SteppingIdSource {
-    fn next_id(&self) -> u16 {
-        self.0.fetch_add(1, Ordering::Relaxed)
+    fn next_id(&self) -> Result<u16, ResolverError> {
+        Ok(self.0.fetch_add(1, Ordering::Relaxed))
     }
 
     fn is_unpredictable(&self) -> bool {
@@ -128,25 +131,24 @@ impl ResolutionIdSource for SteppingIdSource {
     }
 }
 
-impl QueryIdSource for &SteppingIdSource {
-    fn next_id(&mut self) -> u16 {
-        // Delegates to the shared atomic so one source can drive the borrowed
-        // `QueryIdSource` interface the wire encoder requires.
-        ResolutionIdSource::next_id(*self)
-    }
+/// Bridges a single already-drawn identifier into the wire encoder's borrowed
+/// [`QueryIdSource`] interface.
+///
+/// The encoder only needs `&mut impl QueryIdSource`, while the draw itself is
+/// fallible and belongs to the resolver. The exchange therefore resolves the ID
+/// first — failing closed on an undrawable source — and hands the encoder this
+/// one-shot carrier, so a query is never built around a guessed value.
+struct IdSourceAdapter {
+    drawn: Option<u16>,
 }
 
-/// Bridges the object-safe [`ResolutionIdSource`] into the wire encoder's
-/// borrowed [`QueryIdSource`] interface.
-///
-/// The wire encoder only needs `&mut impl QueryIdSource`, while the resolver
-/// stores its source behind `Arc<dyn ResolutionIdSource>`; this adapter keeps
-/// both contracts without duplicating either.
-struct IdSourceAdapter<'a>(&'a dyn ResolutionIdSource);
-
-impl QueryIdSource for IdSourceAdapter<'_> {
+impl QueryIdSource for IdSourceAdapter {
     fn next_id(&mut self) -> u16 {
-        self.0.next_id()
+        // Reached only with the ID the exchange already accepted; the encoder
+        // uses it exactly once.
+        self.drawn
+            .take()
+            .expect("the exchange draws exactly one id before encoding")
     }
 }
 
@@ -218,18 +220,22 @@ pub(crate) async fn exchange(
         .check_at(Instant::now(), SideEffectState::NotSent)
         .map_err(control_error)?;
 
-    // Encode one query and retransmit the identical bytes; the ID is generated
-    // once, so a retransmission can never be mistaken for a new question.
-    let mut source = IdSourceAdapter(ids);
+    // Draw the transaction ID first: if the source cannot supply an
+    // unpredictable value, the exchange fails closed before encoding anything.
+    let request_id = ids.next_id()?;
+    // Encode one query and retransmit the identical bytes; the ID is drawn once,
+    // so a retransmission can never be mistaken for a new question.
+    let mut source = IdSourceAdapter {
+        drawn: Some(request_id),
+    };
     let query = build_resolver_query(target_host, family, &mut source)
         .map_err(|_| ResolverError::InvalidHostname)?;
     let qname_wire = question_name(&query).ok_or(ResolverError::MalformedBootstrapResponse)?;
+    debug_assert_eq!(u16::from_be_bytes([query[0], query[1]]), request_id);
     // The owner's own bounds must govern the wire parse, not dns-core's default
     // policy: dns-core clamps the effective TTL it reports, so parsing under its
     // defaults would silently discard a caller's custom floor or ceiling.
     let cname_policy = policy.dns_core_policy()?;
-    let request_id = u16::from_be_bytes([query[0], query[1]]);
-
     let owner = control.owner_cancellation();
     let caller = control.caller_cancellation();
     let owner_cancelled = owner.cancelled();
@@ -341,8 +347,8 @@ mod tests {
     #[test]
     fn stepping_id_source_advances() {
         let source = SteppingIdSource::new();
-        assert_eq!(source.next_id(), 1);
-        assert_eq!(source.next_id(), 2);
-        assert_eq!(source.next_id(), 3);
+        assert_eq!(source.next_id(), Ok(1));
+        assert_eq!(source.next_id(), Ok(2));
+        assert_eq!(source.next_id(), Ok(3));
     }
 }

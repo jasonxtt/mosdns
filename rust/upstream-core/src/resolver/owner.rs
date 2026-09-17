@@ -190,6 +190,30 @@ impl BootstrapResolver {
         Self::with_id_source(target, bootstrap, policy, clock, Arc::new(OsIdSource))
     }
 
+    /// Builds a resolver whose ID source always fails to draw.
+    ///
+    /// Test-only: it proves the exchange surfaces a typed error instead of
+    /// substituting a guessed identifier.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::with_id_source`].
+    #[doc(hidden)]
+    pub fn with_failing_ids_for_tests(
+        target: ResolutionTarget,
+        bootstrap: BootstrapEndpoint,
+        policy: ResolutionPolicy,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, ResolverError> {
+        Self::with_id_source(
+            target,
+            bootstrap,
+            policy,
+            clock,
+            Arc::new(super::bootstrap::FailingIdSource),
+        )
+    }
+
     /// Builds a resolver with deterministic, **predictable** transaction IDs.
     ///
     /// This exists only so tests can pin IDs without touching the exchange. It
@@ -199,6 +223,7 @@ impl BootstrapResolver {
     /// # Errors
     ///
     /// As [`Self::with_id_source`].
+    #[doc(hidden)]
     pub fn with_deterministic_ids_for_tests(
         target: ResolutionTarget,
         bootstrap: BootstrapEndpoint,
@@ -222,7 +247,7 @@ impl BootstrapResolver {
     /// # Errors
     ///
     /// As [`Self::new`].
-    pub fn with_id_source(
+    pub(crate) fn with_id_source(
         target: ResolutionTarget,
         bootstrap: BootstrapEndpoint,
         policy: ResolutionPolicy,

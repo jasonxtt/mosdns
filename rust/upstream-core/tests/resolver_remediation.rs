@@ -677,3 +677,72 @@ fn config_version_and_identity_contracts_still_hold() {
         "192.0.2.7:853".parse::<SocketAddr>().expect("addr")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Final audit: policy expressibility and ID-source honesty
+// ---------------------------------------------------------------------------
+
+/// A policy bound that cannot be expressed to the wire codec must be rejected by
+/// the constructor, not silently truncated and rejected later at resolve time.
+#[test]
+fn a_policy_bound_that_cannot_be_expressed_is_rejected_at_construction() {
+    // TTL bounds are second-granular on the wire. A sub-second floor would be
+    // truncated to zero by `as_secs()`, so it must be refused here.
+    assert_eq!(
+        ResolutionPolicy::new(Duration::from_millis(500), Duration::from_secs(600)),
+        Err(ResolverError::InvalidPolicy),
+        "a sub-second floor cannot be expressed"
+    );
+    assert_eq!(
+        ResolutionPolicy::new(Duration::from_secs(300), Duration::from_millis(60_500)),
+        Err(ResolverError::InvalidPolicy),
+        "a sub-second ceiling cannot be expressed"
+    );
+
+    // A ceiling beyond the wire's 32-bit second range cannot be expressed either.
+    let too_large = Duration::from_secs(u64::from(u32::MAX) + 1);
+    assert_eq!(
+        ResolutionPolicy::new(Duration::from_secs(300), too_large),
+        Err(ResolverError::InvalidPolicy),
+        "a ceiling above u32 seconds cannot be expressed"
+    );
+
+    // The largest expressible bound is still accepted, so the check is a limit
+    // rather than a blanket rejection.
+    assert!(
+        ResolutionPolicy::new(
+            Duration::from_secs(1),
+            Duration::from_secs(u64::from(u32::MAX))
+        )
+        .is_ok()
+    );
+    // And every accepted policy can actually be converted to a codec policy.
+    let policy = ResolutionPolicy::default();
+    assert!(policy.dns_core_policy().is_ok());
+}
+
+/// The production ID source must never turn a failure into pseudo-randomness: a
+/// source that cannot draw must surface a typed error instead of a guessed ID.
+#[test]
+fn a_failing_id_source_is_a_typed_error_not_a_guessed_id() {
+    block_on(async {
+        let clock = ManualClock::new();
+        let resolver = BootstrapResolver::with_failing_ids_for_tests(
+            ResolutionTarget::new("bootstrap.example.org", 53, AddressFamily::Ipv4)
+                .expect("target"),
+            BootstrapEndpoint::new("127.0.0.1", 53).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            clock,
+        )
+        .expect("resolver");
+
+        // The exchange cannot obtain an unpredictable ID, so it must fail with
+        // the typed error and publish nothing, rather than sending a query whose
+        // transaction ID was derived from a clock reading.
+        let error = bounded(resolver.resolve(context(5)))
+            .await
+            .expect_err("no drawable id");
+        assert_eq!(error, ResolverError::UnpredictableIdsUnavailable);
+        assert_eq!(resolver.state().published(), None);
+    });
+}
