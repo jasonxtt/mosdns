@@ -205,3 +205,26 @@ Added conversation-scoped Herdr executor and ChatGPT reviewer selection, fail-cl
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Close secure upstream foundation
+
+**Date**: 2026-09-17
+**Task**: Close secure upstream foundation
+**Branch**: `rust`
+
+### Summary
+
+Completed and root-reviewed Rust secure upstream foundation Slices 0-4. rust0916 returned PASS / Slice4 CLOSED with P0=0/P1=0 on cb89974; Linux Actions 35181231182 passed. Recorded closure, preserved MSRV and evidence limitations, and archived the task after explicit user authorization. No later slice or production wiring started.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c84d268` | (see git log) |
+| `cb89974` | (see git log) |
+| `ba2f545` | (see git log) |
+
+### Status
+
+[OK] **Completed**
