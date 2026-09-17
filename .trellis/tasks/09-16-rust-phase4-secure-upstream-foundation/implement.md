@@ -524,13 +524,20 @@ structured-shutdown evidence.
   non-REFUSED `RST_STREAM(CANCEL)` case. The executor tests now include a
   parked teardown/liveness barrier and a candidate-before-commit ordering test.
 
-Scoped remediation evidence is complete locally but awaits a new root review;
-Slice3 remains open and Slice4 is not authorized. The remediation stays within
-DoH HTTP/2 ownership/tests and the corresponding quality/task evidence only.
+The scoped remediation was independently root-reviewed against GitHub commit
+`d3566bf105008e23c315536d6560b00d55250e55`. The final gate returned
+`PASS / Slice3 CLOSED` with P0=0 and P1=0. The review confirmed that the h2
+teardown barrier precedes the only final commit, owner/caller/deadline controls
+cannot become late success during teardown, and the structured h2 failure
+evidence proves exactly one application stream and one TCP connection. The
+remediation stays within DoH HTTP/2 ownership/tests and the corresponding
+quality/task evidence only.
 
-The final full-workspace/release and Linux evidence checks remain later Slice4
-work. This record is not a production, Linux, host E2E, throughput, or
-deployment claim.
+This closes Slice3 only; Slice4 is not automatically authorized. The final
+full-workspace/release and Linux evidence checks remain later Slice4 work.
+
+This record is not a production, Linux, host E2E, throughput, or deployment
+claim.
 
 ## Slice4 — final quality and isolated Linux evidence
 
