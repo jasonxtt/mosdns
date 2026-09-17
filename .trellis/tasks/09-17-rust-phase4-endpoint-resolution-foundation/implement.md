@@ -327,3 +327,77 @@ outgoing CNAME edge are each caught by the new tests.
   statement about DNS semantics.
 - Still no socket, retransmission, cache, refresh, deadline, or lifecycle
   behavior; that remains Slice 1+.
+
+## Slice 0 remediation round 2 — reviewer FAIL on bd869b5 (2026-09-17)
+
+Two in-scope P1 findings; fixes confined to `rust/dns-core/**`. RED public
+regressions were added first for each.
+
+### P1-1 — TC is terminal immediately after correlation
+
+TC was still evaluated after the answer/authority/additional walk and after the
+extended RCODE was read. A correlated TC=1 packet therefore reported
+`Rcode(2)` (header SERVFAIL) or `Rcode(16)` (OPT BADVERS) instead of
+`Truncated`, and a TC=1 packet whose declared RR framing was actually cut
+reported `Malformed`.
+
+Fix: QR, opcode, ID and exact question correlation are unchanged and still run
+first; TC is now checked immediately after the question check, before any record
+is walked and before any extended RCODE is read. A correlated truncated response
+is terminal, so a cut or hostile body can never be reported as `Malformed` or a
+negative answer. Wrong-question precedence is preserved.
+
+New tests: `truncated_wins_over_rcode_for_a_correlated_response` (TC=1 +
+matching question + header SERVFAIL, + OPT BADVERS, + plain NOERROR all return
+`Truncated`), `truncated_is_reported_before_a_cut_record_walk` (a TC=1 packet
+declaring nine answers and holding one returns `Truncated`, while the same body
+with TC clear still returns `Malformed`), and
+`wrong_question_precedence_is_preserved_for_truncated_packets` (wrong question,
+wrong ID and QR-clear still win over TC).
+
+### P1-2 — an OPT record's owner must be the DNS root
+
+The additional-section branch accepted any `TYPE 41` record as an OPT and read
+its TTL upper byte as the extended RCODE, so a non-root `TYPE 41` record could
+either be accepted or inject an extended RCODE.
+
+Fix: the branch now requires `is_root_name(&owner)` — the expanded owner must be
+the single root label `[0]`, which is the only root encoding `read_name` returns.
+A non-root `TYPE 41` record is `Malformed` and never contributes an extended
+RCODE. The existing checks are retained: an OPT in the authority section is
+`Malformed`, a duplicate OPT is `Malformed`, and an unparsable OPT RDLENGTH
+still fails the framing walk.
+
+New test: `rejects_an_opt_record_whose_owner_is_not_the_root` — a multi-label
+non-root owner with extended RCODE 0 and with extended RCODE 1 (BADVERS) both
+return `Malformed`, a single-label non-root owner returns `Malformed`, and a
+root owner is still accepted with its extended RCODE still applying
+(`Rcode(16)` for extended RCODE 1).
+
+### Checks (branch `rust`, `/Users/tom/github/mosdns-rust`)
+
+| Command | Result |
+| --- | --- |
+| `cargo test … -p mosdns-dns-core --all-targets --all-features --locked` | 53 + 1 + 2 + 42 + 1 passed, 0 failed |
+| `cargo test … --workspace --all-targets --all-features --locked` | 25 suites ok, no failures |
+| `cargo fmt --manifest-path rust/Cargo.toml --all --check` | clean |
+| `cargo clippy … -p mosdns-dns-core --all-targets --all-features --locked -- -D warnings` | clean |
+| `cargo clippy … --workspace --all-targets --all-features --locked -- -D warnings` | clean |
+| `cargo tree … -p mosdns-dns-core -e normal --locked` | still only `mosdns-dns-core` |
+| `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | passed |
+| `git diff --check` | clean |
+
+Mutation check (backup under `rust/target/`, restored on EXIT/INT/TERM): moving
+the TC check back after the answer walk, moving it back after the RCODE check,
+removing the root-owner requirement, and tolerating a non-root OPT are each
+caught by the new tests.
+
+### Limitations carried forward
+
+- Previously recorded limitations are unchanged: the CNAME state budget fails
+  closed with `InvalidCnameChain` on a crafted answer section, a name owned by
+  several CNAME records resolves by message order, and there is still no socket,
+  retransmission, cache, refresh, deadline, or lifecycle behavior (Slice 1+).
+- A TC=1 response is never inspected for records, so its body framing is not
+  validated; that is deliberate, since a truncated body is by definition
+  incomplete and this codec performs no TCP retry.

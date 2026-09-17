@@ -1412,3 +1412,201 @@ fn rejects_a_malformed_opt_record() {
         Err(ResolverWireError::Malformed)
     );
 }
+
+// ---------------------------------------------------------------------------
+// P1-1 (round 2): TC is terminal immediately after correlation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn truncated_wins_over_rcode_for_a_correlated_response() {
+    let qname = qname_wire();
+
+    // TC set with a matching question and a header SERVFAIL must be reported as
+    // truncation: the partial body is not a usable negative answer.
+    let servfail = correlated(
+        0x70,
+        FLAG_TC | 2,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        parse(&servfail, AddressFamily::Ipv4, &qname, 0x70),
+        Err(ResolverWireError::Truncated)
+    );
+
+    // Same for an extended (BADVERS) RCODE carried in an OPT record.
+    let badvers = correlated(
+        0x70,
+        FLAG_TC,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[opt(1200, 1, 0)],
+    );
+    assert_eq!(
+        parse(&badvers, AddressFamily::Ipv4, &qname, 0x70),
+        Err(ResolverWireError::Truncated)
+    );
+
+    // And for a plain matching NOERROR packet that is nevertheless truncated.
+    let plain = correlated(
+        0x70,
+        FLAG_TC,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        parse(&plain, AddressFamily::Ipv4, &qname, 0x70),
+        Err(ResolverWireError::Truncated)
+    );
+}
+
+#[test]
+fn truncated_is_reported_before_a_cut_record_walk() {
+    let qname = qname_wire();
+    // A TC=1 response whose declared answer count runs past the packet would be
+    // Malformed if the body were walked. Because TC is terminal right after
+    // correlation, the truncation is reported instead.
+    let mut packet = correlated(
+        0x71,
+        FLAG_TC,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[],
+    );
+    packet[6..8].copy_from_slice(&9u16.to_be_bytes()); // claim nine answers
+    assert_eq!(
+        parse(&packet, AddressFamily::Ipv4, &qname, 0x71),
+        Err(ResolverWireError::Truncated)
+    );
+
+    // With TC clear the same malformed body is still Malformed.
+    let mut untruncated = correlated(
+        0x72,
+        0,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[],
+    );
+    untruncated[6..8].copy_from_slice(&9u16.to_be_bytes());
+    assert_eq!(
+        parse(&untruncated, AddressFamily::Ipv4, &qname, 0x72),
+        Err(ResolverWireError::Malformed)
+    );
+}
+
+#[test]
+fn wrong_question_precedence_is_preserved_for_truncated_packets() {
+    let qname = qname_wire();
+    let other = question(&["other", "example", "org"], TYPE_A);
+
+    let wrong_question = response(0x73, FLAG_QR | FLAG_TC | 2, &other, &[], &[], &[]);
+    assert_eq!(
+        parse(&wrong_question, AddressFamily::Ipv4, &qname, 0x73),
+        Err(ResolverWireError::QuestionMismatch)
+    );
+
+    let wrong_id = response(
+        0x74,
+        FLAG_QR | FLAG_TC,
+        &question(&QNAME, TYPE_A),
+        &[],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        parse(&wrong_id, AddressFamily::Ipv4, &qname, 0x75),
+        Err(ResolverWireError::MismatchedId)
+    );
+
+    let not_a_response = response(0x76, FLAG_TC, &question(&QNAME, TYPE_A), &[], &[], &[]);
+    assert_eq!(
+        parse(&not_a_response, AddressFamily::Ipv4, &qname, 0x76),
+        Err(ResolverWireError::NotAResponse)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P1-2 (round 2): an OPT record's owner must be the DNS root
+// ---------------------------------------------------------------------------
+
+/// An OPT record with a non-root owner name.
+fn opt_with_owner(owner: &[u8], extended_rcode: u8) -> Vec<u8> {
+    let mut wire = owner.to_vec();
+    wire.extend_from_slice(&41u16.to_be_bytes());
+    wire.extend_from_slice(&1200u16.to_be_bytes());
+    wire.extend_from_slice(&[extended_rcode, 0x00, 0x00, 0x00]);
+    wire.extend_from_slice(&0u16.to_be_bytes());
+    wire
+}
+
+#[test]
+fn rejects_an_opt_record_whose_owner_is_not_the_root() {
+    let qname = qname_wire();
+    let answer = rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]));
+
+    // A TYPE41 record with a non-root owner is not an OPT record.
+    let named = correlated(
+        0x80,
+        0,
+        std::slice::from_ref(&answer),
+        &[],
+        &[opt_with_owner(&name(&["opt", "example", "org"]), 0)],
+    );
+    assert_eq!(
+        parse(&named, AddressFamily::Ipv4, &qname, 0x80),
+        Err(ResolverWireError::Malformed)
+    );
+
+    // The same record must not be read for an extended RCODE either.
+    let named_badvers = correlated(
+        0x80,
+        0,
+        std::slice::from_ref(&answer),
+        &[],
+        &[opt_with_owner(&name(&["opt", "example", "org"]), 1)],
+    );
+    assert_eq!(
+        parse(&named_badvers, AddressFamily::Ipv4, &qname, 0x80),
+        Err(ResolverWireError::Malformed),
+        "a non-root owner must not contribute an extended RCODE"
+    );
+
+    // A one-label non-root owner is the same violation.
+    let partial = correlated(
+        0x80,
+        0,
+        std::slice::from_ref(&answer),
+        &[],
+        &[opt_with_owner(&[0x03, b'o', b'p', b't', 0x00], 0)],
+    );
+    assert_eq!(
+        parse(&partial, AddressFamily::Ipv4, &qname, 0x80),
+        Err(ResolverWireError::Malformed)
+    );
+
+    // A root owner is still accepted, and its extended RCODE still applies.
+    let root = correlated(
+        0x81,
+        0,
+        std::slice::from_ref(&answer),
+        &[],
+        &[opt_with_owner(&[0x00], 0)],
+    );
+    assert_eq!(
+        expect_ok(&root, AddressFamily::Ipv4, &qname, 0x81).address,
+        IpAddr::from([192, 0, 2, 1])
+    );
+    let root_badvers = correlated(
+        0x81,
+        0,
+        std::slice::from_ref(&answer),
+        &[],
+        &[opt_with_owner(&[0x00], 1)],
+    );
+    assert_eq!(
+        parse(&root_badvers, AddressFamily::Ipv4, &qname, 0x81),
+        Err(ResolverWireError::Rcode(16))
+    );
+}
