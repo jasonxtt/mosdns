@@ -535,3 +535,125 @@ contract is unchanged.
 - Connection pooling/reuse/pipeline, socket policy/proxy, QUIC/HTTP3, server
   listeners, YAML/host/API/WebUI wiring, and Phase 6 retirement remain out of
   scope and untouched.
+
+## Controller audit remediation (2026-09-17)
+
+The controller's independent audit of `27d9f37` found eight contract gaps.
+All eight were addressed with RED tests first. Commit `e81dec8`.
+
+### P1 — single-flight generations carry a token
+
+`SingleFlight` now assigns a monotonic `GenerationId` to every generation, and a
+waiter attaches to the specific token it observed. A waiter whose own generation
+finished can no longer race a new leader's `try_lead`, see `running` with no
+result recorded yet, and adopt the newer generation as its own: it returns
+`AlreadyResolving` instead. `complete` also ignores a superseded token, so a
+stale leader cannot overwrite a newer generation's state.
+
+Tests: `a_waiter_attached_to_a_finished_generation_cannot_adopt_the_next_one`,
+`a_waiter_attached_to_a_finished_generation_receives_its_result`,
+`a_superseded_leader_cannot_complete_a_newer_generation` (crate-internal, where
+the token interleaving is directly constructible), plus
+`a_waiter_never_attaches_to_a_later_generation` and
+`concurrent_waiters_observe_only_their_own_generation` at the public boundary.
+
+### P2 — publication goes through the lifecycle linearization gate
+
+Both the DNS-result path and the numeric bypass now call the existing
+`Lifecycle::commit_final_response` under the same lock as registration and
+`begin_close`. Owner close, caller cancellation, and the caller's original
+absolute deadline are evaluated there, so a close that wins the gate prevents
+publication and a committed publication cannot be reversed by a later close.
+Test: `owner_close_wins_over_publication`.
+
+### P3 — the numeric bypass honors the terminal controls
+
+The numeric path previously published without checking the caller's budget or
+close. It now applies the same controls before publishing and through the same
+gate. Tests: `numeric_bypass_honors_an_expired_deadline`,
+`numeric_bypass_honors_caller_cancellation`, `numeric_bypass_honors_owner_close`.
+
+### P4 — the owner's TTL policy governs the wire parse
+
+The exchange hard-coded `dns_core::CnameChainPolicy::default()`, so `dns-core`'s
+own clamp silently overrode a custom `ResolutionPolicy` floor or ceiling.
+`ResolutionPolicy::dns_core_policy()` now derives an equivalent codec policy
+(same min/max; the codec's CNAME link bound keeps its reviewed default, since it
+is not a resolver policy knob), and the exchange parses under it.
+Tests: `a_custom_policy_bound_reaches_the_wire_parse` and
+`a_custom_policy_ceiling_reaches_the_wire_parse`, each configured so the
+resolver's bound differs from the `dns-core` default and only the resolver's own
+bound can produce the asserted TTL.
+
+### P5 — destination family is validated
+
+`ResolvedDestination::new` returns the typed `FamilyMismatch` when the address is
+not in the declared family, instead of publishing a mismatched pair. The
+infallible `new_literal` keeps a debug assertion. Test:
+`a_destination_cannot_disagree_with_its_family`.
+
+### P6 — no wall-clock sleeps in the resolver tests
+
+`resolver_slice3.rs` had `sleep(100ms)`, `sleep(10ms)`, and a wall-clock
+`elapsed()` assertion. All three are gone: the "no traffic" assertions now drop
+the resolver and then read the fixture's own counter, the abort-recovery test
+uses a cooperative `yield_now` spin, and the short-deadline test asserts the
+typed outcome plus no publication rather than an elapsed bound. The blocking
+`std::sync::Barrier` in the remediation file was replaced by `tokio::sync::
+Barrier`, because blocking a `current_thread` runtime also deadlocked it.
+Every await in the resolver tests is now wrapped in a file-wide bounded helper.
+
+Two blocking-fixture `elapsed()` bounds remain, in `resolver_slice5.rs` and
+`resolver_remediation.rs`. They bound only a mock server's own drain loop, the
+same pattern as the reviewed Slice 1/2 fixtures; they order nothing in the
+tests, and the client side of every exchange is deadline-bounded.
+
+### P7 — unpredictable IDs by default
+
+`OsIdSource` draws from the operating system through `getrandom` and refuses to
+construct when no entropy is available (`UnpredictableIdsUnavailable`) rather
+than degrading to a predictable sequence. `getrandom 0.4.3` (MIT OR
+Apache-2.0, MSRV 1.85) becomes a direct dependency; the lockfile change is a
+single line adding it to `mosdns-upstream-core`'s dependency list, because it
+was already resolved transitively via uuid/moka. The deterministic stepping
+source is reachable only through the explicitly named
+`with_deterministic_ids_for_tests`, and `uses_unpredictable_ids()` exposes which
+path was taken without revealing any ID. Tests:
+`the_default_construction_uses_unpredictable_ids` (crate-internal),
+`the_production_default_id_source_is_not_deterministic`, and
+`an_injected_deterministic_source_is_explicit_and_test_only`.
+
+### P8 — exchange correlation coverage
+
+Added focused tests for a wrong-ID datagram being ignored while the real answer
+still wins, a correlated terminal rcode being typed, and the retransmission
+being byte-identical to the original query. No real transport was weakened.
+
+### Honest limitations
+
+- No mutation sweep was completed for this remediation round. An earlier
+  in-place sweep destroyed the working source when it was interrupted mid-
+  restore, and was recovered from `e81dec8`; the user then directed that
+  expensive mutation sweeps not be re-run, so these eight fixes are evidenced by
+  the tests above rather than by mutation-kill results. An isolated-worktree
+  sweep was also interrupted before producing results.
+- The P3 early control check is redundant with the lifecycle gate for the
+  numeric path; removing both is caught by the tests, removing only the early
+  check is not. It is kept as defense in depth.
+- Rust 1.85 is still not installed and was not run; MSRV evidence remains
+  indirect (every resolved package declares at most 1.85, none above).
+- No Linux evidence: this round ran on macOS only. The task's Linux loopback
+  gate remains outstanding before final closure.
+- Native dual-stack resolution / Happy Eyeballs is still the reviewed future
+  follow-up; `AddressFamily` remains single-family.
+
+### Checks (branch `rust`, `/Users/tom/github/mosdns-rust`, commit e81dec8)
+
+| Command | Result |
+| --- | --- |
+| resolver tests | slice1 17, slice2 7, slice3 10, slice4 7, slice5 6, remediation 15 — all passed |
+| `cargo test … --workspace --all-targets --all-features --locked` | 31 suites ok, 0 failures |
+| `cargo fmt --manifest-path rust/Cargo.toml --all --check` | clean |
+| `cargo clippy … --workspace --all-targets --all-features --locked -- -D warnings` | clean |
+| `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | passed |
+| `git diff --check` | clean |
