@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use tokio::sync::Notify;
 
-use super::bootstrap::{ResolutionIdSource, SteppingIdSource};
+use super::bootstrap::{OsIdSource, ResolutionIdSource, SteppingIdSource};
 use super::{
     BootstrapEndpoint, Clock, PublishedTarget, ResolutionPolicy, ResolutionTarget,
     ResolvedDestination, ResolverError, ResolverState,
@@ -28,12 +28,21 @@ use crate::{
     LifecycleState, Transport, TransportCancellation, Upstream,
 };
 
+/// A monotonic identity for one refresh generation.
+///
+/// Waiters attach to a specific token, so a waiter from generation *N* can never
+/// observe generation *N+1*'s in-progress state or its result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GenerationId(u64);
+
 /// The lifecycle of the single refresh generation the owner may run.
 #[derive(Debug, Default)]
 struct Generation {
-    /// Whether one leader is currently running a generation.
+    /// The identity of the current or most recent generation.
+    id: u64,
+    /// Whether one leader is currently running the generation `id`.
     running: bool,
-    /// The complete result the leader committed, if any.
+    /// The complete result the generation `id` committed, if any.
     result: Option<Result<PublishedTarget, ResolverError>>,
 }
 
@@ -62,53 +71,75 @@ impl SingleFlight {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Attempts to become the leader of one generation.
+    /// Attempts to become the leader of a fresh generation.
     ///
-    /// Returns `true` when this caller owns the generation and must run it, and
-    /// `false` when another caller is already leading, in which case the caller
-    /// becomes a bounded waiter.
-    fn try_lead(&self) -> bool {
+    /// Returns the new generation's token when this caller owns it, or `None`
+    /// when another caller is already leading, in which case the caller becomes
+    /// a bounded waiter attached to that in-flight generation.
+    fn try_lead(&self) -> Option<GenerationId> {
         let mut generation = self.lock();
         if generation.running {
-            return false;
+            return None;
         }
+        generation.id = generation.id.wrapping_add(1);
         generation.running = true;
         generation.result = None;
-        true
+        Some(GenerationId(generation.id))
+    }
+
+    /// The identity of the generation a new waiter must attach to, if one is
+    /// currently running or has an unread result.
+    fn current_generation(&self) -> Option<GenerationId> {
+        let generation = self.lock();
+        if generation.running || generation.result.is_some() {
+            return Some(GenerationId(generation.id));
+        }
+        None
     }
 
     /// The outcome a dropped leader publishes, so waiters can never deadlock on
     /// a generation whose leader future was abandoned or aborted.
     const ABANDONED: Result<PublishedTarget, ResolverError> = Err(ResolverError::Cancelled);
 
-    /// Commits the leader's outcome and wakes every waiter.
-    fn complete(&self, result: Result<PublishedTarget, ResolverError>) {
+    /// Commits the leader's outcome for `token` and wakes every waiter.
+    ///
+    /// A completion for a superseded generation is ignored, so a stale leader
+    /// can never overwrite a newer generation's state.
+    fn complete(&self, token: GenerationId, result: Result<PublishedTarget, ResolverError>) {
         let mut generation = self.lock();
+        if GenerationId(generation.id) != token || !generation.running {
+            return;
+        }
         generation.running = false;
         generation.result = Some(result);
         drop(generation);
         self.completed.notify_waiters();
     }
 
-    /// Awaits the current generation and returns its committed outcome.
+    /// Awaits the specific generation `token` and returns its committed outcome.
     ///
-    /// The waiter observes only the generation it attached to: the result slot
-    /// is read while the lock is held and the generation is cleared on
-    /// completion, so a later generation can never be mistaken for this one.
-    async fn wait(&self) -> Result<PublishedTarget, ResolverError> {
+    /// The waiter only ever reads the state of the generation it attached to. If
+    /// that generation has been superseded, this waiter does not silently adopt
+    /// the newer one: it reports [`ResolverError::AlreadyResolving`], which is
+    /// what makes a waiter from a finished generation unable to observe a later
+    /// leader's half-built state.
+    async fn wait(&self, token: GenerationId) -> Result<PublishedTarget, ResolverError> {
         loop {
             let notified = self.completed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
             {
                 let generation = self.lock();
-                if !generation.running {
-                    if let Some(result) = &generation.result {
-                        return result.clone();
-                    }
-                    // The generation finished and was already consumed by an
-                    // earlier waiter; this caller may lead a fresh one.
+                if GenerationId(generation.id) != token {
+                    // A newer generation owns the slot; this waiter's own
+                    // generation is gone and must not be confused with it.
                     return Err(ResolverError::AlreadyResolving);
+                }
+                if !generation.running {
+                    return match &generation.result {
+                        Some(result) => result.clone(),
+                        None => Err(ResolverError::AlreadyResolving),
+                    };
                 }
             }
             notified.await;
@@ -133,13 +164,42 @@ pub struct BootstrapResolver {
 }
 
 impl BootstrapResolver {
-    /// Builds a resolver for one validated tuple.
+    /// Builds a production resolver for one validated tuple.
+    ///
+    /// The transaction IDs come from [`OsIdSource`], the unpredictable
+    /// operating-system source. A DNS transaction ID is part of the
+    /// anti-spoofing correlation set, so this path never falls back to a
+    /// predictable sequence; on a host with no usable entropy source it returns
+    /// [`ResolverError::UnpredictableIdsUnavailable`] instead.
     ///
     /// # Errors
     ///
     /// Returns [`ResolverError::BootstrapFamilyMismatch`] when the numeric
-    /// bootstrap peer's family cannot serve the target's selected family.
+    /// bootstrap peer's family cannot serve the target's selected family, and
+    /// [`ResolverError::UnpredictableIdsUnavailable`] when no unpredictable ID
+    /// source is available.
     pub fn new(
+        target: ResolutionTarget,
+        bootstrap: BootstrapEndpoint,
+        policy: ResolutionPolicy,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, ResolverError> {
+        if !OsIdSource.is_available() {
+            return Err(ResolverError::UnpredictableIdsUnavailable);
+        }
+        Self::with_id_source(target, bootstrap, policy, clock, Arc::new(OsIdSource))
+    }
+
+    /// Builds a resolver with deterministic, **predictable** transaction IDs.
+    ///
+    /// This exists only so tests can pin IDs without touching the exchange. It
+    /// is not a production path: it must never be reachable from the default
+    /// construction, which is why it is named for its one legitimate caller.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::with_id_source`].
+    pub fn with_deterministic_ids_for_tests(
         target: ResolutionTarget,
         bootstrap: BootstrapEndpoint,
         policy: ResolutionPolicy,
@@ -209,6 +269,15 @@ impl BootstrapResolver {
         Arc::clone(&self.state)
     }
 
+    /// Whether this resolver draws unpredictable transaction IDs.
+    ///
+    /// An observability hook proving the default production path did not select
+    /// the deterministic test source; it exposes no ID values.
+    #[must_use]
+    pub fn uses_unpredictable_ids(&self) -> bool {
+        self.ids.is_unpredictable()
+    }
+
     /// The owner lifecycle state.
     #[must_use]
     pub fn lifecycle_state(&self) -> LifecycleState {
@@ -264,9 +333,19 @@ impl BootstrapResolver {
             .ensure_open()
             .map_err(|_| ResolverError::Closed)?;
 
+        // Every path that can publish first applies the same terminal controls:
+        // owner shutdown, caller cancellation, then the caller's one absolute
+        // deadline. A numeric target bypasses DNS, but not the caller's budget.
+        self.check_control(&context, crate::SideEffectState::NotSent)?;
+
         // A numeric target never touches the network.
         if let Some(address) = self.target.numeric_address() {
             let published = super::resolve_numeric(address)?;
+            // Publishing is a success, so it goes through the same lifecycle
+            // linearization gate as a DNS result: a close that wins the gate
+            // prevents publication, and a publication that wins cannot be
+            // reversed by a later close.
+            self.commit_or_closed(&context)?;
             self.state.publish(published.clone());
             return Ok(published);
         }
@@ -275,29 +354,75 @@ impl BootstrapResolver {
         if let Some(fresh) = self.state.serve_fresh(now) {
             return Ok(fresh);
         }
-        self.check_control(&context, crate::SideEffectState::NotSent)?;
 
-        if self.flight.try_lead() {
-            // Leader: run one generation, then publish its committed outcome.
-            // The guard completes the generation even if this future is dropped.
-            let guard = LeaderGuard {
-                flight: &self.flight,
-                completed: false,
-            };
-            let outcome = self.run_leader(&context).await;
-            if let Ok(published) = &outcome {
-                self.state.publish(published.clone());
-            } else if let Err(error) = &outcome {
-                self.state.record_refresh_failure(error.clone());
+        match self.flight.try_lead() {
+            Some(token) => {
+                // Leader: run one generation, then publish its committed outcome.
+                // The guard completes the generation even if this future is
+                // dropped, so waiters can never deadlock on an abandoned leader.
+                let guard = LeaderGuard {
+                    flight: &self.flight,
+                    token,
+                    completed: false,
+                };
+                let outcome = self.run_leader(&context).await;
+                // Publication is a success and goes through the same lifecycle
+                // linearization gate as a numeric publish: a close that wins the
+                // gate turns the completed result into `Closed` instead of
+                // publishing, so no value can be committed after close wins.
+                let outcome = match outcome {
+                    Ok(published) => match self.commit_or_closed(&context) {
+                        Ok(()) => {
+                            self.state.publish(published.clone());
+                            Ok(published)
+                        }
+                        Err(error) => {
+                            self.state.record_refresh_failure(error.clone());
+                            Err(error)
+                        }
+                    },
+                    Err(error) => {
+                        self.state.record_refresh_failure(error.clone());
+                        Err(error)
+                    }
+                };
+                guard.complete(outcome.clone());
+                outcome
             }
-            guard.complete(outcome.clone());
-            outcome
-        } else {
-            // Waiter: attach to the in-flight generation and observe this
-            // caller's own cancellation, owner shutdown, and deadline while
-            // waiting, so a stalled leader cannot pin a waiter forever.
-            self.wait_for_generation(&context).await
+            None => {
+                // Waiter: attach to the specific in-flight generation and
+                // observe this caller's own cancellation, owner shutdown, and
+                // deadline while waiting, so a stalled leader cannot pin a
+                // waiter forever and a superseded generation is never adopted.
+                match self.flight.current_generation() {
+                    Some(token) => self.wait_for_generation(&context, token).await,
+                    // The generation finished between the two lock acquisitions;
+                    // this caller may simply lead its own.
+                    None => Err(ResolverError::AlreadyResolving),
+                }
+            }
         }
+    }
+
+    /// Completes the lifecycle linearization gate for a publication.
+    ///
+    /// Owner close, caller cancellation, and the caller's original absolute
+    /// deadline are evaluated under the same lifecycle lock as registration and
+    /// `begin_close`, so a close that wins the gate always prevents the
+    /// publication and a committed publication can never be reversed by a later
+    /// close.
+    fn commit_or_closed(&self, context: &ExchangeContext) -> Result<(), ResolverError> {
+        self.lifecycle
+            .commit_final_response(
+                &context.cancellation(),
+                context.deadline(),
+                crate::SideEffectState::Sent,
+            )
+            .map_err(|error| match error {
+                crate::UpstreamError::Closed(_) => ResolverError::Closed,
+                crate::UpstreamError::Cancelled(_) => ResolverError::Cancelled,
+                _ => ResolverError::BootstrapTimeout,
+            })
     }
 
     /// Waits on the current generation while independently honoring this
@@ -305,6 +430,7 @@ impl BootstrapResolver {
     async fn wait_for_generation(
         &self,
         context: &ExchangeContext,
+        token: GenerationId,
     ) -> Result<PublishedTarget, ResolverError> {
         let caller_token = context.cancellation();
         let owner = self.cancellation.cancelled();
@@ -326,7 +452,7 @@ impl BootstrapResolver {
             () = &mut owner => Err(ResolverError::Closed),
             () = &mut caller => Err(ResolverError::Cancelled),
             () = &mut timer => Err(ResolverError::BootstrapTimeout),
-            result = self.flight.wait() => result,
+            result = self.flight.wait(token) => result,
         }
     }
 
@@ -365,14 +491,15 @@ impl BootstrapResolver {
             self.target.host(),
             self.target.family(),
             self.bootstrap,
-            self.policy,
+            &self.policy,
             &control,
             self.ids.as_ref(),
         )
         .await?;
 
-        // Final check immediately before publication: no post-terminal publish,
-        // and owner close wins.
+        // Final control check before the completed result is handed back: no
+        // post-terminal result, and owner close wins. The publication itself
+        // goes through the lifecycle gate in `resolve`.
         self.check_control(context, crate::SideEffectState::Sent)?;
 
         let ttl = self.policy.clamp_ttl_secs(answer.ttl_secs);
@@ -396,6 +523,7 @@ impl BootstrapResolver {
 /// one.
 struct LeaderGuard<'a> {
     flight: &'a SingleFlight,
+    token: GenerationId,
     completed: bool,
 }
 
@@ -403,14 +531,14 @@ impl<'a> LeaderGuard<'a> {
     /// Commits this generation exactly once and wakes the waiters.
     fn complete(mut self, result: Result<PublishedTarget, ResolverError>) {
         self.completed = true;
-        self.flight.complete(result);
+        self.flight.complete(self.token, result);
     }
 }
 
 impl Drop for LeaderGuard<'_> {
     fn drop(&mut self) {
         if !self.completed {
-            self.flight.complete(SingleFlight::ABANDONED);
+            self.flight.complete(self.token, SingleFlight::ABANDONED);
         }
     }
 }
@@ -512,7 +640,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use super::{BootstrapResolver, ResolverComposition};
+    use super::{BootstrapResolver, ResolverComposition, SingleFlight};
     use crate::resolver::{
         AddressFamily, BootstrapEndpoint, Clock, ConfigVersion, ResolutionPolicy, ResolutionTarget,
         ResolverError,
@@ -531,6 +659,16 @@ mod tests {
         BootstrapResolver::new(
             ResolutionTarget::new(host, 853, AddressFamily::Ipv4).expect("target"),
             BootstrapEndpoint::new("127.0.0.1", 53).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            Arc::new(FixedClock(Instant::now())),
+        )
+        .expect("resolver")
+    }
+
+    fn resolver_under_test() -> BootstrapResolver {
+        BootstrapResolver::with_deterministic_ids_for_tests(
+            ResolutionTarget::new("bootstrap.example.org", 53, AddressFamily::Ipv4).expect("t"),
+            BootstrapEndpoint::new("127.0.0.1", 53).expect("b"),
             ResolutionPolicy::default(),
             Arc::new(FixedClock(Instant::now())),
         )
@@ -581,6 +719,90 @@ mod tests {
         .err()
         .expect("family mismatch");
         assert_eq!(error, ResolverError::BootstrapFamilyMismatch);
+    }
+
+    /// A waiter that attached to generation N must never observe generation N+1.
+    ///
+    /// This is the exact interleaving the audit found: a waiter whose own
+    /// generation already finished can race a new leader's `try_lead`, see
+    /// `running` with no result recorded yet, and adopt the newer generation as
+    /// if it were its own. The token makes that impossible.
+    #[tokio::test]
+    async fn a_waiter_attached_to_a_finished_generation_cannot_adopt_the_next_one() {
+        let flight = SingleFlight::new();
+
+        // Generation 1 runs and then fails, so its result is recorded.
+        let first = flight.try_lead().expect("leader of generation 1");
+        flight.complete(first, Err(ResolverError::BootstrapTimeout));
+
+        // A new leader takes generation 2 and is still running: `running` is
+        // true and no result has been recorded. This is exactly the state a
+        // token-less waiter would mistake for its own generation.
+        let second = flight.try_lead().expect("leader of generation 2");
+        assert_ne!(first, second, "generation 2 has its own token");
+
+        // The stale generation-1 waiter must not adopt generation 2's live,
+        // result-less state; it reports that its own generation is gone.
+        assert_eq!(
+            flight.wait(first).await,
+            Err(ResolverError::AlreadyResolving),
+            "a superseded generation is never adopted by its old waiter"
+        );
+
+        // The live token still observes its own committed result.
+        let target = super::super::ResolutionTarget::new("192.0.2.1", 853, AddressFamily::Ipv4)
+            .expect("target");
+        let destination = super::super::ResolvedDestination::new_literal(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
+            AddressFamily::Ipv4,
+        );
+        let published = super::super::PublishedTarget::new(target, destination);
+        flight.complete(second, Ok(published.clone()));
+        assert_eq!(flight.wait(second).await, Ok(published));
+    }
+
+    /// A waiter attached to a generation that finished receives its own result.
+    #[tokio::test]
+    async fn a_waiter_attached_to_a_finished_generation_receives_its_result() {
+        let flight = SingleFlight::new();
+        let token = flight.try_lead().expect("leader");
+        flight.complete(token, Err(ResolverError::BootstrapTimeout));
+        assert_eq!(
+            flight.wait(token).await,
+            Err(ResolverError::BootstrapTimeout),
+            "the waiter sees its own generation's typed failure"
+        );
+    }
+
+    /// A stale leader's completion cannot overwrite a newer generation.
+    #[test]
+    fn a_superseded_leader_cannot_complete_a_newer_generation() {
+        let flight = SingleFlight::new();
+        let first = flight.try_lead().expect("generation 1");
+        flight.complete(first, Err(ResolverError::BootstrapTimeout));
+        let second = flight.try_lead().expect("generation 2");
+
+        // The generation-1 token is stale; completing it must be a no-op.
+        flight.complete(first, Err(ResolverError::Cancelled));
+        let generation = flight.lock();
+        assert!(generation.running, "generation 2 is still running");
+        assert!(generation.result.is_none(), "no stale result was recorded");
+        assert_eq!(generation.id, second.0);
+    }
+
+    /// The production construction path never selects the predictable source.
+    #[test]
+    fn the_default_construction_uses_unpredictable_ids() {
+        let resolver = BootstrapResolver::new(
+            ResolutionTarget::new("bootstrap.example.org", 53, AddressFamily::Ipv4).expect("t"),
+            BootstrapEndpoint::new("127.0.0.1", 53).expect("b"),
+            ResolutionPolicy::default(),
+            Arc::new(FixedClock(Instant::now())),
+        )
+        .expect("production resolver");
+        assert!(resolver.uses_unpredictable_ids());
+        let deterministic = resolver_under_test();
+        assert!(!deterministic.uses_unpredictable_ids());
     }
 
     #[test]

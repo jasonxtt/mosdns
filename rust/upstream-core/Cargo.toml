@@ -11,6 +11,14 @@ crate-type = ["rlib"]
 
 [dependencies]
 mosdns-dns-core = { path = "../dns-core" }
+# Phase 4 resolver endpoint resolution: unpredictable bootstrap DNS transaction
+# IDs. Only `fill` is used, to draw the two ID octets. Default features are
+# disabled because the crate declares no default feature set, and only `std`
+# is enabled for error/std integration. Resolved lock: getrandom 0.4.3
+# (MIT OR Apache-2.0, MSRV 1.85, edition 2024) - at the workspace MSRV, not
+# above it. This was already present in the lock as a transitive dependency of
+# uuid/moka, so making it direct adds no new crate to the resolved graph.
+getrandom = { version = "0.4.3", default-features = false, features = ["std"] }
 # Slice1 production async I/O: `net` for the per-exchange UdpSocket, `time`
 # for the one absolute-deadline sleep, `rt` for runtime-owned I/O/select
 # support, `sync` for the close/drain Notify wake primitive, and `macros` for

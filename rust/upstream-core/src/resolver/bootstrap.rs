@@ -36,13 +36,77 @@ const RECV_BUFFER_BYTES: usize = 65_535;
 pub trait ResolutionIdSource: Send + Sync {
     /// Returns the transaction ID for the next bootstrap query.
     fn next_id(&self) -> u16;
+
+    /// Whether this source's IDs are unpredictable.
+    ///
+    /// The production construction path refuses to use a source that reports
+    /// `false`, so a predictable source can never be selected by accident.
+    fn is_unpredictable(&self) -> bool;
+}
+
+/// The production ID source: unpredictable transaction IDs from the operating
+/// system.
+///
+/// A DNS transaction ID is part of the anti-spoofing correlation set (RFC 5452),
+/// so a bootstrap query must not use a guessable sequence. This is the only
+/// source the default construction path may select.
+#[derive(Debug, Default)]
+pub struct OsIdSource;
+
+impl OsIdSource {
+    /// Whether this host can actually supply unpredictable bytes.
+    ///
+    /// One probe draw is taken here, so a host without entropy fails at
+    /// construction rather than degrading silently for the resolver's lifetime.
+    #[must_use]
+    pub fn is_available(&self) -> bool {
+        let mut bytes = [0u8; 2];
+        getrandom::fill(&mut bytes).is_ok()
+    }
+}
+
+impl ResolutionIdSource for OsIdSource {
+    fn next_id(&self) -> u16 {
+        // `is_available` proved the call succeeds on this host; a later failure
+        // is still handled by drawing a fresh unpredictable fallback rather than
+        // a predictable sequence.
+        let mut bytes = [0u8; 2];
+        if getrandom::fill(&mut bytes).is_ok() {
+            return u16::from_ne_bytes(bytes);
+        }
+        fallback_random_u16()
+    }
+
+    fn is_unpredictable(&self) -> bool {
+        true
+    }
+}
+
+/// A last-resort unpredictable value, used only when the operating-system call
+/// fails mid-flight.
+///
+/// It is seeded from the standard library's per-process `RandomState` hash
+/// entropy plus the current time, so it never degrades into a predictable
+/// sequence. It is deliberately documented as not being a cryptographic
+/// guarantee; [`OsIdSource::is_available`] is what gates the production path.
+fn fallback_random_u16() -> u16 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0),
+    );
+    hasher.finish() as u16
 }
 
 /// A monotonically stepping, non-cryptographic ID source.
 ///
-/// It makes the exchange testable and deterministic. It is **not** a source of
-/// unpredictability; a production caller must supply an unpredictable
-/// implementation through [`super::BootstrapResolver::with_id_source`].
+/// This source is **not** unpredictable and exists only so tests can pin IDs
+/// without touching the exchange. It is reachable only through
+/// [`super::BootstrapResolver::with_deterministic_ids_for_tests`]; the
+/// production construction path never selects it.
 #[derive(Debug, Default)]
 pub struct SteppingIdSource(AtomicU16);
 
@@ -57,6 +121,10 @@ impl SteppingIdSource {
 impl ResolutionIdSource for SteppingIdSource {
     fn next_id(&self) -> u16 {
         self.0.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn is_unpredictable(&self) -> bool {
+        false
     }
 }
 
@@ -120,7 +188,7 @@ pub(crate) async fn exchange(
     target_host: &str,
     family: AddressFamily,
     bootstrap: BootstrapEndpoint,
-    policy: ResolutionPolicy,
+    policy: &ResolutionPolicy,
     control: &ExchangeControl,
     ids: &dyn ResolutionIdSource,
 ) -> Result<BootstrapAnswer, ResolverError> {
@@ -156,6 +224,10 @@ pub(crate) async fn exchange(
     let query = build_resolver_query(target_host, family, &mut source)
         .map_err(|_| ResolverError::InvalidHostname)?;
     let qname_wire = question_name(&query).ok_or(ResolverError::MalformedBootstrapResponse)?;
+    // The owner's own bounds must govern the wire parse, not dns-core's default
+    // policy: dns-core clamps the effective TTL it reports, so parsing under its
+    // defaults would silently discard a caller's custom floor or ceiling.
+    let cname_policy = policy.dns_core_policy()?;
     let request_id = u16::from_be_bytes([query[0], query[1]]);
 
     let owner = control.owner_cancellation();
@@ -233,7 +305,7 @@ pub(crate) async fn exchange(
                     family,
                     &qname_wire,
                     request_id,
-                    &mosdns_dns_core::CnameChainPolicy::default(),
+                    &cname_policy,
                 ) {
                     Ok(selected) => {
                         return Ok(BootstrapAnswer {

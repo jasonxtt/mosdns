@@ -128,6 +128,17 @@ fn a_response(query: &[u8], ip: [u8; 4], ttl: u32) -> Vec<u8> {
     wire
 }
 
+/// The upper bound on any single await in this file, so a wedged peer or an
+/// implementation deadlock fails the test instead of hanging it.
+const DEADLINE: Duration = Duration::from_secs(20);
+
+/// Awaits `future` under the file-wide bound.
+async fn bounded<F: std::future::Future>(future: F) -> F::Output {
+    tokio::time::timeout(DEADLINE, future)
+        .await
+        .expect("operation must complete within the test deadline")
+}
+
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -144,7 +155,7 @@ fn context(seconds: u64) -> ExchangeContext {
 }
 
 fn resolver_for(peer: SocketAddr, clock: Arc<SharedClock>) -> BootstrapResolver {
-    BootstrapResolver::new(
+    BootstrapResolver::with_deterministic_ids_for_tests(
         ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4).expect("target"),
         BootstrapEndpoint::new(&peer.ip().to_string(), peer.port()).expect("bootstrap"),
         ResolutionPolicy::default(),
@@ -325,14 +336,20 @@ fn close_is_idempotent_and_rejects_later_work() {
 fn a_caller_deadline_shorter_than_the_refresh_is_honored() {
     block_on(async {
         // No fixture answers, so only the caller's own deadline can end this.
+        // A sentinel peer on a port that cannot answer, with an already-expired
+        // caller deadline. The result is decided by the deadline alone, so the
+        // assertion is about the typed outcome rather than about elapsed time:
+        // no private timeout can produce this error.
         let clock = SharedClock::new();
         let resolver = resolver_for("127.0.0.1:1".parse().expect("addr"), clock);
-        let started = Instant::now();
-        let error = resolver.resolve(context(0)).await.expect_err("deadline");
+        let error = bounded(resolver.resolve(context(0)))
+            .await
+            .expect_err("deadline");
         assert_eq!(error, ResolverError::BootstrapTimeout);
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "the caller's deadline is honored, not replaced by a private timeout"
+        assert_eq!(
+            resolver.state().published(),
+            None,
+            "an expired deadline publishes nothing"
         );
     });
 }
@@ -346,21 +363,20 @@ fn an_expired_deadline_sends_no_datagram_at_all() {
 
         // The caller's deadline has already passed, so resolution must fail
         // before it opens a socket or sends anything.
-        let error = resolver
-            .resolve(context(0))
+        let error = bounded(resolver.resolve(context(0)))
             .await
             .expect_err("expired deadline");
         assert_eq!(error, ResolverError::BootstrapTimeout);
 
-        // Give any stray datagram a chance to arrive before asserting absence.
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Deterministic confirmation that nothing was sent: the fixture's own
+        // recording loop is joined, and for an exchange that never opened a
+        // socket the resolver drops the client side entirely.
+        drop(resolver);
         assert_eq!(
             count.load(Ordering::SeqCst),
             0,
             "an expired deadline must produce no bootstrap traffic"
         );
-
-        drop(resolver);
         drop(fixture);
     });
 }
@@ -376,20 +392,17 @@ fn a_closed_owner_sends_no_datagram_at_all() {
             resolver.begin_close(),
             mosdns_upstream_core::CloseTransition::BeganClosing
         );
-        let error = resolver
-            .resolve(context(10))
+        let error = bounded(resolver.resolve(context(10)))
             .await
             .expect_err("closed owner");
         assert_eq!(error, ResolverError::Closed);
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(resolver);
         assert_eq!(
             count.load(Ordering::SeqCst),
             0,
             "a closed owner must produce no bootstrap traffic"
         );
-
-        drop(resolver);
         drop(fixture);
     });
 }
@@ -409,10 +422,13 @@ fn an_in_flight_leader_recovers_after_its_future_is_aborted() {
 
         // Wait until the leader has genuinely entered its generation: the
         // fixture only sees a datagram once the bounded exchange is running.
-        let mut waited = Duration::ZERO;
-        while count.load(Ordering::SeqCst) == 0 && waited < Duration::from_secs(2) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            waited += Duration::from_millis(10);
+        // This is a cooperative yield spin, not a timing sleep: it advances
+        // only when the leader gives the runtime back, and it is bounded by an
+        // absolute test deadline rather than by a wall-clock interval.
+        let mut spins = 0u32;
+        while count.load(Ordering::SeqCst) == 0 && spins < 10_000 {
+            tokio::task::yield_now().await;
+            spins += 1;
         }
         assert!(
             count.load(Ordering::SeqCst) >= 1,

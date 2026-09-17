@@ -42,7 +42,7 @@ fn bootstrap(address: SocketAddr) -> BootstrapEndpoint {
 
 fn resolver(peer: SocketAddr) -> Arc<BootstrapResolver> {
     Arc::new(
-        BootstrapResolver::new(
+        BootstrapResolver::with_deterministic_ids_for_tests(
             target(),
             bootstrap(peer),
             ResolutionPolicy::default(),
@@ -187,7 +187,7 @@ fn a_numeric_target_resolves_without_any_bootstrap_traffic() {
     let numeric = ResolutionTarget::new("192.0.2.77", 853, AddressFamily::Ipv4).expect("literal");
     // Port 1 on loopback would fail immediately if a socket were actually used.
     let resolver = Arc::new(
-        BootstrapResolver::new(
+        BootstrapResolver::with_deterministic_ids_for_tests(
             numeric,
             bootstrap("127.0.0.1:1".parse().expect("addr")),
             ResolutionPolicy::default(),
