@@ -1402,11 +1402,12 @@ fn an_absent_response_head_is_never_reported_as_sent() {
 }
 
 #[test]
-fn a_peer_that_cannot_speak_http11_fails_before_any_request() {
+fn a_peer_offering_only_h2_is_not_reinterpreted_as_http11() {
     block_on(async {
-        // The server offers only h2, which this client does not implement. A
-        // conformant peer with no ALPN overlap refuses the handshake, so no
-        // request is ever sent.
+        // The server offers only h2. Slice3 now dispatches that protocol to
+        // the scoped HTTP/2 driver; this deliberately HTTP/1.1-shaped test
+        // peer cannot complete an h2 request, but the client must not retry it
+        // as HTTP/1.1 or open another connection.
         let set = FixtureSet::generate();
         let (address, handle) = alpn_server(
             &set,
@@ -1418,17 +1419,12 @@ fn a_peer_that_cannot_speak_http11_fails_before_any_request() {
         let error = exchange_owned(&upstream, &query_wire(0x7411), open_context())
             .await
             .expect_err("a peer that cannot speak HTTP/1.1 must not be used");
-        assert!(
-            matches!(
-                error,
-                SecureError::Tls(_) | SecureError::DohProtocol(DohProtocolError::UnexpectedAlpn)
-            ),
-            "expected a handshake or ALPN rejection, got {error:?}"
-        );
+        assert_eq!(error.side_effect(), SideEffectState::MaybeSent);
+        assert!(matches!(error, SecureError::Transport(_)), "got {error:?}");
         assert_eq!(
             error.side_effect(),
-            SideEffectState::NotSent,
-            "no request exists before the handshake completes, so this is never Sent"
+            SideEffectState::MaybeSent,
+            "the h2 request was handed to the driver, but the peer did not return a response"
         );
         assert_eq!(upstream.in_flight_exchanges(), 0);
         let _ = handle.join();

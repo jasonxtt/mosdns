@@ -548,6 +548,7 @@ name = "mosdns-upstream-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "h2",
  "http-body-util",
  "hyper",
  "hyper-util",

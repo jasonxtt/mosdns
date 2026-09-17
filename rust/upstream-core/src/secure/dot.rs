@@ -48,8 +48,18 @@ use crate::{
 pub enum SecureTransport {
     /// DNS-over-TLS on a fresh authenticated connection.
     Dot,
-    /// DNS-over-HTTPS over HTTP/1.1 on a fresh authenticated connection.
+    /// DNS-over-HTTPS on a fresh authenticated connection. The negotiated
+    /// HTTP version is exposed by [`SecureResponse::http_version`].
     Doh,
+}
+
+/// The HTTP protocol selected for a DoH exchange.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SecureHttpVersion {
+    /// HTTP/1.1, including the no-ALPN case permitted by the DoH contract.
+    Http1,
+    /// HTTP/2 selected through ALPN `h2`.
+    Http2,
 }
 
 /// The complete DNS wire returned by one secure exchange.
@@ -63,6 +73,7 @@ pub struct SecureResponse {
     request_id: u16,
     response_id: u16,
     transport: SecureTransport,
+    http_version: Option<SecureHttpVersion>,
     truncated: bool,
 }
 
@@ -75,7 +86,12 @@ impl SecureResponse {
     /// and `response_id` reports the ID actually present in that wire so the
     /// metadata and the bytes can never disagree.
     #[must_use]
-    pub(crate) fn doh(wire: Vec<u8>, request_id: u16, truncated: bool) -> Self {
+    pub(crate) fn doh(
+        wire: Vec<u8>,
+        request_id: u16,
+        http_version: SecureHttpVersion,
+        truncated: bool,
+    ) -> Self {
         debug_assert_eq!(
             u16::from_be_bytes([wire[0], wire[1]]),
             request_id,
@@ -86,6 +102,7 @@ impl SecureResponse {
             request_id,
             response_id: request_id,
             transport: SecureTransport::Doh,
+            http_version: Some(http_version),
             truncated,
         }
     }
@@ -103,6 +120,7 @@ impl SecureResponse {
             request_id,
             response_id,
             transport,
+            http_version: None,
             truncated,
         }
     }
@@ -133,6 +151,12 @@ impl SecureResponse {
     #[must_use]
     pub const fn transport(&self) -> SecureTransport {
         self.transport
+    }
+
+    /// The negotiated DoH HTTP version, or `None` for a DoT response.
+    #[must_use]
+    pub const fn http_version(&self) -> Option<SecureHttpVersion> {
+        self.http_version
     }
 
     /// Whether the complete response carried `TC=1`.
