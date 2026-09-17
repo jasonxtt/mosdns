@@ -1,5 +1,5 @@
 //! Secure upstream endpoint construction and the bounded secure transports
-//! (Phase 4 Slices 0-2).
+//! (Phase 4 Slices 0-3).
 //!
 //! This module covers pre-I/O construction and encoding plus two one-exchange
 //! secure primitives:
@@ -12,9 +12,9 @@
 //!   query/response exchange;
 //! * [`DohUpstream`], which dials one fresh numeric connection, authenticates
 //!   it with TLS against the service URL identity, and then performs exactly one
-//!   HTTPS `GET` over HTTP/1.1.
+//!   HTTPS `GET` over HTTP/1.1 or HTTP/2 with scoped child-task ownership.
 //!
-//! HTTP/2, connection pooling/reuse, resolver/bootstrap, and listener or host
+//! Connection pooling/reuse, resolver/bootstrap, HTTP/3, and listener or host
 //! composition remain outside this slice.
 
 mod doh;
@@ -24,7 +24,7 @@ mod error;
 mod tls;
 
 pub use doh::DohUpstream;
-pub use dot::{DotUpstream, SecureResponse, SecureTransport};
+pub use dot::{DotUpstream, SecureHttpVersion, SecureResponse, SecureTransport};
 pub use endpoint::{DohEndpoint, DotEndpoint, ServerIdentity};
 pub use error::{
     CertificateRejection, DohProtocolError, DohRequestError, IdentityError, SecureError,

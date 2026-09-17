@@ -79,6 +79,8 @@ tokio-rustls = { version = "=0.26.4", default-features = false, features = ["rin
 # `tests/`; no production code imports it, and `cargo tree -e normal` shows
 # neither rcgen nor x509-parser for the crate or the workspace.
 rcgen = { version = "=0.14.7", default-features = false, features = ["ring"] }
+# Slice3 loopback-only HTTP/2 server for the client/executor contract tests.
+h2 = "=0.4.19"
 # Test-only driver for the Slice1 UDP contract tests: a bounded current-thread
 # runtime plus async wake/timeout primitives. Mock servers use blocking
 # std::net::UdpSocket tasks and the library still creates no Tokio runtime.

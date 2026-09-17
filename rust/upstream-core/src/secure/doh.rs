@@ -1,4 +1,4 @@
-//! One-exchange DNS-over-HTTPS primitive over HTTP/1.1 (Phase 4 Slice2).
+//! One-exchange DNS-over-HTTPS primitive over HTTP/1.1 and HTTP/2 (Phase 4 Slice3).
 //!
 //! [`DohUpstream`] owns a [`DohEndpoint`] and an explicit [`TlsPolicy`]. Each
 //! exchange opens exactly one fresh TCP connection to the endpoint's **numeric**
@@ -10,9 +10,8 @@
 //!
 //! 1. Numeric connect. The caller supplied a `SocketAddr`; the service identity
 //!    never selects the destination.
-//! 2. Authenticated TLS handshake against the service URL host. Absent ALPN
-//!    means HTTP/1.1 on the already-established stream; an unexpected ALPN is
-//!    terminal.
+//! 2. Authenticated TLS handshake against the service URL host. ALPN selects
+//!    HTTP/2 or HTTP/1.1; absent ALPN means HTTP/1.1 on the established stream.
 //! 3. Exactly one `GET`, with no request body, no `User-Agent`, and no
 //!    `Content-Encoding`.
 //! 4. The response must be `200`, `application/dns-message`, identity-encoded,
@@ -23,14 +22,14 @@
 //! plaintext, follows a redirect, retries, pools the connection, or falls back
 //! to another protocol.
 //!
-//! This slice deliberately uses Hyper's **low-level** HTTP/1.1 connection API.
-//! Hyper's `http1::Connection` is itself a `Future` that the exchange polls
-//! inline, so no background task or executor owns any part of the exchange:
-//! there is no detached driver to reap and no library retry to prevent.
+//! This slice uses Hyper's low-level connection APIs. HTTP/1.1 is polled inline;
+//! HTTP/2 receives a sealed, tracked executor so every child future is owned and
+//! drained, with no pool or hidden retry.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use hyper::body::Incoming;
@@ -42,15 +41,15 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
-use crate::secure::dot::SecureResponse;
+use crate::secure::dot::{SecureHttpVersion, SecureResponse};
 use crate::secure::endpoint::DohEndpoint;
 use crate::secure::error::{DohProtocolError, SecureError};
 use crate::secure::tls::{TlsPolicy, classify_handshake_error, server_name_for};
 use crate::tcp::race_control;
 use crate::{
     CloseCompletion, CloseResult, CloseTransition, ExchangeContext, ExchangeControl,
-    ExchangeRequest, Lifecycle, LifecycleState, SideEffectState, TransportCancellation,
-    UpstreamError,
+    ExchangeRequest, Lifecycle, LifecycleState, SharedInFlightGuard, SideEffectState,
+    TransportCancellation, UpstreamError,
 };
 
 /// The `application/dns-message` media type, compared case-insensitively.
@@ -90,13 +89,206 @@ const MAX_HTTP1_BUFFER: usize = MAX_RESPONSE_HEADER_BYTES;
 
 /// The ALPN protocol list offered for DoH, in preference order.
 ///
-/// Only HTTP/1.1 is implemented in this slice. HTTP/2 is deliberately absent so
-/// a peer cannot negotiate a protocol this client does not drive; advertising it
-/// would risk a silent, unimplemented downgrade. Slice3 adds `h2` together with
-/// the scoped HTTP/2 driver.
-const DOH_ALPN: &[&[u8]] = &[b"http/1.1"];
+/// HTTP/2 is selected only when the scoped driver below is able to account for
+/// every future Hyper submits to its executor. HTTP/1.1 remains the fallback
+/// when it is selected or when the peer omits ALPN.
+const DOH_ALPN: &[&[u8]] = &[b"h2", b"http/1.1"];
 
-/// A pure Rust DNS-over-HTTPS owner over HTTP/1.1.
+/// Shared state for the futures Hyper submits while building an HTTP/2
+/// connection. Hyper's HTTP/2 connection future is a dispatcher: its actual
+/// connection, request-send, and body-pipe futures are handed to the supplied
+/// executor. This registry makes those otherwise hidden children owned work.
+struct H2ChildState {
+    children: Mutex<H2Children>,
+    drained: tokio::sync::Notify,
+    _liveness: Arc<SharedInFlightGuard>,
+    scope_cancellation: TransportCancellation,
+    owner_cancellation: TransportCancellation,
+    caller_cancellation: TransportCancellation,
+}
+
+struct H2Children {
+    sealed: bool,
+    next_id: u64,
+    active: usize,
+    aborts: HashMap<u64, tokio::task::AbortHandle>,
+}
+
+/// Executor supplied to Hyper's low-level HTTP/2 handshake.
+#[derive(Clone)]
+struct TrackedH2Executor {
+    state: Arc<H2ChildState>,
+}
+
+/// An exchange-held lease whose synchronous drop path seals admission and
+/// aborts every child. The async finish path additionally waits for every
+/// child guard to drop before the caller's lifecycle registration is released.
+struct H2ScopeLease {
+    state: Arc<H2ChildState>,
+}
+
+struct H2ChildGuard {
+    state: Arc<H2ChildState>,
+    id: u64,
+}
+
+impl H2ScopeLease {
+    fn new(
+        liveness: Arc<SharedInFlightGuard>,
+        owner_cancellation: TransportCancellation,
+        caller_cancellation: TransportCancellation,
+    ) -> Self {
+        Self {
+            state: Arc::new(H2ChildState {
+                children: Mutex::new(H2Children {
+                    sealed: false,
+                    next_id: 0,
+                    active: 0,
+                    aborts: HashMap::new(),
+                }),
+                drained: tokio::sync::Notify::new(),
+                _liveness: liveness,
+                scope_cancellation: TransportCancellation::new(),
+                owner_cancellation,
+                caller_cancellation,
+            }),
+        }
+    }
+
+    fn executor(&self) -> TrackedH2Executor {
+        TrackedH2Executor {
+            state: Arc::clone(&self.state),
+        }
+    }
+
+    #[cfg(test)]
+    fn active_children(&self) -> usize {
+        self.state
+            .children
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
+    }
+
+    fn seal_and_abort(&self) {
+        self.state.scope_cancellation.cancel();
+        let mut children = self
+            .state
+            .children
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        children.sealed = true;
+        for handle in children.aborts.values() {
+            handle.abort();
+        }
+    }
+
+    async fn finish(&self) {
+        self.seal_and_abort();
+        loop {
+            let drained = {
+                let children = self
+                    .state
+                    .children
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                children.active == 0
+            };
+            if drained {
+                return;
+            }
+            let notified = self.state.drained.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let still_drained = {
+                let children = self
+                    .state
+                    .children
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                children.active == 0
+            };
+            if still_drained {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+impl Drop for H2ScopeLease {
+    fn drop(&mut self) {
+        self.seal_and_abort();
+    }
+}
+
+impl H2ChildState {
+    fn execute<F>(self: &Arc<Self>, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let mut children = self
+            .children
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if children.sealed {
+            return;
+        }
+
+        // Registration and tokio::spawn happen under the same mutex. A close
+        // cannot seal the scope between accounting a child and giving Tokio
+        // ownership of it.
+        let id = children.next_id;
+        children.next_id = children.next_id.wrapping_add(1);
+        children.active += 1;
+        let guard = H2ChildGuard {
+            state: Arc::clone(self),
+            id,
+        };
+        let scope_cancellation = self.scope_cancellation.clone();
+        let owner_cancellation = self.owner_cancellation.clone();
+        let caller_cancellation = self.caller_cancellation.clone();
+        let join = tokio::spawn(async move {
+            let _guard = guard;
+            tokio::pin!(future);
+            tokio::select! {
+                biased;
+                () = scope_cancellation.cancelled() => {},
+                () = owner_cancellation.cancelled() => {},
+                () = caller_cancellation.cancelled() => {},
+                () = &mut future => {},
+            }
+        });
+        children.aborts.insert(id, join.abort_handle());
+    }
+}
+
+impl Drop for H2ChildGuard {
+    fn drop(&mut self) {
+        let mut children = self
+            .state
+            .children
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if children.aborts.remove(&self.id).is_some() {
+            children.active = children.active.saturating_sub(1);
+            if children.active == 0 {
+                self.state.drained.notify_waiters();
+            }
+        }
+    }
+}
+
+impl<F> hyper::rt::Executor<F> for TrackedH2Executor
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    fn execute(&self, future: F) {
+        self.state.execute(future);
+    }
+}
+
+/// A pure Rust DNS-over-HTTPS owner over HTTP/1.1 or HTTP/2.
 ///
 /// The owner reuses the same [`Lifecycle`] admission/drain gate as the DoT and
 /// plain transports: registration is serialized with `Open -> Closing`, and
@@ -105,7 +297,7 @@ const DOH_ALPN: &[&[u8]] = &[b"http/1.1"];
 pub struct DohUpstream {
     endpoint: DohEndpoint,
     tls: TlsPolicy,
-    lifecycle: Lifecycle,
+    lifecycle: Arc<Lifecycle>,
     cancellation: TransportCancellation,
     #[cfg(test)]
     pause: std::sync::Mutex<Option<std::sync::Arc<DohPause>>>,
@@ -126,7 +318,7 @@ impl DohUpstream {
         Ok(Self {
             endpoint,
             tls,
-            lifecycle: Lifecycle::new(),
+            lifecycle: Arc::new(Lifecycle::new()),
             cancellation: TransportCancellation::new(),
             #[cfg(test)]
             pause: std::sync::Mutex::new(None),
@@ -176,7 +368,7 @@ impl DohUpstream {
         }
     }
 
-    /// Performs one bounded authenticated DoH exchange over HTTP/1.1.
+    /// Performs one bounded authenticated DoH exchange over HTTP/1.1 or HTTP/2.
     ///
     /// The exchange registers as in-flight under the same gate that serializes
     /// `Open -> Closing`, so close can never observe a zero registration count
@@ -201,7 +393,9 @@ impl DohUpstream {
         let target = self.endpoint.get_request_target(request)?;
         let authority = self.endpoint.authority();
         let prepared = self.prepare_exchange(request, context, target, authority)?;
-        exchange_inner(&prepared).await
+        // Keep the public exchange future small even as the protocol-specific
+        // HTTP/1.1 and tracked HTTP/2 state machines grow independently.
+        Box::pin(exchange_inner(&prepared)).await
     }
 
     /// Registers and validates one exchange before any socket action.
@@ -217,7 +411,7 @@ impl DohUpstream {
         Ok(PreparedDoh {
             endpoint: &self.endpoint,
             tls: &self.tls,
-            lifecycle: &self.lifecycle,
+            lifecycle: Arc::clone(&self.lifecycle),
             request,
             target,
             authority,
@@ -348,7 +542,7 @@ impl DohPause {
 struct PreparedDoh<'a> {
     endpoint: &'a DohEndpoint,
     tls: &'a TlsPolicy,
-    lifecycle: &'a Lifecycle,
+    lifecycle: Arc<Lifecycle>,
     request: ExchangeRequest<'a>,
     target: String,
     authority: String,
@@ -416,9 +610,6 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
     // The client configuration is rebuilt from the frozen policy for every
     // exchange, so no mutable per-owner state can flip a verified policy into an
     // insecure one between exchanges.
-    // Only HTTP/1.1 is offered in this slice. Advertising `h2` here without a
-    // scoped HTTP/2 driver would let a peer negotiate a protocol this client
-    // cannot drive, which is exactly the silent fallback this design forbids.
     let config = Arc::new(prepared.tls.client_config_with_alpn(DOH_ALPN)?);
     let server_name = server_name_for(prepared.endpoint.identity())?;
 
@@ -448,7 +639,7 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
         })
         .await?;
 
-    check_negotiated_alpn(&tls)?;
+    let protocol = negotiated_protocol(&tls)?;
 
     // The handshake succeeded, so the peer is authenticated. No DNS byte has
     // been sent yet, so this check is still `NotSent`.
@@ -458,79 +649,153 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
     // `User-Agent`, and no request `Content-Encoding`.
     let request = build_get_request(&prepared.target, &prepared.authority)?;
 
-    prepared.reach(DohPhase::BeforeRequest).await;
+    match protocol {
+        DohProtocol::Http1 => {
+            exchange_http1(prepared, tls, request, request_id, control, deadline).await
+        }
+        DohProtocol::Http2 => {
+            exchange_http2(prepared, tls, request, request_id, control, deadline).await
+        }
+    }
+}
 
-    // Phase 3: one request, driven inline. `http1::Connection` is itself a
-    // future, so the connection is polled by this exchange rather than by a
-    // detached task; there is nothing to reap and no background retry to stop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DohProtocol {
+    Http1,
+    Http2,
+}
+
+/// Runs the already-authenticated HTTP/1.1 leg. The connection future is
+/// polled inline, preserving Slice2's no-background-driver ownership contract.
+async fn exchange_http1(
+    prepared: &PreparedDoh<'_>,
+    tls: TlsStream<TcpStream>,
+    request: hyper::Request<EmptyBody>,
+    request_id: u16,
+    control: ExchangeControl,
+    deadline: Instant,
+) -> Result<SecureResponse, SecureError> {
+    prepared.reach(DohPhase::BeforeRequest).await;
     let io = TokioIo::new(tls);
     let (mut sender, connection) =
         race_control(&control, SideEffectState::NotSent, deadline, async {
             hyper::client::conn::http1::Builder::new()
                 .max_headers(MAX_RESPONSE_HEADERS)
-                // Hyper requires at least 8192; this is well above the largest
-                // legal header block this contract accepts.
                 .max_buf_size(MAX_HTTP1_BUFFER)
                 .handshake::<_, EmptyBody>(io)
                 .await
                 .map_err(|_| SecureError::from(UpstreamError::Connect))
         })
         .await?;
-
     tokio::pin!(connection);
-
-    // The last control check that is still provably `NotSent`. Nothing has been
-    // handed to the driver yet, so a control error here cannot have sent a
-    // query.
     prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
-
-    // The handoff is the linearization point between `NotSent` and
-    // `MaybeSent`. `SendRequest::send_request` synchronously dispatches the
-    // request into the connection driver, so from this statement onward the
-    // query may be on the wire and every later control error must be reported
-    // conservatively as `MaybeSent`.
     let request_future = sender.send_request(request);
     tokio::pin!(request_future);
-
-    // Only now is the request genuinely with the driver, which is what this
-    // phase exists to observe.
     prepared.reach(DohPhase::AfterRequestSent).await;
-
     let response = send_request(&control, deadline, &mut request_future, &mut connection).await?;
+    finish_doh_response(
+        prepared,
+        request_id,
+        SecureHttpVersion::Http1,
+        control,
+        deadline,
+        response,
+        &mut connection,
+    )
+    .await
+}
 
-    // Phase 4: read the response body to a complete end under the same control.
+/// Runs the already-authenticated HTTP/2 leg with a tracked executor. Hyper
+/// submits the socket driver and request/body futures to this executor; the
+/// scope seals new submissions and aborts/drains every registered child on all
+/// normal, error, cancellation, and dropped-future paths.
+async fn exchange_http2(
+    prepared: &PreparedDoh<'_>,
+    tls: TlsStream<TcpStream>,
+    request: hyper::Request<EmptyBody>,
+    request_id: u16,
+    control: ExchangeControl,
+    deadline: Instant,
+) -> Result<SecureResponse, SecureError> {
+    let liveness = Arc::new(prepared.lifecycle.register_shared()?);
+    let scope = H2ScopeLease::new(
+        liveness,
+        prepared.owner_cancellation.clone(),
+        prepared.caller_cancellation.clone(),
+    );
+    let result = exchange_http2_scoped(
+        prepared, tls, request, request_id, control, deadline, &scope,
+    )
+    .await;
+    scope.finish().await;
+    result
+}
+
+async fn exchange_http2_scoped(
+    prepared: &PreparedDoh<'_>,
+    tls: TlsStream<TcpStream>,
+    request: hyper::Request<EmptyBody>,
+    request_id: u16,
+    control: ExchangeControl,
+    deadline: Instant,
+    scope: &H2ScopeLease,
+) -> Result<SecureResponse, SecureError> {
+    prepared.reach(DohPhase::BeforeRequest).await;
+    let io = TokioIo::new(tls);
+    let executor = scope.executor();
+    let (mut sender, connection) =
+        race_control(&control, SideEffectState::NotSent, deadline, async {
+            let mut builder = hyper::client::conn::http2::Builder::new(executor);
+            builder.max_header_list_size(MAX_RESPONSE_HEADER_BYTES as u32);
+            builder
+                .handshake::<_, EmptyBody>(io)
+                .await
+                .map_err(|_| SecureError::from(UpstreamError::Connect))
+        })
+        .await?;
+    tokio::pin!(connection);
+    prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
+    let request_future = sender.send_request(request);
+    tokio::pin!(request_future);
+    prepared.reach(DohPhase::AfterRequestSent).await;
+    let response = send_request(&control, deadline, &mut request_future, &mut connection).await?;
+    finish_doh_response(
+        prepared,
+        request_id,
+        SecureHttpVersion::Http2,
+        control,
+        deadline,
+        response,
+        &mut connection,
+    )
+    .await
+}
+
+/// Validates an HTTP response, restores only the caller's DNS ID, and commits
+/// it under the owner/caller/deadline linearization gate.
+async fn finish_doh_response<C>(
+    prepared: &PreparedDoh<'_>,
+    request_id: u16,
+    http_version: SecureHttpVersion,
+    control: ExchangeControl,
+    deadline: Instant,
+    response: Response<Incoming>,
+    connection: &mut Pin<&mut C>,
+) -> Result<SecureResponse, SecureError>
+where
+    C: Future<Output = hyper::Result<()>>,
+{
     prepared.reach(DohPhase::BeforeBody).await;
-    let body = read_body(&control, deadline, response, &mut connection).await?;
-
-    // A body shorter than the DNS header cannot be a response at all.
+    let body = read_body(&control, deadline, response, connection).await?;
     if body.len() < 12 {
         return Err(SecureError::DohProtocol(DohProtocolError::IncompleteBody));
     }
     let header = inspect_response_header(&body)
         .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
-    // The DoH contract associates a response with its HTTP stream, not with a
-    // DNS transaction ID, so a remote ID of 0 is normal. Only the caller's
-    // original ID is restored into the owned wire; every other header byte,
-    // including the response's own flags, is preserved verbatim.
-    //
-    // This deliberately does not use `dns_core::patch_response_id_ra`: that
-    // helper is the frozen server-path oracle and also sets RA, which would
-    // rewrite a flag the upstream chose. A DoH client must return the upstream's
-    // response with just the transaction ID fixed up.
     let restored = restore_request_id(&body, request_id)?;
-    // Only a complete, dns-core-valid response may be returned. A DoH response
-    // with TC set is still returned to the caller rather than retried.
     if validate_response(&restored).is_err() {
         return Err(SecureError::from(UpstreamError::MalformedResponse));
     }
-
-    // Phase 5: the final control-aware commit is the single linearization point
-    // against owner close, caller cancellation, and the original absolute
-    // deadline. Priority is owner, then caller, then deadline, then success.
-    //
-    // Nothing may be asserted about owner state after this returns: the commit
-    // wins under the lifecycle mutex and an owner close may legally begin
-    // immediately afterwards.
     prepared.reach(DohPhase::BeforeCommit).await;
     prepared.lifecycle.commit_final_response(
         &prepared.caller_cancellation,
@@ -538,8 +803,12 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
         SideEffectState::Sent,
     )?;
     prepared.reach(DohPhase::AfterCommit).await;
-
-    Ok(SecureResponse::doh(restored, request_id, header.truncated))
+    Ok(SecureResponse::doh(
+        restored,
+        request_id,
+        http_version,
+        header.truncated,
+    ))
 }
 
 /// Returns a copy of `body` with only the DNS transaction ID replaced.
@@ -566,18 +835,20 @@ fn restore_request_id(body: &[u8], request_id: u16) -> Result<Vec<u8>, SecureErr
     Ok(restored)
 }
 
-/// Rejects a negotiated ALPN protocol other than HTTP/1.1.
+/// Selects the one protocol this fresh connection can drive.
 ///
-/// Absent ALPN is accepted: the connection already carries HTTP/1.1, which is
-/// what this slice implements. An explicitly negotiated protocol that is not
-/// HTTP/1.1 is terminal rather than silently reinterpreted.
-fn check_negotiated_alpn(tls: &TlsStream<TcpStream>) -> Result<(), SecureError> {
+/// Absent ALPN is accepted as HTTP/1.1 on the already-established stream. Any
+/// explicitly negotiated protocol outside the offered h2/http1.1 pair is
+/// terminal rather than silently reinterpreted or retried.
+fn negotiated_protocol(tls: &TlsStream<TcpStream>) -> Result<DohProtocol, SecureError> {
     let (_, session) = tls.get_ref();
-    match session.alpn_protocol() {
-        None => Ok(()),
-        Some(protocol) if protocol == b"http/1.1" => Ok(()),
-        // A negotiated protocol this client cannot drive is terminal; the
-        // connection is abandoned rather than replayed with another protocol.
+    classify_alpn(session.alpn_protocol())
+}
+
+fn classify_alpn(protocol: Option<&[u8]>) -> Result<DohProtocol, SecureError> {
+    match protocol {
+        None | Some(b"http/1.1") => Ok(DohProtocol::Http1),
+        Some(b"h2") => Ok(DohProtocol::Http2),
         Some(_) => Err(SecureError::DohProtocol(DohProtocolError::UnexpectedAlpn)),
     }
 }
@@ -878,12 +1149,12 @@ mod tests {
     use tokio_rustls::TlsAcceptor;
     use tokio_rustls::server::TlsStream;
 
-    use super::{DohPhase, DohUpstream};
+    use super::{DohPhase, DohProtocol, DohUpstream, H2ScopeLease, classify_alpn};
     use crate::secure::endpoint::DohEndpoint;
-    use crate::secure::error::SecureError;
+    use crate::secure::error::{DohProtocolError, SecureError};
     use crate::secure::tls::TlsPolicy;
     use crate::{
-        CloseResult, CloseTransition, ExchangeContext, ExchangeRequest, SideEffectState,
+        CloseResult, CloseTransition, ExchangeContext, ExchangeRequest, Lifecycle, SideEffectState,
         TransportCancellation, UpstreamError,
     };
 
@@ -1461,6 +1732,50 @@ mod tests {
                 "a terminal protocol failure must never produce a second GET"
             );
         });
+    }
+
+    #[test]
+    fn h2_executor_seals_admission_and_drains_registered_children() {
+        block_on(async {
+            let lifecycle = Arc::new(Lifecycle::new());
+            let liveness = Arc::new(
+                lifecycle
+                    .register_shared()
+                    .expect("liveness registration succeeds while open"),
+            );
+            let scope = H2ScopeLease::new(
+                liveness,
+                TransportCancellation::new(),
+                TransportCancellation::new(),
+            );
+            let executor = scope.executor();
+            hyper::rt::Executor::execute(&executor, async {
+                std::future::pending::<()>().await;
+            });
+            assert_eq!(scope.active_children(), 1);
+
+            scope.finish().await;
+            assert_eq!(scope.active_children(), 0);
+
+            // Hyper submissions that race with teardown are dropped at the
+            // sealed boundary rather than becoming untracked Tokio work.
+            hyper::rt::Executor::execute(&executor, async {});
+            assert_eq!(scope.active_children(), 0);
+            drop(executor);
+            drop(scope);
+            assert_eq!(lifecycle.in_flight(), 0);
+        });
+    }
+
+    #[test]
+    fn alpn_dispatch_accepts_only_the_two_driven_protocols() {
+        assert_eq!(classify_alpn(None), Ok(DohProtocol::Http1));
+        assert_eq!(classify_alpn(Some(b"http/1.1")), Ok(DohProtocol::Http1));
+        assert_eq!(classify_alpn(Some(b"h2")), Ok(DohProtocol::Http2));
+        assert_eq!(
+            classify_alpn(Some(b"acme/1")),
+            Err(SecureError::DohProtocol(DohProtocolError::UnexpectedAlpn))
+        );
     }
 
     /// The context used by the success-path tests.

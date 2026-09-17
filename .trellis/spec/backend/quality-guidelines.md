@@ -360,3 +360,76 @@ Correct: verify both pane identities and matching cwd, inspect each visible
 command, approve only the bounded safe set, reject unsafe writes/history
 operations, require the `我是Claude` handoff, and stop at the explicit review
 and user-authorization boundary.
+
+## Scenario: native DoH HTTP/2 child ownership
+
+### 1. Scope / Trigger
+
+Use this contract for pure Rust DoH HTTP/2 work in `rust/upstream-core`. Hyper's
+low-level HTTP/2 client submits connection, request-send, and body-pipe futures
+through a caller-supplied executor; using the default Tokio executor would make
+those children invisible to owner shutdown.
+
+### 2. Signatures
+
+- `DohUpstream::exchange(ExchangeRequest<'_>, ExchangeContext)` remains one
+  fresh numeric connection and one GET.
+- The DoH response exposes `SecureHttpVersion::{Http1,Http2}`; DoT exposes no
+  HTTP version.
+- The private executor implements `hyper::rt::Executor<F>` for every tracked
+  `Future<Output = ()> + Send + 'static` submitted by Hyper.
+
+### 3. Contracts
+
+- ALPN offers `h2,http/1.1` in that order. `h2` dispatches to
+  `hyper::client::conn::http2`; negotiated or absent HTTP/1.1 dispatches to the
+  inline HTTP/1.1 driver. No protocol fallback or request replay is allowed.
+- Executor admission registers a child before `tokio::spawn` while the scope
+  is unsealed. Teardown seals admission, aborts all registered handles, and
+  waits until every child guard drops.
+- A shared `Lifecycle` registration is retained by the executor state and its
+  child tasks. Dropping the caller future cannot let `close().await` return
+  before those children are gone.
+- HTTP/2 is one request per fresh connection in this foundation; pooling,
+  multiplexing across callers, resolver/bootstrap, and HTTP/3 are separate
+  tasks.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| h2 response success | validated owned DNS wire, original ID restored, `Http2` metadata |
+| RST_STREAM/GOAWAY/EOF before response head | typed terminal failure with `MaybeSent`, no retry |
+| caller cancel/owner close after handoff | control error, child scope sealed and drained |
+| executor submission after seal | future dropped, no new task or registration |
+| unknown negotiated ALPN | typed `UnexpectedAlpn`, `NotSent`, no request |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `TrackedH2Executor` owns an abort handle and lifecycle hold for every
+  Hyper child, and `H2ScopeLease::finish()` waits for active count zero.
+- Base: a successful response still seals and drains the one-shot h2 driver;
+  it does not leave a reusable pool behind.
+- Bad: pass `hyper_util::rt::TokioExecutor`, spawn an untracked connection
+  driver, or release the exchange registration as soon as the caller future is
+  dropped.
+
+### 6. Tests Required
+
+- Real TLS+h2 loopback success must assert service authority/path, original ID,
+  HTTP-version metadata, and independent fresh owners.
+- Reset, GOAWAY, EOF, caller cancellation, and dropped-future tests must assert
+  side-effect state, zero in-flight registrations after close, and no second
+  accepted connection.
+- Executor unit tests must park a child, prove pre-spawn accounting, seal and
+  drain it, reject post-seal work, and prove the shared lifecycle count reaches
+  zero.
+
+### 7. Wrong vs Correct
+
+Wrong: spawn Hyper's h2 futures with `TokioExecutor` and let the parent
+exchange's registration drop immediately when the caller aborts.
+
+Correct: supply a sealed `TrackedH2Executor`, retain a shared lifecycle hold in
+its state/children, abort and drain every registered child before releasing the
+exchange's owner liveness.

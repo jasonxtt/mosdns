@@ -1,4 +1,4 @@
-# Secure upstream implementation plan — Slice2 active
+# Secure upstream implementation plan — Slice3 active
 
 Historical record, 2026-09-16: implementation was first authorized for the
 bounded Slice0 dependency/MSRV and Hyper API-inspection scope only. That
@@ -9,9 +9,11 @@ then completed under its separate review boundary.
 
 2026-09-17: Slice1 was explicitly accepted by `rust0916` at
 `25c7c961453e15d7347d65bbc401026f813ff27c` (`PASS / Slice1 CLOSED`). The user
-then explicitly authorized Slice2. Slice2 is now the active bounded scope;
-Slice3+, production wiring, deployment, and automatic progression remain
-unauthorized. The executor routing and prompt-approval contract is recorded in
+then explicitly authorized Slice2. Slice2 was closed at its separate review
+boundary, and the user has now explicitly authorized Slice3. Slice3 is the
+active bounded scope; Slice4, production wiring, deployment, and automatic
+progression remain unauthorized. The executor routing and prompt-approval
+contract is recorded in
 `.trellis/spec/backend/quality-guidelines.md`.
 
 ## Planning package review checklist
@@ -416,21 +418,84 @@ Rust 1.85.0 is not installed. This remediation adds no dependency.
 
 ## Slice3 — HTTP/2 and complete structured shutdown
 
-- [ ] Implement only reviewed ALPN dispatch and scoped HTTP2 executor/driver.
+- [x] Implement only reviewed ALPN dispatch and scoped HTTP2 executor/driver.
   No independent queries share a connection; no h3 or failed-request replay.
-- [ ] Test h2 success, service authority/path, concurrent independent owners,
+- [x] Test h2 success, service authority/path, concurrent independent owners,
   unexpected ALPN, reset/GOAWAY/refused stream/EOF and send-state classification.
-- [ ] Track all executor futures before spawn; freeze spawn admission at teardown;
+- [x] Track all executor futures before spawn; freeze spawn admission at teardown;
   prove child liveness retains owner registration when caller future is aborted.
-- [ ] Explicit barriers cover cancellation and close while handshake, request,
+- [x] Explicit barriers cover cancellation and close while handshake, request,
   headers, data, final validation/commit or driver teardown are parked.
-- [ ] Record zero sockets/registrations/driver/executor tasks after close on
+- [x] Record zero sockets/registrations/driver/executor tasks after close on
   success, all errors, dropped requests, and repeated/concurrent close.
-- [ ] Server-side counters prove no hidden library retry or protocol fallback.
+- [x] Server-side counters prove no hidden library retry or protocol fallback.
 
 Allowed: scoped executor/DoH HTTP2 implementation and lifecycle tests. If API
 behavior violates the ownership design, STOP and revise; do not weaken drain.
 STOP for scoped review before final evidence slice.
+
+### Slice3 execution and evidence record — 2026-09-17
+
+Implementation is complete and stops at the scoped review boundary. The change
+adds only DoH ALPN dispatch, low-level Hyper HTTP/2 ownership, lifecycle
+liveness retention, response HTTP-version metadata, and loopback contract tests.
+It does not add pooling/reuse, resolver/bootstrap, socket policy, HTTP/3,
+listeners, host composition, YAML/API/WebUI, Go/cgo/selector/fallback, or
+production wiring.
+
+Produced behavior and contracts:
+
+- `rust/upstream-core/src/secure/doh.rs` offers `h2,http/1.1` in order;
+  negotiated `h2` uses `hyper::client::conn::http2`, negotiated or absent
+  HTTP/1.1 keeps the existing inline driver, and an unrecognized ALPN is a
+  terminal typed pre-request error. Each exchange remains one fresh numeric
+  connection and one GET; no independent caller queries share a connection.
+- `TrackedH2Executor` accounts for every Hyper future submitted through the
+  caller-supplied executor. Registration happens before `tokio::spawn`, a
+  sealed scope drops later submissions, and abort handles plus a Notify drain
+  every child. The shared `Lifecycle` hold is retained by the executor state
+  and its child tasks, so dropping the caller future cannot release owner
+  liveness before those tasks are dropped.
+- `SecureHttpVersion` reports HTTP/1.1 or HTTP/2 on DoH responses while DoT
+  reports no HTTP version. HTTP status/MIME/body validation and DNS ID restore
+  are shared by both protocols; h2 reset, GOAWAY and EOF failures remain
+  terminal `MaybeSent` observations with no retry or protocol fallback.
+
+RED/GREEN and drain evidence:
+
+- `negotiated_h2_serves_one_doh_get_with_service_authority_and_path` first
+  failed at the TLS ALPN boundary when the client offered only HTTP/1.1, then
+  passed after dispatch was added. It verifies the service authority/path,
+  original caller ID, and `SecureHttpVersion::Http2` on the owned response.
+- `independent_h2_owners_use_independent_fresh_connections` runs two owners
+  concurrently against separate TLS+h2 loopback peers. The reset/GOAWAY/EOF
+  matrix is terminal and `h2_reset_goaway_and_eof_are_terminal_maybe_sent_failures`
+  asserts `MaybeSent`; its listener remains open for a bounded acceptance window
+  and records exactly one connection, proving no hidden retry/fallback.
+- `h2_executor_seals_admission_and_drains_registered_children` parks a tracked
+  child, proves active accounting, seals admission, aborts/drains it, rejects a
+  post-seal submission, and proves the shared lifecycle registration reaches
+  zero. The two real h2 hang tests cancel or abort immediately after request
+  handoff; `close().await` returns `Closed` only after `in_flight_exchanges()`
+  is zero.
+- The existing deterministic DoH phase matrix remains green across its six
+  pre-result phases and four controls; the h2 handoff tests additionally cover
+  caller cancellation, owner close/drop, driver teardown, and final resource
+  drain without sleeps.
+
+Focused verification (Darwin arm64, cargo/rustc 1.95.0; Rust 1.85.0 is not
+installed here):
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice3_doh --locked` | PASS, 5 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 53 unit + 169 integration tests across 8 targets |
+| `cargo clippy --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings` | PASS |
+
+The remaining full-workspace/release and final task evidence checks belong to
+the later Slice4 authorization. This record is not a production, Linux, host
+E2E, throughput, or deployment claim. Slice4 and final review remain stopped.
 
 ## Slice4 — final quality and isolated Linux evidence
 

@@ -16,7 +16,7 @@ pub use secure::{
 
 use std::fmt;
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use mosdns_dns_core::parse_query;
@@ -715,6 +715,21 @@ impl Lifecycle {
         Ok(InFlightGuard { lifecycle: self })
     }
 
+    /// Registers one shared liveness hold that can be moved into executor
+    /// children with an `Arc`. This is used only by secure HTTP/2: an aborted
+    /// caller future must not release the owner registration while a tracked
+    /// Hyper child still exists.
+    pub(crate) fn register_shared(self: &Arc<Self>) -> Result<SharedInFlightGuard, UpstreamError> {
+        let mut inner = self.lock();
+        if inner.state != LifecycleState::Open {
+            return Err(UpstreamError::Closed(SideEffectState::NotSent));
+        }
+        inner.in_flight += 1;
+        Ok(SharedInFlightGuard {
+            lifecycle: Arc::clone(self),
+        })
+    }
+
     /// Releases one registration. The matching guard calls this exactly once.
     fn release(&self) {
         let mut inner = self.lock();
@@ -763,6 +778,17 @@ struct InFlightGuard<'a> {
 }
 
 impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.lifecycle.release();
+    }
+}
+
+/// Owned registration used when a child task may outlive the caller future.
+pub(crate) struct SharedInFlightGuard {
+    lifecycle: Arc<Lifecycle>,
+}
+
+impl Drop for SharedInFlightGuard {
     fn drop(&mut self) {
         self.lifecycle.release();
     }
