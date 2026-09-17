@@ -746,3 +746,118 @@ fn a_failing_id_source_is_a_typed_error_not_a_guessed_id() {
         assert_eq!(resolver.state().published(), None);
     });
 }
+
+// ---------------------------------------------------------------------------
+// Final gate P1-2: the bootstrap peer's transport family is independent of the
+// answer family. `bootstrap` is its own numeric UDP endpoint and
+// `bootstrap_version` only selects A vs AAAA.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn an_ipv4_bootstrap_answers_an_aaaa_query() {
+    block_on(async {
+        let (socket, address) = bind_loopback();
+        // The fixture records the exact query it received, so the test can prove
+        // an AAAA question was asked through an IPv4 transport peer.
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let seen_in = Arc::clone(&seen);
+        let handle = tokio::task::spawn_blocking(move || {
+            socket
+                .set_read_timeout(Some(Duration::from_millis(50)))
+                .expect("read timeout");
+            let mut buffer = vec![0u8; 65535];
+            let started = std::time::Instant::now();
+            while started.elapsed() < Duration::from_secs(8) {
+                let Ok((length, peer)) = socket.recv_from(&mut buffer) else {
+                    continue;
+                };
+                let query = buffer[..length].to_vec();
+                // Answer with an AAAA record, as an IPv4 resolver legitimately can.
+                let id = u16::from_be_bytes([query[0], query[1]]);
+                let mut position = 12;
+                while query[position] != 0 {
+                    position += 1 + usize::from(query[position]);
+                }
+                position += 1;
+                let question = &query[12..position + 4];
+                let mut reply = Vec::new();
+                reply.extend_from_slice(&id.to_be_bytes());
+                reply.extend_from_slice(&0x8180u16.to_be_bytes());
+                reply.extend_from_slice(&1u16.to_be_bytes());
+                reply.extend_from_slice(&1u16.to_be_bytes());
+                reply.extend_from_slice(&0u16.to_be_bytes());
+                reply.extend_from_slice(&0u16.to_be_bytes());
+                reply.extend_from_slice(question);
+                reply.extend_from_slice(&[0xc0, 0x0c, 0x00, 0x1c, 0x00, 0x01]);
+                reply.extend_from_slice(&900u32.to_be_bytes());
+                reply.extend_from_slice(&[0x00, 0x10]);
+                reply.extend_from_slice(&[
+                    0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x2a,
+                ]);
+                *seen_in.lock().expect("seen") = query;
+                socket.send_to(&reply, peer).expect("send");
+                break;
+            }
+        });
+
+        // The target asks for IPv6 while the bootstrap peer is IPv4 loopback.
+        let clock = ManualClock::new();
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
+            ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv6)
+                .expect("target"),
+            BootstrapEndpoint::new(&address.ip().to_string(), address.port()).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            clock,
+        )
+        .expect("an IPv4 bootstrap peer may serve an IPv6 target");
+        assert_eq!(resolver.bootstrap().family(), AddressFamily::Ipv4);
+
+        let published = bounded(resolver.resolve(context(10)))
+            .await
+            .expect("the IPv4 bootstrap answered the AAAA query");
+        assert_eq!(published.family(), AddressFamily::Ipv6);
+        assert_eq!(
+            published.address(),
+            "2001:db8::2a".parse::<IpAddr>().expect("v6")
+        );
+
+        bounded(handle).await.expect("fixture joined");
+
+        // The question that actually went out asked for AAAA (type 28).
+        let query = seen.lock().expect("seen");
+        assert!(!query.is_empty(), "the fixture received the query");
+        let mut position = 12;
+        while query[position] != 0 {
+            position += 1 + usize::from(query[position]);
+        }
+        position += 1;
+        let qtype = u16::from_be_bytes([query[position], query[position + 1]]);
+        assert_eq!(qtype, 28, "the bootstrap query asked for AAAA");
+    });
+}
+
+#[test]
+fn a_numeric_target_accepts_a_different_family_bootstrap() {
+    block_on(async {
+        // A numeric IPv6 target with an IPv4 bootstrap peer: no DNS is needed,
+        // so the peer is never contacted and the families need not match.
+        let clock = ManualClock::new();
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
+            ResolutionTarget::new("2001:db8::9", 853, AddressFamily::Ipv6).expect("literal"),
+            BootstrapEndpoint::new("127.0.0.1", 1).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            clock,
+        )
+        .expect("the families are independent");
+
+        let published = bounded(resolver.resolve(context(5)))
+            .await
+            .expect("a numeric target bypasses DNS entirely");
+        assert_eq!(
+            published.dial(),
+            "[2001:db8::9]:853".parse::<SocketAddr>().expect("parses")
+        );
+        assert_eq!(published.family(), AddressFamily::Ipv6);
+        assert_eq!(resolver.bootstrap().family(), AddressFamily::Ipv4);
+    });
+}

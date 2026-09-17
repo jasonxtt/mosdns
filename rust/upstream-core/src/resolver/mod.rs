@@ -123,7 +123,9 @@ pub enum ResolverError {
     InvalidPolicy,
     /// A zero TTL would publish an already-dead result.
     InvalidTtl,
-    /// The bootstrap endpoint's address family does not match the target's.
+    /// Retained for API stability. The bootstrap peer's transport family and the
+    /// target's answer family are independent, so this resolver never returns
+    /// it: an IPv4 bootstrap may answer AAAA and an IPv6 bootstrap may answer A.
     BootstrapFamilyMismatch,
     /// The bootstrap exchange reached the caller's absolute deadline.
     BootstrapTimeout,
