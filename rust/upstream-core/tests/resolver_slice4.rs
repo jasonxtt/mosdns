@@ -67,7 +67,7 @@ fn fixture(ip: [u8; 4]) -> (SocketAddr, tokio::task::JoinHandle<()>) {
 }
 
 fn resolver_for(peer: SocketAddr) -> BootstrapResolver {
-    BootstrapResolver::new(
+    BootstrapResolver::with_deterministic_ids_for_tests(
         ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4).expect("target"),
         BootstrapEndpoint::new(&peer.ip().to_string(), peer.port()).expect("bootstrap"),
         ResolutionPolicy::default(),
@@ -140,7 +140,7 @@ fn dot_composition_keeps_the_original_sni_identity() {
 fn doh_composition_keeps_the_original_url_authority_and_path() {
     block_on(async {
         let (address, handle) = fixture([192, 0, 2, 73]);
-        let resolver = BootstrapResolver::new(
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
             ResolutionTarget::new("upstream.example.org", 443, AddressFamily::Ipv4)
                 .expect("target"),
             BootstrapEndpoint::new(&address.ip().to_string(), address.port()).expect("bootstrap"),
@@ -241,7 +241,7 @@ fn resolution_and_handoff_share_one_original_deadline() {
 #[test]
 fn a_numeric_target_resolver_never_opens_a_bootstrap_socket() {
     block_on(async {
-        let resolver = BootstrapResolver::new(
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
             ResolutionTarget::new("192.0.2.99", 853, AddressFamily::Ipv4).expect("literal"),
             BootstrapEndpoint::new("127.0.0.1", 1).expect("bootstrap"),
             ResolutionPolicy::default(),

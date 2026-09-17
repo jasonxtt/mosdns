@@ -139,7 +139,7 @@ fn resolved_address_drives_a_real_udp_exchange_on_one_deadline() {
         let target_fixture = serve_one(target_socket, [198, 51, 100, 7], 600);
 
         // The target's port is what makes the resolved address dialable.
-        let resolver = BootstrapResolver::new(
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
             ResolutionTarget::new("upstream.example.org", bootstrap_port, AddressFamily::Ipv4)
                 .expect("target"),
             BootstrapEndpoint::new("127.0.0.1", bootstrap_address.port()).expect("bootstrap"),
@@ -252,7 +252,7 @@ fn a_malformed_bootstrap_reply_is_typed_not_a_dial() {
             }
         });
 
-        let resolver = BootstrapResolver::new(
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
             ResolutionTarget::new("upstream.example.org", 53, AddressFamily::Ipv4).expect("target"),
             BootstrapEndpoint::new("127.0.0.1", server_address.port()).expect("bootstrap"),
             ResolutionPolicy::default(),
@@ -302,7 +302,7 @@ fn a_terminal_dns_rcode_publishes_nothing() {
             server.send_to(&reply, peer).expect("send");
         });
 
-        let resolver = BootstrapResolver::new(
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
             ResolutionTarget::new("upstream.example.org", 53, AddressFamily::Ipv4).expect("target"),
             BootstrapEndpoint::new("127.0.0.1", server_address.port()).expect("bootstrap"),
             ResolutionPolicy::default(),
@@ -337,7 +337,7 @@ fn a_terminal_dns_rcode_publishes_nothing() {
 #[test]
 fn close_drains_and_the_owner_stays_usable_only_until_closing() {
     block_on(async {
-        let resolver = BootstrapResolver::new(
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
             ResolutionTarget::new("192.0.2.5", 853, AddressFamily::Ipv4).expect("literal"),
             BootstrapEndpoint::new("127.0.0.1", 53).expect("bootstrap"),
             ResolutionPolicy::default(),

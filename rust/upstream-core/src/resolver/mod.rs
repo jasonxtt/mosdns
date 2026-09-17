@@ -115,7 +115,9 @@ pub enum ResolverError {
     /// A bootstrap server must be a numeric address; hostname recursion is not
     /// allowed.
     BootstrapNotNumeric,
-    /// The requested address family does not match a numeric literal's family.
+    /// An address disagrees with the family it was validated or published for:
+    /// a numeric literal whose family differs from the requested one, or a
+    /// resolved destination whose address is not in its declared family.
     FamilyMismatch,
     /// The TTL/policy bounds are unusable.
     InvalidPolicy,
@@ -143,6 +145,10 @@ pub enum ResolverError {
     BootstrapRcode(u16),
     /// A refresh generation was already running and this caller attached to it.
     AlreadyResolving,
+    /// Unpredictable bootstrap transaction IDs are unavailable on this host, so
+    /// the production construction path refused to fall back to a predictable
+    /// source.
+    UnpredictableIdsUnavailable,
     /// An IPv6 bootstrap socket could not be prepared on this host.
     BootstrapUnavailable,
 }
@@ -168,6 +174,7 @@ impl fmt::Display for ResolverError {
             Self::NoUsableAddress => "no usable address",
             Self::BootstrapRcode(_) => "bootstrap rcode",
             Self::AlreadyResolving => "resolution already in flight",
+            Self::UnpredictableIdsUnavailable => "unpredictable ids unavailable",
             Self::BootstrapUnavailable => "bootstrap transport unavailable",
         };
         formatter.write_str(name)
@@ -372,6 +379,31 @@ impl ResolutionPolicy {
         self.retransmit_interval
     }
 
+    /// Derives the `dns-core` wire-parse policy from these bounds.
+    ///
+    /// The wire codec clamps the effective TTL it reports, so parsing a reply
+    /// under `dns-core`'s own defaults would silently override a caller's custom
+    /// floor or ceiling. The resolver therefore always parses under its own
+    /// bounds. The codec's CNAME link bound is not a resolver policy knob, so it
+    /// keeps the reviewed default.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolverError::InvalidPolicy`] when these bounds cannot be
+    /// expressed to `dns-core`, which the constructor already rejects.
+    pub fn dns_core_policy(&self) -> Result<mosdns_dns_core::CnameChainPolicy, ResolverError> {
+        let min_ttl =
+            u32::try_from(self.min_ttl.as_secs()).map_err(|_| ResolverError::InvalidPolicy)?;
+        let max_ttl =
+            u32::try_from(self.max_ttl.as_secs()).map_err(|_| ResolverError::InvalidPolicy)?;
+        mosdns_dns_core::CnameChainPolicy::new(
+            mosdns_dns_core::RESOLVER_DEFAULT_MAX_CNAME_LINKS,
+            min_ttl,
+            max_ttl,
+        )
+        .map_err(|_| ResolverError::InvalidPolicy)
+    }
+
     /// Applies the explicit clamp to an observed TTL in seconds.
     #[must_use]
     pub fn clamp_ttl_secs(&self, ttl_secs: u32) -> Duration {
@@ -409,13 +441,17 @@ impl ResolvedDestination {
     /// # Errors
     ///
     /// Returns [`ResolverError::InvalidTtl`] for a zero TTL, because publishing
-    /// an already-dead result is never a success.
+    /// an already-dead result is never a success, and
+    /// [`ResolverError::FamilyMismatch`] when `address` is not in `family`.
     pub fn new(
         address: IpAddr,
         family: AddressFamily,
         ttl_secs: u32,
         now: Instant,
     ) -> Result<Self, ResolverError> {
+        if AddressFamily::of(address) != family {
+            return Err(ResolverError::FamilyMismatch);
+        }
         if ttl_secs == 0 {
             return Err(ResolverError::InvalidTtl);
         }
@@ -429,8 +465,16 @@ impl ResolvedDestination {
     }
 
     /// Builds the timeless destination of an IP literal.
+    ///
+    /// The family must match `address`; a mismatch is a programming error and is
+    /// caught by a debug assertion, while [`Self::new`] returns the typed error
+    /// for untrusted input.
     #[must_use]
     pub const fn new_literal(address: IpAddr, family: AddressFamily) -> Self {
+        debug_assert!(matches!(
+            (address, family),
+            (IpAddr::V4(_), AddressFamily::Ipv4) | (IpAddr::V6(_), AddressFamily::Ipv6)
+        ));
         Self {
             address,
             family,
