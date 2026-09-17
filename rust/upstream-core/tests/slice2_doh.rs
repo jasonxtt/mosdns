@@ -1169,13 +1169,129 @@ fn a_response_head_over_the_byte_bound_is_rejected() {
         let error = exchange_owned(&upstream, &query_wire(id), open_context())
             .await
             .expect_err("a head over the byte bound must be rejected");
+        // A single header far larger than the whole allowed head is refused by
+        // the raw parser bound while it is still being read, so no head is ever
+        // handed to the exchange.
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
+            "an over-long head must never produce a parsed response head"
+        );
+        assert_eq!(error.side_effect(), SideEffectState::MaybeSent);
+        server.join();
+    });
+}
+
+#[test]
+fn an_over_long_non_canonical_reason_phrase_is_rejected_on_the_raw_wire() {
+    block_on(async {
+        // The post-parse byte check reconstructs the head from parsed fields and
+        // therefore cannot see a long reason phrase: Hyper keeps only the status
+        // code and discards the rest of the status line. A head whose real wire
+        // size is between 16 KiB and 32 KiB, made up almost entirely of the
+        // reason phrase, would therefore slip past a post-parse-only bound.
+        // This proves the *raw* parser bound rejects it in a real HTTP/1.1
+        // loopback exchange.
+        let set = FixtureSet::generate();
+        let id = 0x7405;
+        let body = response_wire(id, 35);
+        let reason = "r".repeat(20 * 1024);
         assert!(
-            matches!(
-                error,
-                SecureError::DohProtocol(DohProtocolError::ResponseHeadTooLarge)
-                    | SecureError::Transport(_)
-            ),
-            "got {error:?}"
+            reason.len() > 16 * 1024 && reason.len() < 32 * 1024,
+            "the reason phrase must sit between the raw bound and the old buffer size"
+        );
+        let server = HttpsServer::start_with(&set, move |_head, _body| {
+            let mut bytes = format!(
+                "HTTP/1.1 200 {reason}\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            )
+            .into_bytes();
+            bytes.extend_from_slice(&body);
+            // Hold the connection open after writing, so the client's failure
+            // is decided by its own parser limit rather than by an EOF race.
+            Reply::Respond(Box::new(ScriptedResponse {
+                status: 200,
+                reason: "OK",
+                content_type: None,
+                extra_headers: Vec::new(),
+                framing: BodyFraming::Raw,
+                body: bytes,
+                truncate_after_head: false,
+            }))
+        });
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        // This is the discriminating assertion: under a 16 KiB parser buffer the
+        // head cannot be assembled, and because the server keeps the connection
+        // open the failure is decided by the client's own limit. If the buffer
+        // were widened (to 32 KiB, or 1 MiB) the whole response would parse and
+        // the exchange would SUCCEED, so `expect_err` would panic.
+        let error = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect_err("a head over the raw 16 KiB bound must not be accepted");
+        // The parser aborts the connection at its limit without ever handing a
+        // head to the exchange, which is exactly the head-not-received case.
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
+            "an over-long raw head must never produce a parsed response head"
+        );
+        assert_eq!(error.side_effect(), SideEffectState::MaybeSent);
+        server.join();
+    });
+}
+
+#[test]
+fn a_chunked_body_over_the_dns_maximum_is_rejected_by_the_incremental_gate() {
+    block_on(async {
+        // Chunked framing carries no Content-Length, so the head-stage check
+        // cannot fire. The body must be stopped by the incremental bound in
+        // `read_body` instead, which is what this exercises.
+        let set = FixtureSet::generate();
+        let id = 0x7406;
+        let oversized = vec![0u8; 65_536]; // one byte over the DNS maximum
+        let mut response = ScriptedResponse::ok_dns(oversized);
+        response.framing = BodyFraming::Chunked;
+        // Deliberately no Content-Length: chunked is the only framing signal.
+        let server = HttpsServer::start(&set, response);
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect_err("a chunked body over the maximum must be rejected");
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::BodyTooLarge),
+            "the incremental body bound must stop an over-max chunked body"
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        server.join();
+    });
+}
+
+#[test]
+fn a_close_delimited_body_over_the_dns_maximum_is_rejected_by_the_incremental_gate() {
+    block_on(async {
+        // A response with neither Content-Length nor chunked framing is
+        // close-delimited, so again only the incremental bound can stop it.
+        let set = FixtureSet::generate();
+        let id = 0x7407;
+        let oversized = vec![0u8; 65_536];
+        let server = HttpsServer::start_with(&set, move |_head, _body| {
+            let mut bytes =
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\n\r\n".to_vec();
+            bytes.extend_from_slice(&oversized);
+            Reply::WriteThenClose(bytes)
+        });
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect_err("a close-delimited body over the maximum must be rejected");
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::BodyTooLarge),
+            "the incremental body bound must stop an over-max close-delimited body"
         );
         server.join();
     });
@@ -1268,18 +1384,18 @@ fn an_absent_response_head_is_never_reported_as_sent() {
         let error = exchange_owned(&upstream, &query_wire(0x7410), open_context())
             .await
             .expect_err("a closed connection before a head is a failure");
-        assert!(
-            matches!(
-                error,
-                SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived)
-                    | SecureError::Transport(_)
-            ),
-            "got {error:?}"
+        // Tightened from "not Sent" to the exact classification the contract
+        // requires: the request was dispatched, but no head ever arrived, so
+        // delivery is unknowable.
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
+            "a clean close before any head must be the head-not-received case"
         );
-        assert_ne!(
+        assert_eq!(
             error.side_effect(),
-            SideEffectState::Sent,
-            "an absent response head must never be reported as Sent: {error:?}"
+            SideEffectState::MaybeSent,
+            "an absent response head is conservatively MaybeSent"
         );
         server.join();
     });

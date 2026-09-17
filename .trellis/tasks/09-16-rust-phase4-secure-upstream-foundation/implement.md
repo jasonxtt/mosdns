@@ -326,6 +326,19 @@ the whole error, which was wrong in two places:
   unknowable at that point, so it now has its own variant,
   `DohProtocolError::ResponseHeadNotReceived`, classified `MaybeSent`.
 
+The second review round also required the handoff itself to be a real
+linearization point. Previously the `AfterRequestSent` seam ran *before*
+`SendRequest::send_request`, so the phase still described a `NotSent` window.
+The exchange now performs the last provably-`NotSent` control check, then calls
+`send_request` synchronously (which dispatches the request into the connection
+driver), and only then reaches the `AfterRequestSent` seam; the post-handoff
+select races the connection, the request and all controls with a `MaybeSent`
+baseline. The seam therefore observes a state in which the query may already be
+on the wire, which is what the phase is named for. The matrix remains 6 x 4 = 24
+cells with the same four controls, drain assertions and at-most-one-request
+counter. `an_absent_response_head_is_never_reported_as_sent` is tightened from
+"not `Sent`" to exactly `MaybeSent`.
+
 Classification is now per-variant via `DohProtocolError::side_effect`, and every
 defect that can only be observed after a complete head (status, media type,
 encoding, head size, body size, incomplete body) remains `Sent`. The
@@ -345,16 +358,33 @@ and that the reported metadata agrees with the returned wire.
 
 **P1-3 — response bounds.**
 Header bounding was a count (`max_headers(64)`) plus a transport buffer size,
-not the 16 KiB byte bound the design requires. `response_head_bytes` now measures
-the parsed head's byte size (status line plus every header line plus the
-terminating blank line) and rejects anything above 16 KiB, so a small number of
-very large headers can no longer exceed the contract. A declared
-`Content-Length` above 65535 is rejected at the head stage before any body byte
-is read, while the incremental body bound is retained. Tests cover a head one
-byte under the bound (accepted) and well over it (rejected), and a genuinely
-valid 65535-byte DNS response (accepted) against 65536 (rejected); the 65535-byte
-fixture is a real dns-core-valid response built to an exact length rather than
-filler.
+not the 16 KiB byte bound the design requires.
+
+The second review round narrowed this further: `response_head_bytes` reconstructs
+the head from *parsed* fields, which Hyper has already reduced to a status code
+and a header map, so it cannot see bytes the parser discarded — most obviously a
+long non-canonical reason phrase, which is not retained unless the `ffi` feature
+is enabled. A post-parse check alone therefore cannot be the raw bound.
+
+The raw bound is now enforced during parsing: the Hyper HTTP/1.1 client builder
+sets `max_buf_size` to `MAX_RESPONSE_HEADER_BYTES` (16 KiB), so the parser aborts
+the connection once the head bytes it has buffered reach the limit, before the
+exchange ever sees a head. `response_head_bytes` is retained as
+defense-in-depth, and the documented comment now states explicitly that it
+cannot see discarded bytes and is therefore secondary.
+
+`Content-Length` above 65535 is still rejected at the head stage, and the
+incremental body bound is still applied to the bytes actually received, so a
+response that omits or understates `Content-Length` is still stopped.
+
+Tests: a head one byte under the bound is accepted and a head well over it is
+rejected; the raw bound is proven by a real HTTP/1.1 loopback exchange whose head
+is a 20 KiB non-canonical reason phrase, which the post-parse reconstruction
+would underestimate but the parser now refuses. A genuinely valid 65535-byte DNS
+response is accepted against 65536 rejected (the fixture is built to an exact
+length from real A records, not filler), and both a chunked and a
+close-delimited 65536-byte body — neither carrying `Content-Length`, so the
+head-stage check cannot fire — are rejected by the incremental gate.
 
 RED evidence (each mutation applied with a repo-local `mktemp target/*` copy and
 a `trap` restore; no backup remains):
@@ -366,14 +396,16 @@ a `trap` restore; no backup remains):
 | Force `UnexpectedAlpn` to `Sent` | `the_side_effect_classification_of_each_doh_defect_is_explicit` FAILED |
 | Remove the head byte bound | `a_response_head_over_the_byte_bound_is_rejected` FAILED |
 | Remove the head-stage `Content-Length` check | `a_declared_content_length_over_the_dns_maximum_fails_at_the_head` FAILED (`IncompleteBody` instead of `BodyTooLarge`) |
+| Widen the raw parser buffer back to 32 KiB | both raw-wire head tests FAILED (the over-long head parses and the exchange *succeeds*) |
+| Remove the incremental body bound | both chunked and close-delimited 65536-byte tests FAILED |
 
 Verification after remediation (macOS Darwin 25.5.0 arm64; cargo/rustc 1.95.0):
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
-| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice2_doh --locked` | PASS, 36 tests |
-| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 212 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice2_doh --locked` | PASS, 39 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 215 tests |
 | `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, 23 targets |
 | `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS, no warnings |
 | `python3 .trellis/scripts/task.py validate rust-phase4-secure-upstream-foundation` | PASS |
