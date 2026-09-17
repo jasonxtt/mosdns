@@ -557,14 +557,17 @@ claim.
 - [x] Inspect exact changed paths; retain no Go/cgo/ABI/selector/host/listener/
   config/API/WebUI changes or copied KixDNS source.
   Evidence: the scope check in the Slice4 local record.
-- [ ] No public upstream or production host is needed. Linux Actions/isolated
+- [x] No public upstream or production host is needed. Linux Actions/isolated
   test evidence is distinct from macOS results; no claim that a library test is
   full native host E2E, production throughput or long-running deployment proof.
-  Partially covered locally; the **Linux Actions result is still outstanding**
-  because this executor must not push. The parent session must observe it.
+  Evidence: the Linux Actions run `35180813379` for
+  `c84d268c66b20ea6e339b4379674ccfb262211bf` succeeded; see "Linux Actions
+  evidence" below. Still a library/loopback gate, not host E2E or deployment
+  proof.
 - [ ] Final root acceptance, then STOP. Archive only after a later wrap-up
   instruction; no implied next protocol/task activation.
-  NOT done: requires the Linux evidence above and an explicit reviewer result.
+  NOT done: the Linux evidence above is complete, but the final root acceptance
+  from `rust0916` has not been returned. Awaiting that explicit review result.
 
 Expected checks after implementation is separately authorized:
 
@@ -591,16 +594,17 @@ frontend and Go concurrently.
 
 ### Slice4 local execution and evidence record — 2026-09-17
 
-Scope: this record covers the local (macOS) half of the Slice4 gate. The Linux
-GitHub Actions half is still outstanding because this executor is not permitted
-to push; see "Outstanding: Linux evidence" below.
+Scope: this record covers the macOS local half of the Slice4 gate; the Linux
+GitHub Actions half is recorded separately under "Linux Actions evidence" below.
+Both halves are now complete; only the final root acceptance remains.
 
 Revision and environment actually used:
 
-- branch `rust`; working tree based on `d52de490306c66b6cbab32cbca698917428ff6a7`,
-  which contains the Slice3 CLOSED record `d3566bf105008e23c315536d6560b00d55250e55`
-  as an ancestor. The reviewer should use the commit the parent session produces
-  from this diff.
+- branch `rust`; reviewed source revision
+  `c84d268c66b20ea6e339b4379674ccfb262211bf`, which contains the Slice3 CLOSED
+  record `d3566bf105008e23c315536d6560b00d55250e55` as an ancestor.
+- The macOS local checks below were run on the working tree that became
+  `c84d268`; the Linux checks were run by GitHub Actions on that exact commit.
 - OS/arch: Darwin 25.5.0 arm64 (Apple silicon).
 - Toolchain: cargo 1.95.0 / rustc 1.95.0 (Homebrew), the only installed
   toolchains are `stable-aarch64-apple-darwin` and `nightly-aarch64-apple-darwin`.
@@ -696,8 +700,10 @@ AC coverage re-inspection (PRD AC1–AC8):
   `slice2_doh.rs`/`slice3_doh.rs` and the per-variant
   `DohProtocolError::side_effect` tests. Covered.
 - AC7 / R7: Rust fmt/test/clippy/release and dependency review pass; existing
-  transport regressions and the Go gates pass (rows 1–13 above). The **Linux**
-  half of AC7 is outstanding — see below. Partially covered locally.
+  transport regressions and the Go gates pass (rows 1–13 above). The Linux half
+  is covered by Actions run `35180813379` on
+  `c84d268c66b20ea6e339b4379674ccfb262211bf` (`rust-foundation` and Go `build`
+  jobs both SUCCESS; `rust-runtime-experimental` skipped by design). Covered.
 - AC8 / R1,R7: no Go/cgo/ABI/selector, host/listener, YAML/API/WebUI,
   deployment or metrics-schema change; the only non-Rust edits are this task's
   evidence documents and the two CI flags. Covered by the scope check below.
@@ -709,24 +715,47 @@ Go, config, API/UI, dependency or later-scope file changed. The three untracked
 
 Explicit limitations of this record:
 
-- These results are **local macOS arm64 evidence only**. They must not be
-  presented as Linux evidence.
-- They are library-level tests against loopback peers. They are **not** native
+- The table above is **macOS arm64 local evidence only**; it is not Linux
+  evidence. The separate Linux evidence is recorded in the next section.
+- All of it is library-level testing against loopback peers. It is **not** native
   host end-to-end evidence, production throughput, or long-running deployment
-  proof.
-- `cargo +1.85.0 check` did not run; MSRV is evidenced by resolved metadata only.
-- The CI `rust-foundation` job result for this revision is **not yet observed**;
-  only its commands were validated locally.
+  proof, on either platform.
+- `cargo +1.85.0 check` did not run on macOS (toolchain absent); MSRV is
+  evidenced by resolved metadata only, plus the Linux CI build on stable.
 
-Outstanding: Linux evidence (requires the parent session)
+### Linux Actions evidence — 2026-09-17
 
-Slice4 requires an actual Linux GitHub Actions `rust-foundation` result for the
-revision under review. This executor was instructed not to push and not to send
-the review, so the Linux half of AC7 remains open and must be completed by the
-parent session after it commits and pushes: read the Actions run for that commit
-and confirm the ordinary `rust-foundation` job ran fmt, the secure all-targets
-`--all-features` tests and warnings-denied clippy successfully on Linux. Until
-that run is observed, Slice4 is **not** complete and no Linux claim is made.
+Slice4's Linux half was obtained from GitHub Actions on the reviewed revision.
+
+- Revision: `c84d268c66b20ea6e339b4379674ccfb262211bf`
+- Run: `35180813379` — <https://github.com/jasonxtt/mosdns/actions/runs/35180813379>
+- Overall workflow "Test mosdns": **SUCCESS**.
+- `rust-foundation` job (`105072346672`): **SUCCESS**, 57s, on `ubuntu-latest`.
+  It ran `cargo fmt --all --check`, the secure-upstream
+  `cargo test -p mosdns-dns-core -p mosdns-upstream-core --all-targets
+  --all-features --locked` (all 13 test executables, including every slice0-3
+  secure target) and `cargo clippy -p mosdns-dns-core -p mosdns-upstream-core
+  --all-targets --all-features --locked -- -D warnings`. This is the Linux
+  evidence for the Rust half of AC7.
+- Go `build` job (`105072346784`): **SUCCESS** (`go build`, `go vet`,
+  `go test ./...` and the focused matcher normal/race suites).
+- `rust-runtime-experimental`: **skipped by design**, because that job is
+  `workflow_dispatch`-only and this run was push-triggered. Its absence is
+  expected and is not a failure; the transitional cgo/ABI/selector path is out
+  of Slice4 scope.
+
+Boundaries kept: this run proves the pure Rust foundation builds, tests and lints
+on Linux, and that the Go default gates pass. It does **not** claim native host
+end-to-end behavior, production throughput, deployment, or any host/production
+wiring, and it does not exercise the `workflow_dispatch`-only experimental path.
+
+Remaining: final root acceptance
+
+Both halves of the Slice4 gate (macOS local and Linux Actions) are now complete
+for `c84d268c66b20ea6e339b4379674ccfb262211bf`. The only outstanding item is the
+final root acceptance result from `rust0916`. Until that explicit `PASS` is
+returned, Slice4 is not closed, the task stays `in_progress`, and no later slice
+or production step is authorized.
 
 ## Slice handoff and rollback
 
