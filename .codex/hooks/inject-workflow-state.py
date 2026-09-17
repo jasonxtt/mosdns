@@ -271,7 +271,7 @@ def prompt_has_skip_keyword(prompt: str, keyword: str) -> bool:
 
 
 def _resolve_codex_dispatch_mode(config: dict) -> str:
-    """Normalize `codex.dispatch_mode` from .trellis/config.yaml to "auto" or "inline".
+    """Normalize Codex dispatch mode to auto, inline, or herdr.
 
     Defaults to `auto`. The legacy `sub-agent` value is an alias for `auto`.
     Any other explicit value (including invalid ones) falls back to `inline`
@@ -286,6 +286,8 @@ def _resolve_codex_dispatch_mode(config: dict) -> str:
             cfg_mode = str(codex_cfg.get("dispatch_mode", mode)).strip().lower()
             if cfg_mode == "inline":
                 mode = "inline"
+            elif cfg_mode == "herdr":
+                mode = "herdr"
             elif cfg_mode in ("auto", "sub-agent"):
                 mode = "auto"
             else:
@@ -315,10 +317,17 @@ def _codex_mode_banner(config: dict) -> str:
             "context injection is preferred and child-side loading is the fallback. "
             "The main session still coordinates, clarifies, updates specs, commits, and finishes."
         )
-    else:
+    elif mode == "inline":
         meaning = (
             "inline: the main session implements/checks directly; "
             "do not dispatch implement/check sub-agents."
+        )
+    else:
+        meaning = (
+            "herdr: Codex is the controller; do not implement directly and do not "
+            "launch native implement/check sub-agents. Before execution, use the "
+            "conversation-scoped routing choice to dispatch to the user-selected "
+            "Herdr pane and send verified work to the selected reviewer."
         )
     return f"<codex-mode>{meaning}</codex-mode>"
 
@@ -339,8 +348,49 @@ def resolve_breadcrumb_key(
     """
     if platform == "codex":
         mode = _resolve_codex_dispatch_mode(config)
-        return f"{status}-inline" if mode == "inline" else status
+        if mode == "inline":
+            return f"{status}-inline"
+        if mode == "herdr":
+            return f"{status}-herdr"
+        return status
     return status
+
+
+def _codex_routing_banner(root: Path, input_data: dict) -> str:
+    """Describe this Codex conversation's persisted Herdr/reviewer choice."""
+    scripts_dir = root / ".trellis" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from common.active_task import resolve_context_key  # type: ignore[import-not-found]
+        from common.codex_routing import load_state  # type: ignore[import-not-found]
+
+        key = resolve_context_key(input_data, platform="codex")
+        if not key:
+            raise RuntimeError("conversation identity unavailable")
+        state = load_state(root, key)
+    except Exception as exc:
+        return f"<codex-routing>unresolved: {exc}; fail closed before dispatch or review.</codex-routing>"
+
+    dispatch = state.get("dispatch")
+    reviewer = state.get("reviewer")
+    missing = [name for name, value in (("executor", dispatch), ("reviewer", reviewer)) if value is None]
+    if missing:
+        return (
+            "<codex-routing>selection required before implementation dispatch or review: "
+            + ", ".join(missing)
+            + ". Run `python3 .trellis/scripts/codex_routing.py discover` and ask "
+              "one combined user question for all missing choices. Planning/read-only work may continue.</codex-routing>"
+        )
+    if dispatch.get("mode") == "inline":
+        dispatch_text = "inline (explicit user choice)"
+    else:
+        dispatch_text = f"Herdr {dispatch.get('workspace_id')}:{dispatch.get('executor_pane_id')}"
+    return (
+        f"<codex-routing>executor={dispatch_text}; reviewer="
+        f"{reviewer.get('conversation_title') or reviewer.get('conversation_id')} "
+        f"({reviewer.get('url')}). Reuse these choices unless the user replaces them or validation fails.</codex-routing>"
+    )
 
 
 def build_breadcrumb(
@@ -443,6 +493,8 @@ def main() -> int:
         if task is None:
             parts.append(CODEX_NO_TASK_BOOTSTRAP_NOTICE)
         parts.append(_codex_mode_banner(config))
+        if _resolve_codex_dispatch_mode(config) == "herdr":
+            parts.append(_codex_routing_banner(root, data))
         parts.append(breadcrumb)
         breadcrumb = "\n\n".join(parts)
 
