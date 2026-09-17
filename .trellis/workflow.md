@@ -213,6 +213,14 @@ Multi-deliverable scope: consider a parent task plus independently verifiable ch
 Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-before-dev`.
 [/workflow-state:planning-inline]
 
+[workflow-state:planning-herdr]
+Load `trellis-brainstorm`; stay in planning.
+Finish and review all required planning artifacts before `task.py start`.
+Herdr mode does not require an executor/reviewer choice for planning or other
+read-only work. Before implementation dispatch or external review, resolve all
+missing conversation-scoped choices in one combined user question.
+[/workflow-state:planning-herdr]
+
 ### Phase 2: Execute
 - 2.1 Implement `[required · repeatable]`
 - 2.2 Quality check `[required · repeatable]`
@@ -252,6 +260,19 @@ responsible for clean-worktree safety, exact diff inspection/apply, verification
 commit/push, and the bounded same-conversation root-review loop described in
 `.trellis/spec/backend/quality-guidelines.md`.
 [/workflow-state:in_progress-inline]
+
+[workflow-state:in_progress-herdr]
+Flow: `trellis-before-dev` -> verify conversation routing -> dispatch one bounded
+behavior/slice to the user-selected Herdr pane -> monitor with bounded
+`herdr agent wait/read` -> independently inspect and validate -> send the
+verified commit to the selected reviewer -> `trellis-update-spec` -> commit and
+`/trellis:finish-work` when the task gate permits.
+Do not implement directly and do not launch native Codex implement/check
+sub-agents. If executor or reviewer is missing, run
+`python3 .trellis/scripts/codex_routing.py discover` and ask one combined user
+question for every missing choice. Reuse valid choices for the rest of this
+Codex conversation. Never silently fall back or auto-select a candidate.
+[/workflow-state:in_progress-herdr]
 
 ### Phase 3: Finish
 - 3.2 Debug retrospective `[on demand]`
@@ -300,6 +321,16 @@ When a user request matches one of these intents inside an active task, route fi
 - Repeated debugging -> `trellis-break-loop`; spec updates -> `trellis-update-spec`.
 
 [/codex-inline, Kilo, Antigravity, Devin]
+
+[codex-herdr]
+
+- Planning or unclear requirements -> `trellis-brainstorm`.
+- Before dispatch -> `trellis-before-dev`, validate the conversation-scoped
+  executor/reviewer choice, then use the Herdr controller contract.
+- After executor handoff -> independently inspect/check; repeated debugging ->
+  `trellis-break-loop`; spec updates -> `trellis-update-spec`.
+
+[/codex-herdr]
 
 ### Guardrails
 
@@ -383,6 +414,14 @@ Do the research in the main session directly and write findings into `{TASK_DIR}
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
+[codex-herdr]
+
+Do read-only research in the controller session and persist findings under
+`{TASK_DIR}/research/`; executor/reviewer selection is not required until
+implementation dispatch or external review.
+
+[/codex-herdr]
+
 **Research artifact conventions**:
 - One file per research topic (e.g. `research/auth-library-comparison.md`)
 - Record third-party library usage examples, API references, version constraints in files
@@ -447,6 +486,14 @@ Skip this step only when both files already have real curated entries.
 Skip this step. Context is loaded directly by the `trellis-before-dev` skill in Phase 2.
 
 [/codex-inline, Kilo, Antigravity, Devin]
+
+[codex-herdr]
+
+Skip JSONL curation. The controller loads artifacts/specs with
+`trellis-before-dev` and includes the bounded task context in the selected
+Herdr executor prompt.
+
+[/codex-herdr]
 
 #### 1.4 Activate task `[required · once]`
 
@@ -558,6 +605,18 @@ The platform prelude auto-handles the context load requirement:
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
+[codex-herdr]
+
+1. Load `trellis-before-dev` and the active task artifacts in the controller.
+2. Validate or obtain the conversation-scoped executor and reviewer choice.
+3. Dispatch exactly one authorized behavior/slice to the selected pane with
+   the repository path, allowed files, checks, prohibitions, and report shape.
+4. Monitor with bounded `herdr agent wait/read`; inspect every approval.
+5. Independently inspect the complete diff and rerun appropriate checks before
+   accepting the handoff or sending a verified commit to review.
+
+[/codex-herdr]
+
 #### 2.2 Quality check `[required · repeatable]`
 
 [Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi]
@@ -591,6 +650,15 @@ Load the `trellis-check` skill and verify the code per its guidance:
 If issues are found → fix → re-check, until green.
 
 [/codex-inline, Kilo, Antigravity, Devin]
+
+[codex-herdr]
+
+The controller performs the final full-scope check after executor handoff:
+spec compliance, exact diff/paths, behavior tests, lint/type-check, task
+validation, branch/push identity, and reviewer evidence. Findings are returned
+only to the selected executor unless the user explicitly changes routing.
+
+[/codex-herdr]
 
 **Final pass (before Phase 3.4 commit)**: the last 2.2 of a task must run full-scope, not just on the latest implement chunk. List all affected packages with `python3 ./.trellis/scripts/get_context.py --mode packages`, then load each package's spec index Quality Check section. This catches cross-layer / multi-package issues a mid-iteration local 2.2 cannot.
 

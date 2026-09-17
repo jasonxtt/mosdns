@@ -249,8 +249,9 @@ def get_codex_dispatch_mode(repo_root: Path | None = None) -> str:
     """Return Codex dispatch mode.
 
     Default is ``auto``, which dispatches Trellis sub-agents and uses native
-    context injection with a child-side fallback. ``inline`` is an explicit
-    opt-out. ``sub-agent`` remains a backwards-compatible alias for ``auto``.
+    context injection with a child-side fallback. ``inline`` runs in the main
+    session. ``herdr`` selects a user-chosen external Herdr pane while Codex
+    remains controller. ``sub-agent`` remains an alias for ``auto``.
 
     Invalid explicit configuration falls back to ``inline`` rather than
     unexpectedly dispatching a sub-agent. This CLI-facing parser is the only
@@ -270,7 +271,7 @@ def get_codex_dispatch_mode(repo_root: Path | None = None) -> str:
 
     raw = codex.get("dispatch_mode", DEFAULT_CODEX_DISPATCH_MODE)
     mode = str(raw).strip().lower()
-    if mode in ("auto", "inline"):
+    if mode in ("auto", "inline", "herdr"):
         return mode
     if mode == "sub-agent":
         return "auto"

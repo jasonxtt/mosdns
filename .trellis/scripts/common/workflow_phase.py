@@ -145,11 +145,12 @@ def resolve_effective_platform(platform: str, config: dict) -> str:
     """Map ``codex`` to a dispatch-mode-namespaced virtual platform name.
 
     When ``--platform codex`` is passed, return ``"codex-sub-agent"`` by
-    default or ``"codex-inline"`` when explicitly configured in
+    default, ``"codex-inline"`` for inline mode, or ``"codex-herdr"`` for
+    conversation-scoped external Herdr execution configured in
     ``.trellis/config.yaml``. ``sub-agent`` remains an alias for ``auto``.
     ``filter_platform`` then surfaces blocks whose marker lists include the
-    namespaced name (e.g. ``[codex-sub-agent, ...]`` or ``[codex-inline, Kilo,
-    Antigravity, Devin]``).
+    namespaced name (e.g. ``[codex-sub-agent, ...]``, ``[codex-inline, Kilo,
+    Antigravity, Devin]``, or ``[codex-herdr]``).
 
     Native Codex context injection supports the ``auto`` default. Invalid
     explicit values fall back to ``inline`` safely; this renderer deliberately
@@ -167,11 +168,15 @@ def resolve_effective_platform(platform: str, config: dict) -> str:
                 cfg_mode = str(codex_cfg.get("dispatch_mode", mode)).strip().lower()
                 if cfg_mode == "inline":
                     mode = "inline"
+                elif cfg_mode == "herdr":
+                    mode = "herdr"
                 elif cfg_mode in ("auto", "sub-agent"):
                     mode = "auto"
                 else:
                     mode = "inline"
-        return "codex-sub-agent" if mode == "auto" else "codex-inline"
+        if mode == "auto":
+            return "codex-sub-agent"
+        return "codex-herdr" if mode == "herdr" else "codex-inline"
     return platform
 
 
