@@ -1,9 +1,14 @@
 # Implementation plan — Rust Phase 4 endpoint resolution foundation
 
-Planning status: implementation authorized; execute only the currently
-authorized slice. Each slice uses one behavior at a time: RED public contract
-test -> GREEN minimum implementation -> bounded refactor -> focused checks ->
-controller diff/check -> web review -> STOP.
+Planning status: implementation authorized. The Slice headings below are
+behavioral milestones in the reviewed plan. In Herdr mode, one selected Claude
+executor receives the active task's full remaining scope (starting at Slice 1
+after the reviewed Slice 0) and may progress through those milestones in one
+handoff; the controller performs one complete-task diff/check and web-review
+gate. In native sub-agent or MCP DSH modes, retain one behavior/slice per job
+and the corresponding handoff gate. Every milestone still uses RED public
+contract test -> GREEN minimum implementation -> bounded refactor -> focused
+checks.
 
 ## Routing and worktree rules
 
@@ -19,7 +24,9 @@ controller diff/check -> web review -> STOP.
   migration-document edits. Never reset/rebase/force-push, switch branches, use
   `git add -A`, or stage by directory.
 - No production deployment, `mosdns`/`mos-test` service mutation, port 53, host
-  wiring, or next-slice progression follows automatically from a review PASS.
+  wiring, work outside this active task, or task archive follows automatically
+  from a review PASS. Herdr's single assignment may include all remaining
+  planned slices in this task; it must still stop at the task boundary.
 
 ## Slice 0 — pure DNS resolver wire contract and dependency gate
 
@@ -401,3 +408,130 @@ caught by the new tests.
 - A TC=1 response is never inspected for records, so its body framing is not
   validated; that is deliberate, since a truncated body is by definition
   incomplete and this codec performs no TCP retry.
+
+## Full remaining task — Herdr single assignment (2026-09-17)
+
+Executed after the reviewed Slice 0 PASS at `e1339f1`. In Herdr mode the selected
+executor receives the active task's full remaining scope, so Slice 1 through
+Slice 5 below are the reviewed plan's behavioral milestones, each built
+RED public contract test -> GREEN minimum implementation -> bounded refactor.
+
+### Changed paths
+
+- `rust/upstream-core/src/resolver/mod.rs` (new, 739 lines): typed model —
+  `AddressFamily` (re-exported from `dns-core`, Slice 0 wire contract untouched),
+  `Clock`/`SystemClock`, `ConfigVersion`, `ResolutionTarget`,
+  `BootstrapEndpoint`, `ResolutionPolicy`, `ResolvedDestination`,
+  `PublishedTarget`, `ResolverState`, `ResolverError`, `resolve_numeric`.
+- `rust/upstream-core/src/resolver/bootstrap.rs` (new, 276 lines): the bounded
+  connected UDP bootstrap exchange and the injectable `ResolutionIdSource`.
+- `rust/upstream-core/src/resolver/owner.rs` (new, 593 lines):
+  `BootstrapResolver` (single-flight generation, lifecycle/reuse, one absolute
+  deadline), `ResolverComposition`, `ResolvedUpstream`.
+- `rust/upstream-core/src/lib.rs`: module declaration, crate-root re-exports, and
+  one additive `Lifecycle::register_owned` wrapper over the existing
+  `register_shared` admission gate. No existing item changed or removed.
+- `rust/upstream-core/tests/resolver_slice1.rs` .. `resolver_slice5.rs` (new,
+  423 + 235 + 449 + 261 + 370 lines).
+
+`rust/dns-core/**`, `rust/Cargo.toml`, and `rust/Cargo.lock` are **unchanged**:
+no manifest or lockfile edit was needed, and no DNS library was added.
+
+### Slice 1 — typed model, config mapping, numeric bypass, deterministic expiry
+
+RED: `resolver_slice1.rs` failed with unresolved
+`resolver::{AddressFamily, Clock, ConfigVersion, ...}` imports while the module
+was an empty scaffold. GREEN: 17 public contract tests pass, covering the
+`0/4 -> IPv4`, `6 -> IPv6` mapping and rejection of every other version; numeric
+dial bypass with no expiry; hostname normalization (case, trailing root dot,
+label rules, 253-octet limit); numeric bootstrap `host:port` validation;
+policy defaults and bounds; deterministic injected-clock expiry at the exact
+boundary; publication with identity separation; and the state model (fresh
+serving, expired value retained as evidence but never served, failed refresh
+never replacing a published value).
+
+### Slice 2 — bounded connected UDP bootstrap exchange
+
+RED: `resolver_slice2.rs` failed on the unresolved `BootstrapResolver` import.
+GREEN: 7 tests pass on loopback fixtures with random high ports and no wall
+sleep, covering a real one-address resolution, TTL clamps, an already-expired
+deadline, caller cancellation, numeric-target bypass, and close/drain; with
+in-crate tests for the blocking bind/connect/send/receive paths.
+
+### Slice 3 — single-flight, refresh, last-known-good, close
+
+RED: `resolver_slice3.rs` failed against the not-yet-existing single-flight
+behavior. GREEN: 10 tests pass with a hand-advanced clock and a query-counting
+fixture: a fresh publication is served with exactly one bootstrap query; an
+expired publication triggers exactly one real refresh; a failed refresh
+publishes nothing and leaves only a typed diagnostic; concurrent callers do not
+fan out into more than one query; an aborted leader lets a later caller lead a
+fresh generation (the RAII `LeaderGuard` completes the abandoned generation);
+close is idempotent and rejects later work; an expired deadline and a closed
+owner each produce **zero** datagrams; and a caller's short deadline is honored
+rather than replaced by a private timeout.
+
+### Slice 4 — composition into the existing boundaries
+
+RED first. GREEN: 7 tests pass, proving a resolved destination feeds the numeric
+`Endpoint`, `ResolvedUpstream` and the secure constructors; DoT keeps the
+caller's original SNI identity; DoH keeps the original URL authority, path, and
+query; a numeric `dial_addr` bypasses the resolver; and resolution plus handoff
+share one original absolute deadline with no fresh budget.
+
+### Slice 5 — end-to-end boundary and the full error matrix
+
+RED first. GREEN: 6 tests pass. The central test resolves a hostname through an
+explicitly bound loopback bootstrap socket whose answer is the *second*,
+separately bound loopback target socket's own address and port, then drives a
+**real** plain UDP exchange through the existing `Upstream` transport to that
+target and asserts the returned wire, the response ID, the target port, and the
+unchanged original deadline. The composition is exercised end to end, not
+mocked. The remaining tests cover the full constructor error matrix, a
+non-response datagram being ignored rather than treated as an answer, a terminal
+negative rcode publishing nothing, close/drain, and identity separation.
+
+A bounded test deadline (`STEP`) wraps every await and every fixture loop has a
+`FIXTURE_TIMEOUT`, so no test can hang: an earlier fixture that answered with an
+unroutable address was replaced by the two-socket reachable design above.
+
+### Checks (branch `rust`, `/Users/tom/github/mosdns-rust`)
+
+| Command | Result |
+| --- | --- |
+| `cargo test … --workspace --all-targets --all-features --locked` | 30 suites ok, 0 failures |
+| `cargo fmt --manifest-path rust/Cargo.toml --all --check` | clean |
+| `cargo clippy … --workspace --all-targets --all-features --locked -- -D warnings` | clean |
+| `cargo tree … -p mosdns-upstream-core -e normal --locked` | no new DNS library |
+| `cargo tree … -p mosdns-dns-core -e normal --locked` | still only `mosdns-dns-core` |
+| `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | passed |
+| `git diff --check` | clean |
+
+Mutation checks (each with a trap-restored copy of the resolver module) confirm
+the suites catch: a swapped config-version family, a removed TTL clamp, a
+removed numeric bypass, an unenforced expiry, a stale value served as fresh, a
+removed bootstrap-numeric check, a disabled single-flight leader gate, a removed
+leader-abort recovery guard, a resolver dialing the wrong port, a publication
+that ignores the resolved address, and a resolution that drops the resolved TTL.
+One survivor — the outer deadline re-check in the owner — is redundant with the
+exchange's own `check_at`, which enforces the same deadline, so the observable
+contract is unchanged.
+
+### Limitations
+
+- No Rust 1.85 run: `rustc 1.95.0` (Homebrew) is the only installed toolchain,
+  so MSRV is evidenced indirectly (every resolved package declares at most
+  `rust-version = 1.85`; none is above it). No claim is made that this compiled
+  under 1.85.
+- No Linux evidence: this assignment ran on macOS only. The resolver's exchange
+  is loopback-tested locally; Linux loopback evidence is still outstanding and
+  is required before final task closure, per the task's own gate.
+- The default `SteppingIdSource` is deterministic and **not** unpredictable; a
+  production caller must supply an unpredictable `ResolutionIdSource` through
+  `BootstrapResolver::with_id_source`. This is documented on the type.
+- Native dual-stack resolution / Happy Eyeballs remains the reviewed future
+  follow-up: `AddressFamily` is single-family (`0/4` = IPv4, `6` = IPv6) and no
+  address racing was added.
+- Connection pooling/reuse/pipeline, socket policy/proxy, QUIC/HTTP3, server
+  listeners, YAML/host/API/WebUI wiring, and Phase 6 retirement remain out of
+  scope and untouched.
