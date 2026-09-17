@@ -5,11 +5,17 @@
 #![allow(clippy::pedantic)]
 
 mod composite;
+pub mod resolver;
 pub mod secure;
 mod tcp;
 mod udp;
 
 pub use composite::UdpTcpPolicy;
+pub use resolver::{
+    AddressFamily, BootstrapEndpoint, BootstrapResolver, Clock, ConfigVersion, PublishedTarget,
+    ResolutionPolicy, ResolutionTarget, ResolvedDestination, ResolvedUpstream, ResolverComposition,
+    ResolverError, ResolverState, SystemClock, resolve_numeric,
+};
 pub use secure::{
     DohEndpoint, DotEndpoint, IdentityError, SecureError, ServerIdentity, ServiceUrlError,
 };
@@ -728,6 +734,15 @@ impl Lifecycle {
         Ok(SharedInFlightGuard {
             lifecycle: Arc::clone(self),
         })
+    }
+
+    /// Registers one in-flight exchange through a shared handle, so a guard can
+    /// be held by a caller-owned future or by the resolver's leader and waiter
+    /// paths without borrowing the owner for a lifetime.
+    ///
+    /// Crate-private, like [`Self::register`]: it uses the same admission gate.
+    pub(crate) fn register_owned(self: &Arc<Self>) -> Result<SharedInFlightGuard, UpstreamError> {
+        self.register_shared()
     }
 
     /// Releases one registration. The matching guard calls this exactly once.
