@@ -152,14 +152,21 @@ fn start_h2_server(
 #[derive(Clone, Copy)]
 enum H2Failure {
     RefusedStream,
+    ResetStream,
     GoAway,
     Eof,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct H2FailureCounts {
+    connections: usize,
+    requests: usize,
 }
 
 fn start_h2_failure_server(
     set: &FixtureSet,
     failure: H2Failure,
-) -> (SocketAddr, std::thread::JoinHandle<usize>) {
+) -> (SocketAddr, std::thread::JoinHandle<H2FailureCounts>) {
     let (listener, address) = bind_listener();
     listener
         .set_nonblocking(true)
@@ -184,10 +191,23 @@ fn start_h2_failure_server(
             let Some(Ok((_request, mut respond))) = connection.accept().await else {
                 panic!("client did not send an h2 request");
             };
+            let mut requests = 1;
             match failure {
                 H2Failure::RefusedStream => {
                     respond.send_reset(Reason::REFUSED_STREAM);
-                    let _ = timeout(TEST_TIMEOUT, connection.accept()).await;
+                    if let Ok(Some(Ok((_request, _respond)))) =
+                        timeout(Duration::from_millis(250), connection.accept()).await
+                    {
+                        requests += 1;
+                    }
+                }
+                H2Failure::ResetStream => {
+                    respond.send_reset(Reason::CANCEL);
+                    if let Ok(Some(Ok((_request, _respond)))) =
+                        timeout(Duration::from_millis(250), connection.accept()).await
+                    {
+                        requests += 1;
+                    }
                 }
                 H2Failure::GoAway => {
                     connection.abrupt_shutdown(Reason::NO_ERROR);
@@ -205,7 +225,10 @@ fn start_h2_failure_server(
             // Keep the listener alive briefly to make a forbidden retry or
             // HTTP/1.1 fallback observable as a second accepted connection.
             let second = timeout(Duration::from_millis(100), listener.accept()).await;
-            if second.is_ok() { 2 } else { 1 }
+            H2FailureCounts {
+                connections: if second.is_ok() { 2 } else { 1 },
+                requests,
+            }
         })
     });
     (address, handle)
@@ -349,7 +372,12 @@ fn independent_h2_owners_use_independent_fresh_connections() {
 
 #[test]
 fn h2_reset_goaway_and_eof_are_terminal_maybe_sent_failures() {
-    for failure in [H2Failure::RefusedStream, H2Failure::GoAway, H2Failure::Eof] {
+    for failure in [
+        H2Failure::RefusedStream,
+        H2Failure::ResetStream,
+        H2Failure::GoAway,
+        H2Failure::Eof,
+    ] {
         block_on(async move {
             let set = FixtureSet::generate();
             let (address, server) = start_h2_failure_server(&set, failure);
@@ -377,8 +405,11 @@ fn h2_reset_goaway_and_eof_are_terminal_maybe_sent_failures() {
             assert_eq!(upstream.in_flight_exchanges(), 0);
             assert_eq!(
                 server.join().expect("failure server joined"),
-                1,
-                "one h2 failure must not trigger a retry or protocol fallback"
+                H2FailureCounts {
+                    connections: 1,
+                    requests: 1,
+                },
+                "one h2 failure must not trigger a retry, second stream, or protocol fallback"
             );
         });
     }
@@ -415,6 +446,42 @@ fn aborting_after_h2_handoff_drains_children_before_close_returns() {
                 .expect("close timeout"),
             CloseResult::Closed
         );
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        server.join().expect("hanging server joined");
+    });
+}
+
+#[test]
+fn owner_close_after_h2_handoff_is_maybe_sent_and_drains_children() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let (request_seen, request_received) = tokio::sync::oneshot::channel();
+        let (address, server) = start_h2_hanging_server(&set, request_seen);
+        let upstream = Arc::new(verified_upstream(&set, address));
+        let task_upstream = Arc::clone(&upstream);
+        let query = query_wire(0x8307);
+        let task = tokio::spawn(async move {
+            task_upstream
+                .exchange(
+                    ExchangeRequest::new(&query).expect("query"),
+                    ExchangeContext::new(
+                        Instant::now() + Duration::from_secs(30),
+                        TransportCancellation::new(),
+                    ),
+                )
+                .await
+        });
+        timeout(TEST_TIMEOUT, request_received)
+            .await
+            .expect("h2 request handoff observed")
+            .expect("request observer alive");
+
+        let (exchange, close) = tokio::join!(task, upstream.close());
+        let error = exchange
+            .expect("exchange task joined")
+            .expect_err("owner close must terminate the h2 exchange");
+        assert_eq!(error.side_effect(), SideEffectState::MaybeSent);
+        assert_eq!(close, CloseResult::Closed);
         assert_eq!(upstream.in_flight_exchanges(), 0);
         server.join().expect("hanging server joined");
     });

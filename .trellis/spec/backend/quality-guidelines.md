@@ -390,6 +390,10 @@ those children invisible to owner shutdown.
 - A shared `Lifecycle` registration is retained by the executor state and its
   child tasks. Dropping the caller future cannot let `close().await` return
   before those children are gone.
+- A validated HTTP/2 response is only a candidate until the executor scope has
+  sealed and drained. The final lifecycle commit occurs after teardown and
+  immediately before returning success, so close/cancel/deadline during drain
+  cannot become a late success.
 - HTTP/2 is one request per fresh connection in this foundation; pooling,
   multiplexing across callers, resolver/bootstrap, and HTTP/3 are separate
   tasks.
@@ -420,7 +424,12 @@ those children invisible to owner shutdown.
   HTTP-version metadata, and independent fresh owners.
 - Reset, GOAWAY, EOF, caller cancellation, and dropped-future tests must assert
   side-effect state, zero in-flight registrations after close, and no second
-  accepted connection.
+  accepted connection. Reset tests must also count application streams on the
+  same h2 connection, not only TCP accepts; `requests == 1` and
+  `connections == 1` are required.
+- A deterministic teardown barrier must park child draining before final commit
+  and prove that owner close/caller cancellation/deadline wins; a real h2
+  owner-close-after-handoff test is required as well.
 - Executor unit tests must park a child, prove pre-spawn accounting, seal and
   drain it, reject post-seal work, and prove the shared lifecycle count reaches
   zero.

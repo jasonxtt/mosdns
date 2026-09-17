@@ -125,11 +125,61 @@ struct TrackedH2Executor {
 /// child guard to drop before the caller's lifecycle registration is released.
 struct H2ScopeLease {
     state: Arc<H2ChildState>,
+    #[cfg(test)]
+    teardown_pause: Mutex<Option<Arc<H2TeardownPause>>>,
 }
 
 struct H2ChildGuard {
     state: Arc<H2ChildState>,
     id: u64,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct H2TeardownPause {
+    arrived: std::sync::atomic::AtomicBool,
+    arrived_notify: tokio::sync::Notify,
+    released: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+impl H2TeardownPause {
+    pub(crate) fn new() -> Self {
+        Self {
+            arrived: std::sync::atomic::AtomicBool::new(false),
+            arrived_notify: tokio::sync::Notify::new(),
+            released: tokio::sync::Notify::new(),
+        }
+    }
+
+    async fn wait_until_released(&self) {
+        let released = self.released.notified();
+        tokio::pin!(released);
+        released.as_mut().enable();
+        self.arrived
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.arrived_notify.notify_waiters();
+        released.await;
+    }
+
+    pub(crate) async fn arrived(&self) {
+        if self.arrived.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+        loop {
+            let notified = self.arrived_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.arrived.load(std::sync::atomic::Ordering::Acquire) {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    pub(crate) fn release(&self) {
+        self.released.notify_waiters();
+    }
 }
 
 impl H2ScopeLease {
@@ -152,7 +202,17 @@ impl H2ScopeLease {
                 owner_cancellation,
                 caller_cancellation,
             }),
+            #[cfg(test)]
+            teardown_pause: Mutex::new(None),
         }
+    }
+
+    #[cfg(test)]
+    fn install_teardown_pause(&self, pause: Arc<H2TeardownPause>) {
+        *self
+            .teardown_pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pause);
     }
 
     fn executor(&self) -> TrackedH2Executor {
@@ -185,6 +245,17 @@ impl H2ScopeLease {
 
     async fn finish(&self) {
         self.seal_and_abort();
+        #[cfg(test)]
+        {
+            let teardown_pause = self
+                .teardown_pause
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(pause) = teardown_pause {
+                pause.wait_until_released().await;
+            }
+        }
         loop {
             let drained = {
                 let children = self
@@ -693,7 +764,7 @@ async fn exchange_http1(
     tokio::pin!(request_future);
     prepared.reach(DohPhase::AfterRequestSent).await;
     let response = send_request(&control, deadline, &mut request_future, &mut connection).await?;
-    finish_doh_response(
+    let response = validate_doh_response(
         prepared,
         request_id,
         SecureHttpVersion::Http1,
@@ -702,7 +773,8 @@ async fn exchange_http1(
         response,
         &mut connection,
     )
-    .await
+    .await?;
+    commit_doh_response(prepared, response, deadline).await
 }
 
 /// Runs the already-authenticated HTTP/2 leg with a tracked executor. Hyper
@@ -727,8 +799,14 @@ async fn exchange_http2(
         prepared, tls, request, request_id, control, deadline, &scope,
     )
     .await;
-    scope.finish().await;
-    result
+    let response = match result {
+        Ok(response) => response,
+        Err(error) => {
+            scope.finish().await;
+            return Err(error);
+        }
+    };
+    finalize_h2_response(prepared, response, &scope, deadline).await
 }
 
 async fn exchange_http2_scoped(
@@ -739,7 +817,7 @@ async fn exchange_http2_scoped(
     control: ExchangeControl,
     deadline: Instant,
     scope: &H2ScopeLease,
-) -> Result<SecureResponse, SecureError> {
+) -> Result<ValidatedDohResponse, SecureError> {
     prepared.reach(DohPhase::BeforeRequest).await;
     let io = TokioIo::new(tls);
     let executor = scope.executor();
@@ -759,7 +837,7 @@ async fn exchange_http2_scoped(
     tokio::pin!(request_future);
     prepared.reach(DohPhase::AfterRequestSent).await;
     let response = send_request(&control, deadline, &mut request_future, &mut connection).await?;
-    finish_doh_response(
+    validate_doh_response(
         prepared,
         request_id,
         SecureHttpVersion::Http2,
@@ -771,9 +849,11 @@ async fn exchange_http2_scoped(
     .await
 }
 
-/// Validates an HTTP response, restores only the caller's DNS ID, and commits
-/// it under the owner/caller/deadline linearization gate.
-async fn finish_doh_response<C>(
+/// Validates an HTTP response and restores only the caller's DNS ID.
+///
+/// The returned candidate is not committed yet. HTTP/2 must first seal and
+/// drain its tracked executor children before the separate final-commit step.
+async fn validate_doh_response<C>(
     prepared: &PreparedDoh<'_>,
     request_id: u16,
     http_version: SecureHttpVersion,
@@ -781,7 +861,7 @@ async fn finish_doh_response<C>(
     deadline: Instant,
     response: Response<Incoming>,
     connection: &mut Pin<&mut C>,
-) -> Result<SecureResponse, SecureError>
+) -> Result<ValidatedDohResponse, SecureError>
 where
     C: Future<Output = hyper::Result<()>>,
 {
@@ -796,6 +876,25 @@ where
     if validate_response(&restored).is_err() {
         return Err(SecureError::from(UpstreamError::MalformedResponse));
     }
+    Ok(ValidatedDohResponse {
+        wire: restored,
+        request_id,
+        http_version,
+        truncated: header.truncated,
+    })
+}
+
+/// Performs the final owner/caller/deadline commit immediately before success.
+///
+/// HTTP/1.1 calls this after its inline driver has finished. HTTP/2 calls it
+/// only after `H2ScopeLease::finish()` has sealed and drained every executor
+/// child, so cancellation or owner close during teardown cannot become a late
+/// success.
+async fn commit_doh_response(
+    prepared: &PreparedDoh<'_>,
+    response: ValidatedDohResponse,
+    deadline: Instant,
+) -> Result<SecureResponse, SecureError> {
     prepared.reach(DohPhase::BeforeCommit).await;
     prepared.lifecycle.commit_final_response(
         &prepared.caller_cancellation,
@@ -804,11 +903,29 @@ where
     )?;
     prepared.reach(DohPhase::AfterCommit).await;
     Ok(SecureResponse::doh(
-        restored,
-        request_id,
-        http_version,
-        header.truncated,
+        response.wire,
+        response.request_id,
+        response.http_version,
+        response.truncated,
     ))
+}
+
+/// Drains the HTTP/2 executor before entering the final commit linearization.
+async fn finalize_h2_response(
+    prepared: &PreparedDoh<'_>,
+    response: ValidatedDohResponse,
+    scope: &H2ScopeLease,
+    deadline: Instant,
+) -> Result<SecureResponse, SecureError> {
+    scope.finish().await;
+    commit_doh_response(prepared, response, deadline).await
+}
+
+struct ValidatedDohResponse {
+    wire: Vec<u8>,
+    request_id: u16,
+    http_version: SecureHttpVersion,
+    truncated: bool,
 }
 
 /// Returns a copy of `body` with only the DNS transaction ID replaced.
@@ -1149,7 +1266,10 @@ mod tests {
     use tokio_rustls::TlsAcceptor;
     use tokio_rustls::server::TlsStream;
 
-    use super::{DohPhase, DohProtocol, DohUpstream, H2ScopeLease, classify_alpn};
+    use super::{
+        DohPhase, DohProtocol, DohUpstream, H2ScopeLease, H2TeardownPause, ValidatedDohResponse,
+        classify_alpn, finalize_h2_response,
+    };
     use crate::secure::endpoint::DohEndpoint;
     use crate::secure::error::{DohProtocolError, SecureError};
     use crate::secure::tls::TlsPolicy;
@@ -1764,6 +1884,126 @@ mod tests {
             drop(executor);
             drop(scope);
             assert_eq!(lifecycle.in_flight(), 0);
+        });
+    }
+
+    #[test]
+    fn h2_teardown_barrier_preserves_liveness_until_scope_release() {
+        block_on(async {
+            let lifecycle = Arc::new(Lifecycle::new());
+            let liveness = Arc::new(
+                lifecycle
+                    .register_shared()
+                    .expect("liveness registration succeeds while open"),
+            );
+            let scope = Arc::new(H2ScopeLease::new(
+                liveness,
+                TransportCancellation::new(),
+                TransportCancellation::new(),
+            ));
+            let pause = Arc::new(H2TeardownPause::new());
+            scope.install_teardown_pause(Arc::clone(&pause));
+            let executor = scope.executor();
+            hyper::rt::Executor::execute(&executor, async {
+                std::future::pending::<()>().await;
+            });
+
+            let finish_scope = Arc::clone(&scope);
+            let finish = tokio::spawn(async move {
+                finish_scope.finish().await;
+            });
+            timeout(TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("teardown reaches the deterministic barrier");
+
+            let mut drain = Box::pin(lifecycle.drain());
+            tokio::select! {
+                biased;
+                () = &mut drain => panic!("owner drain returned while h2 scope liveness was held"),
+                () = tokio::task::yield_now() => {},
+            }
+
+            pause.release();
+            timeout(TEST_TIMEOUT, finish)
+                .await
+                .expect("h2 teardown finishes")
+                .expect("teardown task joins");
+            assert_eq!(scope.active_children(), 0);
+
+            drop(executor);
+            drop(scope);
+            timeout(TEST_TIMEOUT, drain)
+                .await
+                .expect("owner drain completes only after scope release");
+            assert_eq!(lifecycle.in_flight(), 0);
+        });
+    }
+
+    #[test]
+    fn h2_validated_response_cannot_commit_until_teardown_releases() {
+        block_on(async {
+            let identity = generate_identity();
+            let (listener, address) = bind();
+            drop(listener);
+            let upstream = owner_for(address, &identity);
+            let query = query_wire(0x7011);
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            let target = upstream
+                .endpoint()
+                .get_request_target(request)
+                .expect("request target");
+            let authority = upstream.endpoint().authority();
+            let prepared = upstream
+                .prepare_exchange(request, open_context(), target, authority)
+                .expect("prepared exchange");
+            let liveness = Arc::new(
+                prepared
+                    .lifecycle
+                    .register_shared()
+                    .expect("h2 liveness registration"),
+            );
+            let scope = H2ScopeLease::new(
+                liveness,
+                prepared.owner_cancellation.clone(),
+                prepared.caller_cancellation.clone(),
+            );
+            let pause = Arc::new(H2TeardownPause::new());
+            scope.install_teardown_pause(Arc::clone(&pause));
+            let executor = scope.executor();
+            hyper::rt::Executor::execute(&executor, async {
+                std::future::pending::<()>().await;
+            });
+            let response = ValidatedDohResponse {
+                wire: response_wire(0, 7),
+                request_id: 0x7011,
+                http_version: super::SecureHttpVersion::Http2,
+                truncated: false,
+            };
+
+            let error = {
+                let finalization =
+                    finalize_h2_response(&prepared, response, &scope, prepared.deadline);
+                tokio::pin!(finalization);
+                tokio::select! {
+                    biased;
+                    result = &mut finalization => panic!("h2 response committed before teardown: {result:?}"),
+                    () = pause.arrived() => {},
+                }
+                assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
+                pause.release();
+                finalization
+                    .await
+                    .expect_err("owner close during teardown must win over success")
+            };
+            assert_eq!(
+                error,
+                SecureError::Transport(UpstreamError::Closed(SideEffectState::Sent))
+            );
+
+            drop(executor);
+            drop(scope);
+            drop(prepared);
+            assert_eq!(upstream.close().await, CloseResult::Closed);
         });
     }
 

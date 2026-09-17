@@ -450,6 +450,10 @@ Produced behavior and contracts:
   HTTP/1.1 keeps the existing inline driver, and an unrecognized ALPN is a
   terminal typed pre-request error. Each exchange remains one fresh numeric
   connection and one GET; no independent caller queries share a connection.
+- HTTP/2 response validation now produces an uncommitted candidate. The tracked
+  executor scope seals and drains before `BeforeCommit` and the single final
+  lifecycle commit, so owner close/caller cancellation/deadline during teardown
+  cannot turn into a late success; HTTP/1.1 keeps its inline commit path.
 - `TrackedH2Executor` accounts for every Hyper future submitted through the
   caller-supplied executor. Registration happens before `tokio::spawn`, a
   sealed scope drops later submissions, and abort handles plus a Notify drain
@@ -470,14 +474,21 @@ RED/GREEN and drain evidence:
 - `independent_h2_owners_use_independent_fresh_connections` runs two owners
   concurrently against separate TLS+h2 loopback peers. The reset/GOAWAY/EOF
   matrix is terminal and `h2_reset_goaway_and_eof_are_terminal_maybe_sent_failures`
-  asserts `MaybeSent`; its listener remains open for a bounded acceptance window
-  and records exactly one connection, proving no hidden retry/fallback.
+  asserts `MaybeSent`; its listener counts both accepted TCP connections and
+  accepted h2 application streams, requiring exactly one of each after
+  REFUSED_STREAM and a non-REFUSED RST_STREAM, proving no hidden retry/fallback
+  on the same stream or a second connection.
 - `h2_executor_seals_admission_and_drains_registered_children` parks a tracked
   child, proves active accounting, seals admission, aborts/drains it, rejects a
   post-seal submission, and proves the shared lifecycle registration reaches
   zero. The two real h2 hang tests cancel or abort immediately after request
   handoff; `close().await` returns `Closed` only after `in_flight_exchanges()`
-  is zero.
+  is zero. `h2_teardown_barrier_preserves_liveness_until_scope_release` proves
+  owner drain stays pending while the shared h2 liveness hold is retained, and
+  `h2_validated_response_cannot_commit_until_teardown_releases` proves the
+  validated candidate cannot commit before the parked teardown; owner close
+  then wins. The real h2 handoff tests cover caller cancellation, dropped
+  future, and owner close after handoff.
 - The existing deterministic DoH phase matrix remains green across its six
   pre-result phases and four controls; the h2 handoff tests additionally cover
   caller cancellation, owner close/drop, driver teardown, and final resource
@@ -489,13 +500,37 @@ installed here):
 | Command | Result |
 | --- | --- |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
-| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice3_doh --locked` | PASS, 5 tests |
-| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 53 unit + 169 integration tests across 8 targets |
-| `cargo clippy --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings` | PASS |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test slice3_doh --locked` | PASS, 6 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core 'secure::doh::tests::h2_' --locked` | PASS, 3 tests |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 225 tests across 9 targets |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, 431 tests across 24 targets |
+| `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS |
 
-The remaining full-workspace/release and final task evidence checks belong to
-the later Slice4 authorization. This record is not a production, Linux, host
-E2E, throughput, or deployment claim. Slice4 and final review remain stopped.
+### Slice3 root-review remediation — 2026-09-17
+
+The first Slice3 root review of `b4aff4de1aef917d0ff69f18d1bf793b43523b8b`
+returned `BLOCKED / FAIL`, P0=0 and two scoped P1 findings. The review confirmed
+ALPN dispatch, Hyper child interception, numeric/service identity separation and
+the basic ownership direction; it blocked only on final-commit ordering and
+structured-shutdown evidence.
+
+- P1-1 is addressed by separating `ValidatedDohResponse` from
+  `commit_doh_response`. HTTP/2 calls `finalize_h2_response`, which seals and
+  drains the tracked scope before `BeforeCommit` and the lifecycle gate. A
+  deterministic teardown pause proves owner close wins while the candidate is
+  parked; no second commit or post-hoc repair is used.
+- P1-2 is addressed with a real h2 owner-close-after-handoff test, h2 failure
+  servers that count both TCP connections and application streams, and a
+  non-REFUSED `RST_STREAM(CANCEL)` case. The executor tests now include a
+  parked teardown/liveness barrier and a candidate-before-commit ordering test.
+
+Scoped remediation evidence is complete locally but awaits a new root review;
+Slice3 remains open and Slice4 is not authorized. The remediation stays within
+DoH HTTP/2 ownership/tests and the corresponding quality/task evidence only.
+
+The final full-workspace/release and Linux evidence checks remain later Slice4
+work. This record is not a production, Linux, host E2E, throughput, or
+deployment claim.
 
 ## Slice4 — final quality and isolated Linux evidence
 
