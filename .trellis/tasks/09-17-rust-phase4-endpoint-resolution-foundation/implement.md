@@ -776,6 +776,61 @@ does not make. Test coverage pins the two interleavings the reviewer named:
 `admission_binds_a_waiter_to_the_generation_it_observed` and
 `admission_serves_an_unclaimed_result_instead_of_requerying`.
 
+#### P1-1 follow-up — the first fix was still wrong, and is superseded
+
+A controller audit then found that the fix above **violated PRD 5.4** ("Other
+callers wait on that generation"). `admit()` read the completed result out of the
+one shared slot with `result.take()`, while `wait()` read that same slot. So:
+
+```text
+W admits -> Waiter(gen 1)                       [W is registered on generation 1]
+leader completes gen 1 -> slot=Some(r), notify_waiters()
+                          >>> W is runnable but has not re-acquired the lock <<<
+new caller admits -> take() -> Result(r), slot now None
+W waits -> running=false, result=None -> AlreadyResolving   ** R_N LOST **
+```
+
+A registered waiter could therefore be robbed of its own generation's result by a
+caller that arrived *after* the generation had already completed, and the test
+that claimed "a waiter receives its own result" was encoding that broken
+semantics (`assert_eq!(.., Err(AlreadyResolving))`).
+
+The state machine is redesigned so the guarantee is structural rather than
+timing-dependent:
+
+- Each generation is now an `Arc<GenerationState>` holding its own
+  `OnceLock<Result<..>>` and its own `Notify`. `admit()` hands the caller the
+  **handle**, and the result is written into that handle, not into a shared slot.
+  A registered waiter reads the result out of the handle it already owns, so no
+  later caller, eviction, or generation advance can take it away. Identity is the
+  allocation itself (`Arc::ptr_eq` in `complete`), so no separate token can drift
+  out of step with it; `GenerationId`/`next_id` were removed as redundant.
+- `complete()` writes the result into the handle **while still holding the state
+  lock**, and only then switches `live -> completed`. Because `admit()` takes the
+  same lock, a caller observes either a live generation (and waits on it) or a
+  completed one **with its result already present** — never the empty window
+  between the two. (The first version of this redesign had an observable gap here;
+  writing the result before releasing the lock closes it.)
+- The `Result` arm still serves a late caller once, but via `completed_claimed`
+  rather than by consuming the result, so serving a late caller cannot remove it
+  from the handle a waiter holds.
+- Failed generations still serve their registered waiters their typed failure, and
+  because a failure is not handed out as a stand-in success, a later caller can
+  still lead a fresh generation and retry.
+
+Tests now pinning this, all deterministic with no sleeps:
+
+| Test | Proves |
+| --- | --- |
+| `a_late_caller_cannot_steal_a_completed_result_from_a_registered_waiter` | the exact controller race: complete → late `admit()` → old waiter still reads its own result |
+| `a_failed_generation_still_serves_its_waiter_and_still_allows_retry` | waiter keeps its typed failure; a later caller still leads a retry |
+| `admission_binds_a_waiter_to_the_generation_it_observed` | admission hands back the observed generation's handle; a waiter never adopts generation 2 |
+| `admission_serves_an_unclaimed_result_instead_of_requerying` | a genuine late success is served, not re-queried |
+| `completion_never_exposes_a_generation_without_a_result` | after `complete`, the generation is neither live nor result-less |
+
+The single-lock admission, the fresh-publication recheck, and the bootstrap-family
+decoupling from P1-2 are all preserved by this redesign.
+
 ### P1-2 — the bootstrap peer's transport family is independent of the answer family
 
 `with_id_source()` returned `BootstrapFamilyMismatch` when the target's and
@@ -874,3 +929,32 @@ above.
 | `cargo clippy --workspace … -- -D warnings` | clean (macOS 1.95, repo toolchain) |
 | `cargo test … --workspace --all-targets --all-features --locked` | 31 suites ok, 0 failures (macOS and Linux 1.85) |
 | task validate, `git diff --check` | passed / clean |
+
+### Round-2 checks (branch `rust`)
+
+| Command | Result |
+| --- | --- |
+| `cargo test … -p mosdns-upstream-core --lib --locked` | 71 passed, 0 failed |
+| `cargo test … --test resolver_slice1 .. resolver_slice5 --locked` | 17 / 7 / 10 / 7 / 6 passed, 0 failed |
+| `cargo test … --test resolver_remediation --locked` | 19 passed, 0 failed |
+| `cargo test … -p mosdns-upstream-core --all-targets --all-features --locked` | 0 failures |
+| `cargo test … --workspace --all-targets --all-features --locked` | 31 suites ok, 0 failures |
+| `cargo fmt --manifest-path rust/Cargo.toml --all --check` | clean |
+| `cargo clippy … --workspace --all-targets --all-features --locked -- -D warnings` | clean |
+| `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | passed |
+| `git diff --check` | clean |
+
+No mutation sweep was run in this round either, and none is claimed: the
+controller explicitly excluded it. The regression for the race is demonstrated by
+construction — the test drives exactly the ordering (complete → late admit → old
+waiter waits) that the destructive `take()` could not survive.
+
+**Limitations.** A leader that has already been admitted still runs to completion,
+so two leaders from *distinct* generations can still overlap; collapsing that
+requires a cache policy deciding which of two fresh values wins, which this
+foundation does not make. Rust 1.85 and Linux evidence for this round were not
+re-run after the redesign: the Linux gate is recorded above at `99a7418`
+(`rustc 1.85.1`, 31 suites / 0 failures) and the redesign adds no new language
+feature — it uses `Arc`, `OnceLock`, and `Notify`, all long-stable — but the
+Linux run has not been repeated for the new revision and is the outstanding item
+before closure.

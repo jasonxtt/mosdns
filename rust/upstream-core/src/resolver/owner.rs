@@ -30,51 +30,81 @@ use crate::{
 
 /// The outcome of one admission decision, taken under a single lock.
 ///
-/// The token is always the generation the caller actually observed, so a caller
-/// can never be admitted against a generation it did not see.
+/// The generation handle is always the one the caller actually observed, so a
+/// caller can never be admitted against a generation it did not see.
 enum Admission {
     /// This caller owns a fresh generation and must run it.
-    Leader(GenerationId),
-    /// A generation is already running; wait on this exact token.
-    Waiter(GenerationId),
+    Leader(Arc<GenerationState>),
+    /// A generation is already running; wait on exactly this generation.
+    Waiter(Arc<GenerationState>),
     /// A generation already finished with an unclaimed result to serve.
     Result(Result<PublishedTarget, ResolverError>),
 }
 
-/// A monotonic identity for one refresh generation.
+/// The owned state of one refresh generation.
 ///
-/// Waiters attach to a specific token, so a waiter from generation *N* can never
-/// observe generation *N+1*'s in-progress state or its result.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct GenerationId(u64);
+/// Every participant holds an [`Arc`] to this rather than reading a shared slot,
+/// which is what makes a registered waiter's guarantee unconditional: the result
+/// it is entitled to lives inside the handle it already owns, so no later caller,
+/// eviction, or generation advance can take it away. PRD 5.4 requires exactly
+/// that every caller admitted to a generation waits on *that* generation.
+///
+/// Generation identity is the allocation itself: `admit` hands out one
+/// [`Arc`] per generation and `complete` compares by pointer, so a handle can
+/// never be confused with another generation's, and no separate token needs to
+/// be kept in step with it.
+#[derive(Debug)]
+struct GenerationState {
+    /// The leader's outcome, written exactly once while the state lock is held.
+    /// Read only after [`Self::done`] fires, so a waiter never blocks on the lock
+    /// to observe it.
+    result: std::sync::OnceLock<Result<PublishedTarget, ResolverError>>,
+    /// Fires once when `result` has been written.
+    done: Notify,
+}
 
-/// The lifecycle of the single refresh generation the owner may run.
+impl GenerationState {
+    fn new() -> Self {
+        Self {
+            result: std::sync::OnceLock::new(),
+            done: Notify::new(),
+        }
+    }
+
+    /// The committed outcome, if the leader has completed.
+    fn committed(&self) -> Option<Result<PublishedTarget, ResolverError>> {
+        self.result.get().cloned()
+    }
+}
+
+/// The owner's admission state for the single refresh generation.
 #[derive(Debug, Default)]
 struct Generation {
-    /// The identity of the current or most recent generation.
-    id: u64,
-    /// Whether one leader is currently running the generation `id`.
-    running: bool,
-    /// The complete result the generation `id` committed, if any.
-    result: Option<Result<PublishedTarget, ResolverError>>,
+    /// The generation a leader is currently running, if any.
+    live: Option<Arc<GenerationState>>,
+    /// The most recently completed generation, retained for a late caller (and
+    /// for any waiter still holding its handle).
+    completed: Option<Arc<GenerationState>>,
+    /// Whether a late caller has already been served `completed`'s result. This
+    /// only stops a finished result from being handed out *forever*; it never
+    /// removes the result from the handle its registered waiters already hold.
+    completed_claimed: bool,
 }
 
 /// Single-flight generation state shared by leader and waiters.
 ///
-/// One short synchronous mutex holds the generation flag and its result, and one
-/// [`Notify`] wakes waiters. No await ever happens while the lock is held, so the
-/// owner cannot deadlock on its own state.
+/// One short synchronous mutex guards admission, completion, and the
+/// live/completed handles. No await ever happens while it is held, so the owner
+/// cannot deadlock on its own state.
 #[derive(Debug)]
 struct SingleFlight {
     inner: Mutex<Generation>,
-    completed: Notify,
 }
 
 impl SingleFlight {
     fn new() -> Self {
         Self {
             inner: Mutex::new(Generation::default()),
-            completed: Notify::new(),
         }
     }
 
@@ -84,76 +114,96 @@ impl SingleFlight {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Admits a caller as the leader of a fresh generation, or as a waiter on an
-    /// existing one, in a single lock acquisition.
+    /// Admits a caller as the leader of a fresh generation, or as a waiter on the
+    /// live one, or as a one-time consumer of the last completed result — all in
+    /// a single lock acquisition.
     ///
-    /// This is the whole point of the operation: deciding leadership and reading
-    /// the token happen under one lock, so a token can never describe a
-    /// different generation than the one the caller observed. Splitting them
-    /// into two acquisitions is exactly the race this prevents — a caller could
-    /// see "running", lose the lock while that generation completed and a new
-    /// one started, and then attach to the *new* generation's token.
+    /// Deciding the role and handing back the generation handle happen under one
+    /// lock, so the handle a caller receives always names the generation it
+    /// observed. Splitting them is the race this prevents: a caller could see a
+    /// live generation, lose the lock while that generation completed and a new
+    /// one started, and then attach to the *new* generation.
     fn admit(&self) -> Admission {
-        let mut generation = self.lock();
-        if generation.running {
-            // A live generation exists: attach to it, whatever its result
-            // slot currently holds.
-            return Admission::Waiter(GenerationId(generation.id));
+        let mut state = self.lock();
+        if let Some(live) = &state.live {
+            // A live generation exists: hand back its exact handle.
+            return Admission::Waiter(Arc::clone(live));
         }
-        if let Some(result) = generation.result.take() {
-            // A finished, unclaimed result is still available for this caller.
-            return Admission::Result(result);
+        // A finished generation still holds its result inside its own handle, so
+        // a late caller may be served it once. This is only a courtesy to a
+        // caller that arrives after the fact; it never affects a waiter that
+        // already holds the handle, because the result is not removed.
+        if !state.completed_claimed {
+            if let Some(completed) = &state.completed {
+                if let Some(result) = completed.committed() {
+                    state.completed_claimed = true;
+                    return Admission::Result(result);
+                }
+            }
         }
-        // No live generation and no unclaimed result: this caller leads.
-        generation.id = generation.id.wrapping_add(1);
-        generation.running = true;
-        Admission::Leader(GenerationId(generation.id))
+        // Nothing live and nothing unclaimed to serve: this caller leads a fresh
+        // generation, which is the only place the previous handle is retired.
+        let generation = Arc::new(GenerationState::new());
+        state.live = Some(Arc::clone(&generation));
+        state.completed = None;
+        state.completed_claimed = false;
+        Admission::Leader(generation)
     }
 
     /// The outcome a dropped leader publishes, so waiters can never deadlock on
     /// a generation whose leader future was abandoned or aborted.
     const ABANDONED: Result<PublishedTarget, ResolverError> = Err(ResolverError::Cancelled);
 
-    /// Commits the leader's outcome for `token` and wakes every waiter.
+    /// Commits the leader's outcome into `generation` and wakes its waiters.
     ///
-    /// A completion for a superseded generation is ignored, so a stale leader
-    /// can never overwrite a newer generation's state.
-    fn complete(&self, token: GenerationId, result: Result<PublishedTarget, ResolverError>) {
-        let mut generation = self.lock();
-        if GenerationId(generation.id) != token || !generation.running {
+    /// A completion is only recorded if this generation is still the live one, so
+    /// a stale leader can never write into a newer generation's handle. The
+    /// write goes to the handle itself, which every waiter already holds, and is
+    /// published exactly once.
+    fn complete(
+        &self,
+        generation: &Arc<GenerationState>,
+        result: Result<PublishedTarget, ResolverError>,
+    ) {
+        let mut state = self.lock();
+        let is_live = state
+            .live
+            .as_ref()
+            .is_some_and(|live| Arc::ptr_eq(live, generation));
+        if !is_live {
             return;
         }
-        generation.running = false;
-        generation.result = Some(result);
-        drop(generation);
-        self.completed.notify_waiters();
+        // Publish the outcome while the state lock is still held, so no caller
+        // can observe a generation that is no longer live yet has no result.
+        // `admit` takes the same lock, so a caller either sees the generation as
+        // live (and waits on it) or sees it completed with its result already
+        // present — never the empty window between the two.
+        let _ = generation.result.set(result);
+        state.live = None;
+        state.completed = Some(Arc::clone(generation));
+        state.completed_claimed = false;
+        drop(state);
+        // Wake every waiter only after the result is visible under the lock.
+        generation.done.notify_waiters();
     }
 
-    /// Awaits the specific generation `token` and returns its committed outcome.
+    /// Awaits the specific generation and returns its committed outcome.
     ///
-    /// The waiter only ever reads the state of the generation it attached to. If
-    /// that generation has been superseded, this waiter does not silently adopt
-    /// the newer one: it reports [`ResolverError::AlreadyResolving`], which is
-    /// what makes a waiter from a finished generation unable to observe a later
-    /// leader's half-built state.
-    async fn wait(&self, token: GenerationId) -> Result<PublishedTarget, ResolverError> {
+    /// Because the result lives in the handle this waiter already owns, the
+    /// guarantee is unconditional: once the generation completes, every waiter
+    /// admitted to it observes that generation's result, no matter how many
+    /// later callers were also served it. A waiter never adopts a newer
+    /// generation's state.
+    async fn wait(
+        &self,
+        generation: &Arc<GenerationState>,
+    ) -> Result<PublishedTarget, ResolverError> {
         loop {
-            let notified = self.completed.notified();
+            let notified = generation.done.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            {
-                let generation = self.lock();
-                if GenerationId(generation.id) != token {
-                    // A newer generation owns the slot; this waiter's own
-                    // generation is gone and must not be confused with it.
-                    return Err(ResolverError::AlreadyResolving);
-                }
-                if !generation.running {
-                    return match &generation.result {
-                        Some(result) => result.clone(),
-                        None => Err(ResolverError::AlreadyResolving),
-                    };
-                }
+            if let Some(result) = generation.committed() {
+                return result;
             }
             notified.await;
         }
@@ -406,10 +456,10 @@ impl BootstrapResolver {
         // result slot, so the next iteration yields `Leader` or `Waiter`.
         loop {
             match self.flight.admit() {
-                Admission::Leader(token) => {
+                Admission::Leader(generation) => {
                     let guard = LeaderGuard {
                         flight: &self.flight,
-                        token,
+                        generation,
                         completed: false,
                     };
                     // Re-read the publication now that this caller is the
@@ -443,10 +493,13 @@ impl BootstrapResolver {
                     guard.complete(outcome.clone());
                     return outcome;
                 }
-                Admission::Waiter(token) => {
+                Admission::Waiter(generation) => {
                     // A live generation owns the work; attach to exactly this
-                    // token and observe this caller's own controls while waiting.
-                    return self.wait_for_generation(&context, token).await;
+                    // generation and observe this caller's own controls while
+                    // waiting. The handle carries the result, so this waiter is
+                    // guaranteed to observe its own generation's outcome even if
+                    // a later caller is served the same result first.
+                    return self.wait_for_generation(&context, &generation).await;
                 }
                 Admission::Result(result) => {
                     self.check_control(&context, crate::SideEffectState::Sent)?;
@@ -495,7 +548,7 @@ impl BootstrapResolver {
     async fn wait_for_generation(
         &self,
         context: &ExchangeContext,
-        token: GenerationId,
+        generation: &Arc<GenerationState>,
     ) -> Result<PublishedTarget, ResolverError> {
         let caller_token = context.cancellation();
         let owner = self.cancellation.cancelled();
@@ -517,7 +570,7 @@ impl BootstrapResolver {
             () = &mut owner => Err(ResolverError::Closed),
             () = &mut caller => Err(ResolverError::Cancelled),
             () = &mut timer => Err(ResolverError::BootstrapTimeout),
-            result = self.flight.wait(token) => result,
+            result = self.flight.wait(generation) => result,
         }
     }
 
@@ -588,7 +641,7 @@ impl BootstrapResolver {
 /// one.
 struct LeaderGuard<'a> {
     flight: &'a SingleFlight,
-    token: GenerationId,
+    generation: Arc<GenerationState>,
     completed: bool,
 }
 
@@ -596,14 +649,15 @@ impl<'a> LeaderGuard<'a> {
     /// Commits this generation exactly once and wakes the waiters.
     fn complete(mut self, result: Result<PublishedTarget, ResolverError>) {
         self.completed = true;
-        self.flight.complete(self.token, result);
+        self.flight.complete(&self.generation, result);
     }
 }
 
 impl Drop for LeaderGuard<'_> {
     fn drop(&mut self) {
         if !self.completed {
-            self.flight.complete(self.token, SingleFlight::ABANDONED);
+            self.flight
+                .complete(&self.generation, SingleFlight::ABANDONED);
         }
     }
 }
@@ -707,8 +761,8 @@ mod tests {
 
     use super::{Admission, BootstrapResolver, ResolverComposition, SingleFlight};
     use crate::resolver::{
-        AddressFamily, BootstrapEndpoint, Clock, ConfigVersion, ResolutionPolicy, ResolutionTarget,
-        ResolverError,
+        AddressFamily, BootstrapEndpoint, Clock, ConfigVersion, PublishedTarget, ResolutionPolicy,
+        ResolutionTarget, ResolvedDestination, ResolverError,
     };
     use crate::{ServerIdentity, Transport};
 
@@ -800,91 +854,166 @@ mod tests {
         assert_eq!(mirror.bootstrap().family(), AddressFamily::Ipv6);
     }
 
-    /// The reviewer's first interleaving: admission must decide leadership and
-    /// read the token in one observation.
+    /// A [`PublishedTarget`] for a loopback-resolvable numeric literal.
+    fn published_pair(ip: [u8; 4]) -> PublishedTarget {
+        let target = ResolutionTarget::new("192.0.2.1", 853, AddressFamily::Ipv4).expect("target");
+        let destination = ResolvedDestination::new_literal(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])),
+            AddressFamily::Ipv4,
+        );
+        PublishedTarget::new(target, destination)
+    }
+
+    /// The exact race the controller audit named: a late caller must not be able
+    /// to consume a completed generation's result out from under a waiter that
+    /// was already admitted to that generation. PRD 5.4 requires every caller
+    /// admitted to a generation to wait on *that* generation.
     ///
-    /// Sequence: generation 1 is running; a caller arrives and must become a
-    /// waiter on generation 1. Then generation 1 completes and a second leader
-    /// claims generation 2. The first caller must still be attached to
-    /// generation 1, so it sees generation 1's outcome, not generation 2's
-    /// live, result-less state.
+    /// Sequence, with the lock released exactly where the bug lived:
+    ///   W admits -> Waiter(gen 1)   [W is registered on generation 1]
+    ///   leader completes gen 1 -> result stored, waiters notified
+    ///   a NEW caller admits -> must not strip generation 1's result
+    ///   W waits on its own handle -> still observes generation 1's outcome
+    ///
+    /// This is deterministic: the ordering is fixed by the calls themselves, and
+    /// no sleep, timeout, or scheduler timing is involved.
+    #[tokio::test]
+    async fn a_late_caller_cannot_steal_a_completed_result_from_a_registered_waiter() {
+        let flight = SingleFlight::new();
+
+        // Generation 1 is live and W is admitted to it.
+        let live = match flight.admit() {
+            Admission::Leader(generation) => generation,
+            _ => panic!("the first caller leads generation 1"),
+        };
+        let waiter = match flight.admit() {
+            Admission::Waiter(generation) => generation,
+            _ => panic!("the second caller waits on generation 1"),
+        };
+        assert!(Arc::ptr_eq(&live, &waiter), "W is bound to generation 1");
+
+        // Generation 1 completes with a real success.
+        let expected = published_pair([192, 0, 2, 71]);
+        flight.complete(&live, Ok(expected.clone()));
+
+        // A brand-new caller arrives after the notification and is served the
+        // result. Under the previous destructive `take()`, this is what emptied
+        // the slot the registered waiter was about to read.
+        match flight.admit() {
+            Admission::Result(result) => assert_eq!(result, Ok(expected.clone())),
+            _ => panic!("the late caller is served the finished result"),
+        }
+
+        // The registered waiter must STILL observe generation 1's own result.
+        assert_eq!(
+            flight.wait(&waiter).await,
+            Ok(expected),
+            "a registered waiter keeps its generation's result after a late caller is served it"
+        );
+    }
+
+    /// The same interleaving with a failed generation: the registered waiter
+    /// still sees its own typed failure, and because a failure is never handed
+    /// out as a stand-in success, a later caller can lead a fresh generation and
+    /// retry rather than being told it already succeeded.
+    #[tokio::test]
+    async fn a_failed_generation_still_serves_its_waiter_and_still_allows_retry() {
+        let flight = SingleFlight::new();
+
+        let live = match flight.admit() {
+            Admission::Leader(generation) => generation,
+            _ => panic!("leader"),
+        };
+        let waiter = match flight.admit() {
+            Admission::Waiter(generation) => generation,
+            _ => panic!("waiter"),
+        };
+        flight.complete(&live, Err(ResolverError::BootstrapTimeout));
+
+        // A late caller is handed this generation's typed failure ...
+        match flight.admit() {
+            Admission::Result(result) => {
+                assert_eq!(result, Err(ResolverError::BootstrapTimeout));
+            }
+            _ => panic!("the failure is this generation's outcome"),
+        }
+
+        // ... the registered waiter still observes its own generation ...
+        assert_eq!(
+            flight.wait(&waiter).await,
+            Err(ResolverError::BootstrapTimeout)
+        );
+
+        // ... and a later caller can still lead a new generation to retry.
+        let retry = match flight.admit() {
+            Admission::Leader(generation) => generation,
+            Admission::Waiter(_) | Admission::Result(_) => {
+                panic!("a failed generation must not block a retry")
+            }
+        };
+        let recovered = published_pair([192, 0, 2, 72]);
+        flight.complete(&retry, Ok(recovered.clone()));
+        assert_eq!(flight.wait(&retry).await, Ok(recovered));
+    }
+
+    /// Admission decides leadership and hands back the generation handle in one
+    /// observation, so a caller can never attach to a generation it did not see.
     #[tokio::test]
     async fn admission_binds_a_waiter_to_the_generation_it_observed() {
         let flight = SingleFlight::new();
 
-        // Generation 1 is running.
-        let first = match flight.admit() {
-            Admission::Leader(token) => token,
+        let gen1 = match flight.admit() {
+            Admission::Leader(generation) => generation,
             _ => panic!("the first caller leads generation 1"),
         };
-
-        // A later caller arrives while generation 1 is live: it must become a
-        // waiter on generation 1's exact token, taken in the same lock.
-        let waiter_token = match flight.admit() {
-            Admission::Waiter(token) => token,
+        let waiter = match flight.admit() {
+            Admission::Waiter(generation) => generation,
             _ => panic!("the second caller waits on generation 1"),
         };
-        assert_eq!(waiter_token, first, "the waiter observed generation 1");
+        assert!(
+            Arc::ptr_eq(&waiter, &gen1),
+            "the waiter observed generation 1"
+        );
 
-        // Generation 1 completes. Its result is claimed here, exactly as the
-        // waiter above would claim it, so the slot is clear for a new leader.
-        flight.complete(first, Err(ResolverError::BootstrapTimeout));
-        match flight.admit() {
-            Admission::Result(_) => {}
-            _ => panic!("generation 1's finished result is claimable"),
-        }
+        flight.complete(&gen1, Err(ResolverError::BootstrapTimeout));
 
-        // A second leader claims generation 2, clearing the result slot.
-        let second = match flight.admit() {
-            Admission::Leader(token) => token,
+        // A later caller leads generation 2, which retires generation 1's handle
+        // from the owner's slot but cannot invalidate the waiter's own handle.
+        let _ = flight.admit();
+        let gen2 = match flight.admit() {
+            Admission::Leader(generation) => generation,
             _ => panic!("generation 2 is led"),
         };
-        assert_ne!(second, first, "generation 2 has its own token");
+        assert!(
+            !Arc::ptr_eq(&gen2, &gen1),
+            "generation 2 is a distinct handle"
+        );
 
-        // The first waiter is still bound to generation 1. Because generation 1
-        // is finished and its result was claimed by the caller above, the waiter
-        // must report that its own generation is gone rather than block on, or
-        // adopt, generation 2's live state.
+        // The generation-1 waiter keeps its own outcome and never adopts
+        // generation 2's state.
         assert_eq!(
-            flight.wait(waiter_token).await,
-            Err(ResolverError::AlreadyResolving),
-            "the waiter never adopts a generation it did not observe"
+            flight.wait(&waiter).await,
+            Err(ResolverError::BootstrapTimeout),
+            "the waiter keeps its own generation's outcome"
         );
 
-        // And it definitively never observes generation 2's committed result.
-        let target = super::super::ResolutionTarget::new("192.0.2.1", 853, AddressFamily::Ipv4)
-            .expect("target");
-        let destination = super::super::ResolvedDestination::new_literal(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
-            AddressFamily::Ipv4,
-        );
-        let second_result = super::super::PublishedTarget::new(target, destination);
-        flight.complete(second, Ok(second_result.clone()));
-        assert_eq!(flight.wait(second).await, Ok(second_result));
+        let gen2_result = published_pair([192, 0, 2, 73]);
+        flight.complete(&gen2, Ok(gen2_result.clone()));
+        assert_eq!(flight.wait(&gen2).await, Ok(gen2_result));
     }
 
     /// A caller arriving after a generation already completed adopts that
     /// generation's result instead of starting a duplicate query.
-    ///
-    /// This is the reviewer's second interleaving: a success lands between the
-    /// caller's freshness read and its admission, so admission itself must hand
-    /// back the unclaimed result and the resolved value must not be re-queried.
     #[tokio::test]
     async fn admission_serves_an_unclaimed_result_instead_of_requerying() {
         let flight = SingleFlight::new();
-        let target = super::super::ResolutionTarget::new("192.0.2.1", 853, AddressFamily::Ipv4)
-            .expect("target");
-        let destination = super::super::ResolvedDestination::new_literal(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
-            AddressFamily::Ipv4,
-        );
-        let published = super::super::PublishedTarget::new(target, destination);
+        let published = published_pair([192, 0, 2, 74]);
 
-        let token = match flight.admit() {
-            Admission::Leader(token) => token,
+        let leader = match flight.admit() {
+            Admission::Leader(generation) => generation,
             _ => panic!("the first caller leads"),
         };
-        flight.complete(token, Ok(published.clone()));
+        flight.complete(&leader, Ok(published.clone()));
 
         // A caller that arrives now must be handed the finished result, not
         // admitted as a leader that would repeat the query.
@@ -895,19 +1024,34 @@ mod tests {
         }
     }
 
-    /// A waiter attached to a generation that finished receives its own result.
-    #[tokio::test]
-    async fn a_waiter_attached_to_a_finished_generation_receives_its_result() {
+    /// `complete` publishes the result and retires the generation under one lock
+    /// hold, so no caller can observe a generation that is neither live nor
+    /// finished, and therefore no waiter can miss a result that was announced.
+    #[test]
+    fn completion_never_exposes_a_generation_without_a_result() {
         let flight = SingleFlight::new();
-        let token = match flight.admit() {
-            Admission::Leader(token) => token,
+        let leader = match flight.admit() {
+            Admission::Leader(generation) => generation,
             _ => panic!("leader"),
         };
-        flight.complete(token, Err(ResolverError::BootstrapTimeout));
-        assert_eq!(
-            flight.wait(token).await,
-            Err(ResolverError::BootstrapTimeout),
-            "the waiter sees its own generation's typed failure"
+        flight.complete(&leader, Err(ResolverError::BootstrapTimeout));
+
+        // After completion the generation is finished AND its result is present:
+        // both were done inside the same critical section.
+        let state = flight.lock();
+        assert!(state.live.is_none(), "the generation is no longer live");
+        assert!(
+            state.completed.is_some(),
+            "the completed generation is retained"
+        );
+        assert!(
+            state
+                .completed
+                .as_ref()
+                .expect("completed")
+                .committed()
+                .is_some(),
+            "the result is stored in the same lock hold that retired the generation"
         );
     }
 
