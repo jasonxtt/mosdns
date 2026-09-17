@@ -107,6 +107,28 @@ impl TlsPolicy {
         self.roots().map(RootCertStore::len)
     }
 
+    /// Builds a rustls client configuration offering exactly `alpn`.
+    ///
+    /// This is the same configuration [`Self::client_config`] builds, with the
+    /// ALPN list set to the caller's protocols. It exists so a transport can
+    /// offer precisely the protocols it implements without mutating a shared
+    /// `Arc<ClientConfig>` or widening the verification policy in any way.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SecureError::TlsConfig`] with [`TlsConfigError::Provider`] only
+    /// if the selected provider supports none of the safe default protocol
+    /// versions.
+    pub(crate) fn client_config_with_alpn(
+        &self,
+        alpn: &[&[u8]],
+    ) -> Result<ClientConfig, SecureError> {
+        let config = self.client_config()?;
+        let mut config = ClientConfig::clone(&config);
+        config.alpn_protocols = alpn.iter().copied().map(<[u8]>::to_vec).collect();
+        Ok(config)
+    }
+
     /// Builds the rustls client configuration for this policy.
     ///
     /// The configuration is built per exchange from the frozen policy, so a

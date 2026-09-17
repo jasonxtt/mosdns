@@ -48,6 +48,8 @@ use crate::{
 pub enum SecureTransport {
     /// DNS-over-TLS on a fresh authenticated connection.
     Dot,
+    /// DNS-over-HTTPS over HTTP/1.1 on a fresh authenticated connection.
+    Doh,
 }
 
 /// The complete DNS wire returned by one secure exchange.
@@ -65,6 +67,29 @@ pub struct SecureResponse {
 }
 
 impl SecureResponse {
+    /// Builds a DoH response.
+    ///
+    /// A DoH response is associated with its HTTP stream rather than a DNS
+    /// transaction ID, so the upstream's own ID is not a routing key and may be
+    /// anything. The returned wire therefore carries the caller's restored ID,
+    /// and `response_id` reports the ID actually present in that wire so the
+    /// metadata and the bytes can never disagree.
+    #[must_use]
+    pub(crate) fn doh(wire: Vec<u8>, request_id: u16, truncated: bool) -> Self {
+        debug_assert_eq!(
+            u16::from_be_bytes([wire[0], wire[1]]),
+            request_id,
+            "the returned DoH wire must carry the caller's restored ID"
+        );
+        Self {
+            wire,
+            request_id,
+            response_id: request_id,
+            transport: SecureTransport::Doh,
+            truncated,
+        }
+    }
+
     #[must_use]
     fn new(
         wire: Vec<u8>,

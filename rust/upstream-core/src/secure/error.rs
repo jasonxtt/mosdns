@@ -199,6 +199,68 @@ impl fmt::Display for TlsHandshakeFailure {
 
 impl Error for TlsHandshakeFailure {}
 
+/// Why a DoH HTTP response was rejected after the request was sent.
+///
+/// Every variant describes an HTTP-level defect: the transport carried a
+/// well-formed reply, but the reply is not an acceptable DoH answer. Because
+/// the request has already been transmitted when any of these can occur, the
+/// side-effect state is never [`SideEffectState::NotSent`].
+///
+/// No variant follows a redirect, retries, sends a second request, or falls
+/// back to another protocol; each is terminal for the exchange. No variant
+/// carries response bytes, header values, or the service URL, so neither
+/// `Display` nor `Debug` can leak response data or the upstream's identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DohProtocolError {
+    /// The response status was not 200.
+    ///
+    /// This covers redirects (3xx), client errors (4xx) and server errors
+    /// (5xx) alike: none is followed, retried, or replayed.
+    UnexpectedStatus {
+        /// The received status code, retained for diagnosis.
+        status: u16,
+    },
+    /// The response declared a media type other than `application/dns-message`.
+    WrongMediaType,
+    /// The response carried no `Content-Type` header.
+    MissingMediaType,
+    /// The response declared a `Content-Encoding` other than `identity`.
+    ///
+    /// The body is never decompressed, so a compressed payload cannot be
+    /// mistaken for a DNS message.
+    ContentEncoding,
+    /// The body exceeded the 65535-byte DNS maximum.
+    BodyTooLarge,
+    /// The response body could not be read to a complete end.
+    ///
+    /// This includes an early EOF, a `Content-Length` that disagrees with the
+    /// bytes actually received, and a malformed chunked encoding.
+    IncompleteBody,
+    /// The TLS handshake negotiated an ALPN protocol this client does not
+    /// implement.
+    ///
+    /// The connection is abandoned rather than replayed with another protocol.
+    UnexpectedAlpn,
+}
+
+impl fmt::Display for DohProtocolError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnexpectedStatus { status } => {
+                write!(formatter, "unexpected HTTP status {status}")
+            }
+            Self::WrongMediaType => formatter.write_str("wrong response media type"),
+            Self::MissingMediaType => formatter.write_str("missing response media type"),
+            Self::ContentEncoding => formatter.write_str("unsupported content encoding"),
+            Self::BodyTooLarge => formatter.write_str("response body exceeds the DNS limit"),
+            Self::IncompleteBody => formatter.write_str("incomplete response body"),
+            Self::UnexpectedAlpn => formatter.write_str("unexpected ALPN protocol"),
+        }
+    }
+}
+
+impl Error for DohProtocolError {}
+
 /// A typed failure raised by a secure upstream, in construction or in an
 /// exchange.
 ///
@@ -208,6 +270,8 @@ impl Error for TlsHandshakeFailure {}
 /// * [`Self::Tls`] wraps a structured handshake failure and is always
 ///   [`SideEffectState::NotSent`], because no DNS query can be transmitted
 ///   before the handshake completes.
+/// * [`Self::DohProtocol`] reports an HTTP-level defect in an already-received
+///   DoH reply; the request was transmitted, so it is never `NotSent`.
 /// * [`Self::Transport`] wraps the exact existing typed [`UpstreamError`]
 ///   rather than duplicating or stringifying every control, send, receive, and
 ///   DNS-response cause; its side-effect state is the wrapped cause's state.
@@ -228,6 +292,8 @@ pub enum SecureError {
     DohRequest(DohRequestError),
     /// The TLS handshake failed before any DNS application byte.
     Tls(TlsHandshakeFailure),
+    /// The HTTP response was not an acceptable DoH answer.
+    DohProtocol(DohProtocolError),
     /// A control, framing, send, receive, or DNS-response failure, retained as
     /// the exact existing typed cause.
     Transport(UpstreamError),
@@ -240,6 +306,10 @@ impl SecureError {
     /// [`SideEffectState::NotSent`]; a transport cause keeps its own tracked
     /// state, so a partially written DoT frame stays `MaybeSent` and a failure
     /// after the frame was flushed stays `Sent`.
+    ///
+    /// A [`Self::DohProtocol`] failure is reported as `Sent`: the request had
+    /// already been transmitted before an HTTP-level defect in the reply could
+    /// be observed, so the DNS query provably left this process.
     #[must_use]
     pub const fn side_effect(&self) -> SideEffectState {
         match self {
@@ -249,6 +319,7 @@ impl SecureError {
             | Self::TlsConfig(_)
             | Self::DohRequest(_)
             | Self::Tls(_) => SideEffectState::NotSent,
+            Self::DohProtocol(_) => SideEffectState::Sent,
             Self::Transport(cause) => cause.side_effect(),
         }
     }
@@ -273,6 +344,7 @@ impl fmt::Display for SecureError {
             Self::TlsConfig(reason) => write!(formatter, "invalid TLS policy: {reason}"),
             Self::DohRequest(reason) => write!(formatter, "invalid DoH GET request: {reason}"),
             Self::Tls(reason) => write!(formatter, "secure TLS handshake failed: {reason}"),
+            Self::DohProtocol(reason) => write!(formatter, "invalid DoH response: {reason}"),
             Self::Transport(cause) => write!(formatter, "secure transport failed: {cause}"),
         }
     }
@@ -287,6 +359,7 @@ impl Error for SecureError {
             Self::TlsConfig(reason) => Some(reason),
             Self::DohRequest(reason) => Some(reason),
             Self::Tls(reason) => Some(reason),
+            Self::DohProtocol(reason) => Some(reason),
             Self::Transport(cause) => Some(cause),
         }
     }
