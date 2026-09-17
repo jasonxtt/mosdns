@@ -57,8 +57,8 @@ jobs:
       - name: Check pure Rust foundation
         run: |
           cargo fmt --manifest-path rust/Cargo.toml --all --check
-          cargo test --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --locked
-          cargo clippy --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --locked -- -D warnings
+          cargo test --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --all-features --locked
+          cargo clippy --manifest-path rust/Cargo.toml -p mosdns-dns-core -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings
 
   rust-runtime-experimental:
     if: github.event_name == 'workflow_dispatch'

@@ -1,4 +1,4 @@
-# Secure upstream implementation plan — Slice3 active
+# Secure upstream implementation plan — Slice4 active
 
 Historical record, 2026-09-16: implementation was first authorized for the
 bounded Slice0 dependency/MSRV and Hyper API-inspection scope only. That
@@ -9,11 +9,14 @@ then completed under its separate review boundary.
 
 2026-09-17: Slice1 was explicitly accepted by `rust0916` at
 `25c7c961453e15d7347d65bbc401026f813ff27c` (`PASS / Slice1 CLOSED`). The user
-then explicitly authorized Slice2. Slice2 was closed at its separate review
-boundary, and the user has now explicitly authorized Slice3. Slice3 is the
-active bounded scope; Slice4, production wiring, deployment, and automatic
-progression remain unauthorized. The executor routing and prompt-approval
-contract is recorded in
+then explicitly authorized Slice2, which was closed at its own review boundary.
+Slice3 was subsequently implemented and, after one scoped remediation round,
+formally accepted as `PASS / Slice3 CLOSED` at
+`d3566bf105008e23c315536d6560b00d55250e55`. The user has now explicitly
+authorized Slice4 as the final quality and isolated Linux evidence gate;
+Slice4 is the active bounded scope. Production wiring, deployment, and
+automatic progression to any later slice remain unauthorized. The executor
+routing and prompt-approval contract is recorded in
 `.trellis/spec/backend/quality-guidelines.md`.
 
 ## Planning package review checklist
@@ -541,19 +544,27 @@ claim.
 
 ## Slice4 — final quality and isolated Linux evidence
 
-- [ ] Re-inspect every PRD AC against tests and every matrix/deferred item.
-- [ ] Run full required checks once at final boundary; additional runs only for
+- [x] Re-inspect every PRD AC against tests and every matrix/deferred item.
+  Evidence: the AC1-AC8 re-inspection in the Slice4 local record below.
+- [x] Run full required checks once at final boundary; additional runs only for
   changes/failures. Use existing loopback CI structure; ordinary rust-foundation
   must actually run secure tests and clippy, not only dns/upstream legacy targets.
-- [ ] Record exact source revision, toolchain, OS/architecture, commands/results,
+  Evidence: rows 1-13 of the local record; the CI audit found the job already
+  ran the secure suites and needed only `--all-features` added.
+- [x] Record exact source revision, toolchain, OS/architecture, commands/results,
   test counts, dependency features/MSRV/licenses and resource-drain evidence.
+  Evidence: the Slice4 local record below.
+- [x] Inspect exact changed paths; retain no Go/cgo/ABI/selector/host/listener/
+  config/API/WebUI changes or copied KixDNS source.
+  Evidence: the scope check in the Slice4 local record.
 - [ ] No public upstream or production host is needed. Linux Actions/isolated
   test evidence is distinct from macOS results; no claim that a library test is
   full native host E2E, production throughput or long-running deployment proof.
-- [ ] Inspect exact changed paths; retain no Go/cgo/ABI/selector/host/listener/
-  config/API/WebUI changes or copied KixDNS source.
+  Partially covered locally; the **Linux Actions result is still outstanding**
+  because this executor must not push. The parent session must observe it.
 - [ ] Final root acceptance, then STOP. Archive only after a later wrap-up
   instruction; no implied next protocol/task activation.
+  NOT done: requires the Linux evidence above and an explicit reviewer result.
 
 Expected checks after implementation is separately authorized:
 
@@ -577,6 +588,145 @@ installed here. Record and resolve graph/toolchain failures before accepting
 Slice0; changes to promised MSRV or library family need review. When testing a
 binary with embedded UI, use repository UI-first build scripts and never build
 frontend and Go concurrently.
+
+### Slice4 local execution and evidence record — 2026-09-17
+
+Scope: this record covers the local (macOS) half of the Slice4 gate. The Linux
+GitHub Actions half is still outstanding because this executor is not permitted
+to push; see "Outstanding: Linux evidence" below.
+
+Revision and environment actually used:
+
+- branch `rust`; working tree based on `d52de490306c66b6cbab32cbca698917428ff6a7`,
+  which contains the Slice3 CLOSED record `d3566bf105008e23c315536d6560b00d55250e55`
+  as an ancestor. The reviewer should use the commit the parent session produces
+  from this diff.
+- OS/arch: Darwin 25.5.0 arm64 (Apple silicon).
+- Toolchain: cargo 1.95.0 / rustc 1.95.0 (Homebrew), the only installed
+  toolchains are `stable-aarch64-apple-darwin` and `nightly-aarch64-apple-darwin`.
+- **Rust 1.85.0 is NOT installed**, so `cargo +1.85.0 check` could not be run.
+  This is recorded as unavailable rather than reported as a pass. MSRV evidence
+  is therefore indirect: a `cargo metadata --locked` audit of the full resolved
+  graph reports **no package whose `rust-version` exceeds 1.85** (142 packages;
+  resolver 3 selected the MSRV-compatible graph recorded in
+  `research/secure-upstream-evidence.md`).
+
+Commands and results (all run once at this boundary, in this order):
+
+| # | Command | Result |
+| --- | --- | --- |
+| 1 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | PASS |
+| 2 | `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --all-targets --all-features --locked` | PASS, 225 tests across 9 targets |
+| 3 | `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | PASS, 431 tests across 24 targets |
+| 4 | `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | PASS, no warnings |
+| 5 | `cargo build --manifest-path rust/Cargo.toml --workspace --release --locked` | PASS |
+| 6 | `cargo tree --manifest-path rust/Cargo.toml -p mosdns-upstream-core -e features --locked` | PASS (inspected; no new dependency) |
+| 7 | `cargo metadata --manifest-path rust/Cargo.toml --locked` MSRV audit | PASS, no package above 1.85 |
+| 8 | `cargo +1.85.0 check ...` | **NOT RUN — toolchain 1.85.0 not installed** |
+| 9 | `go build ./...` | PASS |
+| 10 | `go vet ./...` | PASS |
+| 11 | `go test ./...` | PASS, 32 packages ok, 0 failures |
+| 12 | `python3 .trellis/scripts/task.py validate rust-phase4-secure-upstream-foundation` | PASS |
+| 13 | `git diff --check` | PASS |
+
+upstream-core per-target counts behind row 2 (9 targets): 55 lib, 12
+`slice0_contract`, 27 `slice0_secure`, 27 `slice1_dot`, 35 `slice1_udp`, 39
+`slice2_doh`, 14 `slice2_tcp`, 6 `slice3_doh`, 10 `slice3_policy`.
+
+No Rust feature is declared by any workspace member, so `--all-features` selects
+the same graph as the default set today; it is still specified explicitly so the
+gate cannot silently stop covering a feature that is added later.
+
+Dependency review (unchanged by Slice4): `mosdns-upstream-core` depends only on
+`mosdns-dns-core`, `tokio`, `tokio-util`, `url`, `base64`, `rustls`,
+`tokio-rustls`, `hyper`, `hyper-util` and `http-body-util`, plus the test-only
+`rcgen` dev-dependency, and keeps `#![forbid(unsafe_code)]`. The exact resolved
+versions, features, licenses and MSRV ledger, including the correction that
+`rcgen`'s default-feature trimming does **not** remove its optional
+`x509-parser` dependency (lockfile-only, not activated), is recorded in
+`research/secure-upstream-evidence.md`.
+
+Resource-drain evidence: the secure suites assert `in_flight_exchanges() == 0`
+after every terminal path. Counted as zero-value assertions: 18 in
+`slice1_dot`, 10 in `slice2_doh`, 7 in `slice3_doh`, 9 in `slice3_policy`, 13 in
+`slice1_udp` and 5 in `slice2_tcp`, plus in-crate assertions in `secure/doh.rs`
+and `secure/dot.rs`; the remaining occurrences in those files assert the
+non-zero in-flight state that proves a registration is actually held while the
+exchange is parked. `close().await` is asserted to return `Closed` only after
+that count reaches zero. Slice3 additionally proves the HTTP/2 tracked executor
+seals admission and drains every child, that a dropped caller future cannot
+release owner liveness before its children are dropped, and that a validated
+response cannot commit while teardown is parked.
+
+CI audit and the one Slice4 change: the ordinary `rust-foundation` job already
+ran the secure suites, clippy and fmt on Linux via
+`cargo test -p mosdns-dns-core -p mosdns-upstream-core --all-targets --locked`
+(13 test executables, verified locally), so it was not rewritten. The only
+change is adding `--all-features` to that job's `cargo test` and `cargo clippy`
+commands, closing the one gap against the Slice4 requirement. Both edited
+commands were re-run locally and pass (278 tests; clippy clean). No other
+workflow content was touched, and the `rust-runtime-experimental` job remains
+`workflow_dispatch`-only.
+
+AC coverage re-inspection (PRD AC1–AC8):
+
+- AC1 / R1: `DotEndpoint`/`DohEndpoint` numeric dial versus service identity —
+  `slice0_secure.rs` construction cases, `slice1_dot.rs` and `slice2_doh.rs`
+  authority/identity separation tests, `slice3_doh.rs` service authority/path.
+  Covered.
+- AC2 / R2: trusted success, wrong name, expired, unknown issuer, bad handshake
+  signature, explicit insecure mode, and handshake stalls under
+  deadline/cancel/close — `slice1_dot.rs` (synthetic in-memory fixtures).
+  Covered.
+- AC3 / R3: DoT framing, partial reads/writes, flush, zero/oversize length, EOF,
+  wrong ID, malformed and full-TC response, unchanged query bytes —
+  `slice1_dot.rs` plus the in-crate DoT phase matrix. Covered.
+- AC4 / R4: HTTP/1.1 and h2 success against isolated loopback servers, server
+  observed GET encoding/authority and zero outbound ID, original ID restored,
+  status/MIME/oversize/truncated body/URL query/ALPN cases —
+  `slice2_doh.rs` and `slice3_doh.rs`. Covered.
+- AC5 / R5: cancellation and close at each I/O phase and immediately before
+  final commit; registrations, sockets and driver/executor tasks drain on
+  normal/error/drop/abort paths — the 6-phase x 4-control deterministic DoH
+  matrix, the 6-phase x 4-control DoT matrix, and the Slice3 teardown barrier,
+  liveness-retention and candidate-before-commit tests. Covered.
+- AC6 / R6: fault injection proves side-effect classification and exactly one
+  application request; redirects, disconnects and h2 stream errors never trigger
+  hidden retry, plaintext fallback or a second connection — request counters in
+  `slice2_doh.rs`/`slice3_doh.rs` and the per-variant
+  `DohProtocolError::side_effect` tests. Covered.
+- AC7 / R7: Rust fmt/test/clippy/release and dependency review pass; existing
+  transport regressions and the Go gates pass (rows 1–13 above). The **Linux**
+  half of AC7 is outstanding — see below. Partially covered locally.
+- AC8 / R1,R7: no Go/cgo/ABI/selector, host/listener, YAML/API/WebUI,
+  deployment or metrics-schema change; the only non-Rust edits are this task's
+  evidence documents and the two CI flags. Covered by the scope check below.
+
+Scope check: `git status` shows only `.github/workflows/test.yml`, this task's
+`task.json` and `implement.md`, and `docs/ai/rust-handover.md`. No Rust runtime,
+Go, config, API/UI, dependency or later-scope file changed. The three untracked
+`.DS_Store` files are local tool state and are excluded from any commit.
+
+Explicit limitations of this record:
+
+- These results are **local macOS arm64 evidence only**. They must not be
+  presented as Linux evidence.
+- They are library-level tests against loopback peers. They are **not** native
+  host end-to-end evidence, production throughput, or long-running deployment
+  proof.
+- `cargo +1.85.0 check` did not run; MSRV is evidenced by resolved metadata only.
+- The CI `rust-foundation` job result for this revision is **not yet observed**;
+  only its commands were validated locally.
+
+Outstanding: Linux evidence (requires the parent session)
+
+Slice4 requires an actual Linux GitHub Actions `rust-foundation` result for the
+revision under review. This executor was instructed not to push and not to send
+the review, so the Linux half of AC7 remains open and must be completed by the
+parent session after it commits and pushes: read the Actions run for that commit
+and confirm the ordinary `rust-foundation` job ran fmt, the secure all-targets
+`--all-features` tests and warnings-denied clippy successfully on Linux. Until
+that run is observed, Slice4 is **not** complete and no Linux claim is made.
 
 ## Slice handoff and rollback
 

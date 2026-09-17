@@ -4,6 +4,13 @@ Date: 2026-09-16. Repository baseline: `cb15361`, branch rust. Read-only source
 inspection and official documentation lookup; no dependency installation,
 compilation experiment or protocol test was performed during planning.
 
+The paragraph above describes the original planning-time baseline only. Slices
+0-3 have since been implemented and accepted, and the records appended below
+(Slice0 dependency/MSRV, Slice0 request-target, Slice1 fixtures, and the
+corrections to the `rcgen`/`x509-parser` feature ledger) supersede it where they
+disagree. The task's `implement.md` is authoritative for execution status and
+verification results.
+
 ## Local product and behavior evidence
 
 | Source anchor | Observed fact | Classification / planned consequence |
