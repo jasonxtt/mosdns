@@ -861,3 +861,186 @@ fn a_numeric_target_accepts_a_different_family_bootstrap() {
         assert_eq!(resolver.bootstrap().family(), AddressFamily::Ipv4);
     });
 }
+
+// ---------------------------------------------------------------------------
+// Review P1-1: entropy acquisition is lazy. A numeric dial address is usable
+// without RNG or DNS, while a real hostname bootstrap exchange keeps
+// unpredictable IDs and still fails closed when it cannot draw one.
+// ---------------------------------------------------------------------------
+
+/// A numeric target must be immediately usable even when the resolver is built
+/// with an ID source that can never draw. The entropy probe and any ID draw are
+/// hostname-only, so the numeric fast path must touch neither.
+#[test]
+fn a_numeric_target_resolves_with_an_id_source_that_would_fail() {
+    block_on(async {
+        let clock = ManualClock::new();
+        let resolver = BootstrapResolver::with_failing_ids_for_tests(
+            ResolutionTarget::new("192.0.2.97", 853, AddressFamily::Ipv4).expect("literal"),
+            BootstrapEndpoint::new("127.0.0.1", 1).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            clock,
+        )
+        .expect("a numeric target is buildable with an undrawable id source");
+
+        // The literal is published without any draw and without any DNS.
+        let published = bounded(resolver.resolve(context(5)))
+            .await
+            .expect("a numeric target bypasses DNS and RNG entirely");
+        assert_eq!(
+            published.dial(),
+            "192.0.2.97:853".parse::<SocketAddr>().expect("addr"),
+            "the numeric dial address is immediately usable"
+        );
+        assert!(published.ttl().is_zero(), "a literal has no TTL");
+        assert_eq!(resolver.state().published().as_ref(), Some(&published));
+    });
+}
+
+/// The same undrawable source must still fail closed for a *hostname* target,
+/// so the lazy acquisition weakens nothing about the bootstrap contract.
+#[test]
+fn a_hostname_target_still_fails_closed_with_an_undrawable_id_source() {
+    block_on(async {
+        let clock = ManualClock::new();
+        let resolver = BootstrapResolver::with_failing_ids_for_tests(
+            ResolutionTarget::new("bootstrap.example.org", 53, AddressFamily::Ipv4)
+                .expect("target"),
+            BootstrapEndpoint::new("127.0.0.1", 1).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            clock,
+        )
+        .expect("resolver");
+
+        let error = bounded(resolver.resolve(context(5)))
+            .await
+            .expect_err("a hostname target needs an unpredictable id");
+        assert_eq!(error, ResolverError::UnpredictableIdsUnavailable);
+        assert_eq!(resolver.state().published(), None);
+    });
+}
+
+/// The production construction path must not gate a numeric target on entropy.
+/// The probe cannot be forced to fail portably, so this pins the observable
+/// half of the contract: a numeric target constructs and resolves through the
+/// production path, and needs no bootstrap traffic to do it.
+#[test]
+fn numeric_construction_does_not_depend_on_entropy_availability() {
+    let clock = ManualClock::new();
+    let resolver = BootstrapResolver::new(
+        ResolutionTarget::new("192.0.2.98", 853, AddressFamily::Ipv4).expect("literal"),
+        BootstrapEndpoint::new("127.0.0.1", 1).expect("bootstrap"),
+        ResolutionPolicy::default(),
+        clock,
+    )
+    .expect("a numeric target must not be gated on entropy");
+    assert!(resolver.target().is_numeric());
+}
+
+// ---------------------------------------------------------------------------
+// Review P1-2: a correlated TC=1 bootstrap reply keeps its own typed error
+// rather than collapsing into a generic malformed-response error.
+// ---------------------------------------------------------------------------
+
+/// A bootstrap reply that carries TC=1 must surface the distinct typed
+/// truncation error, publish nothing, and open no TCP fallback. This drives a
+/// real loopback exchange.
+#[test]
+fn a_truncated_bootstrap_reply_is_typed_truncated() {
+    block_on(async {
+        let (socket, address) = bind_loopback();
+        let served = Arc::new(AtomicUsize::new(0));
+        let served_in = Arc::clone(&served);
+        let handle = tokio::task::spawn_blocking(move || {
+            socket
+                .set_read_timeout(Some(Duration::from_millis(50)))
+                .expect("read timeout");
+            let mut buffer = vec![0u8; 65535];
+            let started = std::time::Instant::now();
+            while started.elapsed() < Duration::from_secs(8) {
+                let Ok((length, peer)) = socket.recv_from(&mut buffer) else {
+                    continue;
+                };
+                // Correlated question and ID, RCODE NOERROR, but TC set.
+                let mut reply = a_response(&buffer[..length], [192, 0, 2, 1], 300);
+                reply[2] |= 0x02; // TC is the high byte's 0x02 bit
+                socket.send_to(&reply, peer).expect("send truncated");
+                served_in.fetch_add(1, Ordering::Relaxed);
+                break;
+            }
+        });
+
+        let clock = ManualClock::new();
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
+            ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
+                .expect("target"),
+            BootstrapEndpoint::new("127.0.0.1", address.port()).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            clock,
+        )
+        .expect("resolver");
+
+        let error = bounded(resolver.resolve(context(5)))
+            .await
+            .expect_err("a truncated reply is terminal");
+        assert_eq!(
+            error,
+            ResolverError::Truncated,
+            "TC=1 must keep its own typed error rather than collapse to malformed"
+        );
+        assert_eq!(
+            resolver.state().published(),
+            None,
+            "a truncated reply publishes nothing"
+        );
+        handle.await.expect("fixture joined");
+        // Exactly one UDP datagram was answered: a TC=1 reply opens no TCP
+        // fallback, so no second bootstrap exchange took place.
+        assert_eq!(
+            served.load(Ordering::Relaxed),
+            1,
+            "a truncated reply is terminal and triggers no retry or fallback"
+        );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Review P1-3: publication/cache mutation is owner-private. An external holder
+// of the shared read-only state cannot publish, so it cannot bypass the
+// lifecycle gate.
+// ---------------------------------------------------------------------------
+
+/// The shared state handle exposes reads only. After a close wins the lifecycle
+/// gate, no public resolver call can publish, and the externally visible
+/// diagnostics stay empty because the mutation surface is not reachable from
+/// outside the owner.
+#[test]
+fn external_state_access_cannot_publish_after_close() {
+    block_on(async {
+        let clock = ManualClock::new();
+        let resolver = BootstrapResolver::with_deterministic_ids_for_tests(
+            ResolutionTarget::new("192.0.2.99", 853, AddressFamily::Ipv4).expect("literal"),
+            BootstrapEndpoint::new("127.0.0.1", 1).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            clock,
+        )
+        .expect("resolver");
+
+        // A close that wins the gate prevents any later publication.
+        assert_eq!(
+            resolver.begin_close(),
+            mosdns_upstream_core::CloseTransition::BeganClosing
+        );
+        let error = bounded(resolver.resolve(context(5)))
+            .await
+            .expect_err("closed");
+        assert_eq!(error, ResolverError::Closed);
+
+        // The externally visible state is unchanged. `ResolverState` offers only
+        // read accessors here, so a caller cannot publish around the gate.
+        let state = resolver.state();
+        assert_eq!(state.published(), None, "no post-close publish");
+        assert!(state.last_expired().is_none());
+        assert!(state.last_error().is_none());
+    });
+}

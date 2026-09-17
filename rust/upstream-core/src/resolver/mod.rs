@@ -141,6 +141,11 @@ pub enum ResolverError {
     BootstrapReceive,
     /// The bootstrap reply was not a valid, correlated DNS response.
     MalformedBootstrapResponse,
+    /// The bootstrap reply carried the DNS truncation (TC) flag. It is kept
+    /// distinct from a malformed reply because a truncated answer is a
+    /// legitimate DNS observation, and this foundation deliberately performs no
+    /// TCP bootstrap fallback: the typed error is the whole policy.
+    Truncated,
     /// The bootstrap reply carried no usable address of the requested family.
     NoUsableAddress,
     /// The bootstrap reply's DNS rcode was not `NOERROR`.
@@ -173,6 +178,7 @@ impl fmt::Display for ResolverError {
             Self::BootstrapSend => "bootstrap send failure",
             Self::BootstrapReceive => "bootstrap receive failure",
             Self::MalformedBootstrapResponse => "malformed bootstrap response",
+            Self::Truncated => "truncated bootstrap response",
             Self::NoUsableAddress => "no usable address",
             Self::BootstrapRcode(_) => "bootstrap rcode",
             Self::AlreadyResolving => "resolution already in flight",
@@ -631,6 +637,12 @@ pub fn resolve_numeric(address: SocketAddr) -> Result<PublishedTarget, ResolverE
 /// There is no global cache: the owner holds the state for exactly one
 /// resolution key, so the tuple itself is the key. State is behind a short
 /// synchronous mutex; no await ever happens while it is held.
+///
+/// Only the *read* side is public. The mutating operations are crate-private, so
+/// a caller holding an `Arc<ResolverState>` can observe diagnostics but can
+/// never publish, fake freshness, or clear a recorded failure from outside the
+/// owner — every mutation in production goes through the owner's lifecycle
+/// linearization gate in [`crate::resolver::BootstrapResolver`].
 #[derive(Debug)]
 pub struct ResolverState {
     inner: Mutex<StateInner>,
@@ -691,7 +703,7 @@ impl ResolverState {
     ///
     /// Publication also clears the recorded refresh diagnostic, because the
     /// failure it described has been resolved.
-    pub fn publish(&self, target: PublishedTarget) {
+    pub(crate) fn publish(&self, target: PublishedTarget) {
         let mut inner = self.lock();
         inner.expired = None;
         inner.last_error = None;
@@ -703,7 +715,7 @@ impl ResolverState {
     /// An expired value is moved to the diagnostic slot and never returned, so
     /// a caller can never receive a stale success. A literal publication has no
     /// expiry and is always fresh.
-    pub fn serve_fresh(&self, now: Instant) -> Option<PublishedTarget> {
+    pub(crate) fn serve_fresh(&self, now: Instant) -> Option<PublishedTarget> {
         let mut inner = self.lock();
         let published = inner.published.clone()?;
         if published.is_expired(now) {
@@ -717,7 +729,7 @@ impl ResolverState {
     ///
     /// The previously published result stays exactly as it was: a failed
     /// refresh must never replace a valid one.
-    pub fn record_refresh_failure(&self, error: ResolverError) {
+    pub(crate) fn record_refresh_failure(&self, error: ResolverError) {
         self.lock().last_error = Some(error);
     }
 }
@@ -741,8 +753,35 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        AddressFamily, Clock, ConfigVersion, ResolutionPolicy, ResolverState, SystemClock,
+        AddressFamily, Clock, ConfigVersion, ResolutionPolicy, ResolvedDestination, ResolverError,
+        ResolverState, SystemClock,
     };
+
+    /// A deterministic clock, advanced by hand. It is used only by the
+    /// crate-internal state-model tests below, which must reach the state's
+    /// crate-private mutations and therefore cannot live in the external
+    /// integration tests.
+    struct SteppingClock {
+        now: Instant,
+    }
+
+    impl SteppingClock {
+        fn new() -> Self {
+            Self {
+                now: Instant::now(),
+            }
+        }
+
+        fn advance(&mut self, seconds: u64) {
+            self.now += Duration::from_secs(seconds);
+        }
+    }
+
+    impl Clock for SteppingClock {
+        fn now(&self) -> Instant {
+            self.now
+        }
+    }
 
     #[test]
     fn default_policy_clamps_both_ends() {
@@ -796,5 +835,122 @@ mod tests {
         let first = clock.now();
         let second = clock.now();
         assert!(second >= first);
+    }
+
+    /// The state starts empty and never serves a value past its expiry, while
+    /// retaining the expired value as diagnostic evidence only.
+    ///
+    /// This is a crate-internal test because it exercises the state's mutation
+    /// surface directly; that surface is deliberately not public, so an
+    /// external caller of the crate cannot publish or fake freshness around the
+    /// owner's lifecycle gate.
+    #[test]
+    fn resolver_state_starts_empty_and_never_serves_a_stale_value() {
+        let mut clock = SteppingClock::new();
+        let state = ResolverState::new();
+        assert!(state.published().is_none());
+
+        let now = clock.now();
+        let destination = ResolvedDestination::new(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            AddressFamily::Ipv4,
+            600,
+            now,
+        )
+        .expect("valid destination");
+        let target =
+            super::ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
+                .expect("valid target");
+        state.publish(super::PublishedTarget::new(target, destination));
+
+        // A fresh entry is served.
+        assert!(state.serve_fresh(now).is_some());
+        assert!(state.published().is_some());
+
+        // Once expired it is never served, but it is retained as diagnostics.
+        clock.advance(600);
+        let expired_at = clock.now();
+        assert!(state.serve_fresh(expired_at).is_none());
+        assert!(
+            state.published().is_some(),
+            "the expired value is retained as evidence, not served"
+        );
+        assert!(state.last_expired().is_some());
+    }
+
+    /// A failed refresh records a typed diagnostic and never replaces the
+    /// previously published value; a later success does advance it.
+    #[test]
+    fn a_failed_refresh_never_replaces_a_published_value() {
+        let mut clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target =
+            super::ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
+                .expect("valid target");
+        let now = clock.now();
+        state.publish(super::PublishedTarget::new(
+            target.clone(),
+            ResolvedDestination::new(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                AddressFamily::Ipv4,
+                600,
+                now,
+            )
+            .expect("valid destination"),
+        ));
+        let published_before = state.published().expect("published");
+
+        // A failed refresh records a typed diagnostic and changes nothing else.
+        state.record_refresh_failure(ResolverError::BootstrapTimeout);
+        let after = state.published().expect("the old value survives");
+        assert_eq!(after.address(), published_before.address());
+        assert_eq!(
+            state.last_error(),
+            Some(ResolverError::BootstrapTimeout),
+            "the diagnostic is observable"
+        );
+
+        // A successful replacement does advance the published value.
+        clock.advance(10);
+        state.publish(super::PublishedTarget::new(
+            target,
+            ResolvedDestination::new(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
+                AddressFamily::Ipv4,
+                900,
+                clock.now(),
+            )
+            .expect("valid destination"),
+        ));
+        assert_eq!(
+            state.published().expect("published").address(),
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))
+        );
+    }
+
+    /// An expired value is never served as success, including exactly at the
+    /// expiry boundary.
+    #[test]
+    fn resolver_state_never_serves_an_expired_value_as_success() {
+        let clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target =
+            super::ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
+                .expect("valid target");
+        let now = clock.now();
+        state.publish(super::PublishedTarget::new(
+            target,
+            ResolvedDestination::new(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                AddressFamily::Ipv4,
+                300,
+                now,
+            )
+            .expect("valid destination"),
+        ));
+        assert!(state.serve_fresh(now + Duration::from_secs(299)).is_some());
+        // At the boundary and beyond, the caller must resolve again.
+        assert!(state.serve_fresh(now + Duration::from_secs(300)).is_none());
+        assert!(state.serve_fresh(now + Duration::from_secs(301)).is_none());
     }
 }
