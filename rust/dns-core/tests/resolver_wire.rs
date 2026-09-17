@@ -641,12 +641,13 @@ fn rejects_query_packets_and_non_query_opcodes() {
 #[test]
 fn rejects_non_noerror_rcodes() {
     let qname = qname_wire();
-    // FORMERR(1), SERVFAIL(2), NXDOMAIN(3), NOTIMP(4), REFUSED(5).
+    // FORMERR(1), SERVFAIL(2), NXDOMAIN(3), NOTIMP(4), REFUSED(5). With no OPT
+    // record the 12-bit RCODE is just the header nibble.
     for rcode in [1u16, 2, 3, 4, 5] {
         let packet = correlated(0x4321, rcode, &[], &[], &[]);
         assert_eq!(
             parse(&packet, AddressFamily::Ipv4, &qname, 0x4321),
-            Err(ResolverWireError::Rcode(u8::try_from(rcode).expect("fits"))),
+            Err(ResolverWireError::Rcode(rcode)),
             "rcode {rcode}"
         );
     }
@@ -1025,4 +1026,389 @@ fn parses_are_pure_and_do_not_mutate_input() {
     let query_before = query.clone();
     let _ = parse_query(&query).expect("valid");
     assert_eq!(query, query_before);
+}
+
+// ---------------------------------------------------------------------------
+// P1-1: correlation precedes terminal matching-query errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn non_matching_question_is_classified_before_rcode_and_truncation() {
+    let qname = qname_wire();
+    let other = question(&["other", "example", "org"], TYPE_A);
+
+    // A response that would be SERVFAIL for a *different* question is not a
+    // terminal answer for this outstanding query: the mismatch is reported.
+    let servfail = response(0x31, FLAG_QR | 2, &other, &[], &[], &[]);
+    assert_eq!(
+        parse(&servfail, AddressFamily::Ipv4, &qname, 0x31),
+        Err(ResolverWireError::QuestionMismatch)
+    );
+
+    // Same for a truncated response carrying the wrong question.
+    let truncated = response(0x31, FLAG_QR | FLAG_TC, &other, &[], &[], &[]);
+    assert_eq!(
+        parse(&truncated, AddressFamily::Ipv4, &qname, 0x31),
+        Err(ResolverWireError::QuestionMismatch)
+    );
+
+    // A wrong question type is a mismatch too, not a terminal rcode.
+    let wrong_type = response(
+        0x31,
+        FLAG_QR | 2,
+        &question(&QNAME, TYPE_AAAA),
+        &[],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        parse(&wrong_type, AddressFamily::Ipv4, &qname, 0x31),
+        Err(ResolverWireError::QuestionMismatch)
+    );
+
+    // A response with no question section also fails correlation before rcode.
+    let no_question = response(0x31, FLAG_QR | 2, &[], &[], &[], &[]);
+    assert_eq!(
+        parse(&no_question, AddressFamily::Ipv4, &qname, 0x31),
+        Err(ResolverWireError::QuestionMismatch)
+    );
+}
+
+#[test]
+fn matching_question_still_reports_rcode_and_truncation() {
+    let qname = qname_wire();
+
+    let servfail = correlated(0x32, 2, &[], &[], &[]);
+    assert_eq!(
+        parse(&servfail, AddressFamily::Ipv4, &qname, 0x32),
+        Err(ResolverWireError::Rcode(2))
+    );
+
+    let truncated = correlated(0x32, FLAG_TC, &[], &[], &[]);
+    assert_eq!(
+        parse(&truncated, AddressFamily::Ipv4, &qname, 0x32),
+        Err(ResolverWireError::Truncated)
+    );
+}
+
+#[test]
+fn id_and_opcode_still_precede_question_correlation() {
+    let qname = qname_wire();
+
+    // A different transaction ID is reported as an ID mismatch even when the
+    // question also differs, because the ID is the cheapest correlation.
+    let other = question(&["other", "example", "org"], TYPE_A);
+    let wrong_id = response(0x40, FLAG_QR, &other, &[], &[], &[]);
+    assert_eq!(
+        parse(&wrong_id, AddressFamily::Ipv4, &qname, 0x41),
+        Err(ResolverWireError::MismatchedId)
+    );
+
+    // A non-QUERY opcode is reported before question correlation as well.
+    let iquery = response(0x40, FLAG_QR | 0x0800, &other, &[], &[], &[]);
+    assert_eq!(
+        parse(&iquery, AddressFamily::Ipv4, &qname, 0x40),
+        Err(ResolverWireError::UnexpectedOpcode(1))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P1-2: CNAME path resolution independent of answer wire order
+// ---------------------------------------------------------------------------
+
+/// Declarative answer-section builder.
+///
+/// `links` are CNAME records as `(owner, target, ttl)`; `addresses` are A
+/// records as `(owner, ip, ttl)`. An owner may be:
+///
+/// - `"@"` — the question name;
+/// - the `target` of a link — the name that link's rdata introduces, emitted as
+///   a pointer to that rdata so the chain is genuinely linked;
+/// - any other dotted name — a name unrelated to the chain, emitted literally.
+///
+/// `emission` lists the combined record indices (`links` first, then
+/// `addresses`) in the order they appear in the message. Every pointer owner is
+/// two bytes, so all offsets are known before any record is written and an
+/// address can be placed before the CNAME that introduces its owner.
+fn build_answers(
+    id: u16,
+    links: &[(&str, &str, u32)],
+    addresses: &[(&str, [u8; 4], u32)],
+    emission: &[usize],
+) -> Vec<u8> {
+    let total = links.len() + addresses.len();
+    assert_eq!(
+        emission.len(),
+        total,
+        "every record is emitted exactly once"
+    );
+
+    let mut start = vec![0usize; total];
+    let pointer_owner = |label: &str, start: &[usize]| -> Option<usize> {
+        if label == "@" {
+            return Some(HEADER_LEN);
+        }
+        links
+            .iter()
+            .position(|(_, target, _)| *target == label)
+            .map(|link| start[link] + 12)
+    };
+    let literal_owner = |label: &str| -> Vec<u8> { name(&label.split('.').collect::<Vec<_>>()) };
+    let owner_len = |label: &str, start: &[usize]| -> usize {
+        if pointer_owner(label, start).is_some() {
+            2
+        } else {
+            literal_owner(label).len()
+        }
+    };
+
+    // Pass 1: the message offset of every record.
+    let mut cursor = first_answer_offset();
+    for &index in emission {
+        start[index] = cursor;
+        let (owner, rdata_len) = if index < links.len() {
+            let (owner, target, _) = links[index];
+            (owner, name(&[target, "example", "org"]).len())
+        } else {
+            let (owner, _, _) = addresses[index - links.len()];
+            (owner, 4)
+        };
+        cursor += owner_len(owner, &start) + 10 + rdata_len;
+    }
+
+    // Pass 2: emit in the requested order.
+    let mut answers = Vec::new();
+    for &index in emission {
+        let (owner, rrtype, ttl, rdata) = if index < links.len() {
+            let (owner, target, ttl) = links[index];
+            (owner, TYPE_CNAME, ttl, name(&[target, "example", "org"]))
+        } else {
+            let (owner, ip, ttl) = addresses[index - links.len()];
+            (owner, TYPE_A, ttl, a_rdata(ip))
+        };
+        let owner_wire = match pointer_owner(owner, &start) {
+            Some(offset) => ptr(offset),
+            None => literal_owner(owner),
+        };
+        answers.extend_from_slice(&rr(&owner_wire, rrtype, ttl, &rdata));
+    }
+
+    let mut wire = Vec::new();
+    wire.extend_from_slice(&id.to_be_bytes());
+    wire.extend_from_slice(&FLAG_QR.to_be_bytes());
+    wire.extend_from_slice(&1u16.to_be_bytes());
+    wire.extend_from_slice(&u16::try_from(total).expect("fits").to_be_bytes());
+    wire.extend_from_slice(&0u16.to_be_bytes());
+    wire.extend_from_slice(&0u16.to_be_bytes());
+    wire.extend_from_slice(&question(&QNAME, TYPE_A));
+    wire.extend_from_slice(&answers);
+    wire
+}
+
+#[test]
+fn resolves_a_chain_whose_address_precedes_its_cname_link() {
+    let qname = qname_wire();
+    // links: mid; addresses: mid -> 192.0.2.30
+    let links = [("@", "mid", 900u32)];
+    let addresses = [("mid", [192, 0, 2, 30], 600u32)];
+
+    // The address record is emitted first, before the CNAME that names its
+    // owner, so a single forward pass could never resolve it.
+    let reversed = build_answers(0x50, &links, &addresses, &[1, 0]);
+    let selected = expect_ok(&reversed, AddressFamily::Ipv4, &qname, 0x50);
+    assert_eq!(selected.address, IpAddr::from([192, 0, 2, 30]));
+    assert_eq!(selected.cname_chain_len, 1);
+    assert_eq!(selected.ttl, 600);
+
+    // The forward order must produce the identical selection.
+    let forward = build_answers(0x50, &links, &addresses, &[0, 1]);
+    assert_eq!(
+        expect_ok(&forward, AddressFamily::Ipv4, &qname, 0x50),
+        selected
+    );
+}
+
+#[test]
+fn resolves_a_two_link_chain_emitted_backwards() {
+    let qname = qname_wire();
+    // QNAME -> a (900) -> b (300) -> A 192.0.2.31 (600); effective TTL is 300.
+    let links = [("@", "a", 900u32), ("a", "b", 300u32)];
+    let addresses = [("b", [192, 0, 2, 31], 600u32)];
+
+    let reversed = build_answers(0x54, &links, &addresses, &[2, 1, 0]);
+    let selected = expect_ok(&reversed, AddressFamily::Ipv4, &qname, 0x54);
+    assert_eq!(selected.address, IpAddr::from([192, 0, 2, 31]));
+    assert_eq!(selected.cname_chain_len, 2);
+    assert_eq!(selected.ttl, 300, "min over the whole selected path");
+}
+
+#[test]
+fn effective_ttl_uses_only_the_selected_path() {
+    let qname = qname_wire();
+    // Only QNAME -> mid is on the selected path; the QNAME -> other link has a
+    // 30-second TTL and an unreachable target, so it must not affect the result.
+    let links = [("@", "mid", 900u32), ("@", "other", 30u32)];
+    let addresses = [("mid", [192, 0, 2, 40], 600u32)];
+
+    let packet = build_answers(0x51, &links, &addresses, &[0, 1, 2]);
+    let selected = expect_ok(&packet, AddressFamily::Ipv4, &qname, 0x51);
+    assert_eq!(selected.address, IpAddr::from([192, 0, 2, 40]));
+    assert_eq!(selected.ttl, 600, "unrelated CNAME TTL must not be used");
+    assert_eq!(selected.cname_chain_len, 1, "only the selected path counts");
+}
+
+#[test]
+fn branching_cname_chooses_the_first_reachable_address_deterministically() {
+    let qname = qname_wire();
+    // QNAME -> a and QNAME -> b both exist. The choice follows the message
+    // order of the reachable addresses, not the order branches were found.
+    let links = [("@", "a", 900u32), ("@", "b", 900u32)];
+    let addresses = [
+        ("a", [192, 0, 2, 51], 600u32),
+        ("b", [192, 0, 2, 52], 700u32),
+    ];
+
+    let a_first = build_answers(0x52, &links, &addresses, &[0, 1, 2, 3]);
+    let selected = expect_ok(&a_first, AddressFamily::Ipv4, &qname, 0x52);
+    assert_eq!(selected.address, IpAddr::from([192, 0, 2, 51]));
+    assert_eq!(selected.cname_chain_len, 1);
+    assert_eq!(selected.ttl, 600);
+
+    // Swapping which reachable address comes first flips the selection and
+    // takes that branch's TTL, proving neither branch has priority.
+    let b_first = build_answers(0x53, &links, &addresses, &[0, 1, 3, 2]);
+    let flipped = expect_ok(&b_first, AddressFamily::Ipv4, &qname, 0x53);
+    assert_eq!(flipped.address, IpAddr::from([192, 0, 2, 52]));
+    assert_eq!(flipped.ttl, 700);
+}
+
+#[test]
+fn unreachable_and_cyclic_chains_are_rejected() {
+    let qname = qname_wire();
+
+    // QNAME -> a, and a's own address is missing, while the only address
+    // belongs to a name the chain never reaches.
+    let dangling = build_answers(
+        0x55,
+        &[("@", "a", 900)],
+        &[("b.example.org", [192, 0, 2, 60], 600)],
+        &[0, 1],
+    );
+    assert_eq!(
+        parse(&dangling, AddressFamily::Ipv4, &qname, 0x55),
+        Err(ResolverWireError::NoUsableAnswer)
+    );
+
+    // A two-link cycle reachable from the question name must fail rather than
+    // loop: QNAME -> a, a -> b, b -> a.
+    let cyclic = build_answers(
+        0x56,
+        &[("@", "a", 900), ("a", "b", 900), ("b", "a", 900)],
+        &[],
+        &[0, 1, 2],
+    );
+    assert_eq!(
+        parse(&cyclic, AddressFamily::Ipv4, &qname, 0x56),
+        Err(ResolverWireError::InvalidCnameChain)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P1-3: EDNS(0) OPT parsing and the full 12-bit extended RCODE
+// ---------------------------------------------------------------------------
+
+/// An OPT record with the given advertised UDP size, extended RCODE byte, and
+/// EDNS version.
+fn opt(udp_size: u16, extended_rcode: u8, version: u8) -> Vec<u8> {
+    let mut wire = vec![0x00]; // root owner
+    wire.extend_from_slice(&41u16.to_be_bytes()); // OPT
+    wire.extend_from_slice(&udp_size.to_be_bytes()); // class: advertised size
+    wire.extend_from_slice(&[
+        extended_rcode,
+        version,
+        0x00,
+        0x00, // extended rcode, version, then flags (no DO)
+    ]);
+    wire.extend_from_slice(&0u16.to_be_bytes()); // no options
+    wire
+}
+
+#[test]
+fn reads_the_extended_rcode_from_the_opt_ttl_upper_byte() {
+    let qname = qname_wire();
+
+    // BADVERS: header RCODE 0 with extended RCODE 1 in the OPT TTL upper byte
+    // is the 12-bit value 16. It must not be mistaken for NOERROR.
+    let badvers = correlated(
+        0x60,
+        0,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[opt(1200, 1, 0)],
+    );
+    assert_eq!(
+        parse(&badvers, AddressFamily::Ipv4, &qname, 0x60),
+        Err(ResolverWireError::Rcode(16)),
+        "BADVERS is 1<<4 | 0 = 16"
+    );
+
+    // A non-zero extended byte composes with the low nibble: RCODE 3 in the
+    // header plus 2 in the OPT is 35.
+    let composed = correlated(0x60, 3, &[], &[], &[opt(1200, 2, 0)]);
+    assert_eq!(
+        parse(&composed, AddressFamily::Ipv4, &qname, 0x60),
+        Err(ResolverWireError::Rcode(35))
+    );
+
+    // An OPT with extended RCODE 0 and a NOERROR header still succeeds, and the
+    // OPT's TTL never reaches the answer TTL.
+    let ok = correlated(
+        0x61,
+        0,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[opt(1232, 0, 0)],
+    );
+    let selected = expect_ok(&ok, AddressFamily::Ipv4, &qname, 0x61);
+    assert_eq!(selected.address, IpAddr::from([192, 0, 2, 1]));
+    assert_eq!(selected.ttl, 600, "the OPT record contributes no TTL");
+}
+
+#[test]
+fn parses_opt_with_the_executable_version_field() {
+    let qname = qname_wire();
+    // A valid OPT carrying EDNS version 0 and a DO-bit-free flags word is
+    // accepted; the version byte is not part of the RCODE.
+    let packet = correlated(
+        0x62,
+        0,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 900, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[opt(1200, 0, 0)],
+    );
+    assert_eq!(
+        expect_ok(&packet, AddressFamily::Ipv4, &qname, 0x62).ttl,
+        900
+    );
+}
+
+#[test]
+fn rejects_a_malformed_opt_record() {
+    let qname = qname_wire();
+
+    // An OPT whose declared RDLENGTH runs past the packet must fail the
+    // message rather than being skipped as an unrelated extra record.
+    let mut packet = correlated(
+        0x63,
+        0,
+        &[rr(&ptr(HEADER_LEN), TYPE_A, 600, &a_rdata([192, 0, 2, 1]))],
+        &[],
+        &[opt(1200, 0, 0)],
+    );
+    let opt_rdlen = packet.len() - 2;
+    packet[opt_rdlen..opt_rdlen + 2].copy_from_slice(&64u16.to_be_bytes());
+    assert_eq!(
+        parse(&packet, AddressFamily::Ipv4, &qname, 0x63),
+        Err(ResolverWireError::Malformed)
+    );
 }

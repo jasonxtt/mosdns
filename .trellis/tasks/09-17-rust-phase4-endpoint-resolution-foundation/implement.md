@@ -229,3 +229,101 @@ API newer than the crate's existing code.
   reachable on an untrusted response; the selection returned is unaffected.
 - Duplicate CNAME targets are collapsed by the chain set, so pathological
   repeated-target chains are bounded but not individually diagnosed.
+
+## Slice 0 remediation — reviewer FAIL on a9fc802 (2026-09-17)
+
+Three in-scope P1 findings; fixes confined to `rust/dns-core/**`. RED public
+regression tests were added for each before the implementation changed.
+
+### P1-1 correlation before terminal matching-query errors
+
+`parse_resolver_response` reported TC and RCODE before it checked the echoed
+question, so a reply for a *different* question could be classified as this
+query's truncation or negative answer.
+
+Fix: QR, opcode and ID are still checked first (they are the cheapest
+correlation), then the full question check runs to completion, and only then are
+the 12-bit RCODE and TC evaluated.
+
+New tests: `non_matching_question_is_classified_before_rcode_and_truncation`
+(wrong question + SERVFAIL, wrong question + TC=1, wrong question type, absent
+question), `matching_question_still_reports_rcode_and_truncation` (the
+correlated case still yields `Rcode(2)` / `Truncated`), and
+`id_and_opcode_still_precede_question_correlation` (ID mismatch and non-QUERY
+opcode still win over a question mismatch).
+
+### P1-2 order-independent CNAME path resolution
+
+The previous selection kept a "reachable set" updated in a single forward pass,
+so a valid answer section that lists an address *before* the CNAME introducing
+its owner never resolved, and the reported `cname_chain_len` and TTL came from
+every visited link rather than the selected path.
+
+Fix: the answer walk now only retains records (`ChainLink`, `AddressRecord`) and
+`select_address` performs an explicit iterative traversal over them with a
+visited-name path per branch. Reachability no longer depends on record order,
+cycles close as soon as a name repeats on the current path, every CNAME owned by
+the current name is followed (so branching is resolved by message order, not by
+discovery order), and both the effective TTL and `cname_chain_len` come from the
+path that reaches the selected record. A hard state budget
+`(links + 1) * (max_cname_links + 1) + 1` fails closed against an answer section
+crafted to contain exponentially many acyclic paths. No recursion and no
+callback into the caller's resolver.
+
+New tests, all built through a declarative `build_answers` helper that fixes
+record offsets before emission so an address can genuinely precede its CNAME:
+
+| Test | Proves |
+| --- | --- |
+| `resolves_a_chain_whose_address_precedes_its_cname_link` | the reversed and forward emissions select identically |
+| `resolves_a_two_link_chain_emitted_backwards` | a two-link chain emitted `[A, link1, link0]` resolves, TTL 300, `cname_chain_len` 2 |
+| `effective_ttl_uses_only_the_selected_path` | an unrelated 30-second CNAME on a different branch does not move the TTL off 600 or inflate the link count |
+| `branching_cname_chooses_the_first_reachable_address_deterministically` | `QNAME -> a`/`QNAME -> b` picks whichever reachable address is first in the message, and swapping the two flips both address and TTL |
+| `unreachable_and_cyclic_chains_are_rejected` | an unreachable address is `NoUsableAnswer`; a reachable two-link cycle is `InvalidCnameChain` |
+
+### P1-3 EDNS(0) OPT and the full 12-bit RCODE
+
+The query emits an OPT record, but the response side ignored OPT entirely, so
+`BADVERS` (header RCODE 0, extended RCODE 1) was accepted as `NOERROR`.
+
+Fix: `ResolverWireError::Rcode` now carries a `u16`, the additional-section walk
+parses the OPT record, and the evaluated RCODE is
+`header_low_nibble | (opt_ttl_upper_byte << 4)`. Two OPT records, or an OPT
+record in the authority section, are `Malformed`; a malformed OPT RDLENGTH
+already failed the framing walk and still does. The OPT contributes no address
+and no TTL.
+
+New tests: `reads_the_extended_rcode_from_the_opt_ttl_upper_byte` (BADVERS = 16;
+composed value 3 | 2 << 4 = 35; and an extended-RCODE-0 OPT still succeeds with
+the answer TTL unaffected), `parses_opt_with_the_executable_version_field`, and
+`rejects_a_malformed_opt_record`. The existing `rejects_non_noerror_rcodes` was
+updated for the `u16` payload.
+
+### Checks (branch `rust`, `/Users/tom/github/mosdns-rust`)
+
+| Command | Result |
+| --- | --- |
+| `cargo test … -p mosdns-dns-core --all-targets --all-features --locked` | 53 + 1 + 2 + 38 + 1 passed, 0 failed |
+| `cargo test … --workspace --all-targets --all-features --locked` | 25 suites ok, no failures |
+| `cargo fmt --manifest-path rust/Cargo.toml --all --check` | clean |
+| `cargo clippy … -p mosdns-dns-core --all-targets --all-features --locked -- -D warnings` | clean |
+| `cargo clippy … --workspace --all-targets --all-features --locked -- -D warnings` | clean |
+| `cargo tree … -p mosdns-dns-core -e normal --locked` | still only `mosdns-dns-core` |
+| `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | passed |
+| `git diff --check` | clean |
+
+Mutation check of the three fixes (backup under `rust/target/`, restored on
+EXIT/INT/TERM): evaluating RCODE before the question check, evaluating TC before
+the question check, ignoring the OPT extended-RCODE byte, and disabling the
+outgoing CNAME edge are each caught by the new tests.
+
+### Limitations carried forward
+
+- The state budget fails closed with `InvalidCnameChain` on a crafted answer
+  section with many distinct acyclic paths; a real authoritative answer is far
+  below it, but the bound is a safety valve rather than a precise diagnostic.
+- A name owned by several CNAME records is ambiguous; the walk follows every
+  such record and resolves by message order, which is deterministic but not a
+  statement about DNS semantics.
+- Still no socket, retransmission, cache, refresh, deadline, or lifecycle
+  behavior; that remains Slice 1+.
