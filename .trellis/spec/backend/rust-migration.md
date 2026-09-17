@@ -591,3 +591,124 @@ let context = ExchangeContext::new(deadline, transport_cancellation);
 let prepared = upstream.prepare_exchange(request, context)?;
 // Slice0 has performed only pure validation; later slices own socket I/O.
 ```
+
+## Scenario: pure Rust Phase 4 endpoint-resolution foundation
+
+### 1. Scope / Trigger
+
+Use this contract for the single-family endpoint-resolution foundation in
+`rust/upstream-core`. It resolves a configured hostname through a numeric
+bootstrap peer and hands a numeric destination to the existing transport
+constructors. It is a pure Rust sibling and must not add host/config/plugin
+wiring, Go/cgo boundaries, backend selectors, fallback paths, or production
+service changes.
+
+Native dual-stack resolution, address ordering/racing, per-family failure
+memory, QUIC/HTTP3 interaction, and the follow-up task that owns them are out
+of scope for this foundation.
+
+### 2. Signatures
+
+- `ResolutionTarget::new(host, port, family)` validates and normalizes a
+  hostname or validates a numeric literal; `numeric_address()` exposes the
+  already-usable dial address.
+- `BootstrapEndpoint::new(host, port)` accepts only a numeric bootstrap peer.
+- `ConfigVersion::from_u8(0 | 4 | 6)` maps to the reviewed single family;
+  `0` and `4` select IPv4/A, while `6` selects IPv6/AAAA.
+- `BootstrapResolver::new(target, bootstrap, policy, clock)` uses the
+  unpredictable OS ID source for hostname resolution and returns a typed error
+  when that source is unavailable.
+- `BootstrapResolver::resolve(context)` preserves the caller's absolute
+  deadline and returns an owned `PublishedTarget`; `ResolverComposition` hands
+  its numeric address to UDP/TCP, DoT, or DoH constructors without changing
+  secure service identity.
+- `ResolverState` exposes `published`, `last_expired`, and `last_error` for
+  diagnostics; publication and refresh mutations remain crate-private and are
+  owned by `BootstrapResolver`.
+
+### 3. Contracts
+
+- A numeric target bypasses DNS, does not open a bootstrap socket, and does not
+  probe or draw from the OS entropy source. Numeric construction therefore
+  remains usable even when an injected or host ID source would fail.
+- A hostname target fails closed when unpredictable transaction IDs are not
+  available; it never substitutes a predictable ID. Deterministic ID sources
+  are test seams only.
+- The bootstrap peer's address family and the target's answer family are
+  independent. An IPv4 bootstrap may answer AAAA and an IPv6 bootstrap may
+  answer A; do not add a peer/answer-family equality invariant.
+- Bootstrap UDP uses one caller-owned runtime, one connected ephemeral socket,
+  one absolute deadline, bounded retransmission, and no system resolver,
+  hidden runtime, detached task, TCP fallback, or deadline extension.
+- Correlation and DNS wire failures remain typed. In particular,
+  `ResolverWireError::Truncated` maps to `ResolverError::Truncated` and is a
+  terminal result for this foundation; it must not be relabeled as malformed
+  or trigger TCP bootstrap fallback.
+- Publication is complete-or-nothing. A failed refresh preserves the prior
+  published value, an expired value is never served as fresh, and lifecycle
+  close/cancellation can prevent a late publication.
+- Public state handles are observation-only. External callers cannot publish,
+  manufacture freshness, or clear refresh diagnostics; state-model tests that
+  need mutation live inside the resolver crate.
+- Resolution composes only after a numeric destination exists. UDP/TCP use the
+  numeric dial address, while DoT SNI and DoH URL authority/path remain the
+  configured service identity. No YAML/API/WebUI or live sequence ownership is
+  introduced here.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| numeric target with unavailable entropy | immediate numeric publication; no RNG/DNS dependency |
+| hostname with unavailable entropy | `UnpredictableIdsUnavailable`; no predictable fallback |
+| bootstrap hostname or zero port | typed validation error before I/O |
+| unsupported `bootstrap_version` | `UnsupportedConfigVersion`; no silent default |
+| correlated TC response | `ResolverError::Truncated`; terminal, no TCP attempt |
+| malformed/wrong-ID/wrong-question response | typed terminal/mismatch handling; no publication |
+| failed refresh with prior value | prior value retained; failure recorded diagnostically |
+| owner close or caller cancellation | typed control error; no late success/publication |
+
+### 5. Good/Base/Bad Cases
+
+- Good: construct numeric targets without touching `OsIdSource`, and let only
+  the owner mutate its read-only shared state after the lifecycle commit gate.
+- Base: use deterministic IDs and an injected clock in tests, while production
+  uses the OS source and caller-owned time/runtime controls.
+- Bad: probe entropy unconditionally in `BootstrapResolver::new`, collapse TC
+  into a generic malformed error, expose public state mutation, call the system
+  resolver, or add a TCP fallback to the bootstrap leg.
+
+### 6. Tests Required
+
+- Public tests cover numeric bypass with a failing ID source, hostname
+  fail-closed behavior, typed TC handling, and the absence of external state
+  mutation.
+- Resolver state-model tests remain crate-internal and cover fresh/expired
+  publication and refresh-failure preservation.
+- Loopback tests use ephemeral high ports, explicit handshakes, bounded waits,
+  injected clocks/IDs, and the existing upstream lifecycle vocabulary; they do
+  not modify an installed service or use port 53.
+- The focused Linux/MSRV resolver gate runs on the isolated Debian test VM via
+  the repository SSH alias. Mac-host Docker/Colima is not a substitute for
+  this evidence. Record any pre-existing Clippy findings separately and do not
+  claim an unrun full-workspace gate.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Every constructor probes entropy, TC becomes a generic parse error, and an
+// Arc<ResolverState> lets integration callers publish arbitrary destinations.
+```
+
+#### Correct
+
+```rust
+if target.is_numeric() {
+    // No ID draw or bootstrap socket: publish the validated numeric address.
+} else if !OsIdSource.is_available() {
+    return Err(ResolverError::UnpredictableIdsUnavailable);
+}
+// Only the owner commits state; a correlated TC reply is terminal.
+```
