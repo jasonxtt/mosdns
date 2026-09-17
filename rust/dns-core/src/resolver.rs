@@ -22,7 +22,10 @@
 //! match the outstanding request, whose full RCODE is `NOERROR`, and whose TC
 //! bit is clear. Correlation completes before any terminal matching-query error
 //! is reported, so a reply for a different question is never classified as this
-//! query's truncation or negative answer.
+//! query's truncation or negative answer. Once correlated, a truncated response
+//! is terminal immediately: it is not walked for records and not read for an
+//! extended RCODE, so a cut body is reported as truncation rather than as a
+//! malformed message or a negative answer.
 //!
 //! A selected address must belong to the question name or to a bounded,
 //! loop-free CNAME path rooted at it. The path is resolved by walking the
@@ -33,8 +36,10 @@
 //!
 //! The RCODE is the full 12-bit value: the header's low nibble extended by the
 //! high 8 bits an OPT record carries in its TTL upper byte, so `BADVERS` (`16`)
-//! is rejected rather than read as `NOERROR`. An OPT record contributes no
-//! address and no TTL.
+//! is rejected rather than read as `NOERROR`. At most one OPT is accepted, only
+//! in the additional section, and its owner must be the DNS root; a non-root
+//! `TYPE 41` record is malformed and never contributes an extended RCODE. An
+//! OPT record contributes no address and no TTL.
 //!
 //! Every record of every declared section is walked within the packet, so a
 //! malformed tail fails the whole message rather than publishing a selection
@@ -338,6 +343,14 @@ pub fn parse_resolver_response(
         return Err(ResolverWireError::QuestionMismatch);
     }
 
+    // A correlated truncated response is terminal immediately: the delivered
+    // body is explicitly incomplete, so it is neither walked for records nor
+    // read for an extended RCODE, and a cut or hostile body cannot be reported
+    // as a different failure. This codec performs no TCP retry.
+    if flags & 0x0200 != 0 {
+        return Err(ResolverWireError::Truncated);
+    }
+
     // Walk every declared record once, retaining only the framing facts the
     // selection needs. The walk is order-independent, so an answer section that
     // lists an address before the CNAME leading to it is still resolved.
@@ -388,11 +401,13 @@ pub fn parse_resolver_response(
     }
 
     // Walk the remaining sections for framing, and read the EDNS(0) OPT record
-    // so the full 12-bit RCODE is available. An OPT owner is always the root
-    // label, so it can never collide with a QNAME.
-    let mut opt: Option<(u8, usize)> = None;
+    // so the full 12-bit RCODE is available. A response may carry at most one
+    // OPT, only in the additional section, and its owner must be the DNS root
+    // (`[0]`) — a non-root TYPE 41 record is not OPT and is rejected rather
+    // than being read for an extended RCODE.
+    let mut opt: Option<u8> = None;
     for index in 0..nscount.saturating_add(arcount) {
-        let (owner_end, _) = read_name(packet, position)?;
+        let (owner_end, owner) = read_name(packet, position)?;
         let fixed_end = owner_end
             .checked_add(RR_FIXED_LEN)
             .ok_or(ResolverWireError::Malformed)?;
@@ -402,13 +417,10 @@ pub fn parse_resolver_response(
         let rrtype = u16::from_be_bytes([fixed[0], fixed[1]]);
         let rdlength = usize::from(u16::from_be_bytes([fixed[8], fixed[9]]));
         if rrtype == TYPE_OPT {
-            if index < nscount {
+            if index < nscount || !is_root_name(&owner) || opt.is_some() {
                 return Err(ResolverWireError::Malformed);
             }
-            if opt.is_some() {
-                return Err(ResolverWireError::Malformed);
-            }
-            opt = Some((fixed[4], position));
+            opt = Some(fixed[4]);
         }
         position = fixed_end
             .checked_add(rdlength)
@@ -418,13 +430,10 @@ pub fn parse_resolver_response(
         }
     }
 
-    let extended = opt.map_or(0u16, |(byte, _)| u16::from(byte));
+    let extended = opt.map_or(0u16, u16::from);
     let rcode = u16::from((flags & 0x0f) as u8) | (extended << 4);
     if rcode != 0 {
         return Err(ResolverWireError::Rcode(rcode));
-    }
-    if flags & 0x0200 != 0 {
-        return Err(ResolverWireError::Truncated);
     }
 
     let (address, observed_ttl, links_used) =
@@ -555,6 +564,14 @@ fn validate_name(name: &str) -> Result<(), ResolverWireError> {
         }
     }
     Ok(())
+}
+
+/// Whether an expanded wire name is the DNS root: the single zero octet.
+///
+/// [`read_name`] always returns a terminated name whose last octet is the root
+/// label, so a bare `[0]` is the only root encoding it can produce.
+fn is_root_name(owner: &[u8]) -> bool {
+    owner == [0]
 }
 
 /// Lowercases the ASCII letters of an uncompressed wire name.
