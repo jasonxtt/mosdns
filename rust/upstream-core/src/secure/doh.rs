@@ -34,7 +34,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use hyper::body::Incoming;
-use hyper::client::conn::http1::SendRequest;
 use hyper::header::{ACCEPT, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, HOST};
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
@@ -76,13 +75,18 @@ const MAX_RESPONSE_HEADER_BYTES: usize = 16 * 1024;
 /// under the byte ceiling. The DNS contract needs only a handful.
 const MAX_RESPONSE_HEADERS: usize = 64;
 
-/// The HTTP/1.1 read-buffer ceiling.
+/// The Hyper HTTP/1.1 parser/read-buffer ceiling: the same 16 KiB the contract
+/// allows for a response head.
 ///
-/// This bounds the header block the connection will assemble. It must stay
-/// above the largest legal header block this contract accepts (16 KiB per the
-/// design) while remaining far below the point where a peer could make the
-/// client allocate unbounded memory; Hyper requires at least 8192.
-const MAX_HTTP1_BUFFER: usize = 32 * 1024;
+/// This is the *raw wire* bound. Hyper aborts the connection once the bytes it
+/// has buffered for a single head reach this limit, so the parser itself cannot
+/// hold more than the contract permits. It is deliberately not larger than
+/// [`MAX_RESPONSE_HEADER_BYTES`]: a bigger buffer would let a peer make the
+/// parser hold more head bytes than the contract accepts, which a post-parse
+/// check could only detect after the allocation had already happened.
+///
+/// Hyper requires at least 8192, which is well below this value.
+const MAX_HTTP1_BUFFER: usize = MAX_RESPONSE_HEADER_BYTES;
 
 /// The ALPN protocol list offered for DoH, in preference order.
 ///
@@ -475,9 +479,24 @@ async fn exchange_inner(prepared: &PreparedDoh<'_>) -> Result<SecureResponse, Se
 
     tokio::pin!(connection);
 
-    // The request is now with the driver but no response head exists yet.
+    // The last control check that is still provably `NotSent`. Nothing has been
+    // handed to the driver yet, so a control error here cannot have sent a
+    // query.
+    prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
+
+    // The handoff is the linearization point between `NotSent` and
+    // `MaybeSent`. `SendRequest::send_request` synchronously dispatches the
+    // request into the connection driver, so from this statement onward the
+    // query may be on the wire and every later control error must be reported
+    // conservatively as `MaybeSent`.
+    let request_future = sender.send_request(request);
+    tokio::pin!(request_future);
+
+    // Only now is the request genuinely with the driver, which is what this
+    // phase exists to observe.
     prepared.reach(DohPhase::AfterRequestSent).await;
-    let response = send_request(&control, deadline, &mut sender, &mut connection, request).await?;
+
+    let response = send_request(&control, deadline, &mut request_future, &mut connection).await?;
 
     // Phase 4: read the response body to a complete end under the same control.
     prepared.reach(DohPhase::BeforeBody).await;
@@ -584,7 +603,12 @@ fn build_get_request(target: &str, authority: &str) -> Result<Request<EmptyBody>
         .map_err(|_| SecureError::DohRequest(crate::secure::error::DohRequestError::TargetTooLarge))
 }
 
-/// Sends the request and reads the response head.
+/// Awaits the response head for an already-dispatched request.
+///
+/// The caller has already handed `request_future` to the connection driver, so
+/// this function is strictly post-handoff: every failure it reports, including a
+/// control failure, is `MaybeSent`, because the request may already have reached
+/// the peer.
 ///
 /// The connection future is polled alongside the request, so the exchange owns
 /// the whole HTTP/1.1 machine. The status and headers are validated here; the
@@ -592,23 +616,17 @@ fn build_get_request(target: &str, authority: &str) -> Result<Request<EmptyBody>
 async fn send_request(
     control: &ExchangeControl,
     deadline: Instant,
-    sender: &mut SendRequest<EmptyBody>,
+    request_future: &mut Pin<&mut impl Future<Output = hyper::Result<Response<Incoming>>>>,
     connection: &mut Pin<&mut impl Future<Output = hyper::Result<()>>>,
-    request: Request<EmptyBody>,
 ) -> Result<Response<Incoming>, SecureError> {
-    // No control check happens between building and sending: the request has
-    // been constructed but nothing is on the wire yet, so a control error here
-    // is still `NotSent`.
     let response = race_control(control, SideEffectState::MaybeSent, deadline, async {
         // Poll the connection and the request together: the request future only
         // completes while the connection is being driven. Both outcomes are
         // terminal for this select, so it is not a loop.
-        let request_future = sender.send_request(request);
-        tokio::pin!(request_future);
         tokio::select! {
-            result = &mut request_future => result.map_err(|_| {
-                // A failure after the request was handed to the driver may
-                // already have transmitted part of it.
+            result = request_future.as_mut() => result.map_err(|_| {
+                // The request was already handed to the driver, so a failure
+                // here may have transmitted part of it.
                 SecureError::Transport(UpstreamError::Send(SideEffectState::MaybeSent))
             }),
             result = connection.as_mut() => Err(match result {
@@ -666,9 +684,15 @@ fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureErr
         ));
     }
 
-    // Bound the response head by bytes, not just by header count: a peer must
-    // not be able to make the client hold far more head bytes than the DNS
-    // contract needs.
+    // Defense in depth. The raw wire bound is enforced during parsing by
+    // `MAX_HTTP1_BUFFER`; this measures the *parsed* head and catches anything
+    // the parser accepted, including a case where the reconstruction and the
+    // wire disagree.
+    //
+    // Note that `response_head_bytes` reconstructs the head from parsed fields
+    // and therefore cannot see bytes the parser discarded, such as a long
+    // non-canonical reason phrase. That is exactly why the raw bound above is
+    // the primary control and this is only a secondary check.
     let head_bytes = response_head_bytes(response);
     if head_bytes > MAX_RESPONSE_HEADER_BYTES {
         return Err(SecureError::DohProtocol(
