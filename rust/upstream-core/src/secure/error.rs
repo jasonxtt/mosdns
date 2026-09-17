@@ -199,12 +199,21 @@ impl fmt::Display for TlsHandshakeFailure {
 
 impl Error for TlsHandshakeFailure {}
 
-/// Why a DoH HTTP response was rejected after the request was sent.
+/// Why a DoH exchange failed, at the HTTP or ALPN layer.
 ///
-/// Every variant describes an HTTP-level defect: the transport carried a
-/// well-formed reply, but the reply is not an acceptable DoH answer. Because
-/// the request has already been transmitted when any of these can occur, the
-/// side-effect state is never [`SideEffectState::NotSent`].
+/// Most variants describe an HTTP-level defect in a reply that did arrive:
+/// the transport carried a well-formed response, but the response is not an
+/// acceptable DoH answer. Those are [`SideEffectState::Sent`], because the
+/// request had certainly been transmitted before the reply could be inspected.
+///
+/// Two variants are deliberately weaker and must not be treated as `Sent`:
+///
+/// * [`Self::ResponseHeadNotReceived`] means the connection ended before any
+///   response head was observed. Whether the request reached the peer is
+///   unknowable at that point, so it is conservatively
+///   [`SideEffectState::MaybeSent`].
+/// * [`Self::UnexpectedAlpn`] is decided during the TLS handshake, before any
+///   HTTP request exists at all, so it is [`SideEffectState::NotSent`].
 ///
 /// No variant follows a redirect, retries, sends a second request, or falls
 /// back to another protocol; each is terminal for the exchange. No variant
@@ -229,18 +238,62 @@ pub enum DohProtocolError {
     /// The body is never decompressed, so a compressed payload cannot be
     /// mistaken for a DNS message.
     ContentEncoding,
-    /// The body exceeded the 65535-byte DNS maximum.
+    /// The response head exceeded the 16 KiB byte bound.
+    ///
+    /// This bounds the head by *bytes* rather than by header count, so a peer
+    /// cannot exceed the contract with a few very large headers.
+    ResponseHeadTooLarge,
+    /// The body, or its declared `Content-Length`, exceeded the 65535-byte DNS
+    /// maximum.
+    ///
+    /// A declared length above the maximum is rejected at the response head,
+    /// before any body byte is read.
     BodyTooLarge,
     /// The response body could not be read to a complete end.
     ///
     /// This includes an early EOF, a `Content-Length` that disagrees with the
-    /// bytes actually received, and a malformed chunked encoding.
+    /// bytes actually received, and a malformed chunked encoding. The response
+    /// head was already observed, so the request is known to have been
+    /// transmitted.
     IncompleteBody,
+    /// The response head was never observed.
+    ///
+    /// The connection ended, or failed, before any response status or header
+    /// arrived. The request had been handed to the driver, but nothing proves
+    /// it reached the peer, so this is conservatively
+    /// [`SideEffectState::MaybeSent`] rather than `Sent`.
+    ResponseHeadNotReceived,
     /// The TLS handshake negotiated an ALPN protocol this client does not
     /// implement.
     ///
     /// The connection is abandoned rather than replayed with another protocol.
+    /// This is decided before any HTTP request exists, so it is
+    /// [`SideEffectState::NotSent`].
     UnexpectedAlpn,
+}
+
+impl DohProtocolError {
+    /// The DNS side-effect state this failure proves.
+    ///
+    /// Every variant except [`Self::ResponseHeadNotReceived`] and
+    /// [`Self::UnexpectedAlpn`] can only be observed after a complete response
+    /// head arrived, which proves the request was transmitted. The two
+    /// exceptions are weaker by design: an absent head leaves delivery
+    /// unknowable, and an ALPN mismatch precedes any request entirely.
+    #[must_use]
+    pub const fn side_effect(self) -> SideEffectState {
+        match self {
+            Self::UnexpectedAlpn => SideEffectState::NotSent,
+            Self::ResponseHeadNotReceived => SideEffectState::MaybeSent,
+            Self::UnexpectedStatus { .. }
+            | Self::WrongMediaType
+            | Self::MissingMediaType
+            | Self::ContentEncoding
+            | Self::ResponseHeadTooLarge
+            | Self::BodyTooLarge
+            | Self::IncompleteBody => SideEffectState::Sent,
+        }
+    }
 }
 
 impl fmt::Display for DohProtocolError {
@@ -252,8 +305,14 @@ impl fmt::Display for DohProtocolError {
             Self::WrongMediaType => formatter.write_str("wrong response media type"),
             Self::MissingMediaType => formatter.write_str("missing response media type"),
             Self::ContentEncoding => formatter.write_str("unsupported content encoding"),
+            Self::ResponseHeadTooLarge => {
+                formatter.write_str("response head exceeds the size limit")
+            }
             Self::BodyTooLarge => formatter.write_str("response body exceeds the DNS limit"),
             Self::IncompleteBody => formatter.write_str("incomplete response body"),
+            Self::ResponseHeadNotReceived => {
+                formatter.write_str("response head was never received")
+            }
             Self::UnexpectedAlpn => formatter.write_str("unexpected ALPN protocol"),
         }
     }
@@ -319,7 +378,7 @@ impl SecureError {
             | Self::TlsConfig(_)
             | Self::DohRequest(_)
             | Self::Tls(_) => SideEffectState::NotSent,
-            Self::DohProtocol(_) => SideEffectState::Sent,
+            Self::DohProtocol(reason) => reason.side_effect(),
             Self::Transport(cause) => cause.side_effect(),
         }
     }
