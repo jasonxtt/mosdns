@@ -2,10 +2,10 @@
   "id": "rust-phase4-secure-upstream-foundation",
   "name": "rust-phase4-secure-upstream-foundation",
   "title": "Rust Phase 4 TLS/HTTPS upstream foundation",
-  "description": "Bounded pure Rust DoT/DoH upstream foundation after the accepted UDP/TCP foundation; Slices 0-3 are CLOSED and Slice4 evidence (macOS local plus Linux Actions) is complete, awaiting final root acceptance.",
+  "description": "Bounded pure Rust DoT/DoH upstream foundation after the accepted UDP/TCP foundation; Slice4 root acceptance is complete (Slices 0-4 root-reviewed CLOSED), while task wrap-up/archive remains a separate unauthorized step.",
   "status": "in_progress",
   "dev_type": null,
-  "scope": "Pure Rust DoT/DoH foundation — Slice4 evidence complete, awaiting rust0916 final root acceptance",
+  "scope": "Pure Rust DoT/DoH foundation — Slices 0-4 root-reviewed CLOSED; task remains in_progress for separate wrap-up/archive",
   "package": null,
   "priority": "P2",
   "creator": "tom",
@@ -25,6 +25,6 @@
     "docs/ai/rust-handover.md",
     "docs/ai/rust-rewrite-plan.md"
   ],
-  "notes": "Slice3 was formally accepted by rust0916 (PASS / Slice3 CLOSED) at d3566bf105008e23c315536d6560b00d55250e55; the user then explicitly authorized Slice4 as the final quality and isolated Linux evidence gate. Slice4 is complete except for the final root acceptance: macOS local checks and the Linux GitHub Actions run 35180813379 on reviewed revision c84d268c66b20ea6e339b4379674ccfb262211bf both succeeded (rust-foundation and Go build jobs SUCCESS; rust-runtime-experimental skipped by design as workflow_dispatch-only), with full evidence in implement.md. The task stays in_progress pending rust0916's final root PASS. Production wiring, deployment, archiving, and any later slice or task remain unauthorized.",
+  "notes": "Slices 0-4 are root-reviewed and CLOSED: Slice1 PASS at 25c7c961453e15d7347d65bbc401026f813ff27c, Slice3 PASS / CLOSED at d3566bf105008e23c315536d6560b00d55250e55, and Slice4 PASS / CLOSED (P0=0, P1=0) at reviewed HEAD cb89974da4b5c3a85b115f9e8e9bf00d500e76e1, following quality-gate commit c84d268c66b20ea6e339b4379674ccfb262211bf and Actions run 35181231182. Reviewer rust0916 recorded two non-blocking notes: Rust 1.85 was never actually installed or run (MSRV is evidenced indirectly via resolver-3 selection, a cargo metadata audit and the stable Linux CI build), and research/secure-upstream-evidence.md is evidence-only rather than normative. The task stays in_progress with completedAt null because closing a slice is not task completion; wrap-up and archiving are a separate step that still needs explicit user authorization. Production wiring, deployment, archiving, and any later slice or task remain unauthorized.",
   "meta": {}
 }

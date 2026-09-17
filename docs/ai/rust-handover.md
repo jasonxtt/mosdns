@@ -55,20 +55,22 @@ used as an intermediate production runtime.
 | `08-15-rust-phase3-query-execution-core` | **archived/completed** (`2026-08-17`) | Phase 3A query/wire foundation complete: Slices 0–4 root-reviewed, including Rust dns/query core, query ABI, Go opt-in adapter/fallback, Linux+cgo real-staticlib normal/race, and final wire/parity remediation. Overall Phase 3 remains incomplete because sequence control flow, matcher dispatch, no-network executable ownership, and query execution ownership are still Go-owned. | The next task is Phase 3B sequence/execution ownership. Reuse the pure Rust dns/query types, but do not extend the query ABI/Go fallback pattern into sequence-core. Keep the existing adapter untouched until the later retirement gate. |
 | `08-17-rust-phase3b-sequence-execution-foundation` | **archived/completed** (`2026-08-18`) | Pure `rust/sequence-core` foundation complete: typed owned execution state, validated program model, explicit continuation stack, product-contract/deviation classification, fuel/cancellation, and no Go adapter/ABI/selector. Implementation commit `0c53c7d`; archive commit `a18fd89`. | Preserve the reviewed sequence contract. Do not reopen Phase3B while planning or implementing Phase4. |
 | `08-17-rust-phase4-upstream-foundation` | **archived/completed** (`2026-09-16`) | Slices0–4 accepted; Slice4 `PASS / CLOSED` at `9d43e9f`, Actions `35090514316` success, closure record `cb15361`. Pure numeric UDP, fresh TCP and UDP TC→TCP foundation only. | Preserve reviewed contracts; archived artifacts are under `.trellis/tasks/archive/2026-09/08-17-rust-phase4-upstream-foundation/`. |
-| `09-16-rust-phase4-secure-upstream-foundation` | **in_progress — Slices 0-3 CLOSED, Slice4 evidence complete, awaiting final root acceptance** (`2026-09-17`) | Slices 0-3 are implemented and formally accepted by `rust0916`: Slice1 `PASS` at `25c7c961453e15d7347d65bbc401026f813ff27c`, Slice3 `PASS / CLOSED` after one scoped remediation at `d3566bf105008e23c315536d6560b00d55250e55`. The bounded pure Rust DoT + DoH (HTTP/1.1 and HTTP/2) foundation exists in `rust/upstream-core` with explicit numeric dialing and independent service identity. Slice4 evidence is complete for reviewed revision `c84d268c66b20ea6e339b4379674ccfb262211bf`: macOS local checks plus Linux GitHub Actions run `35180813379` (`rust-foundation` and Go `build` jobs SUCCESS; `rust-runtime-experimental` skipped by design as `workflow_dispatch`-only). | Only the final root acceptance from `rust0916` remains; this is not a completion claim and does not authorize a later slice. Do not wire host/production, deploy, or archive the task. |
+| `09-16-rust-phase4-secure-upstream-foundation` | **in_progress — Slices 0-4 root-reviewed CLOSED, wrap-up/archive not yet authorized** (`2026-09-17`) | Reviewer `rust0916` closed every slice: Slice1 `PASS` at `25c7c961453e15d7347d65bbc401026f813ff27c`, Slice3 `PASS / CLOSED` at `d3566bf105008e23c315536d6560b00d55250e55`, and Slice4 `PASS / CLOSED` (P0=0, P1=0) at reviewed HEAD `cb89974da4b5c3a85b115f9e8e9bf00d500e76e1`, following quality-gate commit `c84d268c66b20ea6e339b4379674ccfb262211bf` and Actions run `35181231182`. The bounded pure Rust DoT + DoH (HTTP/1.1 and HTTP/2) foundation exists in `rust/upstream-core` with explicit numeric dialing and independent service identity. Two non-blocking reviewer notes are recorded in the task evidence: Rust 1.85 was never actually installed or run (MSRV is evidenced indirectly), and `research/secure-upstream-evidence.md` is evidence-only, not normative. | Slice closure is not task completion: the task stays `in_progress` and wrap-up/archiving needs separate explicit authorization. Do not wire host/production, deploy, archive, or start a later slice. |
 
 Active migration work is the **secure-upstream foundation** on branch `rust`.
-Slices 0-3 are CLOSED. The UDP/TCP foundation is archived after final root
-acceptance; its completion is not completion of the whole Phase4 data plane. The
-native host, resolver/bootstrap, connection pooling, listeners and hybrid
-retirement are not implemented by this foundation.
+Slices 0-4 are root-reviewed CLOSED. The UDP/TCP foundation is archived after
+final root acceptance; its completion is not completion of the whole Phase4 data
+plane. The native host, resolver/bootstrap, connection pooling, listeners and
+hybrid retirement are not implemented by this foundation.
 
-`.trellis/tasks/09-16-rust-phase4-secure-upstream-foundation/` is the active
-task. All of its Slice4 evidence has been gathered — macOS local checks and the
-Linux Actions run above — and only the final root acceptance is outstanding, so
-the task stays `in_progress`. The task's `implement.md` holds the exact
-verification commands, results and their limitations. Production wiring,
-deployment, archiving, and any later slice remain unauthorized.
+`.trellis/tasks/09-16-rust-phase4-secure-upstream-foundation/` has completed
+Slices 0-4, and `rust0916` returned `PASS / Slice4 CLOSED` on reviewed HEAD
+`cb89974da4b5c3a85b115f9e8e9bf00d500e76e1`. The task nevertheless stays
+`in_progress`, because closing a slice is not the same as finishing a task:
+wrap-up and archiving are a separate step that still needs explicit user
+authorization. The task's `implement.md` holds the exact verification commands,
+results and their limitations. Production wiring, deployment, archiving, and any
+later slice remain unauthorized.
 The old foundation's exact commands and results remain in its archived
 `implement.md`; no new runtime verification is claimed by administrative closure.
 

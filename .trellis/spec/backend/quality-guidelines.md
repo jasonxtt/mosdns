@@ -166,6 +166,14 @@ scoped commit, send its GitHub evidence, read the explicit reviewer result,
 repeat bounded fixes until PASS, then stop and wait for the user's next-phase
 decision.
 
+### 9. Slice closure versus task completion
+
+An explicit reviewer `PASS` closes only the slice it names. Record the closure in
+the task artifacts — reviewer, exact reviewed revision, review run, and findings
+disposition — but leave the task `in_progress`, because a closed slice is not a
+finished task. Starting the next slice and finishing/archiving the task each need
+their own explicit user authorization; neither follows from a slice `PASS`.
+
 ## MCP DSH controlled execution
 
 Use this protocol when the user authorizes MCP DSH as the implementation
