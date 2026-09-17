@@ -19,11 +19,22 @@
 //!
 //! [`parse_resolver_response`] accepts a message only when it is a standard
 //! QUERY response (`QR=1`, opcode 0) whose ID and question (name, type, class)
-//! match the outstanding request, whose RCODE is `NOERROR`, and whose TC bit is
-//! clear. A selected address must belong to the question name or to a bounded,
-//! loop-free in-message CNAME chain rooted at it; the first matching address in
-//! wire order wins and the effective TTL is the minimum over the used CNAME
-//! links and the selected record, clamped by [`CnameChainPolicy`].
+//! match the outstanding request, whose full RCODE is `NOERROR`, and whose TC
+//! bit is clear. Correlation completes before any terminal matching-query error
+//! is reported, so a reply for a different question is never classified as this
+//! query's truncation or negative answer.
+//!
+//! A selected address must belong to the question name or to a bounded,
+//! loop-free CNAME path rooted at it. The path is resolved by walking the
+//! retained records rather than by reading the answer section in order, so an
+//! address listed before the CNAME that leads to it is still reachable; the
+//! first reachable address in message order wins and the effective TTL is the
+//! minimum over the path that reaches it, clamped by [`CnameChainPolicy`].
+//!
+//! The RCODE is the full 12-bit value: the header's low nibble extended by the
+//! high 8 bits an OPT record carries in its TTL upper byte, so `BADVERS` (`16`)
+//! is rejected rather than read as `NOERROR`. An OPT record contributes no
+//! address and no TTL.
 //!
 //! Every record of every declared section is walked within the packet, so a
 //! malformed tail fails the whole message rather than publishing a selection
@@ -51,6 +62,7 @@ const CLASS_IN: u16 = 1;
 const TYPE_A: u16 = 1;
 const TYPE_CNAME: u16 = 5;
 const TYPE_AAAA: u16 = 28;
+const TYPE_OPT: u16 = 41;
 
 /// The advertised EDNS(0) UDP payload size for bootstrap queries.
 pub const RESOLVER_UDP_PAYLOAD_SIZE: u16 = 1200;
@@ -212,8 +224,11 @@ pub enum ResolverWireError {
     MismatchedId,
     /// The response is truncated; this codec performs no TCP fallback.
     Truncated,
-    /// The response RCODE is not `NOERROR`. Negative answers are never cached.
-    Rcode(u8),
+    /// The response RCODE is not `NOERROR`. The value is the full 12-bit
+    /// RCODE: the header's low nibble extended by the high 8 bits an OPT
+    /// record carries in its TTL upper byte (for example BADVERS is `16`).
+    /// Negative answers are never cached.
+    Rcode(u16),
     /// The echoed question does not match the expected name, type, and class.
     QuestionMismatch,
     /// The CNAME chain loops, exceeds the policy bound, or is otherwise
@@ -300,19 +315,15 @@ pub fn parse_resolver_response(
     if u16::from_be_bytes([header[0], header[1]]) != expected_id {
         return Err(ResolverWireError::MismatchedId);
     }
-    if flags & 0x0200 != 0 {
-        return Err(ResolverWireError::Truncated);
-    }
-    let rcode = (flags & 0x0f) as u8;
-    if rcode != 0 {
-        return Err(ResolverWireError::Rcode(rcode));
-    }
 
     let qdcount = u16::from_be_bytes([header[4], header[5]]);
     let ancount = usize::from(u16::from_be_bytes([header[6], header[7]]));
     let nscount = usize::from(u16::from_be_bytes([header[8], header[9]]));
     let arcount = usize::from(u16::from_be_bytes([header[10], header[11]]));
 
+    // Correlation runs to completion before any terminal matching-query error
+    // (TC or RCODE) is reported, so a stale or off-path reply can never be
+    // classified as this query's truncation or negative answer.
     if qdcount != 1 {
         return Err(ResolverWireError::QuestionMismatch);
     }
@@ -327,10 +338,11 @@ pub fn parse_resolver_response(
         return Err(ResolverWireError::QuestionMismatch);
     }
 
-    let mut chain: Vec<Vec<u8>> = vec![expected];
-    let mut chain_ttl: Option<u32> = None;
-    let mut links: u8 = 0;
-    let mut selected: Option<(IpAddr, u32)> = None;
+    // Walk every declared record once, retaining only the framing facts the
+    // selection needs. The walk is order-independent, so an answer section that
+    // lists an address before the CNAME leading to it is still resolved.
+    let mut links: Vec<ChainLink> = Vec::new();
+    let mut addresses: Vec<AddressRecord> = Vec::new();
     let mut position = question_end + 4;
 
     for _ in 0..ancount {
@@ -352,33 +364,34 @@ pub fn parse_resolver_response(
             .get(fixed_end..rdata_end)
             .ok_or(ResolverWireError::Malformed)?;
 
-        // Only the first in-chain address of the requested family selects; the
-        // rest of the message is still framing-checked below.
-        if selected.is_none() && rclass == CLASS_IN && chain.contains(&owner) {
+        if rclass == CLASS_IN {
             if rrtype == family.wire_type() {
                 if rdata.len() != family.rdata_len() {
                     return Err(ResolverWireError::Malformed);
                 }
-                let observed = chain_ttl.map_or(ttl, |previous| previous.min(ttl));
-                selected = Some((decode_address(family, rdata)?, observed));
+                addresses.push(AddressRecord {
+                    owner,
+                    offset: position,
+                    ttl,
+                    address: decode_address(family, rdata)?,
+                });
             } else if rrtype == TYPE_CNAME {
-                if links == policy.max_cname_links() {
-                    return Err(ResolverWireError::InvalidCnameChain);
-                }
                 let (target_end, target) = read_name(packet, fixed_end)?;
-                if target_end != rdata_end || chain.contains(&target) {
+                if target_end != rdata_end {
                     return Err(ResolverWireError::InvalidCnameChain);
                 }
-                chain.push(target);
-                links += 1;
-                chain_ttl = Some(chain_ttl.map_or(ttl, |previous| previous.min(ttl)));
+                links.push(ChainLink { owner, target, ttl });
             }
         }
 
         position = rdata_end;
     }
 
-    for _ in 0..nscount.saturating_add(arcount) {
+    // Walk the remaining sections for framing, and read the EDNS(0) OPT record
+    // so the full 12-bit RCODE is available. An OPT owner is always the root
+    // label, so it can never collide with a QNAME.
+    let mut opt: Option<(u8, usize)> = None;
+    for index in 0..nscount.saturating_add(arcount) {
         let (owner_end, _) = read_name(packet, position)?;
         let fixed_end = owner_end
             .checked_add(RR_FIXED_LEN)
@@ -386,7 +399,17 @@ pub fn parse_resolver_response(
         let fixed = packet
             .get(owner_end..fixed_end)
             .ok_or(ResolverWireError::Malformed)?;
+        let rrtype = u16::from_be_bytes([fixed[0], fixed[1]]);
         let rdlength = usize::from(u16::from_be_bytes([fixed[8], fixed[9]]));
+        if rrtype == TYPE_OPT {
+            if index < nscount {
+                return Err(ResolverWireError::Malformed);
+            }
+            if opt.is_some() {
+                return Err(ResolverWireError::Malformed);
+            }
+            opt = Some((fixed[4], position));
+        }
         position = fixed_end
             .checked_add(rdlength)
             .ok_or(ResolverWireError::Malformed)?;
@@ -395,13 +418,123 @@ pub fn parse_resolver_response(
         }
     }
 
-    let (address, observed_ttl) = selected.ok_or(ResolverWireError::NoUsableAnswer)?;
+    let extended = opt.map_or(0u16, |(byte, _)| u16::from(byte));
+    let rcode = u16::from((flags & 0x0f) as u8) | (extended << 4);
+    if rcode != 0 {
+        return Err(ResolverWireError::Rcode(rcode));
+    }
+    if flags & 0x0200 != 0 {
+        return Err(ResolverWireError::Truncated);
+    }
+
+    let (address, observed_ttl, links_used) =
+        select_address(&links, &addresses, &expected, policy)?;
     Ok(SelectedAddress {
         address,
         family,
         ttl: policy.clamp_ttl(observed_ttl),
-        cname_chain_len: links,
+        cname_chain_len: links_used,
     })
+}
+
+/// One CNAME record retained from the answer section.
+struct ChainLink {
+    owner: Vec<u8>,
+    target: Vec<u8>,
+    ttl: u32,
+}
+
+/// One address record retained from the answer section.
+struct AddressRecord {
+    owner: Vec<u8>,
+    /// The record's own offset in the message, the wire-order key.
+    offset: usize,
+    ttl: u32,
+    address: IpAddr,
+}
+
+/// Resolves the CNAME path rooted at `root` and returns the first reachable
+/// address in answer wire order, the minimum TTL over the path that reaches it,
+/// and the number of CNAME links on that path.
+///
+/// The traversal is an explicit iterative walk over the retained records, so the
+/// result never depends on the order the records appear in the message: an
+/// address listed before the CNAME that leads to it is still reachable. Every
+/// CNAME whose owner is the current name is followed, so a branching answer
+/// section is resolved deterministically by answering "which reachable address
+/// comes first in the message" rather than by which branch was discovered
+/// first. A name already on the current path closes a cycle, a path longer than
+/// the policy allows is rejected, and the walk has a hard state budget so a
+/// pathological answer section cannot make it super-linear.
+///
+/// Addresses not reachable from `root` are ignored; a message with no reachable
+/// address of the requested family is [`ResolverWireError::NoUsableAnswer`].
+fn select_address(
+    links: &[ChainLink],
+    addresses: &[AddressRecord],
+    root: &[u8],
+    policy: &CnameChainPolicy,
+) -> Result<(IpAddr, u32, u8), ResolverWireError> {
+    // A crafted answer section can contain exponentially many distinct acyclic
+    // CNAME paths, so the walk carries a hard state budget and fails closed
+    // rather than resolving unbounded work. A genuine authoritative answer has
+    // far fewer links than this bound.
+    let mut budget = links
+        .len()
+        .saturating_add(1)
+        .saturating_mul(usize::from(policy.max_cname_links()) + 1)
+        .saturating_add(1);
+
+    // Paths still to expand: the names visited so far, the running TTL minimum,
+    // and the link count. The visited-name list is the cycle check and is
+    // independent of the order records appeared in.
+    let mut frontier: Vec<(Vec<Vec<u8>>, u32, u8)> = vec![(vec![root.to_vec()], u32::MAX, 0)];
+    let mut best: Option<(&AddressRecord, u32, u8)> = None;
+
+    while !frontier.is_empty() {
+        let level = std::mem::take(&mut frontier);
+        for (path, ttl_so_far, depth) in level {
+            budget = budget
+                .checked_sub(1)
+                .ok_or(ResolverWireError::InvalidCnameChain)?;
+            let current = path.last().ok_or(ResolverWireError::Malformed)?;
+
+            for record in addresses.iter().filter(|record| &record.owner == current) {
+                let effective = ttl_so_far.min(record.ttl);
+                best = Some(match best {
+                    None => (record, effective, depth),
+                    Some((chosen, chosen_ttl, chosen_depth)) => {
+                        // First in message order wins; ties break on the smaller
+                        // TTL and then the shorter path, so the result is total.
+                        let candidate = (record.offset, effective, depth);
+                        let incumbent = (chosen.offset, chosen_ttl, chosen_depth);
+                        if candidate < incumbent {
+                            (record, effective, depth)
+                        } else {
+                            (chosen, chosen_ttl, chosen_depth)
+                        }
+                    }
+                });
+            }
+
+            for link in links.iter().filter(|link| &link.owner == current) {
+                if path.contains(&link.target) {
+                    return Err(ResolverWireError::InvalidCnameChain);
+                }
+                if depth >= policy.max_cname_links() {
+                    return Err(ResolverWireError::InvalidCnameChain);
+                }
+                let mut extended = path.clone();
+                extended.push(link.target.clone());
+                frontier.push((extended, ttl_so_far.min(link.ttl), depth + 1));
+            }
+        }
+    }
+
+    match best {
+        Some((record, ttl, depth)) => Ok((record.address, ttl, depth)),
+        None => Err(ResolverWireError::NoUsableAnswer),
+    }
 }
 
 /// Rejects names that are not plain ASCII hostname syntax.
