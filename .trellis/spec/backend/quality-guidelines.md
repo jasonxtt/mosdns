@@ -280,6 +280,8 @@ The Codex controller may automatically approve a visible Claude confirmation
 only after reading the exact command or action. Safe approval includes:
 
 - repository-local reads, searches, status/log/show/diff and metadata checks;
+- explicit read-only inspection of the local Cargo registry or other pinned
+  dependency sources when needed to verify an API or ownership contract;
 - repository-local format, build, test, clippy, task validation and other
   explicitly requested checks;
 - creating or removing unique temporary files under a task-scoped temporary
@@ -292,7 +294,7 @@ following:
 - broad or unresolved deletion, overwrite, or recursive cleanup;
 - `git reset`, rebase, force-push, branch switching, or history rewriting;
 - `git add -A` or staging unrelated dirty files;
-- secrets, credentials, private keys, or access outside the repository;
+- secrets, credentials, private keys, or any write outside the repository;
 - writes of marker/temp files at the repository root or other fixed paths that
   can collide with user files; or
 - a command whose scope cannot be determined from the visible prompt.
@@ -329,9 +331,9 @@ return an explicit PASS and the user must authorize the next slice.
 ### 5. Good / Base / Bad cases
 
 - Good: `agent explain` confirms Codex `w6:p1` and Claude `w6:p2` in the
-  same repository; a visible `cargo test --locked` prompt is inspected and
-  approved; a root-level marker write is rejected and replaced with a unique
-  temporary path.
+  same repository; a visible `cargo test --locked` prompt and a read-only
+  pinned Hyper source inspection are inspected and approved; a root-level
+  marker write is rejected and replaced with a unique temporary path.
 - Base: Claude is idle after pushing a scoped commit; Codex reads the pane,
   independently verifies the commit, sends it to `rust0916`, and waits.
 - Bad: approve every Claude prompt because it is in a trusted pane, accept a
