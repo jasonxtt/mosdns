@@ -235,19 +235,26 @@ impl BootstrapResolver {
     /// predictable sequence; on a host with no usable entropy source it returns
     /// [`ResolverError::UnpredictableIdsUnavailable`] instead.
     ///
+    /// The entropy probe is taken only when the target actually needs DNS. A
+    /// numeric `dial_addr` target is usable immediately and must not depend on
+    /// RNG availability at all, so it is constructed without probing and
+    /// without ever drawing an ID.
+    ///
     /// # Errors
     ///
-    /// Returns [`ResolverError::UnpredictableIdsUnavailable`] when no
-    /// unpredictable ID source is available. The bootstrap peer's transport
-    /// family and the target's answer family are independent, so a mismatch
-    /// between them is not an error.
+    /// Returns [`ResolverError::UnpredictableIdsUnavailable`] when a hostname
+    /// target needs unpredictable IDs and none is available. The bootstrap
+    /// peer's transport family and the target's answer family are independent,
+    /// so a mismatch between them is not an error.
     pub fn new(
         target: ResolutionTarget,
         bootstrap: BootstrapEndpoint,
         policy: ResolutionPolicy,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, ResolverError> {
-        if !OsIdSource.is_available() {
+        // Numeric targets bypass DNS entirely and therefore never draw an ID, so
+        // they must not be gated on entropy their host may not have.
+        if !target.is_numeric() && !OsIdSource.is_available() {
             return Err(ResolverError::UnpredictableIdsUnavailable);
         }
         Self::with_id_source(target, bootstrap, policy, clock, Arc::new(OsIdSource))

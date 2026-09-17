@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use mosdns_upstream_core::{
     AddressFamily, BootstrapEndpoint, Clock, ConfigVersion, PublishedTarget, ResolutionPolicy,
-    ResolutionTarget, ResolvedDestination, ResolverError, ResolverState, ServerIdentity,
-    TransportCancellation, resolve_numeric,
+    ResolutionTarget, ResolvedDestination, ResolverError, ServerIdentity, TransportCancellation,
+    resolve_numeric,
 };
 
 // ---------------------------------------------------------------------------
@@ -318,90 +318,13 @@ fn zero_ttl_and_port_zero_are_rejected_before_publication() {
 // ---------------------------------------------------------------------------
 // State model
 // ---------------------------------------------------------------------------
-
-#[test]
-fn resolver_state_starts_empty_and_never_serves_a_stale_value() {
-    let mut clock = TestClock::new();
-    let state = ResolverState::new();
-    assert!(state.published().is_none());
-
-    let now = clock.now();
-    let destination =
-        ResolvedDestination::new([192, 0, 2, 1].into(), AddressFamily::Ipv4, 600, now)
-            .expect("valid destination");
-    let target = ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
-        .expect("valid target");
-    state.publish(PublishedTarget::new(target, destination));
-
-    // A fresh entry is served.
-    assert!(state.serve_fresh(now).is_some());
-    assert!(state.published().is_some());
-
-    // Once expired it is never served, but it is retained as diagnostics.
-    clock.advance(600);
-    let expired_at = clock.now();
-    assert!(state.serve_fresh(expired_at).is_none());
-    assert!(
-        state.published().is_some(),
-        "the expired value is retained as evidence, not served"
-    );
-    assert!(state.last_expired().is_some());
-}
-
-#[test]
-fn a_failed_refresh_never_replaces_a_published_value() {
-    let mut clock = TestClock::new();
-    let state = ResolverState::new();
-    let target = ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
-        .expect("valid target");
-    let now = clock.now();
-    state.publish(PublishedTarget::new(
-        target.clone(),
-        ResolvedDestination::new([192, 0, 2, 1].into(), AddressFamily::Ipv4, 600, now)
-            .expect("valid destination"),
-    ));
-    let published_before = state.published().expect("published");
-
-    // A failed refresh records a typed diagnostic and changes nothing else.
-    state.record_refresh_failure(ResolverError::BootstrapTimeout);
-    let after = state.published().expect("the old value survives");
-    assert_eq!(after.address(), published_before.address());
-    assert_eq!(
-        state.last_error(),
-        Some(ResolverError::BootstrapTimeout),
-        "the diagnostic is observable"
-    );
-
-    // A successful replacement does advance the published value.
-    clock.advance(10);
-    state.publish(PublishedTarget::new(
-        target.clone(),
-        ResolvedDestination::new([192, 0, 2, 2].into(), AddressFamily::Ipv4, 900, clock.now())
-            .expect("valid destination"),
-    ));
-    assert_eq!(
-        state.published().expect("published").address(),
-        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))
-    );
-}
-
-#[test]
-fn resolver_state_never_serves_an_expired_value_as_success() {
-    let clock = TestClock::new();
-    let state = ResolverState::new();
-    let target = ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
-        .expect("valid target");
-    let now = clock.now();
-    state.publish(PublishedTarget::new(
-        target,
-        ResolvedDestination::new([192, 0, 2, 1].into(), AddressFamily::Ipv4, 300, now)
-            .expect("valid destination"),
-    ));
-    assert!(state.serve_fresh(now + Duration::from_secs(299)).is_some());
-    // At the boundary and beyond, the caller must resolve again.
-    assert!(state.serve_fresh(now + Duration::from_secs(300)).is_none());
-    assert!(state.serve_fresh(now + Duration::from_secs(301)).is_none());
-}
+//
+// The state-model tests (empty start, no stale serving, failed refresh,
+// expired-value rejection) moved into the crate-internal test module in
+// `src/resolver/mod.rs`. They exercise `ResolverState`'s mutation surface,
+// which is deliberately crate-private so that no external caller can publish
+// or fake freshness around the owner's lifecycle gate. Relocating them keeps
+// that boundary intact rather than widening it for test convenience.
 
 // ---------------------------------------------------------------------------
 // Cancellation vocabulary reuse

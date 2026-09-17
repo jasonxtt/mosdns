@@ -978,3 +978,132 @@ requires a cache policy deciding which of two fresh values wins, which this
 foundation does not make. The redesign adds no new language feature — `Arc`,
 `OnceLock`, and `Notify` are all long-stable — and the Linux 1.85 run above
 confirms it compiles and passes on the declared MSRV.
+
+## Scoped remediation — three reviewer P1 fixes (2026-09-18)
+
+Evidence-only appendix. This round is **uncommitted working-tree evidence** for the
+active task; final acceptance still requires the controller's exact-diff review,
+commit/push, and the selected root reviewer's explicit PASS.
+
+### Scope
+
+Five paths, all inside this task's reviewed resolver surface:
+`rust/upstream-core/src/resolver/mod.rs`,
+`rust/upstream-core/src/resolver/owner.rs`,
+`rust/upstream-core/src/resolver/bootstrap.rs`,
+`rust/upstream-core/tests/resolver_remediation.rs`,
+`rust/upstream-core/tests/resolver_slice1.rs`.
+`rust/upstream-core/src/lib.rs` is byte-identical to HEAD; an initially added
+crate-root re-export was reverted before the round proceeded.
+
+### P1-1 — the numeric constructor no longer probes for entropy
+
+`BootstrapResolver::new` now takes the entropy probe only for hostname targets
+(`!target.is_numeric() && !OsIdSource.is_available()`). A numeric `dial_addr`
+target is therefore constructible and immediately usable without RNG and without
+DNS, while a hostname bootstrap keeps unpredictable IDs and still fails closed in
+`next_id()`. New regressions:
+`a_numeric_target_resolves_with_an_id_source_that_would_fail`,
+`a_hostname_target_still_fails_closed_with_an_undrawable_id_source`,
+`numeric_construction_does_not_depend_on_entropy_availability`.
+
+### P1-2 — a truncated bootstrap reply keeps a distinct typed error
+
+`ResolverError::Truncated` is a new additive public variant (with a `Display`
+arm), and the upstream exchange's `wire_error()` maps
+`ResolverWireError::Truncated` to it instead of collapsing it into
+`MalformedBootstrapResponse`. The outcome remains terminal and this foundation
+still performs no TCP bootstrap fallback. New regression
+`a_truncated_bootstrap_reply_is_typed_truncated` drives a real loopback exchange
+and asserts the typed error, no publication, and exactly one answered datagram
+(no retry or fallback).
+
+### P1-3 — the state mutation surface is owner-private, with no public hook
+
+`ResolverState::{publish, serve_fresh, record_refresh_failure}` are now
+`pub(crate)`; `published`, `last_expired`, and `last_error` remain public
+read-only diagnostics. No crate-root test hook or export was added. The three
+state-model tests that exercise the mutation surface moved from
+`tests/resolver_slice1.rs` into the existing `#[cfg(test)] mod tests` in
+`src/resolver/mod.rs`, which reaches `pub(crate)` directly, so no production
+authority was widened for test convenience. `resolver_slice1.rs` retains its 14
+public contract tests and documents the relocation in place of the removed
+block. New regression `external_state_access_cannot_publish_after_close` shows
+an external holder of the shared state cannot publish after a close wins the
+lifecycle gate.
+
+### Local checks (macOS, branch `rust`, working tree at HEAD `c02430d`)
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | clean, exit 0 |
+| `cargo test … -p mosdns-dns-core --all-targets --all-features --locked` | exit 0 — 53 / 1 / 2 / 42 / 1 passed, 0 failed |
+| `cargo test … -p mosdns-upstream-core --all-targets --all-features --locked` | exit 0 — lib 74; remediation 24; slice1 14; slice2 7; slice3 10; slice4 7; slice5 6; slice0_contract 12; slice0_secure 27; slice1_dot 27; slice1_udp 35; slice2_doh 39; slice2_tcp 14; slice3_doh 6; slice3_policy 10 — 0 failed |
+| `cargo test … --workspace --all-targets --all-features --locked` | exit 0 — 31 suites ok, 0 failures |
+| `cargo clippy … --workspace --all-targets --all-features --locked --quiet -- -D warnings` | clean, exit 0 (local 1.95 toolchain) |
+| `python3 ./.trellis/scripts/task.py validate rust-phase4-endpoint-resolution-foundation` | All validations passed |
+| `git diff --check` | clean |
+
+### Linux evidence — Debian VM, Rust 1.85.1
+
+Real MSRV evidence was obtained this round on the user-supplied Debian test VM
+through the SSH alias exactly as `ssh mosdns-rust` (10.0.0.92), after the user
+corrected the earlier container route.
+
+- **Remote staging path:** `/root/mosdns-rust-phase4-rerun`. Transfer was
+  `rsync -az --delete --checksum` of only the local `rust/` workspace, excluding
+  `.git/`, `target/`, `.DS_Store`, and build artifacts. 72 files; no `.git` and
+  no `target/` in the staging tree.
+- **Transfer verification:** all five edited files' sha256 matched the local
+  files exactly — `mod.rs` `57f11d3e…`, `owner.rs` `05b881d7…`, `bootstrap.rs`
+  `6c267c0d…`, `resolver_remediation.rs` `42baf519…`, `resolver_slice1.rs`
+  `c969f067…`. Sorted per-file digest manifest over every `.rs`/`Cargo.toml`/
+  `Cargo.lock`: `82c9635da476eecc1813cdf151fdae2e1d512087b26a2231f06f0da58019ecd0`.
+- **Toolchain:** `rustc 1.85.1 (4eb161250 2025-03-15)`,
+  `cargo 1.85.1 (d73d2caf9 2024-12-31)`, installed via the authorized
+  `rustup toolchain install 1.85.1 --profile minimal` plus
+  `rustup component add rustfmt clippy` for that toolchain. Host `mosdns-rust`,
+  `x86_64`, kernel `7.0.9-x64v3-xanmod1`.
+- **Commands and results**, all with a task-scoped target directory inside the
+  staging tree (`CARGO_TARGET_DIR=/root/mosdns-rust-phase4-rerun/.cargo-target`),
+  no fixed `/tmp` path:
+
+| Command | Result |
+| --- | --- |
+| `cargo +1.85.1 test -j 2 --locked -p mosdns-upstream-core --all-targets --all-features` | exit 0 — 15 targets, 0 failures: lib 74; remediation 24; slice1 14; slice2 7; slice3 10; slice4 7; slice5 6; slice0_contract 12; slice0_secure 27; slice1_dot 27; slice1_udp 35; slice2_doh 39; slice2_tcp 14; slice3_doh 6; slice3_policy 10 |
+| new regressions observed passing on Linux 1.85.1 | `a_numeric_target_resolves_with_an_id_source_that_would_fail`; `a_hostname_target_still_fails_closed_with_an_undrawable_id_source`; `numeric_construction_does_not_depend_on_entropy_availability`; `a_truncated_bootstrap_reply_is_typed_truncated`; `external_state_access_cannot_publish_after_close` |
+| `cargo +1.85.1 fmt --all -- --check` | clean, exit 0 (rustfmt on 1.85.1) |
+| `cargo +1.85.1 clippy --locked -p mosdns-upstream-core --all-targets --all-features` | **exit 101**, 3 pre-existing `needless_lifetimes` — `src/lib.rs:1099`, `src/composite.rs:109`, `src/resolver/owner.rs:655` (the `impl<'a> LeaderGuard<'a>` that is byte-identical at `c02430d`, merely line-shifted) |
+| `cargo +1.85.1 clippy --locked -p mosdns-dns-core --all-targets --all-features` | **exit 101**, 4 pre-existing `operator precedence` — `edns.rs:174`, `query.rs:164`, `resolver.rs:642`, `response.rs:180`, plus 1 more in untouched `cache-core/wire.rs` |
+
+**Linux clippy is not green and is not claimed green.** All seven findings are
+pre-existing, outside this remediation's diff, and present at HEAD; `rust/dns-core`
+is untouched by this round. They were not fixed because doing so would exceed
+this task's allowed write paths. The macOS workspace clippy gate at the
+repository toolchain (1.95) is clean.
+
+**The full Linux workspace gate was not run or claimed** for this revision; the
+evidence above covers the resolver and upstream-core package scope.
+
+### Cleanup and blast radius
+
+`/root/mosdns-rust-phase4-rerun` was removed after evidence collection and
+confirmed gone. The unrelated pre-existing `/root/mosdns-rust-build` was left
+intact. The active production service was not touched: `systemctl is-active
+mosdns` remained `active` with unchanged PID 454 (`/usr/local/bin/mosdns start
+-d /cus/mosdns -c /cus/mosdns/config_custom.yaml`), and `/cus/mosdns` mtime was
+unchanged. No service, config, port-53, or `systemctl` mutation was performed.
+After the user's correction, no Docker or Colima was used on the Mac or the VM;
+the earlier local container attempt (killed, exit 137, before any test executed)
+is recorded as invalid and its local evidence directory was deleted.
+
+### Open items
+
+- Linux clippy findings above remain pre-existing and unremediated by design.
+- P1-1's "no probe is taken for a numeric target" is asserted by construction
+  (a numeric target resolves with a deliberately undrawable ID source) rather
+  than by directly forcing the probe to fail, which is not portably possible.
+- `ResolverError::Truncated` is an additive public enum variant and should be
+  explicitly acknowledged by the reviewer.
+- Final acceptance still requires the controller's commit/push of the exact
+  revision and the selected root reviewer's explicit scoped PASS.

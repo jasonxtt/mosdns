@@ -170,12 +170,19 @@ fn control_error(error: UpstreamError) -> ResolverError {
 }
 
 /// Maps a DNS wire failure onto the resolver's typed vocabulary, preserving the
-/// terminal rcode when the reply was correlated but negative.
+/// terminal rcode when the reply was correlated but negative and the truncation
+/// observation when the reply carried TC.
+///
+/// A correlated TC=1 reply is a legitimate DNS observation, not a malformed
+/// message, so it keeps its own typed error instead of collapsing into
+/// [`ResolverError::MalformedBootstrapResponse`]. This foundation performs no
+/// TCP bootstrap fallback, so that error is terminal.
 fn wire_error(error: mosdns_dns_core::ResolverWireError) -> ResolverError {
     use mosdns_dns_core::ResolverWireError as Wire;
     match error {
         Wire::Rcode(code) => ResolverError::BootstrapRcode(code),
         Wire::NoUsableAnswer => ResolverError::NoUsableAddress,
+        Wire::Truncated => ResolverError::Truncated,
         _ => ResolverError::MalformedBootstrapResponse,
     }
 }
