@@ -15,11 +15,15 @@
 //! - `response`: response validation and TTL observation/aging/replacement
 //!   over declared counts, skipping OPT records;
 //! - `header`: response ID/RA patching and pure UDP/stream/HTTP framing
-//!   helpers.
+//!   helpers;
+//! - `resolver`: bootstrap query encoding and response selection for endpoint
+//!   resolution, still without sockets, clocks, caches, or a runtime.
 //!
 //! Typed errors classify wire defects versus unsupported-but-legal input, and
 //! every inspection allocates nothing or returns caller-owned values; malformed
-//! input never produces partial output or mutates its input.
+//! input never produces partial output or mutates its input. `resolver`'s query
+//! builder is the one exception to "allocates nothing": it returns a new
+//! caller-owned query buffer and never retains or mutates its inputs.
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 // Pedantic is denied at workspace level; like the matcher-core/runtime
@@ -30,6 +34,7 @@
 pub mod edns;
 pub mod header;
 pub mod query;
+pub mod resolver;
 pub mod response;
 
 // Re-exports mirror the Go oracle's public atoms so callers depend on this
@@ -43,6 +48,11 @@ pub use header::{
 pub use query::{
     QueryError, QueryHeader, QueryParseError, QueryUnsupportedError, QuestionInfo, parse_query,
     parse_question,
+};
+pub use resolver::{
+    AddressFamily, CnameChainPolicy, QueryIdSource, RESOLVER_DEFAULT_MAX_CNAME_LINKS,
+    RESOLVER_MAX_CNAME_LINKS, RESOLVER_UDP_PAYLOAD_SIZE, ResolverWireError, SelectedAddress,
+    build_resolver_query, parse_resolver_response,
 };
 pub use response::{
     ResponseError, TtlInfo, age_response_ttls, observe_response_ttl, replace_response_ttls,
