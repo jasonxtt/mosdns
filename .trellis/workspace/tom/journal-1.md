@@ -228,3 +228,25 @@ Completed and root-reviewed Rust secure upstream foundation Slices 0-4. rust0916
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Rust Phase 4 resolver foundation review and archive
+
+**Date**: 2026-09-18
+**Task**: Rust Phase 4 resolver foundation review and archive
+**Branch**: `rust`
+
+### Summary
+
+Completed the approved single-family Rust endpoint-resolution foundation. Claude validated the remediation on the isolated Debian VM via ssh mosdns-rust with Rust 1.85.1; the selected web reviewer returned PASS with P0/P1 zero. Recorded resolver contracts in the Rust migration spec and archived the completed Trellis task. Preserved unrelated dirty documents and DS_Store files; no dual-stack or production wiring started.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ed1074` | (see git log) |
+| `a87455b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
