@@ -28,6 +28,19 @@ use crate::{
     LifecycleState, Transport, TransportCancellation, Upstream,
 };
 
+/// The outcome of one admission decision, taken under a single lock.
+///
+/// The token is always the generation the caller actually observed, so a caller
+/// can never be admitted against a generation it did not see.
+enum Admission {
+    /// This caller owns a fresh generation and must run it.
+    Leader(GenerationId),
+    /// A generation is already running; wait on this exact token.
+    Waiter(GenerationId),
+    /// A generation already finished with an unclaimed result to serve.
+    Result(Result<PublishedTarget, ResolverError>),
+}
+
 /// A monotonic identity for one refresh generation.
 ///
 /// Waiters attach to a specific token, so a waiter from generation *N* can never
@@ -71,30 +84,30 @@ impl SingleFlight {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Attempts to become the leader of a fresh generation.
+    /// Admits a caller as the leader of a fresh generation, or as a waiter on an
+    /// existing one, in a single lock acquisition.
     ///
-    /// Returns the new generation's token when this caller owns it, or `None`
-    /// when another caller is already leading, in which case the caller becomes
-    /// a bounded waiter attached to that in-flight generation.
-    fn try_lead(&self) -> Option<GenerationId> {
+    /// This is the whole point of the operation: deciding leadership and reading
+    /// the token happen under one lock, so a token can never describe a
+    /// different generation than the one the caller observed. Splitting them
+    /// into two acquisitions is exactly the race this prevents — a caller could
+    /// see "running", lose the lock while that generation completed and a new
+    /// one started, and then attach to the *new* generation's token.
+    fn admit(&self) -> Admission {
         let mut generation = self.lock();
         if generation.running {
-            return None;
+            // A live generation exists: attach to it, whatever its result
+            // slot currently holds.
+            return Admission::Waiter(GenerationId(generation.id));
         }
+        if let Some(result) = generation.result.take() {
+            // A finished, unclaimed result is still available for this caller.
+            return Admission::Result(result);
+        }
+        // No live generation and no unclaimed result: this caller leads.
         generation.id = generation.id.wrapping_add(1);
         generation.running = true;
-        generation.result = None;
-        Some(GenerationId(generation.id))
-    }
-
-    /// The identity of the generation a new waiter must attach to, if one is
-    /// currently running or has an unread result.
-    fn current_generation(&self) -> Option<GenerationId> {
-        let generation = self.lock();
-        if generation.running || generation.result.is_some() {
-            return Some(GenerationId(generation.id));
-        }
-        None
+        Admission::Leader(GenerationId(generation.id))
     }
 
     /// The outcome a dropped leader publishes, so waiters can never deadlock on
@@ -174,10 +187,10 @@ impl BootstrapResolver {
     ///
     /// # Errors
     ///
-    /// Returns [`ResolverError::BootstrapFamilyMismatch`] when the numeric
-    /// bootstrap peer's family cannot serve the target's selected family, and
-    /// [`ResolverError::UnpredictableIdsUnavailable`] when no unpredictable ID
-    /// source is available.
+    /// Returns [`ResolverError::UnpredictableIdsUnavailable`] when no
+    /// unpredictable ID source is available. The bootstrap peer's transport
+    /// family and the target's answer family are independent, so a mismatch
+    /// between them is not an error.
     pub fn new(
         target: ResolutionTarget,
         bootstrap: BootstrapEndpoint,
@@ -254,9 +267,13 @@ impl BootstrapResolver {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn ResolutionIdSource>,
     ) -> Result<Self, ResolverError> {
-        if target.family() != bootstrap.family() {
-            return Err(ResolverError::BootstrapFamilyMismatch);
-        }
+        // The bootstrap peer's transport family and the answer family are
+        // independent: `bootstrap` is its own numeric UDP endpoint, and
+        // `bootstrap_version` only selects whether the query asks A or AAAA. An
+        // IPv4 bootstrap server may answer AAAA and an IPv6 one may answer A, so
+        // there is deliberately no equality invariant between them. The exchange
+        // binds and connects in the peer's own family and passes the target's
+        // answer family separately.
         Ok(Self {
             target,
             bootstrap,
@@ -380,50 +397,69 @@ impl BootstrapResolver {
             return Ok(fresh);
         }
 
-        match self.flight.try_lead() {
-            Some(token) => {
-                // Leader: run one generation, then publish its committed outcome.
-                // The guard completes the generation even if this future is
-                // dropped, so waiters can never deadlock on an abandoned leader.
-                let guard = LeaderGuard {
-                    flight: &self.flight,
-                    token,
-                    completed: false,
-                };
-                let outcome = self.run_leader(&context).await;
-                // Publication is a success and goes through the same lifecycle
-                // linearization gate as a numeric publish: a close that wins the
-                // gate turns the completed result into `Closed` instead of
-                // publishing, so no value can be committed after close wins.
-                let outcome = match outcome {
-                    Ok(published) => match self.commit_or_closed(&context) {
-                        Ok(()) => {
-                            self.state.publish(published.clone());
-                            Ok(published)
-                        }
+        // Admission decides leadership and reads the generation token under one
+        // lock, so a waiter can never attach to a generation other than the one
+        // it observed. A finished-but-unclaimed generation result is handed back
+        // here; if that result is a still-fresh success this caller serves it
+        // instead of repeating the query, and otherwise this caller tries to lead
+        // a fresh generation. The loop is bounded because `admit` consumes the
+        // result slot, so the next iteration yields `Leader` or `Waiter`.
+        loop {
+            match self.flight.admit() {
+                Admission::Leader(token) => {
+                    let guard = LeaderGuard {
+                        flight: &self.flight,
+                        token,
+                        completed: false,
+                    };
+                    // Re-read the publication now that this caller is the
+                    // admitted leader: a generation may have completed and
+                    // published between the `serve_fresh` check above and this
+                    // admission. Without this recheck the new leader would repeat
+                    // a DNS query for a value that is already fresh. The
+                    // generation is completed with the observed value so
+                    // concurrent waiters receive it too.
+                    if let Some(fresh) = self.state.serve_fresh(self.clock.now()) {
+                        guard.complete(Ok(fresh.clone()));
+                        return Ok(fresh);
+                    }
+                    let outcome = self.run_leader(&context).await;
+                    let outcome = match outcome {
+                        Ok(published) => match self.commit_or_closed(&context) {
+                            Ok(()) => {
+                                self.state.publish(published.clone());
+                                Ok(published)
+                            }
+                            Err(error) => {
+                                self.state.record_refresh_failure(error.clone());
+                                Err(error)
+                            }
+                        },
                         Err(error) => {
                             self.state.record_refresh_failure(error.clone());
                             Err(error)
                         }
-                    },
-                    Err(error) => {
-                        self.state.record_refresh_failure(error.clone());
-                        Err(error)
+                    };
+                    guard.complete(outcome.clone());
+                    return outcome;
+                }
+                Admission::Waiter(token) => {
+                    // A live generation owns the work; attach to exactly this
+                    // token and observe this caller's own controls while waiting.
+                    return self.wait_for_generation(&context, token).await;
+                }
+                Admission::Result(result) => {
+                    self.check_control(&context, crate::SideEffectState::Sent)?;
+                    // A concurrent success is served without re-querying, but only
+                    // while it is genuinely fresh: an expired value must never be
+                    // returned as success. A failed generation's result is not
+                    // returned either, so this caller may retry by leading a new
+                    // generation.
+                    if let Ok(published) = &result
+                        && !published.is_expired(self.clock.now())
+                    {
+                        return result;
                     }
-                };
-                guard.complete(outcome.clone());
-                outcome
-            }
-            None => {
-                // Waiter: attach to the specific in-flight generation and
-                // observe this caller's own cancellation, owner shutdown, and
-                // deadline while waiting, so a stalled leader cannot pin a
-                // waiter forever and a superseded generation is never adopted.
-                match self.flight.current_generation() {
-                    Some(token) => self.wait_for_generation(&context, token).await,
-                    // The generation finished between the two lock acquisitions;
-                    // this caller may simply lead its own.
-                    None => Err(ResolverError::AlreadyResolving),
                 }
             }
         }
@@ -665,7 +701,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use super::{BootstrapResolver, ResolverComposition, SingleFlight};
+    use super::{Admission, BootstrapResolver, ResolverComposition, SingleFlight};
     use crate::resolver::{
         AddressFamily, BootstrapEndpoint, Clock, ConfigVersion, ResolutionPolicy, ResolutionTarget,
         ResolverError,
@@ -733,48 +769,105 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_family_must_match_the_target_family() {
-        let error = BootstrapResolver::new(
+    fn bootstrap_and_target_families_are_independent() {
+        // An IPv6 answer family may be requested through an IPv4 bootstrap peer:
+        // bootstrap is a numeric UDP endpoint, and `bootstrap_version` only picks
+        // A vs AAAA. No equality invariant exists between the two families.
+        let resolver = BootstrapResolver::new(
             ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv6)
                 .expect("target"),
             BootstrapEndpoint::new("127.0.0.1", 53).expect("bootstrap"),
             ResolutionPolicy::default(),
             Arc::new(FixedClock(Instant::now())),
         )
-        .err()
-        .expect("family mismatch");
-        assert_eq!(error, ResolverError::BootstrapFamilyMismatch);
+        .expect("an IPv4 bootstrap may serve an AAAA target");
+        assert_eq!(resolver.target().family(), AddressFamily::Ipv6);
+        assert_eq!(resolver.bootstrap().family(), AddressFamily::Ipv4);
+
+        // And the mirror case: an IPv6 bootstrap peer serving an A target.
+        let mirror = BootstrapResolver::new(
+            ResolutionTarget::new("bootstrap.example.org", 853, AddressFamily::Ipv4)
+                .expect("target"),
+            BootstrapEndpoint::new("::1", 53).expect("bootstrap"),
+            ResolutionPolicy::default(),
+            Arc::new(FixedClock(Instant::now())),
+        )
+        .expect("an IPv6 bootstrap may serve an A target");
+        assert_eq!(mirror.bootstrap().family(), AddressFamily::Ipv6);
     }
 
-    /// A waiter that attached to generation N must never observe generation N+1.
+    /// The reviewer's first interleaving: admission must decide leadership and
+    /// read the token in one observation.
     ///
-    /// This is the exact interleaving the audit found: a waiter whose own
-    /// generation already finished can race a new leader's `try_lead`, see
-    /// `running` with no result recorded yet, and adopt the newer generation as
-    /// if it were its own. The token makes that impossible.
+    /// Sequence: generation 1 is running; a caller arrives and must become a
+    /// waiter on generation 1. Then generation 1 completes and a second leader
+    /// claims generation 2. The first caller must still be attached to
+    /// generation 1, so it sees generation 1's outcome, not generation 2's
+    /// live, result-less state.
     #[tokio::test]
-    async fn a_waiter_attached_to_a_finished_generation_cannot_adopt_the_next_one() {
+    async fn admission_binds_a_waiter_to_the_generation_it_observed() {
         let flight = SingleFlight::new();
 
-        // Generation 1 runs and then fails, so its result is recorded.
-        let first = flight.try_lead().expect("leader of generation 1");
+        // Generation 1 is running.
+        let first = match flight.admit() {
+            Admission::Leader(token) => token,
+            _ => panic!("the first caller leads generation 1"),
+        };
+
+        // A later caller arrives while generation 1 is live: it must become a
+        // waiter on generation 1's exact token, taken in the same lock.
+        let waiter_token = match flight.admit() {
+            Admission::Waiter(token) => token,
+            _ => panic!("the second caller waits on generation 1"),
+        };
+        assert_eq!(waiter_token, first, "the waiter observed generation 1");
+
+        // Generation 1 completes. Its result is claimed here, exactly as the
+        // waiter above would claim it, so the slot is clear for a new leader.
         flight.complete(first, Err(ResolverError::BootstrapTimeout));
+        match flight.admit() {
+            Admission::Result(_) => {}
+            _ => panic!("generation 1's finished result is claimable"),
+        }
 
-        // A new leader takes generation 2 and is still running: `running` is
-        // true and no result has been recorded. This is exactly the state a
-        // token-less waiter would mistake for its own generation.
-        let second = flight.try_lead().expect("leader of generation 2");
-        assert_ne!(first, second, "generation 2 has its own token");
+        // A second leader claims generation 2, clearing the result slot.
+        let second = match flight.admit() {
+            Admission::Leader(token) => token,
+            _ => panic!("generation 2 is led"),
+        };
+        assert_ne!(second, first, "generation 2 has its own token");
 
-        // The stale generation-1 waiter must not adopt generation 2's live,
-        // result-less state; it reports that its own generation is gone.
+        // The first waiter is still bound to generation 1. Because generation 1
+        // is finished and its result was claimed by the caller above, the waiter
+        // must report that its own generation is gone rather than block on, or
+        // adopt, generation 2's live state.
         assert_eq!(
-            flight.wait(first).await,
+            flight.wait(waiter_token).await,
             Err(ResolverError::AlreadyResolving),
-            "a superseded generation is never adopted by its old waiter"
+            "the waiter never adopts a generation it did not observe"
         );
 
-        // The live token still observes its own committed result.
+        // And it definitively never observes generation 2's committed result.
+        let target = super::super::ResolutionTarget::new("192.0.2.1", 853, AddressFamily::Ipv4)
+            .expect("target");
+        let destination = super::super::ResolvedDestination::new_literal(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
+            AddressFamily::Ipv4,
+        );
+        let second_result = super::super::PublishedTarget::new(target, destination);
+        flight.complete(second, Ok(second_result.clone()));
+        assert_eq!(flight.wait(second).await, Ok(second_result));
+    }
+
+    /// A caller arriving after a generation already completed adopts that
+    /// generation's result instead of starting a duplicate query.
+    ///
+    /// This is the reviewer's second interleaving: a success lands between the
+    /// caller's freshness read and its admission, so admission itself must hand
+    /// back the unclaimed result and the resolved value must not be re-queried.
+    #[tokio::test]
+    async fn admission_serves_an_unclaimed_result_instead_of_requerying() {
+        let flight = SingleFlight::new();
         let target = super::super::ResolutionTarget::new("192.0.2.1", 853, AddressFamily::Ipv4)
             .expect("target");
         let destination = super::super::ResolvedDestination::new_literal(
@@ -782,37 +875,36 @@ mod tests {
             AddressFamily::Ipv4,
         );
         let published = super::super::PublishedTarget::new(target, destination);
-        flight.complete(second, Ok(published.clone()));
-        assert_eq!(flight.wait(second).await, Ok(published));
+
+        let token = match flight.admit() {
+            Admission::Leader(token) => token,
+            _ => panic!("the first caller leads"),
+        };
+        flight.complete(token, Ok(published.clone()));
+
+        // A caller that arrives now must be handed the finished result, not
+        // admitted as a leader that would repeat the query.
+        match flight.admit() {
+            Admission::Result(result) => assert_eq!(result, Ok(published)),
+            Admission::Leader(_) => panic!("a completed success must not start a new query"),
+            Admission::Waiter(_) => panic!("no generation is running"),
+        }
     }
 
     /// A waiter attached to a generation that finished receives its own result.
     #[tokio::test]
     async fn a_waiter_attached_to_a_finished_generation_receives_its_result() {
         let flight = SingleFlight::new();
-        let token = flight.try_lead().expect("leader");
+        let token = match flight.admit() {
+            Admission::Leader(token) => token,
+            _ => panic!("leader"),
+        };
         flight.complete(token, Err(ResolverError::BootstrapTimeout));
         assert_eq!(
             flight.wait(token).await,
             Err(ResolverError::BootstrapTimeout),
             "the waiter sees its own generation's typed failure"
         );
-    }
-
-    /// A stale leader's completion cannot overwrite a newer generation.
-    #[test]
-    fn a_superseded_leader_cannot_complete_a_newer_generation() {
-        let flight = SingleFlight::new();
-        let first = flight.try_lead().expect("generation 1");
-        flight.complete(first, Err(ResolverError::BootstrapTimeout));
-        let second = flight.try_lead().expect("generation 2");
-
-        // The generation-1 token is stale; completing it must be a no-op.
-        flight.complete(first, Err(ResolverError::Cancelled));
-        let generation = flight.lock();
-        assert!(generation.running, "generation 2 is still running");
-        assert!(generation.result.is_none(), "no stale result was recorded");
-        assert_eq!(generation.id, second.0);
     }
 
     /// The production construction path never selects the predictable source.
