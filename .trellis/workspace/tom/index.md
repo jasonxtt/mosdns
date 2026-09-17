@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-09-17
+- **Total Sessions**: 9
+- **Last Active**: 2026-09-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~230 | Active |
+| `journal-1.md` | ~252 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-09-18 | Rust Phase 4 resolver foundation review and archive | `7ed1074`, `a87455b` | `rust` |
 | 8 | 2026-09-17 | Close secure upstream foundation | `c84d268`, `cb89974`, `ba2f545` | `rust` |
 | 7 | 2026-09-17 | Add Herdr routing mode | `9f6f1ae` | `rust` |
 | 6 | 2026-09-16 | Close UDP/TCP foundation and plan secure upstream | `476cdb5`, `cb15361`, `9d43e9f`, `21bff19` | `rust` |
