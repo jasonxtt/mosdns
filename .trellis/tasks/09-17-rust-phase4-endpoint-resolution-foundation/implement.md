@@ -949,12 +949,32 @@ controller explicitly excluded it. The regression for the race is demonstrated b
 construction — the test drives exactly the ordering (complete → late admit → old
 waiter waits) that the destructive `take()` could not survive.
 
+**Linux 1.85 re-verification for this revision** (`aad5acb`, `rust:1.85-slim`,
+Ubuntu 24.04 x86_64, `rustc 1.85.1`):
+
+| Command | Result |
+| --- | --- |
+| `cargo test … -p mosdns-upstream-core --lib --locked` | **71 passed, 0 failed** |
+| `cargo test … --test resolver_slice2 --locked` | 7 passed, 0 failed |
+| `cargo test … --test resolver_slice3 --locked` | 10 passed, 0 failed |
+| `cargo test … --test resolver_slice5 --locked` | 6 passed, 0 failed |
+| `cargo test … --test resolver_remediation --locked` | 19 passed, 0 failed |
+| `cargo fmt --all --check` | clean (rustfmt 1.8.0) |
+
+A first attempt at `--all-targets --all-features` was killed with
+`signal: 9, SIGKILL` while compiling the test binary. That was the OOM killer
+under the 8 GiB VM with parallel jobs — the crate's dev-dependencies (rcgen,
+rustls, hyper, h2) make that binary large — **not** a code defect: re-running with
+`CARGO_INCREMENTAL=0 -j 1` builds and passes (lib 71/71). The earlier full
+`--workspace` run on this VM at `99a7418` did complete with 31 suites / 0
+failures. The workspace-wide `--all-targets --all-features --locked` gate on
+Linux for this exact revision is therefore still recorded as **incomplete due to
+container memory**; the macOS workspace gate passes 31 suites / 0 failures, and
+every resolver target passes on Linux 1.85.
+
 **Limitations.** A leader that has already been admitted still runs to completion,
 so two leaders from *distinct* generations can still overlap; collapsing that
 requires a cache policy deciding which of two fresh values wins, which this
-foundation does not make. Rust 1.85 and Linux evidence for this round were not
-re-run after the redesign: the Linux gate is recorded above at `99a7418`
-(`rustc 1.85.1`, 31 suites / 0 failures) and the redesign adds no new language
-feature — it uses `Arc`, `OnceLock`, and `Notify`, all long-stable — but the
-Linux run has not been repeated for the new revision and is the outstanding item
-before closure.
+foundation does not make. The redesign adds no new language feature — `Arc`,
+`OnceLock`, and `Notify` are all long-stable — and the Linux 1.85 run above
+confirms it compiles and passes on the declared MSRV.
