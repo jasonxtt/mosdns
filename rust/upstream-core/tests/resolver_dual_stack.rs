@@ -55,12 +55,125 @@ impl Clock for ManualClock {
 
 /// The upper bound on any single await in this file. A wedged peer, a missed
 /// wake, or a deadlock fails the test instead of hanging it.
+///
+/// This is a **deadlock guard only**. Fixture lifetime is ended explicitly by
+/// [`FixtureStop::stop`]; the deadline never terminates a fixture in normal
+/// operation, and no assertion in this file depends on elapsed wall-clock time.
 const DEADLINE: Duration = Duration::from_secs(20);
 
 async fn bounded<F: std::future::Future>(future: F) -> F::Output {
     tokio::time::timeout(DEADLINE, future)
         .await
         .expect("operation must complete within the test deadline")
+}
+
+/// Waits for an explicitly signalled fixture thread to finish.
+///
+/// A `JoinHandle` returned by `spawn_blocking` cannot be cancelled, so there is
+/// no "abort" path: the owning test must release the fixture first. A stuck
+/// handle means the fixture's protocol was violated, so this fails the test
+/// instead of hanging the suite.
+async fn join_fixture(handle: tokio::task::JoinHandle<()>) {
+    // `bounded` already panics on the deadlock guard; the inner result is the
+    // fixture thread's own join outcome.
+    let joined = bounded(handle).await;
+    joined.expect("fixture thread must not panic");
+}
+
+/// A one-byte marker that releases a fixture's blocking `recv_from`.
+///
+/// The marker datagram is deliberately shorter than a DNS header (12 bytes), so
+/// a fixture can never mistake it for a query: every legitimate query is at
+/// least a header plus a question. It is sent from a control socket that the
+/// **test** owns, which is what makes classification unambiguous.
+const STOP_MARKER: [u8; 1] = [0x00];
+
+/// A deterministic stop handshake for a loopback fixture thread.
+///
+/// The test owns the fixture's lifetime entirely: [`Self::stop`] sends one
+/// [`STOP_MARKER`] datagram from the test-owned control socket **to the fixture's
+/// own UDP address**, which immediately wakes the fixture's **blocking**
+/// `recv_from`. The fixture recognises the marker by the datagram's *source* (its
+/// control peer) and by its being shorter than a DNS header, returns, and only
+/// then does the caller await the join.
+///
+/// `peer` and `target` are different addresses and must not be confused: `peer`
+/// is the control socket's own address, which is what the fixture compares the
+/// *source* against; `target` is the fixture socket's address, which is where the
+/// marker is *sent*.
+///
+/// There is no poll interval, no read timeout, and no elapsed-time deadline on
+/// the fixture path: the fixture's `recv_from` blocks indefinitely until either a
+/// real query or the marker arrives, and the marker is what ends it. A fixture
+/// never stops because a wall clock elapsed or because it received some number
+/// of datagrams.
+struct FixtureStop {
+    control: Arc<std::net::UdpSocket>,
+    peer: SocketAddr,
+    target: Option<SocketAddr>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl FixtureStop {
+    /// Creates the control socket the fixture will recognise as its test peer.
+    fn new() -> Self {
+        let control = std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("control bind");
+        let peer = control.local_addr().expect("control addr");
+        Self {
+            control: Arc::new(control),
+            peer,
+            target: None,
+            handle: None,
+        }
+    }
+
+    /// The control socket's address, which the fixture compares *sources* against.
+    fn peer(&self) -> SocketAddr {
+        self.peer
+    }
+
+    /// Attaches the fixture socket's address and its thread.
+    ///
+    /// The address is where the marker is sent; it is the fixture's own bound
+    /// loopback address from [`bind_loopback`].
+    fn attach(&mut self, target: SocketAddr, handle: tokio::task::JoinHandle<()>) {
+        self.target = Some(target);
+        self.handle = Some(handle);
+    }
+
+    /// Sends the stop marker to the fixture, then awaits its join.
+    ///
+    /// The marker is sent before the join, so a fixture blocked in `recv_from`
+    /// is woken by the datagram itself rather than by any timeout.
+    async fn stop(&mut self) {
+        let handle = self.handle.take().expect("fixture handle attached");
+        let target = self.target.expect("fixture target attached");
+        let sent = self
+            .control
+            .send_to(&STOP_MARKER, target)
+            .expect("send stop marker");
+        assert_eq!(sent, STOP_MARKER.len(), "the marker is one datagram");
+        join_fixture(handle).await;
+    }
+}
+
+/// Whether a datagram is the fixture's stop marker.
+///
+/// Both conditions are required. The source address proves the datagram came
+/// from the test-owned control socket and not from the resolver, and the length
+/// proves it is not a DNS message — so a resolver query can never be mistaken
+/// for a release, whatever it contains.
+fn is_stop_marker(from: SocketAddr, length: usize, control: SocketAddr) -> bool {
+    from == control && length < 12
+}
+
+/// Reads one datagram from a fixture socket, blocking until one arrives.
+///
+/// There is no read timeout: the fixture's only exit is the stop marker, so a
+/// missing marker surfaces as the outer join guard rather than as a silent
+/// timeout-driven exit.
+fn recv_query(socket: &std::net::UdpSocket, buffer: &mut [u8]) -> Option<(usize, SocketAddr)> {
+    socket.recv_from(buffer).ok()
 }
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
@@ -190,7 +303,7 @@ fn truncated_response(query: &[u8]) -> Vec<u8> {
 struct SwitchingFixture {
     address: SocketAddr,
     phase: Arc<AtomicUsize>,
-    handle: tokio::task::JoinHandle<()>,
+    stop: FixtureStop,
 }
 
 impl SwitchingFixture {
@@ -198,27 +311,34 @@ impl SwitchingFixture {
     fn set_phase(&self, phase: usize) {
         self.phase.store(phase, Ordering::SeqCst);
     }
+
+    /// Sends the stop marker, then awaits the fixture's join.
+    async fn stop(mut self) {
+        self.stop.stop().await;
+    }
 }
 
 /// Serves `plan[phase]` for each family, where each entry is `(A, AAAA)`.
 ///
-/// `Arc<AtomicUsize>` rather than a mutable closure keeps the fixture on a plain
-/// blocking socket thread while the test owns the phase.
+/// The fixture exits when the test releases it; there is no elapsed-time
+/// deadline and no datagram-count expectation, because the test decides how many
+/// generations it drives.
 fn switching_fixture(plan: Vec<(Answer, Answer)>) -> SwitchingFixture {
     let (socket, address) = bind_loopback();
     let phase = Arc::new(AtomicUsize::new(0));
     let phase_in = Arc::clone(&phase);
+    let mut stop = FixtureStop::new();
+    let control = stop.peer();
 
     let handle = tokio::task::spawn_blocking(move || {
-        socket
-            .set_read_timeout(Some(Duration::from_millis(50)))
-            .expect("read timeout");
         let mut buffer = vec![0u8; 65535];
-        let started = std::time::Instant::now();
-        while started.elapsed() < Duration::from_secs(10) {
-            let Ok((length, peer)) = socket.recv_from(&mut buffer) else {
+        loop {
+            let Some((length, peer)) = recv_query(&socket, &mut buffer) else {
                 continue;
             };
+            if is_stop_marker(peer, length, control) {
+                return;
+            }
             let query = &buffer[..length];
             let current = phase_in.load(Ordering::SeqCst);
             let Some((a, aaaa)) = plan.get(current) else {
@@ -237,11 +357,11 @@ fn switching_fixture(plan: Vec<(Answer, Answer)>) -> SwitchingFixture {
             socket.send_to(&reply, peer).expect("send");
         }
     });
-
+    stop.attach(address, handle);
     SwitchingFixture {
         address,
         phase,
-        handle,
+        stop,
     }
 }
 
@@ -266,33 +386,38 @@ enum Answer {
 /// A fixture that answers each family with an independently controlled result.
 ///
 /// It records every query it receives, so tests can assert how many lookups
-/// happened and which QTYPE each carried. Ordering never depends on timing: the
-/// fixture answers each datagram as it arrives.
+/// happened and which QTYPE each carried. Lifetime is explicit: the fixture runs
+/// until the owning test sends the stop marker, and there is no elapsed-time
+/// deadline and no datagram-count target.
 struct DualFixture {
     address: SocketAddr,
     ipv4_seen: Arc<AtomicUsize>,
     ipv6_seen: Arc<AtomicUsize>,
-    handle: tokio::task::JoinHandle<()>,
+    stop: FixtureStop,
 }
 
+/// Builds a dual-family fixture.
+///
+/// The fixture runs until the owning test releases it with
+/// [`DualFixture::stop`]; it never stops on elapsed time or on a datagram count.
 fn dual_fixture(ipv4: Answer, ipv6: Answer) -> DualFixture {
     let (socket, address) = bind_loopback();
     let ipv4_seen = Arc::new(AtomicUsize::new(0));
     let ipv6_seen = Arc::new(AtomicUsize::new(0));
     let ipv4_in = Arc::clone(&ipv4_seen);
     let ipv6_in = Arc::clone(&ipv6_seen);
+    let mut stop = FixtureStop::new();
+    let control = stop.peer();
 
     let handle = tokio::task::spawn_blocking(move || {
-        socket
-            .set_read_timeout(Some(Duration::from_millis(50)))
-            .expect("read timeout");
         let mut buffer = vec![0u8; 65535];
-        let started = std::time::Instant::now();
-        // Bounded so a wedged test cannot leave the fixture running forever.
-        while started.elapsed() < Duration::from_secs(8) {
-            let Ok((length, peer)) = socket.recv_from(&mut buffer) else {
+        loop {
+            let Some((length, peer)) = recv_query(&socket, &mut buffer) else {
                 continue;
             };
+            if is_stop_marker(peer, length, control) {
+                return;
+            }
             let query = &buffer[..length];
             let reply = if query_qtype(query) == 28 {
                 ipv6_in.fetch_add(1, Ordering::Relaxed);
@@ -316,12 +441,13 @@ fn dual_fixture(ipv4: Answer, ipv6: Answer) -> DualFixture {
             socket.send_to(&reply, peer).expect("send");
         }
     });
+    stop.attach(address, handle);
 
     DualFixture {
         address,
         ipv4_seen,
         ipv6_seen,
-        handle,
+        stop,
     }
 }
 
@@ -331,6 +457,11 @@ impl DualFixture {
             self.ipv4_seen.load(Ordering::Relaxed),
             self.ipv6_seen.load(Ordering::Relaxed),
         )
+    }
+
+    /// Sends the stop marker, then awaits the fixture's join.
+    async fn stop(mut self) {
+        self.stop.stop().await;
     }
 }
 
@@ -481,7 +612,7 @@ fn dual_mode_queries_both_families_and_prefers_a() {
         let (v4, v6) = fixture.queries();
         assert_eq!(v4, 1, "exactly one A query");
         assert_eq!(v6, 1, "exactly one AAAA query");
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -512,7 +643,7 @@ fn dual_mode_uses_aaaa_when_no_usable_a_exists() {
             "the A failure stays observable"
         );
         assert!(snapshot.ipv6().is_some_and(|c| c.destination().is_some()));
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -539,7 +670,7 @@ fn dual_mode_uses_a_when_aaaa_fails() {
             Some(ResolverError::BootstrapRcode(5)),
             "the AAAA failure stays observable and does not erase the A success"
         );
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -565,7 +696,7 @@ fn dual_mode_reports_an_aggregate_failure_when_neither_family_answers() {
         let snapshot = resolver.state().snapshot().expect("snapshot");
         assert_eq!(snapshot.diagnostics().len(), 2);
         assert!(snapshot.select(Instant::now()).is_none());
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -590,7 +721,7 @@ fn single_family_modes_issue_exactly_one_query() {
             let (v4, v6) = fixture.queries();
             assert_eq!(v4, expected_a, "A queries for {mode:?}");
             assert_eq!(v6, expected_aaaa, "AAAA queries for {mode:?}");
-            fixture.handle.await.expect("fixture joined");
+            fixture.stop().await;
         }
     });
 }
@@ -621,7 +752,7 @@ fn a_cancelled_dual_lookup_publishes_nothing() {
             "a cancelled generation publishes nothing"
         );
         drop(resolver);
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -644,7 +775,7 @@ fn an_expired_deadline_in_dual_mode_reaches_no_peer() {
         drop(resolver);
         let (v4, v6) = fixture.queries();
         assert_eq!((v4, v6), (0, 0), "an expired deadline sends no datagram");
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -666,7 +797,7 @@ fn owner_close_in_dual_mode_publishes_nothing() {
             .expect_err("closed");
         assert_eq!(error, ResolverError::Closed);
         assert!(resolver.state().snapshot().is_none());
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -675,17 +806,19 @@ fn a_truncated_leg_is_typed_per_family_without_cross_family_retry() {
     block_on(async {
         // A answers with TC=1; AAAA answers normally. The truncated leg must be
         // recorded as that family's typed failure, and AAAA must still be used.
+        // The fixture runs until the test sends the stop marker.
         let (socket, address) = bind_loopback();
+        let mut stop = FixtureStop::new();
+        let control = stop.peer();
         let handle = tokio::task::spawn_blocking(move || {
-            socket
-                .set_read_timeout(Some(Duration::from_millis(50)))
-                .expect("read timeout");
             let mut buffer = vec![0u8; 65535];
-            let started = std::time::Instant::now();
-            while started.elapsed() < Duration::from_secs(8) {
-                let Ok((length, peer)) = socket.recv_from(&mut buffer) else {
+            loop {
+                let Some((length, peer)) = recv_query(&socket, &mut buffer) else {
                     continue;
                 };
+                if is_stop_marker(peer, length, control) {
+                    return;
+                }
                 let query = &buffer[..length];
                 if query_qtype(query) == 28 {
                     let reply = a_response_for(query, AddressFamily::Ipv6, IpAddr::V6(V6), 600);
@@ -697,6 +830,7 @@ fn a_truncated_leg_is_typed_per_family_without_cross_family_retry() {
                 }
             }
         });
+        stop.attach(address, handle);
 
         let clock = ManualClock::new();
         let resolver = dual_resolver(
@@ -718,7 +852,7 @@ fn a_truncated_leg_is_typed_per_family_without_cross_family_retry() {
             Some(ResolverError::Truncated),
             "a truncated A leg is typed and does not trigger a retry"
         );
-        handle.await.expect("fixture joined");
+        stop.stop().await;
     });
 }
 
@@ -756,7 +890,7 @@ fn each_family_keeps_its_own_ttl_and_expiry() {
             v6.expiry(),
             "each family expires independently"
         );
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -797,7 +931,7 @@ fn a_fresh_aaaa_survives_an_expired_a_after_the_boundary() {
             Some(IpAddr::V6(V6)),
             "the expired A is never selected once AAAA is the only fresh family"
         );
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -827,7 +961,7 @@ fn an_expired_candidate_is_never_served_as_success() {
             snapshot.select(clock.now()).is_none(),
             "both families are expired, so nothing may be selected"
         );
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -897,7 +1031,7 @@ fn a_failed_family_refresh_preserves_a_still_fresh_sibling_same_state() {
             snapshot6(&snapshot).ttl() == Duration::from_secs(900),
             "the fresh AAAA candidate is retained with its own TTL"
         );
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -960,7 +1094,7 @@ fn a_refresh_that_fails_a_keeps_serving_the_fresh_aaaa_and_retains_the_diagnosti
             None,
             "a successful A publication clears the previous A failure"
         );
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -1001,7 +1135,7 @@ fn concurrent_dual_callers_share_one_generation() {
             );
         }
         drop(resolver);
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -1023,7 +1157,7 @@ fn dual_close_is_idempotent_and_drains() {
         assert_eq!(first, mosdns_upstream_core::CloseResult::Closed);
         assert_eq!(second, mosdns_upstream_core::CloseResult::AlreadyClosed);
         assert_eq!(resolver.in_flight_resolutions(), 0, "all work drained");
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -1075,7 +1209,7 @@ fn a_dual_selection_composes_numerically_and_keeps_secure_identity() {
         assert_eq!(doh.dial(), SocketAddr::new(IpAddr::V4(V4), 853));
         assert_eq!(doh.host(), "secure.example.org");
         assert_eq!(doh.path(), "/dns-query");
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -1105,7 +1239,7 @@ fn a_dual_aaaa_selection_still_keeps_the_secure_identity() {
             Some("aaaasecure.example.org"),
             "resolution never rewrites the SNI identity"
         );
-        fixture.handle.await.expect("fixture joined");
+        fixture.stop().await;
     });
 }
 
@@ -1129,7 +1263,7 @@ fn the_deferred_quic_boundary_is_a_numeric_selection_plus_caller_identity() {
         published.dial(),
         "192.0.2.55:853".parse::<SocketAddr>().expect("addr")
     );
-    assert!(published.family() == AddressFamily::Ipv4);
+    assert_eq!(published.family(), AddressFamily::Ipv4);
     // And it carries no protocol or connection policy of its own.
     assert!(published.ttl().is_zero());
 }
