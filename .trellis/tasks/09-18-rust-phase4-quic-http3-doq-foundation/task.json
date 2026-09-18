@@ -1,0 +1,28 @@
+{
+  "id": "rust-phase4-quic-http3-doq-foundation",
+  "name": "rust-phase4-quic-http3-doq-foundation",
+  "title": "Rust Phase 4 QUIC/HTTP3/DoQ foundation",
+  "description": "Pure-Rust QUIC/HTTP3/DoQ one-shot foundation for the future native host: audited QUIC stack, DoQ stream exchange with RFC 9250 ID-zero wire encoding, DoH3 GET over fresh H3 connection, numeric-dial/identity separation and caller-owned deadline/cancel/close preserved; no pooling, 0-RTT, migration, socket policy, listeners, or host wiring.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": "rust/upstream-core QUIC/DoQ/DoH3 one-shot foundation: endpoint/wire contracts, fresh-connection DoQ and DoH3 exchanges, deadline/cancel/close preservation; no reuse/pool, socket policy, listeners, host/config wiring, or Go/cgo/FFI",
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-18",
+  "completedAt": null,
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Pure-Rust QUIC/HTTP3/DoQ one-shot foundation for the future native host: audited QUIC stack, DoQ stream exchange with RFC 9250 ID-zero wire encoding, DoH3 GET over fresh H3 connection, numeric-dial/identity separation and caller-owned deadline/cancel/close preserved; no pooling, 0-RTT, migration, socket policy, listeners, or host wiring."
+  }
+}
