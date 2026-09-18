@@ -277,6 +277,7 @@ pub struct ReuseKey {
 pub(crate) enum TransportDiscriminant {
     Udp,
     Tcp,
+    Quic,
 }
 
 impl From<Transport> for TransportDiscriminant {
@@ -284,6 +285,7 @@ impl From<Transport> for TransportDiscriminant {
         match transport {
             Transport::Udp => Self::Udp,
             Transport::Tcp => Self::Tcp,
+            Transport::Quic => Self::Quic,
         }
     }
 }
@@ -358,6 +360,7 @@ impl ReuseKey {
         match self.transport {
             TransportDiscriminant::Udp => Transport::Udp,
             TransportDiscriminant::Tcp => Transport::Tcp,
+            TransportDiscriminant::Quic => Transport::Quic,
         }
     }
 

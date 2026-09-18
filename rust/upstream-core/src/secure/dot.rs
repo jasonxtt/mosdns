@@ -51,6 +51,16 @@ pub enum SecureTransport {
     /// DNS-over-HTTPS on a fresh authenticated connection. The negotiated
     /// HTTP version is exposed by [`SecureResponse::http_version`].
     Doh,
+    /// DNS-over-QUIC on a fresh authenticated connection (RFC 9250).
+    ///
+    /// The one-shot DoQ driver lands in Slice 1; this arm freezes the result
+    /// vocabulary ahead of it so no QUIC result is ever mislabelled as DoT.
+    Doq,
+    /// DNS-over-HTTP/3 on a fresh authenticated connection.
+    ///
+    /// The one-shot DoH3 driver lands in Slice 2; this arm freezes the result
+    /// vocabulary ahead of it so no QUIC result is ever mislabelled as DoH.
+    Doh3,
 }
 
 /// The HTTP protocol selected for a DoH exchange.
@@ -60,6 +70,8 @@ pub enum SecureHttpVersion {
     Http1,
     /// HTTP/2 selected through ALPN `h2`.
     Http2,
+    /// HTTP/3 selected through ALPN `h3` (DoH3 only).
+    Http3,
 }
 
 /// The complete DNS wire returned by one secure exchange.

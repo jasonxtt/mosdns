@@ -5,6 +5,7 @@
 #![allow(clippy::pedantic)]
 
 mod composite;
+pub mod quic;
 pub mod resolver;
 mod reuse;
 pub mod secure;
@@ -44,6 +45,12 @@ use tokio_util::sync::CancellationToken;
 pub enum Transport {
     Udp,
     Tcp,
+    /// QUIC substrate for the Phase 4 QUIC task (DoQ and DoH3).
+    ///
+    /// The one-shot QUIC driver lands in Slice 1; until then dispatch reports
+    /// [`UpstreamError::Connect`] (`NotSent`) for this arm rather than
+    /// mislabelling it as UDP or TCP.
+    Quic,
 }
 
 /// A validated numeric upstream endpoint.
@@ -1126,6 +1133,11 @@ impl Upstream {
         match prepared.endpoint().transport() {
             Transport::Udp => udp::exchange(&prepared, &commit).await,
             Transport::Tcp => tcp::exchange(&prepared, &commit).await,
+            // Slice 0 placeholder: the QUIC one-shot driver lands in Slice 1.
+            // Reporting `Connect` (`NotSent`) is truthful — no QUIC connection
+            // can be established yet — and keeps this arm from ever
+            // mislabelling QUIC as UDP or TCP.
+            Transport::Quic => Err(UpstreamError::Connect),
         }
     }
 }
