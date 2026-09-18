@@ -12,6 +12,7 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Logging](./logging-guidelines.md) | Structured operational logs without secrets |
 | [Quality](./quality-guidelines.md) | Tests, builds, deployment order, and surgical changes |
 | [Rust migration](./rust-migration.md) | Architecture, reuse policy, ABI, and phase gates |
+| [Web review transport (Playwright MCP)](./web-review-mcp.md) | Connecting to and messaging the selected web ChatGPT reviewer |
 
 ## Before development
 
