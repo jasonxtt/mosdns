@@ -19,8 +19,9 @@ use tokio::sync::Notify;
 
 use super::bootstrap::{OsIdSource, ResolutionIdSource, SteppingIdSource};
 use super::{
-    BootstrapEndpoint, Clock, PublishedTarget, ResolutionPolicy, ResolutionTarget,
-    ResolvedDestination, ResolverError, ResolverState,
+    AddressFamily, BootstrapEndpoint, Clock, FamilyCandidate, PublishedTarget, ResolutionMode,
+    ResolutionPolicy, ResolutionSnapshot, ResolutionTarget, ResolvedDestination, ResolverError,
+    ResolverState,
 };
 use crate::secure::{DohEndpoint, DotEndpoint};
 use crate::{
@@ -214,6 +215,12 @@ impl SingleFlight {
 ///
 /// Numeric targets bypass DNS entirely: the numeric destination is published
 /// immediately and no bootstrap socket is opened.
+///
+/// The resolver also carries its [`ResolutionMode`], which decides how many DNS
+/// families a hostname target is asked for. A single-family mode keeps the
+/// original one-query behavior; `PreferIpv4Dual` issues one A and one AAAA query
+/// under the same caller budget. Neither opens a target connection, and no
+/// connection racing, cross-family fallback, or protocol fallback exists here.
 pub struct BootstrapResolver {
     target: ResolutionTarget,
     bootstrap: BootstrapEndpoint,
@@ -224,6 +231,7 @@ pub struct BootstrapResolver {
     state: Arc<ResolverState>,
     flight: SingleFlight,
     ids: Arc<dyn ResolutionIdSource>,
+    mode: ResolutionMode,
 }
 
 impl BootstrapResolver {
@@ -258,6 +266,29 @@ impl BootstrapResolver {
             return Err(ResolverError::UnpredictableIdsUnavailable);
         }
         Self::with_id_source(target, bootstrap, policy, clock, Arc::new(OsIdSource))
+    }
+
+    /// Builds a production resolver for one tuple under an explicit mode.
+    ///
+    /// This is the dual-stack entry: `mode` decides which families a hostname
+    /// target is asked for, independently of the target's own declared family.
+    /// The single-family compatibility seam is [`Self::new`], which derives the
+    /// mode from the target.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::new`].
+    pub fn with_mode(
+        target: ResolutionTarget,
+        bootstrap: BootstrapEndpoint,
+        policy: ResolutionPolicy,
+        clock: Arc<dyn Clock>,
+        mode: ResolutionMode,
+    ) -> Result<Self, ResolverError> {
+        if !target.is_numeric() && !OsIdSource.is_available() {
+            return Err(ResolverError::UnpredictableIdsUnavailable);
+        }
+        Self::with_plan(target, bootstrap, policy, clock, Arc::new(OsIdSource), mode)
     }
 
     /// Builds a resolver whose ID source always fails to draw.
@@ -309,14 +340,38 @@ impl BootstrapResolver {
         )
     }
 
-    /// Builds a resolver with an injected query-ID source.
+    /// Builds a deterministic-ID resolver under an explicit mode.
     ///
-    /// A production caller supplies an unpredictable source here; the default
-    /// stepping source exists so the exchange stays deterministic in tests.
+    /// The dual-stack counterpart of [`Self::with_deterministic_ids_for_tests`],
+    /// so the dual collection path is drivable deterministically.
     ///
     /// # Errors
     ///
-    /// As [`Self::new`].
+    /// As [`Self::with_plan`].
+    #[doc(hidden)]
+    pub fn with_deterministic_ids_and_mode_for_tests(
+        target: ResolutionTarget,
+        bootstrap: BootstrapEndpoint,
+        policy: ResolutionPolicy,
+        clock: Arc<dyn Clock>,
+        mode: ResolutionMode,
+    ) -> Result<Self, ResolverError> {
+        Self::with_plan(
+            target,
+            bootstrap,
+            policy,
+            clock,
+            Arc::new(SteppingIdSource::new()),
+            mode,
+        )
+    }
+
+    /// Builds a resolver with an injected query-ID source, deriving the mode
+    /// from the target's declared family (the single-family compatibility seam).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::with_plan`].
     pub(crate) fn with_id_source(
         target: ResolutionTarget,
         bootstrap: BootstrapEndpoint,
@@ -324,6 +379,34 @@ impl BootstrapResolver {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn ResolutionIdSource>,
     ) -> Result<Self, ResolverError> {
+        let mode = ResolutionMode::from_family(target.family());
+        Self::with_plan(target, bootstrap, policy, clock, ids, mode)
+    }
+
+    /// Builds a resolver with an injected query-ID source and an explicit mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolverError::FamilyMismatch`] when a single-family mode
+    /// disagrees with the target's own declared family: those modes must not
+    /// silently query a family the caller did not validate the target for.
+    pub(crate) fn with_plan(
+        target: ResolutionTarget,
+        bootstrap: BootstrapEndpoint,
+        policy: ResolutionPolicy,
+        clock: Arc<dyn Clock>,
+        ids: Arc<dyn ResolutionIdSource>,
+        mode: ResolutionMode,
+    ) -> Result<Self, ResolverError> {
+        // A single-family mode is the caller's own declared family; letting the
+        // two disagree would query a family the target was never validated for.
+        // Dual mode is the one mode that is independent of the target's family,
+        // because its whole purpose is to look at both. A numeric target never
+        // queries at all, so the mode places no constraint on it either: its
+        // declared family describes its own address, not a lookup.
+        if !mode.is_dual() && !target.is_numeric() && mode.preferred_family() != target.family() {
+            return Err(ResolverError::FamilyMismatch);
+        }
         // The bootstrap peer's transport family and the answer family are
         // independent: `bootstrap` is its own numeric UDP endpoint, and
         // `bootstrap_version` only selects whether the query asks A or AAAA. An
@@ -341,6 +424,7 @@ impl BootstrapResolver {
             state: Arc::new(ResolverState::new()),
             flight: SingleFlight::new(),
             ids,
+            mode,
         })
     }
 
@@ -480,18 +564,48 @@ impl BootstrapResolver {
                         guard.complete(Ok(fresh.clone()));
                         return Ok(fresh);
                     }
-                    let outcome = self.run_leader(&context).await;
+
+                    // Run the generation and hold its complete outcome. The
+                    // snapshot — not the selected address — is the authoritative
+                    // result: it retains each family's candidate or typed failure
+                    // so a failed leg cannot erase a still-fresh sibling.
+                    let outcome = self.run_leader_snapshot(&context).await;
                     let outcome = match outcome {
-                        Ok(published) => match self.commit_or_closed(&context) {
-                            Ok(()) => {
-                                self.state.publish(published.clone());
-                                Ok(published)
+                        Ok(snapshot) => {
+                            let now = self.clock.now();
+                            // Publishing is a success, so it passes the same
+                            // lifecycle linearization gate as before: a close
+                            // that wins the gate prevents publication, and a
+                            // committed publication cannot be reversed by a later
+                            // close.
+                            match self.commit_or_closed(&context) {
+                                Ok(()) => {
+                                    // Merge first, then select from the *merged*
+                                    // snapshot: this generation can succeed by
+                                    // carrying a still-fresh sibling or previous
+                                    // candidate forward, and a selection taken
+                                    // before the merge would miss that.
+                                    let merged = self.state.publish_generation(snapshot, now);
+                                    match merged.selected_target(now) {
+                                        Some(target) => Ok(target),
+                                        None => {
+                                            // Nothing is fresh even after the
+                                            // merge. The merged snapshot still
+                                            // carries the per-family causes, so
+                                            // it stays as the diagnostic and the
+                                            // generation reports the aggregate.
+                                            let error = merged.aggregate_error();
+                                            self.state.record_refresh_failure(error.clone());
+                                            Err(error)
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    self.state.record_refresh_failure(error.clone());
+                                    Err(error)
+                                }
                             }
-                            Err(error) => {
-                                self.state.record_refresh_failure(error.clone());
-                                Err(error)
-                            }
-                        },
+                        }
                         Err(error) => {
                             self.state.record_refresh_failure(error.clone());
                             Err(error)
@@ -511,17 +625,26 @@ impl BootstrapResolver {
                 Admission::Result(result) => {
                     self.check_control(&context, crate::SideEffectState::Sent)?;
                     // A concurrent success is served without re-querying, but only
-                    // while it is genuinely fresh: an expired value must never be
-                    // returned as success. A failed generation's result is not
-                    // returned either, so this caller may retry by leading a new
-                    // generation.
+                    // while it is genuinely settled: an expired value must never be
+                    // returned as success, and in dual mode a value whose preferred
+                    // family has expired must not be served either, or the caller
+                    // would never get to refresh that family. A failed generation's
+                    // result is not returned, so this caller may retry by leading a
+                    // new generation.
+                    //
+                    // The check mirrors the published-state fast path exactly, so a
+                    // just-completed generation and an already-published one agree
+                    // on when a refresh is still allowed.
                     // Written without a let-chain so this stays valid on the
                     // workspace MSRV: let-chains are not stable until later.
-                    let fresh = match &result {
-                        Ok(published) => !published.is_expired(self.clock.now()),
+                    let settled = match &result {
+                        Ok(published) => self.state.snapshot().is_some_and(|snapshot| {
+                            snapshot.preferred_is_fresh(self.clock.now())
+                                && snapshot.committed_target().as_ref() == Some(published)
+                        }),
                         Err(_) => false,
                     };
-                    if fresh {
+                    if settled {
                         return result;
                     }
                 }
@@ -599,43 +722,99 @@ impl BootstrapResolver {
             })
     }
 
-    /// Runs one leader generation: the bounded bootstrap exchange, then the
-    /// atomic publication of a complete validated result.
-    async fn run_leader(
+    /// Runs one leader generation and returns the complete multi-family result.
+    ///
+    /// The snapshot is the authoritative outcome: it retains each family's
+    /// candidate or typed failure so a single failed family cannot erase a
+    /// still-fresh sibling. A single-family mode runs exactly one query,
+    /// preserving the original behavior; a dual mode runs one query per family
+    /// under this same caller budget. Neither mode opens a target connection,
+    /// and a family failure is recorded as that family's diagnostic rather than
+    /// retried across families.
+    async fn run_leader_snapshot(
         &self,
         context: &ExchangeContext,
-    ) -> Result<PublishedTarget, ResolverError> {
+    ) -> Result<ResolutionSnapshot, ResolverError> {
         // Register with the lifecycle so an owner close drains this resolution.
         let _guard = self
             .lifecycle
             .register_owned()
             .map_err(|_| ResolverError::Closed)?;
 
-        let control = crate::ExchangeControl::new(context.clone(), self.cancellation.child_token());
-        let answer = super::bootstrap::exchange(
-            self.target.host(),
-            self.target.family(),
-            self.bootstrap,
-            &self.policy,
-            &control,
-            self.ids.as_ref(),
-        )
-        .await?;
+        let families = self.mode.families();
+        let (ipv4, ipv6) = match families {
+            // Single-family modes keep the original one-query path exactly.
+            [AddressFamily::Ipv4] => (
+                Some(self.run_family(context, AddressFamily::Ipv4).await),
+                None,
+            ),
+            [AddressFamily::Ipv6] => (
+                None,
+                Some(self.run_family(context, AddressFamily::Ipv6).await),
+            ),
+            // Explicit dual mode: both legs run concurrently under this one
+            // caller-owned budget. This is lookup concurrency, not endpoint
+            // racing — no target connection exists at this layer.
+            _ => {
+                let (ipv4, ipv6) = tokio::join!(
+                    self.run_family(context, AddressFamily::Ipv4),
+                    self.run_family(context, AddressFamily::Ipv6),
+                );
+                (Some(ipv4), Some(ipv6))
+            }
+        };
 
         // Final control check before the completed result is handed back: no
         // post-terminal result, and owner close wins. The publication itself
         // goes through the lifecycle gate in `resolve`.
         self.check_control(context, crate::SideEffectState::Sent)?;
 
-        let ttl = self.policy.clamp_ttl_secs(answer.ttl_secs);
-        let destination = ResolvedDestination::new(
-            answer.address,
-            self.target.family(),
-            u32::try_from(ttl.as_secs()).map_err(|_| ResolverError::InvalidTtl)?,
-            self.clock.now(),
-        )?;
+        // Each family's own failure is captured as this generation's diagnostic
+        // by the publication path, which records it before any candidate is
+        // carried forward, so a still-fresh address from an earlier generation
+        // cannot hide the failure that produced it.
+        Ok(ResolutionSnapshot::new(
+            self.target.clone(),
+            self.mode,
+            ipv4,
+            ipv6,
+        ))
+    }
 
-        Ok(PublishedTarget::new(self.target.clone(), destination))
+    /// Runs one family's bounded bootstrap exchange and clamps its TTL.
+    ///
+    /// Every failure is captured as that family's typed diagnostic. It is never
+    /// converted into a query for the other family: the resolver has no
+    /// cross-family fallback, and the caller's transport owns connection errors.
+    async fn run_family(
+        &self,
+        context: &ExchangeContext,
+        family: AddressFamily,
+    ) -> FamilyCandidate {
+        let control = crate::ExchangeControl::new(context.clone(), self.cancellation.child_token());
+        let answer = match super::bootstrap::exchange(
+            self.target.host(),
+            family,
+            self.bootstrap,
+            &self.policy,
+            &control,
+            self.ids.as_ref(),
+        )
+        .await
+        {
+            Ok(answer) => answer,
+            Err(error) => return FamilyCandidate::Failed(error),
+        };
+
+        let ttl = self.policy.clamp_ttl_secs(answer.ttl_secs);
+        let ttl_secs = match u32::try_from(ttl.as_secs()) {
+            Ok(ttl_secs) => ttl_secs,
+            Err(_) => return FamilyCandidate::Failed(ResolverError::InvalidTtl),
+        };
+        match ResolvedDestination::new(answer.address, family, ttl_secs, self.clock.now()) {
+            Ok(destination) => FamilyCandidate::Address(destination),
+            Err(error) => FamilyCandidate::Failed(error),
+        }
     }
 }
 

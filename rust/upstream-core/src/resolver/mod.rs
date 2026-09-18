@@ -58,13 +58,13 @@ impl Clock for SystemClock {
 
 /// The typed product-level `bootstrap_version` selection.
 ///
-/// This preserves the reviewed single-family contract exactly: `0` and `4`
-/// select A/IPv4, `6` selects AAAA/IPv6. Native dual-stack resolution and
-/// address racing are a required follow-up task, which is why the selection is
-/// a named enum rather than a boolean.
+/// This is the *configured* value, not the effective lookup plan: `0` is the
+/// explicit dual-stack entry, while `4` and `6` stay single-family. Map it
+/// through [`Self::mode`] to get the families that will actually be queried.
+/// Address racing and Happy Eyeballs are explicitly not part of that plan.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigVersion {
-    /// Version `0`, which the product currently maps to IPv4 like `4`.
+    /// Explicit version `0`: collect A and AAAA, preferring A.
     Zero,
     /// Version `4`: A records.
     Ipv4,
@@ -89,12 +89,113 @@ impl ConfigVersion {
         }
     }
 
-    /// The address family this version selects. `0` and `4` are IPv4.
+    /// Maps an omitted configuration value to the product default of `4`.
+    ///
+    /// Omission and an explicit `0` must never collapse into the same integer:
+    /// `None` is the A-only default, while `Some(0)` is the explicit dual-stack
+    /// entry. This is the boundary that keeps the default from silently becoming
+    /// a second A+AAAA lookup.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::from_u8`] for any present but undefined value.
+    pub fn from_optional(version: Option<u8>) -> Result<Self, ResolverError> {
+        match version {
+            None => Ok(Self::Ipv4),
+            Some(value) => Self::from_u8(value),
+        }
+    }
+
+    /// The address family this version prefers. `0` and `4` prefer IPv4.
+    ///
+    /// For [`Self::Zero`] this is the *preferred* family, not the only one; use
+    /// [`Self::mode`] for the complete lookup plan.
     #[must_use]
     pub const fn family(self) -> AddressFamily {
         match self {
             Self::Zero | Self::Ipv4 => AddressFamily::Ipv4,
             Self::Ipv6 => AddressFamily::Ipv6,
+        }
+    }
+
+    /// The effective lookup mode for this version.
+    #[must_use]
+    pub const fn mode(self) -> ResolutionMode {
+        match self {
+            Self::Zero => ResolutionMode::PreferIpv4Dual,
+            Self::Ipv4 => ResolutionMode::Ipv4,
+            Self::Ipv6 => ResolutionMode::Ipv6,
+        }
+    }
+}
+
+impl Default for ConfigVersion {
+    /// The product default when no version is configured: `4`, A-only.
+    fn default() -> Self {
+        Self::Ipv4
+    }
+}
+
+/// The effective set of families a resolution will query.
+///
+/// This is deliberately an enum rather than a boolean or an integer so the
+/// distinction between "omitted/`4`", "`6`", and "explicit `0`" stays explicit
+/// at the type level, and so a later address-selection policy can be additive.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResolutionMode {
+    /// A only.
+    Ipv4,
+    /// AAAA only.
+    Ipv6,
+    /// Collect A and AAAA independently; prefer a usable A.
+    PreferIpv4Dual,
+}
+
+/// The families asked for in a single-family mode, in query order.
+const IPV4_FAMILIES: &[AddressFamily] = &[AddressFamily::Ipv4];
+/// The families asked for in single-family AAAA mode.
+const IPV6_FAMILIES: &[AddressFamily] = &[AddressFamily::Ipv6];
+/// The families asked for in explicit dual mode: A first, then AAAA.
+///
+/// The order is the query and selection order, not a race: the two lookups are
+/// issued under the same deadline and neither opens a target connection.
+const DUAL_FAMILIES: &[AddressFamily] = &[AddressFamily::Ipv4, AddressFamily::Ipv6];
+
+impl ResolutionMode {
+    /// The mode implied by a target's single declared family.
+    ///
+    /// This is the compatibility seam: the existing single-family
+    /// `ResolutionTarget` constructors keep their exact meaning.
+    #[must_use]
+    pub const fn from_family(family: AddressFamily) -> Self {
+        match family {
+            AddressFamily::Ipv4 => Self::Ipv4,
+            AddressFamily::Ipv6 => Self::Ipv6,
+        }
+    }
+
+    /// Every family this mode queries, in query order.
+    #[must_use]
+    pub const fn families(self) -> &'static [AddressFamily] {
+        match self {
+            Self::Ipv4 => IPV4_FAMILIES,
+            Self::Ipv6 => IPV6_FAMILIES,
+            Self::PreferIpv4Dual => DUAL_FAMILIES,
+        }
+    }
+
+    /// Whether this mode issues more than one DNS lookup for a hostname target.
+    #[must_use]
+    pub const fn is_dual(self) -> bool {
+        matches!(self, Self::PreferIpv4Dual)
+    }
+
+    /// The family a fresh candidate is preferred from.
+    #[must_use]
+    pub const fn preferred_family(self) -> AddressFamily {
+        match self {
+            Self::Ipv6 => AddressFamily::Ipv6,
+            Self::Ipv4 | Self::PreferIpv4Dual => AddressFamily::Ipv4,
         }
     }
 }
@@ -632,6 +733,277 @@ pub fn resolve_numeric(address: SocketAddr) -> Result<PublishedTarget, ResolverE
     ))
 }
 
+/// One family's contribution to a resolution generation.
+///
+/// A candidate is either a fresh address for its family or a typed failure for
+/// that family. Keeping both shapes in one type is what lets a dual-mode
+/// generation record "A failed, AAAA succeeded" without discarding either fact.
+#[derive(Clone, Debug)]
+pub enum FamilyCandidate {
+    /// A usable address of this family, with its own freshness metadata.
+    Address(ResolvedDestination),
+    /// This family's lookup reached a terminal typed failure.
+    Failed(ResolverError),
+}
+
+impl FamilyCandidate {
+    /// The usable destination, if this family produced one.
+    #[must_use]
+    pub const fn destination(&self) -> Option<&ResolvedDestination> {
+        match self {
+            Self::Address(destination) => Some(destination),
+            Self::Failed(_) => None,
+        }
+    }
+
+    /// The typed failure, if this family produced one.
+    #[must_use]
+    pub const fn error(&self) -> Option<&ResolverError> {
+        match self {
+            Self::Address(_) => None,
+            Self::Failed(error) => Some(error),
+        }
+    }
+
+    /// Whether the candidate carries an address that is still fresh at `now`.
+    ///
+    /// A failed candidate is never fresh, so a failure can never be selected.
+    #[must_use]
+    pub fn is_fresh(&self, now: Instant) -> bool {
+        match self {
+            Self::Address(destination) => !destination.is_expired(now),
+            Self::Failed(_) => false,
+        }
+    }
+}
+
+/// The complete result of one resolution generation for one target.
+///
+/// This is the multi-family publication shape: it carries the target identity,
+/// the generation ordinal, each queried family's candidate, and each family's
+/// typed diagnostic for this generation. It is observation-only — the owner is
+/// the only writer — and it deliberately exposes no mutation. The type is
+/// multi-family even though the current wire codec still selects one
+/// deterministic address per query.
+///
+/// A candidate and a diagnostic are independent slots on purpose. When a
+/// family's refresh fails but a still-fresh address from an earlier generation
+/// is carried forward, *both* facts must stay observable: the carried address is
+/// the candidate, and the current generation's failure is the diagnostic. That
+/// is why a carried-forward candidate is not rewritten into a `Failed`
+/// candidate, and why a diagnostic is not derived only from the candidate shape.
+///
+/// The snapshot carries no service identity: a resolved address never rewrites
+/// TLS SNI or a DoH URL authority.
+#[derive(Clone, Debug)]
+pub struct ResolutionSnapshot {
+    target: ResolutionTarget,
+    mode: ResolutionMode,
+    generation: u64,
+    ipv4: Option<FamilyCandidate>,
+    ipv6: Option<FamilyCandidate>,
+    ipv4_diagnostic: Option<ResolverError>,
+    ipv6_diagnostic: Option<ResolverError>,
+}
+
+impl ResolutionSnapshot {
+    /// Builds a snapshot for one target and mode, as generation zero.
+    ///
+    /// The generation ordinal is assigned by the owner at publication, so a
+    /// snapshot built directly is only an uncommitted candidate.
+    #[must_use]
+    pub const fn new(
+        target: ResolutionTarget,
+        mode: ResolutionMode,
+        ipv4: Option<FamilyCandidate>,
+        ipv6: Option<FamilyCandidate>,
+    ) -> Self {
+        Self {
+            target,
+            mode,
+            generation: 0,
+            ipv4,
+            ipv6,
+            ipv4_diagnostic: None,
+            ipv6_diagnostic: None,
+        }
+    }
+
+    /// The target this generation resolved.
+    #[must_use]
+    pub const fn target(&self) -> &ResolutionTarget {
+        &self.target
+    }
+
+    /// The mode this generation ran under.
+    #[must_use]
+    pub const fn mode(&self) -> ResolutionMode {
+        self.mode
+    }
+
+    /// The monotonic ordinal of the generation that produced this snapshot.
+    ///
+    /// Every publication through the owner's state bumps this value, so a
+    /// caller can observe which generation it is looking at and detect that a
+    /// superseded generation did not replace a newer one. Zero means the
+    /// snapshot has not been published.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Assigns the generation ordinal. Only the owner's publication path does.
+    pub(crate) const fn set_generation(&mut self, generation: u64) {
+        self.generation = generation;
+    }
+
+    /// The IPv4 candidate, if that family was queried.
+    #[must_use]
+    pub const fn ipv4(&self) -> Option<&FamilyCandidate> {
+        self.ipv4.as_ref()
+    }
+
+    /// The IPv6 candidate, if that family was queried.
+    #[must_use]
+    pub const fn ipv6(&self) -> Option<&FamilyCandidate> {
+        self.ipv6.as_ref()
+    }
+
+    /// The candidate recorded for `family`, if that family was queried.
+    #[must_use]
+    pub const fn candidate(&self, family: AddressFamily) -> Option<&FamilyCandidate> {
+        match family {
+            AddressFamily::Ipv4 => self.ipv4(),
+            AddressFamily::Ipv6 => self.ipv6(),
+        }
+    }
+
+    /// Replaces one family's candidate.
+    ///
+    /// Crate-private by construction of the type: a snapshot is observation-only
+    /// to every consumer, and only the resolver owner's publication path may
+    /// carry a still-fresh candidate forward across a generation.
+    pub(crate) fn set_candidate(&mut self, family: AddressFamily, candidate: FamilyCandidate) {
+        match family {
+            AddressFamily::Ipv4 => self.ipv4 = Some(candidate),
+            AddressFamily::Ipv6 => self.ipv6 = Some(candidate),
+        }
+    }
+
+    /// Records this generation's typed diagnostic for one family.
+    pub(crate) fn set_diagnostic(&mut self, family: AddressFamily, error: ResolverError) {
+        match family {
+            AddressFamily::Ipv4 => self.ipv4_diagnostic = Some(error),
+            AddressFamily::Ipv6 => self.ipv6_diagnostic = Some(error),
+        }
+    }
+
+    /// This generation's typed diagnostic for `family`, if that family failed.
+    ///
+    /// This is the *current generation's* failure, which is retained even when a
+    /// still-fresh address from an earlier generation is carried forward for the
+    /// same family. Falling back to the candidate's own failure keeps snapshots
+    /// built without an explicit diagnostic (single-family and test paths)
+    /// reporting their error exactly as before.
+    #[must_use]
+    pub fn family_error(&self, family: AddressFamily) -> Option<ResolverError> {
+        let explicit = match family {
+            AddressFamily::Ipv4 => self.ipv4_diagnostic.as_ref(),
+            AddressFamily::Ipv6 => self.ipv6_diagnostic.as_ref(),
+        };
+        explicit
+            .or_else(|| self.candidate(family).and_then(FamilyCandidate::error))
+            .cloned()
+    }
+
+    /// The fresh address selected for this generation, if any.
+    ///
+    /// Selection is explicit and deterministic: a fresh IPv4 candidate always
+    /// wins; AAAA is selected only when no IPv4 candidate is fresh. Families are
+    /// considered in a fixed order regardless of which lookup completed first.
+    #[must_use]
+    pub fn select(&self, now: Instant) -> Option<ResolvedDestination> {
+        for family in [AddressFamily::Ipv4, AddressFamily::Ipv6] {
+            if let Some(FamilyCandidate::Address(destination)) = self.candidate(family) {
+                if !destination.is_expired(now) {
+                    return Some(*destination);
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether the family this mode prefers has a fresh candidate.
+    ///
+    /// A dual-mode generation is only completely satisfied while its preferred
+    /// family is fresh: an expired A with a fresh AAAA is still serviceable, but
+    /// it is a state a later caller must be allowed to refresh.
+    #[must_use]
+    pub fn preferred_is_fresh(&self, now: Instant) -> bool {
+        matches!(
+            self.candidate(self.mode.preferred_family()),
+            Some(FamilyCandidate::Address(destination)) if !destination.is_expired(now)
+        )
+    }
+
+    /// The selected fresh destination as a dialable publication, if any.
+    ///
+    /// This is the bridge to the existing single-address composition boundary:
+    /// the returned [`PublishedTarget`] carries only the numeric address and the
+    /// target's original port.
+    #[must_use]
+    pub fn selected_target(&self, now: Instant) -> Option<PublishedTarget> {
+        self.select(now)
+            .map(|destination| PublishedTarget::new(self.target.clone(), destination))
+    }
+
+    /// The selected destination **ignoring freshness**, as a publication.
+    ///
+    /// This exists for the diagnostic `published`/`last_expired` accessors,
+    /// whose contract is "the value exactly as it was committed, fresh or not".
+    /// It is never the path that decides success: freshness is always applied by
+    /// [`Self::selected_target`] before a caller can receive an address.
+    #[must_use]
+    pub fn committed_target(&self) -> Option<PublishedTarget> {
+        for family in [AddressFamily::Ipv4, AddressFamily::Ipv6] {
+            if let Some(FamilyCandidate::Address(destination)) = self.candidate(family) {
+                return Some(PublishedTarget::new(self.target.clone(), *destination));
+            }
+        }
+        None
+    }
+
+    /// The aggregate typed failure when no family has a fresh candidate.
+    ///
+    /// A single-family mode reports its own family's error directly. Dual mode
+    /// prefers the preferred family's cause, then any other recorded cause; the
+    /// per-family causes always stay available through [`Self::family_error`].
+    #[must_use]
+    pub fn aggregate_error(&self) -> ResolverError {
+        if let Some(error) = self.family_error(self.mode.preferred_family()) {
+            return error;
+        }
+        for family in self.mode.families() {
+            if let Some(error) = self.family_error(*family) {
+                return error;
+            }
+        }
+        ResolverError::NoUsableAddress
+    }
+
+    /// Every recorded family failure, in the mode's family order.
+    #[must_use]
+    pub fn diagnostics(&self) -> Vec<(AddressFamily, ResolverError)> {
+        let mut diagnostics = Vec::new();
+        for family in self.mode.families() {
+            if let Some(error) = self.family_error(*family) {
+                diagnostics.push((*family, error));
+            }
+        }
+        diagnostics
+    }
+}
+
 /// The owned publication state for one target/bootstrap tuple.
 ///
 /// There is no global cache: the owner holds the state for exactly one
@@ -643,6 +1015,11 @@ pub fn resolve_numeric(address: SocketAddr) -> Result<PublishedTarget, ResolverE
 /// never publish, fake freshness, or clear a recorded failure from outside the
 /// owner — every mutation in production goes through the owner's lifecycle
 /// linearization gate in [`crate::resolver::BootstrapResolver`].
+///
+/// The state is multi-family: it retains one candidate per family so a failed
+/// or expired family cannot erase a still-fresh sibling. The single-family
+/// accessors below are derived from that snapshot, so existing callers keep
+/// their meaning.
 #[derive(Debug)]
 pub struct ResolverState {
     inner: Mutex<StateInner>,
@@ -650,9 +1027,15 @@ pub struct ResolverState {
 
 #[derive(Debug, Default)]
 struct StateInner {
-    published: Option<PublishedTarget>,
-    expired: Option<PublishedTarget>,
+    /// The current multi-family generation result.
+    published: Option<ResolutionSnapshot>,
+    /// The most recent generation whose candidates had all expired, retained as
+    /// diagnostic evidence only and never served as success.
+    expired: Option<ResolutionSnapshot>,
+    /// The last typed generation-level diagnostic, if any.
     last_error: Option<ResolverError>,
+    /// The monotonic ordinal assigned to the most recent publication.
+    generation: u64,
 }
 
 impl Default for ResolverState {
@@ -670,6 +1053,7 @@ impl ResolverState {
                 published: None,
                 expired: None,
                 last_error: None,
+                generation: 0,
             }),
         }
     }
@@ -680,17 +1064,32 @@ impl ResolverState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The published value, fresh or not, exactly as it was committed.
+    /// The published generation snapshot, fresh or not, exactly as committed.
     #[must_use]
-    pub fn published(&self) -> Option<PublishedTarget> {
+    pub fn snapshot(&self) -> Option<ResolutionSnapshot> {
         self.lock().published.clone()
     }
 
-    /// The most recent value that expired without being replaced. It is
+    /// The address published for the state's selected family, if any.
+    ///
+    /// This preserves the original single-family read API exactly: it is the
+    /// selected candidate of the published generation, independent of freshness.
+    #[must_use]
+    pub fn published(&self) -> Option<PublishedTarget> {
+        self.lock()
+            .published
+            .as_ref()
+            .and_then(ResolutionSnapshot::committed_target)
+    }
+
+    /// The most recent generation that expired without being replaced. It is
     /// retained as diagnostic evidence only and is never served as success.
     #[must_use]
     pub fn last_expired(&self) -> Option<PublishedTarget> {
-        self.lock().expired.clone()
+        self.lock()
+            .expired
+            .as_ref()
+            .and_then(ResolutionSnapshot::committed_target)
     }
 
     /// The last typed refresh diagnostic, if any.
@@ -699,33 +1098,142 @@ impl ResolverState {
         self.lock().last_error.clone()
     }
 
-    /// Atomically publishes a complete, validated result.
+    /// The ordinal of the most recently published generation; zero if none.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.lock().generation
+    }
+
+    /// Atomically publishes a complete, validated generation.
     ///
-    /// Publication also clears the recorded refresh diagnostic, because the
-    /// failure it described has been resolved.
-    pub(crate) fn publish(&self, target: PublishedTarget) {
+    /// Publication assigns the next monotonic generation ordinal and clears the
+    /// recorded refresh diagnostic, because the failure it described has been
+    /// resolved. Returns the committed snapshot with its ordinal.
+    pub(crate) fn publish_snapshot(&self, mut snapshot: ResolutionSnapshot) -> ResolutionSnapshot {
         let mut inner = self.lock();
+        inner.generation += 1;
+        snapshot.set_generation(inner.generation);
         inner.expired = None;
         inner.last_error = None;
-        inner.published = Some(target);
+        inner.published = Some(snapshot.clone());
+        drop(inner);
+        snapshot
     }
 
-    /// Returns the published value only when it is still fresh at `now`.
+    /// Publishes a generation, preserving a still-fresh candidate for any family
+    /// the new generation failed to produce, and returns the merged snapshot.
     ///
-    /// An expired value is moved to the diagnostic slot and never returned, so
-    /// a caller can never receive a stale success. A literal publication has no
-    /// expiry and is always fresh.
+    /// A complete snapshot replaces the previous one atomically, but a family
+    /// whose lookup failed must not erase a candidate that is still fresh: doing
+    /// so would let one family's outage destroy a usable address. Only a *fresh*
+    /// prior candidate is carried over; an expired one is never resurrected, so
+    /// this can never serve a stale address as success.
+    ///
+    /// Carrying a candidate forward does **not** discard this generation's
+    /// failure. The carried address stays the family's candidate and the new
+    /// typed error stays that family's diagnostic, so both remain observable
+    /// through [`ResolutionSnapshot::family_error`] and
+    /// [`ResolutionSnapshot::diagnostics`].
+    ///
+    /// The returned merged snapshot is what callers must select from: an earlier
+    /// selection taken before the merge would miss a candidate this generation
+    /// only became serviceable through.
+    pub(crate) fn publish_generation(
+        &self,
+        mut snapshot: ResolutionSnapshot,
+        now: Instant,
+    ) -> ResolutionSnapshot {
+        // Capture this generation's own failures as diagnostics *before* any
+        // candidate is carried forward. This is what keeps a carried address
+        // from hiding the failure that caused the carry: the failure is recorded
+        // from the incoming snapshot, so overwriting the candidate slot below
+        // cannot erase it.
+        for family in [AddressFamily::Ipv4, AddressFamily::Ipv6] {
+            let failed = snapshot
+                .candidate(family)
+                .and_then(FamilyCandidate::error)
+                .cloned();
+            if let Some(error) = failed {
+                snapshot.set_diagnostic(family, error);
+            }
+        }
+        let mut inner = self.lock();
+        if let Some(previous) = inner.published.as_ref() {
+            for family in [AddressFamily::Ipv4, AddressFamily::Ipv6] {
+                // Only fill a family the new generation did not satisfy with a
+                // fresh address of its own.
+                let new_is_fresh = snapshot
+                    .candidate(family)
+                    .is_some_and(|candidate| candidate.is_fresh(now));
+                if new_is_fresh {
+                    continue;
+                }
+                if let Some(FamilyCandidate::Address(destination)) = previous.candidate(family) {
+                    if !destination.is_expired(now) {
+                        // The address is carried forward; the diagnostic recorded
+                        // just above is kept alongside it.
+                        snapshot.set_candidate(family, FamilyCandidate::Address(*destination));
+                    }
+                }
+            }
+        }
+        inner.generation += 1;
+        snapshot.set_generation(inner.generation);
+        inner.expired = None;
+        inner.last_error = None;
+        inner.published = Some(snapshot.clone());
+        drop(inner);
+        snapshot
+    }
+
+    /// Publishes a single-family result.
+    ///
+    /// Compatibility seam for the one-family constructor paths; the snapshot
+    /// shape is identical to what the dual path produces. A failure is recorded
+    /// as that family's diagnostic so the aggregate error stays readable.
+    pub(crate) fn publish(&self, target: PublishedTarget) -> ResolutionSnapshot {
+        let destination = *target.destination();
+        let (ipv4, ipv6) = match destination.family() {
+            AddressFamily::Ipv4 => (Some(FamilyCandidate::Address(destination)), None),
+            AddressFamily::Ipv6 => (None, Some(FamilyCandidate::Address(destination))),
+        };
+        self.publish_snapshot(ResolutionSnapshot::new(
+            target.target().clone(),
+            ResolutionMode::from_family(destination.family()),
+            ipv4,
+            ipv6,
+        ))
+    }
+
+    /// Returns the published result for the fast path, or `None` when this
+    /// caller should run (or join) a refresh generation.
+    ///
+    /// The fast path only satisfies a caller whose *preferred* family is fresh.
+    /// That matters for dual mode: when the preferred A has expired while AAAA
+    /// is still fresh, the address is usable but the generation is not settled,
+    /// so returning here would keep serving AAAA forever without ever retrying
+    /// the expired family. Treating it as a miss lets the next caller refresh A
+    /// — and if that A leg fails, the still-fresh AAAA is carried forward and
+    /// still satisfies the caller.
+    ///
+    /// A generation with *no* fresh family at all is moved to the diagnostic
+    /// slot and is never served. A partially fresh generation is deliberately
+    /// left published: its fresh sibling is still legitimately serviceable while
+    /// refreshes are attempted.
     pub(crate) fn serve_fresh(&self, now: Instant) -> Option<PublishedTarget> {
         let mut inner = self.lock();
-        let published = inner.published.clone()?;
-        if published.is_expired(now) {
-            inner.expired = Some(published);
-            return None;
+        let snapshot = inner.published.clone()?;
+        if snapshot.preferred_is_fresh(now) {
+            return snapshot.selected_target(now);
         }
-        Some(published)
+        // Nothing fresh in any family: retain it as evidence, never serve it.
+        if snapshot.select(now).is_none() {
+            inner.expired = Some(snapshot);
+        }
+        None
     }
 
-    /// Records a failed refresh without touching the published value.
+    /// Records a failed refresh without touching the published generation.
     ///
     /// The previously published result stays exactly as it was: a failed
     /// refresh must never replace a valid one.
@@ -753,8 +1261,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        AddressFamily, Clock, ConfigVersion, ResolutionPolicy, ResolvedDestination, ResolverError,
-        ResolverState, SystemClock,
+        AddressFamily, Clock, ConfigVersion, FamilyCandidate, ResolutionMode, ResolutionPolicy,
+        ResolutionSnapshot, ResolvedDestination, ResolverError, ResolverState, SystemClock,
     };
 
     /// A deterministic clock, advanced by hand. It is used only by the
@@ -952,5 +1460,344 @@ mod tests {
         // At the boundary and beyond, the caller must resolve again.
         assert!(state.serve_fresh(now + Duration::from_secs(300)).is_none());
         assert!(state.serve_fresh(now + Duration::from_secs(301)).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Partial refresh, merged publication, and generation metadata
+    // -----------------------------------------------------------------------
+
+    /// A dual-mode target.
+    fn dual_target() -> super::ResolutionTarget {
+        super::ResolutionTarget::new("dual.example.org", 853, AddressFamily::Ipv4)
+            .expect("valid target")
+    }
+
+    /// An A candidate with the given TTL, starting at `now`.
+    fn a_candidate(ttl_secs: u32, now: Instant) -> FamilyCandidate {
+        FamilyCandidate::Address(
+            ResolvedDestination::new(
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+                AddressFamily::Ipv4,
+                ttl_secs,
+                now,
+            )
+            .expect("valid A"),
+        )
+    }
+
+    /// An AAAA candidate with the given TTL, starting at `now`.
+    fn aaaa_candidate(ttl_secs: u32, now: Instant) -> FamilyCandidate {
+        FamilyCandidate::Address(
+            ResolvedDestination::new(
+                IpAddr::V6("2001:db8::10".parse().expect("v6")),
+                AddressFamily::Ipv6,
+                ttl_secs,
+                now,
+            )
+            .expect("valid AAAA"),
+        )
+    }
+
+    /// A failed A leg carrying the given typed error.
+    fn a_failure(error: ResolverError) -> FamilyCandidate {
+        FamilyCandidate::Failed(error)
+    }
+
+    /// A dual snapshot for `target` with the given family slots.
+    fn dual_snapshot(
+        target: &super::ResolutionTarget,
+        ipv4: Option<FamilyCandidate>,
+        ipv6: Option<FamilyCandidate>,
+    ) -> ResolutionSnapshot {
+        ResolutionSnapshot::new(target.clone(), ResolutionMode::PreferIpv4Dual, ipv4, ipv6)
+    }
+
+    /// The reviewer's item 1: carrying a still-fresh address forward must not
+    /// destroy the new generation's diagnostic for that same family. Both facts
+    /// must stay observable.
+    #[test]
+    fn a_carried_forward_candidate_keeps_its_familys_new_diagnostic() {
+        let mut clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target = dual_target();
+        let now = clock.now();
+
+        // Generation 1: A (300s) and AAAA (900s) both succeed.
+        let first = dual_snapshot(
+            &target,
+            Some(a_candidate(300, now)),
+            Some(aaaa_candidate(900, now)),
+        );
+        let first = state.publish_generation(first, now);
+        assert_eq!(
+            first.generation(),
+            1,
+            "the first publication is generation 1"
+        );
+
+        // Generation 2: the A leg fails and the AAAA leg still succeeds. The
+        // prior A is still fresh, so it is carried forward.
+        clock.advance(100);
+        let second_now = clock.now();
+        let second = dual_snapshot(
+            &target,
+            Some(a_failure(ResolverError::BootstrapRcode(2))),
+            Some(aaaa_candidate(900, second_now)),
+        );
+        let merged = state.publish_generation(second, second_now);
+
+        // The carried address is the A candidate ...
+        assert!(
+            merged
+                .candidate(AddressFamily::Ipv4)
+                .is_some_and(|candidate| candidate.destination().is_some()),
+            "the still-fresh prior A is carried forward"
+        );
+        // ... and the new generation's typed A failure is STILL observable.
+        assert_eq!(
+            merged.family_error(AddressFamily::Ipv4),
+            Some(ResolverError::BootstrapRcode(2)),
+            "the carried-forward address must not hide this generation's failure"
+        );
+        // The diagnostic list reports the A failure alongside the fresh AAAA.
+        assert_eq!(
+            merged.diagnostics(),
+            vec![(AddressFamily::Ipv4, ResolverError::BootstrapRcode(2))]
+        );
+        // Selection still prefers the fresh A, which is the carried one.
+        assert_eq!(
+            merged.select(second_now).map(|d| d.family()),
+            Some(AddressFamily::Ipv4)
+        );
+    }
+
+    /// The reviewer's item 2: the merged snapshot is what a caller selects from,
+    /// so a generation whose own legs produced nothing usable can still succeed
+    /// through a carried forward sibling.
+    #[test]
+    fn a_generation_succeeds_through_the_merged_snapshot() {
+        let mut clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target = dual_target();
+        let now = clock.now();
+
+        // Generation 1: only AAAA succeeds; A fails.
+        let first = dual_snapshot(
+            &target,
+            Some(a_failure(ResolverError::BootstrapRcode(3))),
+            Some(aaaa_candidate(300, now)),
+        );
+        state.publish_generation(first, now);
+
+        // Generation 2: A fails again and AAAA fails too, but the AAAA from
+        // generation 1 is still fresh. Selecting from the *merged* snapshot is
+        // what makes this generation serviceable.
+        clock.advance(100);
+        let second_now = clock.now();
+        let second = dual_snapshot(
+            &target,
+            Some(a_failure(ResolverError::BootstrapRcode(3))),
+            Some(a_failure(ResolverError::BootstrapTimeout)),
+        );
+        let pre_merge_selection = second.selected_target(second_now);
+        assert!(
+            pre_merge_selection.is_none(),
+            "the unmerged snapshot alone has no usable address"
+        );
+
+        let merged = state.publish_generation(second, second_now);
+        assert!(
+            merged.selected_target(second_now).is_some(),
+            "the merged snapshot is serviceable via the carried-forward AAAA"
+        );
+        assert_eq!(
+            merged.select(second_now).map(|d| d.family()),
+            Some(AddressFamily::Ipv6)
+        );
+        // And both of this generation's failures remain observable.
+        assert_eq!(merged.diagnostics().len(), 2);
+    }
+
+    /// The reviewer's item 2, second half: an expired prior candidate must never
+    /// be resurrected by a failed refresh.
+    #[test]
+    fn an_expired_prior_candidate_is_never_resurrected_by_a_failed_refresh() {
+        let mut clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target = dual_target();
+        let now = clock.now();
+
+        let first = dual_snapshot(
+            &target,
+            Some(a_candidate(300, now)),
+            Some(aaaa_candidate(300, now)),
+        );
+        state.publish_generation(first, now);
+
+        // Advance past both expiries, then run a generation where both fail.
+        clock.advance(400);
+        let later = clock.now();
+        let second = dual_snapshot(
+            &target,
+            Some(a_failure(ResolverError::BootstrapTimeout)),
+            Some(a_failure(ResolverError::BootstrapTimeout)),
+        );
+        let merged = state.publish_generation(second, later);
+
+        assert!(
+            merged.selected_target(later).is_none(),
+            "an expired candidate must never be carried forward as fresh"
+        );
+        assert!(
+            merged.committed_target().is_none(),
+            "the expired addresses are not retained as candidates at all"
+        );
+        assert_eq!(
+            merged.aggregate_error(),
+            ResolverError::BootstrapTimeout,
+            "the aggregate failure is reported instead"
+        );
+    }
+
+    /// The reviewer's item 4: publication assigns monotonic generation metadata,
+    /// and a superseded generation is still identifiable.
+    #[test]
+    fn publication_assigns_monotonic_generation_metadata() {
+        let clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target = dual_target();
+        let now = clock.now();
+
+        assert_eq!(state.generation(), 0, "an empty state has no generation");
+
+        let first = state.publish_generation(
+            dual_snapshot(
+                &target,
+                Some(a_candidate(300, now)),
+                Some(aaaa_candidate(300, now)),
+            ),
+            now,
+        );
+        assert_eq!(first.generation(), 1);
+        assert_eq!(state.generation(), 1);
+
+        let second = state.publish_generation(
+            dual_snapshot(
+                &target,
+                Some(a_candidate(300, now)),
+                Some(aaaa_candidate(300, now)),
+            ),
+            now,
+        );
+        assert_eq!(
+            second.generation(),
+            2,
+            "each publication advances the ordinal"
+        );
+        assert_eq!(state.generation(), 2);
+
+        // The superseded snapshot keeps its own ordinal, so a late holder can
+        // tell that it is not looking at the current generation.
+        assert_eq!(first.generation(), 1);
+        assert_eq!(
+            state.snapshot().expect("published").generation(),
+            2,
+            "the published snapshot carries the newest ordinal"
+        );
+        assert_ne!(
+            first.generation(),
+            state.generation(),
+            "a superseded generation is distinguishable from the current one"
+        );
+    }
+
+    /// The reviewer's item 5: a dual generation whose preferred A has expired
+    /// while AAAA is still fresh must not be served as settled forever. The fast
+    /// path has to become reachable again so a later caller can refresh A.
+    #[test]
+    fn a_fresh_sibling_does_not_mask_an_expired_preferred_family() {
+        let clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target = dual_target();
+        let now = clock.now();
+
+        // A expires at 300s, AAAA is fresh for 900s.
+        state.publish_generation(
+            dual_snapshot(
+                &target,
+                Some(a_candidate(300, now)),
+                Some(aaaa_candidate(900, now)),
+            ),
+            now,
+        );
+
+        // While both are fresh, the fast path serves the preferred A.
+        let early = state
+            .serve_fresh(now + Duration::from_secs(100))
+            .expect("fresh A");
+        assert_eq!(early.family(), AddressFamily::Ipv4);
+
+        // Past the A expiry but inside the AAAA window the fast path is a MISS
+        // rather than a silent permanent AAAA answer, so a refresh can happen.
+        assert!(
+            state.serve_fresh(now + Duration::from_secs(400)).is_none(),
+            "an expired preferred family must make the fast path miss"
+        );
+        // The partially fresh generation is still published, not moved to the
+        // expired slot: its fresh AAAA remains legitimately serviceable.
+        let snapshot = state.snapshot().expect("still published");
+        assert!(
+            snapshot.select(now + Duration::from_secs(400)).is_some(),
+            "the fresh AAAA remains available for selection"
+        );
+        assert!(
+            state.last_expired().is_none(),
+            "a partially fresh generation is not treated as expired"
+        );
+
+        // Once nothing is fresh at all, it does move to the diagnostic slot.
+        assert!(state.serve_fresh(now + Duration::from_secs(1000)).is_none());
+        assert!(state.last_expired().is_some());
+    }
+
+    /// Item 5 continued: after A expires, a later generation whose A leg fails
+    /// still serves AAAA and keeps the A failure as a diagnostic.
+    #[test]
+    fn a_later_generation_can_refresh_a_and_still_serve_the_fresh_aaaa() {
+        let mut clock = SteppingClock::new();
+        let state = ResolverState::new();
+        let target = dual_target();
+        let now = clock.now();
+
+        state.publish_generation(
+            dual_snapshot(
+                &target,
+                Some(a_candidate(300, now)),
+                Some(aaaa_candidate(900, now)),
+            ),
+            now,
+        );
+
+        // The A has expired but AAAA has not, so a refresh is attempted.
+        clock.advance(400);
+        let later = clock.now();
+        let refresh = dual_snapshot(
+            &target,
+            Some(a_failure(ResolverError::BootstrapRcode(2))),
+            Some(aaaa_candidate(900, later)),
+        );
+        let merged = state.publish_generation(refresh, later);
+
+        // The expired A is NOT resurrected, the AAAA serves, and the A failure
+        // is visible.
+        assert_eq!(
+            merged.select(later).map(|d| d.family()),
+            Some(AddressFamily::Ipv6),
+            "the expired A is not resurrected; the fresh AAAA serves"
+        );
+        assert_eq!(
+            merged.family_error(AddressFamily::Ipv4),
+            Some(ResolverError::BootstrapRcode(2))
+        );
     }
 }
