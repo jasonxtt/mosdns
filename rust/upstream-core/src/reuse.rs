@@ -1374,6 +1374,13 @@ pub struct DohReuseOwner {
     lifecycle: Arc<Lifecycle>,
     cancellation: TransportCancellation,
     inner: Arc<Mutex<DohPoolInner>>,
+    /// Signals that the shared pooled teardown has finished draining.
+    ///
+    /// Every concurrent `close()` waits on this rather than assuming that
+    /// observing `Closing` with no idle session and no leases means teardown is
+    /// done: a second `close()` could otherwise return `Closed` while the first
+    /// is still awaiting `shutdown()`.
+    teardown_finished: Arc<tokio::sync::Notify>,
     clock: Arc<dyn Clock>,
     /// Deterministic parking seam immediately before this owner's pooled-response
     /// commit gate. Compiled for tests only; see [`CommitPause`].
@@ -1399,6 +1406,19 @@ struct DohPoolInner {
     idle_since: Instant,
     leased: usize,
     closed: bool,
+    /// The drain handle of the HTTP/2 scope for the most recent pooled attempt.
+    ///
+    /// It is parked here the moment a session is established, *before* the
+    /// attempt can be aborted, because a dropped attempt only runs a synchronous
+    /// `Drop` that cannot await its tracked children. `close()` drains through
+    /// this handle so teardown completes even when the exchange future never
+    /// ran to completion. Draining is idempotent, so holding it past a normal
+    /// completion is harmless.
+    attempt: Option<crate::secure::H2DrainHandle>,
+    /// Whether a `close()` caller has claimed the pooled teardown.
+    teardown_in_progress: bool,
+    /// Whether the pooled teardown has fully finished (children drained).
+    teardown_complete: bool,
 }
 
 impl fmt::Debug for DohPoolInner {
@@ -1408,6 +1428,9 @@ impl fmt::Debug for DohPoolInner {
             .field("has_idle", &self.idle.is_some())
             .field("leased", &self.leased)
             .field("closed", &self.closed)
+            .field("has_attempt", &self.attempt.is_some())
+            .field("teardown_in_progress", &self.teardown_in_progress)
+            .field("teardown_complete", &self.teardown_complete)
             .finish()
     }
 }
@@ -1431,7 +1454,11 @@ impl DohReuseOwner {
                 idle_since: Instant::now(),
                 leased: 0,
                 closed: false,
+                attempt: None,
+                teardown_in_progress: false,
+                teardown_complete: false,
             })),
+            teardown_finished: Arc::new(tokio::sync::Notify::new()),
             clock: Arc::new(SystemClock),
             #[cfg(test)]
             commit_pause: Mutex::new(None),
@@ -1510,12 +1537,76 @@ impl DohReuseOwner {
         }
         self.lifecycle.drain().await;
 
-        // Await the retained session's teardown outside the lifecycle gate.
+        // Wait for a teardown another caller already owns, rather than
+        // duplicating it or concluding too early.
+        let mut wait_for_teardown = false;
+        {
+            let inner = self.doh_lock();
+            if inner.teardown_complete {
+                return self.complete_close();
+            }
+            if inner.teardown_in_progress {
+                wait_for_teardown = true;
+            }
+        }
+        if wait_for_teardown {
+            // Register interest before re-checking, so a finish between the two
+            // cannot be missed.
+            let waiting = self.teardown_finished.notified();
+            tokio::pin!(waiting);
+            waiting.as_mut().enable();
+            if self.doh_lock().teardown_complete {
+                return self.complete_close();
+            }
+            waiting.await;
+            return self.complete_close();
+        }
+
+        // Claim the shared teardown.
+        {
+            let mut inner = self.doh_lock();
+            if inner.teardown_complete {
+                return self.complete_close();
+            }
+            if inner.teardown_in_progress {
+                wait_for_teardown = true;
+            } else {
+                inner.teardown_in_progress = true;
+            }
+        }
+        if wait_for_teardown {
+            let waiting = self.teardown_finished.notified();
+            tokio::pin!(waiting);
+            waiting.as_mut().enable();
+            if self.doh_lock().teardown_complete {
+                return self.complete_close();
+            }
+            waiting.await;
+            return self.complete_close();
+        }
+
+        // Await teardown outside the lock, so a concurrent `close()` observes
+        // `teardown_in_progress` and waits instead of racing ahead.
         let idle = self.doh_lock().idle.take();
         if let Some((_key, session)) = idle {
             session.shutdown().await;
         }
+        let attempt = self.doh_lock().attempt.take();
+        if let Some(handle) = attempt {
+            handle.finish().await;
+        }
 
+        {
+            let mut inner = self.doh_lock();
+            inner.teardown_in_progress = false;
+            inner.teardown_complete = true;
+        }
+        self.teardown_finished.notify_waiters();
+        self.complete_close()
+    }
+
+    /// Finalizes the lifecycle once the shared teardown has finished.
+    fn complete_close(&self) -> CloseResult {
         self.doh_lock().closed = true;
         match self.lifecycle.finish_close() {
             CloseCompletion::Closed | CloseCompletion::AlreadyClosed => CloseResult::Closed,
@@ -1536,6 +1627,43 @@ impl DohReuseOwner {
         Some(DohLeaseGuard {
             inner: Arc::clone(&self.inner),
         })
+    }
+
+    /// Parks the drain handle of a session's HTTP/2 scope for later teardown.
+    ///
+    /// Called the moment a session is established, before the attempt can be
+    /// aborted. An HTTP/1.1 session has no scope, so this is a no-op for it.
+    ///
+    /// The slot is single and may already hold a handle from a **previous**
+    /// attempt whose future was aborted: there the outer lease was dropped and
+    /// the session never reached `idle`, so nothing else would ever await that
+    /// scope's children. Overwriting it blindly would strand them — `close()`
+    /// waits on this slot, so it would return `Closed` over live children. The
+    /// stale handle is therefore drained first.
+    ///
+    /// The stale handle is **cloned out**, never taken. Taking it would empty the
+    /// slot for the duration of the drain, so an abort of *this* attempt during
+    /// that await would drop the only remaining waiter and `close()` would lose
+    /// the scope. With a clone, the slot keeps naming the scope until the drain
+    /// finishes and the new handle replaces it under the lock; an abort in the
+    /// window therefore leaves the stale scope still parked and still waitable.
+    ///
+    /// Only genuinely stale handles are met here. A successfully retained session
+    /// has its handle cleared by [`Self::release`], so a normal reuse never finds
+    /// a live scope in this slot and cannot seal the session it is about to use.
+    async fn park_attempt_handle(&self, handle: Option<crate::secure::H2DrainHandle>) {
+        // The handle is passed in already extracted: taking a `&PooledDohSession`
+        // as a parameter would keep that borrow alive across the recovery await
+        // and make the exchange future non-`Send`.
+        let Some(handle) = handle else {
+            return;
+        };
+        // Clone, so the slot keeps its waiter for the whole drain.
+        let stale = self.doh_lock().attempt.clone();
+        if let Some(stale) = stale {
+            stale.finish().await;
+        }
+        self.doh_lock().attempt = Some(handle);
     }
 
     /// Takes a live idle session serving the same service as `base`.
@@ -1563,6 +1691,10 @@ impl DohReuseOwner {
             session.shutdown().await;
             return None;
         }
+        // Re-park the retained session's scope so a later abort of *this*
+        // attempt still has a handle to drain through. `checkout_live` is already
+        // async, so the recovery is free here.
+        self.park_attempt_handle(session.h2_drain_handle()).await;
         Some(session)
     }
 
@@ -1571,6 +1703,14 @@ impl DohReuseOwner {
     /// Both HTTP/1.1 and HTTP/2 sessions are retained. A pooled HTTP/2 session
     /// owns its own child-tracking scope and holds no owner registration, so
     /// retaining it does not prevent `close()` from draining.
+    ///
+    /// On the retention path the parked attempt handle is **cleared**. The
+    /// session is now owned by `idle`, so `close()` tears it down through
+    /// `session.shutdown()`; leaving the handle parked would make the next
+    /// attempt's parking step treat this live scope as stale and drain it,
+    /// killing the session it is about to reuse. The handle is only kept when
+    /// the session is **not** retained — a discard, or an aborted attempt whose
+    /// `idle` stays empty — because then nothing else owns the scope.
     async fn release(&self, key: ReuseKey, session: crate::secure::PooledDohSession) {
         let now = self.clock.now();
         let mut session = Some(session);
@@ -1589,6 +1729,8 @@ impl DohReuseOwner {
                         .expect("the session is present before retention"),
                 ));
                 inner.idle_since = now;
+                // The retained session owns its scope from here on; see above.
+                inner.attempt = None;
                 false
             }
         };
@@ -1635,6 +1777,34 @@ impl DohReuseOwner {
         let inner = self.doh_lock();
         let (_key, session) = inner.idle.as_ref()?;
         session.active_children_for_test()
+    }
+
+    /// Installs a teardown barrier on the parked attempt handle.
+    ///
+    /// This is the handle that survives an aborted exchange, so it is the one
+    /// the abort regression must park. Returns `false` when no HTTP/2 attempt
+    /// handle is parked. Test-only.
+    #[cfg(test)]
+    fn install_teardown_pause_on_attempt_for_test(
+        &self,
+        pause: Arc<crate::secure::H2TeardownPause>,
+    ) -> bool {
+        let inner = self.doh_lock();
+        let Some(handle) = inner.attempt.as_ref() else {
+            return false;
+        };
+        handle.install_teardown_pause(pause);
+        true
+    }
+
+    /// The live tracked-child count of the parked attempt handle, if any.
+    #[cfg(test)]
+    fn attempt_children_for_test(&self) -> Option<usize> {
+        let inner = self.doh_lock();
+        inner
+            .attempt
+            .as_ref()
+            .map(|handle| handle.active_children())
     }
 
     /// Installs a teardown barrier on the retained session's HTTP/2 scope.
@@ -1751,6 +1921,13 @@ impl DohReuseOwner {
             deadline,
         )
         .await?;
+
+        // Park the session's drain handle *before* the attempt can be aborted.
+        // An aborted exchange drops the session, whose synchronous `Drop` can
+        // only seal and abort; this handle is what lets `close()` still await the
+        // tracked children. Draining later through it is idempotent. Parking also
+        // recovers a stale handle left by an earlier aborted attempt.
+        self.park_attempt_handle(session.h2_drain_handle()).await;
 
         // Connect/handshake are an async wake: re-apply the control before the
         // request. No DNS byte has been sent, so this is `NotSent`.
@@ -2725,6 +2902,418 @@ mod tests {
         peer.join();
     }
 
+    /// An **aborted** pooled HTTP/2 exchange must still have its children drained
+    /// before `close()` reports `Closed`.
+    ///
+    /// Dropping the exchange future drops the local `PooledDohSession`, whose
+    /// synchronous `Drop` can only seal and abort — it cannot await the tracked
+    /// children. The owner must therefore hold a drain handle that outlives the
+    /// future and that `close()` waits on.
+    #[test]
+    fn an_aborted_pooled_h2_exchange_still_drains_before_close_completes() {
+        let identity = commit_identity();
+        let peer = CommitH2Peer::start(&identity);
+        let endpoint =
+            crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
+                .expect("doh endpoint");
+        let owner =
+            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+
+        with_runtime(async {
+            // Establish a pooled h2 session, then start a second exchange and
+            // abort it while it is in flight.
+            let first = test_query(0xd011);
+            bounded_exchange(
+                &owner,
+                ExchangeRequest::new(&first).expect("request"),
+                POOL_TEST_TIMEOUT,
+            )
+            .await
+            .expect("the first h2 exchange succeeds");
+
+            let second = test_query(0xd012);
+            let inflight = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move {
+                    let request = ExchangeRequest::new(&second).expect("request");
+                    Box::pin(owner.exchange(
+                        request,
+                        ExchangeContext::new(
+                            Instant::now() + POOL_TEST_TIMEOUT,
+                            TransportCancellation::new(),
+                        ),
+                    ))
+                    .await
+                })
+            };
+            // Let it reach the exchange, then abort it. The future is dropped at
+            // an await point, so its local session is dropped without running any
+            // teardown of its own.
+            tokio::task::yield_now().await;
+            inflight.abort();
+            let _ = inflight.await;
+
+            // Park the teardown of the scope that survived the abort.
+            let pause = Arc::new(crate::secure::H2TeardownPause::new());
+            assert!(
+                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&pause)),
+                "an h2 attempt handle must be parked even after the abort"
+            );
+
+            let closer = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move { owner.close().await })
+            };
+
+            // Close must reach the barrier: the aborted attempt's children are
+            // still tracked, and close waits on them rather than returning.
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("close reaches the abort-surviving teardown barrier");
+
+            let mut closer = closer;
+            tokio::select! {
+                biased;
+                result = &mut closer => panic!(
+                    "close returned {result:?} while the aborted exchange's children were live"
+                ),
+                () = tokio::task::yield_now() => {}
+            }
+
+            pause.release();
+            let outcome = tokio::time::timeout(POOL_TEST_TIMEOUT, closer)
+                .await
+                .expect("close finishes once the aborted attempt drains")
+                .expect("close task joins");
+            assert_eq!(outcome, crate::CloseResult::Closed);
+            assert_eq!(
+                owner.attempt_children_for_test(),
+                None,
+                "the drained attempt handle is released"
+            );
+        });
+        peer.join();
+    }
+
+    /// Two concurrent `close()` calls must both wait for the *same* teardown.
+    ///
+    /// The second caller must not observe `Closing` with no idle session and no
+    /// leases and conclude that teardown is finished while the first is still
+    /// awaiting `shutdown()`.
+    #[test]
+    fn concurrent_pooled_h2_closes_share_one_teardown() {
+        let identity = commit_identity();
+        let peer = CommitH2Peer::start(&identity);
+        let endpoint =
+            crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
+                .expect("doh endpoint");
+        let owner =
+            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+
+        with_runtime(async {
+            let query = test_query(0xd013);
+            bounded_exchange(
+                &owner,
+                ExchangeRequest::new(&query).expect("request"),
+                POOL_TEST_TIMEOUT,
+            )
+            .await
+            .expect("the h2 exchange succeeds");
+            assert_eq!(owner.idle_connections(), 1, "an h2 session is retained");
+
+            let pause = Arc::new(crate::secure::H2TeardownPause::new());
+            assert!(
+                owner.install_teardown_pause_for_test(Arc::clone(&pause)),
+                "the retained session must be HTTP/2 for this test"
+            );
+
+            let first = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move { owner.close().await })
+            };
+            // Let the first caller claim the teardown and park on the barrier.
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the first close reaches the teardown barrier");
+
+            // The second caller arrives while the teardown is in progress.
+            let second = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move { owner.close().await })
+            };
+
+            // Neither may complete while the barrier is held.
+            let mut first = first;
+            let mut second = second;
+            for _ in 0..8 {
+                tokio::select! {
+                    biased;
+                    result = &mut first => panic!(
+                        "the first close returned {result:?} before children drained"
+                    ),
+                    result = &mut second => panic!(
+                        "the second close returned {result:?} before children drained"
+                    ),
+                    () = tokio::task::yield_now() => {}
+                }
+            }
+
+            pause.release();
+            let first = tokio::time::timeout(POOL_TEST_TIMEOUT, first)
+                .await
+                .expect("the first close finishes after drain")
+                .expect("first close joins");
+            let second = tokio::time::timeout(POOL_TEST_TIMEOUT, second)
+                .await
+                .expect("the second close finishes after drain")
+                .expect("second close joins");
+            assert_eq!(first, crate::CloseResult::Closed);
+            assert_eq!(second, crate::CloseResult::Closed);
+            assert_eq!(owner.idle_connections(), 0);
+            assert_eq!(owner.in_flight_exchanges(), 0);
+        });
+        peer.join();
+    }
+
+    /// A new attempt must not overwrite a parked handle whose children are still
+    /// alive, or those children would lose the only thing `close()` can wait on.
+    ///
+    /// Sequence: one successful exchange retains a session; a second exchange is
+    /// aborted in flight, leaving its still-running children and a parked handle;
+    /// a third exchange then starts. Because the drain slot is single, the new
+    /// attempt must first finish draining the stale handle.
+    ///
+    /// The stale handle here is genuinely stale — the aborted attempt took the
+    /// idle session, so its scope was never retained and nothing else owns it.
+    /// (A *successfully* retained session clears the slot in `release`, so this
+    /// recovery can never seal a live reusable scope; the two normal reuse tests
+    /// in `reuse_doh` pin that.)
+    #[test]
+    fn a_new_attempt_drains_the_stale_attempt_handle_before_replacing_it() {
+        let identity = commit_identity();
+        // `hold_open` keeps the served connection alive after the first stream,
+        // which is what leaves the aborted attempt's children genuinely live.
+        let peer = ReusableH2Peer::start(&identity, true);
+        let endpoint =
+            crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
+                .expect("doh endpoint");
+        let owner =
+            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+
+        with_runtime(async {
+            // 1. Establish and retain a session.
+            let first = test_query(0xd020);
+            bounded_exchange(
+                &owner,
+                ExchangeRequest::new(&first).expect("request"),
+                POOL_TEST_TIMEOUT,
+            )
+            .await
+            .expect("the first h2 exchange succeeds");
+            assert_eq!(owner.idle_connections(), 1);
+
+            // 2. Start a second exchange and abort it in flight.
+            let second = test_query(0xd021);
+            let inflight = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move {
+                    let request = ExchangeRequest::new(&second).expect("request");
+                    Box::pin(owner.exchange(
+                        request,
+                        ExchangeContext::new(
+                            Instant::now() + POOL_TEST_TIMEOUT,
+                            TransportCancellation::new(),
+                        ),
+                    ))
+                    .await
+                })
+            };
+            tokio::task::yield_now().await;
+            inflight.abort();
+            let _ = inflight.await;
+
+            // Park the stale handle, so the drain it needs is observable.
+            let pause = Arc::new(crate::secure::H2TeardownPause::new());
+            assert!(
+                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&pause)),
+                "the aborted attempt must have parked a handle"
+            );
+
+            // 3. The next exchange must park its own handle, which requires the
+            // stale one to be drained first — so it blocks on the barrier.
+            let third = test_query(0xd022);
+            let mut next = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move {
+                    let request = ExchangeRequest::new(&third).expect("request");
+                    Box::pin(owner.exchange(
+                        request,
+                        ExchangeContext::new(
+                            Instant::now() + POOL_TEST_TIMEOUT,
+                            TransportCancellation::new(),
+                        ),
+                    ))
+                    .await
+                })
+            };
+
+            // The recovery must reach the barrier rather than silently
+            // overwriting the stale handle.
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("the new attempt drains the stale handle before parking its own");
+
+            // While the barrier is held the stale children have not drained, so
+            // no new attempt may have parked.
+            tokio::select! {
+                biased;
+                result = &mut next => panic!(
+                    "a new attempt proceeded while the stale handle's children were live: {result:?}"
+                ),
+                () = tokio::task::yield_now() => {}
+            }
+
+            // Releasing the barrier lets the stale children drain and the new
+            // exchange proceed normally.
+            pause.release();
+            let outcome = tokio::time::timeout(POOL_TEST_TIMEOUT, next)
+                .await
+                .expect("the new exchange finishes once the stale handle drains")
+                .expect("exchange task joins");
+            assert!(
+                outcome.is_ok(),
+                "the exchange after the recovery must succeed, got {outcome:?}"
+            );
+            // The aborted attempt had already taken the idle session, so the
+            // next exchange legitimately dials its own connection. The point of
+            // this test is that it *proceeded* only after the stale scope drained.
+            assert_eq!(
+                peer.accepts(),
+                2,
+                "the aborted session is gone, so the next exchange dials fresh"
+            );
+        });
+        peer.join();
+    }
+
+    /// Aborting an attempt *during* the stale-handle recovery must not lose the
+    /// stale waiter.
+    ///
+    /// The recovery clones the parked handle instead of taking it, so the slot
+    /// keeps naming the stale scope for the whole drain. If the recovering
+    /// attempt is itself aborted mid-await, `close()` must still find that scope
+    /// in the slot and still wait for it. Taking the handle would empty the slot,
+    /// and this test's re-install step would find nothing.
+    #[test]
+    fn aborting_during_the_stale_handle_recovery_keeps_the_waiter() {
+        let identity = commit_identity();
+        let peer = ReusableH2Peer::start(&identity, true);
+        let endpoint =
+            crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
+                .expect("doh endpoint");
+        let owner =
+            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+
+        with_runtime(async {
+            // 1. Establish a pooled h2 session.
+            let first = test_query(0xd030);
+            bounded_exchange(
+                &owner,
+                ExchangeRequest::new(&first).expect("request"),
+                POOL_TEST_TIMEOUT,
+            )
+            .await
+            .expect("the first h2 exchange succeeds");
+
+            // 2. Abort a second exchange in flight, leaving a stale handle.
+            let second = test_query(0xd031);
+            let inflight = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move {
+                    let request = ExchangeRequest::new(&second).expect("request");
+                    Box::pin(owner.exchange(
+                        request,
+                        ExchangeContext::new(
+                            Instant::now() + POOL_TEST_TIMEOUT,
+                            TransportCancellation::new(),
+                        ),
+                    ))
+                    .await
+                })
+            };
+            tokio::task::yield_now().await;
+            inflight.abort();
+            let _ = inflight.await;
+
+            // 3. Park the stale scope's teardown, so the recovery blocks on it.
+            let recovery_gate = Arc::new(crate::secure::H2TeardownPause::new());
+            assert!(
+                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&recovery_gate)),
+                "the aborted attempt must have parked a handle"
+            );
+
+            // 4. Start the next attempt; it enters the recovery and blocks.
+            let third = test_query(0xd032);
+            let recovering = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move {
+                    let request = ExchangeRequest::new(&third).expect("request");
+                    Box::pin(owner.exchange(
+                        request,
+                        ExchangeContext::new(
+                            Instant::now() + POOL_TEST_TIMEOUT,
+                            TransportCancellation::new(),
+                        ),
+                    ))
+                    .await
+                })
+            };
+            tokio::time::timeout(POOL_TEST_TIMEOUT, recovery_gate.arrived())
+                .await
+                .expect("the recovery reaches the stale handle's teardown barrier");
+
+            // 5. Abort the recovering attempt *while it is draining*.
+            recovering.abort();
+            let _ = recovering.await;
+
+            // 6. The stale scope must still be parked, so `close()` still has a
+            // waiter. This is the discriminating assertion: with the handle
+            // taken out of the slot, there would be nothing left to install on.
+            let close_gate = Arc::new(crate::secure::H2TeardownPause::new());
+            assert!(
+                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&close_gate)),
+                "aborting the recovery must not have emptied the drain slot"
+            );
+
+            // 7. close() must reach that barrier rather than returning over an
+            // unwaited scope.
+            let closer = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move { owner.close().await })
+            };
+            tokio::time::timeout(POOL_TEST_TIMEOUT, close_gate.arrived())
+                .await
+                .expect("close waits on the scope the aborted recovery left behind");
+
+            let mut closer = closer;
+            tokio::select! {
+                biased;
+                result = &mut closer => panic!(
+                    "close returned {result:?} while the stale scope was still undrained"
+                ),
+                () = tokio::task::yield_now() => {}
+            }
+
+            close_gate.release();
+            let outcome = tokio::time::timeout(POOL_TEST_TIMEOUT, closer)
+                .await
+                .expect("close finishes once the stale scope drains")
+                .expect("close task joins");
+            assert_eq!(outcome, crate::CloseResult::Closed);
+        });
+        peer.join();
+    }
+
     /// Runs one pooled exchange under a bound, failing loudly instead of hanging.
     async fn bounded_exchange(
         owner: &DohReuseOwner,
@@ -2837,6 +3426,140 @@ mod tests {
         }
 
         fn join(self) {
+            let _ = self.handle.join();
+        }
+    }
+
+    /// A reusable loopback DoH peer speaking HTTP/2 over TLS.
+    ///
+    /// It accepts **one connection at a time**, serves h2 streams on it, records
+    /// each accepted connection, and — when `hold_open` is set — keeps serving
+    /// that connection until the client goes away rather than ending after the
+    /// first stream. That combination is what lets a test model "the previous
+    /// session's children are still alive" while a later attempt runs.
+    struct ReusableH2Peer {
+        address: SocketAddr,
+        accepts: Arc<std::sync::atomic::AtomicUsize>,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        handle: std::thread::JoinHandle<()>,
+    }
+
+    impl ReusableH2Peer {
+        fn start(identity: &CommitIdentity, hold_open: bool) -> Self {
+            use base64::Engine as _;
+            use std::sync::atomic::Ordering;
+            use tokio::net::TcpListener as AsyncTcpListener;
+            use tokio::time::timeout;
+            use tokio_rustls::TlsAcceptor;
+
+            let listener =
+                std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind loopback");
+            let address = listener.local_addr().expect("address");
+            listener.set_nonblocking(true).expect("non-blocking");
+
+            let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("safe protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![identity.leaf_der.clone(), identity.ca_der.clone()],
+                rustls::pki_types::PrivateKeyDer::try_from(identity.leaf_key.serialize_der())
+                    .expect("valid PKCS#8 key"),
+            )
+            .expect("consistent certificate and key");
+            config.alpn_protocols = vec![b"h2".to_vec()];
+            let config = Arc::new(config);
+            let accepts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let accepts_in = Arc::clone(&accepts);
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stop_in = Arc::clone(&stop);
+
+            let handle = std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("server runtime");
+                runtime.block_on(async move {
+                    let listener =
+                        AsyncTcpListener::from_std(listener).expect("adopt the listener");
+                    while !stop_in.load(Ordering::SeqCst) {
+                        let Ok(Ok((stream, _))) =
+                            timeout(POOL_TEST_TIMEOUT, listener.accept()).await
+                        else {
+                            break;
+                        };
+                        if stop_in.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        accepts_in.fetch_add(1, Ordering::SeqCst);
+                        let acceptor = TlsAcceptor::from(Arc::clone(&config));
+                        let Ok(Ok(tls)) = timeout(POOL_TEST_TIMEOUT, acceptor.accept(stream)).await
+                        else {
+                            continue;
+                        };
+                        let Ok(mut connection) = h2::server::handshake(tls).await else {
+                            continue;
+                        };
+                        // Serve streams on this one connection.
+                        loop {
+                            let next = timeout(POOL_TEST_TIMEOUT, connection.accept()).await;
+                            let Ok(Some(Ok((request, mut respond)))) = next else {
+                                break;
+                            };
+                            let Some(target) = request.uri().path_and_query() else {
+                                break;
+                            };
+                            let Some(encoded) = target.as_str().split("dns=").nth(1) else {
+                                break;
+                            };
+                            let Ok(query) =
+                                base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)
+                            else {
+                                break;
+                            };
+                            let received_id = u16::from_be_bytes([query[0], query[1]]);
+                            let reply = test_response(received_id);
+                            let head = hyper::Response::builder()
+                                .status(200)
+                                .header("content-type", "application/dns-message")
+                                .body(())
+                                .expect("h2 response head");
+                            let Ok(mut send) = respond.send_response(head, false) else {
+                                break;
+                            };
+                            if send
+                                .send_data(hyper::body::Bytes::from(reply), true)
+                                .is_err()
+                            {
+                                break;
+                            }
+                            if !hold_open {
+                                // Model a peer that ends the connection after the
+                                // first stream, leaving its children to drain.
+                                break;
+                            }
+                        }
+                    }
+                });
+            });
+
+            Self {
+                address,
+                accepts,
+                stop,
+                handle,
+            }
+        }
+
+        fn accepts(&self) -> usize {
+            self.accepts.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn join(self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = std::net::TcpStream::connect(self.address);
             let _ = self.handle.join();
         }
     }

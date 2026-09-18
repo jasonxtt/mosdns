@@ -450,14 +450,165 @@ install_teardown_pause_for_test, active_children_for_test}` and
 `DohReuseOwner::{install_teardown_pause_for_test, active_children_for_test}`.
 All are `pub(crate)`/`cfg(test)`; no public API, config, or manifest changed.
 
+### Root reviewer FINAL FAIL round 2 — two further P1 blockers
+
+A second root review (web, `b5c6259`) returned **FAIL** on two more current-task
+P1 items. Both were real and both are fixed below; the P1-1/-2/-3 fixes above are
+preserved unchanged.
+
+**P1-1 — an aborted pooled-H2 exchange could not drain.**
+
+Draining was reachable only through the *session's* `H2ScopeLease`, whose
+`Drop` can only seal and abort. If the caller aborted or dropped
+`DohReuseOwner::exchange` while a pooled H2 attempt was in flight, the local
+`PooledDohSession` was dropped, only the synchronous seal/abort ran, and the
+owner's lifecycle registration was released with the outer future. `close()`
+could then return `Closed` before the tracked children had actually reached zero.
+
+Fix: draining now hangs off a **standalone handle on the shared child state**,
+not off the lease. `H2ChildState` holds the test teardown barrier (it moved off
+`H2ScopeLease` so it still applies when only the surviving `Arc` remains), and a
+new `H2DrainHandle` clones that state — so it outlives the lease and the session.
+`PooledDohSession::h2_drain_handle()` exposes it, and the owner **parks** it in
+`DohPoolInner::attempt` the moment a session is established (at connect, and again
+at checkout for a reused session), *before* the attempt can be aborted.
+`close()` drains through the parked handle, so the children are awaited even when
+the exchange future never ran to completion. Draining through it is idempotent,
+so parking it past a normal completion is harmless.
+
+Regression: `an_aborted_pooled_h2_exchange_still_drains_before_close_completes`
+establishes a pooled h2 session, starts a second exchange, aborts it with
+`JoinHandle::abort()`, then parks the abort-surviving scope on the
+`H2TeardownPause` barrier and asserts `close()` cannot complete until it is
+released. **RED:** replacing `handle.finish().await` with `drop(handle)` makes it
+fail with `close reaches the abort-surviving teardown barrier: Elapsed(())` —
+close never drained the aborted attempt at all.
+
+**P1-2 — concurrent `close()` calls could bypass a teardown in progress.**
+
+`close()` performed the teardown itself and then finalized. A second concurrent
+caller could observe `Closing`, `in_flight == 0`, and `idle == None`, conclude
+that everything was done, and return `Closed` while the first caller was still
+awaiting `session.shutdown()`.
+
+Fix: teardown is now **shared close state**. `DohPoolInner` carries
+`teardown_in_progress` / `teardown_complete`, and the owner holds a
+`teardown_finished` `Notify`. Exactly one caller claims the teardown; every other
+concurrent caller registers interest on the notify (then re-checks, so a finish
+landing between the two cannot be missed) and waits for the owning caller to
+finish before finalizing. Finalization moved into `complete_close()`.
+
+Regression: `concurrent_pooled_h2_closes_share_one_teardown` runs two `close()`
+calls against one pooled h2 session with the teardown parked on the barrier, and
+asserts neither returns before the barrier is released and that both then return
+`Closed`. **RED:** making the second caller return `complete_close()` immediately
+when `teardown_in_progress` (the pre-fix behaviour) makes it fail with `the
+second close returned Ok(Closed) before children drained`.
+
+No caller token is captured anywhere in this work, the no-deadlock serial pooled
+exchange semantics are unchanged, and no dependency, manifest, config, or public
+API changed. Test-only additions this round:
+`H2DrainHandle::{active_children, install_teardown_pause}`,
+`PooledDohSession::h2_drain_handle`, and
+`DohReuseOwner::{install_teardown_pause_on_attempt_for_test,
+attempt_children_for_test}`; the DoT discard paths keep their existing synchronous
+drops (a DoT session has no tracked children).
+
+### Self-audit follow-up — stale drain handle across a new attempt
+
+A boundary audit of the round-2 fix found a real race in it, and the fix for the
+fix is narrow.
+
+**The race.** The single `DohPoolInner::attempt` slot could still hold the drain
+handle of a **previous** attempt whose future had been aborted: the outer lease
+was dropped and `idle` was `None`, so nothing else would ever await that scope's
+children. A new attempt that overwrote the slot blindly would strand them, and
+`close()` — which waits on this slot — would then return `Closed` over live
+children. That part of the audit is correct and is fixed by draining the stale
+handle before replacing it.
+
+**A second defect the audit surfaced in the fix itself.** `park_attempt_handle`
+is also called from `checkout_live`, and a *successful* exchange had not cleared
+the slot in `release`. So after the first successful re-pool the slot still named
+the **retained** session's scope, and the next normal reuse would take that handle
+and `finish()` it — sealing and aborting the very session it was about to reuse.
+Two integration tests caught it: `a_second_doh_exchange_reuses_one_http2_session`
+and `a_cancelled_first_caller_token_does_not_kill_the_retained_http2_session` both
+failed.
+
+**Corrected invariant**, now enforced in code:
+
+- **Retained** (the session goes into `idle`): `release` clears `attempt`. The
+  session owns its scope from then on, and `close()` tears it down through
+  `session.shutdown()`. The slot is never drained for a live reusable scope.
+- **Not retained** (discard, failure, or an aborted attempt that left
+  `idle == None`): the handle stays parked, because nothing else owns the scope.
+  The next `park_attempt_handle` drains it *before* replacing it, so its children
+  are always awaited exactly once and `close()` never loses a waiter.
+
+So the recovery applies only to genuinely stale handles, and a normal H2 reuse
+neither finds nor drains anything in the slot.
+
+Regression: `a_new_attempt_drains_the_stale_attempt_handle_before_replacing_it`
+drives retain → abort-in-flight → next attempt against a reusable loopback h2
+peer that holds its connection open, parks the stale handle on the
+`H2TeardownPause` barrier, and asserts the new attempt reaches that barrier and
+cannot proceed until it is released. **RED:** replacing `stale.finish().await`
+with a blind overwrite makes it fail with `the new attempt drains the stale
+handle before parking its own: Elapsed(())`. The two normal-reuse integration
+tests in `reuse_doh` are the guard in the other direction: they fail if `release`
+stops clearing the slot.
+
+Local gates re-run at this revision: `cargo fmt --all -- --check` clean;
+`reuse::tests` **14 passed**; `reuse_doh` **9** / `reuse_secure` **7** /
+`reuse_slice0_key` **24** passed; `cargo test --workspace --locked` **652 passed,
+0 failures**; `cargo clippy --workspace --all-targets --all-features --locked --
+-D warnings` clean.
+
+### Second self-audit follow-up — aborting the recovery must not lose the waiter
+
+A further audit of the recovery found one more real window, in the recovery
+itself.
+
+**The window.** The recovery did `take()` on the drain slot and then awaited the
+removed handle. During that await the slot was **empty**, so if the recovering
+attempt was itself aborted (or the outer future dropped), the handle was dropped
+with it and `close()` had no waiter left for a scope whose children were still
+live. `take()` is only safe if the caller cannot be interrupted between the take
+and the completion of the work — which is exactly what an abortable future does
+not guarantee.
+
+**Fix.** `H2DrainHandle` is now `Clone` (it shares the `Arc<H2ChildState>`), and
+`park_attempt_handle` **clones** the parked handle instead of taking it, drains
+through the clone, and only then replaces the slot under the lock with the new
+handle. The slot therefore names a live scope for the entire drain, so an abort
+anywhere in the recovery window leaves the stale scope still parked and still
+waitable by `close()`. Draining through a clone is the same teardown (shared
+state) and remains idempotent.
+
+Regression: `aborting_during_the_stale_handle_recovery_keeps_the_waiter` runs
+retain → abort-in-flight → next attempt (which blocks inside the recovery on the
+stale scope's barrier) → **abort that recovering attempt mid-drain**, then
+re-installs a barrier on the slot and asserts it is still there and that `close()`
+reaches it and cannot complete until released. **RED:** reverting the clone to
+`take()` makes it fail with `aborting the recovery must not have emptied the
+drain slot`.
+
+Local gates at this revision: `cargo fmt --all -- --check` clean; `reuse::tests`
+**15 passed**; `reuse_doh` **9** / `reuse_secure` **7** / `reuse_slice0_key`
+**24** passed; upstream-core **400 passed, 0 failed** (lib **97**);
+`cargo test --workspace --locked` **653 passed, 0 failures**; `cargo clippy
+--workspace --all-targets --all-features --locked -- -D warnings` clean;
+`cargo tree -e features --locked` exit 0.
+
 ### Local gates (macOS)
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | clean, exit 0 |
-| `cargo test --manifest-path rust/Cargo.toml --workspace --locked` | exit 0 — **649 tests passed, 0 failures** (after the three P1 fixes and final discard-path hardening; 644 before). The controller independently re-ran the workspace suite as `--workspace --all-targets --all-features --locked`. |
-| `cargo test … -p mosdns-upstream-core --lib --locked` | exit 0 — lib **93** (80 + 5 pool tests + 3 pooled final-commit tests + 2 policy-revision tests + **1 pooled H2 drain test** + **2 write-progress tests**) |
-| `cargo test … -p mosdns-upstream-core --lib --locked reuse::tests` | exit 0 — **11 passed** |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --locked` | exit 0 — **653 tests passed, 0 failures** (after the abort-window follow-up; 652 before it, 651 before that). |
+| `cargo test … -p mosdns-upstream-core --lib --locked` | exit 0 — lib **97** (80 + 5 pool + 3 pooled final-commit + 2 policy-revision + 5 pooled-close/abort/recovery + 2 write-progress tests) |
+| `cargo test … -p mosdns-upstream-core --lib --locked reuse::tests` | exit 0 — **15 passed** |
 | `cargo test … -p mosdns-upstream-core --test reuse_doh --locked` | exit 0 — **9 passed** (h1/h2 reuse, the cancellation regression, and the two idle half-close tests), 0 failed |
 | `cargo test … -p mosdns-upstream-core --test reuse_secure --test reuse_slice0_key --locked` | exit 0 — reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
 | `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | exit 0, clean — run by the executor **and** independently re-run by the controller |
@@ -527,8 +678,9 @@ Toolchain: `rustc 1.85.1 (4eb161250 2025-03-15)`,
 `cargo 1.85.1 (d73d2caf9 2024-12-31)`.
 
 Rerun against the **current** tree (after the pooled-caller-token fix, the pooled
-final-commit fix, the roots-revision fix, all three root-review P1 fixes, and
-the final async discard-path hardening).
+final-commit fix, the roots-revision fix, all three root-review P1 fixes, the
+round-2 concurrent-close/aborted-H2 fixes, and the stale-handle recovery
+follow-up).
 
 Transfer was `rsync -az --delete --checksum` of only the local `rust/` workspace
 into `/root/mosdns-rust-phase4-reuse`, excluding `.git/`, `target/`,
@@ -538,10 +690,10 @@ the local copies by sha256 **after** the transfer:
 | File | sha256 |
 | --- | --- |
 | `src/lib.rs` | `f4030cc27a6bc6dd2da1349239faa0a88ded4068b7a06a5bc40a7d585481797f` |
-| `src/reuse.rs` | `da24b37d90b3805585abd81a4d0a5dc5532c78fb5970d6b7bf220910f7d4a50b` |
-| `src/secure/doh.rs` | `9bb73497e803273123a15db84525edb1971d4b8381a8cdbe1179488d7b463ce1` |
+| `src/reuse.rs` | `c18458d10b69ab4599280fd2202b458acc6a0c87736f90cc3d21bf7b2e00b336` |
+| `src/secure/doh.rs` | `7d5c127bd7bc335121c2c23af17934e12672351872dd8edaa5efc8492b2e649d` |
 | `src/secure/dot.rs` | `21676f7fba0d09bb658fc15d63bad0d6e45f40a7a3f326d39b1e5766036250c8` |
-| `src/secure/mod.rs` | `bd1b264f0b5bfaa48bdecc341c1d8ba3204932a9545413a11497863f50ac43a4` |
+| `src/secure/mod.rs` | `a7eddaaeee42ca56164b547178bae9d8a24f19c689c93a5a2f16b3c0ee73cad8` |
 | `src/secure/tls.rs` | `cd398df4f7da6064e18505d03e48f31868c02e0b0d298dd94aa6c731baeafc3d` |
 | `src/tcp.rs` | `4fc5641483a4a79c0ec85c1c49a934aad393db70d67b5ba12892ef104195fd36` |
 | `tests/reuse_doh.rs` | `f86503866fb5c39785438fe84a39d0c35b7fb491de1002a148774f23a76cbc1a` |
@@ -550,11 +702,11 @@ the local copies by sha256 **after** the transfer:
 
 | Remote command | Result |
 | --- | --- |
-| `cargo +1.85.1 test -j 2 --locked -p mosdns-upstream-core --lib --test reuse_doh --test reuse_secure --test reuse_slice0_key` | exit 0 — lib **93** (incl. all 11 `reuse::tests`), reuse_doh **9**, reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
+| `cargo +1.85.1 test -j 2 --locked --offline -p mosdns-upstream-core --lib --test reuse_doh --test reuse_secure --test reuse_slice0_key` | exit 0 — lib **97** (incl. all 15 `reuse::tests`), reuse_doh **9**, reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
 | `cargo +1.85.1 fmt --all -- --check` | clean, exit 0 |
 | `cargo +1.85.1 clippy -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings -A clippy::precedence -A clippy::needless_lifetimes -A clippy::similar_names` | clean, exit 0 — nothing in this task's code |
 
-These VM counts match the local macOS counts exactly (lib 93, reuse_doh 9,
+These VM counts match the local macOS counts exactly (lib 97, reuse_doh 9,
 reuse_secure 7, reuse_slice0_key 24), so the P1 fixes behave identically on the
 MSRV toolchain.
 
