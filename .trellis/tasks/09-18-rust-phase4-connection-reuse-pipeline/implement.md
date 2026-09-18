@@ -781,12 +781,70 @@ Local gates at this revision: `cargo fmt --all -- --check` clean; `reuse::tests`
 `cargo test --workspace --locked` **656 passed, 0 failures**; workspace clippy
 `-D warnings` clean.
 
+### Close ownership for the idle session, and dead-state removal
+
+**Close ownership (review-raised).** `close()` previously did
+`let idle = self.doh_lock().idle.take()` and then awaited `session.shutdown()`
+with the session in a **caller-local variable**. Once the session left `idle` it
+was invisible to the pool: a concurrent `close()` would find `idle == None`,
+finish its sweep, and — for HTTP/1.1, which has no scope registry to wait on —
+report `Closed` while the connection was still alive and held by the first
+caller. PRD A4 / design §4 require close to have drained **and discarded** the
+connection before completing. An aborted first caller was worse: the session was
+dropped with no record and no waiter at all.
+
+Fix: `DohPoolInner` gains `closing: Option<PooledDohSession>` and
+`session_closed: bool`, and `close()` is split so the session is **never in a
+caller-local across an await**:
+
+- **A** — `idle` → `closing`, synchronously under one lock.
+- **B** — drain the parked session's own HTTP/2 scope through a *cloned* handle,
+  so the session stays in shared state throughout. HTTP/1.1 has no scope, so for
+  H1 steps A and C are adjacent and synchronous.
+- **C** — drop the session and set `session_closed`, synchronously under the lock.
+  Because `shutdown()` consumes the session by value, "C happened" is a checkable
+  completion condition rather than a claim about reaching a line.
+
+No single-owner claim, no detached task, no background reaper: every caller
+performs all three steps, each of which either leaves the resources parked
+(abortable, recoverable) or completes synchronously. `design.md` §3 is preserved.
+
+**Dead state removed.** `DohReuseOwner::teardown_finished` (an
+`Arc<tokio::sync::Notify>`) was constructed and `notify_waiters()`ed but never
+awaited by anything, together with a doc comment claiming every concurrent
+`close()` waits on it. Both were leftovers from the removed leader/follower
+design and are deleted.
+
+**Test scaffolding removed, and an honest note about the regression.** A
+concurrent-close regression and its `close_pause` / `reach_close_gate` /
+`has_closing_session` seams were added while investigating this, then **removed at
+the reviewer's instruction**. The reason matters: the test did not actually
+discriminate. Its first form asserted that a second `close()` must block until the
+parked session was released, which is **not** the contract — the second caller
+legitimately performs steps A–C itself and is correct to return once the session is
+gone. A later probe that reproduced the legacy caller-local shape failed on the
+test's own precondition (`has_closing_session`) rather than on the reviewer's
+claimed outcome, so it never demonstrated that a concurrent `close()` returns
+`Closed` over a live connection. Consequently **no regression test covers this
+fix**, and none is claimed. The fix stands on the ownership restructure and on
+keeping the session in shared state; verifying the reviewed failure mode would
+need a purpose-built probe of the old shape, which is not in the tree.
+
+Local gates at this revision: `cargo fmt --all -- --check` clean; `reuse::tests`
+**18 passed**; `reuse_doh` **9** / `reuse_secure` **7** / `reuse_slice0_key`
+**24** passed; upstream-core lib **100 passed, 0 failed**;
+`cargo test --workspace --locked` **656 passed, 0 failures**; workspace clippy
+`-D warnings` clean. Verified by grep that no `close_pause`,
+`install_close_pause`, `reach_close_gate`, `has_closing_session`,
+`teardown_finished`, `DISCRIMINATION`, or `closing.take()` remains anywhere in
+`src/` or `tests/`.
+
 ### Local gates (macOS)
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | clean, exit 0 |
-| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | exit 0 — **656 tests passed, 0 failures** (after the scope-registry dedup and comment reconciliation; 655 before it). |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | exit 0 — **655 tests passed, 0 failures**. The default `cargo test --workspace --locked` total is **656** because it also runs one doctest. |
 | `cargo test … -p mosdns-upstream-core --lib --locked` | exit 0 — lib **100** (80 + 5 pool + 3 pooled final-commit + 2 policy-revision + 8 pooled-close/abort/recovery/registry + 2 write-progress tests) |
 | `cargo test … -p mosdns-upstream-core --lib --locked reuse::tests` | exit 0 — **18 passed** |
 | `cargo test … -p mosdns-upstream-core --test reuse_doh --locked` | exit 0 — **9 passed** (h1/h2 reuse, the cancellation regression, and the two idle half-close tests), 0 failed |
@@ -858,12 +916,13 @@ Toolchain: `rustc 1.85.1 (4eb161250 2025-03-15)`,
 `cargo 1.85.1 (d73d2caf9 2024-12-31)`.
 
 **Current VM evidence** — this run covers the current tree, including the
-scope-registry dedup and the comment reconciliation. The two files those rounds
-changed matched the local copies by sha256 after the transfer:
+close-ownership restructure and the dead-`teardown_finished` removal. All ten
+changed files were digest-verified after the transfer; the two with new content
+are:
 
 | File | sha256 |
 | --- | --- |
-| `src/reuse.rs` | `12ba10d5d59cc83359d812bf9f0e60fa2e3717623713659585f520a0c765606b` |
+| `src/reuse.rs` | `642ea78942c71e6b8d794658219c01b986cbd1e9b9242415e9f2eb917076aa6e` |
 | `src/secure/doh.rs` | `ac6c9f445598fcf35d29c3034ee7dd86641636e1d49d71db9db753a22f70f5a6` |
 
 | Remote command | Result |
@@ -875,6 +934,11 @@ changed matched the local copies by sha256 after the transfer:
 These match the current local macOS counts exactly (lib 100, reuse_doh 9,
 reuse_secure 7, reuse_slice0_key 24, `reuse::tests` 18), so the implementation
 behaves identically on the MSRV toolchain.
+
+Host state after this run: the staging directory was removed and confirmed gone;
+`/root/mosdns-rust-build` was left intact; the installed service was untouched
+(`systemctl is-active mosdns` → **active**, `MainPID` **454**, unchanged from
+before the run). No Mac Docker/Colima was used.
 
 Cleanup and host state: the staging directory was removed and confirmed gone;
 `/root/mosdns-rust-build` was left intact; the installed service was untouched
@@ -895,18 +959,25 @@ is clean. The one `needless_lifetimes` finding that *was* in this task's new cod
 <details>
 <summary>Historical runs superseded by the current run above (kept for the record)</summary>
 
+**Pre-close-ownership run** (after the scope-registry dedup and the comment
+reconciliation, before the close-ownership restructure and the
+`teardown_finished` removal). Same counts (lib **100** / 18 `reuse::tests`), but
+with `src/reuse.rs` at
+`12ba10d5d59cc83359d812bf9f0e60fa2e3717623713659585f520a0c765606b`, superseded by
+the current value above. That run verified all ten files by digest; only
+`src/reuse.rs` differs now, `src/secure/doh.rs` being unchanged.
+
 **Round-3 run** (after the pooled-caller-token fix, the pooled final-commit fix,
 the roots-revision fix, all three root-review P1 fixes, the round-2
 concurrent-close/aborted-H2 fixes, the stale-handle recovery follow-up, and the
 round-3 close-cancellation/scope-less-attempt fixes — but before the
-scope-registry dedup and comment reconciliation). This is the last run recorded in
-the main body before the current one; it counted lib **99** (incl. all 17
-`reuse::tests`) and matched the then-local counts. The two files those later
+scope-registry dedup and comment reconciliation). It counted lib **99** (incl. all
+17 `reuse::tests`) and matched the then-local counts. The two files those later
 rounds changed carried `src/reuse.rs`
 `c8aa70a18c4336036044aef656f4b9688c4fd1eaff0e872cadd889f25a80bcf1` and
 `src/secure/doh.rs`
 `7d5c127bd7bc335121c2c23af17934e12672351872dd8edaa5efc8492b2e649d` at that
-revision, superseded by the current values above.
+revision.
 
 | Remote command | Result |
 | --- | --- |
