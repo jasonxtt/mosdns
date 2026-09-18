@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-09-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~276 | Active |
+| `journal-1.md` | ~302 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-09-18 | Rust Phase 4 upstream connection reuse | `9971459`, `b5c6259`, `6fcc5c3`, `8a6c995`, `c91c32c`, `4eeab2d` | `rust` |
 | 10 | 2026-09-18 | Rust dual-stack endpoint selection review and MCP transport rollback | `125519e`, `604c8ee`, `00a7c56`, `ace1e32` | `rust` |
 | 9 | 2026-09-18 | Rust Phase 4 resolver foundation review and archive | `7ed1074`, `a87455b` | `rust` |
 | 8 | 2026-09-17 | Close secure upstream foundation | `c84d268`, `cb89974`, `ba2f545` | `rust` |
