@@ -40,5 +40,5 @@ pub(crate) use doh::H2TeardownPause;
 /// private state, so connection reuse reuses the existing framing, control race,
 /// and HTTP/2 child tracking instead of duplicating a second state machine.
 /// Nothing here is re-exported from the crate root.
-pub(crate) use doh::PooledDohSession;
+pub(crate) use doh::{H2DrainHandle, PooledDohSession};
 pub(crate) use dot::PooledDotSession;

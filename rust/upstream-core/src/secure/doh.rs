@@ -129,6 +129,14 @@ struct H2ChildState {
     /// [`run_pooled_exchange`], and a failure there hands the session back as a
     /// discard, which seals this scope and aborts its children.
     caller_cancellation: TransportCancellation,
+    /// Deterministic barrier used by tests to hold a drain open.
+    ///
+    /// It lives on the shared child state rather than on [`H2ScopeLease`] so it
+    /// still applies when the scope's owner was dropped and only the surviving
+    /// [`Arc<H2ChildState>`] handle is left to drain — which is exactly the
+    /// aborted-exchange path the pooled-close regression exercises.
+    #[cfg(test)]
+    teardown_pause: Mutex<Option<Arc<H2TeardownPause>>>,
 }
 
 struct H2Children {
@@ -146,11 +154,68 @@ struct TrackedH2Executor {
 
 /// An exchange-held lease whose synchronous drop path seals admission and
 /// aborts every child. The async finish path additionally waits for every
-/// child guard to drop before the caller's lifecycle registration is released.
+/// child guard to drop.
+///
+/// The lease is deliberately **not** the thing that drains. Its [`Drop`] can
+/// only seal and abort, because dropping cannot await, and a caller that aborts
+/// an exchange drops the lease while the future is still in flight. Draining is
+/// therefore owned by the *resource* that spawned the children — for a pooled
+/// session, the session itself, which exposes [`H2DrainHandle`] at connect time
+/// so the owner can drain a scope whose lease has already been dropped.
 pub(crate) struct H2ScopeLease {
     state: Arc<H2ChildState>,
+}
+
+/// A standalone handle that can seal and drain a pooled HTTP/2 child scope.
+///
+/// It clones the shared child state, **not** the lease, so it keeps working
+/// after the exchange's `H2ScopeLease` has been dropped by an abort or an
+/// explicit drop. The owner holds one for the whole lifetime of a pooled HTTP/2
+/// session and uses it to finish teardown on every path that ends the session,
+/// including the one where the exchange future never ran to completion.
+///
+/// The handle is `Clone` so an owner can start a drain **without removing the
+/// waiter from its slot**: if the attempt performing that drain is itself
+/// aborted mid-await, the slot still names the scope and `close()` can still
+/// await it. A clone shares the same [`H2ChildState`], so draining through any
+/// clone is the same teardown.
+///
+/// Draining is idempotent: sealing and aborting twice is harmless, and a second
+/// drain simply observes an already-empty child set.
+#[derive(Clone)]
+pub(crate) struct H2DrainHandle {
+    state: Arc<H2ChildState>,
+}
+
+impl H2DrainHandle {
+    /// Seals admission, aborts every tracked child, and waits for the child
+    /// count to reach zero.
+    pub(crate) async fn finish(&self) {
+        let lease = H2ScopeLease {
+            state: Arc::clone(&self.state),
+        };
+        lease.finish().await;
+    }
+
+    /// The number of tracked children that have not finished yet.
     #[cfg(test)]
-    teardown_pause: Mutex<Option<Arc<H2TeardownPause>>>,
+    pub(crate) fn active_children(&self) -> usize {
+        self.state
+            .children
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
+    }
+
+    /// Installs the deterministic teardown barrier for this scope.
+    #[cfg(test)]
+    pub(crate) fn install_teardown_pause(&self, pause: Arc<H2TeardownPause>) {
+        *self
+            .state
+            .teardown_pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pause);
+    }
 }
 
 struct H2ChildGuard {
@@ -248,18 +313,26 @@ impl H2ScopeLease {
                 scope_cancellation: TransportCancellation::new(),
                 owner_cancellation,
                 caller_cancellation,
+                #[cfg(test)]
+                teardown_pause: Mutex::new(None),
             }),
-            #[cfg(test)]
-            teardown_pause: Mutex::new(None),
         }
     }
 
     #[cfg(test)]
     fn install_teardown_pause(&self, pause: Arc<H2TeardownPause>) {
         *self
+            .state
             .teardown_pause
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pause);
+    }
+
+    /// A standalone drain handle for this scope.
+    fn drain_handle(&self) -> H2DrainHandle {
+        H2DrainHandle {
+            state: Arc::clone(&self.state),
+        }
     }
 
     fn executor(&self) -> TrackedH2Executor {
@@ -295,6 +368,7 @@ impl H2ScopeLease {
         #[cfg(test)]
         {
             let teardown_pause = self
+                .state
                 .teardown_pause
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1525,6 +1599,18 @@ impl PooledDohSession {
         match self {
             Self::Http1 { .. } => None,
             Self::Http2 { _scope, .. } => Some(_scope.active_children()),
+        }
+    }
+    /// The drain handle for this session's HTTP/2 scope, if it has one.
+    ///
+    /// The owner parks this for the whole lifetime of a pooled HTTP/2 session so
+    /// it can finish teardown even when the exchange future was aborted and only
+    /// this session's synchronous `Drop` ran.
+    #[must_use]
+    pub(crate) fn h2_drain_handle(&self) -> Option<H2DrainHandle> {
+        match self {
+            Self::Http1 { .. } => None,
+            Self::Http2 { _scope, .. } => Some(_scope.drain_handle()),
         }
     }
 
