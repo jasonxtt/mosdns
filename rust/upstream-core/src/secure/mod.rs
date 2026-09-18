@@ -32,6 +32,8 @@ pub use error::{
 };
 pub use tls::TlsPolicy;
 
+#[cfg(test)]
+pub(crate) use doh::H2TeardownPause;
 /// Crate-internal reuse surface for the secure transports.
 ///
 /// The pooled-session types live beside the protocol code that owns their

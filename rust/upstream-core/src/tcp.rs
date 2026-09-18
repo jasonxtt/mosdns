@@ -153,10 +153,17 @@ pub(crate) fn encode_frame(payload: &[u8]) -> Result<Vec<u8>, UpstreamError> {
 ///
 /// The frame is fully encoded before the first write, so an unframeable
 /// payload never touches the stream. The write loop retries partial writes: a
-/// short write is progress, not a message boundary. A write failure after the
-/// frame has begun maps to [`UpstreamError::Send`] with the conservative
-/// `MaybeSent` state, because the kernel may already have accepted part of the
-/// frame.
+/// short write is progress, not a message boundary.
+///
+/// The reported `SideEffectState` preserves write progress, because that is the
+/// only sound basis for allowing a replacement connection:
+///
+/// * **No byte accepted** — `Send(NotSent)`. The kernel never took any part of
+///   the frame, so the query provably did not reach the peer and a fresh
+///   connection cannot double-send. This is what makes the owners' single
+///   replacement rule reachable at all.
+/// * **Any byte accepted** — `Send(MaybeSent)`. The kernel may already have put
+///   part of the frame on the wire, so a retry could duplicate the query.
 pub(crate) async fn write_frame<W>(writer: &mut W, payload: &[u8]) -> Result<(), UpstreamError>
 where
     W: AsyncWrite + Unpin,
@@ -164,7 +171,7 @@ where
     let frame = encode_frame(payload)?;
     write_all_bytes(writer, &frame)
         .await
-        .map_err(|_| UpstreamError::Send(SideEffectState::MaybeSent))
+        .map_err(|failure| UpstreamError::Send(failure.side_effect()))
 }
 
 /// Flushes every buffered byte of a framed message to the transport.
@@ -283,20 +290,54 @@ where
     race_control(prepared.control(), side_effect, deadline, io).await
 }
 
+/// A partial-write failure that carries how much of the frame was accepted.
+///
+/// This is the minimum information the transport contract needs to decide
+/// whether a replacement connection is safe, and it exists only on this private
+/// path: the public error surface keeps its closed `SideEffectState` shape.
+#[derive(Debug)]
+struct WriteFailure {
+    /// Bytes the writer accepted before failing. Zero means nothing crossed.
+    accepted: usize,
+}
+
+impl WriteFailure {
+    /// `NotSent` only when nothing at all was accepted.
+    const fn side_effect(&self) -> SideEffectState {
+        if self.accepted == 0 {
+            SideEffectState::NotSent
+        } else {
+            SideEffectState::MaybeSent
+        }
+    }
+}
+
 /// Writes every byte of `buffer`, retrying partial writes until the whole slice
-/// has been accepted. A zero-byte write is a distinct `WriteZero` failure
-/// rather than silent progress.
-async fn write_all_bytes<W>(writer: &mut W, mut buffer: &[u8]) -> std::io::Result<()>
+/// has been accepted.
+///
+/// Progress is tracked across the whole loop so a failure can report whether the
+/// writer had already accepted anything: a zero-byte `poll_write` is a distinct
+/// `WriteZero` failure rather than silent progress, and it is classified by the
+/// bytes accepted *before* it.
+async fn write_all_bytes<W>(writer: &mut W, mut buffer: &[u8]) -> Result<(), WriteFailure>
 where
     W: AsyncWrite + Unpin,
 {
+    let total = buffer.len();
     while !buffer.is_empty() {
-        let written = poll_fn(|cx| Pin::new(&mut *writer).poll_write(cx, buffer)).await?;
+        let polled = poll_fn(|cx| Pin::new(&mut *writer).poll_write(cx, buffer)).await;
+        let written = match polled {
+            Ok(written) => written,
+            Err(_) => {
+                return Err(WriteFailure {
+                    accepted: total - buffer.len(),
+                });
+            }
+        };
         if written == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::WriteZero,
-                "framed write made no progress",
-            ));
+            return Err(WriteFailure {
+                accepted: total - buffer.len(),
+            });
         }
         buffer = &buffer[written..];
     }
@@ -490,6 +531,27 @@ mod tests {
         }
     }
 
+    /// A writer that accepts nothing at all, modelling a `WriteZero` result.
+    struct ZeroWriter;
+
+    impl AsyncWrite for ZeroWriter {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buffer: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            Poll::Ready(Ok(0))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
     #[test]
     fn encode_frame_prefixes_payload_length_big_endian() {
         let payload: Vec<u8> = (0..300u32).map(|index| (index % 251) as u8).collect();
@@ -600,6 +662,52 @@ mod tests {
                 writer.written.len() < payload.len() + 2,
                 "the failure happened before the full frame was written"
             );
+        });
+    }
+
+    /// A write that fails **before accepting any byte** must be `NotSent`.
+    ///
+    /// This is what makes the owners' single-replacement rule reachable: the
+    /// connection was never written to, so a fresh one provably cannot
+    /// double-send the query. Before this was tracked, every write failure
+    /// reported `MaybeSent` and the replacement path was dead code.
+    #[test]
+    fn write_frame_reports_zero_progress_as_send_with_not_sent_state() {
+        block_on(async {
+            let payload = vec![0xABu8; 12];
+            let mut writer = ShortWriter::new(4).failing_after_chunks(0);
+
+            let error = super::write_frame(&mut writer, &payload)
+                .await
+                .expect_err("a write failure before any byte is reported");
+
+            assert_eq!(
+                error,
+                UpstreamError::Send(SideEffectState::NotSent),
+                "no byte was accepted, so the query provably did not reach the peer"
+            );
+            assert!(
+                writer.written.is_empty(),
+                "the writer must not have accepted part of the frame"
+            );
+        });
+    }
+
+    /// A `WriteZero` failure before any byte is also `NotSent`.
+    ///
+    /// A writer that accepts nothing is the same evidence as an outright error:
+    /// no part of the frame left this process.
+    #[test]
+    fn write_frame_reports_zero_byte_write_as_send_with_not_sent_state() {
+        block_on(async {
+            let payload = vec![0x11u8; 8];
+            let mut writer = ZeroWriter;
+
+            let error = super::write_frame(&mut writer, &payload)
+                .await
+                .expect_err("a zero-byte write is a failure, not progress");
+
+            assert_eq!(error, UpstreamError::Send(SideEffectState::NotSent));
         });
     }
 

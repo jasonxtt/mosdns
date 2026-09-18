@@ -1476,23 +1476,46 @@ impl DohReuseOwner {
     }
 
     /// Begins owner shutdown and cancels owned work.
+    ///
+    /// The retained session is deliberately **not** dropped here. Dropping can
+    /// only seal and abort an HTTP/2 scope; it cannot wait for the tracked
+    /// children to finish, and `begin_close` is synchronous. The session is
+    /// therefore left in place for [`Self::close`], which awaits its explicit
+    /// teardown. Lease admission is already refused once the lifecycle leaves
+    /// `Open`, so a session parked here can never be handed out again.
     #[must_use]
     pub fn begin_close(&self) -> CloseTransition {
         let transition = self.lifecycle.begin_close();
         if transition == CloseTransition::BeganClosing {
             self.cancellation.cancel();
-            self.doh_lock().idle = None;
         }
         transition
     }
 
     /// Begins close, drains every leased session, then completes shutdown.
+    ///
+    /// Close does not merely drop the retained session: a pooled HTTP/2 session
+    /// owns tracked child futures, and the design requires that no tracked child
+    /// outlives its connection and that close returns `Closed` only after
+    /// draining has finished. `begin_close` leaves the idle session parked
+    /// because it is synchronous; this takes that session and awaits its
+    /// explicit teardown. A session still leased when close begins discards
+    /// itself on return and awaits the same teardown before its guard drops, and
+    /// `drain()` above waits for that guard — so `Closed` is only reachable once
+    /// the children are gone.
     pub async fn close(&self) -> CloseResult {
         match self.begin_close() {
             CloseTransition::AlreadyClosed => return CloseResult::AlreadyClosed,
             CloseTransition::BeganClosing | CloseTransition::AlreadyClosing => {}
         }
         self.lifecycle.drain().await;
+
+        // Await the retained session's teardown outside the lifecycle gate.
+        let idle = self.doh_lock().idle.take();
+        if let Some((_key, session)) = idle {
+            session.shutdown().await;
+        }
+
         self.doh_lock().closed = true;
         match self.lifecycle.finish_close() {
             CloseCompletion::Closed | CloseCompletion::AlreadyClosed => CloseResult::Closed,
@@ -1523,19 +1546,21 @@ impl DohReuseOwner {
     /// property of the connection, and the retained session itself is the
     /// authority on which protocol it speaks. A session established for a
     /// different service can therefore never be handed out.
-    fn checkout_live(&self, base: &ReuseKey) -> Option<crate::secure::PooledDohSession> {
-        let (stored_key, session) = {
+    async fn checkout_live(&self, base: &ReuseKey) -> Option<crate::secure::PooledDohSession> {
+        let (stored_key, mut session) = {
             let mut inner = self.doh_lock();
             inner.idle.take()?
         };
         let idle_since = self.doh_lock().idle_since;
         if self.clock.now().saturating_duration_since(idle_since) >= IDLE_TIMEOUT {
+            session.shutdown().await;
             return None;
         }
         let same_service = stored_key.dial == base.dial
             && stored_key.transport == base.transport
             && stored_key.secure == base.secure;
         if !same_service || session.is_closed() {
+            session.shutdown().await;
             return None;
         }
         Some(session)
@@ -1546,17 +1571,34 @@ impl DohReuseOwner {
     /// Both HTTP/1.1 and HTTP/2 sessions are retained. A pooled HTTP/2 session
     /// owns its own child-tracking scope and holds no owner registration, so
     /// retaining it does not prevent `close()` from draining.
-    fn release(&self, key: ReuseKey, session: crate::secure::PooledDohSession) {
+    async fn release(&self, key: ReuseKey, session: crate::secure::PooledDohSession) {
         let now = self.clock.now();
-        let mut inner = self.doh_lock();
-        if inner.leased > 0 {
-            inner.leased -= 1;
+        let mut session = Some(session);
+        let discard = {
+            let mut inner = self.doh_lock();
+            if inner.leased > 0 {
+                inner.leased -= 1;
+            }
+            if inner.closed || self.lifecycle.state() != LifecycleState::Open {
+                true
+            } else {
+                inner.idle = Some((
+                    key,
+                    session
+                        .take()
+                        .expect("the session is present before retention"),
+                ));
+                inner.idle_since = now;
+                false
+            }
+        };
+        if discard {
+            session
+                .take()
+                .expect("the discarded session is present")
+                .shutdown()
+                .await;
         }
-        if inner.closed || self.lifecycle.state() != LifecycleState::Open {
-            return;
-        }
-        inner.idle = Some((key, session));
-        inner.idle_since = now;
     }
 
     /// The final commit linearization point for one pooled `DoH` response.
@@ -1584,6 +1626,28 @@ impl DohReuseOwner {
                 SideEffectState::Sent,
             )
             .map_err(SecureError::from)
+    }
+
+    /// The live tracked-child count of the retained session's HTTP/2 scope, or
+    /// `None` when nothing is retained. Test-only.
+    #[cfg(test)]
+    fn active_children_for_test(&self) -> Option<usize> {
+        let inner = self.doh_lock();
+        let (_key, session) = inner.idle.as_ref()?;
+        session.active_children_for_test()
+    }
+
+    /// Installs a teardown barrier on the retained session's HTTP/2 scope.
+    ///
+    /// Returns `false` when no session is retained or the retained one is
+    /// HTTP/1.1 (which has no tracked children). Test-only.
+    #[cfg(test)]
+    fn install_teardown_pause_for_test(&self, pause: Arc<crate::secure::H2TeardownPause>) -> bool {
+        let inner = self.doh_lock();
+        let Some((_key, session)) = inner.idle.as_ref() else {
+            return false;
+        };
+        session.install_teardown_pause_for_test(pause).is_some()
     }
 
     #[cfg(test)]
@@ -1637,7 +1701,7 @@ impl DohReuseOwner {
         // always carries the protocol its session actually negotiated, so this
         // can only miss — the safe direction, because the session's own protocol
         // is what decides whether it may serve this request.
-        if let Some(session) = self.checkout_live(&self.service_key()?) {
+        if let Some(session) = self.checkout_live(&self.service_key()?).await {
             let negotiated = session.protocol_name().to_owned();
             match session
                 .exchange(&target, &authority, request_id, &control, deadline)
@@ -1650,21 +1714,26 @@ impl DohReuseOwner {
                     #[cfg(test)]
                     self.reach_commit_gate().await;
                     if let Err(error) = self.commit_pooled_response(&control, deadline) {
-                        drop(session);
+                        session.shutdown().await;
                         drop(lease);
                         return Err(error);
                     }
-                    self.release(self.confirmed_key(&negotiated)?, session);
+                    self.release(self.confirmed_key(&negotiated)?, session)
+                        .await;
                     drop(lease);
                     return Ok(response);
                 }
                 Err(outcome) => {
                     if !outcome.rebuildable {
-                        drop(outcome.session);
+                        if let Some(session) = outcome.session {
+                            session.shutdown().await;
+                        }
                         drop(lease);
                         return Err(outcome.error);
                     }
-                    drop(outcome.session);
+                    if let Some(session) = outcome.session {
+                        session.shutdown().await;
+                    }
                 }
             }
         }
@@ -1698,16 +1767,19 @@ impl DohReuseOwner {
                 #[cfg(test)]
                 self.reach_commit_gate().await;
                 if let Err(error) = self.commit_pooled_response(&control, deadline) {
-                    drop(session);
+                    session.shutdown().await;
                     drop(lease);
                     return Err(error);
                 }
-                self.release(self.confirmed_key(&negotiated)?, session);
+                self.release(self.confirmed_key(&negotiated)?, session)
+                    .await;
                 drop(lease);
                 Ok(response)
             }
             Err(outcome) => {
-                drop(outcome.session);
+                if let Some(session) = outcome.session {
+                    session.shutdown().await;
+                }
                 drop(lease);
                 Err(outcome.error)
             }
@@ -2569,6 +2641,204 @@ mod tests {
             );
         });
         peer.join();
+    }
+
+    /// Owner close must not report `Closed` while a pooled HTTP/2 session still
+    /// has live tracked children.
+    ///
+    /// A pooled h2 session owns Hyper's per-request send/pipe futures and its
+    /// connection driver through `H2ScopeLease`. `Drop` can only seal and abort;
+    /// it cannot wait. Without the explicit async teardown, `close()` would
+    /// return `Closed` while those children were still alive, which is exactly
+    /// the "tracked child outliving its connection" the design forbids.
+    ///
+    /// This drives a real pooled h2 session against a loopback peer, parks its
+    /// teardown on the existing `H2TeardownPause` barrier, and asserts that
+    /// `close()` does not complete until the barrier is released.
+    #[test]
+    fn a_pooled_h2_close_waits_for_tracked_children_to_drain() {
+        let identity = commit_identity();
+        let peer = CommitH2Peer::start(&identity);
+        let endpoint =
+            crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
+                .expect("doh endpoint");
+        let owner =
+            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+
+        with_runtime(async {
+            // One successful exchange leaves a retained, negotiated h2 session
+            // whose scope has live tracked children (the connection driver).
+            let query = test_query(0xd010);
+            let request = ExchangeRequest::new(&query).expect("request");
+            bounded_exchange(&owner, request, POOL_TEST_TIMEOUT)
+                .await
+                .expect("the h2 exchange succeeds");
+            assert_eq!(owner.idle_connections(), 1, "an h2 session is retained");
+
+            // Park the next teardown of that session's scope.
+            let pause = Arc::new(crate::secure::H2TeardownPause::new());
+            assert!(
+                owner.install_teardown_pause_for_test(Arc::clone(&pause)),
+                "the retained session must be HTTP/2 for this test"
+            );
+
+            let closer = {
+                let owner = Arc::clone(&owner);
+                tokio::spawn(async move { owner.close().await })
+            };
+
+            // Close must reach the barrier rather than completing immediately.
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+                .await
+                .expect("close reaches the pooled h2 teardown barrier");
+
+            // While the barrier is held, the children have not drained, so close
+            // must not have finished.
+            let mut closer = closer;
+            tokio::select! {
+                biased;
+                result = &mut closer => panic!(
+                    "close returned {result:?} while pooled h2 children were still live"
+                ),
+                () = tokio::task::yield_now() => {}
+            }
+
+            // Releasing the barrier lets the children drain and close converge.
+            pause.release();
+            let outcome = tokio::time::timeout(POOL_TEST_TIMEOUT, closer)
+                .await
+                .expect("close finishes once children drain")
+                .expect("close task joins");
+            assert_eq!(outcome, crate::CloseResult::Closed);
+            assert_eq!(
+                owner.idle_connections(),
+                0,
+                "close drops the retained session"
+            );
+            assert_eq!(owner.in_flight_exchanges(), 0);
+            assert_eq!(
+                owner.active_children_for_test(),
+                None,
+                "the drained session is gone, so its scope is gone with it"
+            );
+        });
+        peer.join();
+    }
+
+    /// Runs one pooled exchange under a bound, failing loudly instead of hanging.
+    async fn bounded_exchange(
+        owner: &DohReuseOwner,
+        request: ExchangeRequest<'_>,
+        bound: Duration,
+    ) -> Result<crate::secure::SecureResponse, crate::secure::SecureError> {
+        tokio::time::timeout(
+            bound,
+            Box::pin(owner.exchange(
+                request,
+                ExchangeContext::new(Instant::now() + bound, TransportCancellation::new()),
+            )),
+        )
+        .await
+        .expect("the exchange must finish within the bound")
+    }
+
+    /// A one-shot loopback DoH peer speaking HTTP/2 over TLS.
+    struct CommitH2Peer {
+        address: SocketAddr,
+        handle: std::thread::JoinHandle<()>,
+    }
+
+    impl CommitH2Peer {
+        fn start(identity: &CommitIdentity) -> Self {
+            use base64::Engine as _;
+            use tokio::net::TcpListener as AsyncTcpListener;
+            use tokio::time::timeout;
+            use tokio_rustls::TlsAcceptor;
+
+            let listener =
+                std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind loopback");
+            let address = listener.local_addr().expect("address");
+            listener.set_nonblocking(true).expect("non-blocking");
+
+            let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("safe protocol versions")
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![identity.leaf_der.clone(), identity.ca_der.clone()],
+                rustls::pki_types::PrivateKeyDer::try_from(identity.leaf_key.serialize_der())
+                    .expect("valid PKCS#8 key"),
+            )
+            .expect("consistent certificate and key");
+            config.alpn_protocols = vec![b"h2".to_vec()];
+            let config = Arc::new(config);
+
+            let handle = std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("server runtime");
+                runtime.block_on(async move {
+                    let listener =
+                        AsyncTcpListener::from_std(listener).expect("adopt the listener");
+                    let Ok(Ok((stream, _))) = timeout(POOL_TEST_TIMEOUT, listener.accept()).await
+                    else {
+                        return;
+                    };
+                    let acceptor = TlsAcceptor::from(config);
+                    let Ok(Ok(tls)) = timeout(POOL_TEST_TIMEOUT, acceptor.accept(stream)).await
+                    else {
+                        return;
+                    };
+                    let Ok(mut connection) = h2::server::handshake(tls).await else {
+                        return;
+                    };
+                    // Serve every stream on this connection so the pooled session
+                    // stays usable and its driver stays alive.
+                    loop {
+                        let next = timeout(POOL_TEST_TIMEOUT, connection.accept()).await;
+                        let Ok(Some(Ok((request, mut respond)))) = next else {
+                            return;
+                        };
+                        let Some(target) = request.uri().path_and_query() else {
+                            return;
+                        };
+                        let Some(encoded) = target.as_str().split("dns=").nth(1) else {
+                            return;
+                        };
+                        let Ok(query) =
+                            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)
+                        else {
+                            return;
+                        };
+                        let received_id = u16::from_be_bytes([query[0], query[1]]);
+                        let reply = test_response(received_id);
+                        let head = hyper::Response::builder()
+                            .status(200)
+                            .header("content-type", "application/dns-message")
+                            .body(())
+                            .expect("h2 response head");
+                        let Ok(mut send) = respond.send_response(head, false) else {
+                            return;
+                        };
+                        if send
+                            .send_data(hyper::body::Bytes::from(reply), true)
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                });
+            });
+
+            Self { address, handle }
+        }
+
+        fn join(self) {
+            let _ = self.handle.join();
+        }
     }
 
     /// Parks an owner on its pooled-response commit gate and returns the handle.

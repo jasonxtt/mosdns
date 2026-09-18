@@ -1349,10 +1349,9 @@ pub(crate) enum PooledDohSession {
         driver: Pin<Box<dyn Future<Output = hyper::Result<()>> + Send>>,
         /// The HTTP/2 child-tracking scope whose executor the driver dispatches
         /// to. It is deliberately never read: it is held for its whole pooled
-        /// lifetime because dropping it is what seals the scope and aborts every
-        /// tracked child — including the connection driver. That `Drop` is the
-        /// only teardown path for a discarded or closed pooled session, which is
-        /// why the field exists at all.
+        /// lifetime, and explicit async shutdown or `Drop` seals the scope and
+        /// aborts every tracked child. The field exists so the session owns the
+        /// scope across exchanges.
         _scope: H2ScopeLease,
     },
 }
@@ -1477,15 +1476,80 @@ impl PooledDohSession {
         }
     }
 
-    /// Whether the peer has already closed this session.
+    /// Tears this session down, awaiting every tracked HTTP/2 child.
     ///
-    /// Hyper reports this directly: a closed sender means the driver has ended,
-    /// so the session must not be handed out again.
-    #[must_use]
-    pub(crate) fn is_closed(&self) -> bool {
+    /// [`Drop`] can only seal and abort — it cannot await — so a session dropped
+    /// on a discard path would leave its children for the runtime to reap
+    /// whenever it next gets to them. That violates the requirement that no
+    /// tracked child outlives its connection and that close returns `Closed`
+    /// only once draining has finished. This is the explicit async teardown: it
+    /// seals admission, aborts the children, and waits for the tracked count to
+    /// reach zero.
+    ///
+    /// HTTP/1.1 has no tracked children, so it has nothing to wait for.
+    ///
+    /// It cannot deadlock against the serial pool: the only children a pooled
+    /// scope ever holds are Hyper's own per-request send/pipe futures and the
+    /// retained driver's, none of which wait on this owner.
+    pub(crate) async fn shutdown(self) {
         match self {
-            Self::Http1 { sender, .. } => sender.is_closed(),
-            Self::Http2 { sender, .. } => sender.is_closed(),
+            Self::Http1 { .. } => {}
+            Self::Http2 { _scope, .. } => _scope.finish().await,
+        }
+    }
+
+    /// Installs a deterministic teardown barrier on a pooled HTTP/2 session's
+    /// scope, so a test can prove that owner close waits for child drain.
+    ///
+    /// Returns `None` for an HTTP/1.1 session, which has no tracked children.
+    #[cfg(test)]
+    pub(crate) fn install_teardown_pause_for_test(
+        &self,
+        pause: Arc<H2TeardownPause>,
+    ) -> Option<()> {
+        match self {
+            Self::Http1 { .. } => None,
+            Self::Http2 { _scope, .. } => {
+                _scope.install_teardown_pause(pause);
+                Some(())
+            }
+        }
+    }
+
+    /// The number of live tracked children on a pooled HTTP/2 scope.
+    ///
+    /// Used by the crate's pooled-close regression to assert the scope really is
+    /// drained once owner close has completed. Test-only.
+    #[cfg(test)]
+    pub(crate) fn active_children_for_test(&self) -> Option<usize> {
+        match self {
+            Self::Http1 { .. } => None,
+            Self::Http2 { _scope, .. } => Some(_scope.active_children()),
+        }
+    }
+
+    /// Whether the peer has already closed this session.
+    /// `SendRequest::is_closed` alone is **not** sufficient for a *retained*
+    /// session: Hyper only learns that the connection ended by polling its
+    /// driver, and an idle pooled driver is not being polled between exchanges.
+    /// A FIN or RST arriving while the session sits in the pool would therefore
+    /// go unnoticed, and the next exchange would hand a request to a dead
+    /// connection.
+    ///
+    /// This probe closes that gap without sending a single DNS byte: it polls
+    /// the retained driver once with a no-op waker. A driver that is already
+    /// finished — cleanly or with an error — is a dead connection and reports
+    /// `true`; a driver still pending is alive and reports `false`, and having
+    /// been polled with a no-op waker it simply re-registers when the pooled
+    /// exchange polls it properly.
+    ///
+    /// Because no request has been handed to the driver yet, the caller may treat
+    /// an ended session as `NotSent` and perform its single fresh replacement.
+    #[must_use]
+    pub(crate) fn is_closed(&mut self) -> bool {
+        match self {
+            Self::Http1 { sender, driver } => sender.is_closed() || driver_ended(driver),
+            Self::Http2 { sender, driver, .. } => sender.is_closed() || driver_ended(driver),
         }
     }
 
@@ -1592,8 +1656,24 @@ impl PooledDohSession {
     }
 }
 
-/// A sender from either negotiated HTTP version.
+/// Polls a retained connection driver once to learn whether it has already
+/// finished.
 ///
+/// The driver is polled with a no-op waker, so this never blocks, never yields
+/// to the runtime, and never registers a real interest. A driver that is still
+/// running returns [`Poll::Pending`] and is untouched by the poll; a driver that
+/// has completed — cleanly or with a transport error — returns `Ready`, which is
+/// exactly the "the retained connection is gone" signal the pool needs.
+fn driver_ended(driver: &mut Pin<Box<dyn Future<Output = hyper::Result<()>> + Send>>) -> bool {
+    let waker = std::task::Waker::noop();
+    let mut context = std::task::Context::from_waker(waker);
+    matches!(
+        driver.as_mut().poll(&mut context),
+        std::task::Poll::Ready(_)
+    )
+}
+
+/// A sender from either negotiated HTTP version.
 /// Hyper's HTTP/1.1 and HTTP/2 senders expose the same `send_request` shape but
 /// share no trait, so this thin adapter lets the pooled path drive either one
 /// through the *same* validation helpers instead of duplicating the request
