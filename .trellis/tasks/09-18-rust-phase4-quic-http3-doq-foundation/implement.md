@@ -55,10 +55,15 @@ final planning summary is explicitly approved and `task.py start` is run.
 ## Slice 1 — DoQ one-shot exchange over loopback
 
 - RED loopback tests: one fresh-connection DoQ exchange succeeds — service
-  identity authenticated, original ID restored at the public boundary, 2-byte
-  prefix framing, STREAM FIN observed by the fixture, exactly one accepted
-  connection; handshake failure is `NotSent`; post-write failure is terminal
-  with no retry; no fallback to any other transport.
+  identity authenticated, peer wire ID 0 asserted before restore, original ID
+  restored at the public boundary, 2-byte prefix framing, request STREAM FIN
+  and peer response FIN both observed by the fixture, exactly one response
+  (returned as `SecureResponse` with `transport == Doq`, `http_version == None`),
+  exactly one accepted connection; handshake failure is `NotSent`; post-write
+  failure is terminal with no retry; no fallback to any other transport.
+- RED negative tests: missing peer response FIN and a trailing second response
+  are both terminal `PROTOCOL_ERROR`, never committed; cancellation actively
+  issues receive-side `DOQ_REQUEST_CANCELLED` on the stream.
 - Implement `DoqUpstream::exchange` per `design.md` §4 on the caller's
   runtime: numeric QUIC connect → `TlsPolicy`-derived TLS config with ALPN
   exactly `["doq"]` → one bidirectional stream → length-prefixed write with
@@ -75,11 +80,20 @@ final planning summary is explicitly approved and `task.py start` is run.
 
 - RED loopback tests: one fresh-connection DoH3 GET succeeds — `:authority`/
   path equal `DohEndpoint` accessors, request target byte-equal to
-  `get_request_target` output for the same input, original ID restored,
-  exactly one connection; handshake/ALPN failure is `NotSent`; no fallback to
-  DoH/H2/H1.
-- Implement the DoH3 driver per `design.md` §5 reusing the existing encoder
-  verbatim; ALPN exactly `["h3"]`; one GET shape only.
+  `get_request_target` output for the same input, request send-side FIN
+  observed, response meets the full DoH contract (200 +
+  `application/dns-message` + identity encoding + complete bounded body
+  ≤ 65535), original ID restored (returned as `SecureResponse` with
+  `transport == Doh3`, `http_version == Some(Http3)`), exactly one connection;
+  handshake/ALPN failure is `NotSent`; no fallback to DoH/H2/H1.
+- RED negative tests: non-200, wrong media type, compressed encoding,
+  oversized/incomplete body are all typed protocol errors; driver leaves no
+  residue after close/cancel (registration count reaches zero).
+- Implement the DoH3 driver per `design.md` §5–§5.1 reusing the existing
+  encoder verbatim and boundedly extracting/reusing the existing crate-private
+  DoH semantic helpers where the H3 response shape permits; ALPN exactly
+  `["h3"]`; one GET shape only; H3 driver follows the H2 child-tracking
+  ownership (tracked child, sealed teardown + drain, commit after drain).
 - Allowed: DoH3 driver module/tests/fixture. Forbidden: generic H3 client
   surface, H3 server code, encoder changes, pooling.
 
@@ -91,8 +105,10 @@ final planning summary is explicitly approved and `task.py start` is run.
   exchanges and is idempotent; guard/registration accounting reaches zero;
   no late success after terminal control.
 - RED tests for the explicit stream-error-code → typed-error mapping
-  (NO_ERROR / INTERNAL_ERROR / REQUEST_CANCELLED at minimum) and the
-  `NotSent`-vs-`Sent` classification table in `design.md` §7.
+  (NO_ERROR / INTERNAL_ERROR / PROTOCOL_ERROR / REQUEST_CANCELLED at minimum,
+  with `0x2` covering nonzero peer ID, missing response FIN, and trailing
+  extra responses) and the `NotSent`-vs-`Sent` classification table in
+  `design.md` §7.
 - Implement the control/error wiring with the existing `Lifecycle`/
   `ExchangeControl` vocabulary; no second gate, no hidden timer.
 - Allowed: control/error-mapping code and tests. Forbidden: behavior changes
@@ -138,7 +154,7 @@ git diff --check
 | Slice | Covers |
 |---|---|
 | 0 | A1 (audit), A2 (endpoint/ALPN/wire-shape) |
-| 1 | A3 (DoQ loopback), A5 (DoQ errors, no fallback), A6 (DoQ control) |
-| 2 | A4 (DoH3 loopback), A5 (DoH3 errors, no fallback), A6 (DoH3 control) |
+| 1 | A3 (DoQ loopback incl. `SecureResponse` result type), A5 (DoQ errors, no fallback), A6 (DoQ control) |
+| 2 | A4 (DoH3 loopback incl. `SecureResponse` result type), A5 (DoH3 errors, no fallback), A6 (DoH3 control) |
 | 3 | A5 (code mapping), A6 (deadline/cancel/close) |
 | 4 | A2 (resolver composition), A7 (no regression), A8 (gates/Linux/review) |

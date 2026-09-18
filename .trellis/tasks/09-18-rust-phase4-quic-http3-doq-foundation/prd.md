@@ -111,13 +111,25 @@ caller-owned deadline、取消/owner close 语义。
 - R4. **TLS 策略沿用 `TlsPolicy`**：verified/insecure 语义不变；ALPN 精确
   提供——DoQ 只提供 `doq`，DoH3 只提供 `h3`；**0-RTT early data 与 session
   resumption 保持关闭**（`tls.rs:224-227` 现状），启用需独立任务。
-- R5. **DoQ wire 编码**：2 字节大端长度前缀；出站 copy 的 DNS ID 置零
+- R5. **DoQ wire 与完成语义**：2 字节大端长度前缀；出站 copy 的 DNS ID 置零
   （RFC 9250 §4.2.1）；写完发 STREAM FIN；响应按同前缀 framing 读取后，
-  **先校验 peer wire 的 ID 为 0**（非零 peer ID 是终态 typed 错误，永不
-  commit），再恢复 caller 原 ID——`ExchangeResponse` 的
-  `request_id == response_id == 原 ID` 契约不变。
-- R6. **DoH3 请求编码**：复用 `DohEndpoint::get_request_target` 的现有实现，
-  不得写第二套 `dns` 参数编码；`:authority`/path 沿用 endpoint 访问器。
+  **先校验 peer wire 的 ID 为 0**（非零 peer ID 是 `DOQ_PROTOCOL_ERROR`，
+  终态，永不 commit）；成功路径还必须观测到 peer 响应侧 FIN 且恰好一个响应
+  （缺 FIN 或多余第二个响应同样是 `DOQ_PROTOCOL_ERROR`，终态）。取消路径必须
+  主动以 `DOQ_REQUEST_CANCELLED` 取消 stream 接收侧（RFC 9250 §4.3），而不只
+  是返回本地 typed 错误。恢复 caller 原 ID 后，返回 `SecureResponse`
+  （`transport == Doq`、`http_version == None`、
+  `request_id == response_id == 原 ID`，见 design.md §3.1 冻结词汇表）。
+- R6. **DoH3 完整 HTTP 契约（与既有 DoH 一致，只换传输）**：请求编码复用
+  `DohEndpoint::get_request_target`（不得写第二套 `dns` 参数编码），且请求
+  满足既有 DoH 请求契约（恰好一次 GET、无 body、无 User-Agent、无
+  Content-Encoding、`Accept: application/dns-message`；`:authority`/path 沿用
+  endpoint 访问器），请求发出后发发送侧 FIN；响应满足既有 DoH 响应契约
+  （status 200、`application/dns-message`、identity 编码、head ≤ 16 KiB /
+  ≤ 64 headers、完整有界 body ≤ 65535，否则为 `DohProtocol` 类 typed 错误）。
+  H3 连接 driver 归属沿用既有 H2 child-tracking 模式（见 design.md §5.1）：
+  driver 作为 exchange scope 的被追踪 child 运行、teardown 密封并排空、最终
+  commit 在排空之后、无 detached 任务。
 - R7. **绝对 deadline 与取消不被新传输改变**：每次 exchange 仍使用 caller 的
   原始 `ExchangeContext`；owner close → caller cancel → deadline 的优先级与
   `commit_final_response` 线性化点不变；`Lifecycle` 注册覆盖在途 exchange，
@@ -128,10 +140,14 @@ caller-owned deadline、取消/owner close 语义。
   `EnableHTTP3` "no fallback" 注释一致，且是本任务的显式契约）。
 - R9. **错误类型与既有并列不重叠**：新增 QUIC/DoQ/DoH3 错误变体与既有
   `UpstreamError`/`SecureError` 并列；QUIC stream 错误码到 typed 错误的映射
-  必须显式（至少覆盖 NO_ERROR/INTERNAL_ERROR/REQUEST_CANCELLED 语义）。
+  必须显式（至少覆盖 NO_ERROR/INTERNAL_ERROR/PROTOCOL_ERROR/REQUEST_CANCELLED
+  语义，其中 `DOQ_PROTOCOL_ERROR (0x2)` 覆盖非零 peer ID、缺响应 FIN、多余响应）。
 - R10. 保持既有 `UdpTcpPolicy`、`ResolverComposition`（既有三个入口）、
   `Endpoint`/`DotEndpoint`/`DohEndpoint` 构造契约不变；QUIC 是新增的传输面，
-  不改变单次 exchange 语义。
+  不改变单次 exchange 语义。结果词汇表按 design.md §3.1 加法冻结：
+  `Transport` 新增 `Quic`、`SecureTransport` 新增 `Doq`/`Doh3`、
+  `SecureHttpVersion` 新增 `Http3`；既有所有枚举臂含义不变，不得把 QUIC 结果
+  标注为既有传输。
 
 ## Acceptance Criteria
 
@@ -143,18 +159,28 @@ caller-owned deadline、取消/owner close 语义。
       DoH3 对 `DohEndpoint` 的复用有 deterministic 构造测试；hostname 永不
       进入 dial 路径；零端口拒绝。
 - [ ] A3. DoQ loopback：一次 fresh-connection DoQ exchange 成功——服务身份、
-      peer wire ID 为 0（先校验，后恢复；非零 peer ID 是终态错误）、原 ID 恢复、
-      2 字节前缀 framing、STREAM FIN 可观测（fixture 断言 FIN 或等价行为），
-      且只接受一条新连接。
+      peer wire ID 为 0（先校验，后恢复；非零 peer ID 是 `PROTOCOL_ERROR` 终态）、
+      原 ID 恢复、2 字节前缀 framing、请求侧 STREAM FIN 与响应侧 peer FIN 均可
+      观测（fixture 断言 FIN；恰好一个响应），返回 `SecureResponse`
+      （`transport == Doq`、`http_version == None`），且只接受一条新连接。
+      否定测试：缺响应 FIN、多余第二个响应均为 `PROTOCOL_ERROR` 终态，
+      永不 commit。
 - [ ] A4. DoH3 loopback：一次 fresh-connection DoH3 GET 成功——`:authority`/
       path 与 `DohEndpoint` 同值、请求字节与同输入的 DoH 路径同形（除 H3
-      传输封装外）、原 ID 恢复。
+      传输封装外）、请求发送侧 FIN 可观测、响应满足完整 DoH 契约（200 +
+      `application/dns-message` + identity 编码 + 完整有界 body ≤ 65535）、
+      原 ID 恢复，返回 `SecureResponse`（`transport == Doh3`、
+      `http_version == Some(Http3)`）。否定测试：非 200、错 media-type、
+      压缩编码、超大/不完整 body 均为 typed 协议错误；driver 在 close/cancel
+      后无残留（注册计数归零）。
 - [ ] A5. 错误分类：handshake 失败为 `NotSent`；写出后失败为终态无重试；
       无跨协议 fallback（DoQ↛DoT/TCP，DoH3↛DoH/H2）的否定测试；stream 错误码
-      映射有直接测试。
+      映射有直接测试（NO_ERROR/INTERNAL_ERROR/PROTOCOL_ERROR/REQUEST_CANCELLED，
+      含 `0x2` 的协议错误语义）。
 - [ ] A6. deadline/取消/close：复用 secure foundation 的语义——命中 deadline、
-      caller cancel、owner close 均为 typed 错误且优先级不变；`close()` 排空
-      在途 exchange；重复 close 收敛；无 late success。
+      caller cancel、owner close 均为 typed 错误且优先级不变；DoQ 在途取消必须
+      主动以 `DOQ_REQUEST_CANCELLED` 取消 stream 接收侧（本地 typed 错误之外）；
+      `close()` 排空在途 exchange；重复 close 收敛；无 late success。
 - [ ] A7. 无回归：既有全部 UDP/TCP/DoT/DoH/resolver/reuse 契约测试继续通过。
 - [ ] A8. Rust focused/full gates、`git diff --check`、task validate，以及隔离
       Debian VM 上的 Linux/Rust 1.85.x loopback/MSRV 证据通过，且选定 reviewer
@@ -163,7 +189,9 @@ caller-owned deadline、取消/owner close 语义。
 ## In scope
 
 - `rust/upstream-core` 内新增的 QUIC 传输模块（endpoint 构造、DoQ stream
-  exchange、DoH3 GET driver）、ALPN 常量、wire 编解码 helper、typed 错误变体。
+  exchange、DoH3 GET driver）、ALPN 常量、wire 编解码 helper、typed 错误变体，
+  以及 design.md §3.1 的加法结果词汇表扩展（`Transport::Quic`、
+  `SecureTransport::Doq/Doh3`、`SecureHttpVersion::Http3`）。
 - 精确裁剪的新依赖（QUIC 客户端 + H3）及其 license/MSRV/依赖图审计记录。
 - 与既有 `Lifecycle`/`ExchangeContext`/`SideEffectState`/`ServerIdentity`/
   `TlsPolicy`/`DohEndpoint::get_request_target` 的集成（复用，不重写）。
