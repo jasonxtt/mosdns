@@ -158,3 +158,19 @@ git diff --check
 | 2 | A4 (DoH3 loopback incl. `SecureResponse` result type), A5 (DoH3 errors, no fallback), A6 (DoH3 control) |
 | 3 | A5 (code mapping), A6 (deadline/cancel/close) |
 | 4 | A2 (resolver composition), A7 (no regression), A8 (gates/Linux/review) |
+
+## Planning review record — 2026-09-18
+
+- Reviewer: user-selected ChatGPT web project conversation for MosDNS Phase 4
+  upstream review (new conversation for this QUIC task).
+- Round 1: `FINAL: FAIL` on `af8a4cb` — 3 planning P1s (DoQ completion/
+  cancellation contract; DoH3 HTTP semantics + H3 driver ownership; public
+  result vocabulary unresolved). Remediated in commit `6ca5c4a`.
+- Round 2: `FINAL: PASS` on
+  `6ca5c4a9d439140bf8255a0c7da7adf9970818ff` (base `af8a4cb`; exactly 1 commit,
+  exactly 4 planning files; `rust` HEAD = `6ca5c4a`). P0=0, P1=0. All three
+  prior P1s closed; no new P0/P1 introduced.
+- Boundary: this PASS closes the planning remediation review only. It does not
+  authorize `task.py start`, dependency changes, implementation, Slice 0
+  execution, production wiring, or any later task. Next phase needs separate
+  explicit user authorization.
