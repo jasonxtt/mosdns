@@ -6,6 +6,7 @@
 
 mod composite;
 pub mod resolver;
+mod reuse;
 pub mod secure;
 mod tcp;
 mod udp;
@@ -17,8 +18,16 @@ pub use resolver::{
     ResolvedDestination, ResolvedUpstream, ResolverComposition, ResolverError, ResolverState,
     SystemClock, resolve_numeric,
 };
+// Additive connection-reuse surface: the reuse owner, its key, and its typed
+// pool error plus the confirmed task-local bound constants. No existing item
+// changes and nothing else is re-exported from the module.
+pub use reuse::{
+    DohReuseOwner, IDLE_TIMEOUT, MAX_IDLE_PER_KEY, MAX_IDLE_TOTAL, MAX_PENDING_PER_CONNECTION,
+    PoolError, ReuseKey, ReuseOwner, SecureKey, SecureKind, SecureReuseOwner,
+};
 pub use secure::{
     DohEndpoint, DotEndpoint, IdentityError, SecureError, ServerIdentity, ServiceUrlError,
+    TlsPolicy,
 };
 
 use std::fmt;
@@ -863,7 +872,11 @@ impl CommitPause {
     /// Signals that the transport reached the gate, then waits until the test
     /// releases it. Interest in `released` is registered before the arrival is
     /// announced, so a release cannot be missed.
-    async fn pause(&self) {
+    ///
+    /// Crate-visible so the connection-reuse owners can park at their own
+    /// pooled-response commit gate with the same seam the plain transports use,
+    /// instead of growing a second pause mechanism.
+    pub(crate) async fn pause(&self) {
         let released = self.released.notified();
         tokio::pin!(released);
         released.as_mut().enable();

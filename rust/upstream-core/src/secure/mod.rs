@@ -31,3 +31,12 @@ pub use error::{
     ServiceUrlError, TlsConfigError, TlsHandshakeFailure,
 };
 pub use tls::TlsPolicy;
+
+/// Crate-internal reuse surface for the secure transports.
+///
+/// The pooled-session types live beside the protocol code that owns their
+/// private state, so connection reuse reuses the existing framing, control race,
+/// and HTTP/2 child tracking instead of duplicating a second state machine.
+/// Nothing here is re-exported from the crate root.
+pub(crate) use doh::PooledDohSession;
+pub(crate) use dot::PooledDotSession;
