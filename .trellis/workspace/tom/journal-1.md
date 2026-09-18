@@ -274,3 +274,29 @@ Completed and root-reviewed rust-phase4-dual-stack-endpoint-selection. Fixed sta
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Rust Phase 4 upstream connection reuse
+
+**Date**: 2026-09-18
+**Task**: Rust Phase 4 upstream connection reuse
+**Branch**: `rust`
+
+### Summary
+
+完成 Rust Phase 4 上游连接复用与流水线基础：补齐 H2 scope registry 的取消安全与 stale/incoming drain，修复 H1/H2 并发 close 的共享 teardown ownership，移除 detached teardown；通过本机 workspace 测试、clippy、fmt、task validate，并在 Debian VM 完成 focused 验证且保持 mosdns 服务 active。网页端 mosdns 项目根复核最终返回 FINAL: PASS。已归档 rust-phase4-connection-reuse-pipeline。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9971459` | (see git log) |
+| `b5c6259` | (see git log) |
+| `6fcc5c3` | (see git log) |
+| `8a6c995` | (see git log) |
+| `c91c32c` | (see git log) |
+| `4eeab2d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
