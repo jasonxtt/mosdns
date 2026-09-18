@@ -41,6 +41,12 @@ All line numbers below were read from the working tree on 2026-09-18 (branch
   `request_id`/`response_id`/`transport`/`truncated`.
 - `Upstream::prepare_exchange` / `exchange` / `close`; each exchange carries
   its own owner lifecycle.
+- Public result vocabulary (frozen by `design.md` §3.1, additive only):
+  `Transport::{Udp,Tcp}` (`lib.rs:44`) gains `Quic`;
+  `SecureTransport::{Dot,Doh}` (`secure/dot.rs:48`) gains `Doq`/`Doh3`;
+  `SecureHttpVersion::{Http1,Http2}` (`secure/dot.rs:58`) gains `Http3`;
+  DoQ returns `SecureResponse` with `transport == Doq`, `http_version == None`;
+  DoH3 returns it with `transport == Doh3`, `http_version == Some(Http3)`.
 - `UdpTcpPolicy` (`composite.rs`): one TCP attempt after a valid UDP TC
   observation, same borrowed query/ID/deadline; UDP errors never trigger
   fallback.

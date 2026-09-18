@@ -10,7 +10,7 @@ transport layer beside the existing primitives** and does not replace them:
 
 | Layer | Existing artifact | Role in this design |
 |---|---|---|
-| Wire/model | `lib.rs` (`Endpoint`, `ExchangeRequest`, `ExchangeContext`, `ExchangeControl`, `SideEffectState`, `Lifecycle`, `Upstream`, `ExchangeResponse`) | **Reused verbatim.** QUIC exchanges use the same request/context/lifecycle/commit vocabulary. |
+| Wire/model | `lib.rs` (request/context/lifecycle/commit vocabulary) + `SecureResponse` family | **Reused, plus additive §3.1 arms.** QUIC exchanges use the same request/context/lifecycle/commit vocabulary; the result vocabulary is the frozen §3.1 extension (`Transport::Quic`, `SecureTransport::Doq/Doh3`, `SecureHttpVersion::Http3`). |
 | Identity | `secure/endpoint.rs` (`ServerIdentity`, `DotEndpoint`, `DohEndpoint`, `get_request_target`) | **Reused verbatim.** DoQ endpoint mirrors `DotEndpoint` shape; DoH3 reuses `DohEndpoint` unchanged. |
 | TLS policy | `secure/tls.rs` (`TlsPolicy`, `client_config_with_alpn`) | **Reused verbatim.** QUIC builds its TLS config from the frozen policy with exact ALPN. |
 | TCP framing | `tcp.rs:145-238` + `dns-core` `frame_response(_, FrameMode::Stream)` | **Reused, not duplicated.** The DoQ 2-byte-prefix encode reuses the same frozen `dns-core` Stream framing helper that `tcp.rs::encode_frame` uses. Only the stream lifecycle around it (FIN signaling, per-stream error-code mapping) is new driver code — never a second prefix codec. No change to `tcp.rs` or `dns-core`. |
@@ -19,9 +19,37 @@ transport layer beside the existing primitives** and does not replace them:
 
 New code: one `quic` module (endpoint construction, DoQ exchange, DoH3
 driver, typed errors, ALPN constants) plus exact manifest/lock additions for
-the audited QUIC dependencies. No Go/cgo/FFI, no C ABI symbols, no
-`MOSDNS_*_BACKEND` selector, no second runtime, no YAML/config/API/WebUI, no
-host wiring.
+the audited QUIC dependencies, plus the additive result-vocabulary extensions
+in §3.1. No Go/cgo/FFI, no C ABI symbols, no `MOSDNS_*_BACKEND` selector, no
+second runtime, no YAML/config/API/WebUI, no host wiring.
+
+### 3.1 Frozen result vocabulary (additive only, no relabeling)
+
+The executor MUST NOT mislabel QUIC results as an existing transport. The
+frozen vocabulary is:
+
+- `Transport` (at `lib.rs:44`): additively extended with `Quic`. Existing
+  `Udp`/`Tcp` arms keep their exact meaning; `Quic` covers both DoQ and DoH3
+  at the plain-transport level (they share the UDP-based QUIC connection
+  substrate; protocol identity is carried one layer up).
+- `SecureTransport` (at `secure/dot.rs:48`): additively extended with `Doq`
+  and `Doh3`. Existing `Dot`/`Doh` arms unchanged.
+- `SecureHttpVersion` (at `secure/dot.rs:58`): additively extended with
+  `Http3` (H3 selected through ALPN `h3`). Existing `Http1`/`Http2` arms
+  unchanged.
+- `DoqUpstream::exchange` returns `SecureResponse` with
+  `transport == SecureTransport::Doq`, `http_version == None` (DoQ has no HTTP
+  version, same as DoT), `request_id == response_id == caller ID`,
+  `truncated` from the validated response.
+- `Doh3Upstream::exchange` returns `SecureResponse` with
+  `transport == SecureTransport::Doh3`, `http_version == Some(Http3)`,
+  `request_id == response_id == caller ID` (ID restored before commit, same
+  `SecureResponse::doh` invariant), `truncated` from the validated response.
+- A plain-level `Upstream`-style DoQ/DoH3 entry, if introduced for resolver
+  composition, reports `Transport::Quic`; it MUST NOT report `Tcp` or `Udp`.
+- No-regression tests assert every pre-existing enum arm still constructs and
+  matches exactly as before (new arms are additive; no existing match is
+  reordered or given new meaning).
 
 ## 2. Dependency audit gate (hard gate before any QUIC code)
 
@@ -82,12 +110,23 @@ caller
        ├─ STREAM FIN (no more request bytes)             (RFC 9250 §4.2)
        ├─ read length-prefixed response on same stream
        ├─ validate peer wire FIRST: dns-core header check + wire ID MUST be 0
-       │   (RFC 9250 §4.2.1; a nonzero peer ID is a terminal typed error, never committed)
+       │   (RFC 9250 §4.2.1; a nonzero peer ID is DoQ PROTOCOL_ERROR, terminal,
+       │   never committed)
+       ├─ require exactly one response + peer response-side FIN
+       │   (RFC 9250: server MUST FIN after the final response; missing FIN or a
+       │   trailing second response is DoQ PROTOCOL_ERROR, terminal)
        ├─ restore original ID into owned response copy   (caller-visible wire keeps its ID)
        ├─ dns-core full response validation on the restored copy
        ├─ commit_final_response(...)                     (existing linearization)
        └─ close connection (one-shot; no pooling)
 ```
+
+Cancellation (active, not just local mapping): a caller/owner cancellation or
+deadline observed while the request is outstanding MUST actively cancel the
+receive side of the stream with `DOQ_REQUEST_CANCELLED` (RFC 9250 §4.3;
+mirrors the Go `WithdrawReserved`/`ExchangeReserved` ctx-done path), in
+addition to returning the typed local control error. Cancellation never
+commits a response received afterwards (§6 no-late-success rule).
 
 Framing notes:
 
@@ -97,9 +136,10 @@ Framing notes:
   shape or its edge handling. Only the surrounding stream lifecycle (FIN
   signaling, per-stream error codes) is new driver code.
 - The outbound copy (not the caller's borrowed bytes) has its ID bytes
-  zeroed before send; the committed `ExchangeResponse` wire has the original
-  ID restored. `request_id == response_id == caller ID` holds at the public
-  boundary exactly as for TCP/DoT/DoH.
+  zeroed before send; the committed `SecureResponse` wire has the original
+  ID restored with `transport == SecureTransport::Doq`. `request_id ==
+  response_id == caller ID` holds at the public boundary exactly as for
+  DoT/DoH.
 
 ## 5. DoH3 driver data flow
 
@@ -110,16 +150,49 @@ caller
        ├─ target = endpoint.get_request_target(request)  (existing encoder, reused verbatim)
        ├─ QUIC connect to endpoint.dial()                (caller runtime)
        ├─ TLS handshake, ALPN exactly ["h3"], verify endpoint.identity()
-       ├─ one H3 GET with :authority = endpoint.authority(), path = target
-       ├─ read application/dns-message body
+       ├─ one H3 GET: :authority = endpoint.authority(), path = target,
+       │   `Accept: application/dns-message`, no request body, no User-Agent,
+       │   no Content-Encoding                           (same request contract as `build_get_request`)
+       ├─ send-side FIN after the request                 (H3 request stream: no more request bytes)
+       ├─ validate response head: status 200, `application/dns-message`
+       │   (case-insensitive, parameters allowed), identity encoding only,
+       │   head ≤ 16 KiB / ≤ 64 headers, declared length ≤ 65535
+       ├─ read complete bounded body ≤ 65535 (early EOF / length mismatch = IncompleteBody, never a prefix)
        ├─ restore original ID, dns-core validation, commit_final_response
+       │   (returns `SecureResponse`: `transport == Doh3`,
+       │   `http_version == Some(Http3)`, restored IDs)
        └─ close connection (one-shot)
 ```
 
 - Request-target encoding is **not** reimplemented: `get_request_target`
   stays the single encoder. Any future encoder fix applies to H1/H2/H3 alike.
+- The response contract is **frozen equal to the existing DoH contract**
+  (`secure/doh.rs` module docs + `validate_response_head` + `read_body`):
+  exactly one GET, status 200, `application/dns-message`, no unsupported
+  content encoding, complete bounded body ≤ 65535, then `dns-core`
+  validation. A bounded extraction/reuse of the existing crate-private DoH
+  semantic helpers is authorized where the H3 response shape permits it;
+  existing H1/H2 behavior is unchanged and covered by the no-regression gate.
 - No H3 generic client surface is exposed: the driver speaks exactly one GET
   shape. Server/listener H3 code is forbidden in this task.
+
+### 5.1 H3 connection-driver ownership
+
+The H3 client connection is a driver that must be continuously polled, so
+"runs on the caller runtime" alone is insufficient. The driver follows the
+existing H2 ownership pattern (`H2Children`/`TrackedH2Executor`/
+`H2ScopeLease` at `secure/doh.rs:110-345`):
+
+- The driver future is registered as a tracked child of the exchange scope
+  before any request byte is sent; teardown seals admission, aborts all
+  registered children, and drains until every child guard drops — same as the
+  H2 scope lease.
+- A validated H3 response is only a candidate until the driver scope has
+  sealed and drained; the final lifecycle commit occurs after teardown,
+  immediately before returning success (same final-commit rule as H2).
+- Cancellation/close/deadline observed during drain wins over the candidate
+  response (§6 no-late-success rule); the driver introduces no detached task,
+  no hidden runtime, and no background work surviving the exchange.
 
 ## 6. Lifecycle, deadline, cancellation, close
 
@@ -150,7 +223,9 @@ Identical to the secure foundation, restated so the executor has no ambiguity:
 | TLS handshake failure (incl. ALPN mismatch) | `NotSent` | Typed TLS error (`TlsHandshakeFailure` family) |
 | Stream open failure before write | `NotSent` | Typed error; no retry loop |
 | Write completed, read failed/EOF/partial | `Sent` | Terminal typed error; no retry |
-| Stream error code received | mapped | `NO_ERROR` after completion is benign; `REQUEST_CANCELLED` on caller-cancel paths; `INTERNAL_ERROR`/peer errors are terminal typed errors |
+| Stream error code received | mapped | `NO_ERROR` after completion is benign; `REQUEST_CANCELLED` on caller-cancel paths; `INTERNAL_ERROR`/`PROTOCOL_ERROR`/other peer errors are terminal typed errors. `DOQ_PROTOCOL_ERROR (0x2)` is explicitly mapped: it is the code for nonzero peer ID, missing response FIN, and trailing extra responses |
+| Missing peer response FIN after the response | `Sent` | Terminal `PROTOCOL_ERROR`; never committed |
+| Trailing second response on the same stream | `Sent` | Terminal `PROTOCOL_ERROR`; never committed |
 | Response ID/QR mismatch or malformed wire | `Sent` | Terminal typed error |
 | Deadline/cancel/close observed | per phase | Typed control error with current state; no retry |
 | Valid response committed | — | `commit_final_response`; connection closed |
@@ -178,7 +253,8 @@ negation tests.
 
 | Contract | Source | Disposition | Evidence |
 |---|---|---|---|
-| Original DNS ID at public boundary | `lib.rs`; reuse PRD | **Preserve** | ID equality tests on both DoQ and DoH3 paths |
+| Original DNS ID at public boundary | `SecureResponse` invariant | **Preserve** | ID equality tests on both DoQ and DoH3 paths |
+| Result vocabulary | §3.1 (additive) | **New, frozen** | `Doq`/`Doh3`/`Http3`/`Quic` arms + no-regression tests on all pre-existing arms |
 | Numeric dial separate from service identity | `secure/endpoint.rs` | **Preserve** | Cross-identity construction/dial tests |
 | One absolute deadline; cancel/close precedence | `lib.rs`; secure tasks | **Preserve** | Deadline/cancel/close tests |
 | `Open -> Closing -> Closed`, close drains | `lib.rs` Lifecycle | **Preserve** | Close/drain/idempotence tests |
