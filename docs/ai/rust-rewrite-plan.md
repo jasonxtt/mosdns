@@ -321,28 +321,35 @@ Phase 5-6（Rust-native host 与清理）
 
 ## 9. 当前 Rust migration 状态
 
-截至 2026-09-16：
+截至 2026-09-18：
 
 - Phase 1 cache、Phase 2 matcher 及扩展、Phase 3A query/wire、Phase 3B
   sequence/execution foundation 均已完成并归档。Cache 的 soak、Miri 和
   扩展测试机门禁已关闭；早期 hybrid bridge 性能未达默认切换要求，不应
   继续优化 cgo 边界来替代 Rust-native host 工作。
-- Phase 4 UDP/TCP upstream foundation 的 Slice0–4 已全部验收。
-  Slice4 在 `9d43e9f` 获得 `PASS / CLOSED`，Actions `35090514316` 成功，
-  `cb15361` 记录最终门禁关闭。任务于 2026-09-16 收尾归档至
-  `.trellis/tasks/archive/2026-09/08-17-rust-phase4-upstream-foundation/`。
-- 已实现的 transport 范围是数字 IP UDP、每次新建连接的 plain TCP、
-  UDP TC→TCP 组合策略，以及对应的取消、deadline、关闭与错误契约。
-  这不代表整个 Phase 4 完成，也不代表独立 Rust host 已存在。
-- 下一任务为 `.trellis/tasks/09-16-rust-phase4-secure-upstream-foundation/`：
-  TLS/HTTPS（DoT/DoH）基础规划。用户仅授权规划，状态必须保持 `planning`；
-  不得运行 `task.py start`、实现协议、修改依赖或进行 host/生产接线。
-  规划将服务身份与数字拨号地址分离，bootstrap/resolver、连接复用与
-  pipeline、QUIC/HTTP3、listeners 保留为后续独立范围。
+- Phase 4 UDP/TCP upstream foundation 的 Slice0–4 已全部验收并归档至
+  `.trellis/tasks/archive/2026-09/08-17-rust-phase4-upstream-foundation/`
+  （Slice4 `PASS / CLOSED`）。
+- Phase 4 secure upstream（TLS/HTTPS，DoT/DoH）的 Slice0–4 已完成 root
+  review 并归档至
+  `.trellis/tasks/archive/2026-09/09-16-rust-phase4-secure-upstream-foundation/`
+  （Slice4 `PASS / CLOSED`，P0=0/P1=0）。已实现的 `rust/upstream-core`
+  secure 能力为**单次、每次新建连接**的 DoT 与 DoH（HTTP/1.1 与 HTTP/2），
+  并保持服务身份与数字拨号地址分离、默认开启校验 TLS。这不代表整个
+  Phase 4 完成，也不代表独立 Rust host 或 host 接线已存在。
+- 该 secure 任务的两点证据说明沿用其归档 `implement.md`：Rust 1.85 实际
+  未安装/运行，MSRV 仅为间接证据；其 `research/secure-upstream-evidence.md`
+  为 evidence-only、非规范。
+- **当前 active Trellis task** 为
+  `.trellis/tasks/09-18-rust-phase4-quic-http3-doq-foundation/`（planning
+  only；实现需经 reviewer 批准并执行 `task.py start` 后才授权）。此前已归档：
+  resolver/bootstrap（`09-17-rust-phase4-endpoint-resolution-foundation`）、
+  双栈选择（`09-18-rust-phase4-dual-stack-endpoint-selection`）、连接复用
+  （`09-18-rust-phase4-connection-reuse-pipeline`）。
+- 更后的范围各自需要独立任务与评审：socket policy（如 SOCKS/local bind 及
+  协议重传）、server listeners，然后 Phase 5 Rust-native host/控制面与完整
+  E2E、Phase 6 hybrid scaffolding retirement。
 
-后续顺序仍是安全上游协议 → QUIC/HTTP3 及相关解析/连接生命周期补齐 →
-server listeners → Phase 5 Rust-native host/控制面与完整 E2E → Phase 6
-hybrid scaffolding retirement。各项依赖与验收门禁必须在任务中明确。
 现有 Go live path 保持不变；Rust foundation 使用纯 Rust crate 组合，不新增
 Go fallback、cgo adapter 或 backend selector。最终发布仍需完整 native
 E2E、性能/长期运行及 retirement gate。
