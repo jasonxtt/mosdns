@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
+- **Total Sessions**: 10
 - **Last Active**: 2026-09-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~252 | Active |
+| `journal-1.md` | ~276 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-09-18 | Rust dual-stack endpoint selection review and MCP transport rollback | `125519e`, `604c8ee`, `00a7c56`, `ace1e32` | `rust` |
 | 9 | 2026-09-18 | Rust Phase 4 resolver foundation review and archive | `7ed1074`, `a87455b` | `rust` |
 | 8 | 2026-09-17 | Close secure upstream foundation | `c84d268`, `cb89974`, `ba2f545` | `rust` |
 | 7 | 2026-09-17 | Add Herdr routing mode | `9f6f1ae` | `rust` |

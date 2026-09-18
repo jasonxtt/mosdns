@@ -250,3 +250,27 @@ Completed the approved single-family Rust endpoint-resolution foundation. Claude
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Rust dual-stack endpoint selection review and MCP transport rollback
+
+**Date**: 2026-09-18
+**Task**: Rust dual-stack endpoint selection review and MCP transport rollback
+**Branch**: `rust`
+
+### Summary
+
+Completed and root-reviewed rust-phase4-dual-stack-endpoint-selection. Fixed stable clippy manual_assert_eq and replaced dual-stack fixture wall-clock polling with explicit UDP stop-marker handshakes; macOS workspace gates and Debian Rust 1.85.1 resolver evidence passed. Restored the pre-existing web-review transport docs and removed the user-level Playwright Chrome instructions; pushed code/doc rollback, then archived the task locally. Left unrelated dirty docs and DS_Store files untouched.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `125519e` | (see git log) |
+| `604c8ee` | (see git log) |
+| `00a7c56` | (see git log) |
+| `ace1e32` | (see git log) |
+
+### Status
+
+[OK] **Completed**
