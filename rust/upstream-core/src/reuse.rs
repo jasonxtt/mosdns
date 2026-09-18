@@ -1374,13 +1374,6 @@ pub struct DohReuseOwner {
     lifecycle: Arc<Lifecycle>,
     cancellation: TransportCancellation,
     inner: Arc<Mutex<DohPoolInner>>,
-    /// Signals that the shared pooled teardown has finished draining.
-    ///
-    /// Every concurrent `close()` waits on this rather than assuming that
-    /// observing `Closing` with no idle session and no leases means teardown is
-    /// done: a second `close()` could otherwise return `Closed` while the first
-    /// is still awaiting `shutdown()`.
-    teardown_finished: Arc<tokio::sync::Notify>,
     clock: Arc<dyn Clock>,
     /// Deterministic parking seam immediately before this owner's pooled-response
     /// commit gate. Compiled for tests only; see [`CommitPause`].
@@ -1421,7 +1414,29 @@ struct DohPoolInner {
     /// drained. An aborted attempt therefore leaves its scope in the list, and a
     /// later `close()` still finds it.
     scopes: Vec<crate::secure::H2DrainHandle>,
-    /// Whether the pooled teardown has fully finished (children drained).
+    /// The idle session currently being torn down by `close()`.
+    ///
+    /// It stays **in shared state** for the whole teardown rather than being
+    /// moved into the caller that started it. Closing a session is not a single
+    /// instant: there is a real window between taking ownership of it and the
+    /// point where it has actually been dropped. If a caller held it locally
+    /// across that window, a concurrent `close()` would find `idle == None`,
+    /// finish its sweep, and report `Closed` while the connection was still
+    /// alive — and if that caller were aborted, the session would be dropped
+    /// with no record and no waiter, so a later `close()` could not even know it
+    /// existed. Keeping it here makes the in-progress teardown visible to every
+    /// concurrent closer and recoverable after an abort.
+    closing: Option<crate::secure::PooledDohSession>,
+    /// Set once the session in [`Self::closing`] has been fully dropped.
+    ///
+    /// `shutdown()` consumes the session, so completion is *defined* as that
+    /// having happened, not as "some caller reached this line". Only when this is
+    /// true may a `close()` report `Closed`: a session still held anywhere means
+    /// the connection may still be alive, which is exactly what PRD A4 / design
+    /// §4 forbid close from overlooking.
+    session_closed: bool,
+    /// Whether the pooled teardown has fully finished (session dropped, children
+    /// drained).
     teardown_complete: bool,
 }
 
@@ -1458,9 +1473,10 @@ impl DohReuseOwner {
                 leased: 0,
                 closed: false,
                 scopes: Vec::new(),
+                closing: None,
+                session_closed: false,
                 teardown_complete: false,
             })),
-            teardown_finished: Arc::new(tokio::sync::Notify::new()),
             clock: Arc::new(SystemClock),
             #[cfg(test)]
             commit_pause: Mutex::new(None),
@@ -1549,36 +1565,69 @@ impl DohReuseOwner {
         }
         self.lifecycle.drain().await;
 
-        // Every caller performs the drain itself and returns only after it.
+        // The *session* cannot be drained idempotently by every caller the way a
+        // scope can, and it must not be moved into a caller across an await: that
+        // is precisely the window this fixes. So it is parked in shared state,
+        // and teardown is split into steps that leave it there until it is
+        // actually dropped:
         //
-        // There is deliberately no single-owner leadership token. Distinguishing
-        // "a live caller is draining" from "an abandoned caller left the work
-        // half-done" needs a liveness signal, and both guesses are wrong: a live
-        // owner treated as gone abandons its work, while an abandoned owner
-        // treated as live waits forever. Because the drain is idempotent, and
-        // because nothing leaves shared state until it has actually drained, each
-        // caller can simply do it: concurrent callers await the same children, so
-        // each returns only after the drain, and an aborted caller strands
-        // nothing. This also keeps the teardown inline, as `design.md` §3 requires.
+        //   A. move `idle` -> `closing`, synchronously under one lock;
+        //   B. await the session's HTTP/2 scope drain, if it has one (no-op for
+        //      HTTP/1.1, so A->C is then an atomic synchronous sequence);
+        //   C. drop the session and record `session_closed`, synchronously.
+        //
+        // Completion is defined by C having happened, not by any caller reaching
+        // a line, so a caller aborted anywhere leaves `closing` populated and
+        // `session_closed` false and the next `close()` redoes the same work.
+        // Every caller performs all three steps — there is no owner to wait on,
+        // so there is nothing that can be left permanently claimed.
         if self.doh_lock().teardown_complete {
             return self.complete_close();
         }
 
-        // Take the idle session. A second caller finding it already gone still
-        // blocks in the scope drain below, which is the part that actually waits
-        // for the children.
-        let idle = self.doh_lock().idle.take();
-        if let Some((_key, session)) = idle {
-            session.shutdown().await;
+        // A. Park the session in shared state, never in a caller-local.
+        {
+            let mut inner = self.doh_lock();
+            if inner.closing.is_none() && !inner.session_closed {
+                inner.closing = inner.idle.take().map(|(_key, session)| session);
+            }
         }
 
-        // Drain every registered scope, including ones an abandoned attempt left
-        // behind. Nothing is forgotten until it has actually drained, so an abort
-        // here strands nothing.
+        // B. Drain the parked session's own HTTP/2 scope, if it has one. The
+        // handle is cloned out, so the session stays in shared state throughout;
+        // HTTP/1.1 has no scope, making A and C adjacent synchronous steps.
+        let token = {
+            let inner = self.doh_lock();
+            if inner.session_closed {
+                None
+            } else {
+                inner
+                    .closing
+                    .as_ref()
+                    .and_then(crate::secure::PooledDohSession::h2_drain_handle)
+            }
+        };
+        if let Some(token) = token {
+            token.finish().await;
+        }
+
+        // C. Drop the session — this is the actual close of the connection — and
+        // record it. Synchronous under the lock, so no window exists between the
+        // session becoming unowned and it being gone.
+        {
+            let mut inner = self.doh_lock();
+            if !inner.session_closed {
+                inner.closing = None;
+                inner.session_closed = true;
+            }
+        }
+
+        // Drain every remaining registered scope, including ones an abandoned
+        // attempt left behind. Nothing is forgotten until it has actually
+        // drained, so an abort here strands nothing.
         self.drain_stale_scopes(None).await;
 
         self.doh_lock().teardown_complete = true;
-        self.teardown_finished.notify_waiters();
         self.complete_close()
     }
 
