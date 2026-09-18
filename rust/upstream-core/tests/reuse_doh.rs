@@ -30,6 +30,14 @@ use tokio_rustls::TlsAcceptor;
 /// The upper bound on any single await: a deadlock guard only.
 const DEADLINE: Duration = Duration::from_secs(20);
 
+/// How long a hang-up fixture waits after sending its response before ending the
+/// connection, so the client can finish reading that response first.
+///
+/// This is fixture timing, not a test assertion: the idle-close tests assert on
+/// accept counts, never on elapsed time. Without it the peer's FIN races the
+/// client's response read and the *first* exchange fails instead of the second.
+const HANG_UP_SETTLE: Duration = Duration::from_millis(250);
+
 async fn bounded<F: std::future::Future>(future: F) -> F::Output {
     tokio::time::timeout(DEADLINE, future)
         .await
@@ -131,17 +139,109 @@ fn server_config(set: &FixtureSet) -> Arc<rustls::ServerConfig> {
     Arc::new(config)
 }
 
+/// Serves `GET /dns-query?...` requests on one accepted HTTP/1.1 TLS connection
+/// until the peer goes away, the fixture is released, or the configured hang-up
+/// fires.
+///
+/// `hang_up_after_first` ends this connection (and signals `hung_up`) after the
+/// first response, modelling a peer that closes an idle kept-alive connection
+/// between exchanges. Returns to the caller's accept loop either way.
+async fn serve_h1_connection(
+    tls: &mut tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
+    stop: &AtomicBool,
+    answer_ip: [u8; 4],
+    hang_up_after_first: bool,
+    hung_up: &AtomicBool,
+) {
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 512];
+        let head_end = loop {
+            if let Some(index) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
+                break index + 4;
+            }
+            if buffer.len() > 64 * 1024 {
+                return;
+            }
+            // The release flag must be observed inside this loop too: a client
+            // that holds the session idle between exchanges would otherwise keep
+            // this connection parked forever and `join` could never return.
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
+            match tokio::time::timeout(Duration::from_millis(20), tls.read(&mut chunk)).await {
+                // EOF and a read error both mean the peer is gone.
+                Ok(Ok(0) | Err(_)) => return,
+                Ok(Ok(read)) => buffer.extend_from_slice(&chunk[..read]),
+                // An idle gap keeps the session for a later reuse.
+                Err(_) => {}
+            }
+        };
+
+        let head = String::from_utf8_lossy(&buffer[..head_end]).into_owned();
+        let Some(target) = head.lines().next().and_then(|line| line.split(' ').nth(1)) else {
+            return;
+        };
+        // The query travels base64url-encoded in the `dns` param, exactly as the
+        // reviewed encoder produces it.
+        let Some(encoded) = target.split("dns=").nth(1) else {
+            return;
+        };
+        let Ok(query) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded) else {
+            return;
+        };
+        let reply = a_response(&query, answer_ip);
+        let mut response = Vec::new();
+        response.extend_from_slice(b"HTTP/1.1 200 OK\r\n");
+        response.extend_from_slice(b"content-type: application/dns-message\r\n");
+        response.extend_from_slice(format!("content-length: {}\r\n", reply.len()).as_bytes());
+        response.extend_from_slice(b"\r\n");
+        response.extend_from_slice(&reply);
+        if tls.write_all(&response).await.is_err() || tls.flush().await.is_err() {
+            return;
+        }
+        if hang_up_after_first {
+            // Let the client finish reading the response, then end *this
+            // connection*. The settle is fixture timing only: the assertions are
+            // about accept counts, never elapsed time, and the wait is bounded.
+            let _ = tokio::time::timeout(HANG_UP_SETTLE, std::future::pending::<()>()).await;
+            let _ = tls.shutdown().await;
+            hung_up.store(true, Ordering::SeqCst);
+            // Return to the accept loop rather than ending the fixture, so the
+            // client's replacement dial still lands.
+            return;
+        }
+    }
+}
+
 /// A `DoH` server that serves `GET /dns-query?...` over HTTP/1.1 on each accepted
 /// TLS connection, keeping a connection open across an idle gap.
 struct DohServer {
     address: SocketAddr,
     accepts: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
+    /// Set by the server thread once it has ended the connection after the first
+    /// response, so a test can wait for a genuinely dead idle peer instead of
+    /// sleeping.
+    hung_up: Arc<AtomicBool>,
     handle: std::thread::JoinHandle<()>,
 }
 
 impl DohServer {
     fn start(set: &FixtureSet, answer_ip: [u8; 4]) -> Self {
+        Self::start_with(set, answer_ip, false)
+    }
+
+    /// Starts the server, optionally hanging up the TLS connection right after
+    /// the first response.
+    ///
+    /// `hang_up_after_first` models a peer that closes an idle kept-alive
+    /// connection between exchanges — the half-close the pool must notice before
+    /// it hands the session out again.
+    fn start_with(set: &FixtureSet, answer_ip: [u8; 4], hang_up_after_first: bool) -> Self {
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
         let address = listener.local_addr().expect("addr");
         listener.set_nonblocking(true).expect("nonblocking");
@@ -149,6 +249,8 @@ impl DohServer {
         let accepts_in = Arc::clone(&accepts);
         let stop = Arc::new(AtomicBool::new(false));
         let stop_in = Arc::clone(&stop);
+        let hung_up = Arc::new(AtomicBool::new(false));
+        let hung_up_in = Arc::clone(&hung_up);
         let config = server_config(set);
 
         let handle = std::thread::spawn(move || {
@@ -172,71 +274,14 @@ impl DohServer {
                     let Ok(mut tls) = acceptor.accept(stream).await else {
                         continue;
                     };
-                    // Serve requests on this connection until EOF or release.
-                    loop {
-                        if stop_in.load(Ordering::SeqCst) {
-                            return;
-                        }
-                        let mut buffer = Vec::new();
-                        let mut chunk = [0u8; 512];
-                        let head_end = loop {
-                            if let Some(index) = buffer.windows(4).position(|w| w == b"\r\n\r\n") {
-                                break index + 4;
-                            }
-                            if buffer.len() > 64 * 1024 {
-                                return;
-                            }
-                            // The release flag must be observed inside this loop
-                            // too: a client that holds the session idle between
-                            // exchanges would otherwise keep this connection
-                            // parked forever and `join` could never return.
-                            if stop_in.load(Ordering::SeqCst) {
-                                return;
-                            }
-                            match tokio::time::timeout(
-                                Duration::from_millis(20),
-                                tls.read(&mut chunk),
-                            )
-                            .await
-                            {
-                                // EOF and a read error both mean the peer is gone.
-                                Ok(Ok(0) | Err(_)) => return,
-                                Ok(Ok(read)) => buffer.extend_from_slice(&chunk[..read]),
-                                // An idle gap keeps the session for a later reuse.
-                                // The loop simply waits for the next byte.
-                                Err(_) => {}
-                            }
-                        };
-
-                        let head = String::from_utf8_lossy(&buffer[..head_end]).into_owned();
-                        let Some(target) =
-                            head.lines().next().and_then(|line| line.split(' ').nth(1))
-                        else {
-                            return;
-                        };
-                        // The query travels base64url-encoded in the `dns` param,
-                        // exactly as the reviewed encoder produces it.
-                        let Some(encoded) = target.split("dns=").nth(1) else {
-                            return;
-                        };
-                        let Ok(query) =
-                            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)
-                        else {
-                            return;
-                        };
-                        let reply = a_response(&query, answer_ip);
-                        let mut response = Vec::new();
-                        response.extend_from_slice(b"HTTP/1.1 200 OK\r\n");
-                        response.extend_from_slice(b"content-type: application/dns-message\r\n");
-                        response.extend_from_slice(
-                            format!("content-length: {}\r\n", reply.len()).as_bytes(),
-                        );
-                        response.extend_from_slice(b"\r\n");
-                        response.extend_from_slice(&reply);
-                        if tls.write_all(&response).await.is_err() || tls.flush().await.is_err() {
-                            return;
-                        }
-                    }
+                    serve_h1_connection(
+                        &mut tls,
+                        &stop_in,
+                        answer_ip,
+                        hang_up_after_first,
+                        &hung_up_in,
+                    )
+                    .await;
                 }
             });
         });
@@ -245,12 +290,29 @@ impl DohServer {
             address,
             accepts,
             stop,
+            hung_up,
             handle,
         }
     }
 
     fn accepts(&self) -> usize {
         self.accepts.load(Ordering::SeqCst)
+    }
+
+    /// Waits until the server thread has ended the first connection, bounded.
+    ///
+    /// The wait polls a flag with a bounded sleep rather than spinning, because
+    /// the peer sits on its own thread and runtime: a pure `yield_now` loop would
+    /// exhaust its budget long before the peer's settle elapsed. Only the
+    /// *assertions* are timing-free; this is fixture synchronization.
+    async fn await_hang_up(&self) {
+        for _ in 0..100 {
+            if self.hung_up.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the server never reported its post-response hang-up");
     }
 
     fn join(self) {
@@ -289,11 +351,20 @@ struct H2DohServer {
     accepts: Arc<AtomicUsize>,
     streams: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
+    /// Set by the server thread once it has ended the connection after the first
+    /// stream, so a test can wait for a genuinely dead idle peer.
+    hung_up: Arc<AtomicBool>,
     handle: std::thread::JoinHandle<()>,
 }
 
 impl H2DohServer {
     fn start(set: &FixtureSet, answer_ip: [u8; 4]) -> Self {
+        Self::start_with(set, answer_ip, false)
+    }
+
+    /// Starts the server, optionally ending the connection right after the first
+    /// stream, modelling an idle h2 peer that goes away between exchanges.
+    fn start_with(set: &FixtureSet, answer_ip: [u8; 4], hang_up_after_first: bool) -> Self {
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
         let address = listener.local_addr().expect("addr");
         listener.set_nonblocking(true).expect("nonblocking");
@@ -303,6 +374,8 @@ impl H2DohServer {
         let streams_in = Arc::clone(&streams);
         let stop = Arc::new(AtomicBool::new(false));
         let stop_in = Arc::clone(&stop);
+        let hung_up = Arc::new(AtomicBool::new(false));
+        let hung_up_in = Arc::clone(&hung_up);
         let config = h2_server_config(set);
 
         let handle = std::thread::spawn(move || {
@@ -377,6 +450,17 @@ impl H2DohServer {
                         // Frames queued by `send_data` reach the wire when the
                         // connection is polled again, which the next iteration's
                         // `accept` does.
+                        if hang_up_after_first {
+                            // Poll once so the queued response frames reach the
+                            // wire, then end the connection. The client keeps a
+                            // retained h2 session whose peer is gone, and must
+                            // notice before its next exchange.
+                            let _ = tokio::time::timeout(HANG_UP_SETTLE, connection.accept()).await;
+                            hung_up_in.store(true, Ordering::SeqCst);
+                            // End only this connection; return to the accept loop
+                            // so the client's replacement dial lands.
+                            break;
+                        }
                     }
                 }
             });
@@ -387,12 +471,27 @@ impl H2DohServer {
             accepts,
             streams,
             stop,
+            hung_up,
             handle,
         }
     }
 
     fn accepts(&self) -> usize {
         self.accepts.load(Ordering::SeqCst)
+    }
+
+    /// Waits until the server thread has ended the first connection, bounded.
+    ///
+    /// Polls a flag with a bounded sleep rather than spinning; see the H1 twin
+    /// for why. Only the assertions are timing-free.
+    async fn await_hang_up(&self) {
+        for _ in 0..100 {
+            if self.hung_up.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the server never reported its post-stream hang-up");
     }
 
     fn streams(&self) -> usize {
@@ -621,6 +720,81 @@ fn a_cancelled_first_caller_token_does_not_kill_the_retained_http2_session() {
             "cancelling the first caller's token must not have forced a new \
              connection"
         );
+        server.join();
+    });
+}
+
+/// A retained HTTP/1.1 session whose peer half-closed while it sat idle must be
+/// rejected before the next exchange, and the owner's single fresh replacement
+/// must serve that exchange.
+///
+/// This is the inter-exchange FIN the pool would otherwise miss: the driver is
+/// not polled while the session is idle, so `sender.is_closed()` alone stays
+/// false. The exchange must still succeed (via the replacement dial) and the
+/// stale session must not be recycled.
+#[test]
+fn an_idle_half_closed_h1_session_is_replaced_before_reuse() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let server = DohServer::start_with(&set, [192, 0, 2, 70], true);
+        let owner = doh_owner(&set, server.address, "https://dns.example/dns-query");
+        let query = query_wire(0x7007, "h1-idle-close.example.org");
+
+        let first = pooled_exchange(&owner, &query, context(10))
+            .await
+            .expect("first h1 exchange");
+        assert_eq!(first.request_id(), 0x7007);
+        assert_eq!(server.accepts(), 1, "the first exchange dialed once");
+
+        // The peer has now closed the connection. Wait until the server thread
+        // has actually ended the TLS session, so the client is genuinely idle
+        // against a dead peer rather than racing the close.
+        server.await_hang_up().await;
+
+        // The second exchange must still succeed: the dead idle session is
+        // detected and replaced by the single permitted fresh dial.
+        let second = pooled_exchange(&owner, &query, context(10))
+            .await
+            .expect("second h1 exchange must be served by a fresh connection");
+        assert_eq!(second.request_id(), 0x7007);
+        assert_eq!(
+            server.accepts(),
+            2,
+            "the stale idle session must be replaced exactly once"
+        );
+        assert_eq!(owner.idle_connections(), 1, "the replacement is retained");
+        server.join();
+    });
+}
+
+/// The HTTP/2 twin of the idle half-close case: an ended retained h2 driver must
+/// be detected before the next stream is handed to it.
+#[test]
+fn an_idle_half_closed_h2_session_is_replaced_before_reuse() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let server = H2DohServer::start_with(&set, [192, 0, 2, 71], true);
+        let owner = doh_owner(&set, server.address, "https://dns.example/dns-query");
+        let query = query_wire(0x7008, "h2-idle-close.example.org");
+
+        let first = pooled_exchange(&owner, &query, context(10))
+            .await
+            .expect("first h2 exchange");
+        assert_eq!(first.request_id(), 0x7008);
+        assert_eq!(server.accepts(), 1);
+
+        server.await_hang_up().await;
+
+        let second = pooled_exchange(&owner, &query, context(10))
+            .await
+            .expect("second h2 exchange must be served by a fresh connection");
+        assert_eq!(second.request_id(), 0x7008);
+        assert_eq!(
+            server.accepts(),
+            2,
+            "the ended idle h2 session must be replaced exactly once"
+        );
+        assert_eq!(owner.idle_connections(), 1, "the replacement is retained");
         server.join();
     });
 }

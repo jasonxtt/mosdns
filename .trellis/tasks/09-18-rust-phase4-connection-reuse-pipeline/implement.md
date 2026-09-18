@@ -126,6 +126,10 @@ commit/push, and the selected reviewer's explicit scoped PASS.
   owns the handshake and framing so reuse composes the existing
   `write_frame`/`flush_bytes`/`read_frame` helpers and the same control race
   rather than duplicating a second DoT state machine. No existing item changed.
+- `rust/upstream-core/src/tcp.rs`: `write_all_bytes` now returns a private
+  `WriteFailure { accepted }` and `write_frame` classifies a zero-progress write
+  failure as `Send(NotSent)` rather than `Send(MaybeSent)` (P1-3). The public
+  error surface and framing behaviour are unchanged.
 - `rust/upstream-core/src/secure/doh.rs`: adds `PooledDohSession` (HTTP/1.1 and
   HTTP/2 variants), `PooledDohOutcome`, the `DohSender` adapter, and
   `run_pooled_exchange`, and makes `H2ScopeLease::pooled` obtainable so a pooled
@@ -358,15 +362,103 @@ no dependency was added.
       built from a specific verified policy, and still agrees with the insecure
       policy key.
 
+### Root reviewer FINAL FAIL — three P1 blockers, and their fixes
+
+A later root review returned **FAIL** on three current-task P1 items. All three
+were real; each fix below records the RED evidence that the test discriminates.
+
+**P1-1 — pooled HTTP/2 close/drain did not wait for tracked children.**
+`H2ScopeLease::seal_and_abort` was reachable only from `Drop` (and the fresh
+path's async `finish`), and the pooled session was dropped on close/discard. A
+`Drop` cannot await, so `DohReuseOwner::close` could return `Closed`, and every
+session-discard path could return, while Hyper's per-request send/pipe futures
+and the retained driver were still live — a tracked child outliving its
+connection, which `design.md` §8 forbids, and close completing before draining,
+which `design.md` §4 forbids.
+
+Fix: `PooledDohSession::shutdown(self)` is the explicit async teardown — it seals
+and aborts, then awaits `H2ScopeLease::finish()` (which waits for the tracked
+count to reach zero); HTTP/1.1 has no children and returns immediately.
+`DohReuseOwner::close` takes the retained session and awaits `shutdown()` before
+finalizing, and every discard path (commit failure, non-rebuildable failure,
+rebuildable failure, and the fresh-dial failure) awaits it too.
+`begin_close` no longer drops the idle session (it cannot await); the session
+stays parked for `close` to tear down, and lease admission is already refused
+once the lifecycle leaves `Open`, so a parked session can never be handed out.
+No caller token is captured, and the serial-pool semantics are unchanged: a
+pooled scope never holds the owner's registration, so `drain()` still converges.
+
+Follow-up hardening before the next review: the same explicit teardown now also
+covers a session rejected during asynchronous checkout (idle expiry, service-key
+mismatch, or an already-ended driver) and a session returned after the owner has
+started closing. `checkout_live` and `release` therefore do not silently drop a
+pooled HTTP/2 scope while its tracked children are still being reaped.
+
+Regression: `a_pooled_h2_close_waits_for_tracked_children_to_drain` drives a real
+pooled h2 session against a loopback `h2` peer, parks its teardown on the
+existing `H2TeardownPause` barrier, and asserts `close()` does **not** complete
+while the children are live and does complete, with the scope gone, once the
+barrier releases. **RED:** removing the `session.shutdown().await` call makes it
+fail with `close reaches the pooled h2 teardown barrier: Elapsed(())` — close
+returned while children were still live.
+
+**P1-2 — a retained idle DoH session could miss an inter-exchange FIN/RST.**
+`PooledDohSession::is_closed` only consulted `SendRequest::is_closed()`.
+Hyper learns a connection ended by polling its driver, and an idle pooled driver
+is not polled between exchanges, so a FIN arriving while the session sat in the
+pool went unnoticed and the next request was handed to a dead connection.
+
+Fix: `is_closed` also polls the retained driver once through `driver_ended`
+(no-op waker). A driver already finished — cleanly or with a transport error —
+means the connection is gone; a pending driver is alive and, having been polled
+with a no-op waker, simply re-registers when the pooled exchange polls it
+properly. No DNS byte is involved, so the owner classifies an ended idle session
+as `NotSent` and performs its single fresh replacement. Nothing retries after a
+request has been handed to the driver.
+
+Regression: `an_idle_half_closed_h1_session_is_replaced_before_reuse` and
+`an_idle_half_closed_h2_session_is_replaced_before_reuse` use loopback peers that
+answer once and then close the connection, wait on a fixture signal for a
+genuinely dead idle peer, and assert the second exchange still succeeds on a
+**new** connection (`accepts == 2`) with the replacement retained. **RED:**
+restoring the `sender.is_closed()`-only check makes both fail with
+`Transport(Receive(MaybeSent))` on the second exchange — the request was handed
+to the dead session.
+
+**P1-3 — zero-progress write failures were reported as `MaybeSent`.**
+`write_frame` mapped every write error to `Send(MaybeSent)`, so the owners'
+`Send(NotSent)` checks in `ReuseOwner::run_framed` and
+`PooledDotOutcome::failed` were unreachable and the single permitted replacement
+could never trigger.
+
+Fix: the private `write_all_bytes` now returns a `WriteFailure { accepted }`
+tracking bytes accepted across the whole loop, and `WriteFailure::side_effect()`
+maps zero accepted bytes to `NotSent` and any progress to `MaybeSent`. The public
+`UpstreamError`/`SideEffectState` surface is unchanged and no new dependency was
+added; the re-encode-before-first-write guarantee is untouched.
+
+Regression: `write_frame_reports_zero_progress_as_send_with_not_sent_state`
+(fails before accepting any byte) and
+`write_frame_reports_zero_byte_write_as_send_with_not_sent_state` (a `WriteZero`
+writer), with the existing `write_frame_reports_partial_write_as_send_with_uncertain_state`
+still pinning the partial case at `MaybeSent`. **RED:** forcing the zero case
+back to `MaybeSent` makes both new tests fail with
+`left: Send(MaybeSent) / right: Send(NotSent)`.
+
+Test-only seams added for this work: `PooledDohSession::{shutdown,
+install_teardown_pause_for_test, active_children_for_test}` and
+`DohReuseOwner::{install_teardown_pause_for_test, active_children_for_test}`.
+All are `pub(crate)`/`cfg(test)`; no public API, config, or manifest changed.
+
 ### Local gates (macOS)
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | clean, exit 0 |
-| `cargo test --manifest-path rust/Cargo.toml --workspace --locked` | exit 0 — **644 tests passed, 0 failures**. The controller independently re-ran the workspace suite as `--workspace --all-targets --all-features --locked` and it also passed. |
-| `cargo test … -p mosdns-upstream-core --lib --locked` | exit 0 — lib **90** (80 + 5 pool tests + 3 pooled final-commit tests + **2 policy-revision tests**) |
-| `cargo test … -p mosdns-upstream-core --lib --locked reuse::tests` | exit 0 — **10 passed** |
-| `cargo test … -p mosdns-upstream-core --test reuse_doh --locked` | exit 0 — **7 passed** (incl. the h2 reuse test and the cancellation regression test), 0 failed |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --locked` | exit 0 — **649 tests passed, 0 failures** (after the three P1 fixes and final discard-path hardening; 644 before). The controller independently re-ran the workspace suite as `--workspace --all-targets --all-features --locked`. |
+| `cargo test … -p mosdns-upstream-core --lib --locked` | exit 0 — lib **93** (80 + 5 pool tests + 3 pooled final-commit tests + 2 policy-revision tests + **1 pooled H2 drain test** + **2 write-progress tests**) |
+| `cargo test … -p mosdns-upstream-core --lib --locked reuse::tests` | exit 0 — **11 passed** |
+| `cargo test … -p mosdns-upstream-core --test reuse_doh --locked` | exit 0 — **9 passed** (h1/h2 reuse, the cancellation regression, and the two idle half-close tests), 0 failed |
 | `cargo test … -p mosdns-upstream-core --test reuse_secure --test reuse_slice0_key --locked` | exit 0 — reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
 | `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | exit 0, clean — run by the executor **and** independently re-run by the controller |
 | `cargo tree -e features --locked` (`rust/`) | exit 0 — no new dependency or feature |
@@ -435,15 +527,36 @@ Toolchain: `rustc 1.85.1 (4eb161250 2025-03-15)`,
 `cargo 1.85.1 (d73d2caf9 2024-12-31)`.
 
 Rerun against the **current** tree (after the pooled-caller-token fix, the pooled
-final-commit fix, and the roots-revision fix). These VM runs are executed by the
-controller on the isolated host and reported here; they are not run from this
-session:
+final-commit fix, the roots-revision fix, all three root-review P1 fixes, and
+the final async discard-path hardening).
+
+Transfer was `rsync -az --delete --checksum` of only the local `rust/` workspace
+into `/root/mosdns-rust-phase4-reuse`, excluding `.git/`, `target/`,
+`.cargo-target/`, `.DS_Store`, and build artifacts. All ten changed files matched
+the local copies by sha256 **after** the transfer:
+
+| File | sha256 |
+| --- | --- |
+| `src/lib.rs` | `f4030cc27a6bc6dd2da1349239faa0a88ded4068b7a06a5bc40a7d585481797f` |
+| `src/reuse.rs` | `da24b37d90b3805585abd81a4d0a5dc5532c78fb5970d6b7bf220910f7d4a50b` |
+| `src/secure/doh.rs` | `9bb73497e803273123a15db84525edb1971d4b8381a8cdbe1179488d7b463ce1` |
+| `src/secure/dot.rs` | `21676f7fba0d09bb658fc15d63bad0d6e45f40a7a3f326d39b1e5766036250c8` |
+| `src/secure/mod.rs` | `bd1b264f0b5bfaa48bdecc341c1d8ba3204932a9545413a11497863f50ac43a4` |
+| `src/secure/tls.rs` | `cd398df4f7da6064e18505d03e48f31868c02e0b0d298dd94aa6c731baeafc3d` |
+| `src/tcp.rs` | `4fc5641483a4a79c0ec85c1c49a934aad393db70d67b5ba12892ef104195fd36` |
+| `tests/reuse_doh.rs` | `f86503866fb5c39785438fe84a39d0c35b7fb491de1002a148774f23a76cbc1a` |
+| `tests/reuse_secure.rs` | `1c5ae5e4623a9dccf5e0fa5d7f479e706be5b7f04527489e8bcf9aac86ebf196` |
+| `tests/reuse_slice0_key.rs` | `18f6276fb51696e41abc1ca77758f9bff794d9f96bd628b2ba73c86766eab6dd` |
 
 | Remote command | Result |
 | --- | --- |
-| `cargo +1.85.1 test -j 2 --locked -p mosdns-upstream-core --lib --test reuse_doh --test reuse_secure --test reuse_slice0_key` | exit 0 — lib **90** (incl. all 10 `reuse::tests`), reuse_doh **7**, reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
+| `cargo +1.85.1 test -j 2 --locked -p mosdns-upstream-core --lib --test reuse_doh --test reuse_secure --test reuse_slice0_key` | exit 0 — lib **93** (incl. all 11 `reuse::tests`), reuse_doh **9**, reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
 | `cargo +1.85.1 fmt --all -- --check` | clean, exit 0 |
 | `cargo +1.85.1 clippy -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings -A clippy::precedence -A clippy::needless_lifetimes -A clippy::similar_names` | clean, exit 0 — nothing in this task's code |
+
+These VM counts match the local macOS counts exactly (lib 93, reuse_doh 9,
+reuse_secure 7, reuse_slice0_key 24), so the P1 fixes behave identically on the
+MSRV toolchain.
 
 The three `-A` allowances cover pre-existing findings in files this task does not
 touch, all of which also appear on a pristine clippy-1.85 tree: `precedence` in
@@ -458,6 +571,12 @@ is clean. The one `needless_lifetimes` finding that *was* in this task's new cod
 
 <details>
 <summary>Historical runs superseded by the rerun above (kept for the record)</summary>
+
+**Intermediate run** (after the roots-revision fix but before the three
+root-review P1 fixes, so it counted lib **90** = 80 + 5 pool + 3 final-commit + 2
+policy-revision tests, 10 `reuse::tests`, and reuse_doh **7**): same three
+commands, all exit 0, clean fmt, focused clippy clean with the same three
+allowances. Superseded by the lib 93 / reuse_doh 9 rerun above.
 
 **Pre-roots-revision run** (after the caller-token and final-commit fixes but
 before the roots-revision fix, so it counts lib **88** = 80 + 5 pool + 3
