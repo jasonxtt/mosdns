@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/rust-migration.md","reason":"Pure Rust Phase 4 boundaries, resolver contracts, no production wiring, and isolated Debian validation policy."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Repository quality, review, dirty-worktree preservation, and evidence rules."}
+{"file":".trellis/tasks/09-18-rust-phase4-dual-stack-endpoint-selection/research/dual-stack-design-evidence.md","reason":"Source-backed current Go/Rust resolver behavior and the user-approved dual-stack scope."}

@@ -12,9 +12,10 @@ mod udp;
 
 pub use composite::UdpTcpPolicy;
 pub use resolver::{
-    AddressFamily, BootstrapEndpoint, BootstrapResolver, Clock, ConfigVersion, PublishedTarget,
-    ResolutionPolicy, ResolutionTarget, ResolvedDestination, ResolvedUpstream, ResolverComposition,
-    ResolverError, ResolverState, SystemClock, resolve_numeric,
+    AddressFamily, BootstrapEndpoint, BootstrapResolver, Clock, ConfigVersion, FamilyCandidate,
+    PublishedTarget, ResolutionMode, ResolutionPolicy, ResolutionSnapshot, ResolutionTarget,
+    ResolvedDestination, ResolvedUpstream, ResolverComposition, ResolverError, ResolverState,
+    SystemClock, resolve_numeric,
 };
 pub use secure::{
     DohEndpoint, DotEndpoint, IdentityError, SecureError, ServerIdentity, ServiceUrlError,
