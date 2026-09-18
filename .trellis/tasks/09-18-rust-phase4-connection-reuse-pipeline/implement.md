@@ -596,19 +596,72 @@ drain slot`.
 
 Local gates at this revision: `cargo fmt --all -- --check` clean; `reuse::tests`
 **15 passed**; `reuse_doh` **9** / `reuse_secure` **7** / `reuse_slice0_key`
-**24** passed; upstream-core **400 passed, 0 failed** (lib **97**);
-`cargo test --workspace --locked` **653 passed, 0 failures**; `cargo clippy
+**24** passed; upstream-core **402 passed, 0 failed** (lib **99**);
+`cargo test --workspace --locked` **655 passed, 0 failures**; `cargo clippy
 --workspace --all-targets --all-features --locked -- -D warnings` clean;
 `cargo tree -e features --locked` exit 0.
+
+### Root reviewer FINAL FAIL round 3 — close cancellation and scope-less retry
+
+The next root review (web, `6fcc5c3`) found two more current-task P1 items.
+Both were real and are fixed below; the earlier P1 fixes remain unchanged.
+
+**P1-1 — aborting the `close()` caller could strand teardown forever.**
+
+The previous shared flags prevented concurrent closers from racing, but the
+leader still owned `idle.take()` / `attempt.take()` while awaiting
+`shutdown()`/`finish()`. Aborting that close future dropped the local session or
+handle while leaving `teardown_in_progress = true`; every later close then waited
+on a notification whose leader no longer existed.
+
+Fix: the leader now takes the resources only to immediately move them into a
+detached Tokio teardown task before its first await. The task owns the retained
+session and parked H2 handle, drains them, publishes `teardown_complete` under
+the shared lock, and notifies all waiters. A close caller can therefore be
+aborted without cancelling or dropping the actual teardown; a later close waits
+for the same task and completes normally.
+
+Regression: `aborting_the_close_leader_lets_a_later_close_take_over` establishes
+a pooled H2 session, parks close on the deterministic teardown barrier, aborts
+the close leader, then starts a second close and asserts it cannot finish before
+the barrier is released and does finish afterward. **RED:** restoring inline
+teardown makes the second close wait forever after the first caller is aborted.
+
+**P1-2 — a stale H2 handle could be lost when the next attempt had no H2 scope.**
+
+`park_attempt_handle(None)` previously returned before looking at the slot. Thus
+an aborted H2 attempt could leave `inner.attempt`, a following scope-less
+HTTP/1.1 attempt could skip its drain, and successful `release()` could then
+clear the slot while the old tracked children were still live.
+
+Fix: every new attempt now clones and drains any stale handle first, regardless
+of whether its own session supplies a handle; only after that await does it
+assign the slot to `Some(new_handle)` or `None`. The normal retained-session
+handoff still installs `idle` and clears the slot under one lock, so a live H2
+scope is never mistaken for stale and an old H2 waiter is never cleared before
+its drain completes.
+
+Regression: `a_scope_less_new_attempt_still_drains_a_stale_handle` leaves an
+aborted H2 handle parked, invokes the scope-less (`handle == None`) parking path,
+holds it on the teardown barrier, and asserts the slot is empty only after the
+barrier is released. **RED:** restoring the early return skips the barrier and
+leaves the stale scope's waiter in place.
+
+Local gates at this revision: `cargo fmt --all -- --check` clean; `reuse::tests`
+**17 passed**; `reuse_doh` **9** / `reuse_secure` **7** / `reuse_slice0_key`
+**24** passed; upstream-core **402 passed, 0 failed** (lib **99**);
+`cargo test --workspace --all-targets --all-features --locked` **655 passed,
+0 failures**; workspace clippy with `-D warnings` clean; `cargo tree -e features
+--locked` exit 0; task validation and `git diff --check` clean.
 
 ### Local gates (macOS)
 
 | Command | Result |
 | --- | --- |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | clean, exit 0 |
-| `cargo test --manifest-path rust/Cargo.toml --workspace --locked` | exit 0 — **653 tests passed, 0 failures** (after the abort-window follow-up; 652 before it, 651 before that). |
-| `cargo test … -p mosdns-upstream-core --lib --locked` | exit 0 — lib **97** (80 + 5 pool + 3 pooled final-commit + 2 policy-revision + 5 pooled-close/abort/recovery + 2 write-progress tests) |
-| `cargo test … -p mosdns-upstream-core --lib --locked reuse::tests` | exit 0 — **15 passed** |
+| `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked` | exit 0 — **655 tests passed, 0 failures** (after close-cancellation and scope-less stale-handle follow-up; 653 before it). |
+| `cargo test … -p mosdns-upstream-core --lib --locked` | exit 0 — lib **99** (80 + 5 pool + 3 pooled final-commit + 2 policy-revision + 7 pooled-close/abort/recovery + 2 write-progress tests) |
+| `cargo test … -p mosdns-upstream-core --lib --locked reuse::tests` | exit 0 — **17 passed** |
 | `cargo test … -p mosdns-upstream-core --test reuse_doh --locked` | exit 0 — **9 passed** (h1/h2 reuse, the cancellation regression, and the two idle half-close tests), 0 failed |
 | `cargo test … -p mosdns-upstream-core --test reuse_secure --test reuse_slice0_key --locked` | exit 0 — reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
 | `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings` | exit 0, clean — run by the executor **and** independently re-run by the controller |
@@ -670,7 +723,7 @@ exchange returned success even though the owner had already begun closing.
 
 ### Isolated Debian VM — Rust 1.85.1
 
-Transfer is `rsync -az --checksum` of only the local `rust/` workspace into
+Transfer is `rsync -a --checksum --delete` of only the local `rust/` workspace into
 `/root/mosdns-rust-phase4-reuse`, excluding `.git/`, `target/`, `.cargo-target/`,
 `.DS_Store`, and build artifacts, with a task-scoped `CARGO_TARGET_DIR`
 (`.cargo-target`), unmodified manifest, and unchanged lock (`--locked`).
@@ -679,10 +732,10 @@ Toolchain: `rustc 1.85.1 (4eb161250 2025-03-15)`,
 
 Rerun against the **current** tree (after the pooled-caller-token fix, the pooled
 final-commit fix, the roots-revision fix, all three root-review P1 fixes, the
-round-2 concurrent-close/aborted-H2 fixes, and the stale-handle recovery
-follow-up).
+round-2 concurrent-close/aborted-H2 fixes, the stale-handle recovery follow-up,
+and the round-3 close-cancellation/scope-less-attempt fixes).
 
-Transfer was `rsync -az --delete --checksum` of only the local `rust/` workspace
+Transfer was `rsync -a --delete --checksum` of only the local `rust/` workspace
 into `/root/mosdns-rust-phase4-reuse`, excluding `.git/`, `target/`,
 `.cargo-target/`, `.DS_Store`, and build artifacts. All ten changed files matched
 the local copies by sha256 **after** the transfer:
@@ -690,7 +743,7 @@ the local copies by sha256 **after** the transfer:
 | File | sha256 |
 | --- | --- |
 | `src/lib.rs` | `f4030cc27a6bc6dd2da1349239faa0a88ded4068b7a06a5bc40a7d585481797f` |
-| `src/reuse.rs` | `c18458d10b69ab4599280fd2202b458acc6a0c87736f90cc3d21bf7b2e00b336` |
+| `src/reuse.rs` | `c8aa70a18c4336036044aef656f4b9688c4fd1eaff0e872cadd889f25a80bcf1` |
 | `src/secure/doh.rs` | `7d5c127bd7bc335121c2c23af17934e12672351872dd8edaa5efc8492b2e649d` |
 | `src/secure/dot.rs` | `21676f7fba0d09bb658fc15d63bad0d6e45f40a7a3f326d39b1e5766036250c8` |
 | `src/secure/mod.rs` | `a7eddaaeee42ca56164b547178bae9d8a24f19c689c93a5a2f16b3c0ee73cad8` |
@@ -702,11 +755,11 @@ the local copies by sha256 **after** the transfer:
 
 | Remote command | Result |
 | --- | --- |
-| `cargo +1.85.1 test -j 2 --locked --offline -p mosdns-upstream-core --lib --test reuse_doh --test reuse_secure --test reuse_slice0_key` | exit 0 — lib **97** (incl. all 15 `reuse::tests`), reuse_doh **9**, reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
+| `cargo +1.85.1 test -j 2 --locked --offline -p mosdns-upstream-core --lib --test reuse_doh --test reuse_secure --test reuse_slice0_key` | exit 0 — lib **99** (incl. all 17 `reuse::tests`), reuse_doh **9**, reuse_secure **7**, reuse_slice0_key **24**, 0 failed |
 | `cargo +1.85.1 fmt --all -- --check` | clean, exit 0 |
 | `cargo +1.85.1 clippy -p mosdns-upstream-core --all-targets --all-features --locked -- -D warnings -A clippy::precedence -A clippy::needless_lifetimes -A clippy::similar_names` | clean, exit 0 — nothing in this task's code |
 
-These VM counts match the local macOS counts exactly (lib 97, reuse_doh 9,
+These VM counts match the local macOS counts exactly (lib 99, reuse_doh 9,
 reuse_secure 7, reuse_slice0_key 24), so the P1 fixes behave identically on the
 MSRV toolchain.
 
