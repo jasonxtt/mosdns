@@ -41,15 +41,49 @@ use super::error::{CertificateRejection, SecureError, TlsConfigError, TlsHandsha
 ///
 /// The mode is private and immutable; calling a constructor is the only way to
 /// choose it. See the module documentation for the verified/insecure contract.
+///
+/// ## Policy identity
+///
+/// Besides the mode, a policy carries a **roots revision**: a monotonic
+/// identifier minted by [`Self::verified`] for each verified policy that is
+/// constructed, and the fixed sentinel `0` for [`Self::insecure_skip_verify`].
+/// It exists so a reuse key can tell two *different* trust configurations apart
+/// without the key ever holding trust material: the revision is an opaque
+/// ordinal, not a hash, not the anchors, and not any certificate byte.
+///
+/// Every call to [`Self::verified`] mints a fresh revision, even for byte-equal
+/// roots. That is the intended reading of "a policy is a trust configuration":
+/// rotating or re-loading roots produces a new policy, and connections opened
+/// under the old one must not be reused under the new one. Cloning preserves the
+/// revision, so a cloned policy still matches the connections it opened.
 #[derive(Clone, Debug)]
 pub struct TlsPolicy {
     mode: TlsMode,
+    roots_revision: u64,
 }
 
 #[derive(Clone, Debug)]
 enum TlsMode {
     Verified(RootCertStore),
     InsecureSkipVerify,
+}
+
+/// The revision reserved for a policy that has no roots to identify: the
+/// insecure mode, and the pure bool-based compatibility path in the reuse key.
+///
+/// Minted revisions start above this, so a `verified` policy can never claim it.
+const NO_ROOTS_REVISION: u64 = 0;
+
+/// Mints a fresh, process-unique roots revision.
+///
+/// The counter is monotonic and starts at `NO_ROOTS_REVISION + 1`, so the
+/// sentinel stays unreachable. Wrapping after 2^64 constructions is not a
+/// practical concern; even then it could only ever re-mint the sentinel once.
+static NEXT_ROOTS_REVISION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(NO_ROOTS_REVISION + 1);
+
+fn mint_roots_revision() -> u64 {
+    NEXT_ROOTS_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl TlsPolicy {
@@ -70,6 +104,7 @@ impl TlsPolicy {
         }
         Ok(Self {
             mode: TlsMode::Verified(roots),
+            roots_revision: mint_roots_revision(),
         })
     }
 
@@ -83,6 +118,7 @@ impl TlsPolicy {
     pub const fn insecure_skip_verify() -> Self {
         Self {
             mode: TlsMode::InsecureSkipVerify,
+            roots_revision: NO_ROOTS_REVISION,
         }
     }
 
@@ -90,6 +126,22 @@ impl TlsPolicy {
     #[must_use]
     pub const fn is_insecure_skip_verify(&self) -> bool {
         matches!(self.mode, TlsMode::InsecureSkipVerify)
+    }
+
+    /// This policy's roots revision, for the connection-reuse key.
+    ///
+    /// A verified policy returns the monotonic ordinal minted when it was
+    /// constructed; the insecure mode returns the [`NO_ROOTS_REVISION`] sentinel.
+    /// Two policies are only interchangeable for reuse when both the mode and
+    /// this revision agree, so a connection authenticated under one trust
+    /// configuration is never handed to a request configured with another.
+    ///
+    /// The value is an opaque ordinal: it carries no root material, no
+    /// certificate bytes, and no digest of either, so it is safe to place in a
+    /// reusable key.
+    #[must_use]
+    pub(crate) const fn roots_revision(&self) -> u64 {
+        self.roots_revision
     }
 
     /// The caller-supplied trust roots, or `None` for the insecure mode.

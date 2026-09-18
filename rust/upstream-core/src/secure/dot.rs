@@ -655,6 +655,191 @@ fn classify_handshake_io_error(error: &std::io::Error) -> TlsHandshakeFailure {
     }
 }
 
+/// A retained, authenticated DoT session available for one reuse.
+///
+/// The pooled-session type lives here, beside the protocol code that owns the
+/// handshake and framing, so reuse composes the existing `write_frame`/
+/// `flush_bytes`/`read_frame` helpers and the same control race instead of
+/// duplicating a second DoT state machine.
+///
+/// The session carries only the established stream; the identity it was
+/// authenticated against is part of the reuse key that owns it, never stored
+/// here, so a session can never be handed to a different identity.
+pub(crate) struct PooledDotSession {
+    tls: TlsStream<TcpStream>,
+}
+
+impl PooledDotSession {
+    /// Dials and authenticates one DoT session for `endpoint` under `tls`.
+    ///
+    /// Ordering is the reviewed DoT contract: numeric connect first, then the
+    /// authenticated handshake against the service identity, and only then is
+    /// the session available for a query. A connect or handshake failure has
+    /// sent no DNS byte, so it is `NotSent`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the exact typed [`SecureError`] the fresh DoT path returns for a
+    /// connect, handshake, or control failure.
+    pub(crate) async fn connect(
+        endpoint: &DotEndpoint,
+        tls: &TlsPolicy,
+        control: &ExchangeControl,
+        deadline: Instant,
+    ) -> Result<Self, SecureError> {
+        let config = tls.client_config()?;
+        let server_name = server_name_for(endpoint.identity())?;
+        let dial = endpoint.dial();
+
+        // Phase 1: numeric dial. No name resolution, so the service identity
+        // cannot influence the destination.
+        let stream: TcpStream = race_control(control, SideEffectState::NotSent, deadline, async {
+            TcpStream::connect(dial)
+                .await
+                .map_err(|_| SecureError::from(UpstreamError::Connect))
+        })
+        .await?;
+
+        control.check_at(Instant::now(), SideEffectState::NotSent)?;
+
+        // Phase 2: authenticated handshake. A verified policy's failure is
+        // terminal: no insecure retry and no plaintext continuation.
+        let connector = TlsConnector::from(config);
+        let tls_stream: TlsStream<TcpStream> =
+            race_control(control, SideEffectState::NotSent, deadline, async {
+                connector
+                    .connect(server_name, stream)
+                    .await
+                    .map_err(|error| SecureError::Tls(classify_handshake_io_error(&error)))
+            })
+            .await?;
+
+        Ok(Self { tls: tls_stream })
+    }
+
+    /// Reports whether the peer has already closed this session.
+    ///
+    /// A TLS session cannot be probed by a plain socket read without consuming
+    /// record bytes, so this asks the underlying TCP stream for readable-at-EOF
+    /// without reading TLS data. `WouldBlock` is the healthy idle case.
+    #[must_use]
+    pub(crate) fn is_peer_closed(&self) -> bool {
+        let mut probe = [0u8; 1];
+        // `TlsStream::get_ref` yields the underlying stream and the TLS session.
+        let (stream, _session) = self.tls.get_ref();
+        match stream.try_read(&mut probe) {
+            Ok(0) | Ok(_) => true,
+            Err(error) => error.kind() != std::io::ErrorKind::WouldBlock,
+        }
+    }
+
+    /// Runs one framed DoT exchange on this established session.
+    ///
+    /// Reuses the shared framing helpers and the shared control race, so the
+    /// deadline, cancellation, and close semantics are identical to the fresh
+    /// path. A failure after the query was flushed is terminal.
+    pub(crate) async fn exchange(
+        mut self,
+        request: &ExchangeRequest<'_>,
+        control: &ExchangeControl,
+        deadline: Instant,
+    ) -> Result<(SecureResponse, Self), PooledDotOutcome> {
+        let request_id = request.request_id();
+        let query = request.query();
+
+        // One unchanged query frame, then the explicit flush a TLS record
+        // buffer requires. A flush failure is conservatively `MaybeSent`.
+        if let Err(error) = race_control(control, SideEffectState::MaybeSent, deadline, async {
+            write_frame(&mut self.tls, query)
+                .await
+                .map_err(SecureError::from)
+        })
+        .await
+        {
+            return Err(PooledDotOutcome::failed(error, self));
+        }
+
+        if let Err(error) = race_control(control, SideEffectState::MaybeSent, deadline, async {
+            flush_bytes(&mut self.tls, SideEffectState::MaybeSent)
+                .await
+                .map_err(SecureError::from)
+        })
+        .await
+        {
+            return Err(PooledDotOutcome::failed(error, self));
+        }
+
+        // The frame is flushed, so the query is `Sent` from here on.
+        let body = match race_control(control, SideEffectState::Sent, deadline, async {
+            read_frame(&mut self.tls).await.map_err(SecureError::from)
+        })
+        .await
+        {
+            Ok(body) => body,
+            Err(error) => return Err(PooledDotOutcome::failed(error, self)),
+        };
+
+        let header = match inspect_response_header(&body) {
+            Ok(header) => header,
+            Err(_) => {
+                return Err(PooledDotOutcome::failed(
+                    SecureError::from(UpstreamError::MalformedResponse),
+                    self,
+                ));
+            }
+        };
+        if header.id != request_id {
+            return Err(PooledDotOutcome::failed(
+                UpstreamError::ResponseMismatch.into(),
+                self,
+            ));
+        }
+        if validate_response(&body).is_err() {
+            return Err(PooledDotOutcome::failed(
+                UpstreamError::MalformedResponse.into(),
+                self,
+            ));
+        }
+
+        Ok((
+            SecureResponse::new(
+                body,
+                request_id,
+                header.id,
+                SecureTransport::Dot,
+                header.truncated,
+            ),
+            self,
+        ))
+    }
+}
+
+/// The terminal outcome of one pooled DoT attempt.
+///
+/// The session is always returned so the owner can decide whether to retain it.
+/// `rebuildable` is true only when no DNS byte was written, which is the single
+/// case in which the owner may dial a replacement session.
+pub(crate) struct PooledDotOutcome {
+    pub(crate) error: SecureError,
+    pub(crate) session: PooledDotSession,
+    pub(crate) rebuildable: bool,
+}
+
+impl PooledDotOutcome {
+    /// Classifies a failure, deciding whether a replacement dial is allowed.
+    fn failed(error: SecureError, session: PooledDotSession) -> Self {
+        // Only a `NotSent` failure provably left no byte with the peer. An idle
+        // session the peer closed fails on the first write with zero bytes
+        // accepted, which is exactly that case.
+        let rebuildable = matches!(error.side_effect(), SideEffectState::NotSent);
+        Self {
+            error,
+            session,
+            rebuildable,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::Future;

@@ -101,9 +101,33 @@ const DOH_ALPN: &[&[u8]] = &[b"h2", b"http/1.1"];
 struct H2ChildState {
     children: Mutex<H2Children>,
     drained: tokio::sync::Notify,
-    _liveness: Arc<SharedInFlightGuard>,
+    /// The owner registration this scope keeps alive, when the scope is bounded
+    /// by one exchange.
+    ///
+    /// The fresh path holds it so an aborted caller cannot release the owner's
+    /// registration while tracked children still exist. A **pooled** scope
+    /// deliberately holds none: it outlives individual exchanges, so holding a
+    /// registration for its whole life would keep the owner permanently
+    /// non-drained and `close()` could never converge. A pooled session's
+    /// children are instead cleaned when the session is dropped, which seals and
+    /// aborts them.
+    _liveness: Option<Arc<SharedInFlightGuard>>,
     scope_cancellation: TransportCancellation,
     owner_cancellation: TransportCancellation,
+    /// The caller cancellation this scope's children are raced against.
+    ///
+    /// A **pooled** scope always receives a fresh token that no caller can
+    /// cancel. A pooled session outlives the request that opened it, so capturing
+    /// that request's caller token would tie the long-lived connection driver to
+    /// one caller's lifetime: the driver is itself a tracked child, so a later
+    /// cancellation of the *first* caller's token would kill the driver and break
+    /// every subsequent reuse.
+    ///
+    /// Nothing is lost by not wiring it to a caller. Cancellation for the
+    /// exchange actually in progress is enforced by that exchange's own
+    /// [`ExchangeControl`](crate::ExchangeControl) inside
+    /// [`run_pooled_exchange`], and a failure there hands the session back as a
+    /// discard, which seals this scope and aborts its children.
     caller_cancellation: TransportCancellation,
 }
 
@@ -123,7 +147,7 @@ struct TrackedH2Executor {
 /// An exchange-held lease whose synchronous drop path seals admission and
 /// aborts every child. The async finish path additionally waits for every
 /// child guard to drop before the caller's lifecycle registration is released.
-struct H2ScopeLease {
+pub(crate) struct H2ScopeLease {
     state: Arc<H2ChildState>,
     #[cfg(test)]
     teardown_pause: Mutex<Option<Arc<H2TeardownPause>>>,
@@ -183,8 +207,31 @@ impl H2TeardownPause {
 }
 
 impl H2ScopeLease {
+    /// Creates a scope bounded by one exchange, holding an owner registration.
     fn new(
         liveness: Arc<SharedInFlightGuard>,
+        owner_cancellation: TransportCancellation,
+        caller_cancellation: TransportCancellation,
+    ) -> Self {
+        Self::with_liveness(Some(liveness), owner_cancellation, caller_cancellation)
+    }
+
+    /// Creates a scope for a pooled session, holding no owner registration and no
+    /// caller cancellation.
+    ///
+    /// A pooled session outlives individual exchanges, so it must not keep a
+    /// registration that would prevent `close()` from draining, and it must not
+    /// capture any single request's caller token — see the field docs on
+    /// [`H2ChildState::caller_cancellation`]. It gets a fresh token no caller can
+    /// cancel, so a later cancellation of the request that opened the session
+    /// cannot kill the retained driver. Its children are still tracked and are
+    /// sealed and aborted when the session is dropped or discarded.
+    pub(crate) fn pooled(owner_cancellation: TransportCancellation) -> Self {
+        Self::with_liveness(None, owner_cancellation, TransportCancellation::new())
+    }
+
+    fn with_liveness(
+        liveness: Option<Arc<SharedInFlightGuard>>,
         owner_cancellation: TransportCancellation,
         caller_cancellation: TransportCancellation,
     ) -> Self {
@@ -1137,12 +1184,15 @@ fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureErr
 /// evade the bound by omitting the header or by declaring a small length. An
 /// early EOF, a `Content-Length`/chunk mismatch, or a malformed chunked encoding
 /// is `IncompleteBody`, never a silently accepted prefix.
-async fn read_body(
+async fn read_body<C>(
     control: &ExchangeControl,
     deadline: Instant,
     response: Response<Incoming>,
-    connection: &mut Pin<&mut impl Future<Output = hyper::Result<()>>>,
-) -> Result<Vec<u8>, SecureError> {
+    connection: &mut Pin<&mut C>,
+) -> Result<Vec<u8>, SecureError>
+where
+    C: Future<Output = hyper::Result<()>> + ?Sized,
+{
     use http_body_util::BodyExt as _;
 
     let mut body = response.into_body();
@@ -1208,7 +1258,7 @@ async fn read_body(
 /// a closed type rather than a generic buffer makes "no request body" a property
 /// of the type.
 #[derive(Debug)]
-struct EmptyBody;
+pub(crate) struct EmptyBody;
 
 impl hyper::body::Body for EmptyBody {
     type Data = hyper::body::Bytes;
@@ -1247,6 +1297,386 @@ fn classify_handshake_io_error(
         }
         _ => crate::secure::error::TlsHandshakeFailure::Protocol,
     }
+}
+
+/// A retained, authenticated DoH session available for one reuse.
+///
+/// The pooled-session type lives here, beside the protocol code that owns the
+/// handshake, request encoding, response validation, and HTTP/2 child tracking,
+/// so reuse composes that machinery instead of duplicating a second DoH state
+/// machine.
+///
+/// ## Why the driver is retained
+///
+/// Hyper's HTTP/1.1 and HTTP/2 clients are *driver* connections: a response head
+/// and body are only produced while the connection future is being polled. The
+/// fresh path drives that future inline for the duration of one exchange.
+/// Reusing the connection therefore requires the driver to stay alive between
+/// exchanges, so this session owns it and polls it from inside the caller's own
+/// await — never from a detached task.
+///
+/// ## HTTP/2 children
+///
+/// An HTTP/2 session also owns the [`H2ScopeLease`] whose executor the driver
+/// dispatches its child futures to. Unlike the fresh path — where the scope is
+/// per exchange, holds an owner registration, and is sealed and drained when
+/// that exchange ends — a pooled scope must survive across exchanges: the
+/// connection driver itself is one of its children and stays alive exactly as
+/// long as the session is usable. So a pooled exchange performs **no** settle
+/// step, because there is nothing to settle down to — waiting for the child
+/// count to reach zero would wait for the connection to die.
+///
+/// Pooled reuse is instead made safe by two other properties: the owner admits
+/// at most one exchange at a time on this session
+/// ([`MAX_PENDING_PER_CONNECTION`](crate::MAX_PENDING_PER_CONNECTION)), and the
+/// session is handed back for retention only after a fully completed exchange.
+/// Every terminal failure returns it as a discard. Sealing and aborting happen
+/// on the paths that actually end the session: an explicit discard, owner
+/// close, or drop.
+///
+/// The negotiated protocol is recorded by the variant itself and drives the reuse
+/// key, so an HTTP/2 session can never be handed to an HTTP/1.1 request or the
+/// reverse.
+pub(crate) enum PooledDohSession {
+    /// An HTTP/1.1 session with its retained driver.
+    Http1 {
+        sender: hyper::client::conn::http1::SendRequest<EmptyBody>,
+        driver: Pin<Box<dyn Future<Output = hyper::Result<()>> + Send>>,
+    },
+    /// An HTTP/2 session with its retained driver and child-tracking scope.
+    Http2 {
+        sender: hyper::client::conn::http2::SendRequest<EmptyBody>,
+        driver: Pin<Box<dyn Future<Output = hyper::Result<()>> + Send>>,
+        /// The HTTP/2 child-tracking scope whose executor the driver dispatches
+        /// to. It is deliberately never read: it is held for its whole pooled
+        /// lifetime because dropping it is what seals the scope and aborts every
+        /// tracked child — including the connection driver. That `Drop` is the
+        /// only teardown path for a discarded or closed pooled session, which is
+        /// why the field exists at all.
+        _scope: H2ScopeLease,
+    },
+}
+
+/// The terminal outcome of one pooled DoH attempt.
+///
+/// The session is returned so the owner can decide whether to retain it;
+/// `rebuildable` is true only when the request was provably never transmitted.
+pub(crate) struct PooledDohOutcome {
+    pub(crate) error: SecureError,
+    pub(crate) session: Option<PooledDohSession>,
+    pub(crate) rebuildable: bool,
+}
+
+/// A negotiated pooled session.
+///
+/// The HTTP/2 scope, when present, lives **inside** [`PooledDohSession::Http2`],
+/// so the session owns its own child tracking for its whole pooled lifetime and
+/// the owner has nothing extra to thread through.
+impl PooledDohSession {
+    /// Dials, authenticates, and negotiates one DoH session.
+    ///
+    /// Ordering is the reviewed DoH contract: numeric connect, then the
+    /// authenticated handshake against the service URL identity with ALPN
+    /// offered, then the HTTP connection handshake. No DNS byte has been sent, so
+    /// a failure in any phase is `NotSent`.
+    ///
+    /// An HTTP/2 session creates its own pooled [`H2ScopeLease`], which holds no
+    /// owner registration (see the type docs) and therefore never blocks
+    /// `close()` from draining.
+    ///
+    /// # Errors
+    ///
+    /// Returns the exact typed [`SecureError`] the fresh DoH path returns for a
+    /// connect, handshake, ALPN, or control failure.
+    ///
+    /// Only the **owner** token is taken, never a caller token: the session this
+    /// builds is retained across exchanges, so binding it to one caller's
+    /// cancellation would outlive that caller. The exchange in progress still
+    /// honors its own caller cancellation through `control`.
+    pub(crate) async fn connect(
+        endpoint: &DohEndpoint,
+        tls: &TlsPolicy,
+        owner_cancellation: TransportCancellation,
+        control: &ExchangeControl,
+        deadline: Instant,
+    ) -> Result<Self, SecureError> {
+        let config = Arc::new(tls.client_config_with_alpn(DOH_ALPN)?);
+        let server_name = server_name_for(endpoint.identity())?;
+        let dial = endpoint.dial();
+
+        // Phase 1: numeric dial, so the service identity cannot select the
+        // destination.
+        let stream: TcpStream = race_control(control, SideEffectState::NotSent, deadline, async {
+            TcpStream::connect(dial)
+                .await
+                .map_err(|_| SecureError::from(UpstreamError::Connect))
+        })
+        .await?;
+
+        control.check_at(Instant::now(), SideEffectState::NotSent)?;
+
+        // Phase 2: authenticated handshake. A verified policy's failure is
+        // terminal: no insecure retry and no plaintext continuation.
+        let connector = TlsConnector::from(config);
+        let tls_stream: TlsStream<TcpStream> =
+            race_control(control, SideEffectState::NotSent, deadline, async {
+                connector
+                    .connect(server_name, stream)
+                    .await
+                    .map_err(|error| SecureError::Tls(classify_handshake_io_error(&error)))
+            })
+            .await?;
+
+        let protocol = negotiated_protocol(&tls_stream)?;
+
+        // The peer is authenticated and still no DNS byte has been sent.
+        control.check_at(Instant::now(), SideEffectState::NotSent)?;
+
+        // Phase 3: the HTTP connection handshake on the caller's runtime.
+        let io = TokioIo::new(tls_stream);
+        match protocol {
+            DohProtocol::Http1 => {
+                let (sender, connection) =
+                    race_control(control, SideEffectState::NotSent, deadline, async {
+                        hyper::client::conn::http1::Builder::new()
+                            .max_headers(MAX_RESPONSE_HEADERS)
+                            .max_buf_size(MAX_HTTP1_BUFFER)
+                            .handshake::<_, EmptyBody>(io)
+                            .await
+                            .map_err(|_| SecureError::from(UpstreamError::Connect))
+                    })
+                    .await?;
+                Ok(Self::Http1 {
+                    sender,
+                    driver: Box::pin(connection),
+                })
+            }
+            DohProtocol::Http2 => {
+                // The pooled scope takes only the owner token: this session
+                // outlives the request that opened it, so wiring in *this*
+                // request's caller token would let a later cancellation of that
+                // token kill the retained driver.
+                let scope = H2ScopeLease::pooled(owner_cancellation);
+                let executor = scope.executor();
+                let (sender, connection) =
+                    race_control(control, SideEffectState::NotSent, deadline, async {
+                        let mut builder = hyper::client::conn::http2::Builder::new(executor);
+                        builder.max_header_list_size(MAX_RESPONSE_HEADER_BYTES as u32);
+                        builder
+                            .handshake::<_, EmptyBody>(io)
+                            .await
+                            .map_err(|_| SecureError::from(UpstreamError::Connect))
+                    })
+                    .await?;
+                Ok(Self::Http2 {
+                    sender,
+                    driver: Box::pin(connection),
+                    _scope: scope,
+                })
+            }
+        }
+    }
+
+    /// Whether the peer has already closed this session.
+    ///
+    /// Hyper reports this directly: a closed sender means the driver has ended,
+    /// so the session must not be handed out again.
+    #[must_use]
+    pub(crate) fn is_closed(&self) -> bool {
+        match self {
+            Self::Http1 { sender, .. } => sender.is_closed(),
+            Self::Http2 { sender, .. } => sender.is_closed(),
+        }
+    }
+
+    /// The protocol name recorded for the reuse key.
+    #[must_use]
+    pub(crate) const fn protocol_name(&self) -> &'static str {
+        match self {
+            Self::Http1 { .. } => "http/1.1",
+            Self::Http2 { .. } => "h2",
+        }
+    }
+
+    /// Runs one DoH `GET` on this established session.
+    ///
+    /// The session is always returned so the owner can decide whether to retain
+    /// it. All request encoding, response-head validation, body reading, and ID
+    /// restoration come from the same helpers the fresh path uses, so this adds
+    /// no second DoH protocol state machine — each variant only wires its sender
+    /// and its retained driver to those helpers.
+    pub(crate) async fn exchange(
+        mut self,
+        target: &str,
+        authority: &str,
+        request_id: u16,
+        control: &ExchangeControl,
+        deadline: Instant,
+    ) -> Result<(SecureResponse, Self), PooledDohOutcome> {
+        let request = match build_get_request(target, authority) {
+            Ok(request) => request,
+            Err(error) => {
+                // A rejected request target never reached the wire.
+                return Err(PooledDohOutcome {
+                    error,
+                    session: Some(self),
+                    rebuildable: true,
+                });
+            }
+        };
+
+        let (http_version, outcome) = match &mut self {
+            Self::Http1 { sender, driver } => (
+                SecureHttpVersion::Http1,
+                run_pooled_exchange(
+                    sender,
+                    driver,
+                    request,
+                    request_id,
+                    control,
+                    deadline,
+                    SecureHttpVersion::Http1,
+                )
+                .await,
+            ),
+            Self::Http2 { sender, driver, .. } => {
+                // The `scope` field is deliberately not bound here: it must stay
+                // owned by the session across exchanges, and this exchange does
+                // not touch it. It seals and aborts only when the session drops.
+                let outcome = run_pooled_exchange(
+                    sender,
+                    driver,
+                    request,
+                    request_id,
+                    control,
+                    deadline,
+                    SecureHttpVersion::Http2,
+                )
+                .await;
+                // No settle step here. A pooled HTTP/2 session keeps its
+                // connection driver alive for the next exchange, and the driver
+                // itself is dispatched to the tracked executor, so the scope
+                // always has a live child while the session is usable. Waiting
+                // for `active == 0` before reuse would therefore wait forever.
+                //
+                // Safety instead comes from the two properties that make the
+                // reuse sound: the owner admits exactly one exchange at a time
+                // for this session (`MAX_PENDING_PER_CONNECTION`), and *every*
+                // terminal failure return below hands the session back to the
+                // owner as a discard, so a session is only retained after a
+                // fully completed exchange. The scope is sealed and its children
+                // aborted when the session is dropped or the owner closes.
+                (SecureHttpVersion::Http2, outcome)
+            }
+        };
+
+        match outcome {
+            Ok(validated) => {
+                let response = SecureResponse::doh(
+                    validated.wire,
+                    validated.request_id,
+                    http_version,
+                    validated.truncated,
+                );
+                Ok((response, self))
+            }
+            Err(error) => Err(PooledDohOutcome {
+                // A failure after the request was handed to the driver may have
+                // transmitted part of it, so it is never rebuildable unless the
+                // error itself says nothing was sent.
+                rebuildable: matches!(error.side_effect(), SideEffectState::NotSent),
+                error,
+                session: Some(self),
+            }),
+        }
+    }
+}
+
+/// A sender from either negotiated HTTP version.
+///
+/// Hyper's HTTP/1.1 and HTTP/2 senders expose the same `send_request` shape but
+/// share no trait, so this thin adapter lets the pooled path drive either one
+/// through the *same* validation helpers instead of duplicating the request
+/// flow per protocol.
+trait DohSender {
+    fn send(
+        &mut self,
+        request: Request<EmptyBody>,
+    ) -> impl Future<Output = hyper::Result<Response<Incoming>>>;
+}
+
+impl DohSender for hyper::client::conn::http1::SendRequest<EmptyBody> {
+    fn send(
+        &mut self,
+        request: Request<EmptyBody>,
+    ) -> impl Future<Output = hyper::Result<Response<Incoming>>> {
+        self.send_request(request)
+    }
+}
+
+impl DohSender for hyper::client::conn::http2::SendRequest<EmptyBody> {
+    fn send(
+        &mut self,
+        request: Request<EmptyBody>,
+    ) -> impl Future<Output = hyper::Result<Response<Incoming>>> {
+        self.send_request(request)
+    }
+}
+
+/// Sends one request on a retained session and reads its complete response.
+///
+/// The retained driver is polled alongside the request and body, exactly as the
+/// fresh path does, so Hyper can produce the frames. Nothing here is a detached
+/// task: the driver is driven from inside the caller's own await.
+async fn run_pooled_exchange<S>(
+    sender: &mut S,
+    driver: &mut Pin<Box<dyn Future<Output = hyper::Result<()>> + Send>>,
+    request: Request<EmptyBody>,
+    request_id: u16,
+    control: &ExchangeControl,
+    deadline: Instant,
+    http_version: SecureHttpVersion,
+) -> Result<ValidatedDohResponse, SecureError>
+where
+    S: DohSender,
+{
+    let request_future = sender.send(request);
+    tokio::pin!(request_future);
+    let mut driver = driver.as_mut();
+
+    let response = race_control(control, SideEffectState::MaybeSent, deadline, async {
+        tokio::select! {
+            result = request_future.as_mut() => result.map_err(|_| {
+                SecureError::Transport(UpstreamError::Send(SideEffectState::MaybeSent))
+            }),
+            result = driver.as_mut() => Err(match result {
+                Ok(()) => SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
+                Err(_) => SecureError::Transport(UpstreamError::Receive(
+                    SideEffectState::MaybeSent,
+                )),
+            }),
+        }
+    })
+    .await?;
+
+    validate_response_head(&response)?;
+
+    let body = read_body(control, deadline, response, &mut driver).await?;
+    if body.len() < 12 {
+        return Err(SecureError::DohProtocol(DohProtocolError::IncompleteBody));
+    }
+    let header = inspect_response_header(&body)
+        .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
+    let restored = restore_request_id(&body, request_id)?;
+    if validate_response(&restored).is_err() {
+        return Err(SecureError::from(UpstreamError::MalformedResponse));
+    }
+    Ok(ValidatedDohResponse {
+        wire: restored,
+        request_id,
+        http_version,
+        truncated: header.truncated,
+    })
 }
 
 #[cfg(test)]
