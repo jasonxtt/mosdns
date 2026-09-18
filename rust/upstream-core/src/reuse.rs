@@ -1406,21 +1406,21 @@ struct DohPoolInner {
     idle_since: Instant,
     leased: usize,
     closed: bool,
-    /// The drain handle of the HTTP/2 scope for the most recent pooled attempt.
+    /// Every HTTP/2 scope the owner must still drain.
     ///
-    /// It is parked here the moment a session is established, *before* the
-    /// attempt can be aborted, because a dropped attempt only runs a synchronous
-    /// `Drop` that cannot await its tracked children. `close()` drains through
-    /// this handle so teardown completes even when the exchange future never
-    /// ran to completion. Draining is idempotent, so holding it past a normal
-    /// completion is harmless.
-    attempt: Option<crate::secure::H2DrainHandle>,
-    /// Whether a detached teardown task has claimed the pooled teardown.
+    /// This is a **list**, and it is the single mechanism that makes the drain
+    /// recoverable. Two things go wrong with a single slot:
     ///
-    /// The task owns the session and drain handle for the duration, so a
-    /// `close()` caller being aborted cannot cancel, drop, or stall the work — it
-    /// only stops waiting.
-    teardown_in_progress: bool,
+    /// * A scope that is about to be drained must be published **before** any
+    ///   cancellable await, or an abort during that await drops the only handle.
+    /// * A stale scope and an incoming scope can both need draining, which one
+    ///   slot cannot represent.
+    ///
+    /// So each scope is published synchronously the moment it becomes the
+    /// owner's responsibility, and removed only after it has actually been
+    /// drained. An aborted attempt therefore leaves its scope in the list, and a
+    /// later `close()` still finds it.
+    scopes: Vec<crate::secure::H2DrainHandle>,
     /// Whether the pooled teardown has fully finished (children drained).
     teardown_complete: bool,
 }
@@ -1432,8 +1432,7 @@ impl fmt::Debug for DohPoolInner {
             .field("has_idle", &self.idle.is_some())
             .field("leased", &self.leased)
             .field("closed", &self.closed)
-            .field("has_attempt", &self.attempt.is_some())
-            .field("teardown_in_progress", &self.teardown_in_progress)
+            .field("registered_scopes", &self.scopes.len())
             .field("teardown_complete", &self.teardown_complete)
             .finish()
     }
@@ -1458,8 +1457,7 @@ impl DohReuseOwner {
                 idle_since: Instant::now(),
                 leased: 0,
                 closed: false,
-                attempt: None,
-                teardown_in_progress: false,
+                scopes: Vec::new(),
                 teardown_complete: false,
             })),
             teardown_finished: Arc::new(tokio::sync::Notify::new()),
@@ -1530,17 +1528,20 @@ impl DohReuseOwner {
     /// outlives its connection and that close returns `Closed` only after
     /// draining has finished.
     ///
-    /// The teardown runs in a **detached task that owns the resources**. That is
-    /// what makes it cancellation-safe: the session and drain handle are moved
-    /// out of the shared state into the task, so a `close()` caller being aborted
-    /// only stops that caller from waiting — it cannot cancel, drop, or stall the
-    /// drain, and it cannot leave the state claiming a teardown nobody owns. Every
-    /// caller, leader or follower, just waits on the shared completion flag.
+    /// The teardown runs **inline in a live caller**, which `design.md` §3
+    /// requires ("No detached task, no background reaper runtime"). It is made
+    /// recoverable, not uncancellable:
     ///
-    /// An earlier design performed the drain inline and relied on the caller
-    /// still being alive to finish it; aborting that caller dropped the session
-    /// mid-drain and left `teardown_in_progress` set forever, so every later
-    /// `close()` waited for a completion that could never arrive.
+    /// * The scope registry and the idle session are **shared state**, and the
+    ///   teardown never removes a scope from the registry until its children have
+    ///   actually drained. So if this caller is aborted mid-drain, nothing is
+    ///   lost: the scopes are still registered and the `idle` session is still
+    ///   parked.
+    /// * There is no ownership claim to get stuck. Every caller drains, so a
+    ///   later `close()` after an aborted one simply drains again — idempotently —
+    ///   and a caller that raced ahead observes the children still draining. That
+    ///   is how an aborted caller is recovered without any state that could be
+    ///   left permanently "in progress".
     pub async fn close(&self) -> CloseResult {
         match self.begin_close() {
             CloseTransition::AlreadyClosed => return CloseResult::AlreadyClosed,
@@ -1548,53 +1549,36 @@ impl DohReuseOwner {
         }
         self.lifecycle.drain().await;
 
-        // Start the detached teardown exactly once, or observe that it is done
-        // or already running.
-        let mut already_done = false;
-        {
-            let mut inner = self.doh_lock();
-            if inner.teardown_complete {
-                already_done = true;
-            } else if !inner.teardown_in_progress {
-                // Claim it and hand the resources to the task. The task holds the
-                // only copies, so nothing about this caller's lifetime can affect
-                // the drain.
-                inner.teardown_in_progress = true;
-                let idle = inner.idle.take();
-                let attempt = inner.attempt.take();
-                let inner_state = Arc::clone(&self.inner);
-                let finished = Arc::clone(&self.teardown_finished);
-                tokio::spawn(async move {
-                    if let Some((_key, session)) = idle {
-                        session.shutdown().await;
-                    }
-                    if let Some(handle) = attempt {
-                        handle.finish().await;
-                    }
-                    {
-                        let mut guard = inner_state
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        guard.teardown_in_progress = false;
-                        guard.teardown_complete = true;
-                    }
-                    finished.notify_waiters();
-                });
-            }
-        }
-        if already_done {
+        // Every caller performs the drain itself and returns only after it.
+        //
+        // There is deliberately no single-owner leadership token. Distinguishing
+        // "a live caller is draining" from "an abandoned caller left the work
+        // half-done" needs a liveness signal, and both guesses are wrong: a live
+        // owner treated as gone abandons its work, while an abandoned owner
+        // treated as live waits forever. Because the drain is idempotent, and
+        // because nothing leaves shared state until it has actually drained, each
+        // caller can simply do it: concurrent callers await the same children, so
+        // each returns only after the drain, and an aborted caller strands
+        // nothing. This also keeps the teardown inline, as `design.md` §3 requires.
+        if self.doh_lock().teardown_complete {
             return self.complete_close();
         }
 
-        // Every caller — including the one that spawned it — waits on the shared
-        // completion. Registering interest before the final check means a
-        // completion between the two cannot be missed.
-        let waiting = self.teardown_finished.notified();
-        tokio::pin!(waiting);
-        waiting.as_mut().enable();
-        if !self.doh_lock().teardown_complete {
-            waiting.await;
+        // Take the idle session. A second caller finding it already gone still
+        // blocks in the scope drain below, which is the part that actually waits
+        // for the children.
+        let idle = self.doh_lock().idle.take();
+        if let Some((_key, session)) = idle {
+            session.shutdown().await;
         }
+
+        // Drain every registered scope, including ones an abandoned attempt left
+        // behind. Nothing is forgotten until it has actually drained, so an abort
+        // here strands nothing.
+        self.drain_stale_scopes(None).await;
+
+        self.doh_lock().teardown_complete = true;
+        self.teardown_finished.notify_waiters();
         self.complete_close()
     }
 
@@ -1622,47 +1606,79 @@ impl DohReuseOwner {
         })
     }
 
-    /// Parks the drain handle of a session's HTTP/2 scope for later teardown.
+    /// Publishes a session's HTTP/2 scope as the owner's responsibility.
     ///
-    /// Called the moment a session is established, before the attempt can be
-    /// aborted.
+    /// Called the moment a session with a scope is established, and again when a
+    /// retained session is checked out, so the scope is registered **before** the
+    /// attempt can be aborted. An HTTP/1.1 session has no scope and publishes
+    /// nothing, but the stale scopes already in the list still get drained by the
+    /// first await point (see [`Self::drain_stale_scopes`]).
     ///
-    /// The slot is single and may already hold a handle from a **previous**
-    /// attempt whose future was aborted: there the outer lease was dropped and
-    /// the session never reached `idle`, so nothing else would ever await that
-    /// scope's children. Overwriting it blindly would strand them — `close()`
-    /// waits on this slot, so it would return `Closed` over live children. The
-    /// stale handle is therefore drained first.
-    ///
-    /// The stale handle is **cloned out**, never taken. Taking it would empty the
-    /// slot for the duration of the drain, so an abort of *this* attempt during
-    /// that await would drop the only remaining waiter and `close()` would lose
-    /// the scope. With a clone, the slot keeps naming the scope until the drain
-    /// finishes and the slot is updated under the lock; an abort in the window
-    /// therefore leaves the stale scope still parked and still waitable.
-    ///
-    /// This runs for **every** new attempt, including one whose session has no
-    /// scope of its own. `handle` is `None` for an HTTP/1.1 session, and a stale
-    /// handle left by an earlier aborted HTTP/2 attempt must still be drained
-    /// then, not skipped: otherwise the following successful `release` would
-    /// clear the slot and the stale scope would lose its only waiter. So a `None`
-    /// handle drains whatever is parked and leaves the slot empty; a `Some` handle
-    /// drains it and then parks the new one.
-    ///
-    /// Only genuinely stale handles are met here. A successfully retained session
-    /// has its handle cleared by [`Self::release`], so a normal reuse never finds
-    /// a live scope in this slot and cannot seal the session it is about to use.
-    async fn park_attempt_handle(&self, handle: Option<crate::secure::H2DrainHandle>) {
-        // The handle is passed in already extracted: taking a `&PooledDohSession`
-        // as a parameter would keep that borrow alive across the recovery await
-        // and make the exchange future non-`Send`.
-        //
-        // Clone, so the slot keeps its waiter for the whole drain.
-        let stale = self.doh_lock().attempt.clone();
-        if let Some(stale) = stale {
-            stale.finish().await;
+    /// Registration is **idempotent by scope identity**. A long-lived reusable
+    /// session is published again on every checkout, and `release` deliberately
+    /// keeps its entry, so pushing unconditionally would grow the registry without
+    /// bound over the session's lifetime. Re-publishing the same scope is a no-op;
+    /// distinct scopes — a stale one and an incoming one — still coexist, because
+    /// the check is `is_same_scope` rather than "is the list non-empty".
+    fn publish_scope(&self, handle: Option<crate::secure::H2DrainHandle>) {
+        let Some(handle) = handle else {
+            return;
+        };
+        let mut inner = self.doh_lock();
+        if inner
+            .scopes
+            .iter()
+            .any(|parked| parked.is_same_scope(&handle))
+        {
+            return;
         }
-        self.doh_lock().attempt = handle;
+        inner.scopes.push(handle);
+    }
+
+    /// Removes a scope from the registry once it has actually drained.
+    ///
+    /// Retained sessions keep their entry deliberately: `close()` must drain an
+    /// idle session's children too, and a concurrent `close()` arriving after
+    /// another caller took the idle session still has to wait for those children —
+    /// the registry is how it sees them.
+    fn forget_scope(&self, handle: &crate::secure::H2DrainHandle) {
+        let mut inner = self.doh_lock();
+        inner.scopes.retain(|parked| !parked.is_same_scope(handle));
+    }
+
+    /// Whether any scope is currently registered.
+    #[cfg(test)]
+    fn registered_scope_count(&self) -> usize {
+        self.doh_lock().scopes.len()
+    }
+
+    /// Drains every registered scope except `keep`.
+    ///
+    /// This is the recoverable sweep that replaced the earlier single-slot drain
+    /// step. Every scope is already published, so an abort during this await
+    /// leaves the whole list intact for the next attempt or for `close()` — the
+    /// method never has to take anything out of shared state to make progress.
+    ///
+    /// Each entry is drained through a clone and removed from the registry only
+    /// after its children have actually finished, so the registry is never
+    /// momentarily missing a scope that still needs draining.
+    async fn drain_stale_scopes(&self, keep: Option<&crate::secure::H2DrainHandle>) {
+        // Snapshot under the lock, then drain without holding it: the drain
+        // awaits, and the registry must stay reachable to `close()` meanwhile.
+        let stale: Vec<crate::secure::H2DrainHandle> = {
+            let inner = self.doh_lock();
+            inner
+                .scopes
+                .iter()
+                .filter(|parked| keep.is_none_or(|keep| !parked.is_same_scope(keep)))
+                .cloned()
+                .collect()
+        };
+        for handle in stale {
+            handle.finish().await;
+            // Only now is it safe to forget it: its children have drained.
+            self.forget_scope(&handle);
+        }
     }
 
     /// Takes a live idle session serving the same service as `base`.
@@ -1678,22 +1694,28 @@ impl DohReuseOwner {
             let mut inner = self.doh_lock();
             inner.idle.take()?
         };
+        // Publish the scope *before* any await. From here the scope is the
+        // owner's responsibility, so an abort in any branch below leaves it
+        // registered and `close()` can still drain it. These branches used to
+        // await `session.shutdown()` with nothing registered, which lost the
+        // scope on cancellation.
+        self.publish_scope(session.h2_drain_handle());
+
         let idle_since = self.doh_lock().idle_since;
         if self.clock.now().saturating_duration_since(idle_since) >= IDLE_TIMEOUT {
-            session.shutdown().await;
             return None;
         }
         let same_service = stored_key.dial == base.dial
             && stored_key.transport == base.transport
             && stored_key.secure == base.secure;
         if !same_service || session.is_closed() {
-            session.shutdown().await;
             return None;
         }
-        // Re-park the retained session's scope so a later abort of *this*
-        // attempt still has a handle to drain through. `checkout_live` is already
-        // async, so the recovery is free here.
-        self.park_attempt_handle(session.h2_drain_handle()).await;
+        // The scope is now being leased to this attempt; drain any *other*
+        // registered scope (an abandoned one) before proceeding. The awaited
+        // session's own scope is kept.
+        self.drain_stale_scopes(session.h2_drain_handle().as_ref())
+            .await;
         Some(session)
     }
 
@@ -1703,14 +1725,14 @@ impl DohReuseOwner {
     /// owns its own child-tracking scope and holds no owner registration, so
     /// retaining it does not prevent `close()` from draining.
     ///
-    /// On the retention path the parked attempt handle is **cleared**, but only
-    /// after a safe handoff: the session is moved into `idle` first, so the scope
-    /// is never unowned. From then on `close()` tears it down through
-    /// `session.shutdown()`. Leaving the handle parked would make the next
-    /// attempt's parking step treat this live scope as stale and drain it, killing
-    /// the session it is about to reuse. The handle is only kept when the session
-    /// is **not** retained — a discard, or an aborted attempt whose `idle` stays
-    /// empty — because then nothing else owns the scope.
+    /// On retention the session's scope **stays registered**. The retained
+    /// session owns its scope, but `close()` and any concurrent exchange still
+    /// have to be able to see and drain it, and the registry is how they do — so
+    /// the entry is intentionally kept. Removing it here would make an idle
+    /// session's children invisible to a `close()` that arrives after another
+    /// caller took the session, which is exactly the window this registry exists
+    /// to close. A session that is **not** retained keeps its entry for the same
+    /// reason.
     async fn release(&self, key: ReuseKey, session: crate::secure::PooledDohSession) {
         let now = self.clock.now();
         let mut session = Some(session);
@@ -1729,10 +1751,6 @@ impl DohReuseOwner {
                         .expect("the session is present before retention"),
                 ));
                 inner.idle_since = now;
-                // The retained session owns its scope from here on; see above.
-                // Clearing under the same lock that installed `idle` means the
-                // scope is never simultaneously unowned and un-parked.
-                inner.attempt = None;
                 false
             }
         };
@@ -1781,31 +1799,32 @@ impl DohReuseOwner {
         session.active_children_for_test()
     }
 
-    /// Installs a teardown barrier on the parked attempt handle.
+    /// Installs a teardown barrier on a registered scope.
     ///
-    /// This is the handle that survives an aborted exchange, so it is the one
-    /// the abort regression must park. Returns `false` when no HTTP/2 attempt
-    /// handle is parked. Test-only.
+    /// `index` selects which registry entry, so a test can park the scope an
+    /// aborted attempt left behind. Returns `false` when no such entry exists.
+    /// Test-only.
     #[cfg(test)]
-    fn install_teardown_pause_on_attempt_for_test(
+    fn install_teardown_pause_on_scope_for_test(
         &self,
+        index: usize,
         pause: Arc<crate::secure::H2TeardownPause>,
     ) -> bool {
         let inner = self.doh_lock();
-        let Some(handle) = inner.attempt.as_ref() else {
+        let Some(handle) = inner.scopes.get(index) else {
             return false;
         };
         handle.install_teardown_pause(pause);
         true
     }
 
-    /// The live tracked-child count of the parked attempt handle, if any.
+    /// The live tracked-child count of a registered scope, if any.
     #[cfg(test)]
-    fn attempt_children_for_test(&self) -> Option<usize> {
+    fn scope_children_for_test(&self, index: usize) -> Option<usize> {
         let inner = self.doh_lock();
         inner
-            .attempt
-            .as_ref()
+            .scopes
+            .get(index)
             .map(|handle| handle.active_children())
     }
 
@@ -1924,12 +1943,17 @@ impl DohReuseOwner {
         )
         .await?;
 
-        // Park the session's drain handle *before* the attempt can be aborted.
-        // An aborted exchange drops the session, whose synchronous `Drop` can
-        // only seal and abort; this handle is what lets `close()` still await the
-        // tracked children. Draining later through it is idempotent. Parking also
-        // recovers a stale handle left by an earlier aborted attempt.
-        self.park_attempt_handle(session.h2_drain_handle()).await;
+        // Publish this session's scope *before* the attempt can be aborted, then
+        // drain any other registered scope. Publishing first is what makes the
+        // window safe: an aborted attempt drops the session, whose synchronous
+        // `Drop` can only seal and abort, and this registry entry is what lets
+        // `close()` still await the tracked children.
+        //
+        // Publishing is synchronous and the drain is skipped when nothing else is
+        // registered, so a normal reuse performs no await here at all.
+        self.publish_scope(session.h2_drain_handle());
+        let own = session.h2_drain_handle();
+        self.drain_stale_scopes(own.as_ref()).await;
 
         // Connect/handshake are an async wake: re-apply the control before the
         // request. No DNS byte has been sent, so this is `NotSent`.
@@ -2867,7 +2891,7 @@ mod tests {
             };
 
             // Close must reach the barrier rather than completing immediately.
-            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.wait_for_arrivals(1))
                 .await
                 .expect("close reaches the pooled h2 teardown barrier");
 
@@ -2958,8 +2982,8 @@ mod tests {
             // Park the teardown of the scope that survived the abort.
             let pause = Arc::new(crate::secure::H2TeardownPause::new());
             assert!(
-                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&pause)),
-                "an h2 attempt handle must be parked even after the abort"
+                owner.install_teardown_pause_on_scope_for_test(0, Arc::clone(&pause)),
+                "an h2 scope must stay registered even after the abort"
             );
 
             let closer = {
@@ -2969,7 +2993,7 @@ mod tests {
 
             // Close must reach the barrier: the aborted attempt's children are
             // still tracked, and close waits on them rather than returning.
-            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.wait_for_arrivals(1))
                 .await
                 .expect("close reaches the abort-surviving teardown barrier");
 
@@ -2989,9 +3013,9 @@ mod tests {
                 .expect("close task joins");
             assert_eq!(outcome, crate::CloseResult::Closed);
             assert_eq!(
-                owner.attempt_children_for_test(),
+                owner.scope_children_for_test(0),
                 None,
-                "the drained attempt handle is released"
+                "the drained scope is forgotten"
             );
         });
         peer.join();
@@ -3028,13 +3052,19 @@ mod tests {
                 owner.install_teardown_pause_for_test(Arc::clone(&pause)),
                 "the retained session must be HTTP/2 for this test"
             );
+            assert_eq!(
+                owner.registered_scope_count(),
+                1,
+                "the idle session keeps its scope registered, so a concurrent \
+                 close that arrives after another took the session still sees it"
+            );
 
             let first = {
                 let owner = Arc::clone(&owner);
                 tokio::spawn(async move { owner.close().await })
             };
             // Let the first caller claim the teardown and park on the barrier.
-            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.wait_for_arrivals(1))
                 .await
                 .expect("the first close reaches the teardown barrier");
 
@@ -3043,6 +3073,11 @@ mod tests {
                 let owner = Arc::clone(&owner);
                 tokio::spawn(async move { owner.close().await })
             };
+
+            // Both callers drain the same scope, so both park on the barrier.
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.wait_for_arrivals(2))
+                .await
+                .expect("both concurrent closes reach the teardown barrier");
 
             // Neither may complete while the barrier is held.
             let mut first = first;
@@ -3077,19 +3112,19 @@ mod tests {
         peer.join();
     }
 
-    /// A new attempt must not overwrite a parked handle whose children are still
-    /// alive, or those children would lose the only thing `close()` can wait on.
+    /// A new attempt must not leave a stale registered scope undrained, or its
+    /// children would lose the waiter `close()` relies on.
     ///
     /// Sequence: one successful exchange retains a session; a second exchange is
-    /// aborted in flight, leaving its still-running children and a parked handle;
-    /// a third exchange then starts. Because the drain slot is single, the new
-    /// attempt must first finish draining the stale handle.
+    /// aborted in flight, leaving its still-running children and a registered
+    /// scope; a third exchange then starts. The new attempt sweeps the stale scope
+    /// before it proceeds.
     ///
-    /// The stale handle here is genuinely stale — the aborted attempt took the
-    /// idle session, so its scope was never retained and nothing else owns it.
-    /// (A *successfully* retained session clears the slot in `release`, so this
-    /// recovery can never seal a live reusable scope; the two normal reuse tests
-    /// in `reuse_doh` pin that.)
+    /// The stale scope here is genuinely abandoned — the aborted attempt took the
+    /// idle session, so its scope was never retained and nothing else owns it. A
+    /// *retained* session keeps its registry entry, so the sweep must skip the
+    /// scope it is about to reuse; the two normal reuse tests in `reuse_doh` pin
+    /// that.
     #[test]
     fn a_new_attempt_drains_the_stale_attempt_handle_before_replacing_it() {
         let identity = commit_identity();
@@ -3137,7 +3172,7 @@ mod tests {
             // Park the stale handle, so the drain it needs is observable.
             let pause = Arc::new(crate::secure::H2TeardownPause::new());
             assert!(
-                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&pause)),
+                owner.install_teardown_pause_on_scope_for_test(0, Arc::clone(&pause)),
                 "the aborted attempt must have parked a handle"
             );
 
@@ -3161,7 +3196,7 @@ mod tests {
 
             // The recovery must reach the barrier rather than silently
             // overwriting the stale handle.
-            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.wait_for_arrivals(1))
                 .await
                 .expect("the new attempt drains the stale handle before parking its own");
 
@@ -3198,14 +3233,14 @@ mod tests {
         peer.join();
     }
 
-    /// Aborting an attempt *during* the stale-handle recovery must not lose the
-    /// stale waiter.
+    /// Aborting an attempt *during* the stale-scope sweep must not lose the
+    /// registered scope.
     ///
-    /// The recovery clones the parked handle instead of taking it, so the slot
-    /// keeps naming the stale scope for the whole drain. If the recovering
+    /// The sweep clones the registered handle instead of taking it, so the
+    /// registry keeps naming the stale scope for the whole drain. If the sweeping
     /// attempt is itself aborted mid-await, `close()` must still find that scope
-    /// in the slot and still wait for it. Taking the handle would empty the slot,
-    /// and this test's re-install step would find nothing.
+    /// registered and still wait for it. Taking the handle would leave the
+    /// registry empty, and this test's re-install step would find nothing.
     #[test]
     fn aborting_during_the_stale_handle_recovery_keeps_the_waiter() {
         let identity = commit_identity();
@@ -3250,7 +3285,7 @@ mod tests {
             // 3. Park the stale scope's teardown, so the recovery blocks on it.
             let recovery_gate = Arc::new(crate::secure::H2TeardownPause::new());
             assert!(
-                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&recovery_gate)),
+                owner.install_teardown_pause_on_scope_for_test(0, Arc::clone(&recovery_gate)),
                 "the aborted attempt must have parked a handle"
             );
 
@@ -3270,7 +3305,7 @@ mod tests {
                     .await
                 })
             };
-            tokio::time::timeout(POOL_TEST_TIMEOUT, recovery_gate.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, recovery_gate.wait_for_arrivals(1))
                 .await
                 .expect("the recovery reaches the stale handle's teardown barrier");
 
@@ -3278,13 +3313,13 @@ mod tests {
             recovering.abort();
             let _ = recovering.await;
 
-            // 6. The stale scope must still be parked, so `close()` still has a
-            // waiter. This is the discriminating assertion: with the handle
-            // taken out of the slot, there would be nothing left to install on.
+            // 6. The stale scope must still be registered, so `close()` still has
+            // a waiter. This is the discriminating assertion: with the handle
+            // taken out of the registry, there would be nothing left to install on.
             let close_gate = Arc::new(crate::secure::H2TeardownPause::new());
             assert!(
-                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&close_gate)),
-                "aborting the recovery must not have emptied the drain slot"
+                owner.install_teardown_pause_on_scope_for_test(0, Arc::clone(&close_gate)),
+                "aborting the sweep must not have emptied the scope registry"
             );
 
             // 7. close() must reach that barrier rather than returning over an
@@ -3293,7 +3328,7 @@ mod tests {
                 let owner = Arc::clone(&owner);
                 tokio::spawn(async move { owner.close().await })
             };
-            tokio::time::timeout(POOL_TEST_TIMEOUT, close_gate.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, close_gate.wait_for_arrivals(1))
                 .await
                 .expect("close waits on the scope the aborted recovery left behind");
 
@@ -3316,13 +3351,17 @@ mod tests {
         peer.join();
     }
 
-    /// Aborting the `close()` caller that started the teardown must not strand
-    /// the shared state; a later `close()` must still complete.
+    /// Aborting a `close()` caller mid-drain must not strand the teardown; a
+    /// later `close()` must still complete.
     ///
-    /// The teardown runs in a detached task that owns the session and handle, so
-    /// aborting the caller only stops it waiting. An inline design would have
-    /// dropped the session mid-drain and left `teardown_in_progress` set forever,
-    /// making every later `close()` wait for a completion that could never come.
+    /// The teardown runs **inline** in the caller (no detached task — design §3),
+    /// so an abort ends that caller's drain. Nothing is lost, because the scope
+    /// registry and the idle session are shared state that the drain only removes
+    /// from once the children have actually gone: the later `close()` finds the
+    /// same scope still registered and drains it again, idempotently. A design
+    /// that took the resources out of shared state before the await — or that
+    /// left a single-owner "in progress" claim behind — would either drop the
+    /// session mid-drain or hang every later `close()` forever.
     #[test]
     fn aborting_the_close_leader_lets_a_later_close_take_over() {
         let identity = commit_identity();
@@ -3355,16 +3394,18 @@ mod tests {
                 let owner = Arc::clone(&owner);
                 tokio::spawn(async move { owner.close().await })
             };
-            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.wait_for_arrivals(1))
                 .await
                 .expect("the first close reaches the teardown barrier");
 
-            // Abort it while the drain is parked. The detached task is unaffected.
+            // Abort it while the drain is parked. The inline drain ends here, but
+            // the scope stays registered for whoever comes next.
             first.abort();
             let _ = first.await;
 
-            // A second close must take over and complete once the barrier is
-            // released — not hang forever on a claim nobody will clear.
+            // A second close must drain the same registered scope and complete
+            // once the barrier is released — not hang forever on a claim nobody
+            // will clear.
             let second = {
                 let owner = Arc::clone(&owner);
                 tokio::spawn(async move { owner.close().await })
@@ -3390,14 +3431,13 @@ mod tests {
         peer.join();
     }
 
-    /// A new attempt whose session has **no** HTTP/2 scope must still process a
-    /// stale handle left by an earlier aborted HTTP/2 attempt.
+    /// A new attempt whose session has **no** HTTP/2 scope must still drain a
+    /// scope left registered by an earlier aborted HTTP/2 attempt.
     ///
-    /// `park_attempt_handle(None)` early-returning would skip the drain, and the
-    /// following successful `release` would clear the slot, dropping the stale
-    /// scope's children with nobody left to await them. The next attempt's session
-    /// protocol is a property of the peer, not of the owner, so this drives the
-    /// HTTP/1.1 branch of the parking step directly against a real stale handle.
+    /// This is the branch an HTTP/1.1 attempt runs. An early return when the
+    /// attempt's own handle is `None` would skip the sweep entirely, leaving the
+    /// stale scope's children with nobody awaiting them. The sweep is driven
+    /// directly here against a real registered scope.
     #[test]
     fn a_scope_less_new_attempt_still_drains_a_stale_handle() {
         let identity = commit_identity();
@@ -3442,31 +3482,31 @@ mod tests {
 
             let pause = Arc::new(crate::secure::H2TeardownPause::new());
             assert!(
-                owner.install_teardown_pause_on_attempt_for_test(Arc::clone(&pause)),
-                "the aborted attempt must have parked a handle"
+                owner.install_teardown_pause_on_scope_for_test(0, Arc::clone(&pause)),
+                "the aborted attempt must have registered a scope"
             );
 
-            // The scope-less branch: exactly what an HTTP/1.1 attempt runs.
-            let parking = {
+            // The scope-less branch: exactly what an HTTP/1.1 attempt runs. Its
+            // new handle is `None`, which previously skipped the stale sweep.
+            let sweeping = {
                 let owner = Arc::clone(&owner);
-                tokio::spawn(async move { owner.park_attempt_handle(None).await })
+                tokio::spawn(async move { owner.drain_stale_scopes(None).await })
             };
-            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.arrived())
+            tokio::time::timeout(POOL_TEST_TIMEOUT, pause.wait_for_arrivals(1))
                 .await
-                .expect("a scope-less attempt must still drain the stale handle");
+                .expect("a scope-less attempt must still drain the stale scope");
 
             pause.release();
-            tokio::time::timeout(POOL_TEST_TIMEOUT, parking)
+            tokio::time::timeout(POOL_TEST_TIMEOUT, sweeping)
                 .await
-                .expect("the parking step finishes")
-                .expect("parking task joins");
+                .expect("the sweep finishes")
+                .expect("sweep task joins");
 
-            // The stale scope was drained, so the slot is now empty and `close()`
-            // has nothing left to lose.
+            // The stale scope drained, so the registry no longer holds it.
             assert_eq!(
-                owner.attempt_children_for_test(),
+                owner.scope_children_for_test(0),
                 None,
-                "the drained stale handle is not left parked"
+                "the drained stale scope is forgotten"
             );
             assert_eq!(
                 tokio::time::timeout(POOL_TEST_TIMEOUT, owner.close())
@@ -3474,6 +3514,41 @@ mod tests {
                     .expect("close completes promptly once the stale scope is drained"),
                 crate::CloseResult::Closed
             );
+        });
+        peer.join();
+    }
+
+    /// Repeated reuse of one session must not grow the scope registry.
+    ///
+    /// A reusable session is re-published on every checkout while `release` keeps
+    /// its entry, so an unconditional push would add a duplicate per exchange and
+    /// the registry would grow for the session's whole lifetime.
+    #[test]
+    fn reusing_one_session_does_not_grow_the_scope_registry() {
+        let identity = commit_identity();
+        let peer = CommitH2Peer::start(&identity);
+        let endpoint =
+            crate::secure::DohEndpoint::new("https://dns.example/dns-query", peer.address)
+                .expect("doh endpoint");
+        let owner =
+            Arc::new(DohReuseOwner::new(endpoint, commit_policy(&identity)).expect("owner"));
+
+        with_runtime(async {
+            for round in 0..5u16 {
+                let query = test_query(0xd050 + round);
+                bounded_exchange(
+                    &owner,
+                    ExchangeRequest::new(&query).expect("request"),
+                    POOL_TEST_TIMEOUT,
+                )
+                .await
+                .expect("each reused exchange succeeds");
+                assert_eq!(
+                    owner.registered_scope_count(),
+                    1,
+                    "round {round}: one session means exactly one registered scope"
+                );
+            }
         });
         peer.join();
     }

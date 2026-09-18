@@ -175,10 +175,10 @@ pub(crate) struct H2ScopeLease {
 /// including the one where the exchange future never ran to completion.
 ///
 /// The handle is `Clone` so an owner can start a drain **without removing the
-/// waiter from its slot**: if the attempt performing that drain is itself
-/// aborted mid-await, the slot still names the scope and `close()` can still
-/// await it. A clone shares the same [`H2ChildState`], so draining through any
-/// clone is the same teardown.
+/// registered scope**: if the attempt performing that drain is itself aborted
+/// mid-await, the owner's scope registry still names the scope and `close()` can
+/// still await it. A clone shares the same [`H2ChildState`], so draining through
+/// any clone is the same teardown.
 ///
 /// Draining is idempotent: sealing and aborting twice is harmless, and a second
 /// drain simply observes an already-empty child set.
@@ -207,6 +207,14 @@ impl H2DrainHandle {
             .active
     }
 
+    /// Whether `other` names the same child scope as `self`.
+    ///
+    /// The owner keeps scopes in a shared list and must remove exactly the entry
+    /// it drained, so identity is compared by pointer rather than by value.
+    pub(crate) fn is_same_scope(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+
     /// Installs the deterministic teardown barrier for this scope.
     #[cfg(test)]
     pub(crate) fn install_teardown_pause(&self, pause: Arc<H2TeardownPause>) {
@@ -226,48 +234,72 @@ struct H2ChildGuard {
 #[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct H2TeardownPause {
-    arrived: std::sync::atomic::AtomicBool,
+    /// Number of drains that have reached the barrier so far.
+    arrivals: std::sync::Mutex<usize>,
     arrived_notify: tokio::sync::Notify,
-    released: tokio::sync::Notify,
+    /// Set once the test releases the barrier. It is a flag rather than a single
+    /// notification because the barrier must stay open: with the per-caller
+    /// teardown, several `close()` calls drain the same scope, and every one of
+    /// them parks here. A one-shot release would leave the later ones waiting.
+    released: std::sync::atomic::AtomicBool,
+    released_notify: tokio::sync::Notify,
 }
 
 #[cfg(test)]
 impl H2TeardownPause {
     pub(crate) fn new() -> Self {
         Self {
-            arrived: std::sync::atomic::AtomicBool::new(false),
+            arrivals: std::sync::Mutex::new(0),
             arrived_notify: tokio::sync::Notify::new(),
-            released: tokio::sync::Notify::new(),
+            released: std::sync::atomic::AtomicBool::new(false),
+            released_notify: tokio::sync::Notify::new(),
         }
     }
 
     async fn wait_until_released(&self) {
-        let released = self.released.notified();
+        // Register interest before re-checking, so a release between the two
+        // cannot be missed; return immediately once the barrier has opened.
+        let released = self.released_notify.notified();
         tokio::pin!(released);
         released.as_mut().enable();
-        self.arrived
-            .store(true, std::sync::atomic::Ordering::Release);
+
+        {
+            let mut arrivals = self
+                .arrivals
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *arrivals += 1;
+        }
         self.arrived_notify.notify_waiters();
+
+        if self.released.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         released.await;
     }
 
-    pub(crate) async fn arrived(&self) {
-        if self.arrived.load(std::sync::atomic::Ordering::Acquire) {
-            return;
-        }
+    /// Waits until `count` drains have parked on this barrier.
+    pub(crate) async fn wait_for_arrivals(&self, count: usize) {
         loop {
             let notified = self.arrived_notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if self.arrived.load(std::sync::atomic::Ordering::Acquire) {
+            let seen = *self
+                .arrivals
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if seen >= count {
                 return;
             }
             notified.await;
         }
     }
 
+    /// Opens the barrier, releasing every parked drain and every later one.
     pub(crate) fn release(&self) {
-        self.released.notify_waiters();
+        self.released
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.released_notify.notify_waiters();
     }
 }
 
@@ -367,12 +399,15 @@ impl H2ScopeLease {
         self.seal_and_abort();
         #[cfg(test)]
         {
+            // Clone rather than take: with the per-caller teardown, every
+            // concurrent drain of the same scope should park on the same barrier,
+            // so the test can observe that all of them wait.
             let teardown_pause = self
                 .state
                 .teardown_pause
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
+                .clone();
             if let Some(pause) = teardown_pause {
                 pause.wait_until_released().await;
             }
@@ -2508,7 +2543,7 @@ mod tests {
             let finish = tokio::spawn(async move {
                 finish_scope.finish().await;
             });
-            timeout(TEST_TIMEOUT, pause.arrived())
+            timeout(TEST_TIMEOUT, pause.wait_for_arrivals(1))
                 .await
                 .expect("teardown reaches the deterministic barrier");
 
@@ -2583,7 +2618,7 @@ mod tests {
                 tokio::select! {
                     biased;
                     result = &mut finalization => panic!("h2 response committed before teardown: {result:?}"),
-                    () = pause.arrived() => {},
+                    () = pause.wait_for_arrivals(1) => {},
                 }
                 assert_eq!(upstream.begin_close(), CloseTransition::BeganClosing);
                 pause.release();
