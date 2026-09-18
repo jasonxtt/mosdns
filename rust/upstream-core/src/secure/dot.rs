@@ -821,7 +821,9 @@ impl PooledDotSession {
 /// case in which the owner may dial a replacement session.
 pub(crate) struct PooledDotOutcome {
     pub(crate) error: SecureError,
-    pub(crate) session: PooledDotSession,
+    /// Boxed: the retained TLS session is over a kilobyte, so an inline
+    /// session would trip `clippy::result_large_err` on the exchange result.
+    pub(crate) session: Box<PooledDotSession>,
     pub(crate) rebuildable: bool,
 }
 
@@ -834,7 +836,7 @@ impl PooledDotOutcome {
         let rebuildable = matches!(error.side_effect(), SideEffectState::NotSent);
         Self {
             error,
-            session,
+            session: Box::new(session),
             rebuildable,
         }
     }
