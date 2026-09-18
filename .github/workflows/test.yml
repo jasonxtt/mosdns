@@ -2,7 +2,15 @@ name: Test mosdns
 
 on:
   push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.trellis/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.trellis/**'
   workflow_dispatch:
 
 jobs:

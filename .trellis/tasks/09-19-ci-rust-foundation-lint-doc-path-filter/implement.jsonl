@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Change discipline + Rust fmt/test/clippy gates for this lint fix"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Typed SecureError/UpstreamError conventions touched by PooledDotOutcome"}

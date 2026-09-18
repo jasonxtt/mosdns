@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review gates for lint fix + workflow filter"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error ownership semantics to verify"}
