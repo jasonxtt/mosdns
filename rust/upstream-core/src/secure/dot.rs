@@ -172,10 +172,6 @@ impl SecureResponse {
     /// fixed — a DoH3 response is never H1/H2 — so it takes no version
     /// parameter. Crate-internal: the one-shot DoH3 driver in `crate::quic`
     /// (Slice 2) is the only caller.
-    ///
-    /// Slice 0 has no driver yet, so this seam is dead in non-test builds
-    /// until Slice 2 lands; the `allow` lapses naturally once it is called.
-    #[allow(dead_code)]
     #[must_use]
     pub(crate) fn doh3(wire: Vec<u8>, request_id: u16, truncated: bool) -> Self {
         debug_assert_eq!(

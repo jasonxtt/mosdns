@@ -53,10 +53,10 @@ use crate::{
 };
 
 /// The `application/dns-message` media type, compared case-insensitively.
-const DNS_MEDIA_TYPE: &str = "application/dns-message";
+pub(crate) const DNS_MEDIA_TYPE: &str = "application/dns-message";
 
 /// The largest DNS message a DoH response may carry: 65535 bytes.
-const MAX_DNS_BODY: usize = 65_535;
+pub(crate) const MAX_DNS_BODY: usize = 65_535;
 
 /// The largest response header block this client will accept: 16 KiB.
 ///
@@ -65,14 +65,21 @@ const MAX_DNS_BODY: usize = 65_535;
 /// many small ones, and still make the client hold far more than the DNS
 /// contract needs. The bound is applied to the parsed head, so it holds however
 /// the peer chose to distribute those bytes across headers.
-const MAX_RESPONSE_HEADER_BYTES: usize = 16 * 1024;
+///
+/// Crate-visible because the one-shot HTTP/3 driver in `crate::quic` freezes its
+/// response head to the same bound.
+pub(crate) const MAX_RESPONSE_HEADER_BYTES: usize = 16 * 1024;
 
 /// The largest number of individual response headers this client will accept.
 ///
 /// This complements the byte bound: it stops a peer from making the client
 /// allocate a huge number of tiny header entries that individually stay well
 /// under the byte ceiling. The DNS contract needs only a handful.
-const MAX_RESPONSE_HEADERS: usize = 64;
+///
+/// Crate-visible because the HTTP/3 driver must enforce the count itself: unlike
+/// the Hyper HTTP/1.1 and HTTP/2 parsers, the h3 client layer has no header-count
+/// limit of its own.
+pub(crate) const MAX_RESPONSE_HEADERS: usize = 64;
 
 /// The Hyper HTTP/1.1 parser/read-buffer ceiling: the same 16 KiB the contract
 /// allows for a response head.
@@ -305,7 +312,7 @@ impl H2TeardownPause {
 
 impl H2ScopeLease {
     /// Creates a scope bounded by one exchange, holding an owner registration.
-    fn new(
+    pub(crate) fn new(
         liveness: Arc<SharedInFlightGuard>,
         owner_cancellation: TransportCancellation,
         caller_cancellation: TransportCancellation,
@@ -395,7 +402,20 @@ impl H2ScopeLease {
         }
     }
 
-    async fn finish(&self) {
+    /// Registers and spawns an arbitrary tracked child under this scope.
+    ///
+    /// The seal/abort/drain contract is protocol-agnostic. The one-shot HTTP/3
+    /// driver in `crate::quic` owns its continuously-polled h3 connection driver
+    /// with the same ownership Hyper's HTTP/2 children get, instead of growing a
+    /// second child registry that could drift.
+    pub(crate) fn spawn<F>(&self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.state.execute(future);
+    }
+
+    pub(crate) async fn finish(&self) {
         self.seal_and_abort();
         #[cfg(test)]
         {
@@ -1094,12 +1114,15 @@ struct ValidatedDohResponse {
 /// This is intentionally narrower than `dns_core::patch_response_id_ra`, which
 /// also sets RA for the server response path.
 ///
+/// Crate-visible because the HTTP/3 driver in `crate::quic` freezes the same
+/// "restore only the caller's ID" semantics for the committed response.
+///
 /// # Errors
 ///
 /// Returns [`UpstreamError::MalformedResponse`] when the packet is shorter than
 /// a DNS header or has QR clear, so a non-response can never be returned to the
 /// caller as if it were one.
-fn restore_request_id(body: &[u8], request_id: u16) -> Result<Vec<u8>, SecureError> {
+pub(crate) fn restore_request_id(body: &[u8], request_id: u16) -> Result<Vec<u8>, SecureError> {
     // Validation only: this rejects a short or QR-clear packet before copying.
     inspect_response_header(body)
         .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
@@ -1198,10 +1221,22 @@ async fn send_request(
 /// (status line plus every header line plus the terminating blank line), which
 /// is what the 16 KiB contract bounds.
 fn response_head_bytes(response: &Response<Incoming>) -> usize {
-    // "HTTP/1.1 200 OK\r\n" — the version is fixed and the reason phrase is not
-    // preserved by the parser, so the status line is measured conservatively
-    // from the parts that are.
-    let version = match response.version() {
+    parsed_head_bytes(response.version(), response.status(), response.headers())
+}
+
+/// Measures the logical wire size of a head already parsed into fields.
+///
+/// Crate-visible so the HTTP/3 driver can apply the same 16 KiB contract to the
+/// h3 response head, which arrives as a status plus a header map rather than as
+/// a Hyper `Response<Incoming>`.
+pub(crate) fn parsed_head_bytes(
+    version: hyper::Version,
+    status: hyper::StatusCode,
+    headers: &hyper::HeaderMap,
+) -> usize {
+    // "HTTP/1.1 200 OK\r\n" — the reason phrase is not preserved by the parser,
+    // so the status line is measured conservatively from the parts that are.
+    let version = match version {
         hyper::Version::HTTP_09 => "HTTP/0.9 ",
         hyper::Version::HTTP_10 => "HTTP/1.0 ",
         _ => "HTTP/1.1 ",
@@ -1209,9 +1244,9 @@ fn response_head_bytes(response: &Response<Incoming>) -> usize {
     let mut total = version.len()
         + 3 // status code
         + 1 // SP
-        + response.status().canonical_reason().map_or(0, str::len)
+        + status.canonical_reason().map_or(0, str::len)
         + 2; // CRLF
-    for (name, value) in response.headers() {
+    for (name, value) in headers {
         // "<name>: <value>\r\n"
         total = total.saturating_add(name.as_str().len() + 2 + value.as_bytes().len() + 2);
     }
@@ -1220,10 +1255,31 @@ fn response_head_bytes(response: &Response<Incoming>) -> usize {
 
 /// Validates the status, size and headers this contract depends on.
 fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureError> {
-    if response.status() != hyper::StatusCode::OK {
+    let head_bytes = response_head_bytes(response);
+    validate_doh_head_parts(response.status(), response.headers(), head_bytes).map(|_declared| ())
+}
+
+/// Validates a parsed DoH head and returns its declared body length, if any.
+///
+/// Shared by the HTTP/1.1, HTTP/2, and HTTP/3 drivers so the frozen DoH response
+/// contract cannot drift between them. The check order is part of the contract:
+/// status, then the head-size bound, then the declared length, then the content
+/// encoding, then the media type.
+///
+/// The returned value is the already range-checked `content-length` declaration,
+/// or `None` when the head carried none. The HTTP/1.1 and HTTP/2 paths ignore it
+/// because Hyper enforces `content-length` framing itself; the HTTP/3 driver
+/// uses it to reject a complete-but-shorter or longer body, since the h3
+/// transport performs no such framing check.
+pub(crate) fn validate_doh_head_parts(
+    status: hyper::StatusCode,
+    headers: &hyper::HeaderMap,
+    head_bytes: usize,
+) -> Result<Option<u64>, SecureError> {
+    if status != hyper::StatusCode::OK {
         return Err(SecureError::DohProtocol(
             DohProtocolError::UnexpectedStatus {
-                status: response.status().as_u16(),
+                status: status.as_u16(),
             },
         ));
     }
@@ -1233,11 +1289,10 @@ fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureErr
     // the parser accepted, including a case where the reconstruction and the
     // wire disagree.
     //
-    // Note that `response_head_bytes` reconstructs the head from parsed fields
+    // Note that `parsed_head_bytes` reconstructs the head from parsed fields
     // and therefore cannot see bytes the parser discarded, such as a long
     // non-canonical reason phrase. That is exactly why the raw bound above is
     // the primary control and this is only a secondary check.
-    let head_bytes = response_head_bytes(response);
     if head_bytes > MAX_RESPONSE_HEADER_BYTES {
         return Err(SecureError::DohProtocol(
             DohProtocolError::ResponseHeadTooLarge,
@@ -1248,7 +1303,7 @@ fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureErr
     // head, before any body byte is read. The incremental bound in `read_body`
     // still applies, so a peer cannot evade the limit by omitting or
     // understating `Content-Length`.
-    if let Some(length) = response.headers().get(CONTENT_LENGTH) {
+    let declared = if let Some(length) = headers.get(CONTENT_LENGTH) {
         let length = length
             .to_str()
             .map_err(|_| SecureError::DohProtocol(DohProtocolError::BodyTooLarge))?;
@@ -1259,19 +1314,21 @@ fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureErr
         if declared > MAX_DNS_BODY as u64 {
             return Err(SecureError::DohProtocol(DohProtocolError::BodyTooLarge));
         }
-    }
+        Some(declared)
+    } else {
+        None
+    };
 
     // Content-Encoding must be absent or `identity`; the body is never
     // decompressed, so a compressed payload cannot be read as DNS wire.
-    if let Some(encoding) = response.headers().get(CONTENT_ENCODING) {
+    if let Some(encoding) = headers.get(CONTENT_ENCODING) {
         let value = encoding.to_str().unwrap_or_default();
         if !value.eq_ignore_ascii_case("identity") {
             return Err(SecureError::DohProtocol(DohProtocolError::ContentEncoding));
         }
     }
 
-    let media_type = response
-        .headers()
+    let media_type = headers
         .get(CONTENT_TYPE)
         .ok_or(SecureError::DohProtocol(DohProtocolError::MissingMediaType))?;
     let media_type = media_type
@@ -1283,7 +1340,7 @@ fn validate_response_head(response: &Response<Incoming>) -> Result<(), SecureErr
     if !essence.eq_ignore_ascii_case(DNS_MEDIA_TYPE) {
         return Err(SecureError::DohProtocol(DohProtocolError::WrongMediaType));
     }
-    Ok(())
+    Ok(declared)
 }
 
 /// Reads the response body to a complete end, bounded by the DNS maximum.

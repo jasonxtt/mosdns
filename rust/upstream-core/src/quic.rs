@@ -1,5 +1,6 @@
 //! Slice 0 QUIC endpoint construction, ALPN singletons, and DoQ byte-shape
-//! helpers, plus the Slice 1 one-shot DoQ exchange (Phase 4 QUIC task).
+//! helpers, plus the Slice 1 one-shot DoQ exchange and the Slice 2 one-shot
+//! DNS-over-HTTP/3 exchange (Phase 4 QUIC task).
 //!
 //! Slice 0 is pre-I/O: endpoint validation, exact ALPN offers, and the outbound
 //! ID-zeroing byte shape. Slice 1 adds [`DoqUpstream`], a fresh-connection DoQ
@@ -13,15 +14,20 @@
 //! aborted instead of finished as a typed missing-FIN DoQ protocol error,
 //! rejects any trailing bytes after the first declared frame as a typed DoQ
 //! protocol error, validates the DNS response, and commits through the existing
-//! lifecycle linearization point.
+//! lifecycle linearization point. Slice 2 adds [`Doh3Upstream`], the same
+//! one-shot shape over HTTP/3: one fresh QUIC connection, one `GET` encoded by
+//! the existing `DohEndpoint`, and the frozen DoH response contract (status,
+//! media type, encoding, header bounds, and complete bounded body) whose
+//! validation is shared with the HTTP/1.1 and HTTP/2 paths instead of being
+//! reimplemented.
 //!
 //! The two-byte length prefix is not reimplemented: the outbound frame reuses
 //! the frozen `dns-core` Stream framing helper through
 //! [`crate::tcp::write_frame`], the same one the plain-TCP and DoT paths use.
-//! No second framing codec exists. Pooling/reuse, retry/fallback, 0-RTT,
-//! resumption, and H3 do not live here. Once the bidirectional stream is open,
-//! a local control decision that wins the outbound write, the request-side
-//! `finish`, or the response read calls `RecvStream::stop` with RFC 9250 §4.3
+//! No second framing codec exists. Pooling/reuse, retry/fallback, and 0-RTT /
+//! resumption do not live here. Once the bidirectional stream is open, a local
+//! control decision that wins the outbound write, the request-side `finish`, or
+//! the response read calls `RecvStream::stop` with RFC 9250 §4.3
 //! `DOQ_REQUEST_CANCELLED` and then returns the original typed local control
 //! error unchanged. That call is best-effort local cancellation: Quinn 0.11.7
 //! exposes no awaitable `STOP_SENDING` flush or peer-acknowledgement future, so
@@ -30,16 +36,26 @@
 //! loopback test park the exchange after that `stop` so the real Quinn driver
 //! can transmit it before the peer is inspected; the seam is a test observation
 //! device, never a production flush mechanism.
+//!
+//! The HTTP/3 driver never detaches: the h3 connection it must poll continuously
+//! runs as a tracked child of the exchange scope (the same seal/abort/drain
+//! ownership the HTTP/2 driver uses), and the final lifecycle commit happens
+//! only after that scope has drained.
 
+use std::future::poll_fn;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Instant;
 
+use hyper::body::Buf as _;
 use mosdns_dns_core::{inspect_response_header, validate_response};
 use quinn::crypto::rustls::QuicClientConfig;
 
 use crate::secure::{
-    IdentityError, SecureError, SecureResponse, ServerIdentity, TlsConfigError, TlsPolicy,
+    DNS_MEDIA_TYPE, DohEndpoint, DohProtocolError, DohRequestError, H2ScopeLease, IdentityError,
+    MAX_DNS_BODY, MAX_RESPONSE_HEADER_BYTES, MAX_RESPONSE_HEADERS, SecureError, SecureResponse,
+    ServerIdentity, TlsConfigError, TlsPolicy, parsed_head_bytes, restore_request_id,
+    validate_doh_head_parts,
 };
 use crate::tcp::{race_control, write_frame};
 use crate::{
@@ -649,4 +665,524 @@ fn classify_read_error(error: quinn::ReadToEndError) -> SecureError {
             SecureError::from(UpstreamError::Receive(SideEffectState::Sent))
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Slice 2: one-shot DNS-over-HTTP/3
+// ---------------------------------------------------------------------------
+
+/// The byte buffer type the h3/h3-quinn stack is driven with.
+///
+/// `hyper::body::Bytes` is a re-export of the exact `bytes::Bytes` the resolved
+/// h3/h3-quinn graph uses, so naming it here pins h3's body parameter without a
+/// manifest entry: `bytes` is not a direct dependency of this crate, this slice
+/// introduces no new dependency, and the resolved graph already holds exactly
+/// one `bytes` 1.x.
+type H3Body = hyper::body::Bytes;
+
+/// The h3 client connection driver this exchange polls as a tracked child.
+type H3Driver = h3::client::Connection<h3_quinn::Connection, H3Body>;
+/// The h3 request sender that owns the one `GET`.
+type H3Sender = h3::client::SendRequest<h3_quinn::OpenStreams, H3Body>;
+/// The one h3 request stream the response is read from.
+type H3Stream = h3::client::RequestStream<h3_quinn::BidiStream<H3Body>, H3Body>;
+
+/// A pure Rust one-shot DNS-over-HTTP/3 owner.
+///
+/// The owner reuses the same [`Lifecycle`] admission/drain gate as the plain,
+/// DoT, and DoH transports: registration is serialized with `Open -> Closing`,
+/// and [`Self::close`] refuses new exchanges and returns only after every
+/// registered exchange has released its guard.
+///
+/// Every exchange opens exactly one fresh QUIC connection on the caller's
+/// runtime, authenticates the endpoint's service identity with a
+/// [`TlsPolicy`]-derived configuration offering exactly `h3`, performs exactly
+/// one HTTPS `GET` by the existing `DohEndpoint` encoder, and closes both the
+/// QUIC connection and the client endpoint before returning. Nothing is pooled,
+/// reused, retried, or replayed, and no path falls back to DoH, HTTP/2, or
+/// HTTP/1.1.
+pub struct Doh3Upstream {
+    endpoint: DohEndpoint,
+    tls: TlsPolicy,
+    lifecycle: Arc<Lifecycle>,
+    cancellation: TransportCancellation,
+}
+
+impl Doh3Upstream {
+    /// Creates a DoH3 owner from a validated endpoint and an explicit policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SecureError::TlsConfig`] when the policy cannot produce a
+    /// usable QUIC-compatible client configuration. The endpoint was validated
+    /// when it was constructed, so no socket, resolver, or handshake work
+    /// happens here.
+    pub fn new(endpoint: DohEndpoint, tls: TlsPolicy) -> Result<Self, SecureError> {
+        // Rebuild the exact ALPN-bearing configuration once at construction so
+        // an unusable policy is rejected before the first exchange.
+        tls.client_config_with_alpn(&[H3_ALPN])?;
+        Ok(Self {
+            endpoint,
+            tls,
+            lifecycle: Arc::new(Lifecycle::new()),
+            cancellation: TransportCancellation::new(),
+        })
+    }
+
+    /// The validated DoH endpoint whose authority and encoder this owner reuses.
+    #[must_use]
+    pub const fn endpoint(&self) -> &DohEndpoint {
+        &self.endpoint
+    }
+
+    #[must_use]
+    pub fn lifecycle_state(&self) -> LifecycleState {
+        self.lifecycle.state()
+    }
+
+    /// Number of exchanges currently registered as in-flight.
+    #[must_use]
+    pub fn in_flight_exchanges(&self) -> usize {
+        self.lifecycle.in_flight()
+    }
+
+    /// Begins owner shutdown and cancels the owner token.
+    ///
+    /// Serialized with exchange registration, so no new exchange can register
+    /// after this returns and registered exchanges drain through their guards.
+    #[must_use]
+    pub fn begin_close(&self) -> CloseTransition {
+        let transition = self.lifecycle.begin_close();
+        if transition == CloseTransition::BeganClosing {
+            self.cancellation.cancel();
+        }
+        transition
+    }
+
+    /// Begins close, drains every in-flight exchange, then completes shutdown.
+    pub async fn close(&self) -> CloseResult {
+        match self.begin_close() {
+            CloseTransition::AlreadyClosed => return CloseResult::AlreadyClosed,
+            CloseTransition::BeganClosing | CloseTransition::AlreadyClosing => {}
+        }
+        self.lifecycle.drain().await;
+        match self.lifecycle.finish_close() {
+            CloseCompletion::Closed | CloseCompletion::AlreadyClosed => CloseResult::Closed,
+            CloseCompletion::NotClosing | CloseCompletion::InFlight => CloseResult::AlreadyClosing,
+        }
+    }
+
+    /// Performs one bounded, fresh-connection DoH3 exchange.
+    ///
+    /// The exchange registers as in-flight under the same gate that serializes
+    /// `Open -> Closing`, so close can never observe a zero registration count
+    /// while this exchange is admitting itself. The RAII guard is held until
+    /// this future returns or is dropped, covering success, every terminal
+    /// error, cancellation/deadline, owner close, and an aborted future. The
+    /// tracked h3 driver additionally holds a shared registration, so an aborted
+    /// caller cannot release the owner while the driver still exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SecureError::DohRequest`] for a pre-I/O request defect,
+    /// [`SecureError::Tls`] when the QUIC/TLS handshake fails (always
+    /// `NotSent`), [`SecureError::DohProtocol`] for an unacceptable HTTP reply,
+    /// and [`SecureError::Transport`] wrapping the exact typed
+    /// [`UpstreamError`] for connect, control, send, and DNS-response failures.
+    pub async fn exchange(
+        &self,
+        request: ExchangeRequest<'_>,
+        context: ExchangeContext,
+    ) -> Result<SecureResponse, SecureError> {
+        // The request target is built before any socket work, so an unframeable
+        // query or an over-long target fails as a pre-I/O `NotSent` defect. The
+        // encoder is reused verbatim: there is no second `dns` parameter codec.
+        let target = self.endpoint.get_request_target(request)?;
+        let authority = self.endpoint.authority();
+        let prepared = self.prepare_exchange(request, context, target, authority)?;
+        Box::pin(exchange_doh3(&prepared)).await
+    }
+
+    /// Registers and validates one exchange before any socket action.
+    fn prepare_exchange<'a>(
+        &'a self,
+        request: ExchangeRequest<'a>,
+        context: ExchangeContext,
+        target: String,
+        authority: String,
+    ) -> Result<PreparedDoh3<'a>, SecureError> {
+        let in_flight = self.lifecycle.register()?;
+        context.check_at(Instant::now(), SideEffectState::NotSent)?;
+        Ok(PreparedDoh3 {
+            endpoint: &self.endpoint,
+            tls: &self.tls,
+            lifecycle: Arc::clone(&self.lifecycle),
+            request,
+            target,
+            authority,
+            deadline: context.deadline(),
+            caller_cancellation: context.cancellation(),
+            owner_cancellation: self.cancellation.clone(),
+            _in_flight: in_flight,
+        })
+    }
+}
+
+/// Validated DoH3 exchange inputs held until the transport primitive runs.
+///
+/// The struct owns the in-flight registration guard, so dropping a prepared
+/// exchange, including through an aborted caller future, releases the
+/// registration without an explicit cleanup step.
+struct PreparedDoh3<'a> {
+    endpoint: &'a DohEndpoint,
+    tls: &'a TlsPolicy,
+    lifecycle: Arc<Lifecycle>,
+    request: ExchangeRequest<'a>,
+    target: String,
+    authority: String,
+    deadline: Instant,
+    caller_cancellation: TransportCancellation,
+    owner_cancellation: TransportCancellation,
+    /// Held only for its RAII release; never read.
+    _in_flight: crate::InFlightGuard<'a>,
+}
+
+impl PreparedDoh3<'_> {
+    /// Checks owner shutdown, caller cancellation, then the shared absolute
+    /// deadline, in the contractually fixed order.
+    fn check_at(&self, now: Instant, side_effect: SideEffectState) -> Result<(), UpstreamError> {
+        if self.owner_cancellation.is_cancelled() {
+            return Err(UpstreamError::Closed(side_effect));
+        }
+        if self.caller_cancellation.is_cancelled() {
+            return Err(UpstreamError::Cancelled(side_effect));
+        }
+        if now >= self.deadline {
+            return Err(UpstreamError::DeadlineExceeded(side_effect));
+        }
+        Ok(())
+    }
+
+    /// The owner/caller/deadline control view raced by the shared helper.
+    fn control(&self) -> ExchangeControl {
+        ExchangeControl::new(
+            ExchangeContext::new(self.deadline, self.caller_cancellation.clone()),
+            self.owner_cancellation.clone(),
+        )
+    }
+}
+
+/// A validated response that is not committed yet.
+///
+/// The candidate is only committed after the tracked h3 driver scope has sealed
+/// and drained, mirroring the HTTP/2 final-commit rule.
+struct ValidatedDoh3Response {
+    wire: Vec<u8>,
+    request_id: u16,
+    truncated: bool,
+}
+
+/// Runs one fresh, authenticated DoH3 exchange for a prepared request.
+///
+/// The single absolute deadline established by the caller covers every phase:
+/// the numeric client-socket bind, QUIC connect and TLS handshake, the h3
+/// connection build, the request and its send-side FIN, the response head and
+/// body, and the final commit. No phase starts a fresh relative timer.
+async fn exchange_doh3(prepared: &PreparedDoh3<'_>) -> Result<SecureResponse, SecureError> {
+    prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
+
+    let control = prepared.control();
+    let dial = prepared.endpoint.dial();
+    let identity = prepared.endpoint.identity();
+    let deadline = prepared.deadline;
+
+    // The client configuration is rebuilt from the frozen policy for every
+    // exchange, with ALPN exactly `h3`, so no mutable per-owner state can flip a
+    // verified policy into an insecure one or offer another protocol.
+    let rustls_config = prepared.tls.client_config_with_alpn(&[H3_ALPN])?;
+    let quic_crypto = QuicClientConfig::try_from(rustls_config)
+        .map_err(|_| SecureError::TlsConfig(TlsConfigError::Provider))?;
+    let client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
+
+    // Phase 1: a fresh client endpoint bound to an ephemeral local port of the
+    // dial's address family. A numeric dial never resolves a name; the service
+    // identity cannot select the destination.
+    let local = if dial.is_ipv4() {
+        SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
+    } else {
+        SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
+    };
+    let mut endpoint =
+        quinn::Endpoint::client(local).map_err(|_| SecureError::from(UpstreamError::Connect))?;
+    endpoint.set_default_client_config(client_config);
+
+    // Phase 2: QUIC connect and TLS handshake. The handshake completes before
+    // the first HTTP/DNS application byte, so a failure here is a typed TLS
+    // error with `NotSent` state. No path retries or downgrades verification.
+    let connecting = endpoint
+        .connect(dial, identity.as_str())
+        .map_err(classify_connect_error)?;
+    let connection = race_control(&control, SideEffectState::NotSent, deadline, async {
+        connecting.await.map_err(classify_handshake_failure)
+    })
+    .await?;
+
+    // The handshake succeeded, so the peer is authenticated. No request byte has
+    // been sent yet, so this check is still `NotSent`.
+    prepared.check_at(Instant::now(), SideEffectState::NotSent)?;
+
+    // The tracked driver scope is created before any request byte exists. The
+    // shared registration keeps the owner non-drained for as long as the driver
+    // child lives, so an aborted caller cannot release the exchange while the h3
+    // driver still runs.
+    let liveness = Arc::new(prepared.lifecycle.register_shared()?);
+    let scope = H2ScopeLease::new(
+        liveness,
+        prepared.owner_cancellation.clone(),
+        prepared.caller_cancellation.clone(),
+    );
+
+    // Phase 3: build the h3 connection on the caller's runtime. This opens the
+    // control and QPACK streams but sends no DNS request byte, so a failure is
+    // a typed connect failure with `NotSent`.
+    let h3_connection = h3_quinn::Connection::new(connection.clone());
+    let mut builder = h3::client::builder();
+    builder.max_field_section_size(u64::try_from(MAX_RESPONSE_HEADER_BYTES).unwrap_or(u64::MAX));
+    let (driver, mut send_request) =
+        race_control(&control, SideEffectState::NotSent, deadline, async {
+            builder
+                .build::<_, _, H3Body>(h3_connection)
+                .await
+                .map_err(classify_h3_setup_error)
+        })
+        .await?;
+
+    // The driver must be polled continuously, so it is registered as a tracked
+    // child before the first request byte is sent. Teardown seals admission,
+    // aborts it, and drains to guard drop; it is never detached.
+    scope.spawn(drive_h3_connection(driver));
+
+    let candidate = match run_h3_request(prepared, &control, deadline, &mut send_request).await {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            scope.finish().await;
+            return Err(error);
+        }
+    };
+
+    // Seal admission, abort the tracked driver, and drain until its guard drops.
+    // Only then is the response allowed to commit, so cancellation or owner
+    // close during teardown cannot become a late success.
+    scope.finish().await;
+    prepared.lifecycle.commit_final_response(
+        &prepared.caller_cancellation,
+        deadline,
+        SideEffectState::Sent,
+    )?;
+
+    // One-shot teardown of the QUIC connection and client endpoint, after the
+    // commit. No pooling, no idle set, no reuse. This is not - and must not be
+    // used as - a cancellation-flush barrier: a control decision always returns
+    // through the typed error path above without reaching this code.
+    connection.close(0u32.into(), b"");
+    endpoint.close(0u32.into(), b"");
+    endpoint.wait_idle().await;
+
+    Ok(SecureResponse::doh3(
+        candidate.wire,
+        candidate.request_id,
+        candidate.truncated,
+    ))
+}
+
+/// Drives one h3 client connection to completion as a tracked child.
+///
+/// The h3 connection owns the control and QPACK stream state, so it must be
+/// polled for the request and response to make progress. It is spawned through
+/// the exchange scope, which owns and drains it; production never starts a
+/// detached task and never hides a runtime.
+async fn drive_h3_connection(driver: H3Driver) {
+    let mut driver = driver;
+    let _ = poll_fn(|context| driver.poll_close(context)).await;
+}
+
+/// Sends the one `GET` and returns the validated, not-yet-committed response.
+///
+/// Every failure here is strictly post-`build`, so the request may or may not
+/// have been written; the response-head phase is conservatively `MaybeSent` and
+/// the body phase is `Sent`.
+async fn run_h3_request(
+    prepared: &PreparedDoh3<'_>,
+    control: &ExchangeControl,
+    deadline: Instant,
+    send_request: &mut H3Sender,
+) -> Result<ValidatedDoh3Response, SecureError> {
+    // Exactly one GET. `:authority` is the service authority and `:path` is the
+    // reused encoder output, so the numeric dial can never leak into either.
+    let request = build_h3_get_request(&prepared.target, &prepared.authority)?;
+
+    let mut stream = race_control(control, SideEffectState::MaybeSent, deadline, async {
+        send_request
+            .send_request(request)
+            .await
+            .map_err(classify_h3_send_error)
+    })
+    .await?;
+
+    // Request send-side FIN: no request body follows the single GET.
+    race_control(control, SideEffectState::MaybeSent, deadline, async {
+        stream.finish().await.map_err(classify_h3_send_error)
+    })
+    .await?;
+
+    let response = race_control(control, SideEffectState::MaybeSent, deadline, async {
+        stream.recv_response().await.map_err(classify_h3_head_error)
+    })
+    .await?;
+
+    let declared = validate_h3_response_head(response.status(), response.headers())?;
+    let request_id = prepared.request.request_id();
+
+    // The body is accumulated incrementally under the DNS bound; the declared
+    // length, when present, must also match exactly, because the h3 transport
+    // performs no `content-length` framing check of its own.
+    let body = read_h3_body(control, deadline, &mut stream, declared).await?;
+    if body.len() < 12 {
+        return Err(SecureError::DohProtocol(DohProtocolError::IncompleteBody));
+    }
+    let header = inspect_response_header(&body)
+        .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
+    let restored = restore_request_id(&body, request_id)?;
+    if validate_response(&restored).is_err() {
+        return Err(SecureError::from(UpstreamError::MalformedResponse));
+    }
+    Ok(ValidatedDoh3Response {
+        wire: restored,
+        request_id,
+        truncated: header.truncated,
+    })
+}
+
+/// Builds the single `GET` this exchange may send.
+///
+/// The request target is the origin-form target produced by the endpoint, so the
+/// numeric dial override cannot leak into it. The authority is carried in the
+/// URI, which makes h3 emit exactly one `:authority` pseudo-header; no `Host`
+/// header is added alongside it.
+fn build_h3_get_request(target: &str, authority: &str) -> Result<hyper::Request<()>, SecureError> {
+    let uri = hyper::Uri::builder()
+        .scheme("https")
+        .authority(authority)
+        .path_and_query(target)
+        .build()
+        .map_err(|_| SecureError::DohRequest(DohRequestError::TargetTooLarge))?;
+    hyper::Request::builder()
+        .method(hyper::Method::GET)
+        .uri(uri)
+        // The DNS media type is the only acceptable response type.
+        .header(hyper::header::ACCEPT, DNS_MEDIA_TYPE)
+        .body(())
+        .map_err(|_| SecureError::DohRequest(DohRequestError::TargetTooLarge))
+}
+
+/// Validates the h3 response head and returns its declared body length.
+///
+/// The status, head byte bound, declared length, content encoding, and media
+/// type checks are the shared DoH contract. The header-count bound is enforced
+/// here because, unlike the Hyper HTTP/1.1 and HTTP/2 parsers, the h3 client
+/// layer imposes no header-count limit of its own.
+fn validate_h3_response_head(
+    status: hyper::StatusCode,
+    headers: &hyper::HeaderMap,
+) -> Result<Option<u64>, SecureError> {
+    if headers.len() > MAX_RESPONSE_HEADERS {
+        return Err(SecureError::DohProtocol(
+            DohProtocolError::ResponseHeadTooLarge,
+        ));
+    }
+    let head_bytes = parsed_head_bytes(hyper::Version::HTTP_3, status, headers);
+    validate_doh_head_parts(status, headers, head_bytes)
+}
+
+/// Reads the response body to its end, bounded by the DNS maximum.
+///
+/// The bound is enforced on the bytes actually received rather than only on a
+/// declared length, so a peer cannot evade it by omitting or understating the
+/// header. An early end of stream, a body that disagrees with `content-length`,
+/// or an empty body is `IncompleteBody`, never a silently accepted prefix.
+async fn read_h3_body(
+    control: &ExchangeControl,
+    deadline: Instant,
+    stream: &mut H3Stream,
+    declared: Option<u64>,
+) -> Result<Vec<u8>, SecureError> {
+    let collected = race_control(control, SideEffectState::Sent, deadline, async {
+        let mut collected: Vec<u8> = Vec::new();
+        loop {
+            let Some(frame) = stream.recv_data().await.map_err(classify_h3_body_error)? else {
+                break;
+            };
+            let data = frame.chunk();
+            if collected.len().saturating_add(data.len()) > MAX_DNS_BODY {
+                return Err(SecureError::DohProtocol(DohProtocolError::BodyTooLarge));
+            }
+            collected.extend_from_slice(data);
+        }
+        Ok::<Vec<u8>, SecureError>(collected)
+    })
+    .await?;
+
+    if collected.is_empty() {
+        return Err(SecureError::DohProtocol(DohProtocolError::IncompleteBody));
+    }
+    if let Some(declared) = declared {
+        if u64::try_from(collected.len()) != Ok(declared) {
+            return Err(SecureError::DohProtocol(DohProtocolError::IncompleteBody));
+        }
+    }
+    Ok(collected)
+}
+
+/// Classifies an h3 connection-build failure.
+///
+/// The build opens only the h3 control and QPACK streams; no DNS request byte
+/// exists yet, so the failure is a typed connect failure with `NotSent`.
+fn classify_h3_setup_error(_error: h3::error::ConnectionError) -> SecureError {
+    SecureError::from(UpstreamError::Connect)
+}
+
+/// Classifies an h3 request-send or request-finish failure.
+///
+/// The request may have been partially written, so the failure is
+/// conservatively a typed send failure with `MaybeSent`. The explicit request
+/// error-code mapping is Slice 3; no branch here retries or replays.
+fn classify_h3_send_error(_error: h3::error::StreamError) -> SecureError {
+    SecureError::from(UpstreamError::Send(SideEffectState::MaybeSent))
+}
+
+/// Classifies an h3 response-head failure.
+///
+/// A field section above the advertised 16 KiB bound is the head-size violation
+/// the DoH contract names. Every other head-phase outcome - the stream or
+/// connection ending, or an h3 message error - is conservatively
+/// [`DohProtocolError::ResponseHeadNotReceived`] (`MaybeSent`) rather than
+/// claiming the request definitely reached the peer; the explicit per-code
+/// mapping is Slice 3.
+fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
+    match error {
+        h3::error::StreamError::HeaderTooBig { .. } => {
+            SecureError::DohProtocol(DohProtocolError::ResponseHeadTooLarge)
+        }
+        _ => SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
+    }
+}
+
+/// Classifies an h3 body-read failure.
+///
+/// The response head was already observed, so the request was transmitted and
+/// the state is `Sent`. Any read failure - a reset, a connection loss, or a
+/// truncated data frame - proves the body did not complete, which is the typed
+/// incomplete-body protocol error.
+fn classify_h3_body_error(_error: h3::error::StreamError) -> SecureError {
+    SecureError::DohProtocol(DohProtocolError::IncompleteBody)
 }

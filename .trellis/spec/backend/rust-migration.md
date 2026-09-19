@@ -694,6 +694,110 @@ if is_local_control_error(&result_error) {
 result // preserve the original typed error and side-effect state
 ```
 
+## Scenario: pure Rust Phase 4 DoH3 one-shot foundation
+
+### 1. Scope / Trigger
+
+Use this contract for the Slice 2 DoH3 primitive in `rust/upstream-core`. It
+adds one fresh, authenticated HTTP/3 exchange on the caller-owned runtime while
+preserving the existing DoH response contract and lifecycle vocabulary. It does
+not add pooling, retry/fallback, host wiring, resolver composition, 0-RTT,
+resumption, migration, or the Slice 3 QUIC/H3 stream-error matrix.
+
+### 2. Signatures
+
+- `Doh3Upstream::new(endpoint: DohEndpoint, tls: TlsPolicy) ->
+  Result<Doh3Upstream, SecureError>` validates an exact `h3` ALPN policy before
+  any socket work.
+- `Doh3Upstream::exchange(request: ExchangeRequest<'_>, context:
+  ExchangeContext) -> Result<SecureResponse, SecureError>` performs one fresh
+  connection and one GET; the result is `SecureTransport::Doh3` with
+  `SecureHttpVersion::Http3`.
+- The H3 connection driver is registered through the existing
+  `H2ScopeLease::spawn` child registry before request bytes are sent; the
+  response candidate is committed only after `H2ScopeLease::finish()` drains
+  that child.
+
+### 3. Contracts
+
+- QUIC dials `DohEndpoint::dial()` numerically, authenticates
+  `DohEndpoint::identity()`, and offers exactly ALPN `h3`. The service
+  authority and request target remain `DohEndpoint::authority()` and
+  `DohEndpoint::get_request_target(request)`; the dial address must never leak
+  into `:authority` or `:path`.
+- Each exchange sends exactly one `GET` with `Accept:
+  application/dns-message`, no body, `User-Agent`, or request
+  `Content-Encoding`, then sends request-side FIN. There is no HTTP/1.1,
+  HTTP/2, retry, fallback, or pooled reuse path.
+- Response validation is shared with H1/H2: status `200`, parsed head at most
+  16 KiB, at most 64 headers, `Content-Length` at most 65535 and exact when
+  present, absent/`identity` content encoding, and a case-insensitive
+  `application/dns-message` media type with optional parameters. The complete
+  body is bounded at 65535 bytes, is DNS-validated, and restores only the
+  caller's original ID.
+- The H3 driver is owned work: no detached task or hidden runtime. Teardown
+  seals admission, aborts tracked children, and drains them before the commit
+  gate. One-shot connection/endpoint close is success-path teardown after
+  commit, never a cancellation or `STOP_SENDING` flush substitute.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| invalid request target or closed owner before I/O | typed `NotSent`; no QUIC connection |
+| connect, TLS, ALPN, or H3 control-stream setup failure | typed connect/TLS failure with `NotSent`; no fallback |
+| non-200, wrong/missing media type, or non-identity encoding | typed DoH protocol error; no commit |
+| more than 64 headers, head over the H3 advertised bound, or declared body over 65535 | typed response-head/body-size error; no commit |
+| early body end, length mismatch, invalid DNS wire, or response ID mismatch | typed incomplete/malformed response; no commit |
+| owner close, caller cancellation, deadline, or dropped exchange before commit | existing typed control/transport error wins; child and in-flight registration drain to zero |
+
+### 5. Good/Base/Bad Cases
+
+- Good: build an absolute HTTPS URI only to derive the correct H3 pseudo-headers,
+  reuse the existing DoH target encoder, register the driver before the GET,
+  drain before `commit_final_response`, and return `Doh3`/`Http3` metadata.
+- Base: use a loopback H3/TLS fixture with an ephemeral port, exact `h3` ALPN,
+  one request per connection, and an independent TCP probe to prove no fallback.
+- Bad: spawn an untracked H3 driver, commit before it drains, invent a second
+  DNS GET encoder, use the numeric dial as authority, or close/wait-idle as a
+  cancellation flush barrier.
+
+### 6. Tests Required
+
+- Focused loopback tests assert authority/path/header bytes, request FIN, ID
+  zeroing/restoration, one request and one fresh connection per exchange, and
+  `Doh3`/`Http3` metadata.
+- Negative tests assert typed status/media/encoding/head/body errors, early EOF
+  and length mismatch, ALPN/TLS/identity failures as `NotSent`, and no TCP or
+  protocol fallback.
+- Ownership tests assert owner close, caller cancellation, dropped futures, and
+  exchange-after-close leave `in_flight == 0`, no second connection, and no
+  late committed response. Slice 3 owns deadline precedence and explicit H3
+  stream-error-code mappings.
+- Run the focused target in debug and release, upstream-core all-target tests,
+  workspace clippy/test gates, fmt, `task.py validate`, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let (driver, mut sender) = builder.build(quic).await?;
+tokio::spawn(driver); // not owned by the exchange scope
+let response = read_and_validate(&mut sender).await?;
+commit_final_response(response); // driver may still be alive
+```
+
+#### Correct
+
+```rust
+let scope = H2ScopeLease::new(liveness, owner_cancel, caller_cancel);
+scope.spawn(drive_h3_connection(driver)); // before request bytes
+let candidate = run_one_get(...).await?;
+scope.finish().await; // seal, abort, and drain the tracked driver
+commit_final_response(...)?;
+```
+
 ## Scenario: pure Rust Phase 4 endpoint-resolution foundation
 
 ### 1. Scope / Trigger
