@@ -9,8 +9,9 @@
 //! bidirectional QUIC stream, writes one two-byte big-endian length-prefixed
 //! query whose wire ID is zeroed, signals request-side STREAM FIN, reads one
 //! response up to its peer response-side STREAM FIN, checks the peer wire ID is
-//! zero before restoring the caller ID, validates the DNS response, and commits
-//! through the existing lifecycle linearization point.
+//! zero before restoring the caller ID, rejects any trailing bytes after the
+//! first declared frame as a typed DoQ protocol error, validates the DNS
+//! response, and commits through the existing lifecycle linearization point.
 //!
 //! The two-byte length prefix is not reimplemented: the outbound frame reuses
 //! the frozen `dns-core` Stream framing helper through
@@ -189,7 +190,9 @@ impl DoqUpstream {
     /// Returns [`SecureError::Tls`] when the QUIC handshake fails (always
     /// `NotSent`), and [`SecureError::Transport`] wrapping the exact typed
     /// [`UpstreamError`] for connect, control, send, receive, and DNS-response
-    /// failures.
+    /// failures. A stream that carries a trailing second response after the
+    /// first declared frame is rejected with
+    /// [`SecureError::DoqProtocolTrailingResponse`] (`Sent`), never committed.
     pub async fn exchange(
         &self,
         request: ExchangeRequest<'_>,
@@ -372,6 +375,13 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     let Some(framed_body) = complete.get(2..2 + length) else {
         return Err(UpstreamError::TruncatedFrame.into());
     };
+    // RFC 9250 §4.2 permits exactly one response per stream. The whole stream
+    // was read up to the peer response-side FIN, so any byte after the first
+    // declared frame — a second complete response or a partial trailing frame —
+    // is a terminal protocol violation, never silently ignored.
+    if complete.len() != 2 + length {
+        return Err(SecureError::DoqProtocolTrailingResponse);
+    }
     let mut body = framed_body.to_vec();
     if body.len() < 2 {
         return Err(UpstreamError::MalformedResponse.into());
