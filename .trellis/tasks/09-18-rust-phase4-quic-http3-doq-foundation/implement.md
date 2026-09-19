@@ -240,3 +240,29 @@ git diff --check
   does not authorize Slice 1 socket/handshake I/O, production wiring, or
   any other task. The task stays `in_progress`; Slice 1 and every later
   slice each need separate explicit user authorization.
+
+## Slice 1 implementation record — 2026-09-19
+
+- Executor: MCP DSH, using clean isolated worktrees and RED-before-GREEN
+  jobs. Controller reviewed and transferred only the allowlisted patches.
+- Implementation commits:
+  - `af017b2` — DoQ one-shot loopback exchange with numeric dial/identity
+    separation, exact `doq` ALPN, one bidirectional stream, two-byte
+    big-endian framing, wire ID zeroing/restoration, response validation,
+    commit gate, and `SecureResponse::doq`.
+  - `93f8d72` — reject trailing bytes/second response without commit.
+  - `a86d04d` — reject response streams that do not complete with normal FIN.
+  - `e57e640` — caller/local control cancellation actively sends
+    `STOP_SENDING(DOQ_REQUEST_CANCELLED=0x3)` while preserving the existing
+    typed error and commit semantics.
+- Focused evidence: `cargo test --manifest-path rust/Cargo.toml -p
+  mosdns-upstream-core --test slice1_doq --locked` — 4 passed, including
+  success, cancellation, trailing-response, and missing-FIN cases. DSH also
+  stress-ran the cancellation case 25/25 times successfully.
+- Full local gates passed: format check, dns-core and upstream-core
+  all-target tests, Rust workspace all-target tests, warnings-denied clippy,
+  locked feature tree, task validation, and `git diff --check`.
+- Scope boundary: DoH3, production host wiring, pooling/retry/fallback,
+  Linux/VM deployment evidence, and the later Slice 2–4 work remain
+  unauthorized and untouched. The task remains `in_progress` pending the
+  separate GPT web review PASS.
