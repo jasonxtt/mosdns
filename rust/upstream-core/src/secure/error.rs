@@ -334,6 +334,9 @@ impl Error for DohProtocolError {}
 /// * [`Self::DoqProtocolTrailingResponse`] reports a DoQ stream that carried a
 ///   second response, or any trailing bytes, after the first declared frame;
 ///   the query was already transmitted, so it is [`SideEffectState::Sent`].
+/// * [`Self::DoqProtocolMissingResponseFin`] reports a DoQ response stream that
+///   the peer aborted instead of completing with a normal STREAM FIN; the query
+///   was already transmitted, so it is [`SideEffectState::Sent`].
 /// * [`Self::Transport`] wraps the exact existing typed [`UpstreamError`]
 ///   rather than duplicating or stringifying every control, send, receive, and
 ///   DNS-response cause; its side-effect state is the wrapped cause's state.
@@ -366,6 +369,18 @@ pub enum SecureError {
     /// [`Self::side_effect`] is [`SideEffectState::Sent`]. This variant carries
     /// no response bytes, so neither `Display` nor `Debug` can leak peer data.
     DoqProtocolTrailingResponse,
+    /// The DoQ response stream was aborted instead of completing with a normal
+    /// STREAM FIN.
+    ///
+    /// RFC 9250 §4.2 requires the server to finish the response stream with
+    /// `STREAM FIN` after the final response, so a reset/abort proves the peer
+    /// never sent a complete response. This is a terminal protocol failure: the
+    /// exchange never commits, retries, or falls back to another transport. The
+    /// query was already fully written before the abort could be observed, so
+    /// [`Self::side_effect`] is [`SideEffectState::Sent`]. This variant carries
+    /// no response bytes or peer error data, so neither `Display` nor `Debug`
+    /// can leak peer material.
+    DoqProtocolMissingResponseFin,
     /// A control, framing, send, receive, or DNS-response failure, retained as
     /// the exact existing typed cause.
     Transport(UpstreamError),
@@ -392,7 +407,9 @@ impl SecureError {
             | Self::DohRequest(_)
             | Self::Tls(_) => SideEffectState::NotSent,
             Self::DohProtocol(reason) => reason.side_effect(),
-            Self::DoqProtocolTrailingResponse => SideEffectState::Sent,
+            Self::DoqProtocolTrailingResponse | Self::DoqProtocolMissingResponseFin => {
+                SideEffectState::Sent
+            }
             Self::Transport(cause) => cause.side_effect(),
         }
     }
@@ -421,6 +438,9 @@ impl fmt::Display for SecureError {
             Self::DoqProtocolTrailingResponse => {
                 formatter.write_str("trailing response on the DoQ stream")
             }
+            Self::DoqProtocolMissingResponseFin => {
+                formatter.write_str("DoQ response stream ended without a normal FIN")
+            }
             Self::Transport(cause) => write!(formatter, "secure transport failed: {cause}"),
         }
     }
@@ -437,6 +457,7 @@ impl Error for SecureError {
             Self::Tls(reason) => Some(reason),
             Self::DohProtocol(reason) => Some(reason),
             Self::DoqProtocolTrailingResponse => None,
+            Self::DoqProtocolMissingResponseFin => None,
             Self::Transport(cause) => Some(cause),
         }
     }

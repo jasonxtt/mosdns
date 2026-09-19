@@ -9,9 +9,11 @@
 //! bidirectional QUIC stream, writes one two-byte big-endian length-prefixed
 //! query whose wire ID is zeroed, signals request-side STREAM FIN, reads one
 //! response up to its peer response-side STREAM FIN, checks the peer wire ID is
-//! zero before restoring the caller ID, rejects any trailing bytes after the
-//! first declared frame as a typed DoQ protocol error, validates the DNS
-//! response, and commits through the existing lifecycle linearization point.
+//! zero before restoring the caller ID, rejects a response stream that was
+//! aborted instead of finished as a typed missing-FIN DoQ protocol error,
+//! rejects any trailing bytes after the first declared frame as a typed DoQ
+//! protocol error, validates the DNS response, and commits through the existing
+//! lifecycle linearization point.
 //!
 //! The two-byte length prefix is not reimplemented: the outbound frame reuses
 //! the frozen `dns-core` Stream framing helper through
@@ -190,9 +192,12 @@ impl DoqUpstream {
     /// Returns [`SecureError::Tls`] when the QUIC handshake fails (always
     /// `NotSent`), and [`SecureError::Transport`] wrapping the exact typed
     /// [`UpstreamError`] for connect, control, send, receive, and DNS-response
-    /// failures. A stream that carries a trailing second response after the
-    /// first declared frame is rejected with
-    /// [`SecureError::DoqProtocolTrailingResponse`] (`Sent`), never committed.
+    /// failures. A response stream that was aborted instead of completing with
+    /// a normal STREAM FIN is rejected with
+    /// [`SecureError::DoqProtocolMissingResponseFin`] (`Sent`), and a stream
+    /// that carries a trailing second response after the first declared frame
+    /// is rejected with [`SecureError::DoqProtocolTrailingResponse`] (`Sent`);
+    /// neither is ever committed.
     pub async fn exchange(
         &self,
         request: ExchangeRequest<'_>,
@@ -352,9 +357,11 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     .await?;
 
     // Phase 4: read the one response up to the peer response-side STREAM FIN.
-    // `read_to_end` only returns once the FIN is observed, so its success is
-    // the FIN evidence. The request frame was fully written, so a control error
-    // while waiting is `Sent`.
+    // `read_to_end` only returns `Ok` once the FIN is observed, so its success
+    // is the FIN evidence; a peer reset aborts the read instead and
+    // `classify_read_error` turns that into the typed missing-FIN protocol
+    // error. The request frame was fully written, so a control error while
+    // waiting is `Sent`.
     let complete = race_control(&control, SideEffectState::Sent, deadline, async {
         recv.read_to_end(MAX_DOQ_MESSAGE)
             .await
@@ -446,11 +453,18 @@ fn classify_handshake_failure(_error: quinn::ConnectionError) -> SecureError {
 
 /// Classifies a stream read-to-FIN outcome.
 ///
-/// A message above the bound is [`UpstreamError::FrameTooLarge`]; every other
-/// read failure is a terminal receive failure with the request already sent.
+/// A message above the bound is [`UpstreamError::FrameTooLarge`]. A peer reset
+/// proves the response stream was aborted instead of completing with a normal
+/// STREAM FIN, so it is the typed [`SecureError::DoqProtocolMissingResponseFin`]
+/// protocol error; every other read failure is a terminal receive failure with
+/// the request already sent. The reset outcome is matched structurally, so no
+/// peer-supplied error code is ever parsed as text.
 fn classify_read_error(error: quinn::ReadToEndError) -> SecureError {
     match error {
         quinn::ReadToEndError::TooLong => SecureError::from(UpstreamError::FrameTooLarge),
+        quinn::ReadToEndError::Read(quinn::ReadError::Reset(_)) => {
+            SecureError::DoqProtocolMissingResponseFin
+        }
         quinn::ReadToEndError::Read(_) => {
             SecureError::from(UpstreamError::Receive(SideEffectState::Sent))
         }
