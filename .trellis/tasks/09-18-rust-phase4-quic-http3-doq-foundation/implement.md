@@ -243,8 +243,9 @@ git diff --check
 
 ## Slice 1 implementation record — 2026-09-19
 
-- Executor: MCP DSH, using clean isolated worktrees and RED-before-GREEN
-  jobs. Controller reviewed and transferred only the allowlisted patches.
+- Executor: DSH Web in the Chrome workspace session, with one whole-phase
+  remediation task. MCP DSH was not used for this remediation; the controller
+  reviewed the resulting allowlisted diff in the shared `rust` worktree.
 - Implementation commits:
   - `af017b2` — DoQ one-shot loopback exchange with numeric dial/identity
     separation, exact `doq` ALPN, one bidirectional stream, two-byte
@@ -255,14 +256,25 @@ git diff --check
   - `e57e640` — caller/local control cancellation actively sends
     `STOP_SENDING(DOQ_REQUEST_CANCELLED=0x3)` while preserving the existing
     typed error and commit semantics.
-- Focused evidence: `cargo test --manifest-path rust/Cargo.toml -p
-  mosdns-upstream-core --test slice1_doq --locked` — 4 passed, including
-  success, cancellation, trailing-response, and missing-FIN cases. DSH also
-  stress-ran the cancellation case 25/25 times successfully.
-- Full local gates passed: format check, dns-core and upstream-core
-  all-target tests, Rust workspace all-target tests, warnings-denied clippy,
-  locked feature tree, task validation, and `git diff --check`.
+- Focused evidence before remediation was 4 passed. The review found that the
+  uncommitted `connection.close`/`endpoint.close`/`wait_idle` experiment could
+  drop `STOP_SENDING`, so the remediation first reproduced RED with both
+  cancellation tests observing no stop code. The web DSH then replaced that
+  pseudo-flush with a shared post-`open_bi` `RecvStream::stop(0x3)` path and a
+  debug-only `DoqStopPause` observation seam; it also mapped
+  `ReadError::ConnectionLost(_)` to the existing missing-response-FIN error.
+- Remediation evidence: `cargo test --manifest-path rust/Cargo.toml -p
+  mosdns-upstream-core --test slice1_doq --locked` — 7 passed; the two
+  cancellation tests passed 16/16 in an 8-round stress run. The added
+  complete-response and partial-response connection-loss fixtures both verify
+  missing-FIN, `Sent`, no commit, and zero in-flight exchanges. Release
+  validation compiled the seam out (0 release symbols, 16 debug symbols) and
+  the release Slice 1 target passed 5 tests with zero warnings.
+- Parent verification also passed: focused Slice 1, upstream-core all-target
+  tests (423 tests), workspace all-target tests, format check, upstream-core
+  and workspace warnings-denied clippy, task validation, and `git diff --check`.
 - Scope boundary: DoH3, production host wiring, pooling/retry/fallback,
   Linux/VM deployment evidence, and the later Slice 2–4 work remain
-  unauthorized and untouched. The task remains `in_progress` pending the
-  separate GPT web review PASS.
+  unauthorized and untouched. The remediation is currently uncommitted and
+  unpushed; the task remains `in_progress` pending the parent commit and the
+  separate same-conversation GPT web review PASS.

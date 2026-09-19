@@ -20,8 +20,22 @@
 //! while the client waits for the response, and one keeps the outbound write
 //! blocked on a tiny advertised flow-control window so the cancellation lands
 //! after `open_bi` but before the request FIN. Both prove the active
-//! `DOQ_REQUEST_CANCELLED` (0x3) cancel on the wire. Error-code mapping beyond
-//! that local cancellation and pooling remain separate follow-up jobs.
+//! `DOQ_REQUEST_CANCELLED` (0x3) cancel on the wire.
+//!
+//! Production cancels the receive side with a single `RecvStream::stop` call
+//! and immediately returns the typed local control error; it makes no claim
+//! that the frame reached the peer, because Quinn 0.11.7 exposes no awaitable
+//! `STOP_SENDING` flush or peer-acknowledgement future and this crate may not
+//! fake one with a yield, sleep, short timeout, polling loop, or
+//! connection/endpoint close plus `wait_idle`. To observe the frame
+//! deterministically, the cancellation tests install the debug-only
+//! [`DoqStopPause`] seam: the exchange parks right after the production `stop`
+//! while the real Quinn driver keeps running on the caller's runtime, the
+//! server reports its `SendStream::stopped()` observation, and only then does
+//! the test release the exchange. The seam is a test observation device, never
+//! a production flush mechanism; it is compiled only under `debug_assertions`.
+//! Error-code mapping beyond that local cancellation and pooling remain
+//! separate follow-up jobs.
 
 mod fixtures;
 
@@ -32,12 +46,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use fixtures::FixtureSet;
+#[cfg(debug_assertions)]
+use mosdns_upstream_core::quic::DoqStopPause;
 use mosdns_upstream_core::quic::{DOQ_ALPN, DoqEndpoint, DoqUpstream};
 use mosdns_upstream_core::secure::{SecureError, SecureResponse, SecureTransport, TlsPolicy};
 use mosdns_upstream_core::{
     ExchangeContext, ExchangeRequest, ServerIdentity, SideEffectState, TransportCancellation,
-    UpstreamError,
 };
+// Only the debug-only cancellation tests inspect the exact typed cause.
+#[cfg(debug_assertions)]
+use mosdns_upstream_core::UpstreamError;
 
 use quinn::crypto::rustls::{HandshakeData, QuicServerConfig};
 use rustls::ServerConfig;
@@ -58,12 +76,16 @@ const ACCEPT_PROBE: Duration = Duration::from_millis(200);
 const DOQ_PROTOCOL_ERROR: u32 = 0x2;
 /// RFC 9250 §4.3 `DOQ_REQUEST_CANCELLED`, the receive-side code the client must
 /// send via `STOP_SENDING` when a local control decision cancels the
-/// outstanding response.
+/// outstanding response. Only the debug-only cancellation seam can observe it,
+/// so it is compiled out of release test builds.
+#[cfg(debug_assertions)]
 const DOQ_REQUEST_CANCELLED: u32 = 0x3;
 /// A deliberately tiny advertised per-stream receive window, smaller than the
 /// framed query. The client's outbound write cannot fit, so it blocks on flow
 /// control until the server reads; the write-phase fixture never reads, so the
-/// blocked write is deterministic without any sleep.
+/// blocked write is deterministic without any sleep. Only the debug-only
+/// write-phase cancellation fixture uses it.
+#[cfg(debug_assertions)]
 const FLOW_CONTROL_WINDOW: u32 = 8;
 
 /// Runs one bounded current-thread runtime for a single test step.
@@ -120,6 +142,16 @@ fn framed(body: &[u8]) -> Vec<u8> {
     frame
 }
 
+/// Builds the concatenated response stream for one frame per marker, each with
+/// a zeroed wire ID (RFC 9250 §4.2.1).
+fn framed_markers(markers: &[u8]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    for marker in markers {
+        payload.extend_from_slice(&framed(&response_wire(0, *marker)));
+    }
+    payload
+}
+
 /// Builds the QUIC server configuration presenting the fixture's trusted leaf
 /// and offering exactly `doq`.
 fn server_config(set: &FixtureSet) -> quinn::ServerConfig {
@@ -137,7 +169,9 @@ fn server_config(set: &FixtureSet) -> quinn::ServerConfig {
 
 /// Like [`server_config`] but advertises a deliberately tiny per-stream receive
 /// window, so a client write larger than the window blocks on flow control until
-/// the server reads the stream.
+/// the server reads the stream. Only the debug-only write-phase cancellation
+/// fixture uses it.
+#[cfg(debug_assertions)]
 fn server_config_with_window(set: &FixtureSet, stream_receive_window: u32) -> quinn::ServerConfig {
     let mut config = server_config(set);
     let mut transport = quinn::TransportConfig::default();
@@ -162,6 +196,19 @@ struct DoqServer {
     handle: std::thread::JoinHandle<()>,
 }
 
+/// How a scripted server ends its response send stream.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ResponseEnding {
+    /// Complete the response with a normal response-side STREAM FIN.
+    StreamFin,
+    /// Abort the response stream with the RFC 9250 `DOQ_PROTOCOL_ERROR` (`0x2`)
+    /// code and no STREAM FIN.
+    StreamReset,
+    /// Terminate the whole connection without any response-side STREAM FIN,
+    /// modelling a peer whose connection is lost before the response completes.
+    ConnectionClose,
+}
+
 impl DoqServer {
     /// Starts a server that accepts one connection, answers the single `DoQ`
     /// stream with a zeroed wire ID, and records what it observed.
@@ -173,7 +220,7 @@ impl DoqServer {
     /// zeroed wire-ID frame per marker, then a normal STREAM FIN. More than one
     /// marker models the protocol-violating trailing-response peer.
     fn start_with_markers(set: &FixtureSet, markers: &[u8]) -> Self {
-        Self::start_scripted(set, markers, true)
+        Self::start_scripted(set, &framed_markers(markers), ResponseEnding::StreamFin)
     }
 
     /// Starts a server that writes the response frame(s) and then aborts the
@@ -181,14 +228,21 @@ impl DoqServer {
     /// instead of a normal STREAM FIN, modelling a peer that never completes
     /// the response stream.
     fn start_without_normal_fin(set: &FixtureSet, markers: &[u8]) -> Self {
-        Self::start_scripted(set, markers, false)
+        Self::start_scripted(set, &framed_markers(markers), ResponseEnding::StreamReset)
     }
 
-    /// Starts a scripted server that writes one zeroed wire-ID frame per
-    /// marker and completes the send stream either with a normal STREAM FIN or
-    /// with a deterministic abort.
-    fn start_scripted(set: &FixtureSet, markers: &[u8], normal_fin: bool) -> Self {
-        let markers = markers.to_vec();
+    /// Starts a server that writes `raw_response` byte-for-byte and then
+    /// terminates the whole connection without ever finishing the response
+    /// stream, modelling a peer whose connection is lost before the response
+    /// completes with a normal STREAM FIN.
+    fn start_closed_without_response_fin(set: &FixtureSet, raw_response: &[u8]) -> Self {
+        Self::start_scripted(set, raw_response, ResponseEnding::ConnectionClose)
+    }
+
+    /// Starts a scripted server that writes `payload` byte-for-byte and then
+    /// ends the response according to `ending`.
+    fn start_scripted(set: &FixtureSet, payload: &[u8], ending: ResponseEnding) -> Self {
+        let payload = payload.to_vec();
         let config = server_config(set);
         let (address_tx, address_rx) = std::sync::mpsc::channel::<SocketAddr>();
         let (evidence_tx, evidence_rx) = oneshot::channel::<ServerEvidence>();
@@ -230,28 +284,35 @@ impl DoqServer {
                 let Ok(request) = recv.read_to_end(MAX_DOQ_MESSAGE).await else {
                     return;
                 };
-                // A DoQ server answers with wire ID zero (RFC 9250 §4.2.1). A
-                // conforming server sends exactly one response frame; a caller
-                // that passes more than one marker models the trailing-response
-                // violation this test rejects.
-                for marker in &markers {
-                    let body = response_wire(0, *marker);
-                    if send.write_all(&framed(&body)).await.is_err() {
-                        return;
-                    }
-                }
-                if normal_fin {
-                    if send.finish().is_err() {
-                        return;
-                    }
-                } else if send
-                    .reset(quinn::VarInt::from_u32(DOQ_PROTOCOL_ERROR))
-                    .is_err()
-                {
-                    // RFC 9250 §4.2: the peer never completed the response
-                    // stream with a normal STREAM FIN; the audit API aborts it
-                    // deterministically with the DoQ protocol-error code.
+                // A DoQ server answers with wire ID zero (RFC 9250 §4.2.1) and
+                // the scripted payload is written byte-for-byte.
+                if send.write_all(&payload).await.is_err() {
                     return;
+                }
+                match ending {
+                    ResponseEnding::StreamFin => {
+                        if send.finish().is_err() {
+                            return;
+                        }
+                    }
+                    ResponseEnding::StreamReset => {
+                        // RFC 9250 §4.2: the peer never completed the response
+                        // stream with a normal STREAM FIN; the fixture aborts it
+                        // deterministically with the DoQ protocol-error code.
+                        if send
+                            .reset(quinn::VarInt::from_u32(DOQ_PROTOCOL_ERROR))
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    ResponseEnding::ConnectionClose => {
+                        // The response stream is never finished: the whole
+                        // connection is terminated instead, so the client's
+                        // read-to-FIN observes connection loss without any
+                        // response-side STREAM FIN.
+                        connection.close(quinn::VarInt::from_u32(DOQ_PROTOCOL_ERROR), b"");
+                    }
                 }
                 let _ = evidence_tx.send(ServerEvidence { alpn, request });
 
@@ -294,7 +355,9 @@ impl DoqServer {
     }
 }
 
-/// What the holding server observed from a cancelled exchange.
+/// What the holding server observed from a cancelled exchange. Only the
+/// debug-only cancellation seam produces this observation.
+#[cfg(debug_assertions)]
 struct CancelEvidence {
     /// The ALPN protocol the handshake negotiated.
     alpn: Option<Vec<u8>>,
@@ -306,7 +369,10 @@ struct CancelEvidence {
 }
 
 /// A server that reads one request, withholds its response, and reports the
-/// peer's receive-side `STOP_SENDING` observation.
+/// peer's receive-side `STOP_SENDING` observation. Only the debug-only
+/// cancellation seam can observe the stop, so it is compiled out of release
+/// test builds.
+#[cfg(debug_assertions)]
 struct HoldingDoqServer {
     address: SocketAddr,
     /// Resolves once the request was read through its request-side FIN and the
@@ -318,6 +384,7 @@ struct HoldingDoqServer {
     handle: std::thread::JoinHandle<()>,
 }
 
+#[cfg(debug_assertions)]
 impl HoldingDoqServer {
     /// Starts a server that accepts one connection, reads the single `DoQ`
     /// request through its FIN, and then never writes a response byte. It
@@ -553,7 +620,79 @@ fn doq_trailing_second_response_is_rejected_without_commit() {
     assert_eq!(evidence.request, framed(&zeroed));
 }
 
+/// Drives one cancellation exchange to the debug-only post-`stop` pause,
+/// observes the peer's receive-side stop, then releases the exchange.
+///
+/// Production calls `RecvStream::stop(DOQ_REQUEST_CANCELLED)` and returns the
+/// typed local control error without waiting for the peer. This helper uses the
+/// debug-only [`DoqStopPause`] seam only as a *test observation device*: the
+/// exchange future stays pending after that `stop`, so the real Quinn driver
+/// keeps running on the caller's runtime and the server's `stopped()`
+/// observation proves the frame was actually transmitted. No sleep, yield,
+/// short timeout, polling loop, or endpoint teardown is used to fake a flush.
+#[cfg(debug_assertions)]
+fn cancel_and_observe_stop(
+    upstream: &DoqUpstream,
+    server: &mut HoldingDoqServer,
+    pause: &DoqStopPause,
+    cancellation: &TransportCancellation,
+    query: &[u8],
+) -> (SecureError, CancelEvidence) {
+    let context = ExchangeContext::new(Instant::now() + EXCHANGE_DEADLINE, cancellation.clone());
+    block_on(async {
+        let request = ExchangeRequest::new(query).expect("valid query");
+        let exchange = upstream.exchange(request, context);
+        tokio::pin!(exchange);
+
+        // The fixture's readiness boundary is phase-specific: the response-wait
+        // fixture signals after the request-side FIN, and the write-phase
+        // fixture signals as soon as the bidi stream is accepted. An exchange
+        // that finished here would mean the wrong phase was cancelled.
+        tokio::select! {
+            ready = &mut server.request_ready => {
+                ready.expect("the server signals request readiness");
+            }
+            result = &mut exchange => {
+                panic!("the exchange completed before cancellation: {result:?}");
+            }
+        }
+
+        cancellation.cancel();
+
+        // The exchange parks immediately after the production `RecvStream::stop`.
+        // The bound only stops a broken path from hanging the suite; the
+        // release below is what lets the exchange finish.
+        timeout(TEST_TIMEOUT, async {
+            tokio::select! {
+                () = pause.arrived() => {}
+                result = &mut exchange => {
+                    panic!("the exchange returned before the post-stop observation: {result:?}");
+                }
+            }
+        })
+        .await
+        .expect("the exchange parks on the post-stop observation within the bound");
+
+        // The exchange future is still parked, so its Quinn connection is alive
+        // and driven; the server's observation is the real STOP_SENDING frame
+        // for the code production sent.
+        let evidence = timeout(TEST_TIMEOUT, &mut server.evidence)
+            .await
+            .expect("the server observes the receive-side stop within the bound")
+            .expect("the server sends its observations");
+
+        pause.release();
+
+        let error = exchange
+            .await
+            .expect_err("the local control decision terminates the exchange");
+
+        (error, evidence)
+    })
+}
+
 #[test]
+#[cfg(debug_assertions)]
 fn doq_caller_cancellation_stops_the_receive_side_with_request_cancelled() {
     let set = FixtureSet::generate();
     let mut server = HoldingDoqServer::start(&set);
@@ -569,47 +708,14 @@ fn doq_caller_cancellation_stops_the_receive_side_with_request_cancelled() {
         TlsPolicy::verified(set.root_store_a()).expect("verified TLS policy"),
     )
     .expect("DoQ owner constructs");
+    let pause = Arc::new(DoqStopPause::new());
+    upstream.install_stop_pause(Arc::clone(&pause));
 
     let query = query_wire(0xBEEF);
     let cancellation = TransportCancellation::new();
-    let context = ExchangeContext::new(Instant::now() + EXCHANGE_DEADLINE, cancellation.clone());
 
-    let (error, evidence) = block_on(async {
-        let request = ExchangeRequest::new(&query).expect("valid query");
-        let exchange = upstream.exchange(request, context);
-        tokio::pin!(exchange);
-
-        // Wait for the server's explicit readiness signal, which it only sends
-        // after reading the request through its request-side FIN and before
-        // writing any response byte. An exchange that finished here would mean
-        // the server answered, so the test fails instead of cancelling the
-        // wrong phase.
-        tokio::select! {
-            ready = &mut server.request_ready => {
-                ready.expect("the server signals request readiness");
-            }
-            result = &mut exchange => {
-                panic!("the exchange completed before cancellation: {result:?}");
-            }
-        }
-
-        cancellation.cancel();
-
-        let error = exchange
-            .await
-            .expect_err("caller cancellation terminates the response wait");
-
-        // Keep the client runtime alive until the server's explicit observation
-        // arrives, instead of dropping the runtime the moment the exchange
-        // returns. The bounded wait is driven by the server's evidence, not by a
-        // sleep.
-        let evidence = timeout(TEST_TIMEOUT, &mut server.evidence)
-            .await
-            .expect("the server observes the receive-side stop within the bound")
-            .expect("the server sends its observations");
-
-        (error, evidence)
-    });
+    let (error, evidence) =
+        cancel_and_observe_stop(&upstream, &mut server, &pause, &cancellation, &query);
 
     // The pre-existing typed local control error is returned unchanged: no
     // string conversion and no new generic receive error.
@@ -642,6 +748,7 @@ fn doq_caller_cancellation_stops_the_receive_side_with_request_cancelled() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
 fn doq_caller_cancellation_during_outbound_write_stops_the_receive_side() {
     let set = FixtureSet::generate();
     let mut server = HoldingDoqServer::start_blocked_on_write(&set);
@@ -657,46 +764,19 @@ fn doq_caller_cancellation_during_outbound_write_stops_the_receive_side() {
         TlsPolicy::verified(set.root_store_a()).expect("verified TLS policy"),
     )
     .expect("DoQ owner constructs");
+    let pause = Arc::new(DoqStopPause::new());
+    upstream.install_stop_pause(Arc::clone(&pause));
 
     let query = query_wire(0xBEEF);
     let cancellation = TransportCancellation::new();
-    let context = ExchangeContext::new(Instant::now() + EXCHANGE_DEADLINE, cancellation.clone());
 
-    let (error, evidence) = block_on(async {
-        let request = ExchangeRequest::new(&query).expect("valid query");
-        let exchange = upstream.exchange(request, context);
-        tokio::pin!(exchange);
-
-        // The server signals as soon as it accepts the bidi stream, before it
-        // reads any request byte. The framed query cannot fit the tiny
-        // advertised receive window, so the outbound write is still blocked on
-        // flow control here and cannot race ahead to the response read.
-        tokio::select! {
-            ready = &mut server.request_ready => {
-                ready.expect("the server signals stream readiness");
-            }
-            result = &mut exchange => {
-                panic!("the exchange completed before cancellation: {result:?}");
-            }
-        }
-
-        cancellation.cancel();
-
-        let error = exchange
-            .await
-            .expect_err("caller cancellation terminates the outbound write");
-
-        // Keep the client runtime alive until the server's explicit observation
-        // arrives, instead of dropping the runtime the moment the exchange
-        // returns. The bounded wait is driven by the server's evidence, not by a
-        // sleep.
-        let evidence = timeout(TEST_TIMEOUT, &mut server.evidence)
-            .await
-            .expect("the server observes the receive-side stop within the bound")
-            .expect("the server sends its observations");
-
-        (error, evidence)
-    });
+    // The write-phase fixture signals as soon as it accepts the bidi stream,
+    // before reading any request byte. The framed query cannot fit the tiny
+    // advertised receive window, so the outbound write is still blocked on flow
+    // control when the cancellation lands, and the shared helper proves the
+    // post-`open_bi` stop even though the request FIN was never reached.
+    let (error, evidence) =
+        cancel_and_observe_stop(&upstream, &mut server, &pause, &cancellation, &query);
 
     // The write may already have been partially accepted, so the phase's own
     // existing state is `MaybeSent`; the typed error is returned unchanged with
@@ -773,4 +853,76 @@ fn doq_response_without_normal_fin_is_rejected_without_commit() {
     zeroed[0] = 0;
     zeroed[1] = 0;
     assert_eq!(evidence.request, framed(&zeroed));
+}
+
+/// Drives one exchange against a server that writes `raw_response` byte-for-byte
+/// and then terminates the whole connection without ever finishing the response
+/// stream, and asserts the terminal missing-FIN outcome.
+fn assert_connection_loss_without_response_fin(raw_response: &[u8]) {
+    let set = FixtureSet::generate();
+    // The server never sends a response-side STREAM FIN: it closes the
+    // connection instead, so the client's read-to-FIN observes connection loss.
+    let server = DoqServer::start_closed_without_response_fin(&set, raw_response);
+    let address = server.address;
+
+    let endpoint = DoqEndpoint::new(
+        address,
+        ServerIdentity::new("dns.example").expect("valid service identity"),
+    )
+    .expect("valid DoQ endpoint");
+    let upstream = DoqUpstream::new(
+        endpoint,
+        TlsPolicy::verified(set.root_store_a()).expect("verified TLS policy"),
+    )
+    .expect("DoQ owner constructs");
+
+    let query = query_wire(0xBEEF);
+    let context = ExchangeContext::new(
+        Instant::now() + EXCHANGE_DEADLINE,
+        TransportCancellation::new(),
+    );
+
+    let error = block_on(async {
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        upstream
+            .exchange(request, context)
+            .await
+            .expect_err("a connection lost before the response FIN is rejected")
+    });
+
+    // The connection was lost before a normal response STREAM FIN, so the
+    // terminal rejection is the same `Sent` missing-FIN protocol error as the
+    // stream-reset case, and the response is never committed.
+    assert_eq!(error, SecureError::DoqProtocolMissingResponseFin);
+    assert_eq!(error.side_effect(), SideEffectState::Sent);
+    // The RAII registration is released on the terminal error path too.
+    assert_eq!(upstream.in_flight_exchanges(), 0);
+
+    let (accepts, evidence) = server.join();
+    assert_eq!(accepts, 1, "exactly one connection is accepted");
+    assert_eq!(evidence.alpn.as_deref(), Some(DOQ_ALPN));
+
+    // The server observed the request-side FIN with a zeroed wire ID before it
+    // terminated the connection; the caller's borrowed query bytes never
+    // changed.
+    let mut zeroed = query.clone();
+    zeroed[0] = 0;
+    zeroed[1] = 0;
+    assert_eq!(evidence.request, framed(&zeroed));
+}
+
+#[test]
+fn doq_connection_lost_after_complete_response_is_rejected_as_missing_fin() {
+    // A complete, well-formed response frame arrives, but the connection is then
+    // terminated without a response-side STREAM FIN: the response must not be
+    // committed on the strength of bytes alone.
+    assert_connection_loss_without_response_fin(&framed(&response_wire(0, 0x2a)));
+}
+
+#[test]
+fn doq_connection_lost_after_partial_response_is_rejected_as_missing_fin() {
+    // A truncated response frame arrives before the connection is terminated.
+    // The partial bytes must not be treated as a shorter message either.
+    let complete = framed(&response_wire(0, 0x2a));
+    assert_connection_loss_without_response_fin(&complete[..6]);
 }
