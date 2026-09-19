@@ -91,22 +91,65 @@ mosdns-upstream-core --locked`):
 4. **Client-only feature selection**: activated quinn features are exactly
    `runtime-tokio` + `rustls-ring` (→ `ring` + `rustls 0.23.45`).
    `cargo tree -e features` shows zero `platform-verifier` and zero
-   `aws-lc-rs` lines anywhere. `futures-io 0.3.34` enters only as
-   h3-quinn's own non-optional transport adapter (`futures-io` is a
-   hard dependency of h3-quinn 0.0.10, not a selected feature), alongside
-   its `futures-core/util/task/sink/channel` family — no async runtime,
-   no server/listener surface. h3/h3-quinn stay at default features
-   (no `tracing`, no `datagram`). PASS on the lock.
+   `aws-lc-rs` lines anywhere. h3/h3-quinn have their default features
+   disabled and no optional feature (`tracing`, `datagram`) is enabled.
+   PASS on the lock, with one disposition below.
 5. **Tree shape**: `cargo tree -e normal -p mosdns-upstream-core` shows
    `h3 0.0.8`, `h3-quinn 0.0.10 → quinn 0.11.7 + h3`, and
    `quinn 0.11.7 → quinn-proto 0.11.18 + quinn-udp 0.5.15`; the remaining
    new lock entries (`lru-slab`, `rustc-hash`, `socket2`, `cfg_aliases`,
    `fastrand`, `rand`/`rand_core`/`rand_pcg`, `chacha20`, `cpufeatures`,
    `web-time`, `slab`, `memchr`, `futures-*`, `pin-utils`) are their
-   transitive closure only, nothing else new. `#![forbid(unsafe_code)]`
-   still applies to this crate's own code. PASS.
+   transitive closure only. No pre-existing package had its version
+   changed; the one pre-existing lock-line edit is a disambiguation, not
+   an upgrade: tokio's `"socket2"` becomes `"socket2 0.6.5"` because the
+   new `socket2 0.5.10` (a quinn-udp transitive) forces the lock to name
+   which socket2 line tokio means.
+   `#![forbid(unsafe_code)]` still applies to this crate's own code. PASS.
 
-Gate CLOSED: the Slice 0 exit gate is satisfied. Slice 1 socket code may
-proceed when authorized. The previously noted unanchored upstream SHAs
-(P2-2, ruled non-blocking) remain as-is; the lock pins above are the
-reproducible record.
+### Disposition: `futures-executor` in the resolved graph (P1-1, remediation)
+
+The lock contains `futures-executor 0.3.34`, reached by exactly one path
+(`cargo tree -i futures-executor`): `h3-quinn 0.0.10 → futures 0.3.34
+(default features) → futures-executor`. This does **not** violate the
+design §2 "no extra async runtimes" gate, for four source-backed reasons:
+
+1. **It is the umbrella's default, not a selected executor.** h3-quinn
+   declares `futures = "0.3.28"` with no `default-features = false`, so
+   the `futures` default set (`std` + `async-await` + `executor`) applies.
+   `futures 0.3.34`'s own manifest defines
+   `executor = ["std", "futures-executor/std"]` — the `std`-only executor
+   surface, **not** `thread-pool` (`thread-pool = ["executor",
+   "futures-executor/thread-pool"]` is a separate, unselected feature).
+   `cargo tree -e features` confirms zero `thread-pool` lines anywhere in
+   the workspace graph.
+2. **`thread-pool` — the only part that owns threads — is absent.**
+   In `futures-executor 0.3.34`'s `src/lib.rs`, `ThreadPool`/`ThreadPoolBuilder`
+   are `#[cfg(feature = "thread-pool")]`-gated; what the activated `std`
+   feature exposes is `local_pool::{block_on, LocalPool, LocalSpawner}` plus
+   the `enter` guard — inline polling helpers, not a reactor, timer, or
+   background thread. No thread pool can exist in this build.
+3. **Neither QUIC/H3 crate calls into it.** `grep` over
+   `h3-quinn-0.0.10/src/` and `h3-0.0.8/src/` finds zero references to
+   `futures_executor`, `futures-executor`, `block_on`, `ThreadPool`,
+   `LocalPool`, or `LocalSpawner`; h3-quinn's actual `futures::` uses are
+   `ready`, `stream::{self}`, `Stream`, `StreamExt` (poll-combinators over
+   the caller's task, in `src/lib.rs:16-20` and `src/datagram.rs:8`).
+   The single `runtime.block_on` hit in `quinn-0.11.7/src/tests.rs` is
+   `tokio::runtime::Runtime::block_on` in quinn's own test module
+   (`use tokio::runtime::{Builder, Runtime}`, `use crate::runtime::TokioRuntime`),
+   never compiled into the library. Protocol work therefore runs on the
+   caller's Tokio runtime via quinn's `runtime-tokio` adapter — the same
+   runtime-ownership model the crate already uses — and nothing owns, polls,
+   or parks work on a second executor.
+4. **No reactor/timer/background surface is activated.** The resolved
+   `futures-executor` exposes no thread pool (point 2), and the workspace
+   feature tree contains no `thread-pool`, `async-std`, `smol`, or second
+   `tokio` runtime instance attributable to QUIC.
+
+Consequence: `futures-executor` is an inert transitive utility (inline
+`LocalPool`/`block_on` helpers, uncalled by the QUIC/H3 crates), not an
+extra async runtime owning protocol work. The design §2 gate holds; no
+dependency reselection is needed, and no weakening of the reviewed design
+was performed. If a future pin ever activates `thread-pool` (or any second
+runtime), that pin fails this gate and the task stops per design §2.
