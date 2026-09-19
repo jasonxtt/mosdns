@@ -42,3 +42,16 @@ pub(crate) use doh::H2TeardownPause;
 /// Nothing here is re-exported from the crate root.
 pub(crate) use doh::{H2DrainHandle, PooledDohSession};
 pub(crate) use dot::PooledDotSession;
+
+/// Crate-internal DoH response-semantics surface for the HTTP/3 driver.
+///
+/// `design.md` §5 freezes the DoH3 response contract equal to the existing DoH
+/// one, so the one-shot H3 driver in `crate::quic` shares the status/head/
+/// encoding/media-type validation, the complete-body bound, the header count and
+/// byte bounds, the ID-restore helper, and the tracked child scope, rather than
+/// growing a second copy that could drift from the HTTP/1.1 and HTTP/2 paths.
+/// Nothing here is re-exported from the crate root.
+pub(crate) use doh::{
+    DNS_MEDIA_TYPE, H2ScopeLease, MAX_DNS_BODY, MAX_RESPONSE_HEADER_BYTES, MAX_RESPONSE_HEADERS,
+    parsed_head_bytes, restore_request_id, validate_doh_head_parts,
+};

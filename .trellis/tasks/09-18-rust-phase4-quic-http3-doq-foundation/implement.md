@@ -280,3 +280,108 @@ git diff --check
   unauthorized and untouched. The remediation is committed as `62e8f1f`,
   pushed to `origin/rust`, and passed the same-conversation GPT web root review
   with `FINAL: PASS`; the task remains `in_progress` at the Slice 1 boundary.
+
+## Slice 2 implementation record — 2026-09-19
+
+- Executor: DSH Web in the Chrome workspace session, single executor with no
+  sub-task split, no second session, and no MCP. The parent controller retains
+  diff inspection, the quality gates, and the external review round.
+- Scope: Slice 2 only — the one-shot DoH3 driver, its loopback integration
+  fixture/tests, and the crate-internal module exports it needs. Slice 3
+  (deadline/cancel/close precedence and the full QUIC/H3 stream-error-code
+  mapping) is **not started**.
+
+### RED baseline (before any Slice 2 implementation)
+
+`cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test
+slice2_doh3 --locked` failed to compile with
+
+```text
+error[E0432]: unresolved import `mosdns_upstream_core::quic::Doh3Upstream`
+  --> upstream-core/tests/slice2_doh3.rs:48:34
+```
+
+which is the required proof that the DoH3 one-shot driver and its public
+capability were absent before the slice.
+
+### Implementation
+
+- `rust/upstream-core/src/quic.rs` — new Slice 2 section with `Doh3Upstream`:
+  - fresh numeric QUIC connect on the caller's runtime using
+    `TlsPolicy::client_config_with_alpn(&[H3_ALPN])`; the service identity, not
+    the dial address, selects the TLS name;
+  - the request target is the reused `DohEndpoint::get_request_target` output
+    and `:authority` is `DohEndpoint::authority()` (no second `dns` encoder and
+    no `Host` header beside the pseudo-header);
+  - exactly one `GET` with `Accept: application/dns-message`, no body, no
+    `User-Agent`, no `Content-Encoding`, followed by a request send-side FIN;
+  - the h3 connection driver is spawned as a tracked child of the exchange
+    scope *before* the first request byte; teardown seals admission, aborts the
+    child, and drains to guard drop, and `commit_final_response` runs only after
+    that drain;
+  - response validation reuses the DoH contract (status 200, head ≤ 16 KiB,
+    declared length ≤ 65535, identity/absent encoding, case-insensitive
+    `application/dns-message` with parameters), adds the 64-header bound the h3
+    layer does not impose itself, and reads a complete bounded body (≤ 65535)
+    rejecting early EOF / length mismatch as `IncompleteBody`;
+  - ID restore plus `dns-core` validation, then `SecureResponse::doh3`
+    (`Doh3`/`Some(Http3)`); the one-shot `connection.close` /
+    `endpoint.close` / `wait_idle` runs only on the success path after the
+    commit, so it is never a cancellation barrier.
+- `rust/upstream-core/src/secure/doh.rs` — behavior-preserving bounded
+  extraction so H3 cannot drift from H1/H2: `parsed_head_bytes`,
+  `validate_doh_head_parts` (now returning the already range-checked declared
+  length), crate-visible `MAX_*` bounds and `DNS_MEDIA_TYPE`,
+  `restore_request_id`, and an `H2ScopeLease::spawn` tracked-child seam with
+  `pub(crate)` `new`/`finish`.
+- `rust/upstream-core/src/secure/mod.rs` — crate-internal re-exports of that
+  surface; nothing is re-exported from the crate root.
+- `rust/upstream-core/src/secure/dot.rs` — drops the now-stale
+  `#[allow(dead_code)]` and Slice-0 note from the `SecureResponse::doh3` seam
+  that Slice 2 now calls.
+- `rust/upstream-core/tests/slice2_doh3.rs` — new loopback integration test
+  with a real in-process h3 server on an ephemeral IPv4 loopback port (server
+  code confined to the integration test), a trusted synthetic leaf, exact `h3`
+  ALPN, and a TCP listener sharing the QUIC port as no-fallback evidence.
+
+No manifest or `Cargo.lock` change, no new dependency, and no debug-only test
+seam, so nothing in the new code is release-gated.
+
+### Evidence
+
+- Focused: `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core
+  --test slice2_doh3 --locked` → 20 passed / 0 failed; the same target with
+  `--release` → 20 passed / 0 failed.
+- Upstream-core: `cargo test ... -p mosdns-upstream-core --all-targets
+  --all-features --locked` → 443 passed / 0 failed.
+- Workspace: `cargo test ... --workspace --all-targets --all-features
+  --locked` → all passed.
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` clean;
+  `cargo clippy ... -p mosdns-upstream-core --all-targets --all-features
+  --locked -- -D warnings` clean; workspace clippy with `-D warnings` clean;
+  `git diff --check` clean.
+- Covered behaviors: fresh-connection successful GET with exact
+  authority/path/headers and observed request FIN; one request per connection
+  and two connections for two exchanges; ALPN, untrusted-certificate, and
+  identity-mismatch handshake failures as `NotSent` with no TCP fallback;
+  non-200; wrong and missing media type; non-identity content encoding;
+  declared-over-maximum and actual-over-maximum bodies; incomplete body;
+  too-many-headers; close-before-head as `ResponseHeadNotReceived`
+  (`MaybeSent`); outbound ID zeroing and caller ID restoration; and zero
+  in-flight registrations after owner close, caller cancellation, a dropped
+  exchange future, and an exchange after close.
+
+### Deliberate boundary and known limits
+
+- Slice 3 is unimplemented: no deadline-precedence test, no active h3 stream
+  cancellation, and no explicit QUIC/H3 stream-error-code → typed-error matrix.
+  A non-`HeaderTooBig` h3 head-phase error is conservatively
+  `ResponseHeadNotReceived` (`MaybeSent`) until that mapping lands.
+- The > 16 KiB response-head rejection is enforced on the receive path by the
+  `max_field_section_size` the client advertises plus h3's QPACK decode bound,
+  and again by the shared post-parse reconstruction. The fixture's h3 server
+  refuses to emit a head above the client's advertised limit, so the directly
+  exercised head-bound negative test is the 64-header case; the byte bound has
+  no dedicated over-limit emitted fixture.
+- Task status was not changed and nothing was committed or pushed; the Slice 2
+  diff is left in the worktree for parent/reviewer inspection.
