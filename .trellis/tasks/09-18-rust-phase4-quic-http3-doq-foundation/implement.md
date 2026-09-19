@@ -266,15 +266,17 @@ git diff --check
 - Remediation evidence: `cargo test --manifest-path rust/Cargo.toml -p
   mosdns-upstream-core --test slice1_doq --locked` — 7 passed; the two
   cancellation tests passed 16/16 in an 8-round stress run. The added
-  complete-response and partial-response connection-loss fixtures both verify
-  missing-FIN, `Sent`, no commit, and zero in-flight exchanges. Release
-  validation compiled the seam out (0 release symbols, 16 debug symbols) and
-  the release Slice 1 target passed 5 tests with zero warnings.
+  full-frame-payload and partial-frame-payload connection-loss fixtures both
+  verify missing-FIN, `Sent`, no commit, and zero in-flight exchanges; they
+  intentionally do not claim that the payload reached the client before
+  connection close. Release validation compiled the seam out (0 release
+  symbols, 16 debug symbols) and the release Slice 1 target passed 5 tests
+  with zero warnings.
 - Parent verification also passed: focused Slice 1, upstream-core all-target
   tests (423 tests), workspace all-target tests, format check, upstream-core
   and workspace warnings-denied clippy, task validation, and `git diff --check`.
 - Scope boundary: DoH3, production host wiring, pooling/retry/fallback,
   Linux/VM deployment evidence, and the later Slice 2–4 work remain
-  unauthorized and untouched. The remediation is currently uncommitted and
-  unpushed; the task remains `in_progress` pending the parent commit and the
-  separate same-conversation GPT web review PASS.
+  unauthorized and untouched. The remediation is committed as `62e8f1f`,
+  pushed to `origin/rust`, and passed the same-conversation GPT web root review
+  with `FINAL: PASS`; the task remains `in_progress` at the Slice 1 boundary.

@@ -912,17 +912,18 @@ fn assert_connection_loss_without_response_fin(raw_response: &[u8]) {
 }
 
 #[test]
-fn doq_connection_lost_after_complete_response_is_rejected_as_missing_fin() {
-    // A complete, well-formed response frame arrives, but the connection is then
-    // terminated without a response-side STREAM FIN: the response must not be
-    // committed on the strength of bytes alone.
+fn doq_connection_lost_with_full_frame_payload_is_rejected_as_missing_fin() {
+    // The fixture writes a complete, well-formed response frame to Quinn's send
+    // path and then terminates the connection before response-side STREAM FIN;
+    // the client must not commit bytes without observing that FIN.
     assert_connection_loss_without_response_fin(&framed(&response_wire(0, 0x2a)));
 }
 
 #[test]
-fn doq_connection_lost_after_partial_response_is_rejected_as_missing_fin() {
-    // A truncated response frame arrives before the connection is terminated.
-    // The partial bytes must not be treated as a shorter message either.
+fn doq_connection_lost_with_partial_frame_payload_is_rejected_as_missing_fin() {
+    // The fixture writes a truncated response-frame payload to Quinn's send
+    // path and then terminates the connection before response-side STREAM FIN;
+    // the partial payload must not be treated as a shorter message.
     let complete = framed(&response_wire(0, 0x2a));
     assert_connection_loss_without_response_fin(&complete[..6]);
 }
