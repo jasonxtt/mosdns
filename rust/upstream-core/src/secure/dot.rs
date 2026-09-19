@@ -137,6 +137,62 @@ impl SecureResponse {
         }
     }
 
+    /// Builds a DoQ response.
+    ///
+    /// Same ID invariant as [`Self::doh`]: the committed wire carries the
+    /// caller's restored ID (the zeroed wire ID is restored before commit),
+    /// so `response_id` equals `request_id`. DoQ has no HTTP version, same as
+    /// DoT. Crate-internal: the one-shot DoQ driver in `crate::quic`
+    /// (Slice 1) is the only caller.
+    ///
+    /// Slice 0 has no driver yet, so this seam is dead in non-test builds
+    /// until Slice 1 lands; the `allow` lapses naturally once it is called.
+    #[allow(dead_code)]
+    #[must_use]
+    pub(crate) fn doq(wire: Vec<u8>, request_id: u16, truncated: bool) -> Self {
+        debug_assert_eq!(
+            u16::from_be_bytes([wire[0], wire[1]]),
+            request_id,
+            "the returned DoQ wire must carry the caller's restored ID"
+        );
+        Self {
+            wire,
+            request_id,
+            response_id: request_id,
+            transport: SecureTransport::Doq,
+            http_version: None,
+            truncated,
+        }
+    }
+
+    /// Builds a DoH3 response.
+    ///
+    /// Same ID invariant as [`Self::doh`], but reports the frozen DoH3 shape:
+    /// `transport == Doh3` with `http_version == Some(Http3)`. The version is
+    /// fixed — a DoH3 response is never H1/H2 — so it takes no version
+    /// parameter. Crate-internal: the one-shot DoH3 driver in `crate::quic`
+    /// (Slice 2) is the only caller.
+    ///
+    /// Slice 0 has no driver yet, so this seam is dead in non-test builds
+    /// until Slice 2 lands; the `allow` lapses naturally once it is called.
+    #[allow(dead_code)]
+    #[must_use]
+    pub(crate) fn doh3(wire: Vec<u8>, request_id: u16, truncated: bool) -> Self {
+        debug_assert_eq!(
+            u16::from_be_bytes([wire[0], wire[1]]),
+            request_id,
+            "the returned DoH3 wire must carry the caller's restored ID"
+        );
+        Self {
+            wire,
+            request_id,
+            response_id: request_id,
+            transport: SecureTransport::Doh3,
+            http_version: Some(SecureHttpVersion::Http3),
+            truncated,
+        }
+    }
+
     #[must_use]
     pub fn wire(&self) -> &[u8] {
         &self.wire
@@ -872,6 +928,7 @@ mod tests {
     use tokio_rustls::server::TlsStream;
 
     use super::{DotPhase, DotUpstream};
+    use super::{SecureHttpVersion, SecureResponse, SecureTransport};
     use crate::secure::endpoint::{DotEndpoint, ServerIdentity};
     use crate::secure::error::SecureError;
     use crate::secure::tls::TlsPolicy;
@@ -1357,9 +1414,48 @@ mod tests {
         }
     }
 
-    /// The phases in the matrix must be exactly the pre-result phases: a phase
-    /// silently missing from the const array would otherwise leave a gap in the
-    /// coverage this test exists to provide.
+    /// The frozen DoQ/DoH3 result shapes are constructible with restored IDs.
+    #[test]
+    fn frozen_quic_result_shapes_are_constructible_with_restored_ids() {
+        // P1 regression (Slice 0 remediation): the frozen DoQ/DoH3 vocabulary
+        // must be more than enum arms — the exact result combinations the
+        // future QUIC drivers commit must be constructible now, with the
+        // restored-ID invariant the public boundary requires.
+        let doq = SecureResponse::doq(response_wire(0x51D0, 3), 0x51D0, false);
+        assert_eq!(doq.transport(), SecureTransport::Doq);
+        assert_eq!(doq.http_version(), None);
+        assert_eq!(doq.request_id(), 0x51D0);
+        assert_eq!(doq.response_id(), 0x51D0);
+        assert_eq!(&doq.wire()[0..2], &0x51D0u16.to_be_bytes());
+
+        let doh3 = SecureResponse::doh3(response_wire(0x51D1, 4), 0x51D1, true);
+        assert_eq!(doh3.transport(), SecureTransport::Doh3);
+        assert_eq!(doh3.http_version(), Some(SecureHttpVersion::Http3));
+        assert_eq!(doh3.request_id(), 0x51D1);
+        assert_eq!(doh3.response_id(), 0x51D1);
+        assert_eq!(&doh3.wire()[0..2], &0x51D1u16.to_be_bytes());
+        assert!(doh3.truncated());
+
+        // No-regression: the pre-existing constructors keep their meanings —
+        // DoT reports Dot/None, DoH reports Doh/Some(version).
+        let dot = SecureResponse::new(
+            response_wire(0x51D2, 5),
+            0x51D2,
+            0x51D2,
+            SecureTransport::Dot,
+            false,
+        );
+        assert_eq!(dot.transport(), SecureTransport::Dot);
+        assert_eq!(dot.http_version(), None);
+        let doh = SecureResponse::doh(
+            response_wire(0x51D3, 6),
+            0x51D3,
+            SecureHttpVersion::Http2,
+            false,
+        );
+        assert_eq!(doh.transport(), SecureTransport::Doh);
+        assert_eq!(doh.http_version(), Some(SecureHttpVersion::Http2));
+    }
     #[test]
     fn the_control_matrix_covers_every_pre_result_phase_exactly_once() {
         let mut seen: Vec<DotPhase> = MATRIX_PHASES.to_vec();

@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use mosdns_upstream_core::{
-    Endpoint, ExchangeContext, ExchangeRequest, ReuseKey, ReuseOwner, SecureKey, SecureKind,
-    SideEffectState, Transport, TransportCancellation, UpstreamError,
+    Endpoint, ExchangeContext, ExchangeRequest, PoolError, ReuseKey, ReuseOwner, SecureKey,
+    SecureKind, SideEffectState, Transport, TransportCancellation, UpstreamError,
 };
 
 /// The upper bound on any single await in this file: a deadlock guard only.
@@ -258,6 +258,39 @@ fn a_udp_endpoint_has_no_reusable_key() {
         ReuseKey::try_from_endpoint(udp).is_err(),
         "a UDP endpoint must not yield a reusable connection key"
     );
+}
+
+#[test]
+fn a_quic_endpoint_is_rejected_by_the_plain_tcp_pool() {
+    // QUIC reuse stays deferred to the QUIC task: the plain-TCP owner must
+    // not admit it, or a QUIC endpoint would execute as TCP.
+    let quic = Endpoint::new(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 853),
+        Transport::Quic,
+    )
+    .expect("quic endpoint");
+    assert!(
+        ReuseKey::try_from_endpoint(quic).is_err(),
+        "a QUIC endpoint must not yield a plain-TCP reusable key"
+    );
+    assert_eq!(
+        ReuseOwner::try_new(quic).expect_err("a QUIC endpoint must not enter the plain-TCP owner"),
+        PoolError::NotReusable,
+        "a QUIC endpoint must not enter the plain-TCP reuse owner"
+    );
+}
+
+#[test]
+fn a_tcp_endpoint_still_enters_the_pool() {
+    // No-regression: the TCP-only gate keeps admitting the one transport the
+    // owner actually executes.
+    let tcp = Endpoint::new(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 53),
+        Transport::Tcp,
+    )
+    .expect("tcp endpoint");
+    assert!(ReuseKey::try_from_endpoint(tcp).is_ok());
+    assert!(ReuseOwner::try_new(tcp).is_ok());
 }
 
 // ---------------------------------------------------------------------------
