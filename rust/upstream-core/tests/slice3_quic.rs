@@ -1274,41 +1274,62 @@ fn doh3_peer_stream_termination_codes_are_typed_and_never_commit() {
 #[test]
 fn doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized() {
     // These codes are delivered on the wire exactly like the HTTP/3 codes
-    // above, but they are not in the reviewed four-category HTTP/3 mapping:
+    // above, but they are not in the reviewed four-category HTTP/3 mapping.
+    // The classifier decides by RFC 9114 §8.1 *context*, not by a numeric
+    // range: a defined code whose §8.1 meaning is scoped to the control
+    // stream, a critical stream, or connection-level bookkeeping is an
+    // unexpected context on the DoH3 request/response stream, so RFC 9114 §8's
+    // MUST makes it `H3_NO_ERROR`-equivalent. Every other case below is a
+    // terminal peer termination that is `Sent` and never commits.
     //
-    // * `0x0`-`0x3` are RFC 9000 §20.1 *transport* error codes. Using one on an
-    //   HTTP/3 request stream is an error code in an unexpected context, so
-    //   RFC 9114 §8 requires it to be treated as equivalent to `H3_NO_ERROR`
-    //   (`0x100`) - never as an H3 protocol error or a request cancellation.
-    //   This is exactly where the old low-code aliases were wrong.
-    // * `0x119` is a reserved `0x1f * N + 0x21` grease code (N = 8); RFC 9114
-    //   §8.1 reserves that space to exercise the unknown-code rule, so it is
-    //   also `H3_NO_ERROR`-equivalent even though it is above `0x100`.
-    // * `0x103` (H3_STREAM_CREATION_ERROR) and `0x200`
-    //   (QPACK_DECOMPRESSION_FAILED) are defined HTTP/3-family codes this
-    //   client does not classify into one of the four categories; they are
-    //   reported as the unclassified `Other` category rather than being
-    //   mislabelled. `0x200` is a *request/response stream* code (RFC 9204 §6
-    //   defines it for a failed field-section decode on a request stream), so
-    //   it is a known error in this context.
+    // * `0x104` H3_CLOSED_CRITICAL_STREAM, `0x109` H3_SETTINGS_ERROR, and
+    //   `0x10a` H3_MISSING_SETTINGS are defined only for the critical/control
+    //   stream (RFC 9114 §6.2.1): a control stream being closed, a SETTINGS
+    //   payload error, or a missing leading SETTINGS frame. None of those
+    //   conditions can occur on a request/response stream, so resetting it with
+    //   one is an error code in an unexpected context -> `NoError`.
+    // * `0x108` H3_ID_ERROR is used only for connection-level stream-ID/push-ID
+    //   bookkeeping (RFC 9114 §4.6/§6.2.2/§7.2.5-7), never for a
+    //   request/response exchange -> `NoError`.
+    // * `0x0`-`0x3` are RFC 9000 §20.1 *transport* error codes and `0x119` is a
+    //   reserved `0x1f * N + 0x21` grease code (N = 8); `0x1234` is
+    //   unregistered. All of these are unknown or out-of-context on this stream,
+    //   so RFC 9114 §8 treats them as `H3_NO_ERROR`.
     // * `0x201` (QPACK_ENCODER_STREAM_ERROR) and `0x202`
-    //   (QPACK_DECODER_STREAM_ERROR) are also *defined* errors, but RFC 9204
-    //   §6 defines them only for the QPACK encoder and decoder streams. Used
-    //   on this request/response stream they are an error code in an
-    //   unexpected context, so RFC 9114 §8's MUST treats them as equivalent to
-    //   `H3_NO_ERROR` (`0x100`) - not as an unclassified H3/QPACK error.
-    //
-    // Every case is a terminal peer termination that is `Sent` and never
-    // commits, and none is mistaken for a caller-local cancellation.
+    //   (QPACK_DECODER_STREAM_ERROR) are defined only for the QPACK encoder and
+    //   decoder streams (RFC 9204 §6), so on this stream they are the same
+    //   unexpected context -> `NoError`.
+    // * `0x200` (QPACK_DECOMPRESSION_FAILED) is different: RFC 9204 §6 defines
+    //   it for a failed field-section decode on a request stream, so it is a
+    //   known error in this context -> `Other`.
+    // * `0x103` and the remaining §8.1 unnamed codes `0x105`-`0x107` and
+    //   `0x10b`-`0x110` describe conditions of a request/response exchange
+    //   (frame legality/size, load, request rejection/incompleteness, message
+    //   malformation, CONNECT-tunnel failure, HTTP/1.1 fallback) and so are
+    //   known HTTP/3-family errors in this context -> `Other`. `0x103` is
+    //   retained as `Other` by the frozen Slice 3 reviewed contract.
     let cases = [
-        (0x0_u64, PeerStreamError::NoError),
+        (0x104_u64, PeerStreamError::NoError),
+        (0x108, PeerStreamError::NoError),
+        (0x109, PeerStreamError::NoError),
+        (0x10a, PeerStreamError::NoError),
+        (0x201, PeerStreamError::NoError),
+        (0x202, PeerStreamError::NoError),
+        (0x0, PeerStreamError::NoError),
         (0x1, PeerStreamError::NoError),
         (0x2, PeerStreamError::NoError),
         (0x3, PeerStreamError::NoError),
         (0x119, PeerStreamError::NoError),
-        (0x201, PeerStreamError::NoError),
-        (0x202, PeerStreamError::NoError),
+        (0x1234, PeerStreamError::NoError),
         (0x103, PeerStreamError::Other),
+        (0x105, PeerStreamError::Other),
+        (0x106, PeerStreamError::Other),
+        (0x107, PeerStreamError::Other),
+        (0x10b, PeerStreamError::Other),
+        (0x10d, PeerStreamError::Other),
+        (0x10e, PeerStreamError::Other),
+        (0x10f, PeerStreamError::Other),
+        (0x110, PeerStreamError::Other),
         (0x200, PeerStreamError::Other),
     ];
     for (code, category) in cases {

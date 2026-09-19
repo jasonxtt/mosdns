@@ -143,14 +143,21 @@ caller-owned deadline、取消/owner close 语义。
   必须显式（至少覆盖 NO_ERROR/INTERNAL_ERROR/PROTOCOL_ERROR/REQUEST_CANCELLED
   语义，其中 `DOQ_PROTOCOL_ERROR (0x2)` 覆盖非零 peer ID、缺响应 FIN、多余响应）。
   DoQ 与 DoH3 使用**各自**的错误码空间，不得互相重解释：DoQ 用 RFC 9250 §4.3
-  的 `0x0`-`0x3`；DoH3 在 request/response stream 语境下用 RFC 9114 §8.1 的
+  的 `0x0`-`0x3`；DoH3 在 request/response stream 语境下按 RFC 9114 §8.1 的
+  stream/connection context 做**显式逐码**判定（不是数值区间）：
   `H3_NO_ERROR (0x100)`/`H3_GENERAL_PROTOCOL_ERROR (0x101)`/
-  `H3_INTERNAL_ERROR (0x102)`/`H3_REQUEST_CANCELLED (0x10c)`；该语境下已知但未
-  单独命名的已定义码（其余 RFC 9114 §8.1 码，如 `H3_STREAM_CREATION_ERROR
-  0x103`；RFC 9204 §6 明确用于 request stream 的
+  `H3_INTERNAL_ERROR (0x102)`/`H3_REQUEST_CANCELLED (0x10c)` 各自映射到对应
+  category；该语境下确实适用的已知 HTTP/3-family 码（`H3_STREAM_CREATION_ERROR
+  0x103`，按已冻结评审契约保留；`H3_FRAME_UNEXPECTED 0x105`/
+  `H3_FRAME_ERROR 0x106`/`H3_EXCESSIVE_LOAD 0x107`/
+  `H3_REQUEST_REJECTED 0x10b`/`H3_REQUEST_INCOMPLETE 0x10d`/
+  `H3_MESSAGE_ERROR 0x10e`/`H3_CONNECT_ERROR 0x10f`/
+  `H3_VERSION_FALLBACK 0x110`；RFC 9204 §6 明确用于 request stream 的
   `QPACK_DECOMPRESSION_FAILED 0x200`）标为 `Other`；其余（RFC 9000 §20.1
   transport 低位码、保留 `0x1f * N + 0x21` grease 码、未知码，以及只定义在别的
-  语境、在 request/response stream 上属于 unexpected context 的 RFC 9204
+  语境、在 request/response stream 上属于 unexpected context 的码：RFC 9114
+  §8.1 的 `H3_CLOSED_CRITICAL_STREAM 0x104`/`H3_ID_ERROR 0x108`/
+  `H3_SETTINGS_ERROR 0x109`/`H3_MISSING_SETTINGS 0x10a`，以及 RFC 9204
   `QPACK_ENCODER_STREAM_ERROR 0x201`/`QPACK_DECODER_STREAM_ERROR 0x202`）按
   RFC 9114 §8 的 MUST 视为等价于 `H3_NO_ERROR`，即低位 DoQ 码绝不映射成 H3
   protocol/cancel 错误。
