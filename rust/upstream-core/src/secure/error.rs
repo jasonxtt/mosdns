@@ -199,9 +199,9 @@ impl fmt::Display for TlsHandshakeFailure {
 
 impl Error for TlsHandshakeFailure {}
 
-/// The closed category of a peer-reported HTTP/3 or QUIC stream-termination
-/// code.
+/// The closed category of a peer-reported HTTP/3 stream-termination code.
 ///
+/// The categories name the RFC 9114 §8.1 HTTP/3 error codes this client reviews.
 /// The peer's raw numeric code and any reason text are deliberately not
 /// retained: only this fixed vocabulary crosses the public boundary, so no
 /// peer-supplied value or payload can leak through `Display`/`Debug`. `NoError`
@@ -209,18 +209,34 @@ impl Error for TlsHandshakeFailure {}
 /// response is still incomplete proves the response never finished, so it can
 /// never commit. It is only benign when the response already completed, which
 /// is the normal FIN path and never reaches this vocabulary.
+///
+/// Because RFC 9114 §9 permits new error codes to be defined without
+/// negotiation, RFC 9114 §8 requires an error code used in an unexpected
+/// context, or an unknown error code, to be treated as equivalent to
+/// `H3_NO_ERROR`. The DoH3 classifier therefore reports such codes as
+/// [`Self::NoError`] instead of inventing a protocol or cancellation failure;
+/// that covers the RFC 9000 §20.1 transport code space below `0x100` (which
+/// includes the DoQ `0x0`-`0x3` values), the reserved `0x1f * N + 0x21` grease
+/// space, and any code not defined by RFC 9114 §8.1 or RFC 9204. A code those two
+/// documents do define, but outside the reviewed four categories, is
+/// [`Self::Other`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeerStreamError {
-    /// The peer terminated the stream with no error (`NO_ERROR`).
+    /// The peer terminated the stream with no error (`H3_NO_ERROR`, `0x100`),
+    /// or with a code RFC 9114 §8 requires this client to treat as equivalent to
+    /// it: an unexpected transport-space, reserved, or otherwise unknown code.
     NoError,
-    /// The peer reported an internal error (`INTERNAL_ERROR`).
+    /// The peer reported an internal error (`H3_INTERNAL_ERROR`, `0x102`).
     InternalError,
-    /// The peer reported a protocol violation (`PROTOCOL_ERROR` or the HTTP/3
-    /// general protocol error).
+    /// The peer reported a protocol violation (`H3_GENERAL_PROTOCOL_ERROR`,
+    /// `0x101`).
     ProtocolError,
-    /// The peer cancelled the request or response (`REQUEST_CANCELLED`).
+    /// The peer cancelled the request or response (`H3_REQUEST_CANCELLED`,
+    /// `0x10c`).
     RequestCancelled,
-    /// Any other nonzero peer stream code.
+    /// A defined HTTP/3 or QPACK stream error code outside the reviewed four
+    /// categories (RFC 9114 §8.1 / RFC 9204; for example
+    /// `H3_STREAM_CREATION_ERROR`, `0x103`).
     Other,
 }
 
@@ -301,6 +317,12 @@ pub enum DohProtocolError {
     /// arrived. The request had been handed to the driver, but nothing proves
     /// it reached the peer, so this is conservatively
     /// [`SideEffectState::MaybeSent`] rather than `Sent`.
+    ///
+    /// The HTTP/1.1 and HTTP/2 drivers produce this variant, whose request
+    /// hand-off and head wait are fused. The DoH3 driver does not: it reads the
+    /// response head only after the request send side has finished, so an
+    /// ordinary head failure there is a `Sent` receive failure instead
+    /// (`design.md` §7).
     ResponseHeadNotReceived,
     /// The peer terminated the response stream with an HTTP/3 or QUIC error
     /// code instead of completing it with a normal response FIN.

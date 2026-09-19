@@ -9,9 +9,14 @@
 //!   the `Lifecycle` close contract (drain, refuse, idempotent, zero residue);
 //! * the structured peer stream-error-code → typed-error mapping: an `H3`
 //!   `RemoteTerminate` code becomes a typed `PeerStreamTerminated` with a code
-//!   *category*, a `DoQ` reset with any RFC 9250 code is the terminal
-//!   missing-response-FIN protocol error, and a nonzero peer `DoQ` wire ID is the
-//!   typed nonzero-response-ID protocol error. None of these ever commits.
+//!   *category* drawn only from the RFC 9114 §8.1 HTTP/3 code space, with RFC
+//!   9114 §8's unexpected/unknown handling applied to the rest; a `DoQ` reset
+//!   with any RFC 9250 code is the terminal missing-response-FIN protocol error,
+//!   and a nonzero peer `DoQ` wire ID is the typed nonzero-response-ID protocol
+//!   error. None of these ever commits;
+//! * the `design.md` §7 calibration of a post-request-FIN `DoH3` head-phase loss
+//!   as a `Sent` receive failure, and not the weaker `MaybeSent` of the
+//!   HTTP/1.1/HTTP/2 head-not-received variant.
 //!
 //! Every test drives a real in-process QUIC/h3 server on an ephemeral IPv4
 //! loopback port with the fixture's trusted synthetic certificate, so the ALPN,
@@ -336,6 +341,10 @@ enum H3Mode {
     /// Complete the QUIC/TLS handshake and hold the connection without any h3
     /// server work (used with a zero stream budget).
     HandshakeOnly,
+    /// Read the request through its send-side FIN and then close the QUIC
+    /// connection without ever sending a response head, so the client ends in
+    /// its response-head phase with an ordinary connection loss.
+    CloseAfterRequest,
     /// Read the request and withhold every response byte.
     Hold,
 }
@@ -528,6 +537,13 @@ async fn run_h3(
             // after a complete body" once the stream really ends, so the fixture
             // finishes after it.
             let _ = stream.finish().await;
+        }
+        H3Mode::CloseAfterRequest => {
+            // The request send-side FIN has already been observed above, so the
+            // request was fully written and finished before this close. An
+            // ordinary connection loss now lands in the client's response-head
+            // phase and must be reported as `Sent` (design.md §7).
+            connection.close(0u32.into(), b"");
         }
         H3Mode::Hold => {
             if let Some(ready) = ready {
@@ -1253,6 +1269,110 @@ fn doh3_peer_stream_termination_codes_are_typed_and_never_commit() {
             "peer stream code {code:#x} opens no second connection"
         );
     }
+}
+
+#[test]
+fn doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized() {
+    // These codes are delivered on the wire exactly like the HTTP/3 codes
+    // above, but they are not in the reviewed four-category HTTP/3 mapping:
+    //
+    // * `0x0`-`0x3` are RFC 9000 §20.1 *transport* error codes. Using one on an
+    //   HTTP/3 request stream is an error code in an unexpected context, so
+    //   RFC 9114 §8 requires it to be treated as equivalent to `H3_NO_ERROR`
+    //   (`0x100`) - never as an H3 protocol error or a request cancellation.
+    //   This is exactly where the old low-code aliases were wrong.
+    // * `0x119` is a reserved `0x1f * N + 0x21` grease code (N = 8); RFC 9114
+    //   §8.1 reserves that space to exercise the unknown-code rule, so it is
+    //   also `H3_NO_ERROR`-equivalent even though it is above `0x100`.
+    // * `0x103` (H3_STREAM_CREATION_ERROR) and `0x200`
+    //   (QPACK_DECOMPRESSION_FAILED) are defined HTTP/3-family codes this
+    //   client does not classify into one of the four categories; they are
+    //   reported as the unclassified `Other` category rather than being
+    //   mislabelled.
+    //
+    // Every case is a terminal peer termination that is `Sent` and never
+    // commits, and none is mistaken for a caller-local cancellation.
+    let cases = [
+        (0x0_u64, PeerStreamError::NoError),
+        (0x1, PeerStreamError::NoError),
+        (0x2, PeerStreamError::NoError),
+        (0x3, PeerStreamError::NoError),
+        (0x119, PeerStreamError::NoError),
+        (0x103, PeerStreamError::Other),
+        (0x200, PeerStreamError::Other),
+    ];
+    for (code, category) in cases {
+        let set = FixtureSet::generate();
+        let server = Doh3Server::start(&set, None, H3Mode::ResetBeforeResponse { code }, None);
+        let upstream = doh3_owner(&set, server.address);
+        let query = query_wire(0xB00C);
+
+        let error = block_on(async {
+            upstream
+                .exchange(
+                    ExchangeRequest::new(&query).expect("valid query"),
+                    open_context(),
+                )
+                .await
+                .expect_err("a peer stream termination is terminal")
+        });
+
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::PeerStreamTerminated { code: category }),
+            "peer stream code {code:#x}"
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        let (accepts, _evidence) = server.join();
+        assert_eq!(
+            accepts, 1,
+            "peer stream code {code:#x} opens no second connection"
+        );
+    }
+}
+
+#[test]
+fn doh3_response_head_connection_loss_after_request_fin_is_sent_and_never_commits() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        // The server reads the request through its send-side FIN and then closes
+        // the QUIC connection before sending any response head, so the client
+        // fails in its response-head phase with an ordinary connection loss.
+        // `design.md` §7 requires `Sent` here: the request was fully written and
+        // its send side finished, so delivery is proven and the failure is a
+        // post-write read failure - not the weaker `MaybeSent` the H1/H2
+        // `ResponseHeadNotReceived` variant carries.
+        let server = Doh3Server::start(&set, None, H3Mode::CloseAfterRequest, None);
+        let upstream = doh3_owner(&set, server.address);
+        let query = query_wire(0xB00B);
+
+        let error = upstream
+            .exchange(
+                ExchangeRequest::new(&query).expect("valid query"),
+                open_context(),
+            )
+            .await
+            .expect_err("a lost connection before the response head is a failure");
+
+        assert_eq!(
+            error,
+            SecureError::Transport(UpstreamError::Receive(SideEffectState::Sent)),
+            "a post-request-FIN head loss is an ordinary Sent receive failure"
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+        assert_eq!(
+            upstream.in_flight_exchanges(),
+            0,
+            "the failed head phase leaves no registration residue"
+        );
+        let (accepts, evidence) = server.join();
+        assert_eq!(accepts, 1, "a failed head phase opens no second connection");
+        assert!(
+            evidence.request_fin,
+            "the request reached the server before the connection was lost"
+        );
+    });
 }
 
 #[test]

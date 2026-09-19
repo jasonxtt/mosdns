@@ -142,6 +142,13 @@ caller-owned deadline、取消/owner close 语义。
   `UpstreamError`/`SecureError` 并列；QUIC stream 错误码到 typed 错误的映射
   必须显式（至少覆盖 NO_ERROR/INTERNAL_ERROR/PROTOCOL_ERROR/REQUEST_CANCELLED
   语义，其中 `DOQ_PROTOCOL_ERROR (0x2)` 覆盖非零 peer ID、缺响应 FIN、多余响应）。
+  DoQ 与 DoH3 使用**各自**的错误码空间，不得互相重解释：DoQ 用 RFC 9250 §4.3
+  的 `0x0`-`0x3`；DoH3 用 RFC 9114 §8.1 的 `H3_NO_ERROR (0x100)`/
+  `H3_GENERAL_PROTOCOL_ERROR (0x101)`/`H3_INTERNAL_ERROR (0x102)`/
+  `H3_REQUEST_CANCELLED (0x10c)`，另一条 RFC 9114 §8.1 / RFC 9204 已定义的码
+  标为 `Other`，其余（RFC 9000 §20.1 transport 低位码、保留 `0x1f * N + 0x21`
+  grease 码、未知码）按 RFC 9114 §8 视为等价于 `H3_NO_ERROR`，即低位 DoQ 码
+  绝不映射成 H3 protocol/cancel 错误。
 - R10. 保持既有 `UdpTcpPolicy`、`ResolverComposition`（既有三个入口）、
   `Endpoint`/`DotEndpoint`/`DohEndpoint` 构造契约不变；QUIC 是新增的传输面，
   不改变单次 exchange 语义。结果词汇表按 design.md §3.1 加法冻结：
