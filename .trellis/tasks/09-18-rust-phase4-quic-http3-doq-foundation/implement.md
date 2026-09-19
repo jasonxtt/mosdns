@@ -635,3 +635,92 @@ error[E0599]: no variant named `PeerStreamTerminated` found for enum
 - No production `sleep`, private timer, or hidden timeout was added; the only
   waits in the new tests are the existing fixture's bounded `TEST_TIMEOUT` and
   explicit `oneshot`/connection signals.
+
+## Slice 3 remediation record 2 — 2026-09-20 (DoH3 QPACK context codes, review P1)
+
+- Executor: DSH Web, single executor with no sub-task split, no second session,
+  and no MCP. The parent controller retains diff inspection, the quality gates,
+  and the external review round.
+- Context: the committed Slice 3 remediation (`cc11986`, "fix(rust): correct
+  Slice 3 QUIC error states") was reviewed by GPT Web over
+  `07c2a2f..cc11986` as `FINAL: FAIL`, `P0=0`, `P1=1`, `P2=1`. The single P1 was
+  the DoH3 HTTP/3 error-code context mapping in
+  `rust/upstream-core/src/quic.rs`: `classify_peer_stream_code()` /
+  `is_defined_h3_code()` mapped every defined `0x103..=0x110 | 0x200..=0x202`
+  code to `PeerStreamError::Other`, but RFC 9114 §8 requires an error code used
+  in an unexpected context to be treated as equivalent to `H3_NO_ERROR`. This
+  record covers only that P1. Slice 4 is not started, and no
+  resolver/pool/retry/fallback/host wiring, Cargo manifest/`Cargo.lock`, or other
+  transport is touched.
+- Worktree state: this remediation is left **uncommitted and unpushed** in the
+  current worktree (`cc11986` HEAD) for the parent to inspect and commit.
+  `task.json` stays `in_progress`. Nothing here claims a commit or push.
+
+### P1 — DoH3 QPACK encoder/decoder stream codes are an unexpected context
+
+- Problem: a `RemoteTerminate` can only arrive on the DoH3 *request/response*
+  stream, yet the classifier treated every RFC 9204 code as the unclassified
+  `Other`. RFC 9204 §6 defines `QPACK_ENCODER_STREAM_ERROR (0x201)` and
+  `QPACK_DECODER_STREAM_ERROR (0x202)` only for the QPACK encoder and decoder
+  streams, so on a request/response stream they are an error code in an
+  unexpected context. RFC 9114 §8: "use of an error code in an unexpected
+  context or receipt of an unknown error code MUST be treated as equivalent to
+  H3_NO_ERROR." `QPACK_DECOMPRESSION_FAILED (0x200)` is different: RFC 9204 §6
+  defines it precisely for a failed field-section decode on a request stream, so
+  it remains a known HTTP/3-family error in this context.
+- RED (before the fix): `slice3_quic`'s real-wire loopback reset test was
+  extended with `0x201` and `0x202` (expecting `NoError`) and run against the
+  unchanged `cc11986` production code:
+  `left: DohProtocol(PeerStreamTerminated { code: Other })`,
+  `right: DohProtocol(PeerStreamTerminated { code: NoError })` on `0x201`. The
+  failure landed in the `is_defined_h3_code` arm, proving the unexpected-context
+  codes were still reported as unclassified known errors.
+- Fix: `classify_peer_stream_code` keeps its four RFC 9114 §8.1 category arms and
+  now consults the renamed, explicitly context-aware
+  `is_defined_request_stream_h3_code` predicate, whose range is
+  `0x103..=0x110 | 0x200`. `0x201`/`0x202` are deliberately excluded and so fall
+  through to `PeerStreamError::NoError` together with every other unknown or
+  unexpected code. The mapping is therefore not a blanket "all QPACK codes are
+  `NoError`": `0x200` stays `Other`, and the four named H3 codes, the low DoQ
+  `0x0`-`0x3` transport values, the `0x119` grease code, and unknown codes keep
+  their previous meaning. Every termination still never commits, is `Sent`, and
+  opens exactly one connection.
+- Docs synced: `quic.rs`'s classifier and predicate docs now state the
+  request/response-stream context and the RFC 9114 §8 MUST; `secure/error.rs`'s
+  `PeerStreamError` enum docs state that `NoError` includes codes defined only
+  for another context and that `Other` means "known in this request/response
+  stream context"; `design.md` §7 and PRD R9 record the same rule. No test
+  expectation other than the two new wire cases changed.
+- New evidence (real QUIC+TLS+h3 loopback reset fixture, `slice3_quic`):
+  `doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized` now
+  drives wire-level resets for `0x201` and `0x202` and asserts
+  `PeerStreamTerminated { code: NoError }`, while still asserting `0x200` and
+  `0x103` → `Other`, `0x119` → `NoError`, and the low transport codes
+  `0x0`-`0x3` → `NoError`, each with `Sent`, no commit, no in-flight residue, and
+  exactly one accepted connection. The four named H3 codes remain covered by
+  `doh3_peer_stream_termination_codes_are_typed_and_never_commit`, and DoQ's own
+  low-code reset semantics by
+  `doq_peer_reset_codes_are_terminal_missing_fin_without_commit`.
+- Boundary preserved: active h3 `H3_REQUEST_CANCELLED` is still not attempted
+  (h3-quinn 0.0.10 `stop_sending` panics after a dropped read future); local
+  owner close / caller cancel / deadline keep their typed control errors and
+  precedence; unrelated dirty files (`.trellis/spec/...`, `.trellis/workflow.md`,
+  `.DS_Store`, `09-19-...` task files) were preserved; no
+  `git reset`/`checkout`/`clean`, no `git add -A`, no commit, no push; no
+  production `sleep`, private timer, or hidden timeout was added.
+
+### Gates (final worktree, uncommitted)
+
+- Focused `slice0_quic`/`slice0_contract`/`slice1_doq`/`slice2_doh3`/
+  `slice3_quic`/`slice2_doh`/`slice3_doh` under debug and again under
+  `--release`: all passed, 0 failed (`slice3_quic` 23/23, including the extended
+  loopback reset test, in both profiles).
+- `cargo test -p mosdns-upstream-core --all-targets --all-features --locked`:
+  exit 0, 0 failed.
+- `cargo test --workspace --all-targets --all-features --locked`:
+  **720 passed / 0 failed** across 39 test binaries.
+- `cargo fmt --all -- --check`: clean. `cargo clippy --workspace --all-targets
+  --all-features --locked -- -D warnings`: clean. `git diff --check`: clean.
+- `python3 ./.trellis/scripts/task.py validate
+  rust-phase4-quic-http3-doq-foundation`: `All validations passed` (the
+  `rust-migration.md` size warning is pre-existing and informational).

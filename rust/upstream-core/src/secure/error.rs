@@ -217,14 +217,23 @@ impl Error for TlsHandshakeFailure {}
 /// [`Self::NoError`] instead of inventing a protocol or cancellation failure;
 /// that covers the RFC 9000 §20.1 transport code space below `0x100` (which
 /// includes the DoQ `0x0`-`0x3` values), the reserved `0x1f * N + 0x21` grease
-/// space, and any code not defined by RFC 9114 §8.1 or RFC 9204. A code those two
-/// documents do define, but outside the reviewed four categories, is
-/// [`Self::Other`].
+/// space, any code not defined by RFC 9114 §8.1 or RFC 9204, and a code those
+/// documents define only for another context - notably RFC 9204's
+/// `QPACK_ENCODER_STREAM_ERROR` (`0x201`) and `QPACK_DECODER_STREAM_ERROR`
+/// (`0x202`), which are scoped to the QPACK encoder and decoder streams and are
+/// unexpected on a DoH3 request/response stream. A code defined for this
+/// request/response stream context, but outside the reviewed four categories, is
+/// [`Self::Other`]; that keeps `QPACK_DECOMPRESSION_FAILED` (`0x200`), which
+/// RFC 9204 §6 defines for a failed field-section decode on a request stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeerStreamError {
     /// The peer terminated the stream with no error (`H3_NO_ERROR`, `0x100`),
     /// or with a code RFC 9114 §8 requires this client to treat as equivalent to
-    /// it: an unexpected transport-space, reserved, or otherwise unknown code.
+    /// it: an unknown code, or a defined code used outside the context its
+    /// definition scopes it to. On the DoH3 request/response stream that
+    /// includes the RFC 9000 §20.1 transport-space codes below `0x100`, the
+    /// reserved `0x1f * N + 0x21` grease space, and RFC 9204's QPACK
+    /// encoder/decoder stream errors (`0x201`/`0x202`).
     NoError,
     /// The peer reported an internal error (`H3_INTERNAL_ERROR`, `0x102`).
     InternalError,
@@ -234,9 +243,10 @@ pub enum PeerStreamError {
     /// The peer cancelled the request or response (`H3_REQUEST_CANCELLED`,
     /// `0x10c`).
     RequestCancelled,
-    /// A defined HTTP/3 or QPACK stream error code outside the reviewed four
-    /// categories (RFC 9114 §8.1 / RFC 9204; for example
-    /// `H3_STREAM_CREATION_ERROR`, `0x103`).
+    /// A defined HTTP/3 or QPACK stream error code that is known in this
+    /// request/response stream context but outside the reviewed four categories
+    /// (RFC 9114 §8.1 / RFC 9204; for example `H3_STREAM_CREATION_ERROR`,
+    /// `0x103`, or `QPACK_DECOMPRESSION_FAILED`, `0x200`).
     Other,
 }
 
