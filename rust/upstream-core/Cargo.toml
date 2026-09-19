@@ -64,10 +64,13 @@ tokio-rustls = { version = "=0.26.4", default-features = false, features = ["rin
 # rust-version 1.71), quinn-proto 0.11.x / quinn-udp 0.5.x via quinn (same
 # license family), h3 =0.0.8 (MIT, MSRV 1.70), h3-quinn =0.0.10 (MIT, MSRV
 # 1.70, depends on quinn 0.11.7) — all below the workspace MSRV of 1.85.
-# Default features are disabled and exactly `runtime-tokio` + `rustls-ring`
-# are enabled: this excludes `platform-verifier` (platform trust-store
+# Default features are disabled and this manifest requests only `runtime-tokio`
+# + `rustls-ring`: this excludes `platform-verifier` (platform trust-store
 # auto-loading would violate the caller-supplied-roots contract) and never
 # enables `aws-lc-rs` (a second crypto provider beside the reviewed `ring`).
+# Note the resolved set additionally contains quinn's `futures-io` feature,
+# requested by h3-quinn itself (poll adapters on quinn stream types, driven
+# from the caller's task - not another runtime; see the Slice 0 audit doc).
 # quinn's rustls is 0.23.5, the same 0.23 line the workspace `rustls` builds
 # the frozen `TlsPolicy` from, so no second rustls major enters the graph.
 # h3/h3-quinn have their default features disabled and no optional feature
