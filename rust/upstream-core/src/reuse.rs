@@ -302,15 +302,18 @@ impl ReuseKey {
         }
     }
 
-    /// Builds a key for a validated numeric endpoint, rejecting UDP.
+    /// Builds a key for a validated numeric endpoint, accepting TCP only.
     ///
-    /// UDP is connectionless, so there is no connection to reuse.
+    /// UDP is connectionless, so there is no connection to reuse; QUIC reuse
+    /// stays deferred to the QUIC task, so the plain-TCP pool must not admit
+    /// it either — admitting QUIC here would hand it to the TCP execution
+    /// path below.
     ///
     /// # Errors
     ///
-    /// Returns [`UpstreamError::InvalidRequest`] for a UDP endpoint.
+    /// Returns [`UpstreamError::InvalidRequest`] for a non-TCP endpoint.
     pub fn try_from_endpoint(endpoint: Endpoint) -> Result<Self, UpstreamError> {
-        if endpoint.transport() == Transport::Udp {
+        if endpoint.transport() != Transport::Tcp {
             return Err(UpstreamError::InvalidRequest(RequestError::Malformed));
         }
         Ok(Self::from_endpoint(endpoint))
@@ -394,7 +397,11 @@ pub enum PoolError {
     Busy,
     /// The owner is closing or closed.
     Closed,
-    /// A connectionless endpoint cannot be pooled.
+    /// A non-TCP endpoint cannot be pooled by this plain-TCP owner.
+    ///
+    /// UDP is connectionless, so there is no connection to reuse; QUIC reuse
+    /// stays deferred to the QUIC task, so admitting it here would execute
+    /// QUIC as TCP.
     NotReusable,
 }
 
@@ -403,7 +410,7 @@ impl fmt::Display for PoolError {
         formatter.write_str(match self {
             Self::Busy => "this key already has an outstanding exchange",
             Self::Closed => "the reuse owner is closed",
-            Self::NotReusable => "a connectionless endpoint cannot be pooled",
+            Self::NotReusable => "this endpoint cannot be pooled by the plain-TCP reuse owner",
         })
     }
 }
@@ -448,7 +455,10 @@ struct PoolInner {
 // Reuse owner
 // ---------------------------------------------------------------------------
 
-/// Owns the reusable connections for one numeric endpoint.
+/// Owns the reusable connections for one numeric TCP endpoint.
+///
+/// TCP-only by construction: [`Self::try_new`] rejects every non-TCP
+/// transport, so a QUIC endpoint can never enter the TCP execution path.
 ///
 /// ## Serial per connection
 ///
@@ -495,24 +505,25 @@ impl fmt::Debug for ReuseOwner {
 }
 
 impl ReuseOwner {
-    /// Creates an owner for one validated numeric endpoint.
+    /// Creates an owner for one validated numeric TCP endpoint.
     ///
     /// # Panics
     ///
-    /// Panics for a UDP endpoint, which has no connection to reuse. Use
-    /// [`Self::try_new`] for a fallible construction.
+    /// Panics for a non-TCP endpoint: UDP has no connection to reuse, and
+    /// QUIC reuse stays deferred to the QUIC task. Use [`Self::try_new`] for
+    /// a fallible construction.
     #[must_use]
     pub fn new(endpoint: Endpoint) -> Self {
-        Self::try_new(endpoint).expect("a UDP endpoint has no reusable connection")
+        Self::try_new(endpoint).expect("only a TCP endpoint has a reusable connection")
     }
 
-    /// Creates an owner for one validated numeric endpoint.
+    /// Creates an owner for one validated numeric TCP endpoint.
     ///
     /// # Errors
     ///
-    /// Returns [`PoolError::NotReusable`] for a UDP endpoint.
+    /// Returns [`PoolError::NotReusable`] for a non-TCP endpoint.
     pub fn try_new(endpoint: Endpoint) -> Result<Self, PoolError> {
-        if endpoint.transport() == Transport::Udp {
+        if endpoint.transport() != Transport::Tcp {
             return Err(PoolError::NotReusable);
         }
         Ok(Self {

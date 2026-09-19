@@ -132,3 +132,14 @@ fn doq_outbound_copy_zeroes_wire_id_without_touching_caller_bytes() {
     assert_eq!(&query[0..2], &[0x12, 0x34]);
     assert_eq!(&outbound[2..], &query[2..]);
 }
+
+#[test]
+fn doq_zero_helper_is_a_noop_on_short_buffers() {
+    // The len < 2 contract is a pinned no-op, not an accident of slicing.
+    let mut empty: Vec<u8> = Vec::new();
+    zero_outbound_query_id(&mut empty);
+    assert!(empty.is_empty());
+    let mut one = vec![0xAB];
+    zero_outbound_query_id(&mut one);
+    assert_eq!(one, vec![0xAB]);
+}
