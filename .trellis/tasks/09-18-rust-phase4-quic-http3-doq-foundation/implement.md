@@ -724,3 +724,120 @@ error[E0599]: no variant named `PeerStreamTerminated` found for enum
 - `python3 ./.trellis/scripts/task.py validate
   rust-phase4-quic-http3-doq-foundation`: `All validations passed` (the
   `rust-migration.md` size warning is pre-existing and informational).
+
+## Slice 3 remediation record 3 — 2026-09-20 (DoH3 HTTP/3 code context mapping, review P1)
+
+- Executor: DSH Web, single executor with no sub-task split, no second session,
+  and no MCP. The parent controller retains diff inspection, the quality gates,
+  and the external review round.
+- Context: the committed Slice 3 remediation 2 (`a425552`, "fix(rust): classify
+  DoH3 QPACK codes by stream context") was reviewed by GPT Web over
+  `cc11986..a425552` as `FINAL: FAIL`, `P0=0`, `P1=1`. The single P1 was the
+  remaining context-insensitive DoH3 error-code predicate in
+  `rust/upstream-core/src/quic.rs`: `is_defined_request_stream_h3_code()` still
+  used `matches!(value, 0x103..=0x110 | 0x200)`, so it treated *every* code in
+  `0x103..=0x110` as a known error in the DoH3 request/response-stream context
+  and mapped it to `PeerStreamError::Other`. RFC 9114 §8 requires a *known* code
+  used in an unexpected context to be treated as `H3_NO_ERROR`-equivalent too.
+  This record covers only that P1. Slice 4 is not started, and no
+  resolver/pool/retry/fallback/host wiring, Cargo manifest/`Cargo.lock`, or other
+  transport is touched.
+- Worktree state: this remediation is left **uncommitted and unpushed** in the
+  current worktree (`a425552` HEAD, `origin/rust` synced to it) for the parent to
+  inspect and commit. `task.json` stays `in_progress`. Nothing here claims a
+  commit or push.
+
+### P1 — known HTTP/3 codes scoped to another context must be `H3_NO_ERROR`
+
+- Problem: the predicate used a numeric range as a proxy for
+  "request/response-stream-valid", but RFC 9114 §8.1 defines several codes in
+  that range only for another stream/connection context. RFC 9114 §8: "use of an
+  error code in an unexpected context or receipt of an unknown error code MUST
+  be treated as equivalent to H3_NO_ERROR." The review's explicit
+  counterexamples were `H3_CLOSED_CRITICAL_STREAM` (`0x104`, a control/QPACK
+  critical stream, §6.2.1), `H3_SETTINGS_ERROR` (`0x109`) and
+  `H3_MISSING_SETTINGS` (`0x10a`, both errors of the control stream's SETTINGS
+  frame, §6.2.1/§7.2.4), which on a DoH3 request/response stream must be
+  `PeerStreamError::NoError`, not `Other`.
+- RED (before the fix): `slice3_quic`'s real QUIC+TLS+h3 loopback reset test was
+  extended with `0x104`/`0x108`/`0x109`/`0x10a` (expecting `NoError`) and run
+  against the unchanged `a425552` production code. It failed in the
+  `is_defined_request_stream_h3_code` arm:
+  `left: DohProtocol(PeerStreamTerminated { code: Other })`,
+  `right: DohProtocol(PeerStreamTerminated { code: NoError })` at code `0x104`.
+  A temporary wire probe over the same fixture recorded every flagged code
+  before the fix as `Other`: `0x104 -> Other`, `0x108 -> Other`,
+  `0x109 -> Other`, `0x10a -> Other` (and `0x105`/`0x107`/`0x10f`/`0x110` as
+  `Other`, which stay `Other`). The probe was removed after use.
+- Fix: `classify_peer_stream_code` keeps its four RFC 9114 §8.1 category arms
+  (`0x100`/`0x101`/`0x102`/`0x10c`) and now consults the explicit per-code
+  `is_request_response_stream_h3_code` allowlist instead of a range. Only codes
+  whose §8.1/§6 meaning applies to a request/response exchange stay `Other`:
+  `0x103` (retained by the frozen Slice 3 reviewed contract), the
+  request/response codes `0x105` `H3_FRAME_UNEXPECTED`, `0x106`
+  `H3_FRAME_ERROR`, `0x107` `H3_EXCESSIVE_LOAD`, `0x10b`
+  `H3_REQUEST_REJECTED`, `0x10d` `H3_REQUEST_INCOMPLETE`, `0x10e`
+  `H3_MESSAGE_ERROR`, `0x10f` `H3_CONNECT_ERROR`, `0x110`
+  `H3_VERSION_FALLBACK`, and RFC 9204 §6's `0x200`
+  `QPACK_DECOMPRESSION_FAILED` (a failed field-section decode on a request
+  stream). Codes defined only for another context now fall through to
+  `PeerStreamError::NoError` together with the unknown/unexpected space:
+  `0x104` `H3_CLOSED_CRITICAL_STREAM`, `0x108` `H3_ID_ERROR` (connection-level
+  stream/push-ID bookkeeping), `0x109` `H3_SETTINGS_ERROR`, `0x10a`
+  `H3_MISSING_SETTINGS`, RFC 9204's `0x201`/`0x202`, the RFC 9000 §20.1
+  transport space below `0x100`, the `0x1f * N + 0x21` grease space, and any
+  unregistered code. The mapping is therefore an RFC-context allowlist, not a
+  blanket "all `0x103..=0x110` are `NoError`": `0x200` stays `Other`,
+  `0x201`/`0x202` stay `NoError`, and the four named codes keep their own
+  categories. Every termination still never commits, is `Sent`, and opens
+  exactly one connection.
+- Docs synced: `quic.rs`'s module doc, `classify_peer_stream_code` doc, and the
+  renamed `is_request_response_stream_h3_code` doc state the explicit
+  request/response-stream context, name the control/critical/connection-scoped
+  codes excluded from it, and quote the RFC 9114 §8 MUST; `secure/error.rs`'s
+  `PeerStreamError` enum and `NoError`/`Other` variant docs record the same
+  boundary; `design.md` §7 and PRD R9 record the explicit per-code rule.
+- New evidence (real QUIC+TLS+h3 loopback reset fixture, `slice3_quic`):
+  `doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized` now
+  drives wire-level resets for `0x104`/`0x108`/`0x109`/`0x10a` → `NoError`,
+  keeps `0x103`/`0x105`/`0x106`/`0x107`/`0x10b`/`0x10d`/`0x10e`/`0x10f`/`0x110`
+  and `0x200` → `Other`, `0x201`/`0x202` → `NoError`, the low transport codes
+  `0x0`-`0x3` and the `0x119` grease code → `NoError`, and adds an unregistered
+  `0x1234` → `NoError`. Each case asserts `Sent`, no commit, no in-flight
+  residue, and exactly one accepted connection. The four named H3 codes remain
+  covered by `doh3_peer_stream_termination_codes_are_typed_and_never_commit`,
+  the mid-body termination by
+  `doh3_peer_stream_termination_after_the_head_is_typed_and_never_commits`, and
+  DoQ's own low-code reset semantics by
+  `doq_peer_reset_codes_are_terminal_missing_fin_without_commit`.
+- Boundary preserved: the already-closed DoH3 response-head side-effect P1
+  (`classify_h3_head_error` returning a `Sent` receive failure for an ordinary
+  post-request-FIN head loss) is **not** reopened and its HTTP/1.1/HTTP/2
+  `ResponseHeadNotReceived`/`MaybeSent` semantics are untouched; active h3
+  `H3_REQUEST_CANCELLED` is still not attempted (h3-quinn 0.0.10 `stop_sending`
+  panics after a dropped read future); local owner close / caller cancel /
+  deadline keep their typed control errors and precedence. Unrelated dirty files
+  (`.trellis/spec/...`, `.trellis/workflow.md`, `.DS_Store`, the `09-19-...`
+  task files) were preserved; no `git reset`/`checkout`/`clean`, no
+  `git add -A`, no commit, no push; no production `sleep`, private timer, or
+  hidden timeout was added - the only waits are the existing fixture's bounded
+  `TEST_TIMEOUT` and explicit `oneshot`/connection signals.
+
+### Gates (final worktree, uncommitted)
+
+- Focused `slice0_quic`/`slice0_contract`/`slice1_doq`/`slice2_doh3`/
+  `slice3_quic`/`slice2_doh`/`slice3_doh`: debug **119 passed / 0 failed** and
+  `--release` **117 passed / 0 failed** across the 7 binaries, exit 0 each
+  (`slice3_quic` 23/23 in both profiles; the extended reset test runs 22 wire
+  cases; the release total is lower only for the debug-assertions-gated DoQ
+  observation tests).
+- `cargo test -p mosdns-upstream-core --all-targets --all-features --locked`:
+  **468 passed / 0 failed** across 23 test binaries, exit 0.
+- `cargo test --workspace --all-targets --all-features --locked`:
+  **720 passed / 0 failed** across 39 test binaries, exit 0.
+- `cargo fmt --all -- --check`: clean (exit 0). `cargo clippy --workspace
+  --all-targets --all-features --locked -- -D warnings`: clean (exit 0).
+  `git diff --check`: clean (exit 0).
+- `python3 ./.trellis/scripts/task.py validate
+  rust-phase4-quic-http3-doq-foundation`: `All validations passed` (exit 0; the
+  `rust-migration.md` size warning is pre-existing and informational).

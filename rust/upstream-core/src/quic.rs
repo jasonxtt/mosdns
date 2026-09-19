@@ -56,7 +56,8 @@
 //! [`run_h3_request`]. Peer h3 stream terminations are mapped structurally
 //! (never by parsing a reason string) to [`DohProtocolError::PeerStreamTerminated`]
 //! with a closed [`PeerStreamError`] category from the RFC 9114 §8.1 HTTP/3 code
-//! space, with RFC 9114 §8's unexpected/unknown handling applied; a DoQ nonzero
+//! space, classified by an explicit request/response-stream context allowlist
+//! with RFC 9114 §8's unexpected/unknown handling applied; a DoQ nonzero
 //! peer wire ID is the typed [`SecureError::DoqProtocolNonzeroResponseId`]
 //! protocol error, and a DoQ reset with any RFC 9250 code remains the terminal
 //! missing-response-FIN error. An ordinary h3 response-head failure after the
@@ -1310,23 +1311,27 @@ fn classify_h3_body_error(error: h3::error::StreamError) -> SecureError {
 ///   `H3_NO_ERROR` (`0x100`), `H3_GENERAL_PROTOCOL_ERROR` (`0x101`),
 ///   `H3_INTERNAL_ERROR` (`0x102`), and `H3_REQUEST_CANCELLED` (`0x10c`) - map
 ///   to their matching categories.
-/// * Another code this client keeps as a *known* HTTP/3-family error is a
-///   termination this four-category review does not name, so it is reported as
-///   the unclassified [`PeerStreamError::Other`] rather than mislabelled. That
-///   covers the remaining RFC 9114 §8.1 codes this review leaves unnamed (for
-///   example `H3_STREAM_CREATION_ERROR`, `0x103`) and RFC 9204's
-///   `QPACK_DECOMPRESSION_FAILED` (`0x200`), which §6 defines for a failed
-///   field-section decode on exactly this request/response stream.
-/// * Everything else is an unknown code or an error code used outside its
-///   defined context, and RFC 9114 §8 requires *both* to be treated as
-///   equivalent to `H3_NO_ERROR`. That includes the whole RFC 9000 §20.1
+/// * A defined HTTP/3 or QPACK code whose meaning applies to this
+///   request/response stream is a termination this four-category review does
+///   not name, so it is reported as the unclassified [`PeerStreamError::Other`]
+///   rather than mislabelled. The eligible codes are listed one by one in
+///   [`is_request_response_stream_h3_code`]; that covers the request/response
+///   codes of RFC 9114 §8.1 (for example `H3_FRAME_UNEXPECTED`, `0x105`) and
+///   RFC 9204's `QPACK_DECOMPRESSION_FAILED` (`0x200`), which §6 defines for a
+///   failed field-section decode on exactly this request/response stream.
+/// * Everything else is an unknown code or a code whose definition is scoped to
+///   another context, and RFC 9114 §8 requires *both* to be treated as
+///   equivalent to `H3_NO_ERROR`. That deliberately includes RFC 9114 §8.1
+///   codes that are defined only for the control stream, a critical stream, or
+///   connection-level bookkeeping - `H3_CLOSED_CRITICAL_STREAM` (`0x104`),
+///   `H3_ID_ERROR` (`0x108`), `H3_SETTINGS_ERROR` (`0x109`), and
+///   `H3_MISSING_SETTINGS` (`0x10a`) - as well as the whole RFC 9000 §20.1
 ///   transport code space below `0x100` (the DoQ `0x0`-`0x3` values), the
 ///   reserved `0x1f * N + 0x21` grease space, and RFC 9204's
 ///   `QPACK_ENCODER_STREAM_ERROR` (`0x201`) and `QPACK_DECODER_STREAM_ERROR`
 ///   (`0x202`), whose definitions are scoped to the QPACK encoder and decoder
-///   streams and are therefore unexpected on a request/response stream. Each
-///   maps to [`PeerStreamError::NoError`] and is never reinterpreted as an H3
-///   internal, protocol, or cancellation error.
+///   streams. Each maps to [`PeerStreamError::NoError`] and is never
+///   reinterpreted as an H3 internal, protocol, or cancellation error.
 ///
 /// A termination never commits regardless of category: completion requires the
 /// response to end with an h3 stream FIN, which a reset or `STOP_SENDING` is
@@ -1337,33 +1342,53 @@ fn classify_peer_stream_code(code: h3::error::Code) -> PeerStreamError {
         0x101 => PeerStreamError::ProtocolError,
         0x102 => PeerStreamError::InternalError,
         0x10c => PeerStreamError::RequestCancelled,
-        value if is_defined_request_stream_h3_code(value) => PeerStreamError::Other,
+        value if is_request_response_stream_h3_code(value) => PeerStreamError::Other,
         _ => PeerStreamError::NoError,
     }
 }
 
-/// Whether `value` is a defined HTTP/3 or QPACK code that this client reports
-/// as the unclassified [`PeerStreamError::Other`] - rather than folding into
-/// RFC 9114 §8's unknown/unexpected `H3_NO_ERROR` equivalence - when it arrives
-/// on the DoH3 *request/response* stream.
+/// Whether `value` is a defined HTTP/3 or QPACK code whose RFC 9114 §8.1 /
+/// RFC 9204 §6 meaning applies to the DoH3 *request/response* stream, so a
+/// `RemoteTerminate` carrying it is a *known* error reported as the unclassified
+/// [`PeerStreamError::Other`] rather than folded into RFC 9114 §8's
+/// unknown/unexpected `H3_NO_ERROR` equivalence.
 ///
-/// The four codes this client maps to its own [`PeerStreamError`] categories are
-/// matched before this predicate, so their overlap with the range below is
-/// unreachable. The predicate is deliberately context-aware rather than a flat
-/// list of every registered code:
+/// This is an explicit per-code allowlist, deliberately **not** a numeric range.
+/// RFC 9114 §8: "use of an error code in an unexpected context or receipt of an
+/// unknown error code MUST be treated as equivalent to H3_NO_ERROR." Several
+/// codes in the `0x103..=0x110` block are defined only for the control stream, a
+/// critical stream, or connection-level stream/push-ID bookkeeping, so they are
+/// absent here and take the `H3_NO_ERROR`-equivalent path:
 ///
-/// * `0x103..=0x110` are the remaining RFC 9114 §8.1 HTTP/3 codes this review
-///   leaves unnamed, and `0x200` is RFC 9204's `QPACK_DECOMPRESSION_FAILED`,
-///   which §6 defines for a failed field-section decode on a request stream -
-///   all *known* HTTP/3-family errors here.
-/// * `0x201` and `0x202` are deliberately **excluded**: RFC 9204 §6 defines
-///   `QPACK_ENCODER_STREAM_ERROR` and `QPACK_DECODER_STREAM_ERROR` only for the
-///   QPACK encoder and decoder streams, so on a request/response stream the peer
-///   is using an error code in an unexpected context. RFC 9114 §8's MUST applies
-///   and they are `H3_NO_ERROR`-equivalent, exactly like an unknown code.
-/// * Any other value - a transport error code, a reserved grease code, or a
-///   code registered by a later extension - is unknown to this client and takes
-///   the same `H3_NO_ERROR`-equivalent path.
-const fn is_defined_request_stream_h3_code(value: u64) -> bool {
-    matches!(value, 0x103..=0x110 | 0x200)
+/// * `H3_CLOSED_CRITICAL_STREAM` (`0x104`) is the closure of a control or QPACK
+///   critical stream (RFC 9114 §6.2.1).
+/// * `H3_ID_ERROR` (`0x108`) is connection-level stream-ID/push-ID misuse
+///   (RFC 9114 §4.6, §6.2.2, §7.2.5-§7.2.7).
+/// * `H3_SETTINGS_ERROR` (`0x109`) and `H3_MISSING_SETTINGS` (`0x10a`) are
+///   errors of the SETTINGS frame, which exists only on the control stream
+///   (RFC 9114 §6.2.1, §7.2.4).
+///
+/// The four codes matched to their own [`PeerStreamError`] categories before
+/// this predicate are not repeated. The eligible codes are the request/response
+/// errors RFC 9114 §8.1 defines for a request or response exchange -
+/// `0x105`, `0x106`, `0x107`, `0x10b`, `0x10d`, `0x10e`, `0x10f`, and `0x110` -
+/// plus `H3_STREAM_CREATION_ERROR` (`0x103`), retained as `Other` by the frozen
+/// Slice 3 reviewed contract, and RFC 9204 §6's `QPACK_DECOMPRESSION_FAILED`
+/// (`0x200`), defined for a failed field-section decode on a request stream.
+/// RFC 9204's `0x201`/`0x202` are QPACK encoder/decoder-stream-only and are
+/// excluded for the same unexpected-context reason.
+const fn is_request_response_stream_h3_code(value: u64) -> bool {
+    matches!(
+        value,
+        0x103 // H3_STREAM_CREATION_ERROR (retained as Other by the frozen contract)
+            | 0x105 // H3_FRAME_UNEXPECTED
+            | 0x106 // H3_FRAME_ERROR
+            | 0x107 // H3_EXCESSIVE_LOAD
+            | 0x10b // H3_REQUEST_REJECTED
+            | 0x10d // H3_REQUEST_INCOMPLETE
+            | 0x10e // H3_MESSAGE_ERROR
+            | 0x10f // H3_CONNECT_ERROR
+            | 0x110 // H3_VERSION_FALLBACK
+            | 0x200 // QPACK_DECOMPRESSION_FAILED (RFC 9204 §6, request stream)
+    )
 }
