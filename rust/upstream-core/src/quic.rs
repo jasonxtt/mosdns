@@ -1110,6 +1110,18 @@ fn validate_h3_response_head(
 /// declared length, so a peer cannot evade it by omitting or understating the
 /// header. An early end of stream, a body that disagrees with `content-length`,
 /// or an empty body is `IncompleteBody`, never a silently accepted prefix.
+///
+/// `recv_data` returning `Ok(None)` is *not* by itself proof that the response
+/// completed: in h3 0.0.8 it also returns `None` as soon as a trailing HEADERS
+/// frame has been buffered as response trailers. Completion therefore requires
+/// one `recv_trailers` step, which waits for the real stream end, validates any
+/// trailing field section, and surfaces a reset or an illegal frame after
+/// trailers as an error. Only `Ok(None)` - no trailers at all - completes the
+/// body. Any trailers are [`DohProtocolError::IncompleteBody`], matching the
+/// HTTP/1.1 and HTTP/2 paths, which never silently accept a response that keeps
+/// going past the body they consumed. That step runs inside the same
+/// control/deadline race as the body loop, so a local control decision or the
+/// absolute deadline still wins over it.
 async fn read_h3_body(
     control: &ExchangeControl,
     deadline: Instant,
@@ -1128,7 +1140,14 @@ async fn read_h3_body(
             }
             collected.extend_from_slice(data);
         }
-        Ok::<Vec<u8>, SecureError>(collected)
+        match stream
+            .recv_trailers()
+            .await
+            .map_err(classify_h3_body_error)?
+        {
+            None => Ok::<Vec<u8>, SecureError>(collected),
+            Some(_) => Err(SecureError::DohProtocol(DohProtocolError::IncompleteBody)),
+        }
     })
     .await?;
 

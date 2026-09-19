@@ -366,7 +366,8 @@ seam, so nothing in the new code is release-gated.
   identity-mismatch handshake failures as `NotSent` with no TCP fallback;
   non-200; wrong and missing media type; non-identity content encoding;
   declared-over-maximum and actual-over-maximum bodies; incomplete body;
-  too-many-headers; close-before-head as `ResponseHeadNotReceived`
+  response trailers after a complete body, both finished and withheld without a
+  stream FIN; too-many-headers; close-before-head as `ResponseHeadNotReceived`
   (`MaybeSent`); outbound ID zeroing and caller ID restoration; and zero
   in-flight registrations after owner close, caller cancellation, a dropped
   exchange future, and an exchange after close.
@@ -383,5 +384,16 @@ seam, so nothing in the new code is release-gated.
   refuses to emit a head above the client's advertised limit, so the directly
   exercised head-bound negative test is the 64-header case; the byte bound has
   no dedicated over-limit emitted fixture.
-- Task status was not changed and nothing was committed or pushed; the Slice 2
-  diff is left in the worktree for parent/reviewer inspection.
+- Task status was not changed. Slice 2 is committed as `c5ef3a5` and pushed to
+  `origin/rust`. The GPT web root review of `69ec2f6..c5ef3a5` returned
+  `FINAL: FAIL` on the single P1-1 blocker: `read_h3_body` treated the first
+  `Ok(None)` from `recv_data` as response completion, although in h3 0.0.8 that
+  `None` also means "a trailing HEADERS frame was buffered as response
+  trailers". The remediation calls `recv_trailers` once on the same
+  `race_control` path and the same absolute deadline, accepts only `Ok(None)` as
+  completion, maps `Ok(Some(_))` to `DohProtocolError::IncompleteBody` (the
+  existing HTTP/1.1 and HTTP/2 semantics), and keeps `Err(_)` on
+  `classify_h3_body_error`; the declared `Content-Length`, `MAX_DNS_BODY`,
+  empty-body, and commit-gate semantics are unchanged. That remediation is not
+  yet committed: it is left in the worktree for parent/reviewer inspection, and
+  the root review is pending against it.
