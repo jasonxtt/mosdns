@@ -28,9 +28,9 @@ use std::time::{Duration, Instant};
 
 use fixtures::FixtureSet;
 use mosdns_upstream_core::quic::{DOQ_ALPN, DoqEndpoint, DoqUpstream};
-use mosdns_upstream_core::secure::{SecureResponse, SecureTransport, TlsPolicy};
+use mosdns_upstream_core::secure::{SecureError, SecureResponse, SecureTransport, TlsPolicy};
 use mosdns_upstream_core::{
-    ExchangeContext, ExchangeRequest, ServerIdentity, TransportCancellation,
+    ExchangeContext, ExchangeRequest, ServerIdentity, SideEffectState, TransportCancellation,
 };
 
 use quinn::crypto::rustls::{HandshakeData, QuicServerConfig};
@@ -137,6 +137,14 @@ impl DoqServer {
     /// Starts a server that accepts one connection, answers the single `DoQ`
     /// stream with a zeroed wire ID, and records what it observed.
     fn start(set: &FixtureSet) -> Self {
+        Self::start_with_markers(set, &[0x2a])
+    }
+
+    /// Starts a server that answers the single accepted `DoQ` stream with one
+    /// zeroed wire-ID frame per marker, then a normal STREAM FIN. More than one
+    /// marker models the protocol-violating trailing-response peer.
+    fn start_with_markers(set: &FixtureSet, markers: &[u8]) -> Self {
+        let markers = markers.to_vec();
         let config = server_config(set);
         let (address_tx, address_rx) = std::sync::mpsc::channel::<SocketAddr>();
         let (evidence_tx, evidence_rx) = oneshot::channel::<ServerEvidence>();
@@ -178,10 +186,15 @@ impl DoqServer {
                 let Ok(request) = recv.read_to_end(MAX_DOQ_MESSAGE).await else {
                     return;
                 };
-                // A DoQ server answers with wire ID zero (RFC 9250 §4.2.1).
-                let body = response_wire(0, 0x2a);
-                if send.write_all(&framed(&body)).await.is_err() {
-                    return;
+                // A DoQ server answers with wire ID zero (RFC 9250 §4.2.1). A
+                // conforming server sends exactly one response frame; a caller
+                // that passes more than one marker models the trailing-response
+                // violation this test rejects.
+                for marker in &markers {
+                    let body = response_wire(0, *marker);
+                    if send.write_all(&framed(&body)).await.is_err() {
+                        return;
+                    }
                 }
                 if send.finish().is_err() {
                     return;
@@ -280,4 +293,55 @@ fn doq_one_shot_exchange_succeeds_over_loopback() {
     zeroed[1] = 0;
     assert_eq!(evidence.request, framed(&zeroed));
     assert_eq!(&query[0..2], &[0xBE, 0xEF]);
+}
+
+#[test]
+fn doq_trailing_second_response_is_rejected_without_commit() {
+    let set = FixtureSet::generate();
+    let server = DoqServer::start_with_markers(&set, &[0x2a, 0x2b]);
+    let address = server.address;
+
+    let endpoint = DoqEndpoint::new(
+        address,
+        ServerIdentity::new("dns.example").expect("valid service identity"),
+    )
+    .expect("valid DoQ endpoint");
+    let upstream = DoqUpstream::new(
+        endpoint,
+        TlsPolicy::verified(set.root_store_a()).expect("verified TLS policy"),
+    )
+    .expect("DoQ owner constructs");
+
+    let query = query_wire(0xBEEF);
+    let context = ExchangeContext::new(
+        Instant::now() + EXCHANGE_DEADLINE,
+        TransportCancellation::new(),
+    );
+
+    let error = block_on(async {
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        upstream
+            .exchange(request, context)
+            .await
+            .expect_err("a trailing second response is rejected, never committed")
+    });
+
+    // The request was fully written before the trailing response arrived, so
+    // the terminal rejection is a `Sent` protocol error that names the
+    // trailing-response violation.
+    assert_eq!(error, SecureError::DoqProtocolTrailingResponse);
+    assert_eq!(error.side_effect(), SideEffectState::Sent);
+    // The RAII registration is released on the terminal error path too.
+    assert_eq!(upstream.in_flight_exchanges(), 0);
+
+    let (accepts, evidence) = server.join();
+    assert_eq!(accepts, 1, "exactly one connection is accepted");
+    assert_eq!(evidence.alpn.as_deref(), Some(DOQ_ALPN));
+
+    // The server still observed the request-side FIN with a zeroed wire ID; the
+    // caller's borrowed query bytes never changed.
+    let mut zeroed = query.clone();
+    zeroed[0] = 0;
+    zeroed[1] = 0;
+    assert_eq!(evidence.request, framed(&zeroed));
 }

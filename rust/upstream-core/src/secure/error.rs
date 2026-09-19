@@ -331,6 +331,9 @@ impl Error for DohProtocolError {}
 ///   before the handshake completes.
 /// * [`Self::DohProtocol`] reports an HTTP-level defect in an already-received
 ///   DoH reply; the request was transmitted, so it is never `NotSent`.
+/// * [`Self::DoqProtocolTrailingResponse`] reports a DoQ stream that carried a
+///   second response, or any trailing bytes, after the first declared frame;
+///   the query was already transmitted, so it is [`SideEffectState::Sent`].
 /// * [`Self::Transport`] wraps the exact existing typed [`UpstreamError`]
 ///   rather than duplicating or stringifying every control, send, receive, and
 ///   DNS-response cause; its side-effect state is the wrapped cause's state.
@@ -353,6 +356,16 @@ pub enum SecureError {
     Tls(TlsHandshakeFailure),
     /// The HTTP response was not an acceptable DoH answer.
     DohProtocol(DohProtocolError),
+    /// The DoQ response stream carried trailing data after the first declared
+    /// frame: either a second complete response or a partial extra frame.
+    ///
+    /// RFC 9250 §4.2 permits exactly one response per stream, so this is a
+    /// terminal protocol failure. The exchange never commits the first
+    /// response, retries, or falls back to another transport. The query was
+    /// already fully written before the trailing bytes could be observed, so
+    /// [`Self::side_effect`] is [`SideEffectState::Sent`]. This variant carries
+    /// no response bytes, so neither `Display` nor `Debug` can leak peer data.
+    DoqProtocolTrailingResponse,
     /// A control, framing, send, receive, or DNS-response failure, retained as
     /// the exact existing typed cause.
     Transport(UpstreamError),
@@ -379,6 +392,7 @@ impl SecureError {
             | Self::DohRequest(_)
             | Self::Tls(_) => SideEffectState::NotSent,
             Self::DohProtocol(reason) => reason.side_effect(),
+            Self::DoqProtocolTrailingResponse => SideEffectState::Sent,
             Self::Transport(cause) => cause.side_effect(),
         }
     }
@@ -404,6 +418,9 @@ impl fmt::Display for SecureError {
             Self::DohRequest(reason) => write!(formatter, "invalid DoH GET request: {reason}"),
             Self::Tls(reason) => write!(formatter, "secure TLS handshake failed: {reason}"),
             Self::DohProtocol(reason) => write!(formatter, "invalid DoH response: {reason}"),
+            Self::DoqProtocolTrailingResponse => {
+                formatter.write_str("trailing response on the DoQ stream")
+            }
             Self::Transport(cause) => write!(formatter, "secure transport failed: {cause}"),
         }
     }
@@ -419,6 +436,7 @@ impl Error for SecureError {
             Self::DohRequest(reason) => Some(reason),
             Self::Tls(reason) => Some(reason),
             Self::DohProtocol(reason) => Some(reason),
+            Self::DoqProtocolTrailingResponse => None,
             Self::Transport(cause) => Some(cause),
         }
     }
