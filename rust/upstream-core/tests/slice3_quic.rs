@@ -1288,7 +1288,15 @@ fn doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized() {
     //   (QPACK_DECOMPRESSION_FAILED) are defined HTTP/3-family codes this
     //   client does not classify into one of the four categories; they are
     //   reported as the unclassified `Other` category rather than being
-    //   mislabelled.
+    //   mislabelled. `0x200` is a *request/response stream* code (RFC 9204 §6
+    //   defines it for a failed field-section decode on a request stream), so
+    //   it is a known error in this context.
+    // * `0x201` (QPACK_ENCODER_STREAM_ERROR) and `0x202`
+    //   (QPACK_DECODER_STREAM_ERROR) are also *defined* errors, but RFC 9204
+    //   §6 defines them only for the QPACK encoder and decoder streams. Used
+    //   on this request/response stream they are an error code in an
+    //   unexpected context, so RFC 9114 §8's MUST treats them as equivalent to
+    //   `H3_NO_ERROR` (`0x100`) - not as an unclassified H3/QPACK error.
     //
     // Every case is a terminal peer termination that is `Sent` and never
     // commits, and none is mistaken for a caller-local cancellation.
@@ -1298,6 +1306,8 @@ fn doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized() {
         (0x2, PeerStreamError::NoError),
         (0x3, PeerStreamError::NoError),
         (0x119, PeerStreamError::NoError),
+        (0x201, PeerStreamError::NoError),
+        (0x202, PeerStreamError::NoError),
         (0x103, PeerStreamError::Other),
         (0x200, PeerStreamError::Other),
     ];
