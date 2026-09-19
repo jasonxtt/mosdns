@@ -397,3 +397,142 @@ seam, so nothing in the new code is release-gated.
   empty-body, and commit-gate semantics are unchanged. The remediation is
   committed as `3aec651` and pushed to `origin/rust`; the follow-up GPT web
   root review of `c5ef3a5..3aec651` returned `FINAL: PASS` with P0/P1 both zero.
+
+## Slice 3 implementation record — 2026-09-19
+
+- Executor: DSH Web, single executor with no sub-task split, no second session,
+  and no MCP. The parent controller retains diff inspection, the quality gates,
+  and the external review round.
+- Scope: Slice 3 only — the QUIC deadline/control/close contract, the
+  H3/DoQ stream-error-code → typed-error mapping, the `NotSent`/`Sent`
+  classification calibration, and their real loopback tests. Slice 4 (resolver
+  composition, Linux/MSRV evidence, release/review gate) is **not started**; no
+  pooling, retry, fallback, host wiring, or dependency change is included.
+
+### RED baseline (before any Slice 3 implementation)
+
+`cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test
+slice3_quic --locked` failed to compile with four errors, proving the Slice 3
+typed vocabulary and mapping were absent:
+
+```text
+error[E0432]: unresolved import `mosdns_upstream_core::secure::PeerStreamError`
+error[E0599]: no variant or associated item named `DoqProtocolNonzeroResponseId`
+              found for enum `SecureError`
+error[E0599]: no variant named `PeerStreamTerminated` found for enum
+              `DohProtocolError` (two call sites)
+```
+
+### Implementation
+
+- `rust/upstream-core/src/secure/error.rs`:
+  - new `PeerStreamError` closed category (`NoError`, `InternalError`,
+    `ProtocolError`, `RequestCancelled`, `Other`). The raw peer code and any
+    reason text are never retained, so `Display`/`Debug` cannot leak peer
+    material, and `NoError` is documented as *not* benign by itself: a
+    termination observed while the response is incomplete can never commit;
+  - `DohProtocolError::PeerStreamTerminated { code }` (`Sent`): a peer h3
+    stream termination is an explicit per-stream signal, and the request stream
+    was already written and finished before the response was awaited;
+  - `SecureError::DoqProtocolNonzeroResponseId` (`Sent`): the RFC 9250 §4.2.1
+    `PROTOCOL_ERROR` (`0x2`) case of a nonzero peer DoQ wire ID. This replaces
+    the previous plain `UpstreamError::ResponseMismatch` mapping, which did not
+    carry the DoQ protocol-error semantics required by `design.md` §7 / PRD R9;
+    the other two DoQ protocol variants are unchanged, so the Slice 1 contract
+    tests still hold.
+- `rust/upstream-core/src/secure/mod.rs`: public re-export of `PeerStreamError`.
+- `rust/upstream-core/src/quic.rs`:
+  - DoQ nonzero peer wire ID now returns `DoqProtocolNonzeroResponseId` instead
+    of a generic DNS mismatch; a peer reset with any RFC 9250 §4.3 code
+    (`0x0`-`0x3`, including `NO_ERROR`) remains the terminal missing-FIN
+    protocol error, because completion requires the response-side FIN and a
+    reset never carries one;
+  - `classify_h3_head_error` / `classify_h3_body_error` match
+    `h3::error::StreamError::RemoteTerminate { code, .. }` **structurally** and
+    map the numeric `h3::error::Code` value through `classify_peer_stream_code`
+    to the closed category: `0x100`/`0x0` → `NoError`, `0x101`/`0x2` →
+    `ProtocolError`, `0x102`/`0x1` → `InternalError`, `0x10c`/`0x3` →
+    `RequestCancelled`, anything else → `Other`. No reason string is parsed.
+    A peer `STOP_SENDING` on the request *send* side stays a typed
+    `Send(MaybeSent)` failure, because the request write is the side still in
+    doubt;
+  - the DoH3 response-head race was calibrated from `MaybeSent` to `Sent`: the
+    request head was written and its send side finished, so a deadline/cancel
+    while waiting for the response head is a post-write read failure per
+    `design.md` §7. The `ResponseHeadNotReceived` *variant* keeps its
+    conservative `MaybeSent` state, so the Slice 2 close-before-head contract is
+    unchanged.
+- No manifest or `Cargo.lock` change, no new dependency, no production sleep,
+  timer, or private timeout; every phase still runs through the existing
+  `race_control` / `ExchangeControl::check_at` / `commit_final_response`
+  vocabulary.
+
+### Evidence
+
+- RED: the four compile errors above on the new `tests/slice3_quic.rs`.
+- Focused: `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core
+  --test slice3_quic --locked` → 21 passed / 0 failed; the same target with
+  `--release` → 21 passed / 0 failed.
+- Regression (focused): `--test slice1_doq --test slice2_doh3 --test slice0_quic
+  --test slice0_contract` all passed (DoQ 7, DoH3 22, quic contracts 10, secure
+  contracts 12).
+- Upstream-core: `cargo test ... -p mosdns-upstream-core --all-targets
+  --all-features --locked` → 466 passed / 0 failed across all targets.
+- Workspace: `cargo test ... --workspace --all-targets --all-features --locked`
+  → all targets passed, 0 failed.
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` clean;
+  `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets
+  --all-features --locked -- -D warnings` clean; `git diff --check` clean.
+- Covered behaviors:
+  - DoQ: deadline at connect/TLS handshake (silent UDP sink) and at stream open
+    (zero advertised bidirectional budget) are `NotSent`; deadline while waiting
+    for the response and after a complete frame without peer FIN are `Sent` and
+    never commit; ALPN mismatch is a typed TLS failure with `NotSent`; a
+    nonzero peer wire ID is the typed nonzero-response-ID protocol error; peer
+    resets with `0x0`/`0x1`/`0x2`/`0x3` are all terminal missing-FIN errors with
+    `Sent`; `close()` drains the in-flight exchange, refuses a new exchange with
+    `Closed(NotSent)`, converges on repeat close, and leaves zero registrations;
+    owner close beats a simultaneous caller cancellation; owner close → caller
+    cancellation → deadline precedence is asserted in all three deterministic
+    pre-flight orders.
+  - DoH3: deadline at connect/handshake (silent UDP sink) is `NotSent`; a
+    blocked h3 request-stream open is `MaybeSent` (h3 0.0.8 fuses stream open and
+    request write into one `send_request`); the response wait and the
+    complete-body-without-FIN wait are `Sent` and never commit; a trailing
+    HEADERS field section after a complete body is `IncompleteBody` (`Sent`);
+    peer `RemoteTerminate` codes `0x100`/`0x101`/`0x102`/`0x10c` are
+    `PeerStreamTerminated` with the matching category in the head phase and
+    `0x10c` again in the body phase, always `Sent` and never committed; a local
+    caller cancellation after a complete body returns the typed `Cancelled`
+    control error rather than a peer error and commits nothing; `close()` drains,
+    refuses, and converges; owner close beats caller cancellation; the three
+    precedence orders are asserted.
+
+### Deliberate boundary and known limits
+
+- **Active h3 `H3_REQUEST_CANCELLED` is not sent, and this is an API blocker,
+  not an omission.** `h3::client::RequestStream::stop_sending` delegates to
+  `h3_quinn::RecvStream::stop_sending`, which does
+  `self.stream.as_mut().unwrap().stop(..)`
+  (`h3-quinn-0.0.10/src/lib.rs:390-397`); `h3_quinn::RecvStream::poll_data`
+  *takes* that `Option` into the in-flight read future and only restores it after
+  that future completes (`h3-quinn-0.0.10/src/lib.rs:375-387`); a local control
+  decision wins by dropping that read future, leaving the inner stream `None`,
+  and an immediate `stop_sending` panics with
+  `called Option::unwrap() on a None value` (observed with `RUST_BACKTRACE=1`
+  before the call was removed). The local cancellation is therefore expressed by
+  the unchanged typed `Closed`/`Cancelled`/`DeadlineExceeded` error (with its own
+  `SideEffectState`) plus the connection/endpoint teardown, and a local decision
+  is never disguised as a peer error. The boundary and the exact source lines
+  are documented on `run_h3_request` in `quic.rs`. DoQ keeps its Slice 1 active
+  `STOP_SENDING(DOQ_REQUEST_CANCELLED)`, which is reachable through quinn's own
+  `RecvStream::stop`.
+- The DoH3 missing-FIN case is exercised with a held (never-finished) complete
+  body terminated by the deadline/cancellation. A fixture that closes the
+  connection immediately after the body races the body delivery and is
+  non-deterministic, so it is not used; the held-body tests prove the same
+  contract (a complete-looking body without FIN never commits).
+- Task status was not changed. Slice 3 is left uncommitted in the Slice 3
+  worktree (`8ffd519` base) for the parent to inspect, commit, and push; the
+  unrelated dirty `.trellis/spec/...`, `.trellis/workflow.md`, `.DS_Store`, and
+  `09-19-ci-rust-foundation-lint-doc-path-filter` files were preserved.

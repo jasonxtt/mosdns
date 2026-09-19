@@ -41,6 +41,24 @@
 //! runs as a tracked child of the exchange scope (the same seal/abort/drain
 //! ownership the HTTP/2 driver uses), and the final lifecycle commit happens
 //! only after that scope has drained.
+//!
+//! Slice 3 closes the control and error-mapping contract. Every phase of both
+//! transports runs inside the shared [`race_control`] race against the caller's
+//! one absolute deadline and the owner/caller tokens, so connect, handshake,
+//! stream open, write, and read all share the same deadline and the fixed owner
+//! close → caller cancellation → deadline → commit precedence; no private timer
+//! exists. A local control decision that wins after the h3 request stream exists
+//! cannot safely send `H3_REQUEST_CANCELLED` through the pinned h3 0.0.8 /
+//! h3-quinn 0.0.10 API (a cancelled read leaves h3-quinn's inner stream `None`
+//! and `stop_sending` then panics), so the typed control error is returned
+//! unchanged - `Closed`, `Cancelled`, or `DeadlineExceeded` - and is never
+//! disguised as a peer failure; the boundary and its evidence are documented on
+//! [`run_h3_request`]. Peer h3 stream terminations are mapped structurally
+//! (never by parsing a reason string) to [`DohProtocolError::PeerStreamTerminated`]
+//! with a closed [`PeerStreamError`] category; a DoQ nonzero peer wire ID is the
+//! typed [`SecureError::DoqProtocolNonzeroResponseId`] protocol error, and a DoQ
+//! reset with any RFC 9250 code remains the terminal missing-response-FIN error.
+//! None of these ever commits.
 
 use std::future::poll_fn;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -53,9 +71,9 @@ use quinn::crypto::rustls::QuicClientConfig;
 
 use crate::secure::{
     DNS_MEDIA_TYPE, DohEndpoint, DohProtocolError, DohRequestError, H2ScopeLease, IdentityError,
-    MAX_DNS_BODY, MAX_RESPONSE_HEADER_BYTES, MAX_RESPONSE_HEADERS, SecureError, SecureResponse,
-    ServerIdentity, TlsConfigError, TlsPolicy, parsed_head_bytes, restore_request_id,
-    validate_doh_head_parts,
+    MAX_DNS_BODY, MAX_RESPONSE_HEADER_BYTES, MAX_RESPONSE_HEADERS, PeerStreamError, SecureError,
+    SecureResponse, ServerIdentity, TlsConfigError, TlsPolicy, parsed_head_bytes,
+    restore_request_id, validate_doh_head_parts,
 };
 use crate::tcp::{race_control, write_frame};
 use crate::{
@@ -568,8 +586,11 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     if body.len() < 2 {
         return Err(UpstreamError::MalformedResponse.into());
     }
+    // RFC 9250 §4.2.1: the peer's wire ID MUST be zero. A nonzero peer ID is the
+    // DoQ `PROTOCOL_ERROR` (0x2) case, terminal and never committed, and it is
+    // reported as a typed DoQ protocol error rather than a plain DNS mismatch.
     if u16::from_be_bytes([body[0], body[1]]) != 0 {
-        return Err(UpstreamError::ResponseMismatch.into());
+        return Err(SecureError::DoqProtocolNonzeroResponseId);
     }
 
     // Restore the caller's original ID into the owned response copy before any
@@ -655,6 +676,15 @@ fn classify_handshake_failure(_error: quinn::ConnectionError) -> SecureError {
 /// read failure is a terminal receive failure with the request already sent.
 /// The outcomes are matched structurally, so no peer-supplied error code or
 /// connection-close text is ever parsed.
+///
+/// For the reset case the RFC 9250 §4.3 application error code does not change
+/// the typed outcome: the violation is the missing response-side FIN, which is
+/// required for completion regardless of why the peer aborted. `NO_ERROR`
+/// (`0x0`) is therefore *not* benign here - it is only benign once a response
+/// has completed, and a completed response arrives as a FIN, not a reset. The
+/// same holds for `INTERNAL_ERROR` (`0x1`), `PROTOCOL_ERROR` (`0x2`), and
+/// `REQUEST_CANCELLED` (`0x3`): all are terminal and never committed. The
+/// `Slice3` suite exercises each code on the wire.
 fn classify_read_error(error: quinn::ReadToEndError) -> SecureError {
     match error {
         quinn::ReadToEndError::TooLong => SecureError::from(UpstreamError::FrameTooLarge),
@@ -1008,9 +1038,13 @@ async fn drive_h3_connection(driver: H3Driver) {
 
 /// Sends the one `GET` and returns the validated, not-yet-committed response.
 ///
-/// Every failure here is strictly post-`build`, so the request may or may not
-/// have been written; the response-head phase is conservatively `MaybeSent` and
-/// the body phase is `Sent`.
+/// The `send_request` and request-FIN phases are conservatively `MaybeSent`, so a
+/// failure there never claims the request reached the peer. Once the FIN has been
+/// accepted, every later phase - the response head, the body, and the trailers -
+/// is `Sent`, because the request was fully written and finished. A local control
+/// error from any post-send phase is returned unchanged; the cancellation
+/// boundary note that follows this function records why no `H3_REQUEST_CANCELLED`
+/// stop frame is sent.
 async fn run_h3_request(
     prepared: &PreparedDoh3<'_>,
     control: &ExchangeControl,
@@ -1035,7 +1069,11 @@ async fn run_h3_request(
     })
     .await?;
 
-    let response = race_control(control, SideEffectState::MaybeSent, deadline, async {
+    // The request head was written and its send side finished, so any failure
+    // while waiting for the response is `Sent`. A local control decision returns
+    // its typed cause unchanged; see the cancellation boundary note below for
+    // why no `H3_REQUEST_CANCELLED` stop frame is attempted.
+    let response = race_control(control, SideEffectState::Sent, deadline, async {
         stream.recv_response().await.map_err(classify_h3_head_error)
     })
     .await?;
@@ -1062,6 +1100,31 @@ async fn run_h3_request(
         truncated: header.truncated,
     })
 }
+
+// Local-cancellation boundary (Slice 3).
+//
+// `design.md` §4/§6 asks for an active `H3_REQUEST_CANCELLED` on the receive
+// side when a local control decision wins. That is **not safely reachable
+// through the pinned h3 0.0.8 / h3-quinn 0.0.10 API** and is therefore
+// deliberately not attempted here, with direct evidence:
+//
+//   * `h3::client::RequestStream::stop_sending` delegates to
+//     `h3_quinn::RecvStream::stop_sending`, which does
+//     `self.stream.as_mut().unwrap().stop(..)`
+//     (`h3-quinn-0.0.10/src/lib.rs:390-397`).
+//   * `h3_quinn::RecvStream::poll_data` *takes* that `Option` into the in-flight
+//     `read_chunk_fut` and only restores it after the read future completes
+//     (`h3-quinn-0.0.10/src/lib.rs:375-387`).
+//   * A local control decision wins by dropping that read future, so `stream`
+//     is left `None` and an immediate `stop_sending` panics with
+//     `called Option::unwrap() on a None value`.
+//
+// The cancellation is therefore expressed by the unchanged typed control error
+// (owner `Closed`, caller `Cancelled`, or `DeadlineExceeded`, each with its own
+// `SideEffectState`) plus the connection/endpoint teardown that follows it, and
+// a local decision is never disguised as a peer error. The `Slice3` suite
+// asserts exactly that outcome for owner close, caller cancellation, and the
+// deadline, including after a complete response body has already arrived.
 
 /// Builds the single `GET` this exchange may send.
 ///
@@ -1172,9 +1235,12 @@ fn classify_h3_setup_error(_error: h3::error::ConnectionError) -> SecureError {
 
 /// Classifies an h3 request-send or request-finish failure.
 ///
-/// The request may have been partially written, so the failure is
-/// conservatively a typed send failure with `MaybeSent`. The explicit request
-/// error-code mapping is Slice 3; no branch here retries or replays.
+/// The request may have been partially written, so the failure is conservatively
+/// a typed send failure with `MaybeSent`. A peer `STOP_SENDING` on the request
+/// send side surfaces here as [`h3::error::StreamError::RemoteTerminate`]; it is
+/// deliberately kept as a send failure rather than a response-stream
+/// termination, because the request write is the side that is still in doubt and
+/// `MaybeSent` is the truthful state. No branch here retries or replays.
 fn classify_h3_send_error(_error: h3::error::StreamError) -> SecureError {
     SecureError::from(UpstreamError::Send(SideEffectState::MaybeSent))
 }
@@ -1182,15 +1248,21 @@ fn classify_h3_send_error(_error: h3::error::StreamError) -> SecureError {
 /// Classifies an h3 response-head failure.
 ///
 /// A field section above the advertised 16 KiB bound is the head-size violation
-/// the DoH contract names. Every other head-phase outcome - the stream or
-/// connection ending, or an h3 message error - is conservatively
+/// the DoH contract names. An explicit peer stream termination is mapped
+/// structurally to the closed [`PeerStreamError`] category, so no raw code,
+/// reason, or payload crosses the boundary. Every other head-phase outcome - the
+/// stream or connection ending, or an h3 message error - is conservatively
 /// [`DohProtocolError::ResponseHeadNotReceived`] (`MaybeSent`) rather than
-/// claiming the request definitely reached the peer; the explicit per-code
-/// mapping is Slice 3.
+/// claiming the request definitely reached the peer.
 fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
     match error {
         h3::error::StreamError::HeaderTooBig { .. } => {
             SecureError::DohProtocol(DohProtocolError::ResponseHeadTooLarge)
+        }
+        h3::error::StreamError::RemoteTerminate { code, .. } => {
+            SecureError::DohProtocol(DohProtocolError::PeerStreamTerminated {
+                code: classify_peer_stream_code(code),
+            })
         }
         _ => SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
     }
@@ -1199,9 +1271,37 @@ fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
 /// Classifies an h3 body-read failure.
 ///
 /// The response head was already observed, so the request was transmitted and
-/// the state is `Sent`. Any read failure - a reset, a connection loss, or a
-/// truncated data frame - proves the body did not complete, which is the typed
-/// incomplete-body protocol error.
-fn classify_h3_body_error(_error: h3::error::StreamError) -> SecureError {
-    SecureError::DohProtocol(DohProtocolError::IncompleteBody)
+/// the state is `Sent`. An explicit peer stream termination keeps its structured
+/// code category; every other read failure - a reset through the connection, a
+/// connection loss, or a truncated data frame - proves the body did not
+/// complete, which is the typed incomplete-body protocol error.
+fn classify_h3_body_error(error: h3::error::StreamError) -> SecureError {
+    match error {
+        h3::error::StreamError::RemoteTerminate { code, .. } => {
+            SecureError::DohProtocol(DohProtocolError::PeerStreamTerminated {
+                code: classify_peer_stream_code(code),
+            })
+        }
+        _ => SecureError::DohProtocol(DohProtocolError::IncompleteBody),
+    }
+}
+
+/// Maps an HTTP/3 or QUIC-numbered peer stream-termination code to the closed
+/// [`PeerStreamError`] category.
+///
+/// The match is on the numeric `h3::error::Code` value, never on a formatted
+/// reason, so a peer cannot influence the classification through `Display`. The
+/// RFC 9114 §8.1 HTTP/3 codes (`0x100`-`0x10c`) and their RFC 9000/9250-numbered
+/// counterparts (`0x0`-`0x3`, which the h3 layer passes through unchanged when a
+/// transport reset uses the low registry) map to the same four categories; an
+/// unrecognized code is [`PeerStreamError::Other`]. The raw code and any reason
+/// text are intentionally discarded.
+fn classify_peer_stream_code(code: h3::error::Code) -> PeerStreamError {
+    match code.value() {
+        0x0 | 0x100 => PeerStreamError::NoError,
+        0x1 | 0x102 => PeerStreamError::InternalError,
+        0x2 | 0x101 => PeerStreamError::ProtocolError,
+        0x3 | 0x10c => PeerStreamError::RequestCancelled,
+        _ => PeerStreamError::Other,
+    }
 }

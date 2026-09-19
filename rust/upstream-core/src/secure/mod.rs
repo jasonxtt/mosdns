@@ -32,8 +32,8 @@ pub use doh::DohUpstream;
 pub use dot::{DotUpstream, SecureHttpVersion, SecureResponse, SecureTransport};
 pub use endpoint::{DohEndpoint, DotEndpoint, ServerIdentity};
 pub use error::{
-    CertificateRejection, DohProtocolError, DohRequestError, IdentityError, SecureError,
-    ServiceUrlError, TlsConfigError, TlsHandshakeFailure,
+    CertificateRejection, DohProtocolError, DohRequestError, IdentityError, PeerStreamError,
+    SecureError, ServiceUrlError, TlsConfigError, TlsHandshakeFailure,
 };
 pub use tls::TlsPolicy;
 

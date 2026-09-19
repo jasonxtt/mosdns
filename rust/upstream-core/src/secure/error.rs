@@ -199,6 +199,45 @@ impl fmt::Display for TlsHandshakeFailure {
 
 impl Error for TlsHandshakeFailure {}
 
+/// The closed category of a peer-reported HTTP/3 or QUIC stream-termination
+/// code.
+///
+/// The peer's raw numeric code and any reason text are deliberately not
+/// retained: only this fixed vocabulary crosses the public boundary, so no
+/// peer-supplied value or payload can leak through `Display`/`Debug`. `NoError`
+/// is **not** a benign completion on its own: a termination observed while the
+/// response is still incomplete proves the response never finished, so it can
+/// never commit. It is only benign when the response already completed, which
+/// is the normal FIN path and never reaches this vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PeerStreamError {
+    /// The peer terminated the stream with no error (`NO_ERROR`).
+    NoError,
+    /// The peer reported an internal error (`INTERNAL_ERROR`).
+    InternalError,
+    /// The peer reported a protocol violation (`PROTOCOL_ERROR` or the HTTP/3
+    /// general protocol error).
+    ProtocolError,
+    /// The peer cancelled the request or response (`REQUEST_CANCELLED`).
+    RequestCancelled,
+    /// Any other nonzero peer stream code.
+    Other,
+}
+
+impl fmt::Display for PeerStreamError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NoError => "peer closed the stream without an error",
+            Self::InternalError => "peer internal stream error",
+            Self::ProtocolError => "peer stream protocol error",
+            Self::RequestCancelled => "peer cancelled the stream",
+            Self::Other => "peer stream error",
+        })
+    }
+}
+
+impl Error for PeerStreamError {}
+
 /// Why a DoH exchange failed, at the HTTP or ALPN layer.
 ///
 /// Most variants describe an HTTP-level defect in a reply that did arrive:
@@ -263,6 +302,21 @@ pub enum DohProtocolError {
     /// it reached the peer, so this is conservatively
     /// [`SideEffectState::MaybeSent`] rather than `Sent`.
     ResponseHeadNotReceived,
+    /// The peer terminated the response stream with an HTTP/3 or QUIC error
+    /// code instead of completing it with a normal response FIN.
+    ///
+    /// `code` is the closed category of the received code; the raw numeric code
+    /// and any reason text are not retained, so `Display`/`Debug` cannot leak
+    /// peer material. This is an explicit per-stream signal from the peer rather
+    /// than a silent connection close, and the request stream had already been
+    /// written and finished before the response was awaited, so it is
+    /// [`SideEffectState::Sent`]. A termination carrying `NO_ERROR` is still
+    /// terminal here: it is only benign once the response has completed, which
+    /// is the FIN path and never reaches this variant.
+    PeerStreamTerminated {
+        /// The closed category of the peer's stream-termination code.
+        code: PeerStreamError,
+    },
     /// The TLS handshake negotiated an ALPN protocol this client does not
     /// implement.
     ///
@@ -275,11 +329,14 @@ pub enum DohProtocolError {
 impl DohProtocolError {
     /// The DNS side-effect state this failure proves.
     ///
-    /// Every variant except [`Self::ResponseHeadNotReceived`] and
-    /// [`Self::UnexpectedAlpn`] can only be observed after a complete response
-    /// head arrived, which proves the request was transmitted. The two
-    /// exceptions are weaker by design: an absent head leaves delivery
-    /// unknowable, and an ALPN mismatch precedes any request entirely.
+    /// [`Self::UnexpectedAlpn`] is decided during the TLS handshake, before any
+    /// request exists, so it is [`SideEffectState::NotSent`]. A connection that
+    /// ends before any response head leaves delivery unknowable, so
+    /// [`Self::ResponseHeadNotReceived`] is conservatively
+    /// [`SideEffectState::MaybeSent`]. Every other variant, including an
+    /// explicit peer stream termination, is observed only after the request
+    /// stream was written and finished, so it is
+    /// [`SideEffectState::Sent`].
     #[must_use]
     pub const fn side_effect(self) -> SideEffectState {
         match self {
@@ -291,7 +348,8 @@ impl DohProtocolError {
             | Self::ContentEncoding
             | Self::ResponseHeadTooLarge
             | Self::BodyTooLarge
-            | Self::IncompleteBody => SideEffectState::Sent,
+            | Self::IncompleteBody
+            | Self::PeerStreamTerminated { .. } => SideEffectState::Sent,
         }
     }
 }
@@ -312,6 +370,9 @@ impl fmt::Display for DohProtocolError {
             Self::IncompleteBody => formatter.write_str("incomplete response body"),
             Self::ResponseHeadNotReceived => {
                 formatter.write_str("response head was never received")
+            }
+            Self::PeerStreamTerminated { code } => {
+                write!(formatter, "peer terminated the response stream: {code}")
             }
             Self::UnexpectedAlpn => formatter.write_str("unexpected ALPN protocol"),
         }
@@ -337,6 +398,9 @@ impl Error for DohProtocolError {}
 /// * [`Self::DoqProtocolMissingResponseFin`] reports a DoQ response stream that
 ///   the peer aborted instead of completing with a normal STREAM FIN; the query
 ///   was already transmitted, so it is [`SideEffectState::Sent`].
+/// * [`Self::DoqProtocolNonzeroResponseId`] reports the RFC 9250 §4.2.1
+///   `PROTOCOL_ERROR` case of a nonzero peer wire ID; the query was already
+///   transmitted, so it is [`SideEffectState::Sent`].
 /// * [`Self::Transport`] wraps the exact existing typed [`UpstreamError`]
 ///   rather than duplicating or stringifying every control, send, receive, and
 ///   DNS-response cause; its side-effect state is the wrapped cause's state.
@@ -381,6 +445,17 @@ pub enum SecureError {
     /// no response bytes or peer error data, so neither `Display` nor `Debug`
     /// can leak peer material.
     DoqProtocolMissingResponseFin,
+    /// The DoQ response carried a nonzero peer wire ID.
+    ///
+    /// RFC 9250 §4.2.1 requires the DNS message ID on the DoQ wire to be zero,
+    /// so a nonzero peer ID is the DoQ `PROTOCOL_ERROR` (`0x2`) case. This is a
+    /// terminal protocol failure: the exchange never restores the caller ID,
+    /// commits, retries, or falls back to another transport. The query was
+    /// already fully written before the response could be inspected, so
+    /// [`Self::side_effect`] is [`SideEffectState::Sent`]. This variant carries
+    /// no response bytes, so neither `Display` nor `Debug` can leak peer
+    /// material.
+    DoqProtocolNonzeroResponseId,
     /// A control, framing, send, receive, or DNS-response failure, retained as
     /// the exact existing typed cause.
     Transport(UpstreamError),
@@ -407,9 +482,9 @@ impl SecureError {
             | Self::DohRequest(_)
             | Self::Tls(_) => SideEffectState::NotSent,
             Self::DohProtocol(reason) => reason.side_effect(),
-            Self::DoqProtocolTrailingResponse | Self::DoqProtocolMissingResponseFin => {
-                SideEffectState::Sent
-            }
+            Self::DoqProtocolTrailingResponse
+            | Self::DoqProtocolMissingResponseFin
+            | Self::DoqProtocolNonzeroResponseId => SideEffectState::Sent,
             Self::Transport(cause) => cause.side_effect(),
         }
     }
@@ -441,6 +516,9 @@ impl fmt::Display for SecureError {
             Self::DoqProtocolMissingResponseFin => {
                 formatter.write_str("DoQ response stream ended without a normal FIN")
             }
+            Self::DoqProtocolNonzeroResponseId => {
+                formatter.write_str("DoQ peer response ID is nonzero")
+            }
             Self::Transport(cause) => write!(formatter, "secure transport failed: {cause}"),
         }
     }
@@ -458,6 +536,7 @@ impl Error for SecureError {
             Self::DohProtocol(reason) => Some(reason),
             Self::DoqProtocolTrailingResponse => None,
             Self::DoqProtocolMissingResponseFin => None,
+            Self::DoqProtocolNonzeroResponseId => None,
             Self::Transport(cause) => Some(cause),
         }
     }
