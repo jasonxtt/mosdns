@@ -88,11 +88,18 @@ mosdns-upstream-core --locked`):
    PASS on the lock.
 3. **TLS-stack alignment**: exactly one rustls line, 0.23.45 — the same
    0.23 major the workspace `TlsPolicy` builds from. PASS on the lock.
-4. **Client-only feature selection**: activated quinn features are exactly
-   `runtime-tokio` + `rustls-ring` (→ `ring` + `rustls 0.23.45`).
-   `cargo tree -e features` shows zero `platform-verifier` and zero
-   `aws-lc-rs` lines anywhere. h3/h3-quinn have their default features
-   disabled and no optional feature (`tracing`, `datagram`) is enabled.
+4. **Client-only feature selection**: quinn resolves with `runtime-tokio`
+   + `rustls-ring` (→ `ring` + `rustls 0.23.45`) + `futures-io`.
+   The `futures-io` feature is requested by h3-quinn itself
+   (`features = ["futures-io"]`, `default-features = false` in the
+   published h3-quinn 0.0.10 manifest): inside quinn 0.11.7 it gates only
+   the `futures_io::AsyncRead`/`AsyncWrite` adapter impls on quinn's
+   stream types (`src/recv_stream.rs:476-477`, `src/send_stream.rs:248-249`)
+   — a poll-adapter surface h3-quinn drives from the caller's task, not
+   another runtime. `cargo tree -e features` shows zero
+   `platform-verifier` and zero `aws-lc-rs` lines anywhere. h3/h3-quinn
+   have their default features disabled and no optional feature
+   (`tracing`, `datagram`) is enabled.
    PASS on the lock, with one disposition below.
 5. **Tree shape**: `cargo tree -e normal -p mosdns-upstream-core` shows
    `h3 0.0.8`, `h3-quinn 0.0.10 → quinn 0.11.7 + h3`, and
@@ -135,8 +142,9 @@ design §2 "no extra async runtimes" gate, for four source-backed reasons:
    `LocalPool`, or `LocalSpawner`; h3-quinn's actual `futures::` uses are
    `ready`, `stream::{self}`, `Stream`, `StreamExt` (poll-combinators over
    the caller's task, in `src/lib.rs:16-20` and `src/datagram.rs:8`).
-   The single `runtime.block_on` hit in `quinn-0.11.7/src/tests.rs` is
-   `tokio::runtime::Runtime::block_on` in quinn's own test module
+   The five `runtime.block_on` hits in `quinn-0.11.7/src/tests.rs`
+   (lines 55, 155, 177, 563, 596) are all
+   `tokio::runtime::Runtime::block_on` calls in quinn's own test module
    (`use tokio::runtime::{Builder, Runtime}`, `use crate::runtime::TokioRuntime`),
    never compiled into the library. Protocol work therefore runs on the
    caller's Tokio runtime via quinn's `runtime-tokio` adapter — the same
