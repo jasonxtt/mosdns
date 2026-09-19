@@ -174,3 +174,25 @@ git diff --check
   authorize `task.py start`, dependency changes, implementation, Slice 0
   execution, production wiring, or any later task. Next phase needs separate
   explicit user authorization.
+
+## Slice 0 pre-I/O review record — 2026-09-19
+
+- Reviewer: user-selected ChatGPT web project conversation for MosDNS Phase 4
+  upstream review (same conversation as the planning rounds).
+- Round 1: `FINAL: FAIL` on
+  `4a7dfc0aacc88d81b60aa4ec18d0dd12a836ec2d` (base `b75bd7f`; 6 files,
+  +288/-0) — P0-1 (QUIC admitted into the plain-TCP reuse owner and executed
+  as TCP), P1-1 (DoQ/DoH3 `SecureResponse` shapes not constructible from the
+  QUIC module), P2-1 (short-buffer no-op untested), P2-2 (audit upstream SHAs
+  unanchored, ruled non-blocking). Remediated in commit `0d2b64e`
+  (TCP-only pool gate; crate-internal `doq`/`doh3` seams; 0/1-byte pin tests).
+- Round 2: `FINAL: PASS` on
+  `0d2b64ed4592597c117f16407accb4c4dfff4825` (base `4a7dfc0`; exactly 1 commit,
+  exactly 4 files; `rust` HEAD = `0d2b64e`). P0=0, P1=0, P2=0. Both prior
+  blockers closed; short-buffer P2 closed; no new findings introduced.
+- Boundary: this PASS closes Slice 0 pre-I/O contracts only, including the
+  remediation. It does not authorize `Cargo.toml`/`Cargo.lock` pinning, locked
+  dependency-audit completion, Slice 1 socket/handshake code, production
+  wiring, or any other task. The task stays `in_progress`; the Slice 0 exit
+  gate (locked manifest/tree/MSRV audit) and every later slice each need
+  separate explicit user authorization.
