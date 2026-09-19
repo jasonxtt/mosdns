@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check routing changes against the required executor safety boundaries, exact-path review, and external reviewer gate."}
+{"file":".trellis/tasks/09-19-codex-host-automation-routing/research/surface-routing-evidence.md","reason":"Check the implementation against the recorded host-detection evidence and provider-neutral selection requirements."}

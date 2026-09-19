@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Provider-specific safety, bounded execution, exact diff inspection, parent-owned verification, and reviewer PASS contracts for Herdr and MCP DSH."}
+{"file":".trellis/tasks/09-19-codex-host-automation-routing/research/surface-routing-evidence.md","reason":"Repository and host evidence establishing the CLI/Desktop distinction, available providers, and fail-closed design constraints."}

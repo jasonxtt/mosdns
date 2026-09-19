@@ -110,27 +110,22 @@ channel:
 #-------------------------------------------------------------------------------
 # Codex (dispatch behavior)
 #-------------------------------------------------------------------------------
-# Codex-only knob; other platforms ignore it. Default ("auto") dispatches
-# trellis-implement / trellis-check / trellis-research sub-agents. "inline"
-# keeps implementation/checks in the main session. "herdr" keeps Codex as the
-# controller and uses a user-selected external Herdr pane plus ChatGPT reviewer;
-# those choices are scoped to the Codex conversation and never auto-selected.
-# Native sub-agent dispatch does not rely on inherited parent transcripts:
-# `fork_turns` remains
-# caller-controlled, while Codex's native SubagentStart hook injects task
-# context when trusted and child-side loading remains the fallback when it is
-# unavailable. "sub-agent" remains a backwards-compatible alias for "auto".
-# Invalid explicit values safely use inline mode.
-#
-# In "auto" mode, dispatched sub-agents inherit the main session's model
-# unless you pin one. To use a cheaper/faster model for implement/check/
-# research sub-agent work, edit `model` / `model_reasoning_effort` directly
-# on the generated `.codex/agents/trellis-*.toml` files (see the commented
-# hint lines in those files) — there is no config.yaml knob for this,
-# `trellis update` preserves your edits across regeneration.
+# Codex-only knob; other platforms ignore it. Default ("auto") distinguishes
+# Codex CLI from Desktop/App: CLI routes to the Herdr provider and Desktop/App
+# routes to MCP DSH. "inline" keeps implementation/checks in the main session.
+# "herdr" and "dsh" select provider classes explicitly. Provider targets and
+# reviewers remain conversation-scoped user choices and are never auto-selected.
+# "sub-agent" remains a backwards-compatible alias for "auto". Provider
+# execution details belong to the selected Herdr/DSH/Codex contract; this
+# policy does not pin a model, pane, worker, or review conversation.
+# Invalid explicit values safely resolve to ask/fail-closed.
 #
 codex:
-  dispatch_mode: herdr
+  dispatch_mode: auto
+  host_routes:
+    cli: herdr
+    desktop: dsh
+    unknown: ask
 
 #-------------------------------------------------------------------------------
 # Sub-agent context injection limits

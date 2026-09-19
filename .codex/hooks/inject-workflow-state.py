@@ -271,10 +271,10 @@ def prompt_has_skip_keyword(prompt: str, keyword: str) -> bool:
 
 
 def _resolve_codex_dispatch_mode(config: dict) -> str:
-    """Normalize Codex dispatch mode to auto, inline, or herdr.
+    """Normalize Codex dispatch mode to a safe policy name.
 
     Defaults to `auto`. The legacy `sub-agent` value is an alias for `auto`.
-    Any other explicit value (including invalid ones) falls back to `inline`
+    Any other explicit value (including invalid ones) falls back to `ask`
     without per-turn warnings. Shared by `_codex_mode_banner` (the per-turn
     banner) and `resolve_breadcrumb_key` (the breadcrumb tag key) so the two
     stay in lockstep.
@@ -288,39 +288,57 @@ def _resolve_codex_dispatch_mode(config: dict) -> str:
                 mode = "inline"
             elif cfg_mode == "herdr":
                 mode = "herdr"
+            elif cfg_mode == "dsh":
+                mode = "dsh"
+            elif cfg_mode == "codex":
+                mode = "codex"
+            elif cfg_mode == "ask":
+                mode = "ask"
             elif cfg_mode in ("auto", "sub-agent"):
                 mode = "auto"
             else:
-                mode = "inline"
+                mode = "ask"
     return mode
 
 
-def _codex_mode_banner(config: dict) -> str:
+def _codex_mode_banner(config: dict, provider: str | None = None) -> str:
     """Emit a `<codex-mode>` banner for the additionalContext payload.
 
     Reads `codex.dispatch_mode` from .trellis/config.yaml; defaults to
-    `auto`, which dispatches Trellis sub-agents using native Codex context
-    injection with a child-side fallback. This does not rely on inherited
-    parent transcripts: `fork_turns` remains caller-controlled, and
-    fresh-history sub-agents still receive their explicit delegated task and
-    inherited session configuration. `inline` is an explicit opt-out; the
+    `auto`, which distinguishes Codex CLI and Desktop/App provider routes.
+    `inline`/`codex`, `herdr`, and `dsh` are explicit provider policies; the
     legacy `sub-agent` value is an alias for `auto`. Invalid explicit values
-    fall back to `inline` without per-turn warnings. The banner makes the
+    fall back to `ask` without per-turn warnings. The banner makes the
     active mode explicit to Codex AI per turn, complementing the workflow-state
     body which is per-status. Mode tells AI which dispatch protocol to follow;
     workflow-state tells AI what step it's at.
     """
     mode = _resolve_codex_dispatch_mode(config)
+    if provider == "codex":
+        mode = "inline"
+    elif provider in {"herdr", "dsh", "ask", "unsupported"}:
+        mode = "ask" if provider in {"ask", "unsupported"} else provider
     if mode == "auto":
         meaning = (
-            "auto: implement/check work defaults to Trellis sub-agents; native Codex "
-            "context injection is preferred and child-side loading is the fallback. "
-            "The main session still coordinates, clarifies, updates specs, commits, and finishes."
+            "auto: distinguish the Codex CLI and Desktop/App surfaces; CLI defaults "
+            "to the Herdr provider and Desktop/App defaults to MCP DSH. The host "
+            "policy selects only a provider class; the conversation still needs "
+            "explicit executor/reviewer targets, and unknown evidence fails closed."
         )
-    elif mode == "inline":
+    elif mode in ("inline", "codex"):
         meaning = (
             "inline: the main session implements/checks directly; "
             "do not dispatch implement/check sub-agents."
+        )
+    elif mode == "dsh":
+        meaning = (
+            "dsh: use the MCP DSH provider selected by the user or host policy; "
+            "do not auto-select a worker, model, or reviewer."
+        )
+    elif mode == "ask":
+        meaning = (
+            "ask: Codex surface or policy is unresolved; fail closed and ask the "
+            "user to choose executor and reviewer targets before implementation/review."
         )
     else:
         meaning = (
@@ -333,31 +351,79 @@ def _codex_mode_banner(config: dict) -> str:
 
 
 def resolve_breadcrumb_key(
-    status: str, platform: str | None, config: dict
+    status: str,
+    platform: str | None,
+    config: dict,
+    surface: str | dict | None = None,
+    provider: str | None = None,
 ) -> str:
     """Pick the breadcrumb tag key based on Codex dispatch_mode.
 
-    Codex defaults to ``auto`` and therefore uses the ordinary ``<status>``
-    breadcrumb for native SubagentStart dispatch with child-side fallback;
-    it does not depend on an inherited parent transcript. ``inline`` selects
-    the parallel ``<status>-inline`` tag; ``sub-agent`` remains an alias for
-    ``auto``. Invalid explicit values fall back to inline without per-turn
-    warnings.
+    Codex defaults to ``auto`` and selects a surface-aware provider tag when
+    evidence is available. ``inline`` selects the parallel
+    ``<status>-inline`` tag; ``sub-agent`` remains an alias for ``auto``.
+    Invalid explicit values resolve to the fail-closed ``<status>-auto`` tag.
 
     Non-codex platforms return the plain status unchanged.
     """
     if platform == "codex":
         mode = _resolve_codex_dispatch_mode(config)
-        if mode == "inline":
+        if provider == "codex":
+            return f"{status}-inline"
+        if provider == "herdr":
+            return f"{status}-herdr"
+        if provider == "dsh":
+            return f"{status}-dsh"
+        if provider in {"ask", "unsupported"}:
+            return f"{status}-auto"
+        if mode in ("inline", "codex"):
             return f"{status}-inline"
         if mode == "herdr":
             return f"{status}-herdr"
+        if mode == "dsh":
+            return f"{status}-dsh"
+        if mode == "ask":
+            return f"{status}-auto"
+        if surface is not None:
+            kind = surface.get("kind") if isinstance(surface, dict) else str(surface)
+            codex_cfg = config.get("codex") if isinstance(config, dict) else None
+            routes = codex_cfg.get("host_routes", {}) if isinstance(codex_cfg, dict) else {}
+            defaults = {"cli": "herdr", "desktop": "dsh", "unknown": "ask"}
+            route = routes.get(kind, defaults.get(kind, "ask")) if isinstance(routes, dict) else defaults.get(kind, "ask")
+            if route == "herdr":
+                return f"{status}-herdr"
+            if route == "dsh":
+                return f"{status}-dsh"
+            if route in ("codex", "inline"):
+                return f"{status}-inline"
+            return f"{status}-auto"
         return status
     return status
 
 
-def _codex_routing_banner(root: Path, input_data: dict) -> str:
-    """Describe this Codex conversation's persisted Herdr/reviewer choice."""
+def _codex_surface(root: Path, input_data: dict) -> dict:
+    """Resolve a persisted surface override before safe host evidence."""
+    scripts_dir = root / ".trellis" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from common.active_task import resolve_context_key  # type: ignore[import-not-found]
+        from common.codex_routing import detect_surface, load_state  # type: ignore[import-not-found]
+
+        key = resolve_context_key(input_data, platform="codex")
+        if key:
+            persisted = load_state(root, key).get("surface")
+            if isinstance(persisted, dict):
+                return persisted
+        explicit = input_data.get("codex_surface")
+        evidence = detect_surface(explicit=explicit if isinstance(explicit, str) else None)
+        return evidence.as_dict()
+    except Exception as exc:
+        return {"kind": "unknown", "source": "hook_error", "evidence": [], "reason": str(exc)}
+
+
+def _codex_routing_state(root: Path, input_data: dict) -> dict:
+    """Load the current conversation's routing state for hook precedence."""
     scripts_dir = root / ".trellis" / "scripts"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
@@ -366,30 +432,52 @@ def _codex_routing_banner(root: Path, input_data: dict) -> str:
         from common.codex_routing import load_state  # type: ignore[import-not-found]
 
         key = resolve_context_key(input_data, platform="codex")
+        return load_state(root, key) if key else {}
+    except Exception:
+        return {}
+
+
+def _codex_routing_banner(root: Path, input_data: dict, surface: dict | None = None) -> str:
+    """Describe this Codex conversation's generic executor/reviewer choice."""
+    scripts_dir = root / ".trellis" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from common.active_task import resolve_context_key  # type: ignore[import-not-found]
+        from common.codex_routing import (  # type: ignore[import-not-found]
+            load_state,
+            resolve_codex_provider,
+            routing_missing_slots,
+            target_summary,
+        )
+
+        key = resolve_context_key(input_data, platform="codex")
         if not key:
             raise RuntimeError("conversation identity unavailable")
         state = load_state(root, key)
+        current_surface = surface or _codex_surface(root, input_data)
+        provider = resolve_codex_provider(root, current_surface, state)
     except Exception as exc:
         return f"<codex-routing>unresolved: {exc}; fail closed before dispatch or review.</codex-routing>"
 
-    dispatch = state.get("dispatch")
+    dispatch = state.get("executor")
     reviewer = state.get("reviewer")
-    missing = [name for name, value in (("executor", dispatch), ("reviewer", reviewer)) if value is None]
+    missing = routing_missing_slots(state)
     if missing:
         return (
-            "<codex-routing>selection required before implementation dispatch or review: "
+            "<codex-routing>surface="
+            f"{current_surface.get('kind', 'unknown')} evidence="
+            f"{','.join(current_surface.get('evidence', [])) or 'none'} policy={provider}; "
+            "selection required before implementation dispatch or review: "
             + ", ".join(missing)
             + ". Run `python3 .trellis/scripts/codex_routing.py discover` and ask "
-              "one combined user question for all missing choices. Planning/read-only work may continue.</codex-routing>"
+              "one combined user question for all missing choices. Explicitly allow "
+              "executor=codex/reviewer=codex for self-routing when intended; planning/read-only work may continue.</codex-routing>"
         )
-    if dispatch.get("mode") == "inline":
-        dispatch_text = "inline (explicit user choice)"
-    else:
-        dispatch_text = f"Herdr {dispatch.get('workspace_id')}:{dispatch.get('executor_pane_id')}"
     return (
-        f"<codex-routing>executor={dispatch_text}; reviewer="
-        f"{reviewer.get('conversation_title') or reviewer.get('conversation_id')} "
-        f"({reviewer.get('url')}). Reuse these choices unless the user replaces them or validation fails.</codex-routing>"
+        f"<codex-routing>executor={target_summary(dispatch)}; reviewer="
+        f"{target_summary(reviewer)}; surface={current_surface.get('kind', 'unknown')} "
+        f"policy={provider}. Reuse these choices unless the user replaces them or validation fails.</codex-routing>"
     )
 
 
@@ -473,17 +561,25 @@ def main() -> int:
 
     templates = load_breadcrumbs(root)
     platform = _detect_platform(data)
+    codex_surface = _codex_surface(root, data) if platform == "codex" else None
+    codex_state = _codex_routing_state(root, data) if platform == "codex" else {}
+    codex_executor = codex_state.get("executor") if isinstance(codex_state, dict) else None
+    codex_provider = codex_executor.get("provider") if isinstance(codex_executor, dict) else None
     task = get_active_task(root, data)
     if task is None:
         # No active task — still emit a breadcrumb nudging AI toward
         # trellis-brainstorm + task.py create when user describes real work.
-        no_task_key = resolve_breadcrumb_key("no_task", platform, config)
+        no_task_key = resolve_breadcrumb_key(
+            "no_task", platform, config, codex_surface, codex_provider
+        )
         breadcrumb = build_breadcrumb(
             None, "no_task", templates, breadcrumb_key=no_task_key
         )
     else:
         task_id, status, source = task
-        status_key = resolve_breadcrumb_key(status, platform, config)
+        status_key = resolve_breadcrumb_key(
+            status, platform, config, codex_surface, codex_provider
+        )
         source_for_breadcrumb = None if platform == "codex" else source
         breadcrumb = build_breadcrumb(
             task_id, status, templates, source_for_breadcrumb, breadcrumb_key=status_key
@@ -492,9 +588,8 @@ def main() -> int:
         parts: list[str] = []
         if task is None:
             parts.append(CODEX_NO_TASK_BOOTSTRAP_NOTICE)
-        parts.append(_codex_mode_banner(config))
-        if _resolve_codex_dispatch_mode(config) == "herdr":
-            parts.append(_codex_routing_banner(root, data))
+        parts.append(_codex_mode_banner(config, codex_provider))
+        parts.append(_codex_routing_banner(root, data, codex_surface))
         parts.append(breadcrumb)
         breadcrumb = "\n\n".join(parts)
 
