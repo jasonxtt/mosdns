@@ -19,7 +19,10 @@
 //! the frozen `dns-core` Stream framing helper through
 //! [`crate::tcp::write_frame`], the same one the plain-TCP and DoT paths use.
 //! No second framing codec exists. Pooling/reuse, retry/fallback, 0-RTT,
-//! resumption, cancellation, and H3 do not live here.
+//! resumption, and H3 do not live here. A local control decision that wins
+//! while the response is outstanding actively cancels the receive side with
+//! RFC 9250 §4.3 `DOQ_REQUEST_CANCELLED` before the typed local control error
+//! is returned.
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -42,6 +45,12 @@ use crate::{
 pub const DOQ_ALPN: &[u8] = b"doq";
 /// The exact ALPN offer for DNS-over-HTTP/3 (RFC 9114).
 pub const H3_ALPN: &[u8] = b"h3";
+
+/// RFC 9250 §4.3 `DOQ_REQUEST_CANCELLED`: the application error code the client
+/// sends on the request stream via `STOP_SENDING` when a local control decision
+/// (owner close, caller cancellation, or the shared absolute deadline) wins
+/// while the response is still outstanding.
+pub const DOQ_REQUEST_CANCELLED: u32 = 0x3;
 
 /// The largest complete DoQ stream message: the DNS wire upper bound plus the
 /// two-byte big-endian stream length prefix.
@@ -362,12 +371,41 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     // `classify_read_error` turns that into the typed missing-FIN protocol
     // error. The request frame was fully written, so a control error while
     // waiting is `Sent`.
-    let complete = race_control(&control, SideEffectState::Sent, deadline, async {
+    let read = race_control(&control, SideEffectState::Sent, deadline, async {
         recv.read_to_end(MAX_DOQ_MESSAGE)
             .await
             .map_err(classify_read_error)
     })
-    .await?;
+    .await;
+    let complete = match read {
+        Ok(complete) => complete,
+        Err(error) => {
+            // RFC 9250 §4.3: a local control decision that wins while the
+            // response is outstanding (owner close, caller cancellation, or the
+            // shared absolute deadline) must actively cancel the receive side
+            // with `DOQ_REQUEST_CANCELLED` before the original typed control
+            // error is returned. The error itself is returned unchanged: no
+            // string conversion, no new generic receive error, and no protocol
+            // read failure is masked by a stop.
+            if matches!(
+                error,
+                SecureError::Transport(
+                    UpstreamError::Closed(_)
+                        | UpstreamError::Cancelled(_)
+                        | UpstreamError::DeadlineExceeded(_)
+                )
+            ) {
+                let _ = recv.stop(quinn::VarInt::from_u32(DOQ_REQUEST_CANCELLED));
+                // The stop frame is queued on the connection; yield once so the
+                // transport driver transmits it before this exchange tears its
+                // endpoint down, since an unflushed cancellation is invisible to
+                // the peer. This is a scheduler yield to the I/O driver, not a
+                // sleep or a retry, and it adds no timeout of its own.
+                tokio::task::yield_now().await;
+            }
+            return Err(error);
+        }
+    };
 
     // A response shorter than a prefix cannot be framed; a zero-length body is
     // malformed. The peer's wire ID MUST be zero (RFC 9250 §4.2.1), checked
