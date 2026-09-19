@@ -15,11 +15,13 @@
 //! * the client observes the peer response-side STREAM FIN (`read_to_end`);
 //! * exactly one connection is accepted.
 //!
-//! Caller cancellation is exercised by a second fixture that withholds the
-//! response and waits for the client's receive-side `STOP_SENDING` frame, so
-//! the active `DOQ_REQUEST_CANCELLED` (0x3) cancel is proven on the wire.
-//! Error-code mapping beyond that local cancellation and pooling remain
-//! separate follow-up jobs.
+//! Caller cancellation is exercised by two fixtures that withhold the response
+//! and wait for the client's receive-side `STOP_SENDING` frame: one cancels
+//! while the client waits for the response, and one keeps the outbound write
+//! blocked on a tiny advertised flow-control window so the cancellation lands
+//! after `open_bi` but before the request FIN. Both prove the active
+//! `DOQ_REQUEST_CANCELLED` (0x3) cancel on the wire. Error-code mapping beyond
+//! that local cancellation and pooling remain separate follow-up jobs.
 
 mod fixtures;
 
@@ -58,6 +60,11 @@ const DOQ_PROTOCOL_ERROR: u32 = 0x2;
 /// send via `STOP_SENDING` when a local control decision cancels the
 /// outstanding response.
 const DOQ_REQUEST_CANCELLED: u32 = 0x3;
+/// A deliberately tiny advertised per-stream receive window, smaller than the
+/// framed query. The client's outbound write cannot fit, so it blocks on flow
+/// control until the server reads; the write-phase fixture never reads, so the
+/// blocked write is deterministic without any sleep.
+const FLOW_CONTROL_WINDOW: u32 = 8;
 
 /// Runs one bounded current-thread runtime for a single test step.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -126,6 +133,17 @@ fn server_config(set: &FixtureSet) -> quinn::ServerConfig {
     tls.alpn_protocols = vec![DOQ_ALPN.to_vec()];
     let quic = QuicServerConfig::try_from(tls).expect("a TLS1.3 config converts to QUIC");
     quinn::ServerConfig::with_crypto(Arc::new(quic))
+}
+
+/// Like [`server_config`] but advertises a deliberately tiny per-stream receive
+/// window, so a client write larger than the window blocks on flow control until
+/// the server reads the stream.
+fn server_config_with_window(set: &FixtureSet, stream_receive_window: u32) -> quinn::ServerConfig {
+    let mut config = server_config(set);
+    let mut transport = quinn::TransportConfig::default();
+    transport.stream_receive_window(quinn::VarInt::from_u32(stream_receive_window));
+    config.transport_config(Arc::new(transport));
+    config
 }
 
 /// What the server observed from the single accepted exchange.
@@ -307,7 +325,29 @@ impl HoldingDoqServer {
     /// cancels the receive side leaves the server waiting instead of hiding the
     /// omission behind a sleep.
     fn start(set: &FixtureSet) -> Self {
-        let config = server_config(set);
+        Self::start_with_window(set, None)
+    }
+
+    /// Starts a server that signals readiness as soon as it accepts the bidi
+    /// stream, before it reads or observes the request FIN, withholds the
+    /// response, and then waits on the stream's `stopped()` signal. The tiny
+    /// advertised receive window keeps the client's outbound write blocked on
+    /// flow control, so the cancellation deterministically lands in the write
+    /// phase rather than racing to the response read.
+    fn start_blocked_on_write(set: &FixtureSet) -> Self {
+        Self::start_with_window(set, Some(FLOW_CONTROL_WINDOW))
+    }
+
+    /// Starts a scripted holding server. `window` is `None` for the
+    /// response-wait fixture (readiness is the observed request-side FIN) and
+    /// `Some` for the write-phase fixture (readiness is the accepted bidi
+    /// stream, and the request is deliberately never read).
+    fn start_with_window(set: &FixtureSet, window: Option<u32>) -> Self {
+        let config = match window {
+            Some(window) => server_config_with_window(set, window),
+            None => server_config(set),
+        };
+        let reads_request = window.is_none();
         let (address_tx, address_rx) = std::sync::mpsc::channel::<SocketAddr>();
         let (ready_tx, ready_rx) = oneshot::channel::<()>();
         let (evidence_tx, evidence_rx) = oneshot::channel::<CancelEvidence>();
@@ -344,15 +384,27 @@ impl HoldingDoqServer {
                 let Ok((mut send, mut recv)) = connection.accept_bi().await else {
                     return;
                 };
-                // The client's request-side FIN is only observed when
-                // `read_to_end` returns, so this is the explicit readiness point
-                // the test waits for before cancelling.
-                let Ok(request) = recv.read_to_end(MAX_DOQ_MESSAGE).await else {
-                    return;
+                // Readiness is the phase boundary the test drives:
+                //   * response-wait fixture: the client's request-side FIN,
+                //     observed only when `read_to_end` returns.
+                //   * write-phase fixture: the accepted bidi stream itself,
+                //     before any request byte is read, so the tiny receive
+                //     window has not yet been widened and the client's write is
+                //     still blocked on flow control.
+                let request = if reads_request {
+                    let Ok(request) = recv.read_to_end(MAX_DOQ_MESSAGE).await else {
+                        return;
+                    };
+                    if ready_tx.send(()).is_err() {
+                        return;
+                    }
+                    request
+                } else {
+                    if ready_tx.send(()).is_err() {
+                        return;
+                    }
+                    Vec::new()
                 };
-                if ready_tx.send(()).is_err() {
-                    return;
-                }
 
                 // Deliberately withhold the response and wait on the stream's
                 // own receive-side stop observation. There is no sleep here: the
@@ -587,6 +639,87 @@ fn doq_caller_cancellation_stops_the_receive_side_with_request_cancelled() {
     zeroed[1] = 0;
     assert_eq!(evidence.request, framed(&zeroed));
     assert_eq!(&query[0..2], &[0xBE, 0xEF]);
+}
+
+#[test]
+fn doq_caller_cancellation_during_outbound_write_stops_the_receive_side() {
+    let set = FixtureSet::generate();
+    let mut server = HoldingDoqServer::start_blocked_on_write(&set);
+    let address = server.address;
+
+    let endpoint = DoqEndpoint::new(
+        address,
+        ServerIdentity::new("dns.example").expect("valid service identity"),
+    )
+    .expect("valid DoQ endpoint");
+    let upstream = DoqUpstream::new(
+        endpoint,
+        TlsPolicy::verified(set.root_store_a()).expect("verified TLS policy"),
+    )
+    .expect("DoQ owner constructs");
+
+    let query = query_wire(0xBEEF);
+    let cancellation = TransportCancellation::new();
+    let context = ExchangeContext::new(Instant::now() + EXCHANGE_DEADLINE, cancellation.clone());
+
+    let (error, evidence) = block_on(async {
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        let exchange = upstream.exchange(request, context);
+        tokio::pin!(exchange);
+
+        // The server signals as soon as it accepts the bidi stream, before it
+        // reads any request byte. The framed query cannot fit the tiny
+        // advertised receive window, so the outbound write is still blocked on
+        // flow control here and cannot race ahead to the response read.
+        tokio::select! {
+            ready = &mut server.request_ready => {
+                ready.expect("the server signals stream readiness");
+            }
+            result = &mut exchange => {
+                panic!("the exchange completed before cancellation: {result:?}");
+            }
+        }
+
+        cancellation.cancel();
+
+        let error = exchange
+            .await
+            .expect_err("caller cancellation terminates the outbound write");
+
+        // Keep the client runtime alive until the server's explicit observation
+        // arrives, instead of dropping the runtime the moment the exchange
+        // returns. The bounded wait is driven by the server's evidence, not by a
+        // sleep.
+        let evidence = timeout(TEST_TIMEOUT, &mut server.evidence)
+            .await
+            .expect("the server observes the receive-side stop within the bound")
+            .expect("the server sends its observations");
+
+        (error, evidence)
+    });
+
+    // The write may already have been partially accepted, so the phase's own
+    // existing state is `MaybeSent`; the typed error is returned unchanged with
+    // no string conversion and no new generic receive error.
+    assert_eq!(
+        error,
+        SecureError::Transport(UpstreamError::Cancelled(SideEffectState::MaybeSent))
+    );
+    // The RAII registration is released on the cancellation path too.
+    assert_eq!(upstream.in_flight_exchanges(), 0);
+
+    let accepts = server.accepts.load(Ordering::SeqCst);
+    server.handle.join().expect("server thread joined");
+    assert_eq!(accepts, 1, "exactly one connection is accepted");
+    assert_eq!(evidence.alpn.as_deref(), Some(DOQ_ALPN));
+    // A control decision that wins after `open_bi` must actively cancel the
+    // receive side even when the exchange never reached the response read. This
+    // is the write-phase analogue of the response-wait cancellation test.
+    assert_eq!(
+        evidence.stopped_code,
+        Some(u64::from(DOQ_REQUEST_CANCELLED)),
+        "the server observes receive-side STOP_SENDING with DOQ_REQUEST_CANCELLED"
+    );
 }
 
 #[test]
