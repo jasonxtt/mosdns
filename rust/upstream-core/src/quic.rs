@@ -19,10 +19,11 @@
 //! the frozen `dns-core` Stream framing helper through
 //! [`crate::tcp::write_frame`], the same one the plain-TCP and DoT paths use.
 //! No second framing codec exists. Pooling/reuse, retry/fallback, 0-RTT,
-//! resumption, and H3 do not live here. A local control decision that wins
-//! while the response is outstanding actively cancels the receive side with
-//! RFC 9250 §4.3 `DOQ_REQUEST_CANCELLED` before the typed local control error
-//! is returned.
+//! resumption, and H3 do not live here. Once the bidirectional stream is open,
+//! a local control decision that wins the outbound write, the request-side
+//! `finish`, or the response read actively cancels the receive side with RFC
+//! 9250 §4.3 `DOQ_REQUEST_CANCELLED` before the typed local control error is
+//! returned.
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -348,22 +349,28 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     // The outbound copy (not the caller's borrowed bytes) has its wire ID
     // zeroed; the two-byte prefix comes from the shared framing helper inside
     // `write_frame`. A control error during a potentially partial write is
-    // conservatively `MaybeSent`.
+    // conservatively `MaybeSent`. Once `open_bi` has succeeded, a local control
+    // decision must stop the receive side even though no request byte may have
+    // been written yet.
     let mut outbound = query.to_vec();
     zero_outbound_query_id(&mut outbound);
-    race_control(&control, SideEffectState::MaybeSent, deadline, async {
+    let written = race_control(&control, SideEffectState::MaybeSent, deadline, async {
         write_frame(&mut send, &outbound)
             .await
             .map_err(SecureError::from)
     })
-    .await?;
+    .await;
+    settle_after_open(&mut recv, written).await?;
 
-    // Request-side STREAM FIN: no more request bytes will be written.
-    race_control(&control, SideEffectState::MaybeSent, deadline, async {
+    // Request-side STREAM FIN: no more request bytes will be written. This is
+    // another post-`open_bi` phase, so a local control decision here stops the
+    // receive side too.
+    let finished = race_control(&control, SideEffectState::MaybeSent, deadline, async {
         send.finish()
             .map_err(|_| SecureError::from(UpstreamError::Send(SideEffectState::MaybeSent)))
     })
-    .await?;
+    .await;
+    settle_after_open(&mut recv, finished).await?;
 
     // Phase 4: read the one response up to the peer response-side STREAM FIN.
     // `read_to_end` only returns `Ok` once the FIN is observed, so its success
@@ -377,35 +384,7 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
             .map_err(classify_read_error)
     })
     .await;
-    let complete = match read {
-        Ok(complete) => complete,
-        Err(error) => {
-            // RFC 9250 §4.3: a local control decision that wins while the
-            // response is outstanding (owner close, caller cancellation, or the
-            // shared absolute deadline) must actively cancel the receive side
-            // with `DOQ_REQUEST_CANCELLED` before the original typed control
-            // error is returned. The error itself is returned unchanged: no
-            // string conversion, no new generic receive error, and no protocol
-            // read failure is masked by a stop.
-            if matches!(
-                error,
-                SecureError::Transport(
-                    UpstreamError::Closed(_)
-                        | UpstreamError::Cancelled(_)
-                        | UpstreamError::DeadlineExceeded(_)
-                )
-            ) {
-                let _ = recv.stop(quinn::VarInt::from_u32(DOQ_REQUEST_CANCELLED));
-                // The stop frame is queued on the connection; yield once so the
-                // transport driver transmits it before this exchange tears its
-                // endpoint down, since an unflushed cancellation is invisible to
-                // the peer. This is a scheduler yield to the I/O driver, not a
-                // sleep or a retry, and it adds no timeout of its own.
-                tokio::task::yield_now().await;
-            }
-            return Err(error);
-        }
-    };
+    let complete = settle_after_open(&mut recv, read).await?;
 
     // A response shorter than a prefix cannot be framed; a zero-length body is
     // malformed. The peer's wire ID MUST be zero (RFC 9250 §4.2.1), checked
@@ -464,6 +443,53 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     endpoint.wait_idle().await;
 
     Ok(SecureResponse::doq(body, request_id, header.truncated))
+}
+
+/// Whether a secure error is one of the three local control outcomes that can
+/// win a post-`open_bi` race: owner close, caller cancellation, or the shared
+/// absolute deadline.
+///
+/// The match is structural, so no peer-supplied value is parsed and no protocol
+/// or ordinary I/O failure is ever classified as a local cancellation.
+fn is_local_control_error(error: &SecureError) -> bool {
+    matches!(
+        error,
+        SecureError::Transport(
+            UpstreamError::Closed(_)
+                | UpstreamError::Cancelled(_)
+                | UpstreamError::DeadlineExceeded(_)
+        )
+    )
+}
+
+/// Applies the shared post-`open_bi` cleanup to one phase result.
+///
+/// Once `open_bi` has succeeded a `RecvStream` exists, so a local control
+/// decision (owner close, caller cancellation, or the shared absolute deadline)
+/// that wins the outbound write, the request-side `finish`, or the response read
+/// must actively cancel the receive side with RFC 9250 §4.3
+/// `DOQ_REQUEST_CANCELLED` before the original typed control error is returned.
+/// Putting the check here keeps those three phases from bypassing it.
+///
+/// The error is returned unchanged, preserving its original `SideEffectState`:
+/// no string conversion, no new generic receive error, and no protocol or
+/// ordinary I/O failure is masked by a stop.
+async fn settle_after_open<T>(
+    recv: &mut quinn::RecvStream,
+    result: Result<T, SecureError>,
+) -> Result<T, SecureError> {
+    if let Err(error) = &result {
+        if is_local_control_error(error) {
+            let _ = recv.stop(quinn::VarInt::from_u32(DOQ_REQUEST_CANCELLED));
+            // The stop frame is queued on the connection; yield once so the
+            // transport driver transmits it before this exchange tears its
+            // endpoint down, since an unflushed cancellation is invisible to
+            // the peer. This is a scheduler yield to the I/O driver, not a
+            // sleep or a retry, and it adds no timeout of its own.
+            tokio::task::yield_now().await;
+        }
+    }
+    result
 }
 
 /// Classifies a QUIC connect/setup error without string parsing.
