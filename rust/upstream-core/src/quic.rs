@@ -21,9 +21,15 @@
 //! No second framing codec exists. Pooling/reuse, retry/fallback, 0-RTT,
 //! resumption, and H3 do not live here. Once the bidirectional stream is open,
 //! a local control decision that wins the outbound write, the request-side
-//! `finish`, or the response read actively cancels the receive side with RFC
-//! 9250 §4.3 `DOQ_REQUEST_CANCELLED` before the typed local control error is
-//! returned.
+//! `finish`, or the response read calls `RecvStream::stop` with RFC 9250 §4.3
+//! `DOQ_REQUEST_CANCELLED` and then returns the original typed local control
+//! error unchanged. That call is best-effort local cancellation: Quinn 0.11.7
+//! exposes no awaitable `STOP_SENDING` flush or peer-acknowledgement future, so
+//! production makes no claim that the frame has reached, or was observed by,
+//! the peer. A debug-only test seam (`DoqStopPause`) lets an independent
+//! loopback test park the exchange after that `stop` so the real Quinn driver
+//! can transmit it before the peer is inspected; the seam is a test observation
+//! device, never a production flush mechanism.
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -52,6 +58,59 @@ pub const H3_ALPN: &[u8] = b"h3";
 /// (owner close, caller cancellation, or the shared absolute deadline) wins
 /// while the response is still outstanding.
 pub const DOQ_REQUEST_CANCELLED: u32 = 0x3;
+
+/// Debug-only deterministic observation pause for the post-`stop` DoQ
+/// cancellation seam.
+///
+/// **This is a test observation device, not a production flush mechanism.**
+/// Production never waits for `STOP_SENDING` to reach the peer: Quinn 0.11.7
+/// exposes no awaitable stop-flush or peer-acknowledgement future, and
+/// [`DoqUpstream::exchange`] returns its typed local control error as soon as
+/// [`quinn::RecvStream::stop`] has been called. The pause exists so an
+/// independent loopback integration test can keep the exchange future pending
+/// after that `stop` while the real Quinn driver runs on the caller's runtime,
+/// observe the peer's [`quinn::SendStream::stopped`] evidence, and only then
+/// release the exchange. It adds no sleep, no scheduler yield, and no timeout
+/// of its own.
+///
+/// The whole seam is compiled only under `debug_assertions`, so a release
+/// library contains no installer and no pause path.
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct DoqStopPause {
+    arrived: tokio::sync::Notify,
+    released: tokio::sync::Notify,
+}
+
+#[cfg(debug_assertions)]
+impl DoqStopPause {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Signals that the exchange parked after `stop`, then waits until the test
+    /// releases it. Interest in the release is registered before the arrival is
+    /// announced, so a release can never be missed.
+    async fn pause(&self) {
+        let released = self.released.notified();
+        tokio::pin!(released);
+        released.as_mut().enable();
+        self.arrived.notify_one();
+        released.await;
+    }
+
+    /// Waits until an exchange has parked on this pause.
+    pub async fn arrived(&self) {
+        self.arrived.notified().await;
+    }
+
+    /// Releases a parked exchange.
+    pub fn release(&self) {
+        self.released.notify_one();
+    }
+}
 
 /// The largest complete DoQ stream message: the DNS wire upper bound plus the
 /// two-byte big-endian stream length prefix.
@@ -122,6 +181,10 @@ pub struct DoqUpstream {
     tls: TlsPolicy,
     lifecycle: Lifecycle,
     cancellation: TransportCancellation,
+    /// Debug-only test observation seam: installed once, consumed by the next
+    /// exchange. Absent from release builds.
+    #[cfg(debug_assertions)]
+    stop_pause: std::sync::Mutex<Option<Arc<DoqStopPause>>>,
 }
 
 impl DoqUpstream {
@@ -143,7 +206,30 @@ impl DoqUpstream {
             tls,
             lifecycle: Lifecycle::new(),
             cancellation: TransportCancellation::new(),
+            #[cfg(debug_assertions)]
+            stop_pause: std::sync::Mutex::new(None),
         })
+    }
+
+    /// Installs the debug-only deterministic post-`stop` observation pause for
+    /// an independent loopback test.
+    ///
+    /// This is a **test observation seam**, not a production flush mechanism.
+    /// The first install wins and is consumed by the next exchange; later
+    /// installs are ignored. The method and the pause itself exist only under
+    /// `debug_assertions`, so a release library has no way to pause an
+    /// exchange waiting for a peer to observe `STOP_SENDING`. A poisoned lock
+    /// is recovered rather than propagated, so this cannot panic.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub fn install_stop_pause(&self, pause: Arc<DoqStopPause>) {
+        let mut slot = self
+            .stop_pause
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.is_none() {
+            *slot = Some(pause);
+        }
     }
 
     /// The validated DoQ endpoint (numeric dial plus service identity).
@@ -202,8 +288,8 @@ impl DoqUpstream {
     /// Returns [`SecureError::Tls`] when the QUIC handshake fails (always
     /// `NotSent`), and [`SecureError::Transport`] wrapping the exact typed
     /// [`UpstreamError`] for connect, control, send, receive, and DNS-response
-    /// failures. A response stream that was aborted instead of completing with
-    /// a normal STREAM FIN is rejected with
+    /// failures. A response stream that ends without a normal STREAM FIN -
+    /// aborted by the peer or lost with the connection - is rejected with
     /// [`SecureError::DoqProtocolMissingResponseFin`] (`Sent`), and a stream
     /// that carries a trailing second response after the first declared frame
     /// is rejected with [`SecureError::DoqProtocolTrailingResponse`] (`Sent`);
@@ -238,6 +324,12 @@ impl DoqUpstream {
             deadline: context.deadline(),
             caller_cancellation: context.cancellation(),
             owner_cancellation: self.cancellation.clone(),
+            #[cfg(debug_assertions)]
+            stop_pause: self
+                .stop_pause
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
             _in_flight: in_flight,
         })
     }
@@ -256,6 +348,10 @@ struct PreparedDoq<'a> {
     deadline: Instant,
     caller_cancellation: TransportCancellation,
     owner_cancellation: TransportCancellation,
+    /// Debug-only test observation seam consumed by this exchange. Release
+    /// builds have no such field.
+    #[cfg(debug_assertions)]
+    stop_pause: Option<Arc<DoqStopPause>>,
     /// Held only for its RAII release; never read.
     _in_flight: crate::InFlightGuard<'a>,
 }
@@ -282,6 +378,52 @@ impl PreparedDoq<'_> {
             ExchangeContext::new(self.deadline, self.caller_cancellation.clone()),
             self.owner_cancellation.clone(),
         )
+    }
+
+    /// Applies the shared post-`open_bi` cancellation to one phase result.
+    ///
+    /// Once `open_bi` has succeeded a `RecvStream` exists, so a local control
+    /// decision (owner close, caller cancellation, or the shared absolute
+    /// deadline) that wins the outbound write, the request-side `finish`, or the
+    /// response read calls `RecvStream::stop` with RFC 9250 §4.3
+    /// `DOQ_REQUEST_CANCELLED` before the original typed control error is
+    /// returned. Putting the check here keeps those three phases from bypassing
+    /// it.
+    ///
+    /// The `stop` return value is deliberately discarded: it only reports
+    /// whether the stream was already closed, and a `ClosedStream` must never
+    /// replace the original typed control error or change its `SideEffectState`.
+    /// The call is best-effort local cancellation only. Quinn 0.11.7 exposes no
+    /// awaitable `STOP_SENDING` flush or peer-acknowledgement future, so this
+    /// method does not - and must not - wait for the peer to observe the stop:
+    /// no `yield_now`, no sleep, no short timeout, no polling loop, and no
+    /// connection/endpoint close plus `wait_idle` stand-in for a barrier. The
+    /// control error is returned immediately, and no `commit_final_response`
+    /// gate is bypassed.
+    ///
+    /// The error is returned unchanged, preserving its original
+    /// `SideEffectState`: no string conversion, no new generic receive error,
+    /// and no protocol or ordinary I/O failure is masked by a stop.
+    async fn settle_after_open<T>(
+        &self,
+        recv: &mut quinn::RecvStream,
+        result: Result<T, SecureError>,
+    ) -> Result<T, SecureError> {
+        if let Err(error) = &result {
+            if is_local_control_error(error) {
+                let _ = recv.stop(quinn::VarInt::from_u32(DOQ_REQUEST_CANCELLED));
+                #[cfg(debug_assertions)]
+                if let Some(pause) = self.stop_pause.as_deref() {
+                    // Debug-only test observation seam: park the exchange so
+                    // the independent loopback test can watch the real Quinn
+                    // driver transmit the stop before it releases this
+                    // exchange. It is not part of the production cancellation
+                    // contract.
+                    pause.pause().await;
+                }
+            }
+        }
+        result
     }
 }
 
@@ -360,7 +502,7 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
             .map_err(SecureError::from)
     })
     .await;
-    settle_after_open(&mut recv, written).await?;
+    prepared.settle_after_open(&mut recv, written).await?;
 
     // Request-side STREAM FIN: no more request bytes will be written. This is
     // another post-`open_bi` phase, so a local control decision here stops the
@@ -370,21 +512,21 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
             .map_err(|_| SecureError::from(UpstreamError::Send(SideEffectState::MaybeSent)))
     })
     .await;
-    settle_after_open(&mut recv, finished).await?;
+    prepared.settle_after_open(&mut recv, finished).await?;
 
     // Phase 4: read the one response up to the peer response-side STREAM FIN.
     // `read_to_end` only returns `Ok` once the FIN is observed, so its success
-    // is the FIN evidence; a peer reset aborts the read instead and
-    // `classify_read_error` turns that into the typed missing-FIN protocol
-    // error. The request frame was fully written, so a control error while
-    // waiting is `Sent`.
+    // is the FIN evidence; a peer reset or a lost connection aborts the read
+    // instead and `classify_read_error` turns either into the typed missing-FIN
+    // protocol error. The request frame was fully written, so a control error
+    // while waiting is `Sent`.
     let read = race_control(&control, SideEffectState::Sent, deadline, async {
         recv.read_to_end(MAX_DOQ_MESSAGE)
             .await
             .map_err(classify_read_error)
     })
     .await;
-    let complete = settle_after_open(&mut recv, read).await?;
+    let complete = prepared.settle_after_open(&mut recv, read).await?;
 
     // A response shorter than a prefix cannot be framed; a zero-length body is
     // malformed. The peer's wire ID MUST be zero (RFC 9250 §4.2.1), checked
@@ -437,7 +579,9 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     )?;
 
     // One-shot teardown: close the connection and the endpoint so no socket or
-    // connection survives the exchange. No pooling, no idle set, no reuse.
+    // connection survives the exchange. No pooling, no idle set, no reuse. This
+    // runs only after the response was committed, so it is not - and must not
+    // be used as - a cancellation-flush barrier for `STOP_SENDING`.
     connection.close(0u32.into(), b"");
     endpoint.close(0u32.into(), b"");
     endpoint.wait_idle().await;
@@ -460,36 +604,6 @@ fn is_local_control_error(error: &SecureError) -> bool {
                 | UpstreamError::DeadlineExceeded(_)
         )
     )
-}
-
-/// Applies the shared post-`open_bi` cleanup to one phase result.
-///
-/// Once `open_bi` has succeeded a `RecvStream` exists, so a local control
-/// decision (owner close, caller cancellation, or the shared absolute deadline)
-/// that wins the outbound write, the request-side `finish`, or the response read
-/// must actively cancel the receive side with RFC 9250 §4.3
-/// `DOQ_REQUEST_CANCELLED` before the original typed control error is returned.
-/// Putting the check here keeps those three phases from bypassing it.
-///
-/// The error is returned unchanged, preserving its original `SideEffectState`:
-/// no string conversion, no new generic receive error, and no protocol or
-/// ordinary I/O failure is masked by a stop.
-async fn settle_after_open<T>(
-    recv: &mut quinn::RecvStream,
-    result: Result<T, SecureError>,
-) -> Result<T, SecureError> {
-    if let Err(error) = &result {
-        if is_local_control_error(error) {
-            let _ = recv.stop(quinn::VarInt::from_u32(DOQ_REQUEST_CANCELLED));
-            // The stop frame is queued on the connection; yield once so the
-            // transport driver transmits it before this exchange tears its
-            // endpoint down, since an unflushed cancellation is invisible to
-            // the peer. This is a scheduler yield to the I/O driver, not a
-            // sleep or a retry, and it adds no timeout of its own.
-            tokio::task::yield_now().await;
-        }
-    }
-    result
 }
 
 /// Classifies a QUIC connect/setup error without string parsing.
@@ -519,16 +633,18 @@ fn classify_handshake_failure(_error: quinn::ConnectionError) -> SecureError {
 ///
 /// A message above the bound is [`UpstreamError::FrameTooLarge`]. A peer reset
 /// proves the response stream was aborted instead of completing with a normal
-/// STREAM FIN, so it is the typed [`SecureError::DoqProtocolMissingResponseFin`]
-/// protocol error; every other read failure is a terminal receive failure with
-/// the request already sent. The reset outcome is matched structurally, so no
-/// peer-supplied error code is ever parsed as text.
+/// STREAM FIN, and a lost connection proves the response stream/connection
+/// terminated before that FIN, so both are the typed
+/// [`SecureError::DoqProtocolMissingResponseFin`] protocol error; every other
+/// read failure is a terminal receive failure with the request already sent.
+/// The outcomes are matched structurally, so no peer-supplied error code or
+/// connection-close text is ever parsed.
 fn classify_read_error(error: quinn::ReadToEndError) -> SecureError {
     match error {
         quinn::ReadToEndError::TooLong => SecureError::from(UpstreamError::FrameTooLarge),
-        quinn::ReadToEndError::Read(quinn::ReadError::Reset(_)) => {
-            SecureError::DoqProtocolMissingResponseFin
-        }
+        quinn::ReadToEndError::Read(
+            quinn::ReadError::Reset(_) | quinn::ReadError::ConnectionLost(_),
+        ) => SecureError::DoqProtocolMissingResponseFin,
         quinn::ReadToEndError::Read(_) => {
             SecureError::from(UpstreamError::Receive(SideEffectState::Sent))
         }

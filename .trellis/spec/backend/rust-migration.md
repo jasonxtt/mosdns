@@ -592,6 +592,108 @@ let prepared = upstream.prepare_exchange(request, context)?;
 // Slice0 has performed only pure validation; later slices own socket I/O.
 ```
 
+## Scenario: Phase 4 DoQ post-open cancellation and response-FIN contract
+
+### 1. Scope / Trigger
+
+Use this contract for a fresh one-shot DoQ exchange after `open_bi` succeeds.
+It captures the cancellation lifecycle and the missing-response-FIN boundary
+because Quinn 0.11.7 queues `STOP_SENDING` but exposes no awaitable flush or
+peer-observation future.
+
+### 2. Signatures
+
+- `DoqUpstream::exchange(...) -> Future<Output = Result<SecureResponse, SecureError>>`
+  owns one `RecvStream` after `open_bi` and returns the existing typed error
+  vocabulary with its original `SideEffectState`.
+- `PreparedDoq::settle_after_open(&mut RecvStream, Result<T, SecureError>)`
+  is the single post-open local-control settlement path for request write,
+  request FIN, and response read.
+- `RecvStream::stop(VarInt::from_u32(DOQ_REQUEST_CANCELLED))` uses
+  `DOQ_REQUEST_CANCELLED = 0x3`; its `ClosedStream` result is not allowed to
+  replace the original local-control error.
+- `classify_read_error(ReadToEndError)` maps both
+  `ReadError::Reset(_)` and `ReadError::ConnectionLost(_)` without a normal
+  response STREAM FIN to `DoqProtocolMissingResponseFin`.
+
+### 3. Contracts
+
+- After `open_bi`, owner close, caller cancellation, or the shared deadline
+  that wins any write/FIN/read phase must call `RecvStream::stop(0x3)` and
+  immediately return the original typed control error; it must not bypass the
+  final response commit gate.
+- Production code must not claim that `STOP_SENDING` was flushed or observed by
+  the peer. Do not substitute `yield_now`, sleep, polling, a short timeout, or
+  `connection.close`/`endpoint.close` plus `wait_idle` as a transport barrier.
+- A debug-only `DoqStopPause` seam may park an integration-test exchange after
+  the production `stop` call while the real Quinn driver runs. It is an
+  observation seam, not a production flush mechanism, and must be absent from
+  release builds.
+- A response is committed only after a normal response STREAM FIN. Reset or
+  connection loss before that FIN is terminal `DoqProtocolMissingResponseFin`
+  with `Sent`; no retry, fallback, or commit is permitted. Connection close
+  after a successfully committed response is ordinary one-shot teardown, not
+  cancellation synchronization.
+
+### 4. Validation & Error Matrix
+
+- local control before `open_bi` -> existing connect/control error,
+  `NotSent`, and no `RecvStream::stop` call;
+- local control after `open_bi` -> one best-effort `stop(0x3)`, unchanged typed
+  control error and side-effect state;
+- `stop` returns `ClosedStream` -> ignore that transport result and preserve the
+  original typed control error;
+- response reset or connection loss before normal FIN ->
+  `DoqProtocolMissingResponseFin`, `Sent`, no commit and no retry;
+- release build -> no pause installer or pause path; tests must not depend on
+  the debug-only seam;
+- test observation -> use explicit readiness/arrival/release handshakes and
+  bounded waits, never equal sleeps or scheduler-yield ordering.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `settle_after_open` is called for all three phases, calls `stop(0x3)`
+  on local control, and returns the original error while an integration test
+  observes `SendStream::stopped()` through the debug seam.
+- Base: a normal response FIN reaches the commit gate, then one-shot teardown
+  closes the connection and endpoint.
+- Bad: close the endpoint immediately after `stop` and call `wait_idle` to
+  imply that the peer saw `STOP_SENDING`, or classify `ConnectionLost` as a
+  generic receive error and commit bytes without FIN.
+
+### 6. Tests Required
+
+- Keep separate response-wait and write-phase cancellation tests; assert peer
+  stop code `0x3`, original typed errors, `in_flight == 0`, and one accepted
+  connection.
+- Add deterministic complete-response and partial-response connection-loss
+  fixtures; assert missing-FIN, `Sent`, no commit, request FIN, and restored
+  wire-ID behavior. Retain the stream-reset fixture.
+- Run focused Slice 1 tests, repeated cancellation stress, debug/release seam
+  checks, upstream-core all-target tests, workspace tests, fmt, clippy, and
+  `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+recv.stop(REQUEST_CANCELLED);
+connection.close(0.into(), b"");
+endpoint.close(0.into(), b"");
+endpoint.wait_idle().await; // not a STOP_SENDING flush or peer ACK
+```
+
+#### Correct
+
+```rust
+let result = race_control(...).await;
+if is_local_control_error(&result_error) {
+    let _ = recv.stop(DOQ_REQUEST_CANCELLED.into());
+}
+result // preserve the original typed error and side-effect state
+```
+
 ## Scenario: pure Rust Phase 4 endpoint-resolution foundation
 
 ### 1. Scope / Trigger
