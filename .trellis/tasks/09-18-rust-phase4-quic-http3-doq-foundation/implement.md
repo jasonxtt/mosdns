@@ -196,3 +196,47 @@ git diff --check
   wiring, or any other task. The task stays `in_progress`; the Slice 0 exit
   gate (locked manifest/tree/MSRV audit) and every later slice each need
   separate explicit user authorization.
+
+## Slice 0 exit-gate review record — 2026-09-19
+
+- Reviewer: user-selected ChatGPT web project conversation for MosDNS Phase 4
+  upstream review (same conversation as the pre-I/O rounds).
+- Round 1: `FINAL: FAIL` on
+  `111687b8050fb7abbecf005a3e5dca15cc885252` (base `d65f497`; 3 files,
+  +294/-1) — P1-1 (`futures-executor 0.3.34` in the lock undispositioned,
+  violates design §2 "no extra async runtimes" as written), P2-1 (false
+  "stay at default features" / `futures-io`-as-adapter wording), P2-2
+  ("pure-additive" wording vs one edited pre-existing lock line).
+  Remediated in commit `a9b0cc7` (source-backed `futures-executor`
+  disposition: single path via h3-quinn's un-narrowed `futures` dep,
+  `std`-only executor surface, `thread-pool` absent with zero feature-tree
+  lines, zero executor refs in h3-quinn/h3 sources, quinn `block_on`
+  tokio test-only; corrected feature wording; socket2 0.6.5
+  disambiguation note; `Cargo.lock` untouched).
+- Round 2: `FINAL: FAIL` on
+  `a9b0cc7bc943a3179693afa73947cee1581df94e` (base `111687b`; exactly 1
+  commit, exactly 2 files, +57/-13). P0=0, P1=0 — P1-1 substantively
+  remediated, P2-2 closed (sole removed lock line is `- "socket2",`,
+  no version line removed). Two P2 residuals: (a) item 4 "activated quinn
+  features are exactly runtime-tokio + rustls-ring" still false — h3-quinn
+  0.0.10 requests quinn with `features = ["futures-io"]`, so unification
+  also activates quinn's `futures-io`; (b) "The single `runtime.block_on`
+  hit" understates — exact quinn 0.11.7 has five
+  (`src/tests.rs:55,155,177,563,596`), all tokio test-only.
+  Remediated in commit `75dcb74` (resolved set =
+  runtime-tokio + rustls-ring + futures-io, with `futures-io` characterized
+  as h3-quinn-requested poll adapters on quinn stream types
+  `recv_stream.rs:476-477` / `send_stream.rs:248-249`; "five hits" with
+  exact lines; `Cargo.toml` comment distinguishes manifest request from
+  resolved set; `Cargo.lock` untouched).
+- Round 3: `FINAL: PASS` on
+  `75dcb7415a68dc006cef21e61d11d2236d134bed` (base `a9b0cc7`; exactly 1
+  commit, exactly 2 files, +20/-9; `Cargo.lock` blob SHA identical before
+  and after). P0=0, P1=0, P2=0. Reviewer verified against exact upstream
+  tags (h3-quinn `2dc3412`, quinn `d8302df`): `futures-io` gates only the
+  two adapter impls; all five `block_on`s are tokio test-only under
+  `#[cfg(test)] mod tests`; scope check passes.
+- Boundary: this PASS closes the Slice 0 exit-gate remediation only. It
+  does not authorize Slice 1 socket/handshake I/O, production wiring, or
+  any other task. The task stays `in_progress`; Slice 1 and every later
+  slice each need separate explicit user authorization.
