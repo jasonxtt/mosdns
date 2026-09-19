@@ -26,8 +26,9 @@
 //! Negative coverage: non-200, wrong/missing media type, non-identity encoding,
 //! a declared or actual body above the DNS maximum, an incomplete body,
 //! response trailers after a complete body (both with a stream FIN and withheld
-//! without one), too many response headers, a peer that closes before any
-//! response head, and an ALPN/TLS/identity handshake failure that must be
+//! without one), too many response headers, a peer that closes after the request
+//! FIN before any response head (a `Sent` receive failure per `design.md` §7),
+//! and an ALPN/TLS/identity handshake failure that must be
 //! `NotSent` with no fallback to DoH/HTTP-2/HTTP-1 (a TCP listener sharing the
 //! QUIC port observes nothing).
 //!
@@ -1103,7 +1104,7 @@ fn doh3_too_many_response_headers_is_rejected() {
 }
 
 #[test]
-fn doh3_close_before_any_response_head_is_not_reported_as_sent() {
+fn doh3_close_after_the_request_fin_before_any_response_head_is_sent() {
     block_on(async {
         let set = FixtureSet::generate();
         let server = Doh3Server::start_closing_without_response(&set);
@@ -1112,16 +1113,20 @@ fn doh3_close_before_any_response_head_is_not_reported_as_sent() {
         let error = exchange_owned(&upstream, &query_wire(0x9014), open_context())
             .await
             .expect_err("a connection closed before a head is a failure");
+        // The fixture only closes after it has read the request through its
+        // send-side FIN, and the client itself already finished the request
+        // send side before it awaited the response head. `design.md` §7
+        // therefore classifies this ordinary post-FIN read failure as a `Sent`
+        // receive failure, not the weaker `MaybeSent` carried by the H1/H2
+        // `DohProtocolError::ResponseHeadNotReceived` variant (whose request
+        // may still be in doubt). The absence of a head is still terminal and
+        // never commits.
         assert_eq!(
             error,
-            SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
-            "a close before any head must be the head-not-received case"
+            SecureError::Transport(UpstreamError::Receive(SideEffectState::Sent)),
+            "a post-request-FIN head loss is an ordinary Sent receive failure"
         );
-        assert_eq!(
-            error.side_effect(),
-            SideEffectState::MaybeSent,
-            "an absent response head is conservatively MaybeSent"
-        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
         assert_eq!(upstream.in_flight_exchanges(), 0);
         server.join();
     });

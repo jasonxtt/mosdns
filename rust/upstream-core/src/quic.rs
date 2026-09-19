@@ -55,10 +55,14 @@
 //! disguised as a peer failure; the boundary and its evidence are documented on
 //! [`run_h3_request`]. Peer h3 stream terminations are mapped structurally
 //! (never by parsing a reason string) to [`DohProtocolError::PeerStreamTerminated`]
-//! with a closed [`PeerStreamError`] category; a DoQ nonzero peer wire ID is the
-//! typed [`SecureError::DoqProtocolNonzeroResponseId`] protocol error, and a DoQ
-//! reset with any RFC 9250 code remains the terminal missing-response-FIN error.
-//! None of these ever commits.
+//! with a closed [`PeerStreamError`] category from the RFC 9114 §8.1 HTTP/3 code
+//! space, with RFC 9114 §8's unexpected/unknown handling applied; a DoQ nonzero
+//! peer wire ID is the typed [`SecureError::DoqProtocolNonzeroResponseId`]
+//! protocol error, and a DoQ reset with any RFC 9250 code remains the terminal
+//! missing-response-FIN error. An ordinary h3 response-head failure after the
+//! request send side finished is a `Sent` receive failure, never the weaker
+//! `MaybeSent` of the HTTP/1.1 and HTTP/2 head-not-received variant. None of
+//! these ever commits.
 
 use std::future::poll_fn;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -1250,10 +1254,16 @@ fn classify_h3_send_error(_error: h3::error::StreamError) -> SecureError {
 /// A field section above the advertised 16 KiB bound is the head-size violation
 /// the DoH contract names. An explicit peer stream termination is mapped
 /// structurally to the closed [`PeerStreamError`] category, so no raw code,
-/// reason, or payload crosses the boundary. Every other head-phase outcome - the
-/// stream or connection ending, or an h3 message error - is conservatively
-/// [`DohProtocolError::ResponseHeadNotReceived`] (`MaybeSent`) rather than
-/// claiming the request definitely reached the peer.
+/// reason, or payload crosses the boundary.
+///
+/// Every other head-phase outcome - the h3 stream or connection ending, or an h3
+/// message error - is observed only after this exchange wrote the request head
+/// and its `stream.finish()` succeeded, so `design.md` §7 classifies it as a
+/// completed write followed by a failed read: a typed receive failure with
+/// [`SideEffectState::Sent`]. It is deliberately *not*
+/// [`DohProtocolError::ResponseHeadNotReceived`], whose conservative `MaybeSent`
+/// state exists for the HTTP/1.1 and HTTP/2 drivers, where the request hand-off
+/// may still be in doubt.
 fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
     match error {
         h3::error::StreamError::HeaderTooBig { .. } => {
@@ -1264,7 +1274,7 @@ fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
                 code: classify_peer_stream_code(code),
             })
         }
-        _ => SecureError::DohProtocol(DohProtocolError::ResponseHeadNotReceived),
+        _ => SecureError::Transport(UpstreamError::Receive(SideEffectState::Sent)),
     }
 }
 
@@ -1286,22 +1296,54 @@ fn classify_h3_body_error(error: h3::error::StreamError) -> SecureError {
     }
 }
 
-/// Maps an HTTP/3 or QUIC-numbered peer stream-termination code to the closed
+/// Maps an HTTP/3 peer stream-termination code to the closed
 /// [`PeerStreamError`] category.
 ///
 /// The match is on the numeric `h3::error::Code` value, never on a formatted
 /// reason, so a peer cannot influence the classification through `Display`. The
-/// RFC 9114 §8.1 HTTP/3 codes (`0x100`-`0x10c`) and their RFC 9000/9250-numbered
-/// counterparts (`0x0`-`0x3`, which the h3 layer passes through unchanged when a
-/// transport reset uses the low registry) map to the same four categories; an
-/// unrecognized code is [`PeerStreamError::Other`]. The raw code and any reason
-/// text are intentionally discarded.
+/// h3 layer passes the raw QUIC stream error code through unchanged, so the
+/// classification separates three cases:
+///
+/// * The four RFC 9114 §8.1 HTTP/3 codes this client reviews -
+///   `H3_NO_ERROR` (`0x100`), `H3_GENERAL_PROTOCOL_ERROR` (`0x101`),
+///   `H3_INTERNAL_ERROR` (`0x102`), and `H3_REQUEST_CANCELLED` (`0x10c`) - map
+///   to their matching categories.
+/// * Another code *defined* by RFC 9114 §8.1 or RFC 9204 is a genuine
+///   HTTP/3-family termination this four-category review does not name (for
+///   example `H3_STREAM_CREATION_ERROR`, `0x103`), so it is reported as the
+///   unclassified [`PeerStreamError::Other`] rather than mislabelled.
+/// * Everything else is an unknown code or an error code used in an unexpected
+///   context - the whole RFC 9000 §20.1 transport code space below `0x100`,
+///   which includes the DoQ `0x0`-`0x3` values, and the reserved
+///   `0x1f * N + 0x21` grease space RFC 9114 §8.1 defines for exactly this
+///   case. RFC 9114 §8 requires such a code to be treated as equivalent to
+///   `H3_NO_ERROR`, so it maps to [`PeerStreamError::NoError`] and is never
+///   reinterpreted as an H3 internal, protocol, or cancellation error.
+///
+/// A termination never commits regardless of category: completion requires the
+/// response to end with an h3 stream FIN, which a reset or `STOP_SENDING` is
+/// not. The raw code and any reason text are intentionally discarded.
 fn classify_peer_stream_code(code: h3::error::Code) -> PeerStreamError {
     match code.value() {
-        0x0 | 0x100 => PeerStreamError::NoError,
-        0x1 | 0x102 => PeerStreamError::InternalError,
-        0x2 | 0x101 => PeerStreamError::ProtocolError,
-        0x3 | 0x10c => PeerStreamError::RequestCancelled,
-        _ => PeerStreamError::Other,
+        0x100 => PeerStreamError::NoError,
+        0x101 => PeerStreamError::ProtocolError,
+        0x102 => PeerStreamError::InternalError,
+        0x10c => PeerStreamError::RequestCancelled,
+        value if is_defined_h3_code(value) => PeerStreamError::Other,
+        _ => PeerStreamError::NoError,
     }
+}
+
+/// Whether `value` is one of the HTTP/3 or QPACK error codes defined by
+/// RFC 9114 §8.1 or RFC 9204.
+///
+/// The four codes this client maps to its own [`PeerStreamError`] categories are
+/// matched before this predicate, so their overlap with the ranges below is
+/// unreachable. Only the codes these two documents define are treated as
+/// *known* other errors. Any other value - including a transport error code, a
+/// reserved grease code, or a code registered by a later extension - stays
+/// unknown to this client and falls under RFC 9114 §8's `H3_NO_ERROR`
+/// equivalence.
+const fn is_defined_h3_code(value: u64) -> bool {
+    matches!(value, 0x103..=0x110 | 0x200..=0x202)
 }

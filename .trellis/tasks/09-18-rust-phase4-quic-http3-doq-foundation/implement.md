@@ -536,3 +536,102 @@ error[E0599]: no variant named `PeerStreamTerminated` found for enum
   worktree (`8ffd519` base) for the parent to inspect, commit, and push; the
   unrelated dirty `.trellis/spec/...`, `.trellis/workflow.md`, `.DS_Store`, and
   `09-19-ci-rust-foundation-lint-doc-path-filter` files were preserved.
+
+## Slice 3 remediation record — 2026-09-20
+
+- Executor: DSH Web, single executor with no sub-task split, no second session,
+  and no MCP. The parent controller retains diff inspection, the quality gates,
+  and the external review round.
+- Context: the original Slice 3 (`07c2a2f`, "feat(rust): complete Slice 3 QUIC
+  control mapping") was committed and pushed by the parent flow on top of
+  `8ffd519`. GPT Web's formal review of `8ffd519..07c2a2f` returned
+  `FINAL: FAIL`, `P0=0`, `P1=2`, `P2=1`. This record covers only the two P1
+  remediations; Slice 4 is not started, and no resolver/pool/retry/fallback/host
+  wiring, Cargo manifest/`Cargo.lock`, or other transport is touched.
+- Worktree state: this remediation is left **uncommitted and unpushed** in the
+  current worktree for the parent to inspect and commit. `task.json` stays
+  `in_progress`. Nothing here claims a commit or push.
+
+### P1-1 — a completed-request-FIN DoH3 head failure is `Sent`
+
+- RED (before the fix): the corrected/new loopback tests failed against
+  `07c2a2f` production code:
+  `slice3_quic::doh3_response_head_connection_loss_after_request_fin_is_sent_and_never_commits`
+  and `slice2_doh3::doh3_close_after_the_request_fin_before_any_response_head_is_sent`
+  both reported `left: DohProtocol(ResponseHeadNotReceived)`,
+  `right: Transport(Receive(Sent))`. Both failures landed in
+  `classify_h3_head_error`'s `_` arm, proving the ordinary connection-loss path
+  was reaching the `MaybeSent` `ResponseHeadNotReceived` variant after the
+  request send side had finished.
+- Fix: `classify_h3_head_error`'s catch-all arm now returns
+  `SecureError::Transport(UpstreamError::Receive(SideEffectState::Sent))` - the
+  existing typed vocabulary, exactly what the DoQ read path already uses for an
+  ordinary post-write read failure. `HeaderTooBig` and `RemoteTerminate` keep
+  their existing mappings. The change is scoped to the H3 response-head phase:
+  `DohProtocolError::ResponseHeadNotReceived` and its `MaybeSent` state are
+  untouched and remain the HTTP/1.1/HTTP/2 head-not-received case (their request
+  hand-off and head wait are fused, so delivery is genuinely in doubt). The
+  variant doc now records that DoH3 does not produce it.
+- `Slice2` close-before-head contract: the DoH3 case in `slice2_doh3.rs` is the
+  exact post-request-FIN head phase - the fixture reads the request through its
+  send-side FIN and only then closes - so its expectation is corrected from
+  `ResponseHeadNotReceived`/`MaybeSent` to a `Sent` receive failure and renamed
+  to `doh3_close_after_the_request_fin_before_any_response_head_is_sent`. The
+  contract that an absent head is a typed terminal failure, never a false
+  success, and leaves no residue is preserved.
+- New evidence: `slice3_quic`'s `H3Mode::CloseAfterRequest` server reads the
+  request FIN and closes the real QUIC connection without any response head; the
+  test asserts `Transport(Receive(Sent))`, `Sent`, one accepted connection,
+  zero in-flight residue, and an observed request FIN.
+
+### P1-2 — the DoH3 peer code mapping uses only the HTTP/3 code space
+
+- RED (before the fix): the new wire-level reset test failed on the DoQ-shaped
+  low codes, e.g. `0x1` → `left: PeerStreamTerminated { code: InternalError }`,
+  `right: PeerStreamTerminated { code: NoError }`.
+- Fix: `classify_peer_stream_code` no longer aliases the DoQ low codes onto H3
+  categories. It maps only the RFC 9114 §8.1 HTTP/3 codes
+  `H3_NO_ERROR (0x100)` → `NoError`, `H3_GENERAL_PROTOCOL_ERROR (0x101)` →
+  `ProtocolError`, `H3_INTERNAL_ERROR (0x102)` → `InternalError`,
+  `H3_REQUEST_CANCELLED (0x10c)` → `RequestCancelled`. Another code *defined* by
+  RFC 9114 §8.1 / RFC 9204 (for example `0x103`, `0x200`) is the unclassified
+  `Other`. Every other value - the RFC 9000 §20.1 transport code space below
+  `0x100`, the reserved `0x1f * N + 0x21` grease space, and any unknown code - is
+  treated as equivalent to `H3_NO_ERROR` per RFC 9114 §8 and maps to `NoError`,
+  so a DoQ `0x2` reset is never reported as an H3 protocol error.
+  `PeerStreamError` docs, `design.md` §7, and PRD R9 were updated to match, and
+  state the RFC unknown/unexpected rule explicitly.
+- New evidence: `slice3_quic`'s
+  `doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized` drives
+  real wire-level H3 stream resets for `0x0`/`0x1`/`0x2`/`0x3` and the reserved
+  grease code `0x119` (all `NoError`, per RFC 9114 §8) and for `0x103`/`0x200`
+  (both `Other`), asserting `Sent`, no commit, and exactly one accepted
+  connection per case. DoQ's own `0x0`-`0x3` reset semantics are unchanged and
+  still covered by
+  `doq_peer_reset_codes_are_terminal_missing_fin_without_commit`.
+- Boundary preserved: active h3 `H3_REQUEST_CANCELLED` is still **not**
+  attempted (h3-quinn 0.0.10 `stop_sending` panics after a dropped read future);
+  local owner close / caller cancel / deadline still return their typed control
+  errors unchanged and retain their precedence; DoQ keeps its Slice 1 active
+  `STOP_SENDING(DOQ_REQUEST_CANCELLED)`.
+- Unrelated dirty files (`.trellis/spec/...`, `.trellis/workflow.md`,
+  `.DS_Store`, `09-19-ci-rust-foundation-lint-doc-path-filter`) were preserved;
+  no `git reset`/`checkout`/`clean`, no `git add -A`, no commit, no push.
+
+### Gates (final worktree)
+
+- Focused debug `slice0_quic`/`slice0_contract`/`slice1_doq`/`slice2_doh3`/
+  `slice3_quic`/`slice2_doh`/`slice3_doh`: all passed, 0 failed (`slice3_quic`
+  23/23, `slice2_doh3` 22/22); the same focused set under `--release`: all
+  passed, 0 failed.
+- `cargo test -p mosdns-upstream-core --all-targets --all-features --locked`:
+  0 failed; `cargo test --workspace --all-targets --all-features --locked`:
+  **720 passed / 0 failed** across 39 test binaries.
+- `cargo fmt --all -- --check`: clean. `cargo clippy --workspace --all-targets
+  --all-features --locked -- -D warnings`: clean. `git diff --check`: clean.
+- `python3 ./.trellis/scripts/task.py validate
+  rust-phase4-quic-http3-doq-foundation`: `All validations passed` (the
+  `rust-migration.md` size warning is pre-existing and informational).
+- No production `sleep`, private timer, or hidden timeout was added; the only
+  waits in the new tests are the existing fixture's bounded `TEST_TIMEOUT` and
+  explicit `oneshot`/connection signals.
