@@ -121,10 +121,14 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
     [workflow-state:no_task]      → no active task; before Phase 1
     [workflow-state:planning]     → all of Phase 1 (status='planning')
     [workflow-state:planning-inline] → Codex inline variant of Phase 1
+    [workflow-state:planning-dsh]    → Codex Desktop/App MCP DSH variant of Phase 1
+    [workflow-state:planning-auto]   → Codex unresolved-surface variant of Phase 1
     [workflow-state:in_progress]  → Phase 2 + Phase 3.2-3.4
                                     (status stays 'in_progress' from
                                     task.py start until task.py archive)
     [workflow-state:in_progress-inline] → Codex inline variant of Phase 2/3
+    [workflow-state:in_progress-dsh]    → Codex MCP DSH variant of Phase 2/3
+    [workflow-state:in_progress-auto]   → Codex unresolved-surface variant of Phase 2/3
     [workflow-state:completed]    → currently DEAD: cmd_archive flips
                                     status and moves the dir in the same
                                     call, so the resolver loses the
@@ -213,6 +217,21 @@ Multi-deliverable scope: consider a parent task plus independently verifiable ch
 Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-before-dev`.
 [/workflow-state:planning-inline]
 
+[workflow-state:planning-dsh]
+Load `trellis-brainstorm`; stay in planning.
+Finish and review the planning artifacts before implementation. Desktop/App
+auto policy resolves only to the MCP DSH provider; it does not select a DSH
+worker or reviewer. Resolve any missing conversation-scoped targets together
+before execution, or explicitly choose `executor=codex` / `reviewer=codex`.
+[/workflow-state:planning-dsh]
+
+[workflow-state:planning-auto]
+Load `trellis-brainstorm`; stay in planning.
+The Codex surface or host route is unresolved. Finish the planning artifacts,
+then ask for an explicit executor and reviewer; do not infer CLI, Desktop,
+Herdr, DSH, a pane, a worker, or a reviewer from weak signals.
+[/workflow-state:planning-auto]
+
 [workflow-state:planning-herdr]
 Load `trellis-brainstorm`; stay in planning.
 Finish and review all required planning artifacts before `task.py start`.
@@ -260,6 +279,26 @@ responsible for clean-worktree safety, exact diff inspection/apply, verification
 commit/push, and the bounded same-conversation root-review loop described in
 `.trellis/spec/backend/quality-guidelines.md`.
 [/workflow-state:in_progress-inline]
+
+[workflow-state:in_progress-dsh]
+Flow: `trellis-before-dev` -> choose one behavior -> red test -> green
+implementation -> refactor while green -> parent-owned `trellis-check` and
+validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
+For MCP DSH execution, preserve the clean isolated worktree, bounded waits,
+exact diff inspection, explicit apply, parent verification/commit, and the
+same-conversation root-review loop from
+`.trellis/spec/backend/quality-guidelines.md`. The host default never selects
+a worker or reviewer; explicit `executor=codex` remains available.
+[/workflow-state:in_progress-dsh]
+
+[workflow-state:in_progress-auto]
+Resolve the Codex surface and conversation-scoped executor/reviewer targets
+before implementation or review. Unknown or conflicting host evidence is
+fail-closed: ask one combined question and never silently fall back to Herdr,
+MCP DSH, a native sub-agent, inline execution, or a reviewer.
+After explicit routing, follow the selected provider's contract, then run
+`trellis-check`, `trellis-update-spec`, validation, and the commit gate.
+[/workflow-state:in_progress-auto]
 
 [workflow-state:in_progress-herdr]
 Flow: `trellis-before-dev` -> verify conversation routing -> dispatch one bounded
@@ -321,6 +360,16 @@ When a user request matches one of these intents inside an active task, route fi
 - Repeated debugging -> `trellis-break-loop`; spec updates -> `trellis-update-spec`.
 
 [/codex-inline, Kilo, Antigravity, Devin]
+
+[codex-dsh, codex-auto]
+
+- Planning or unclear requirements -> `trellis-brainstorm`.
+- Before editing or dispatch -> resolve the detected surface and generic
+  executor/reviewer targets; use the provider-specific safety contract.
+- After editing -> `trellis-check`; repeated debugging -> `trellis-break-loop`;
+  spec updates -> `trellis-update-spec`.
+
+[/codex-dsh, codex-auto]
 
 [codex-herdr]
 
@@ -414,6 +463,14 @@ Do the research in the main session directly and write findings into `{TASK_DIR}
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
+[codex-dsh, codex-auto]
+
+Do read-only research in the controller session and persist findings under
+`{TASK_DIR}/research/`; provider/resource selection is not required until
+implementation dispatch or external review.
+
+[/codex-dsh, codex-auto]
+
 [codex-herdr]
 
 Do read-only research in the controller session and persist findings under
@@ -486,6 +543,15 @@ Skip this step only when both files already have real curated entries.
 Skip this step. Context is loaded directly by the `trellis-before-dev` skill in Phase 2.
 
 [/codex-inline, Kilo, Antigravity, Devin]
+
+[codex-dsh, codex-auto]
+
+Resolve the generic routing target before implementation dispatch when the
+selected provider requires a resource. Keep `implement.jsonl` and
+`check.jsonl` aligned with the task artifacts when the selected route uses
+sub-agents; inline self-execution may skip those manifests.
+
+[/codex-dsh, codex-auto]
 
 [codex-herdr]
 
@@ -605,6 +671,14 @@ The platform prelude auto-handles the context load requirement:
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
+[codex-dsh, codex-auto]
+
+Use one behavior slice at a time. For MCP DSH, the parent owns exact diff
+inspection, explicit apply, verification, and commit; for an unresolved
+surface, obtain an explicit route before editing.
+
+[/codex-dsh, codex-auto]
+
 [codex-herdr]
 
 1. Load `trellis-before-dev` and the active task artifacts in the controller.
@@ -650,6 +724,14 @@ Load the `trellis-check` skill and verify the code per its guidance:
 If issues are found → fix → re-check, until green.
 
 [/codex-inline, Kilo, Antigravity, Devin]
+
+[codex-dsh, codex-auto]
+
+Load `trellis-check` and perform the full-scope quality check. Preserve the
+provider contract, verify routing targets independently, and fix findings in
+the parent session before the final commit gate.
+
+[/codex-dsh, codex-auto]
 
 [codex-herdr]
 

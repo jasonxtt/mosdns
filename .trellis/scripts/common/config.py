@@ -169,6 +169,13 @@ DEFAULT_SESSION_COMMIT_MESSAGE = "chore: record journal"
 DEFAULT_MAX_JOURNAL_LINES = 2000
 DEFAULT_SESSION_AUTO_COMMIT = True
 DEFAULT_CODEX_DISPATCH_MODE = "auto"
+DEFAULT_CODEX_HOST_ROUTES = {
+    "cli": "herdr",
+    "desktop": "dsh",
+    "unknown": "ask",
+}
+VALID_CODEX_POLICY_MODES = {"auto", "ask", "codex", "dsh", "herdr", "inline"}
+VALID_CODEX_PROVIDERS = {"ask", "codex", "dsh", "herdr"}
 
 CONFIG_FILE = "config.yaml"
 
@@ -251,10 +258,11 @@ def get_codex_dispatch_mode(repo_root: Path | None = None) -> str:
     Default is ``auto``, which dispatches Trellis sub-agents and uses native
     context injection with a child-side fallback. ``inline`` runs in the main
     session. ``herdr`` selects a user-chosen external Herdr pane while Codex
-    remains controller. ``sub-agent`` remains an alias for ``auto``.
+    remains controller. ``dsh`` selects the MCP DSH provider, and ``ask`` is
+    a fail-closed policy. ``sub-agent`` remains an alias for ``auto``.
 
-    Invalid explicit configuration falls back to ``inline`` rather than
-    unexpectedly dispatching a sub-agent. This CLI-facing parser is the only
+    Invalid explicit configuration falls back to ``ask`` rather than
+    unexpectedly selecting an executor. This CLI-facing parser is the only
     place that emits a warning for invalid values; hook readers fail safely
     without producing per-turn warning noise.
     """
@@ -264,22 +272,54 @@ def get_codex_dispatch_mode(repo_root: Path | None = None) -> str:
         return DEFAULT_CODEX_DISPATCH_MODE
     if not isinstance(codex, dict):
         print(
-            f"[WARN] invalid codex config: {codex!r}; using inline",
+            f"[WARN] invalid codex config: {codex!r}; using ask",
             file=sys.stderr,
         )
-        return "inline"
+        return "ask"
 
     raw = codex.get("dispatch_mode", DEFAULT_CODEX_DISPATCH_MODE)
     mode = str(raw).strip().lower()
-    if mode in ("auto", "inline", "herdr"):
+    if mode in VALID_CODEX_POLICY_MODES:
         return mode
     if mode == "sub-agent":
         return "auto"
     print(
-        f"[WARN] invalid codex.dispatch_mode value: {raw!r}; using inline",
+        f"[WARN] invalid codex.dispatch_mode value: {raw!r}; using ask",
         file=sys.stderr,
     )
-    return "inline"
+    return "ask"
+
+
+def get_codex_host_routes(repo_root: Path | None = None) -> dict[str, str]:
+    """Return the configurable Codex surface-to-provider policy.
+
+    Route names identify provider classes only. They never identify a
+    concrete Herdr pane, DSH worker, or reviewer conversation.
+    """
+    result = dict(DEFAULT_CODEX_HOST_ROUTES)
+    config = _load_config(repo_root)
+    codex = config.get("codex")
+    if not isinstance(codex, dict):
+        return result
+    routes = codex.get("host_routes")
+    if not isinstance(routes, dict):
+        return result
+    for surface in result:
+        raw = routes.get(surface)
+        if raw is None:
+            continue
+        provider = str(raw).strip().lower()
+        if provider == "inline":
+            provider = "codex"
+        if provider in VALID_CODEX_PROVIDERS:
+            result[surface] = provider
+        else:
+            print(
+                f"[WARN] invalid codex.host_routes.{surface} value: {raw!r}; using ask",
+                file=sys.stderr,
+            )
+            result[surface] = "ask"
+    return result
 
 
 DEFAULT_CONTEXT_INJECTION_MAX_FILE_BYTES = 32768

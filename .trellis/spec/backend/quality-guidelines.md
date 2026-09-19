@@ -38,10 +38,11 @@ conversation review the work. It applies to planning documents and to
 implementation changes that must be reviewed through GitHub.
 
 The local Codex task is the controller; execution follows the conversation's
-selected mode (inline, native sub-agent, or Herdr executor). The selected
-ChatGPT web conversation is the plan owner and root acceptance gate. The user
-remains the authority for which conversation is used and whether the next
-phase may begin.
+selected mode (self/inline, native sub-agent, MCP DSH, or a Herdr executor).
+The selected reviewer may be a ChatGPT web conversation or the current Codex
+conversation when the user explicitly chooses self-review. The user remains
+the authority for which executor/reviewer is used and whether the next phase
+may begin.
 
 ### 2. Roles and handoff contract
 
@@ -49,10 +50,12 @@ phase may begin.
   result; it controls the selected executor, independently verifies the scoped
   diff, checks the pushed commit, and reports the exact commit to the reviewer
   conversation. In explicit inline mode, Codex also performs the edits.
-- The ChatGPT web conversation supplies the plan/review decision. It must
-  review the GitHub commit and repository evidence, return an explicit PASS or
-  FAIL, and identify the next authorized scope. It is not an authorization to
-  silently start later phases.
+- The selected reviewer supplies the plan/review decision. A ChatGPT web
+  conversation must review the GitHub commit and repository evidence; an
+  explicitly selected current-Codex reviewer performs the same evidence-based
+  self-review locally. Either must return an explicit PASS or FAIL and identify
+  the next authorized scope. Review is not authorization to silently start
+  later phases.
 - The user selects or confirms the destination conversation. Conversations may
   change between review rounds, but Codex must ask the user for confirmation
   before sending work to a different conversation or when the destination is
@@ -166,6 +169,98 @@ scoped commit, send its GitHub evidence, read the explicit reviewer result,
 repeat bounded fixes until PASS, then stop and wait for the user's next-phase
 decision.
 
+## Host-aware Codex routing and explicit self-selection
+
+When `codex.dispatch_mode: auto` is active, detect the execution surface from
+strong host evidence only: Codex CLI maps to the Herdr provider and Codex
+Desktop/App maps to MCP DSH. The repository policy selects a provider class,
+not a Herdr pane, DSH worker, model, or reviewer. Persist concrete targets
+under the current Codex conversation identity and never infer them from pane
+position, terminal title, cwd, executable presence, or recency.
+
+The user may override either role in the conversation with an explicit target,
+including `executor=codex` and `reviewer=codex`. That means the current Codex
+session owns implementation and the independent self-review gate for this
+authorized task; it is not an implicit fallback when an external provider is
+missing. A reviewer replacement or invalidation changes only the reviewer
+slot, and an executor failure changes only the executor slot. Unknown or
+conflicting surface evidence resolves to `ask` and must be handled with one
+combined selection question before implementation/review.
+
+### 1. Scope / Trigger
+
+This contract applies when the Codex CLI/Desktop distinction, conversation
+target state, hook banner, workflow filtering, or provider policy changes. It
+is an infrastructure boundary, not MosDNS runtime behavior.
+
+### 2. Signatures
+
+- `detect_surface(environ: dict | None = None, *, explicit: str | None = None)`
+  returns `SurfaceEvidence(kind, source, evidence, reason)`.
+- `resolve_codex_provider(repo_root, surface, state: dict | None = None)` returns
+  a provider class (`codex`, `herdr`, `dsh`, `ask`, or `unsupported`) and never
+  a concrete pane, worker, model, or conversation.
+- `codex_routing.py set-executor --provider <name> --reference <opaque-ref>`
+  and `set-reviewer` persist only the named conversation slot; `set-surface`
+  persists an explicit `cli`, `desktop`, or `unknown` override.
+
+### 3. Contracts
+
+- Routing state is v2 JSON at `.trellis/.runtime/routing/<context>.json` with
+  `surface`, `executor`, and `reviewer` slots. Each target has `provider`,
+  `reference`, `label`, and `selected_by`; provider metadata is optional.
+- Strong host evidence is name-only: `CODEX_SURFACE`/
+  `CODEX_HOST_SURFACE`, `CODEX_APP_TOOLS_PIPE_PATH` (Desktop/App), and
+  `CODEX_CLI_SURFACE`/`CODEX_CLI` (CLI). Values and paths are never emitted.
+- `auto` maps `cli -> herdr`, `desktop -> dsh`, and `unknown -> ask` through
+  `codex.host_routes`; a valid persisted executor override takes precedence.
+- `executor=codex` and `reviewer=codex` mean explicit current-session
+  self-execution/self-review, not an implicit fallback.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| App-only marker | `desktop`, evidence contains marker name |
+| CLI-only marker | `cli`, evidence contains marker name |
+| Missing or conflicting markers | `unknown`, provider `ask`, combined prompt |
+| Invalid policy/provider | `ask`/`unsupported`; never choose another target |
+| Missing Herdr pane or invalid DSH/reviewer target | Invalidate only the affected slot |
+| Valid v1 state | Migrate in memory to v2; preserve identity/metadata |
+
+### 5. Good/Base/Bad Cases
+
+- Good: Desktop evidence resolves to DSH, the user selects
+  `dsh:provider-managed`, and the parent still owns diff inspection and review.
+- Base: unknown evidence leaves both slots unresolved and asks one combined
+  question while allowing planning/read-only investigation.
+- Bad: choose the only Herdr pane, infer CLI from missing App state, or use a
+  fixed ChatGPT URL/title as the reviewer.
+
+### 6. Tests Required
+
+- Surface fixtures assert `desktop`, `cli`, `unknown`, conflicting evidence,
+  and marker names without private values.
+- State tests assert v1 migration, generic provider/reference targets,
+  Codex self targets, independent invalidation, and provider fail-closedness.
+- Hook/workflow tests assert Desktop does not emit Herdr, explicit Codex
+  overrides use inline workflow content, and missing slots are combined.
+- CLI smoke checks assert `discover`, `set-*`, `clear-*`, `validate`, and
+  `show` use the same conversation-scoped state.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+Treat `CODEX_APP_TOOLS_PIPE_PATH`'s absence as proof of CLI, auto-select a
+Herdr pane/DSH worker, or silently replace an unavailable reviewer.
+
+#### Correct
+
+Record only strong marker names, resolve the provider class, request explicit
+provider/reference targets, and let `executor=codex` / `reviewer=codex` be a
+deliberate user override that follows the inline self-review gate.
+
 ### 9. Slice closure versus task completion
 
 An explicit reviewer `PASS` closes only the slice it names. Record the closure in
@@ -245,8 +340,10 @@ push, start a later slice, or change the project's review destination.
 
 ### 1. Scope / Trigger
 
-Use this routing contract when `codex.dispatch_mode` is `herdr`. The executor
-is a pane explicitly selected by the user for the current Codex conversation;
+Use this routing contract when `codex.dispatch_mode` is `herdr`, or when the
+host-aware `auto` policy resolves a Codex CLI conversation to the Herdr
+provider. The executor is a pane explicitly selected by the user for the
+current Codex conversation;
 it may have any position, agent label, title, state, or initial cwd. Discovery
 makes panes candidates and never authorizes one automatically.
 

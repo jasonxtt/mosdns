@@ -141,29 +141,43 @@ def _platform_matches(platform: str, block_names: list[str]) -> bool:
     return False
 
 
-def resolve_effective_platform(platform: str, config: dict) -> str:
+def resolve_effective_platform(
+    platform: str,
+    config: dict,
+    surface: str | dict | None = None,
+    provider: str | None = None,
+) -> str:
     """Map ``codex`` to a dispatch-mode-namespaced virtual platform name.
 
     When ``--platform codex`` is passed, return ``"codex-sub-agent"`` by
-    default, ``"codex-inline"`` for inline mode, or ``"codex-herdr"`` for
-    conversation-scoped external Herdr execution configured in
-    ``.trellis/config.yaml``. ``sub-agent`` remains an alias for ``auto``.
+    default for compatibility. When a detected ``surface`` is supplied,
+    ``auto`` resolves to the configured host provider and returns
+    ``codex-herdr``, ``codex-dsh``, or ``codex-auto``. Explicit ``inline``,
+    ``herdr``, and ``dsh`` modes remain stable.
     ``filter_platform`` then surfaces blocks whose marker lists include the
     namespaced name (e.g. ``[codex-sub-agent, ...]``, ``[codex-inline, Kilo,
     Antigravity, Devin]``, or ``[codex-herdr]``).
 
     Native Codex context injection supports the ``auto`` default. Invalid
-    explicit values fall back to ``inline`` safely; this renderer deliberately
-    does not warn because it can run in normal CLI output flows.
+    explicit values resolve to ``codex-auto`` safely; this renderer
+    deliberately does not warn because it can run in normal CLI output flows.
 
     Other platforms are returned unchanged.
     """
     if platform == "codex":
+        if provider == "codex":
+            return "codex-inline"
+        if provider == "herdr":
+            return "codex-herdr"
+        if provider == "dsh":
+            return "codex-dsh"
+        if provider in {"ask", "unsupported"}:
+            return "codex-auto"
         mode = "auto"
         codex_cfg = config.get("codex") if isinstance(config, dict) else None
         if codex_cfg is not None:
             if not isinstance(codex_cfg, dict):
-                mode = "inline"
+                mode = "ask"
             else:
                 cfg_mode = str(codex_cfg.get("dispatch_mode", mode)).strip().lower()
                 if cfg_mode == "inline":
@@ -172,11 +186,36 @@ def resolve_effective_platform(platform: str, config: dict) -> str:
                     mode = "herdr"
                 elif cfg_mode in ("auto", "sub-agent"):
                     mode = "auto"
+                elif cfg_mode == "dsh":
+                    mode = "dsh"
+                elif cfg_mode == "ask":
+                    mode = "ask"
                 else:
-                    mode = "inline"
+                    mode = "ask"
         if mode == "auto":
-            return "codex-sub-agent"
-        return "codex-herdr" if mode == "herdr" else "codex-inline"
+            if surface is None:
+                return "codex-sub-agent"
+            if isinstance(surface, dict):
+                surface_kind = str(surface.get("kind", "unknown"))
+            else:
+                surface_kind = str(surface)
+            routes = codex_cfg.get("host_routes", {}) if isinstance(codex_cfg, dict) else {}
+            defaults = {"cli": "herdr", "desktop": "dsh", "unknown": "ask"}
+            route = routes.get(surface_kind, defaults.get(surface_kind, "ask")) if isinstance(routes, dict) else defaults.get(surface_kind, "ask")
+            if route == "herdr":
+                return "codex-herdr"
+            if route == "dsh":
+                return "codex-dsh"
+            if route in ("codex", "inline"):
+                return "codex-inline"
+            return "codex-auto"
+        if mode in ("codex", "inline"):
+            return "codex-inline"
+        if mode == "herdr":
+            return "codex-herdr"
+        if mode == "dsh":
+            return "codex-dsh"
+        return "codex-auto"
     return platform
 
 
