@@ -24,10 +24,12 @@
 //!   of head, with a complete bounded body of at most 65535 bytes.
 //!
 //! Negative coverage: non-200, wrong/missing media type, non-identity encoding,
-//! a declared or actual body above the DNS maximum, an incomplete body, too many
-//! response headers, a peer that closes before any response head, and an
-//! ALPN/TLS/identity handshake failure that must be `NotSent` with no fallback
-//! to DoH/HTTP-2/HTTP-1 (a TCP listener sharing the QUIC port observes nothing).
+//! a declared or actual body above the DNS maximum, an incomplete body,
+//! response trailers after a complete body (both with a stream FIN and withheld
+//! without one), too many response headers, a peer that closes before any
+//! response head, and an ALPN/TLS/identity handshake failure that must be
+//! `NotSent` with no fallback to DoH/HTTP-2/HTTP-1 (a TCP listener sharing the
+//! QUIC port observes nothing).
 //!
 //! Control coverage is limited to the Slice2 ownership contract: caller
 //! cancellation, owner close, a dropped exchange future, and an exchange after
@@ -121,10 +123,14 @@ struct ScriptedH3Response {
     body: Vec<u8>,
     /// The `content-length` header, omitted when `None`.
     declared_length: Option<u64>,
+    /// Trailing header fields sent after the body, in order. Empty means the
+    /// response carries no trailers.
+    trailers: Vec<(String, String)>,
 }
 
 impl ScriptedH3Response {
-    /// A `200` response carrying `body` as `application/dns-message`.
+    /// A `200` response carrying `body` as `application/dns-message`, with no
+    /// trailers.
     fn ok_dns(body: Vec<u8>) -> Self {
         let declared_length = u64::try_from(body.len()).expect("body length fits u64");
         Self {
@@ -133,6 +139,7 @@ impl ScriptedH3Response {
             extra_headers: Vec::new(),
             body,
             declared_length: Some(declared_length),
+            trailers: Vec::new(),
         }
     }
 }
@@ -141,6 +148,10 @@ impl ScriptedH3Response {
 enum Behavior {
     /// Answer the request with a clone of this response.
     Respond(Box<ScriptedH3Response>),
+    /// Send the response head, body, and trailers, signal `ready`, then leave
+    /// the stream open (no FIN, no reset) until `release` fires, and only then
+    /// finish it.
+    RespondTrailersThenFinishOnRelease(Box<ScriptedH3Response>),
     /// Read the request and then withhold every response byte until the client
     /// closes the connection.
     Hold,
@@ -201,8 +212,8 @@ fn h3_server_config(set: &FixtureSet) -> quinn::ServerConfig {
     )
 }
 
-/// Sends one scripted HTTP/3 response on `stream`.
-async fn send_scripted(
+/// Writes the response head, body, and any trailers, without ending the stream.
+async fn send_h3_parts(
     stream: &mut h3::server::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
     response: &ScriptedH3Response,
 ) -> Result<(), h3::error::StreamError> {
@@ -221,6 +232,26 @@ async fn send_scripted(
     if !response.body.is_empty() {
         stream.send_data(Bytes::from(response.body.clone())).await?;
     }
+    if !response.trailers.is_empty() {
+        let mut trailers = hyper::HeaderMap::new();
+        for (key, value) in &response.trailers {
+            trailers.append(
+                hyper::header::HeaderName::from_bytes(key.as_bytes())
+                    .expect("valid trailer field name"),
+                hyper::header::HeaderValue::from_str(value).expect("valid trailer field value"),
+            );
+        }
+        stream.send_trailers(trailers).await?;
+    }
+    Ok(())
+}
+
+/// Sends one scripted HTTP/3 response and ends the stream.
+async fn send_scripted(
+    stream: &mut h3::server::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+    response: &ScriptedH3Response,
+) -> Result<(), h3::error::StreamError> {
+    send_h3_parts(stream, response).await?;
     stream.finish().await
 }
 
@@ -242,6 +273,26 @@ impl Doh3Server {
             Behavior::Respond(Box::new(response)),
             1,
             None,
+            None,
+            false,
+        )
+    }
+
+    /// Starts a server that sends one response head, body, and trailers, signals
+    /// `ready`, and leaves the stream open until `release` fires before sending
+    /// the response FIN.
+    fn start_trailers_then_release(
+        set: &FixtureSet,
+        response: ScriptedH3Response,
+        ready: oneshot::Sender<()>,
+        release: oneshot::Receiver<()>,
+    ) -> Self {
+        Self::start_scripted(
+            h3_server_config(set),
+            Behavior::RespondTrailersThenFinishOnRelease(Box::new(response)),
+            1,
+            Some(ready),
+            Some(release),
             false,
         )
     }
@@ -249,7 +300,14 @@ impl Doh3Server {
     /// Starts a server that reads one request, signals `ready`, then withholds
     /// every response byte until the client closes.
     fn start_holding(set: &FixtureSet, ready: oneshot::Sender<()>) -> Self {
-        Self::start_scripted(h3_server_config(set), Behavior::Hold, 1, Some(ready), false)
+        Self::start_scripted(
+            h3_server_config(set),
+            Behavior::Hold,
+            1,
+            Some(ready),
+            None,
+            false,
+        )
     }
 
     /// Starts a server that reads one request, then closes the connection
@@ -259,6 +317,7 @@ impl Doh3Server {
             h3_server_config(set),
             Behavior::CloseWithoutResponse,
             1,
+            None,
             None,
             false,
         )
@@ -271,6 +330,7 @@ impl Doh3Server {
             quic_server_config(set.good.cert.clone(), set.good.key.clone_key(), alpn),
             Behavior::CloseWithoutResponse,
             1,
+            None,
             None,
             true,
         )
@@ -287,6 +347,7 @@ impl Doh3Server {
             Behavior::CloseWithoutResponse,
             1,
             None,
+            None,
             false,
         )
     }
@@ -299,6 +360,7 @@ impl Doh3Server {
             Behavior::Respond(Box::new(response)),
             2,
             None,
+            None,
             false,
         )
     }
@@ -310,6 +372,7 @@ impl Doh3Server {
         behavior: Behavior,
         expected_connections: usize,
         mut ready: Option<oneshot::Sender<()>>,
+        mut release: Option<oneshot::Receiver<()>>,
         probe_tcp: bool,
     ) -> Self {
         // Reserving the port over TCP and then binding QUIC over UDP on the same
@@ -419,15 +482,31 @@ impl Doh3Server {
                         }
                     }
 
-                    if let Some(sender) = ready.take() {
-                        let _ = sender.send(());
-                    }
-
                     match &behavior {
                         Behavior::Respond(response) => {
+                            if let Some(sender) = ready.take() {
+                                let _ = sender.send(());
+                            }
                             let _ = send_scripted(&mut stream, response).await;
                         }
-                        Behavior::Hold | Behavior::CloseWithoutResponse => {}
+                        Behavior::RespondTrailersThenFinishOnRelease(response) => {
+                            let _ = send_h3_parts(&mut stream, response).await;
+                            // The whole head, body, and trailers are now sent;
+                            // the test can observe that the stream is still
+                            // open before releasing the FIN.
+                            if let Some(sender) = ready.take() {
+                                let _ = sender.send(());
+                            }
+                            if let Some(receiver) = release.take() {
+                                let _ = receiver.await;
+                            }
+                            let _ = stream.finish().await;
+                        }
+                        Behavior::Hold | Behavior::CloseWithoutResponse => {
+                            if let Some(sender) = ready.take() {
+                                let _ = sender.send(());
+                            }
+                        }
                     }
                     evidence.push(H3Evidence {
                         alpn,
@@ -894,6 +973,106 @@ fn doh3_incomplete_body_is_a_typed_protocol_error() {
         );
         assert_eq!(error.side_effect(), SideEffectState::Sent);
         server.join();
+    });
+}
+
+#[test]
+fn doh3_response_trailers_after_a_complete_body_are_not_a_success() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let id = 0x9019;
+        // The body is a complete, dns-core-valid DNS response and the stream is
+        // finished after the trailers. The h3 0.0.8 client returns `Ok(None)`
+        // from `recv_data` as soon as it buffers a trailing HEADERS frame, so an
+        // implementation that treats that `None` as the end of the response
+        // would commit this as a success even though the frozen DoH response
+        // contract never contains trailers.
+        let mut response = ScriptedH3Response::ok_dns(response_wire(id, 3));
+        response.trailers = vec![("x-check".to_owned(), "1".to_owned())];
+        let server = Doh3Server::start(&set, response);
+        let upstream = verified_owner(&set, server.address, "https://dns.example/dns-query");
+
+        let error = exchange_owned(&upstream, &query_wire(id), open_context())
+            .await
+            .expect_err("a response carrying trailers must not be committed as a success");
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::IncompleteBody)
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+        // No residue and no false success: one connection, one request, and the
+        // owner is drained when the exchange future returns.
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        let (accepts, evidence) = server.join();
+        assert_eq!(accepts, 1, "a rejected response opens no second connection");
+        assert_eq!(evidence.len(), 1, "exactly one request is sent");
+    });
+}
+
+#[test]
+fn doh3_trailers_without_a_stream_fin_do_not_complete_the_body() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let id = 0x901a;
+        // The peer sends the same complete body plus trailers but withholds the
+        // stream FIN. The body bytes alone must not complete the response: the
+        // client has to keep waiting for the real stream end, and only the FIN
+        // can turn the buffered trailers into the typed incomplete-body error.
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let mut response = ScriptedH3Response::ok_dns(response_wire(id, 4));
+        response.trailers = vec![("x-check".to_owned(), "1".to_owned())];
+        let server = Doh3Server::start_trailers_then_release(&set, response, ready_tx, release_rx);
+        let upstream = Arc::new(verified_owner(
+            &set,
+            server.address,
+            "https://dns.example/dns-query",
+        ));
+        let query = query_wire(id);
+        let mut exchange = {
+            let upstream = Arc::clone(&upstream);
+            let query = query.clone();
+            tokio::spawn(async move {
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                upstream.exchange(request, open_context()).await
+            })
+        };
+
+        // The response head, body, and trailers are on the wire; only the FIN is
+        // missing.
+        timeout(TEST_TIMEOUT, ready_rx)
+            .await
+            .expect("the server sends the body and trailers within the bound")
+            .expect("the readiness signal is delivered");
+
+        // A complete-looking body with trailers but no stream end must not be
+        // committed, so the exchange is still pending within the bounded window.
+        assert!(
+            timeout(ACCEPT_PROBE, &mut exchange).await.is_err(),
+            "a body followed by trailers and no FIN must not become a committed success"
+        );
+
+        release_tx
+            .send(())
+            .expect("the server is waiting for the release");
+        let error = timeout(TEST_TIMEOUT, exchange)
+            .await
+            .expect("the exchange returns once the stream ends")
+            .expect("exchange task joined")
+            .expect_err("a response carrying trailers must not be committed as a success");
+        assert_eq!(
+            error,
+            SecureError::DohProtocol(DohProtocolError::IncompleteBody)
+        );
+        assert_eq!(error.side_effect(), SideEffectState::Sent);
+
+        // No residue and no false success: one connection, one request, and the
+        // owner is drained when the exchange future returns.
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        let (accepts, evidence) = server.join();
+        assert_eq!(accepts, 1, "a rejected response opens no second connection");
+        assert_eq!(evidence.len(), 1, "exactly one request is sent");
     });
 }
 

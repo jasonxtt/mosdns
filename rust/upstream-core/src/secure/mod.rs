@@ -14,7 +14,12 @@
 //!   it with TLS against the service URL identity, and then performs exactly one
 //!   HTTPS `GET` over HTTP/1.1 or HTTP/2 with scoped child-task ownership.
 //!
-//! Connection pooling/reuse, resolver/bootstrap, HTTP/3, and listener or host
+//! The Phase 4 QUIC task's Slice 2 adds the shared DoH response semantics behind
+//! [`Doh3Upstream`](crate::quic::Doh3Upstream), which drives one fresh QUIC
+//! connection and one HTTP/3 `GET` through the same status/head/encoding/
+//! media-type validation, complete-body bound, ID restoration, and header
+//! bounds as the HTTP/1.1 and HTTP/2 paths rather than growing a second copy.
+//! Connection pooling/reuse, resolver/bootstrap, and listener or host
 //! composition remain outside this slice.
 
 mod doh;
