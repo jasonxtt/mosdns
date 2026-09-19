@@ -350,8 +350,8 @@ seam, so nothing in the new code is release-gated.
 ### Evidence
 
 - Focused: `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core
-  --test slice2_doh3 --locked` → 20 passed / 0 failed; the same target with
-  `--release` → 20 passed / 0 failed.
+  --test slice2_doh3 --locked` → 22 passed / 0 failed; the same target with
+  `--release` → 22 passed / 0 failed.
 - Upstream-core: `cargo test ... -p mosdns-upstream-core --all-targets
   --all-features --locked` → 443 passed / 0 failed.
 - Workspace: `cargo test ... --workspace --all-targets --all-features
@@ -394,6 +394,6 @@ seam, so nothing in the new code is release-gated.
   completion, maps `Ok(Some(_))` to `DohProtocolError::IncompleteBody` (the
   existing HTTP/1.1 and HTTP/2 semantics), and keeps `Err(_)` on
   `classify_h3_body_error`; the declared `Content-Length`, `MAX_DNS_BODY`,
-  empty-body, and commit-gate semantics are unchanged. That remediation is not
-  yet committed: it is left in the worktree for parent/reviewer inspection, and
-  the root review is pending against it.
+  empty-body, and commit-gate semantics are unchanged. The remediation is
+  committed as `3aec651` and pushed to `origin/rust`; the follow-up GPT web
+  root review of `c5ef3a5..3aec651` returned `FINAL: PASS` with P0/P1 both zero.
