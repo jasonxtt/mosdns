@@ -223,13 +223,17 @@ impl Error for TlsHandshakeFailure {}
 /// QPACK critical stream), `H3_ID_ERROR` (`0x108`, connection-level
 /// stream/push-ID bookkeeping), `H3_SETTINGS_ERROR` (`0x109`) and
 /// `H3_MISSING_SETTINGS` (`0x10a`, both errors of the control stream's SETTINGS
-/// frame), and RFC 9204's `QPACK_ENCODER_STREAM_ERROR` (`0x201`) and
-/// `QPACK_DECODER_STREAM_ERROR` (`0x202`). A code defined for this
-/// request/response stream context, but outside the reviewed four categories, is
-/// [`Self::Other`]; that keeps `QPACK_DECOMPRESSION_FAILED` (`0x200`), which
-/// RFC 9204 §6 defines for a failed field-section decode on a request stream,
-/// and the remaining RFC 9114 §8.1 request/response-stream codes such as
-/// `H3_FRAME_UNEXPECTED` (`0x105`) and `H3_MESSAGE_ERROR` (`0x10e`).
+/// frame), `H3_STREAM_CREATION_ERROR` (`0x103`, the peer creating a *new* stream
+/// the endpoint will not accept rather than terminating the existing
+/// request/response stream), `H3_CONNECT_ERROR` (`0x10f`, the TCP connection of
+/// a `CONNECT` tunnel; this path is a plain `GET`), and RFC 9204's
+/// `QPACK_ENCODER_STREAM_ERROR` (`0x201`) and `QPACK_DECODER_STREAM_ERROR`
+/// (`0x202`). A code defined for this request/response stream context, but
+/// outside the reviewed four categories, is [`Self::Other`]; that keeps
+/// `QPACK_DECOMPRESSION_FAILED` (`0x200`), which RFC 9204 §6 defines for a
+/// failed field-section decode on a request stream, and the remaining RFC 9114
+/// §8.1 request/response-stream codes such as `H3_FRAME_UNEXPECTED` (`0x105`)
+/// and `H3_MESSAGE_ERROR` (`0x10e`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PeerStreamError {
     /// The peer terminated the stream with no error (`H3_NO_ERROR`, `0x100`),
@@ -238,7 +242,8 @@ pub enum PeerStreamError {
     /// definition scopes it to. On the DoH3 request/response stream that
     /// includes the RFC 9000 §20.1 transport-space codes below `0x100`, the
     /// reserved `0x1f * N + 0x21` grease space, RFC 9114 §8.1's
-    /// control/critical/connection-scoped `0x104`/`0x108`/`0x109`/`0x10a`, and
+    /// control/critical/connection-scoped `0x104`/`0x108`/`0x109`/`0x10a`, its
+    /// stream-creation-scoped `0x103` and CONNECT-tunnel-scoped `0x10f`, and
     /// RFC 9204's QPACK encoder/decoder stream errors (`0x201`/`0x202`).
     NoError,
     /// The peer reported an internal error (`H3_INTERNAL_ERROR`, `0x102`).
@@ -251,9 +256,8 @@ pub enum PeerStreamError {
     RequestCancelled,
     /// A defined HTTP/3 or QPACK stream error code that is known in this
     /// request/response stream context but outside the reviewed four categories
-    /// (RFC 9114 §8.1 / RFC 9204; for example `H3_STREAM_CREATION_ERROR`,
-    /// `0x103`, `H3_FRAME_UNEXPECTED`, `0x105`, or
-    /// `QPACK_DECOMPRESSION_FAILED`, `0x200`).
+    /// (RFC 9114 §8.1 / RFC 9204; for example `H3_FRAME_UNEXPECTED`, `0x105`,
+    /// `H3_MESSAGE_ERROR`, `0x10e`, or `QPACK_DECOMPRESSION_FAILED`, `0x200`).
     Other,
 }
 
