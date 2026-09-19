@@ -47,6 +47,9 @@ const MAX_DOQ_MESSAGE: usize = 65_537;
 /// A bounded probe after the first connection closes, used to prove the client
 /// did not open a second connection.
 const ACCEPT_PROBE: Duration = Duration::from_millis(200);
+/// RFC 9250 §4.3 `DOQ_PROTOCOL_ERROR`, the code used to abort the response send
+/// stream instead of completing it with a normal STREAM FIN.
+const DOQ_PROTOCOL_ERROR: u32 = 0x2;
 
 /// Runs one bounded current-thread runtime for a single test step.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -144,6 +147,21 @@ impl DoqServer {
     /// zeroed wire-ID frame per marker, then a normal STREAM FIN. More than one
     /// marker models the protocol-violating trailing-response peer.
     fn start_with_markers(set: &FixtureSet, markers: &[u8]) -> Self {
+        Self::start_scripted(set, markers, true)
+    }
+
+    /// Starts a server that writes the response frame(s) and then aborts the
+    /// response send stream with the RFC 9250 `DOQ_PROTOCOL_ERROR` (`0x2`) code
+    /// instead of a normal STREAM FIN, modelling a peer that never completes
+    /// the response stream.
+    fn start_without_normal_fin(set: &FixtureSet, markers: &[u8]) -> Self {
+        Self::start_scripted(set, markers, false)
+    }
+
+    /// Starts a scripted server that writes one zeroed wire-ID frame per
+    /// marker and completes the send stream either with a normal STREAM FIN or
+    /// with a deterministic abort.
+    fn start_scripted(set: &FixtureSet, markers: &[u8], normal_fin: bool) -> Self {
         let markers = markers.to_vec();
         let config = server_config(set);
         let (address_tx, address_rx) = std::sync::mpsc::channel::<SocketAddr>();
@@ -196,7 +214,17 @@ impl DoqServer {
                         return;
                     }
                 }
-                if send.finish().is_err() {
+                if normal_fin {
+                    if send.finish().is_err() {
+                        return;
+                    }
+                } else if send
+                    .reset(quinn::VarInt::from_u32(DOQ_PROTOCOL_ERROR))
+                    .is_err()
+                {
+                    // RFC 9250 §4.2: the peer never completed the response
+                    // stream with a normal STREAM FIN; the audit API aborts it
+                    // deterministically with the DoQ protocol-error code.
                     return;
                 }
                 let _ = evidence_tx.send(ServerEvidence { alpn, request });
@@ -340,6 +368,59 @@ fn doq_trailing_second_response_is_rejected_without_commit() {
 
     // The server still observed the request-side FIN with a zeroed wire ID; the
     // caller's borrowed query bytes never changed.
+    let mut zeroed = query.clone();
+    zeroed[0] = 0;
+    zeroed[1] = 0;
+    assert_eq!(evidence.request, framed(&zeroed));
+}
+
+#[test]
+fn doq_response_without_normal_fin_is_rejected_without_commit() {
+    let set = FixtureSet::generate();
+    // The server writes the complete response frame and then aborts its send
+    // stream with `DOQ_PROTOCOL_ERROR` (0x2) instead of a normal STREAM FIN.
+    let server = DoqServer::start_without_normal_fin(&set, &[0x2a]);
+    let address = server.address;
+
+    let endpoint = DoqEndpoint::new(
+        address,
+        ServerIdentity::new("dns.example").expect("valid service identity"),
+    )
+    .expect("valid DoQ endpoint");
+    let upstream = DoqUpstream::new(
+        endpoint,
+        TlsPolicy::verified(set.root_store_a()).expect("verified TLS policy"),
+    )
+    .expect("DoQ owner constructs");
+
+    let query = query_wire(0xBEEF);
+    let context = ExchangeContext::new(
+        Instant::now() + EXCHANGE_DEADLINE,
+        TransportCancellation::new(),
+    );
+
+    let error = block_on(async {
+        let request = ExchangeRequest::new(&query).expect("valid query");
+        upstream
+            .exchange(request, context)
+            .await
+            .expect_err("a response that never completes with normal FIN is rejected")
+    });
+
+    // The peer aborted the response stream instead of sending a normal STREAM
+    // FIN. The request was already fully written, so the terminal rejection is
+    // a `Sent` missing-response-FIN protocol error that is never committed.
+    assert_eq!(error, SecureError::DoqProtocolMissingResponseFin);
+    assert_eq!(error.side_effect(), SideEffectState::Sent);
+    // The RAII registration is released on the terminal error path too.
+    assert_eq!(upstream.in_flight_exchanges(), 0);
+
+    let (accepts, evidence) = server.join();
+    assert_eq!(accepts, 1, "exactly one connection is accepted");
+    assert_eq!(evidence.alpn.as_deref(), Some(DOQ_ALPN));
+
+    // The server observed the request-side FIN with a zeroed wire ID before it
+    // aborted the response; the caller's borrowed query bytes never changed.
     let mut zeroed = query.clone();
     zeroed[0] = 0;
     zeroed[1] = 0;
