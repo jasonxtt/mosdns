@@ -300,3 +300,24 @@ Completed and root-reviewed rust-phase4-dual-stack-endpoint-selection. Fixed sta
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: Codex host-aware automation routing
+
+**Date**: 2026-09-19
+**Task**: Codex host-aware automation routing
+**Branch**: `rust`
+
+### Summary
+
+Implemented host-aware Codex CLI/Desktop routing with generic v2 executor/reviewer targets, v1 migration, dynamic hook/workflow routing, self-review override, tests, and archived the task.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `65fa0c3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
