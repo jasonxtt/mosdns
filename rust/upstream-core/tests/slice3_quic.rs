@@ -1276,9 +1276,10 @@ fn doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized() {
     // These codes are delivered on the wire exactly like the HTTP/3 codes
     // above, but they are not in the reviewed four-category HTTP/3 mapping.
     // The classifier decides by RFC 9114 §8.1 *context*, not by a numeric
-    // range: a defined code whose §8.1 meaning is scoped to the control
-    // stream, a critical stream, or connection-level bookkeeping is an
-    // unexpected context on the DoH3 request/response stream, so RFC 9114 §8's
+    // range: a defined code whose §8.1 meaning is scoped to another context -
+    // the control stream, a critical stream, connection-level bookkeeping,
+    // plain stream *creation*, or a `CONNECT` tunnel - is an unexpected context
+    // on the DoH3 request/response stream for a plain `GET`, so RFC 9114 §8's
     // MUST makes it `H3_NO_ERROR`-equivalent. Every other case below is a
     // terminal peer termination that is `Sent` and never commits.
     //
@@ -1302,12 +1303,24 @@ fn doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized() {
     // * `0x200` (QPACK_DECOMPRESSION_FAILED) is different: RFC 9204 §6 defines
     //   it for a failed field-section decode on a request stream, so it is a
     //   known error in this context -> `Other`.
-    // * `0x103` and the remaining §8.1 unnamed codes `0x105`-`0x107` and
-    //   `0x10b`-`0x110` describe conditions of a request/response exchange
-    //   (frame legality/size, load, request rejection/incompleteness, message
-    //   malformation, CONNECT-tunnel failure, HTTP/1.1 fallback) and so are
-    //   known HTTP/3-family errors in this context -> `Other`. `0x103` is
-    //   retained as `Other` by the frozen Slice 3 reviewed contract.
+    // * `0x103` (H3_STREAM_CREATION_ERROR) and `0x10f` (H3_CONNECT_ERROR) are
+    //   the two codes in the `0x103..=0x110` block whose §8.1 definitions are
+    //   scoped away from this exchange. RFC 9114 §8.1 defines `0x103` as "the
+    //   endpoint detected that its peer created a stream that it will not
+    //   accept" - a *new* stream the endpoint refuses, not the termination of
+    //   an existing request/response stream that the peer is already using.
+    //   `0x10f` is defined only for "the TCP connection established in
+    //   response to a CONNECT request" (RFC 9114 §4.4/§8.1), and this exchange
+    //   sends a plain `GET`, never `CONNECT`. Both are therefore error codes
+    //   used in an unexpected context on this stream, and RFC 9114 §8's MUST
+    //   makes them `H3_NO_ERROR`-equivalent -> `NoError`.
+    // * The remaining §8.1 codes `0x105`-`0x107`, `0x10b`, `0x10d`, `0x10e`,
+    //   and `0x110` do describe conditions of the current request/response
+    //   exchange (frame legality on the current stream, frame layout, peer
+    //   load, request rejection, an incomplete request stream, a malformed
+    //   HTTP message, and the requested operation not being servable over
+    //   HTTP/3) and so are known HTTP/3-family errors in this context ->
+    //   `Other`.
     let cases = [
         (0x104_u64, PeerStreamError::NoError),
         (0x108, PeerStreamError::NoError),
@@ -1321,14 +1334,14 @@ fn doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized() {
         (0x3, PeerStreamError::NoError),
         (0x119, PeerStreamError::NoError),
         (0x1234, PeerStreamError::NoError),
-        (0x103, PeerStreamError::Other),
+        (0x103, PeerStreamError::NoError),
+        (0x10f, PeerStreamError::NoError),
         (0x105, PeerStreamError::Other),
         (0x106, PeerStreamError::Other),
         (0x107, PeerStreamError::Other),
         (0x10b, PeerStreamError::Other),
         (0x10d, PeerStreamError::Other),
         (0x10e, PeerStreamError::Other),
-        (0x10f, PeerStreamError::Other),
         (0x110, PeerStreamError::Other),
         (0x200, PeerStreamError::Other),
     ];

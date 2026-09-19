@@ -147,17 +147,18 @@ caller-owned deadline、取消/owner close 语义。
   stream/connection context 做**显式逐码**判定（不是数值区间）：
   `H3_NO_ERROR (0x100)`/`H3_GENERAL_PROTOCOL_ERROR (0x101)`/
   `H3_INTERNAL_ERROR (0x102)`/`H3_REQUEST_CANCELLED (0x10c)` 各自映射到对应
-  category；该语境下确实适用的已知 HTTP/3-family 码（`H3_STREAM_CREATION_ERROR
-  0x103`，按已冻结评审契约保留；`H3_FRAME_UNEXPECTED 0x105`/
+  category；该语境下确实适用的已知 HTTP/3-family 码（`H3_FRAME_UNEXPECTED 0x105`/
   `H3_FRAME_ERROR 0x106`/`H3_EXCESSIVE_LOAD 0x107`/
   `H3_REQUEST_REJECTED 0x10b`/`H3_REQUEST_INCOMPLETE 0x10d`/
-  `H3_MESSAGE_ERROR 0x10e`/`H3_CONNECT_ERROR 0x10f`/
-  `H3_VERSION_FALLBACK 0x110`；RFC 9204 §6 明确用于 request stream 的
-  `QPACK_DECOMPRESSION_FAILED 0x200`）标为 `Other`；其余（RFC 9000 §20.1
-  transport 低位码、保留 `0x1f * N + 0x21` grease 码、未知码，以及只定义在别的
-  语境、在 request/response stream 上属于 unexpected context 的码：RFC 9114
+  `H3_MESSAGE_ERROR 0x10e`/`H3_VERSION_FALLBACK 0x110`；RFC 9204 §6 明确用于
+  request stream 的 `QPACK_DECOMPRESSION_FAILED 0x200`）标为 `Other`；其余（RFC 9000
+  §20.1 transport 低位码、保留 `0x1f * N + 0x21` grease 码、未知码，以及只定义在别的
+  语境、在 request/response stream 上属于 unexpected context 的码 —— RFC 9114
   §8.1 的 `H3_CLOSED_CRITICAL_STREAM 0x104`/`H3_ID_ERROR 0x108`/
-  `H3_SETTINGS_ERROR 0x109`/`H3_MISSING_SETTINGS 0x10a`，以及 RFC 9204
+  `H3_SETTINGS_ERROR 0x109`/`H3_MISSING_SETTINGS 0x10a`，`H3_STREAM_CREATION_ERROR
+  0x103`（§8.1 指对端新建了一个本端不接受的 stream，而非终止既有
+  request/response stream）与 `H3_CONNECT_ERROR 0x10f`（§8.1 仅指 `CONNECT`
+  请求建立的 TCP 连接，本路径是普通 `GET`），以及 RFC 9204 的
   `QPACK_ENCODER_STREAM_ERROR 0x201`/`QPACK_DECODER_STREAM_ERROR 0x202`）按
   RFC 9114 §8 的 MUST 视为等价于 `H3_NO_ERROR`，即低位 DoQ 码绝不映射成 H3
   protocol/cancel 错误。
