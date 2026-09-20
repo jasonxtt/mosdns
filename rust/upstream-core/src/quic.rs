@@ -712,14 +712,14 @@ pub(crate) fn validate_doq_payload(
 /// manifest entry: `bytes` is not a direct dependency of this crate, this slice
 /// introduces no new dependency, and the resolved graph already holds exactly
 /// one `bytes` 1.x.
-type H3Body = hyper::body::Bytes;
+pub(crate) type H3Body = hyper::body::Bytes;
 
 /// The h3 client connection driver this exchange polls as a tracked child.
-type H3Driver = h3::client::Connection<h3_quinn::Connection, H3Body>;
+pub(crate) type H3Driver = h3::client::Connection<h3_quinn::Connection, H3Body>;
 /// The h3 request sender that owns the one `GET`.
-type H3Sender = h3::client::SendRequest<h3_quinn::OpenStreams, H3Body>;
+pub(crate) type H3Sender = h3::client::SendRequest<h3_quinn::OpenStreams, H3Body>;
 /// The one h3 request stream the response is read from.
-type H3Stream = h3::client::RequestStream<h3_quinn::BidiStream<H3Body>, H3Body>;
+pub(crate) type H3Stream = h3::client::RequestStream<h3_quinn::BidiStream<H3Body>, H3Body>;
 
 /// A pure Rust one-shot DNS-over-HTTP/3 owner.
 ///
@@ -994,7 +994,9 @@ async fn exchange_doh3(prepared: &PreparedDoh3<'_>) -> Result<SecureResponse, Se
     // The driver must be polled continuously, so it is registered as a tracked
     // child before the first request byte is sent. Teardown seals admission,
     // aborts it, and drains to guard drop; it is never detached.
-    scope.spawn(drive_h3_connection(driver));
+    scope.spawn(async move {
+        let _ = drive_h3_connection(driver).await;
+    });
 
     let candidate = match run_h3_request(prepared, &control, deadline, &mut send_request).await {
         Ok(candidate) => candidate,
@@ -1035,9 +1037,9 @@ async fn exchange_doh3(prepared: &PreparedDoh3<'_>) -> Result<SecureResponse, Se
 /// polled for the request and response to make progress. It is spawned through
 /// the exchange scope, which owns and drains it; production never starts a
 /// detached task and never hides a runtime.
-async fn drive_h3_connection(driver: H3Driver) {
+pub(crate) async fn drive_h3_connection(driver: H3Driver) -> h3::error::ConnectionError {
     let mut driver = driver;
-    let _ = poll_fn(|context| driver.poll_close(context)).await;
+    poll_fn(|context| driver.poll_close(context)).await
 }
 
 /// Sends the one `GET` and returns the validated, not-yet-committed response.
@@ -1136,7 +1138,10 @@ async fn run_h3_request(
 /// numeric dial override cannot leak into it. The authority is carried in the
 /// URI, which makes h3 emit exactly one `:authority` pseudo-header; no `Host`
 /// header is added alongside it.
-fn build_h3_get_request(target: &str, authority: &str) -> Result<hyper::Request<()>, SecureError> {
+pub(crate) fn build_h3_get_request(
+    target: &str,
+    authority: &str,
+) -> Result<hyper::Request<()>, SecureError> {
     let uri = hyper::Uri::builder()
         .scheme("https")
         .authority(authority)
@@ -1158,7 +1163,7 @@ fn build_h3_get_request(target: &str, authority: &str) -> Result<hyper::Request<
 /// type checks are the shared DoH contract. The header-count bound is enforced
 /// here because, unlike the Hyper HTTP/1.1 and HTTP/2 parsers, the h3 client
 /// layer imposes no header-count limit of its own.
-fn validate_h3_response_head(
+pub(crate) fn validate_h3_response_head(
     status: hyper::StatusCode,
     headers: &hyper::HeaderMap,
 ) -> Result<Option<u64>, SecureError> {
@@ -1189,7 +1194,7 @@ fn validate_h3_response_head(
 /// going past the body they consumed. That step runs inside the same
 /// control/deadline race as the body loop, so a local control decision or the
 /// absolute deadline still wins over it.
-async fn read_h3_body(
+pub(crate) async fn read_h3_body(
     control: &ExchangeControl,
     deadline: Instant,
     stream: &mut H3Stream,
@@ -1245,7 +1250,7 @@ fn classify_h3_setup_error(_error: h3::error::ConnectionError) -> SecureError {
 /// deliberately kept as a send failure rather than a response-stream
 /// termination, because the request write is the side that is still in doubt and
 /// `MaybeSent` is the truthful state. No branch here retries or replays.
-fn classify_h3_send_error(_error: h3::error::StreamError) -> SecureError {
+pub(crate) fn classify_h3_send_error(_error: h3::error::StreamError) -> SecureError {
     SecureError::from(UpstreamError::Send(SideEffectState::MaybeSent))
 }
 
@@ -1264,7 +1269,7 @@ fn classify_h3_send_error(_error: h3::error::StreamError) -> SecureError {
 /// [`DohProtocolError::ResponseHeadNotReceived`], whose conservative `MaybeSent`
 /// state exists for the HTTP/1.1 and HTTP/2 drivers, where the request hand-off
 /// may still be in doubt.
-fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
+pub(crate) fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
     match error {
         h3::error::StreamError::HeaderTooBig { .. } => {
             SecureError::DohProtocol(DohProtocolError::ResponseHeadTooLarge)
@@ -1285,7 +1290,7 @@ fn classify_h3_head_error(error: h3::error::StreamError) -> SecureError {
 /// code category; every other read failure - a reset through the connection, a
 /// connection loss, or a truncated data frame - proves the body did not
 /// complete, which is the typed incomplete-body protocol error.
-fn classify_h3_body_error(error: h3::error::StreamError) -> SecureError {
+pub(crate) fn classify_h3_body_error(error: h3::error::StreamError) -> SecureError {
     match error {
         h3::error::StreamError::RemoteTerminate { code, .. } => {
             SecureError::DohProtocol(DohProtocolError::PeerStreamTerminated {
