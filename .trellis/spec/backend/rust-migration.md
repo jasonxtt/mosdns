@@ -6,7 +6,21 @@ The complete architecture and phase gates are in `docs/ai/rust-rewrite-plan.md`.
 
 The final target is a **pure Rust-native MosDNS binary and runtime**, not a permanently hybrid Go/Rust process. The migration still uses a strangler sequence, but the Go shell and C ABI are transitional scaffolding created by the completed cache/matcher/query-foundation phases. Phase 3B and later foundations should compose as Rust crates for the future Rust host and must not add a Go adapter, backend selector, mirror, or fallback unless a separately reviewed requirement proves one is needed.
 
-The module order remains cache -> matchers -> DNS/query execution -> sequence -> transports/servers -> Rust-native host -> retirement of the old hybrid scaffolding.
+The historical foundation order is cache -> matchers -> DNS/query execution ->
+sequence -> transports. The revised roadmap brings Phase 5A minimal native host
+and its UDP/TCP listeners forward after the current QUIC reuse task closes,
+without waiting for all remaining Phase 4 work. Remaining transports/servers
+compose with 5B full query features; 5C completes the control plane, 5D verifies
+the full system, and Phase 6 retires hybrid scaffolding. No existing task scope
+or implementation authorization is enlarged by that ordering.
+
+Linux amd64 is the primary target. Full functionality/correctness and stability
+are prerequisites; prioritize tail latency and sustainable useful throughput.
+Memory is secondary and bounded performance-oriented tradeoffs are allowed.
+Track library readiness, native integration and product acceptance separately
+in `docs/rust/feature-coverage.md`; use
+`docs/rust/performance-validation.md` for native performance evidence. Historical
+hybrid thresholds and archived evidence are not rewritten.
 
 ## Compatibility policy
 
@@ -475,7 +489,9 @@ crate uses `mosdns-dns-core` as its only MosDNS crate dependency and must not de
   `mosdns-dns-core::parse_query` and records the original transaction ID.
 - The accepted foundation includes per-exchange UDP, fresh plain TCP and
   `UdpTcpPolicy`. All run on the caller's host-owned runtime; no runtime is
-  created by an upstream. The secure-upstream successor is planning only.
+  created by an upstream. This scenario describes the UDP/TCP foundation;
+  secure transport extensions have separate contracts and evidence. Read the
+  handover/task records for their current status, not this historical scope.
 - `ExchangeResponse` owns its complete returned wire. No Go pool or FFI
   release is part of the API.
 - A prepared exchange keeps caller cancellation and upstream-owner shutdown
