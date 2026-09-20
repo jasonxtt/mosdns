@@ -95,9 +95,11 @@ All Quinn/H3 citations above are paths inside the **locked local registry
 source** (`~/.cargo/registry/src/<registry>/`), not files copied into this
 repository.
 
+Locked package locations, symmetric across all three pins: `quinn 0.11.7` /
 `h3 0.0.8` / `h3-quinn 0.0.10` are pinned with `default-features = false` in
-`rust/upstream-core/Cargo.toml:81-82`, and `rust/Cargo.lock:377-380` locks
-`h3 0.0.8`. These are the frozen assumptions R0c verifies; a mismatch is a
+`rust/upstream-core/Cargo.toml:80-82`, and `rust/Cargo.lock` locks them at
+`h3 0.0.8` (`:377-380`), `h3-quinn 0.0.10` (`:391-394`), and `quinn 0.11.7`
+(`:792-795`). These are the frozen assumptions R0c verifies; a mismatch is a
 re-review stop and never a dependency change.
 
 ## Planning decisions derived from the evidence
@@ -105,9 +107,15 @@ re-review stop and never a dependency change.
 1. Use a new QUIC-specific key/owner and do not extend the serial TCP pool.
 2. Keep one physical connection per key in this task. Use per-stream permits
    for bounded concurrency and use generation identity to select the exact entry
-   for logical deactivation/`Closing`. A served entry is never removed from the
-   map before its drain; removal happens only at `Drained`/`Failed`, with the one
-   exception of an initialization failure that never acquired a resource.
+   for logical deactivation/`Closing`. Any installed entry or `Initializing`
+   reservation is removed from the map, and has its slot/liveness released, only
+   at the terminal `Drained`/`Failed`: every initialization failure — whether or
+   not it acquired a transport/H3 resource — delivers its completion to the same
+   entry-owned supervised teardown, which finishes promptly with an explicit
+   terminal outcome when there is nothing to drain. There is no entry-teardown
+   exception. Only a pre-entry validation failure (for example an invalid key or
+   zero port) creates no entry at all, is not teardown, and may be returned
+   directly before admission.
 3. Make H3 driver lifetime a connection-entry responsibility. A request stream
    may fail without killing a healthy H3 connection; a driver/connection
    terminal failure logically deactivates the exact key+generation
@@ -120,25 +128,30 @@ re-review stop and never a dependency change.
 6. Keep the dependency graph locked and defer all socket policy, retransmission,
    listener, host, config, and production wiring.
 7. Enforce `MAX_CONNECTIONS_PER_OWNER` in one no-await owner-map critical section
-   that does lookup, transition of dead/idle-expired entries to `Closing`
-   (without removal), the capacity check counting `Initializing`/`Closing`/
-   `Active` entries as occupied until `Drained`/`Failed` (or the no-resource
-   early release), and reservation/join/reuse together; a check-then-insert
-   split, or reusing a `Closing` slot early, is a concurrency bug.
-8. Make `Initializing` an explicit state: the reservation is installed under the
-   map lock, and `Initializing -> Active` publication and the owner/entry close
-   decision share one linearization point. An initializer that observes close
-   never publishes `Active` and never returns an entry; the reservation then
-   follows the single resource rule: no acquired transport/H3 resource is
-   released immediately by key+generation, while an acquired resource joins the
-   entry's shared supervised teardown.
+   that does lookup, marking dead/idle-expired entries `Closing` (without
+   removal), the capacity check counting `Initializing`/`Closing`/`Active` as
+   occupied until terminal `Drained`/`Failed`, and reservation/join/reuse
+   together; a check-then-insert split, or reusing a `Closing` slot before
+   terminal, is a concurrency bug.
+8. Make `Initializing` an explicit state and freeze one crossing protocol:
+   owner close marks every `Initializing`/`Active` entry `Closing`/
+   `TeardownRequested` at the shared map/state linearization point without
+   removing the reservation, and entering `Closing` starts the supervised
+   teardown exactly once. The initializer builds outside the lock and hands one
+   result back under that same lock/handoff protocol: it publishes `Active` only
+   while the owner is `Open` and the generation is still `Initializing`;
+   otherwise it never publishes and hands the whole result, including a
+   late-acquired resource, to the supervised teardown. No resource yields a
+   terminal `Failed` with nothing to drain, and only terminal `Drained`/`Failed`
+   removes the exact key+generation and releases slot+liveness.
 9. Give each entry an explicit
    `Initializing -> Active -> Closing -> Drained | Failed` lifecycle. Entering
-   `Closing` starts exactly one entry-owned supervised teardown task that owns
-   the driver/`JoinHandle`, shutdown signal, liveness guard, shared completion,
-   and terminal-only map removal. Close callers only await the shared completion,
-   so aborting one or all of them cannot stop teardown or detach the driver, and
-   teardown never relies on a later close/drain pass.
+   `Closing` starts exactly one entry-owned supervised teardown task that owns the
+   initializer completion/handoff, driver/`JoinHandle`, shutdown signal, liveness
+   guard, shared completion, and terminal-only map removal plus slot/liveness
+   release. Close callers only await the shared completion, so aborting one or all
+   of them cannot stop teardown or detach the driver, and teardown never relies on
+   a later close/drain pass.
 10. Resolve a same-key lookup by state: `Active` leases, `Initializing` joins the
     single-flight initializer under the caller deadline, and `Closing` returns
     the existing `Closed(NotSent)` vocabulary with no drain wait, no second

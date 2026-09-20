@@ -152,14 +152,18 @@ task-local calibration choices, not product contract or Go parity claims.
 no-await owner-map critical section performs, in order: lookup for the key,
 transition of dead and idle-expired entries to `Closing` **without removal**,
 capacity check against the entry bound while **counting `Initializing`,
-`Closing`, and `Active` entries as occupied capacity until they reach
-`Drained`/`Failed`** (or are released by the no-resource initialization-failure
-path in R6), and either reuse/join of the existing entry or installation of a new
-`Initializing` placeholder with a generation identity. No `await` may occur
-inside that section, and no two concurrent admissions for different keys may both
-observe a below-capacity map and over-commit. A separate map lock, a
-check-then-insert split, a per-key lock, or reusing a `Closing` entry's slot
-before its drain completes does not satisfy this requirement.
+`Closing`, and `Active` entries as occupied capacity until they reach the
+terminal `Drained`/`Failed`**, and either reuse/join of the existing entry or
+installation of a new `Initializing` placeholder with a generation identity. No
+entry-teardown path — including initialization failure with or without a
+transport/H3 resource — bypasses that terminal removal, so a slot is never freed
+early. No `await` may occur inside that section, and no two concurrent admissions
+for different keys may both observe a below-capacity map and over-commit. A
+separate map lock, a check-then-insert split, a per-key lock, or reusing a
+`Closing` entry's slot before its drain completes does not satisfy this
+requirement. Pure validation failures that construct no entry at all (for example
+an invalid key or zero port) are pre-I/O errors, not entry teardown, and are
+resolved before this section.
 
 A same-key lookup resolves by the found entry state: an `Active` entry is leased
 normally; an `Initializing` entry is joined through the single-flight initializer
@@ -174,24 +178,27 @@ terminal removal.
 ### R6. Failure, replacement, and teardown
 
 - A reservation is installed as an explicit `Initializing` placeholder with a
-  generation identity. It becomes `Active` only when, under the same
-  owner-map/state lock, the owner is still `Open` and this exact generation is
-  still `Initializing`. If owner close, idle expiry, or a connection-level
-  logical deactivation wins that lock first, initialization must never publish
-  `Active` and never returns an entry. The reservation's fate then follows the
-  single resource rule below, not a second rule: if no transport/H3 resource was
-  acquired yet, the initializer releases the reservation immediately by exact
-  key+generation identity; if a resource was acquired, it joins the entry's
-  shared supervised `Closing -> Drained | Failed` teardown.
-- Initialization failure, or close observed during initialization, is classified
-  by resource acquisition:
-  **before acquiring any endpoint, QUIC connection, or H3 driver/handle**
-  (`NotSent`, released immediately by exact key+generation identity; it never
-  became `Active`, has nothing to drain, and frees its capacity slot at once)
-  versus **after a transport/H3 resource exists** (including a resource created
-  after teardown started, which must use the same `Closing -> Drained | Failed`
-  supervised teardown as a served entry). The early no-resource release is the
-  only removal path outside `Drained`/`Failed`.
+  generation identity under the owner-map/state lock. Owner close marks **every
+  `Initializing` and `Active` entry `Closing`/`TeardownRequested` at that same
+  linearization point** and never removes the `Initializing` reservation; a
+  `Closing` entry stays discoverable but unleasable.
+- Entering `Closing` starts the entry-owned supervised teardown task exactly once.
+  That task supervises the initializer completion/handoff and owns the
+  driver/`JoinHandle`, shutdown signal, liveness guard, and shared completion; no
+  close-waiter abort can stop it.
+- The initializer builds resources outside the lock and hands its single result to
+  the entry-owned teardown/owner state under the same lock/handoff protocol: if
+  the owner is still `Open` and this exact generation is still `Initializing` it
+  may publish `Active` (the only publication point); if it is already
+  `Closing`/`TeardownRequested` it must never publish `Active` and never leave a
+  resource in a removed generation — the whole result, including a late-acquired
+  resource, goes to the supervised teardown, and an initializer that failed still
+  delivers its completion so teardown finishes promptly on one explicit terminal
+  outcome.
+- Only the terminal `Drained`/`Failed` performs exact key+generation physical
+  removal and releases the slot and liveness. There is no late-resource race, no
+  early drain, no stranded `Closing`, no second generation, and no reliance on a
+  later close/drain pass to re-drive teardown.
 - A stream-local reset, malformed response, or local query cancellation does
   not deactivate a healthy connection merely because the query failed.
 - A QUIC connection close, H3 driver terminal failure, endpoint failure, or
@@ -282,11 +289,12 @@ satisfy R0a or R0b, the task stops and returns to planning review with the
 evidence.
 
 R0d. **Atomic admission, initialization, and teardown contracts are fixed here,
-implemented in Slice 0.** The one-lock admission rule (R5), the
-`Initializing -> Active` publication and early-release rules (R6), and the
-entry-owned supervised teardown
-`Initializing/Active -> Closing -> Drained/Failed` (R3/R6) are specified in
-`design.md` §3, §4, and §7 and must be implemented in Slice 0, not deferred.
+implemented in Slice 0.** The one-lock admission rule (R5), the single
+initialization crossing/handoff protocol including `Initializing -> Active`
+publication (R6), and the entry-owned supervised teardown
+`Initializing/Active -> Closing -> Drained/Failed` that alone performs terminal
+removal (R3/R6) are specified in `design.md` §3, §4, and §7 and must be
+implemented in Slice 0, not deferred.
 
 ## Acceptance criteria
 
@@ -318,11 +326,12 @@ entry-owned supervised teardown
       not close a healthy connection used by another request. A deterministic
       aborted-at-barrier/no-surviving-caller test proves the strong contract:
       entering `Closing` starts exactly one entry-owned supervised teardown task
-      that owns the driver/`JoinHandle`, the shutdown signal, the liveness guard,
-      and the shared completion; aborting the first close waiter and then dropping
-      **all** close waiter futures cannot stop teardown, and the task reaches
-      `Drained`/`Failed` and removes the entry with no surviving caller and
-      without a later close/drain pass. The real pinned-stack H3 loopback proof
+      that owns the initializer completion/handoff, the driver/`JoinHandle`, the
+      shutdown signal, the liveness guard, and the shared completion; aborting the
+      first close waiter and then dropping **all** close waiter futures cannot
+      stop teardown, and the task reaches `Drained`/`Failed`, removing the entry
+      and releasing its slot/liveness only at that terminal, with no surviving
+      caller and without a later close/drain pass. The real pinned-stack H3 loopback proof
       (one canceled request leaves the shared connection, the driver, and another
       concurrent request healthy) is part of this criterion.
 - [ ] A6. Local stream-slot and owner-entry bounds are finite and observable;
@@ -333,8 +342,8 @@ entry-owned supervised teardown
       simultaneous admissions for distinct keys never leave more than the cap of
       live entries, and the admitted-key count equals the cap exactly when the
       cap is reached. `Initializing` and `Closing` entries still occupy their
-      slots until terminal removal (or the no-resource initialization-failure
-      release), so a slot is not reusable early. A deterministic same-key test
+      slots until the terminal `Drained`/`Failed` removal, so a slot is not
+      reusable early. A deterministic same-key test
       proves that a lookup finding `Closing` returns `Closed(NotSent)` with no
       wait on drain, creates no second generation, and does not lease the
       `Closing` slot.
@@ -346,9 +355,14 @@ entry-owned supervised teardown
 - [ ] A8. Existing lifecycle precedence and final commit behavior remain
       observable for DoQ and DoH3: owner close, caller cancellation, deadline,
       and a successful final response cannot be reordered into a late success.
-      An initialization-versus-owner-close barrier test proves that an
-      `Initializing` entry can never publish `Active` once close wins the shared
-      lock, and that it joins the shared teardown outcome instead.
+      A deterministic initialization-versus-owner-close barrier test proves the
+      crossing protocol: close wins the shared lock first, the `Initializing`
+      reservation is not removed, and the initializer then completes and acquires
+      its resource; the entry never publishes `Active`, the generation does not
+      disappear, the resource is taken over and closed by the supervised teardown
+      (no orphan, no late-resource race, no second generation), `Lifecycle` does
+      not drain early, and removal plus slot/liveness release happen only at the
+      terminal `Drained`/`Failed`.
 - [ ] A9. Resolver composition tests prove A/AAAA `PublishedTarget::dial()`
       feeds the key while the validated identity/authority remains unchanged;
       no hostname enters the socket dial path.
@@ -375,11 +389,12 @@ entry-owned supervised teardown
       around.
 - [ ] A13. Owner admission and entry teardown are covered by deterministic
       Slice 0 model tests: the multi-key cap test (A6), the same-key `Closing`
-      lookup test (A6), the init-vs-owner-close barrier test (A8), and the
+      lookup test (A6), the init-vs-owner-close barrier test (A8, including
+      close-wins-then-late-resource acquisition), and the
       aborted-at-barrier/no-surviving-caller supervised-teardown test (A5) all
-      fail if the atomic no-await admission section, the `Initializing`
-      publication rule, or the entry-owned supervised teardown contract is
-      removed.
+      fail if the atomic no-await admission section, the single initialization
+      crossing/handoff protocol, or the entry-owned supervised teardown contract
+      is removed.
 
 ## Out of scope
 
@@ -421,25 +436,32 @@ entry-owned supervised teardown
   pinned-stack H3 health proof belongs to Slice 2/A5.
 - Initialization is an explicit `Initializing` state, not an invisible
   placeholder. `Initializing -> Active` publication and the owner/entry close
-  decision share one lock linearization point, so an initializer that observes
-  close can never publish `Active` and instead joins the shared teardown.
-  Initialization failure before any transport/H3 resource exists is released
-  immediately by key+generation; failure after a resource exists takes the
-  supervised teardown.
+  decision share one lock linearization point: an initializer that observes
+  `Closing`/`TeardownRequested` can never publish `Active` and must hand its
+  completion/handoff to the same entry-owned supervised teardown. **Neither owner
+  close nor initialization failure — with or without a transport/H3 resource —
+  bypasses that supervised task**: the initializer always delivers exactly one
+  completion, teardown records a terminal `Drained`/`Failed` promptly (nothing to
+  drain when no resource existed), a late-acquired resource is handed to and
+  closed by the same task, and only that terminal performs exact key+generation
+  removal plus slot/liveness release.
 - A same-key lookup finding `Closing` returns the existing
   `Closed(NotSent)` vocabulary with no wait on drain, no second generation, and
   no lease of the `Closing` slot; it may retry after terminal removal.
 - `MAX_CONNECTIONS_PER_OWNER` is enforced by one no-await map critical section
   that performs lookup, transition of dead/idle-expired entries to `Closing`
   (without removal), the capacity check counting `Initializing`/`Closing`/`Active`
-  entries as occupied until `Drained`/`Failed` (or the no-resource early
-  release), and reservation/join/reuse together. A check-then-insert split, or
-  reusing a `Closing` entry's slot early, would be a concurrency bug, not a
-  stylistic choice.
+  entries as occupied until the terminal `Drained`/`Failed`, and
+  reservation/join/reuse together. A check-then-insert split, or reusing a
+  `Closing` entry's slot early, would be a concurrency bug, not a stylistic
+  choice.
 - A served or `Active` entry that hits a connection-level failure is logically
   deactivated by exact key+generation `Active -> Closing` and is immediately
-  unleasable; physical map removal happens only at `Drained`/`Failed`. The one
-  other removal path is an initialization failure that never acquired a resource.
+  unleasable; physical map removal and slot/liveness release happen only at the
+  terminal `Drained`/`Failed`. That supervised terminal is the **only** entry
+  removal path, including for an initialization that never acquired a resource;
+  pre-entry validation failures (invalid key/zero port) are not entry teardown at
+  all.
 - The exact task-local bounds are not product behavior. If implementation
   evidence shows the proposed values are unsuitable, the slice may revise the
   constants without changing the public contract, but it must keep the bounds
