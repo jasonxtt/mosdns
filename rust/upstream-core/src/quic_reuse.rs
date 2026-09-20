@@ -73,17 +73,18 @@
 //!
 //! The one exception to "name everything by variant" is forced by the pinned API
 //! itself: `h3 0.0.8` marks the whole `StreamError` enum **and** every one of its
-//! variants `#[non_exhaustive]` with no opt-out feature, so a downstream crate
-//! can only pattern-match the struct-shaped variants and can never construct or
-//! match the tuple/unit ones (`ConnectionError(_)`, `RemoteClosing`,
+//! variants `#[non_exhaustive]` while the locked dependency configuration leaves
+//! h3's opt-out feature disabled, so a downstream crate can only pattern-match
+//! the struct-shaped variants and can never construct or match the tuple/unit
+//! ones (`ConnectionError(_)`, `RemoteClosing`,
 //! `Undefined(_)`). For exactly this reason the R0b evidence records a second,
 //! equivalent, classification rule that needs no variant name (see
 //! [`classify_h3_request_outcome`]): **call sites that own a real H3 driver
-//! pass an explicit [`H3ErrorObservation`] — the backend error shape, the
-//! shared GOAWAY-closing flag, and the driver's `poll_close` outcome for the
-//! same event.** The GOAWAY case is the proof this is load-bearing: a normal
-//! peer GOAWAY makes `RemoteClosing` observable while `poll_close` may still be
-//! `Pending`, so the entry-terminal class comes from the flag, not from an
+//! pass an explicit [`H3ErrorObservation`] — the backend/operation provenance
+//! and the driver's `poll_close` outcome for the same event.** The GOAWAY case
+//! is the proof this is load-bearing: a normal peer GOAWAY makes
+//! `RemoteClosing` observable while `poll_close` may still be `Pending`, so the
+//! entry-terminal class comes from the `PeerClosing` provenance, not from an
 //! unwritten driver error.
 //!
 //! A `SendRequest`-level failure on its own proves neither health nor death, so
@@ -518,8 +519,9 @@ pub enum QuicErrorClass {
 ///
 /// This is the discriminator the single-argument classifiers cannot carry for
 /// `h3 0.0.8`, because that crate marks the whole `StreamError` enum and every
-/// one of its variants `#[non_exhaustive]` with no opt-out feature. A
-/// downstream crate can match the three struct-shaped variants and nothing
+/// one of its variants `#[non_exhaustive]` while the locked dependency
+/// configuration leaves h3's opt-out feature disabled. A downstream crate can
+/// match the three struct-shaped variants and nothing
 /// else, so [`classify_h3_stream_error`] alone cannot route
 /// `ConnectionError(_)`, `RemoteClosing`, or `Undefined(_)`. Call sites that
 /// own a real H3 driver therefore pass an explicit [`H3ErrorObservation`]:
@@ -560,6 +562,9 @@ pub enum H3ErrorShape {
     /// arm, which `h3` itself maps to `StreamError::ConnectionError` while
     /// recording it on the shared state (`connection_error_creators.rs:120-123`).
     BackendConnection,
+    /// The driver's own `poll_close` reported a connection-level terminal
+    /// outcome for this request's entry.
+    DriverConnection,
     /// The peer's GOAWAY set the shared `is_closing` flag
     /// (`connection.rs:663-701`), so `check_peer_connection_closing` refuses
     /// new work with `RemoteClosing` (`connection_error_creators.rs:133-139`).
@@ -579,31 +584,31 @@ pub enum H3ErrorShape {
 /// downstream crate write down `ConnectionError(_)`, `RemoteClosing`, or
 /// `Undefined(_)` in a pattern, so those outcomes must be identified by the
 /// discriminator the pinned code itself routes on — the backend error shape,
-/// the shared closing flag, or the driver's `poll_close` outcome.
+/// the peer-closing operation result, or the driver's `poll_close` outcome.
 ///
-/// Slice 0 has no driver and no H3 I/O, so this model's callers are the
-/// deterministic tests below and (from Slice 2 on) the real request paths,
-/// which must fill in every field they can read from the pinned API rather
-/// than inferring a level from a bare `Result` shape or a reason string.
+/// The variants are provenance labels, not booleans inferred from a rendered
+/// error. `BackendConnection` comes from the public
+/// `StreamErrorIncoming::ConnectionErrorIncoming` shape; `DriverConnection`
+/// comes from the public driver `ConnectionError` result; `StreamScoped` and
+/// `Unobserved` come from the corresponding backend/stream shapes. The
+/// `PeerClosing` label is reserved for a validated request that was rejected by
+/// the pinned pre-stream `check_peer_connection_closing` path. Slice 0 has no
+/// driver or H3 I/O, so its tests exercise these labels as a deterministic
+/// model; later call sites must construct a label from the pinned operation
+/// boundary, never from a string or an unchecked enum wildcard.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct H3ErrorObservation {
-    /// Whether the pinned backend handed the failure up as
-    /// `StreamErrorIncoming::ConnectionErrorIncoming { .. }` (rather than
-    /// `StreamTerminated` / `Unknown`).
-    pub backend_connection_error: bool,
-    /// Whether the peer's GOAWAY had set the entry's shared `is_closing` flag
-    /// when the request failed (the pinned `process_goaway` writes exactly
-    /// that flag and returns `Ok`).
-    pub peer_closing_observed: bool,
-    /// Whether the entry's driver `poll_close` had already surfaced a
-    /// connection error for this event (an independently
-    /// [`QuicErrorClass::EntryTerminal`] outcome).
-    pub driver_reported_connection_error: bool,
-    /// Whether the stream error was only an unnameable
-    /// `#[non_exhaustive]` remainder (`Undefined(_)` or a future variant),
-    /// rather than one of the pinned struct-shaped stream variants. This is a
-    /// discriminator for [`H3ErrorShape::Unobserved`], not a string match.
-    pub unobserved_stream_error: bool,
+pub enum H3ErrorObservation {
+    /// A known request-stream outcome with no connection evidence.
+    StreamScoped,
+    /// A public backend connection error crossed into a stream operation.
+    BackendConnection,
+    /// A validated request was rejected by the pinned pre-stream GOAWAY check.
+    PeerClosing,
+    /// The long-lived driver's public `poll_close` reported a connection error.
+    DriverConnection,
+    /// A backend/stream error was an opaque non-exhaustive remainder with no
+    /// connection observation.
+    Unobserved,
 }
 
 /// Classifies one request-stream failure together with its explicit
@@ -611,15 +616,16 @@ pub struct H3ErrorObservation {
 ///
 /// Routing table (no string matching, no `Result`-shape inference):
 ///
-/// - `backend_connection_error == true` → the failure crossed the backend
+/// - `H3ErrorObservation::BackendConnection` → the failure crossed the backend
 ///   boundary as a connection error ([`H3ErrorShape::BackendConnection`]) →
 ///   [`QuicErrorClass::EntryTerminal`].
-/// - `peer_closing_observed == true` → the peer is in GOAWAY shutdown for new
+/// - `H3ErrorObservation::PeerClosing` → the peer is in GOAWAY shutdown for new
 ///   work ([`H3ErrorShape::PeerClosing`]) → [`QuicErrorClass::EntryTerminal`].
 ///   This is the normal-GOAWAY case the reviewer verified: `process_goaway`
 ///   returns `Ok` and `poll_close` may still be `Pending`, so the class comes
-///   from the flag, not from a driver error that may not exist yet.
-/// - `driver_reported_connection_error == true` → the driver independently
+///   from the `PeerClosing` provenance, not from a driver error that may not
+///   exist yet.
+/// - `H3ErrorObservation::DriverConnection` → the driver independently
 ///   proved the connection terminal → [`QuicErrorClass::EntryTerminal`].
 /// - otherwise → the failure is either a nameable stream-scoped variant
 ///   ([`H3ErrorShape::StreamScoped`]) or an unobserved `#[non_exhaustive]`
@@ -633,36 +639,30 @@ pub struct H3ErrorObservation {
 ///   `handle_frame_stream_error_on_request_stream`, and any connection-carrying
 ///   one of those simultaneously records the connection error on the shared
 ///   state and wakes the driver — which would flip one of the three connection
-///   flags above. The separate `unobserved_stream_error` flag records the
+///   observations above. The separate `Unobserved` provenance records the
 ///   non-exhaustive shape without changing that connection-level proof.
 #[must_use]
 pub const fn classify_h3_request_outcome(observation: H3ErrorObservation) -> QuicErrorClass {
-    if observation.backend_connection_error {
-        return QuicErrorClass::EntryTerminal;
+    match observation {
+        H3ErrorObservation::BackendConnection
+        | H3ErrorObservation::PeerClosing
+        | H3ErrorObservation::DriverConnection => QuicErrorClass::EntryTerminal,
+        H3ErrorObservation::StreamScoped | H3ErrorObservation::Unobserved => {
+            QuicErrorClass::StreamLocal
+        }
     }
-    if observation.peer_closing_observed {
-        return QuicErrorClass::EntryTerminal;
-    }
-    if observation.driver_reported_connection_error {
-        return QuicErrorClass::EntryTerminal;
-    }
-    QuicErrorClass::StreamLocal
 }
 
 /// Names the shape of one request-stream failure for a call site that must
 /// also record the matching [`H3ErrorObservation`].
 #[must_use]
 pub const fn h3_error_shape_for_observation(observation: H3ErrorObservation) -> H3ErrorShape {
-    if observation.backend_connection_error {
-        H3ErrorShape::BackendConnection
-    } else if observation.peer_closing_observed {
-        H3ErrorShape::PeerClosing
-    } else if observation.driver_reported_connection_error {
-        H3ErrorShape::BackendConnection
-    } else if observation.unobserved_stream_error {
-        H3ErrorShape::Unobserved
-    } else {
-        H3ErrorShape::StreamScoped
+    match observation {
+        H3ErrorObservation::StreamScoped => H3ErrorShape::StreamScoped,
+        H3ErrorObservation::BackendConnection => H3ErrorShape::BackendConnection,
+        H3ErrorObservation::PeerClosing => H3ErrorShape::PeerClosing,
+        H3ErrorObservation::DriverConnection => H3ErrorShape::DriverConnection,
+        H3ErrorObservation::Unobserved => H3ErrorShape::Unobserved,
     }
 }
 
@@ -831,9 +831,37 @@ pub const PINNED_ERROR_CLASSIFICATION_TABLE: &[PinnedErrorClassRow] = &[
     PinnedErrorClassRow {
         vocabulary: "quinn",
         error_type: "quinn::ReadToEndError",
-        item: "Read",
-        citation: "quinn-0.11.7/src/recv_stream.rs:467-475",
+        item: "Read(Reset)",
+        citation: "quinn-0.11.7/src/recv_stream.rs:467-475; :520-547",
         class: QuicErrorClass::StreamLocal,
+    },
+    PinnedErrorClassRow {
+        vocabulary: "quinn",
+        error_type: "quinn::ReadToEndError",
+        item: "Read(ConnectionLost)",
+        citation: "quinn-0.11.7/src/recv_stream.rs:467-475; :520-547",
+        class: QuicErrorClass::EntryTerminal,
+    },
+    PinnedErrorClassRow {
+        vocabulary: "quinn",
+        error_type: "quinn::ReadToEndError",
+        item: "Read(ClosedStream)",
+        citation: "quinn-0.11.7/src/recv_stream.rs:467-475; :520-547",
+        class: QuicErrorClass::StreamLocal,
+    },
+    PinnedErrorClassRow {
+        vocabulary: "quinn",
+        error_type: "quinn::ReadToEndError",
+        item: "Read(IllegalOrderedRead)",
+        citation: "quinn-0.11.7/src/recv_stream.rs:467-475; :520-547",
+        class: QuicErrorClass::StreamLocal,
+    },
+    PinnedErrorClassRow {
+        vocabulary: "quinn",
+        error_type: "quinn::ReadToEndError",
+        item: "Read(ZeroRttRejected)",
+        citation: "quinn-0.11.7/src/recv_stream.rs:467-475; :520-547",
+        class: QuicErrorClass::EntryTerminal,
     },
     PinnedErrorClassRow {
         vocabulary: "quinn",
@@ -895,15 +923,16 @@ pub const PINNED_ERROR_CLASSIFICATION_TABLE: &[PinnedErrorClassRow] = &[
     // ---- h3 0.0.8 driver and request stream -------------------------------
     //
     // R0b non-weakening note: `h3::error::StreamError` marks the enum and every
-    // variant `#[non_exhaustive]` with no opt-out (`error.rs:16-19` and each
-    // variant's `cfg_attr`), so a downstream crate cannot match
+    // variant `#[non_exhaustive]` while the locked dependency configuration
+    // leaves h3's opt-out feature disabled (`h3/src/lib.rs:20-21` and each
+    // variant's `cfg_attr` in `error.rs:16-19`), so a downstream crate cannot match
     // `ConnectionError(_)`, `RemoteClosing`, or `Undefined(_)` at all. Because a
     // normal peer GOAWAY writes only the shared `is_closing` flag and returns
     // `Ok` (`connection.rs:663-701`), the tuple/unit outcomes are classified by
     // the explicit discriminator model instead: see `H3ErrorShape`,
-    // `H3ErrorObservation`, and `classify_h3_request_outcome`, where
-    // `peer_closing_observed` is entry-terminal even while `poll_close` is still
-    // `Pending`. They are never folded into the stream-local wildcard of
+    // `H3ErrorObservation`, and `classify_h3_request_outcome`, where the
+    // `PeerClosing` provenance is entry-terminal even while `poll_close` is
+    // still `Pending`. They are never folded into the stream-local wildcard of
     // `classify_h3_stream_error`. No pinned variant is silently reclassified.
     PinnedErrorClassRow {
         vocabulary: "h3",
@@ -1125,18 +1154,18 @@ pub fn classify_h3_connection_error(_error: &h3::error::ConnectionError) -> Quic
 ///    exactly the struct-shaped variants: `StreamError{..}`, `RemoteTerminate{..}`
 ///    (a reset on one stream direction), and `HeaderTooBig{..}` — all
 ///    [`QuicErrorClass::StreamLocal`].
-/// 2. `h3 0.0.8` marks the enum and every variant `#[non_exhaustive]`
-///    (`error.rs:16-19, 84-87, 94-99, 105-110, 114-121, 126-131, 134-139`) with
-///    no opt-out, so the tuple/unit variants `ConnectionError(_)`,
+/// 2. `h3 0.0.8` marks the enum and every variant `#[non_exhaustive]` while the
+///    locked dependency configuration leaves h3's opt-out feature disabled
+///    (`h3/src/lib.rs:20-21`; `error.rs:16-19, 84-87, 94-99, 105-110, 114-121,
+///    126-131, 134-139`), so the tuple/unit variants `ConnectionError(_)`,
 ///    `RemoteClosing`, and `Undefined(_)` **cannot be matched downstream**.
 ///    Those outcomes are therefore classified by the explicit discriminator
 ///    model instead: see [`classify_h3_request_outcome`], whose
-///    [`H3ErrorObservation`] records the backend error shape, the shared
-///    GOAWAY-closing flag, and the driver's `poll_close` outcome for the same
-///    event. In particular a normal peer GOAWAY makes `RemoteClosing`
-///    observable while `poll_close` may still be `Pending` — that case is
-///    [`QuicErrorClass::EntryTerminal`] via the `peer_closing_observed` flag,
-///    not via this wildcard.
+///    [`H3ErrorObservation`] records the backend/operation provenance and the
+///    driver's `poll_close` outcome for the same event. In particular a normal
+///    peer GOAWAY makes `RemoteClosing` observable while `poll_close` may still
+///    be `Pending` — that case is [`QuicErrorClass::EntryTerminal`] via the
+///    `PeerClosing` provenance, not via this wildcard.
 ///
 /// The wildcard arm below is `StreamLocal` only because the wildcard is
 /// unreachable without the paired observation: a call site that routes an
