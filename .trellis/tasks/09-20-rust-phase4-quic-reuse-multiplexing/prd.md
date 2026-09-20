@@ -116,6 +116,15 @@ progress, cannot detach the driver, and cannot lose liveness: the supervised tas
 reaches `Drained`/`Failed` and removes the entry from the map on its own, with no
 surviving caller and without relying on a later close/drain pass.
 
+Initializer execution is equally entry-owned and cancellation-safe: installing an
+`Initializing` reservation starts and holds one entry-owned initializer task with
+a `JoinHandle` (or an equivalent entry-owned shared future plus guard), so no
+exchange caller owns, polls, or is required to drive it. Every same-key caller
+only awaits the shared completion, and its cancellation/deadline/
+`ExchangeControl` ends only its own wait — dropping the last waiter, or every
+caller, cannot stop the initializer, which still produces exactly one completion
+for the supervised teardown (`design.md` §3/§3.1/§7.2).
+
 ### R4. Lifecycle and final commit
 
 Reuse the existing `Lifecycle`, `ExchangeContext`, `ExchangeControl`, absolute
@@ -195,6 +204,15 @@ terminal removal.
   resource, goes to the supervised teardown, and an initializer that failed still
   delivers its completion so teardown finishes promptly on one explicit terminal
   outcome.
+- Installing the `Initializing` reservation starts and holds one **entry-owned
+  initializer task with a `JoinHandle`** (or an equivalent entry-owned shared
+  future plus guard); no exchange caller owns, polls, or drives it. All same-key
+  callers only await the shared completion, and a caller's cancellation, deadline,
+  or `ExchangeControl` ends only its own wait. Dropping the last waiter, or every
+  caller, cannot stop the initializer: its guard is owned by the entry, never
+  spawn-and-forget, and released only at terminal, so it still delivers exactly one
+  completion. An aborted leader caller can therefore never strand an
+  `Initializing`/`Closing` entry.
 - Only the terminal `Drained`/`Failed` performs exact key+generation physical
   removal and releases the slot and liveness. There is no late-resource race, no
   early drain, no stranded `Closing`, no second generation, and no reliance on a
@@ -326,12 +344,14 @@ implemented in Slice 0, not deferred.
       not close a healthy connection used by another request. A deterministic
       aborted-at-barrier/no-surviving-caller test proves the strong contract:
       entering `Closing` starts exactly one entry-owned supervised teardown task
-      that owns the initializer completion/handoff, the driver/`JoinHandle`, the
-      shutdown signal, the liveness guard, and the shared completion; aborting the
-      first close waiter and then dropping **all** close waiter futures cannot
-      stop teardown, and the task reaches `Drained`/`Failed`, removing the entry
-      and releasing its slot/liveness only at that terminal, with no surviving
-      caller and without a later close/drain pass. The real pinned-stack H3 loopback proof
+      that owns the initializer completion/handoff plus guard, the
+      driver/`JoinHandle`, the shutdown signal, the liveness guard, and the shared
+      completion. Initializer execution itself is entry-owned: aborting the first
+      initializer caller and dropping **every exchange waiter** cannot stop it, and
+      aborting the first close waiter and then dropping **all** close waiter
+      futures cannot stop teardown; the task reaches `Drained`/`Failed`, removing
+      the entry and releasing its slot/liveness only at that terminal, with no
+      surviving caller and without a later close/drain pass. The real pinned-stack H3 loopback proof
       (one canceled request leaves the shared connection, the driver, and another
       concurrent request healthy) is part of this criterion.
 - [ ] A6. Local stream-slot and owner-entry bounds are finite and observable;
@@ -356,9 +376,11 @@ implemented in Slice 0, not deferred.
       observable for DoQ and DoH3: owner close, caller cancellation, deadline,
       and a successful final response cannot be reordered into a late success.
       A deterministic initialization-versus-owner-close barrier test proves the
-      crossing protocol: close wins the shared lock first, the `Initializing`
-      reservation is not removed, and the initializer then completes and acquires
-      its resource; the entry never publishes `Active`, the generation does not
+      crossing protocol: the first initializer caller is aborted and every exchange
+      waiter dropped first, yet the entry-owned initializer still produces exactly
+      one completion; close then wins the shared lock first, the `Initializing`
+      reservation is not removed, and the initializer completes and acquires its
+      resource; the entry never publishes `Active`, the generation does not
       disappear, the resource is taken over and closed by the supervised teardown
       (no orphan, no late-resource race, no second generation), `Lifecycle` does
       not drain early, and removal plus slot/liveness release happen only at the
@@ -390,11 +412,12 @@ implemented in Slice 0, not deferred.
 - [ ] A13. Owner admission and entry teardown are covered by deterministic
       Slice 0 model tests: the multi-key cap test (A6), the same-key `Closing`
       lookup test (A6), the init-vs-owner-close barrier test (A8, including
+      initializer-caller abort with zero surviving waiters and
       close-wins-then-late-resource acquisition), and the
       aborted-at-barrier/no-surviving-caller supervised-teardown test (A5) all
       fail if the atomic no-await admission section, the single initialization
-      crossing/handoff protocol, or the entry-owned supervised teardown contract
-      is removed.
+      crossing/handoff protocol, the entry-owned cancellation-safe initializer
+      execution, or the entry-owned supervised teardown contract is removed.
 
 ## Out of scope
 

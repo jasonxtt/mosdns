@@ -99,23 +99,34 @@ Checklist:
       `Initializing`, otherwise handing the whole result (including a
       late-acquired resource) to the supervised teardown; no resource means the
       task records terminal `Failed` and removes exactly once.
+- [ ] Implement cancellation-safe initializer execution ownership (`design.md`
+      §3/§3.1/§3.2): installing the `Initializing` reservation starts and holds one
+      entry-owned initializer task with a `JoinHandle` (or an equivalent
+      entry-owned shared future plus guard) under the same lock — never a
+      caller-owned future and never spawn-and-forget. Same-key callers only await
+      the shared completion; a caller's `ExchangeControl`/deadline/cancellation
+      ends only its own wait, and dropping the last waiter or every caller cannot
+      stop the initializer. Its guard is released only at terminal, so exactly one
+      completion is always delivered to the supervised teardown and an
+      `Initializing`/`Closing` entry can never be stranded.
 - [ ] Implement the atomic multi-key admission section (`design.md` §4.1): one
       no-await map critical section performing lookup, transition of
       dead/idle-expired entries to `Closing` (without removal), the capacity
       check counting `Initializing`/`Closing`/`Active` entries as occupied until
       the terminal `Drained`/`Failed`, and reservation/join/reuse.
 - [ ] Implement the same-key lookup behavior (`design.md` §4.3): `Active` leased,
-      `Initializing` joined through the single-flight initializer under the
-      caller deadline (returning `Closed(NotSent)` if close wins), `Closing`
-      returns `Closed(NotSent)` with no wait on drain, no second generation, and
-      no lease of the `Closing` slot, and the same key may retry to admit a fresh
-      generation only after the old entry reaches terminal removal.
+      `Initializing` joined by awaiting the **entry-owned** initializer under the
+      caller deadline (cancelling only that wait, returning `Closed(NotSent)` if
+      close wins), `Closing` returns `Closed(NotSent)` with no wait on drain, no
+      second generation, and no lease of the `Closing` slot, and the same key may
+      retry to admit a fresh generation only after the old entry reaches terminal
+      removal.
 - [ ] Implement the entry-owned supervised teardown task (`design.md` §7.2):
-      started exactly once at the `Closing` transition; it owns the initializer
-      completion/handoff, driver/`JoinHandle`, shutdown signal, liveness guard,
-      shared completion, and terminal-only map removal plus slot/liveness
-      release. Close callers only await the completion, and the admission path
-      never awaits a drain.
+      started exactly once at the `Closing` transition; it holds the entry-owned
+      initializer task/`JoinHandle`/guard and its completion/handoff, plus the
+      driver/`JoinHandle`, shutdown signal, liveness guard, shared completion, and
+      terminal-only map removal with slot/liveness release. Close callers only
+      await the completion, and the admission path never awaits a drain.
 - [ ] Freeze task-local bounds as finite non-configurable constants. Keep the
       proposed values (32 streams, 8 entries, 30 seconds lazy idle) explicitly
       implementation-only.
@@ -127,12 +138,15 @@ Checklist:
       `Closed(NotSent)` with no drain wait, no second generation, no slot reuse,
       and a successful fresh-generation admission only after terminal removal.
 - [ ] Add the **init-vs-owner-close barrier test** (`design.md` §3.1/§11.1):
-      close wins the linearization point first, the reservation is not removed,
-      then the initializer completes and acquires its resource; assert `Active` is
-      never published, the generation does not disappear, `Lifecycle` does not
-      drain early, the resource is taken over and closed by the supervised
-      teardown with no orphan or second generation, and removal plus
-      slot/liveness release happen only at terminal `Drained`/`Failed`.
+      abort/cancel the first initializer caller and drop every exchange waiter at
+      the initializer barrier, then assert the entry-owned initializer task is
+      still alive and yields exactly one completion; close then wins the
+      linearization point first, the reservation is not removed, and the
+      initializer completes and acquires its resource; assert `Active` is never
+      published, the generation does not disappear, `Lifecycle` does not drain
+      early, the resource is taken over and closed by the supervised teardown with
+      no orphan or second generation, and removal plus slot/liveness release
+      happen only at terminal `Drained`/`Failed`.
 - [ ] Add the **aborted-at-barrier/no-surviving-caller supervised-teardown test**
       (`design.md` §11.1): abort the first close waiter, then drop all close
       waiter futures, and assert exactly one teardown runs to `Drained`/`Failed`
@@ -331,6 +345,11 @@ For each external-executor slice:
 - If a same-key lookup finding `Closing` blocks on drain, opens a second
   generation, or leases the `Closing` slot, stop Slice 0 and fix the lookup
   contract.
+- If initializer execution can be stopped by aborting its first caller or by
+  dropping the last/every exchange waiter, if its task/`JoinHandle`/guard is
+  caller-owned or spawn-and-forget, or if a stranded `Initializing`/`Closing`
+  entry can block its own completion, stop Slice 0 and fix the initializer
+  ownership before anything else.
 - If the entry-owned supervised teardown can be stopped by aborting the first
   close waiter or all close waiters, if it detaches the H3 driver/`JoinHandle`,
   strands an entry in `Closing`, or makes `Lifecycle` report drained early, stop
