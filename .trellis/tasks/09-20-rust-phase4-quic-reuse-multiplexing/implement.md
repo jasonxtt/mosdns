@@ -39,12 +39,12 @@ executor target.
 - [ ] If any pinned API cannot satisfy R0a/R0b/R0c, **stop and return to
       planning review**. Do not add, remove, or version-bump a dependency to work
       around it.
-- [ ] The atomic multi-key admission contract (`design.md` §4.1), the
-      `Initializing` state and publication/early-release rules (`design.md` §3),
-      and the entry-owned supervised
-      `Initializing/Active -> Closing -> Drained | Failed` teardown
-      (`design.md` §7) are implemented in Slice 0 with their deterministic
-      model tests.
+- [ ] The atomic multi-key admission contract (`design.md` §4.1), the single
+      `Initializing` crossing/handoff protocol including publication
+      (`design.md` §3), and the entry-owned supervised
+      `Initializing/Active -> Closing -> Drained | Failed` teardown that alone
+      performs terminal removal (`design.md` §7) are implemented in Slice 0 with
+      their deterministic model tests.
 - [ ] After the user approves this plan, run `python3 ./.trellis/scripts/task.py start
       rust-phase4-quic-reuse-multiplexing` (or the repository-equivalent start
       command) and only then dispatch Slice 0.
@@ -89,21 +89,21 @@ Checklist:
       `Initializing -> Active -> Closing -> Drained | Failed` lifecycle,
       generation identity, stream-slot reservation, health states, idle
       timestamps, and typed backpressure/closed errors without opening a socket.
-- [ ] Implement the `Initializing` reservation and the single-lock
-      `Initializing -> Active` publication rule (`design.md` §3.1): an initializer
-      publishes `Active` only while the owner is still `Open` and the same
-      generation is still `Initializing`; otherwise it never publishes and joins
-      the shared teardown.
-- [ ] Implement initialization-failure classification (`design.md` §3.2): no
-      acquired transport/H3 resource releases the reservation immediately by
-      key+generation; any acquired resource takes the supervised
-      `Closing -> Drained/Failed` teardown.
+- [ ] Implement the single initialization crossing protocol (`design.md`
+      §3.1/§3.2): owner close marks every `Initializing`/`Active` entry
+      `Closing`/`TeardownRequested` at the shared lock linearization point without
+      removing the reservation; entering `Closing` starts the supervised teardown
+      exactly once; the initializer builds resources outside the lock and hands
+      one result back under the same lock/handoff protocol, publishing `Active`
+      only when the owner is still `Open` and the generation is still
+      `Initializing`, otherwise handing the whole result (including a
+      late-acquired resource) to the supervised teardown; no resource means the
+      task records terminal `Failed` and removes exactly once.
 - [ ] Implement the atomic multi-key admission section (`design.md` §4.1): one
       no-await map critical section performing lookup, transition of
       dead/idle-expired entries to `Closing` (without removal), the capacity
       check counting `Initializing`/`Closing`/`Active` entries as occupied until
-      `Drained`/`Failed` (or the no-resource early release), and
-      reservation/join/reuse.
+      the terminal `Drained`/`Failed`, and reservation/join/reuse.
 - [ ] Implement the same-key lookup behavior (`design.md` §4.3): `Active` leased,
       `Initializing` joined through the single-flight initializer under the
       caller deadline (returning `Closed(NotSent)` if close wins), `Closing`
@@ -111,11 +111,11 @@ Checklist:
       no lease of the `Closing` slot, and the same key may retry to admit a fresh
       generation only after the old entry reaches terminal removal.
 - [ ] Implement the entry-owned supervised teardown task (`design.md` §7.2):
-      started exactly once at the `Closing` transition; it owns the driver/
-      `JoinHandle`, shutdown signal, liveness guard, shared completion, and
-      terminal-only map removal. Close callers only await the completion, and the
-      admission path never awaits a drain (idle expiry detection is
-      non-blocking; only the explicit maintenance path may await the completion).
+      started exactly once at the `Closing` transition; it owns the initializer
+      completion/handoff, driver/`JoinHandle`, shutdown signal, liveness guard,
+      shared completion, and terminal-only map removal plus slot/liveness
+      release. Close callers only await the completion, and the admission path
+      never awaits a drain.
 - [ ] Freeze task-local bounds as finite non-configurable constants. Keep the
       proposed values (32 streams, 8 entries, 30 seconds lazy idle) explicitly
       implementation-only.
@@ -126,10 +126,13 @@ Checklist:
 - [ ] Add the **same-key `Closing` lookup test** (`design.md` §4.3):
       `Closed(NotSent)` with no drain wait, no second generation, no slot reuse,
       and a successful fresh-generation admission only after terminal removal.
-- [ ] Add the **init-vs-owner-close barrier test** (`design.md` §3.1): an
-      initializer that observes close never publishes `Active`; with no acquired
-      resource it releases the reservation immediately, and with an acquired
-      resource it joins the shared supervised teardown to a terminal state.
+- [ ] Add the **init-vs-owner-close barrier test** (`design.md` §3.1/§11.1):
+      close wins the linearization point first, the reservation is not removed,
+      then the initializer completes and acquires its resource; assert `Active` is
+      never published, the generation does not disappear, `Lifecycle` does not
+      drain early, the resource is taken over and closed by the supervised
+      teardown with no orphan or second generation, and removal plus
+      slot/liveness release happen only at terminal `Drained`/`Failed`.
 - [ ] Add the **aborted-at-barrier/no-surviving-caller supervised-teardown test**
       (`design.md` §11.1): abort the first close waiter, then drop all close
       waiter futures, and assert exactly one teardown runs to `Drained`/`Failed`
@@ -214,10 +217,12 @@ Checklist:
       shared connection, the driver, or another concurrent request (this is the
       Slice 2/A5 real-H3 evidence, not the Slice 0 model).
 - [ ] Implement the entry-owned supervised teardown task (`design.md` §7.2) and
-      owner close ordering: stop admission, transition
-      `Initializing`/`Active -> Closing`, let the supervised task cancel request
-      streams, signal driver shutdown, close/force-close the QUIC connection if
-      needed, await driver/stream cleanup, and let `Lifecycle` finish; close
+      owner close ordering: stop admission, mark `Initializing`/`Active` as
+      `Closing`/`TeardownRequested` without removing reservations, have the
+      supervised task await the initializer handoff (closing any late-acquired
+      resource), cancel request streams, signal driver shutdown, close/force-close
+      the QUIC connection if needed, await driver/stream cleanup, and only then
+      remove the entry, release slot/liveness, and let `Lifecycle` finish; close
       callers only await the shared completion.
 - [ ] Add deterministic close barriers for the supervised teardown, driver and
       stream drain, no-surviving-caller progress, concurrent close/idempotence
@@ -253,11 +258,12 @@ Checklist:
 - [ ] Add peer advertised stream-limit tests. The pending open path must obey the
       original deadline/cancellation and must not create duplicate connections.
 - [ ] Add idle expiry using the injected clock/maintenance path: the expired
-      entry transitions to `Closing` under the owner-map lock (never removed),
-      stops being leasable, stays discoverable until `Drained`/`Failed`, and its
-      slot is not reusable early. Add connection-level logical deactivation,
-      same-key-`Closing` retry-after-terminal, init-vs-close, close-vs-return
-      race, concurrent close, no-surviving-caller, and aborted exchange tests.
+      entry is marked `Closing` under the owner-map lock (never removed), stops
+      being leasable, stays discoverable until terminal `Drained`/`Failed`, and
+      its slot is not reusable early. Add connection-level logical deactivation,
+      same-key-`Closing` retry-after-terminal, init-vs-close with late resource
+      acquisition, close-vs-return race, concurrent close, no-surviving-caller,
+      and aborted exchange tests.
 - [ ] Add A/AAAA `PublishedTarget` composition tests proving the selected
       numeric dial changes the key while identity/authority remain unchanged.
 - [ ] Add bounded concurrent stress for DoQ and DoH3, checking connection count,
@@ -317,9 +323,11 @@ For each external-executor slice:
 - If a pinned API assumption from `research/quic-reuse-evidence.md` does not hold,
   stop and return to planning review instead of changing `Cargo.toml`/`Cargo.lock`.
 - If concurrent first users can create two connections for one key, if an
-  `Initializing` entry can publish `Active` after close wins the shared lock, or
-  if concurrent distinct-key admissions can exceed `MAX_CONNECTIONS_PER_OWNER`,
-  stop before DoQ/H3 integration and fix the admission/publication section.
+  `Initializing` entry can publish `Active` after close wins the shared lock, if a
+  late-acquired resource is orphaned or a `Closing` reservation is removed before
+  terminal, or if concurrent distinct-key admissions can exceed
+  `MAX_CONNECTIONS_PER_OWNER`, stop before DoQ/H3 integration and fix the
+  admission/crossing-handoff section.
 - If a same-key lookup finding `Closing` blocks on drain, opens a second
   generation, or leases the `Closing` slot, stop Slice 0 and fix the lookup
   contract.
