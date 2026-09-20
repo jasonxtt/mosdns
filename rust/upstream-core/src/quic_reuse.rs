@@ -137,7 +137,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -146,11 +146,12 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::secure::{DohEndpoint, TlsPolicy};
-use crate::tcp::race_control;
+use crate::secure::{DohEndpoint, SecureError, TlsPolicy};
+use crate::tcp::{race_control, write_frame};
 use crate::{
-    CloseCompletion, CloseResult, CloseTransition, ExchangeContext, ExchangeControl, Lifecycle,
-    LifecycleState, SharedInFlightGuard, SideEffectState, TransportCancellation, UpstreamError,
+    CloseCompletion, CloseResult, CloseTransition, ExchangeContext, ExchangeControl,
+    ExchangeRequest, Lifecycle, LifecycleState, SharedInFlightGuard, SideEffectState,
+    TransportCancellation, UpstreamError,
 };
 
 /// The exact DoQ ALPN, reusing the frozen constant rather than duplicating it.
@@ -184,6 +185,9 @@ pub const MAX_CONNECTIONS_PER_OWNER: usize = 8;
 /// There is no background reaper and no timer: expiry is evaluated under the
 /// owner-map lock by [`QuicReuseOwner::maintain`] and by the admission scan.
 pub const QUIC_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The complete DoQ stream bound shared with the one-shot protocol.
+const MAX_DOQ_MESSAGE: usize = 65_537;
 
 // ---------------------------------------------------------------------------
 // The closed protocol discriminator and the validated reuse key
@@ -1395,11 +1399,22 @@ pub struct ModelSeams {
 /// supervised teardown and closed exactly once — including a resource acquired
 /// after teardown was already requested. Slice 1/2 replace it with the real
 /// Quinn connection and H3 driver handle.
-#[derive(Debug)]
 pub struct EntryTransport {
     id: u64,
     closed: AtomicBool,
     close_calls: AtomicUsize,
+    doq: Option<Arc<DoqConnection>>,
+}
+
+impl std::fmt::Debug for EntryTransport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EntryTransport")
+            .field("id", &self.id)
+            .field("closed", &self.is_closed())
+            .field("close_calls", &self.close_calls())
+            .finish_non_exhaustive()
+    }
 }
 
 impl EntryTransport {
@@ -1410,6 +1425,16 @@ impl EntryTransport {
             id,
             closed: AtomicBool::new(false),
             close_calls: AtomicUsize::new(0),
+            doq: None,
+        }
+    }
+
+    fn from_doq(connection: DoqConnection) -> Self {
+        Self {
+            id: 0,
+            closed: AtomicBool::new(false),
+            close_calls: AtomicUsize::new(0),
+            doq: Some(Arc::new(connection)),
         }
     }
 
@@ -1432,8 +1457,28 @@ impl EntryTransport {
     }
 
     fn close(&self) {
+        if let Some(connection) = &self.doq {
+            connection.close();
+        }
         self.closed.store(true, Ordering::SeqCst);
         self.close_calls.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn doq_connection(&self) -> Option<Arc<DoqConnection>> {
+        self.doq.clone()
+    }
+}
+
+/// The physical DoQ resource kept alive by one entry generation.
+struct DoqConnection {
+    endpoint: quinn::Endpoint,
+    connection: quinn::Connection,
+}
+
+impl DoqConnection {
+    fn close(&self) {
+        self.connection.close(0u32.into(), b"");
+        self.endpoint.close(0u32.into(), b"");
     }
 }
 
@@ -1465,6 +1510,48 @@ impl EntryInitializer for ImmediateInitializer {
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         Box::pin(async move { Some(Arc::new(EntryTransport::new(id))) })
     }
+}
+
+/// Entry-owned initializer for a shared DoQ connection.
+struct DoqEntryInitializer {
+    endpoint: crate::quic::DoqEndpoint,
+    tls: TlsPolicy,
+}
+
+impl EntryInitializer for DoqEntryInitializer {
+    fn initialize(&self, _key: QuicReuseKey, _generation: u64) -> InitializeFuture {
+        let endpoint = self.endpoint.clone();
+        let tls = self.tls.clone();
+        Box::pin(async move {
+            let connection = build_doq_connection(&endpoint, &tls).await?;
+            Some(Arc::new(EntryTransport::from_doq(connection)))
+        })
+    }
+}
+
+/// Builds one authenticated DoQ connection outside the owner-map lock.
+async fn build_doq_connection(
+    endpoint: &crate::quic::DoqEndpoint,
+    tls: &TlsPolicy,
+) -> Option<DoqConnection> {
+    let rustls_config = tls.client_config_with_alpn(&[DOQ_ALPN]).ok()?;
+    let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config).ok()?;
+    let client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
+    let local = if endpoint.dial().is_ipv4() {
+        SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
+    } else {
+        SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
+    };
+    let mut client = quinn::Endpoint::client(local).ok()?;
+    client.set_default_client_config(client_config);
+    let connecting = client
+        .connect(endpoint.dial(), endpoint.identity().as_str())
+        .ok()?;
+    let connection = connecting.await.ok()?;
+    Some(DoqConnection {
+        endpoint: client,
+        connection,
+    })
 }
 
 /// The per-generation record that outlives the map entry.
@@ -1947,6 +2034,15 @@ impl StreamLease {
     pub const fn record(&self) -> &Arc<EntryRecord> {
         &self.record
     }
+
+    fn doq_connection(&self) -> Option<Arc<DoqConnection>> {
+        let state = self.shared.lock();
+        let entry = state.entries.get(&self.key)?;
+        if entry.generation != self.generation {
+            return None;
+        }
+        entry.transport.as_ref()?.doq_connection()
+    }
 }
 
 impl Drop for StreamLease {
@@ -2417,6 +2513,193 @@ impl QuicReuseOwner {
             CloseCompletion::Closed | CloseCompletion::AlreadyClosed => CloseResult::Closed,
             CloseCompletion::NotClosing | CloseCompletion::InFlight => CloseResult::AlreadyClosing,
         }
+    }
+}
+
+/// A shared-connection DoQ upstream built on [`QuicReuseOwner`].
+///
+/// The owner performs one authenticated numeric QUIC connection per validated
+/// DoQ key. Each exchange leases only a stream slot and opens a fresh
+/// bidirectional stream; no DNS ID is used for demultiplexing and a failed
+/// stream is never replayed on a replacement connection.
+#[derive(Clone)]
+pub struct DoqReuseUpstream {
+    endpoint: crate::quic::DoqEndpoint,
+    tls: TlsPolicy,
+    owner: QuicReuseOwner,
+}
+
+impl DoqReuseUpstream {
+    /// Creates a shared DoQ owner and validates the exact `doq` TLS policy
+    /// before any entry can start an entry-owned connection initializer.
+    pub fn new(endpoint: crate::quic::DoqEndpoint, tls: TlsPolicy) -> Result<Self, SecureError> {
+        tls.client_config_with_alpn(&[DOQ_ALPN])?;
+        let lifecycle = Arc::new(Lifecycle::new());
+        let initializer = Arc::new(DoqEntryInitializer {
+            endpoint: endpoint.clone(),
+            tls: tls.clone(),
+        });
+        let owner = QuicReuseOwner::with_parts(
+            lifecycle,
+            Arc::new(SystemOwnerClock),
+            initializer,
+            ModelSeams::default(),
+        );
+        Ok(Self {
+            endpoint,
+            tls,
+            owner,
+        })
+    }
+
+    /// Number of physical connection generations still present in the owner
+    /// map, including an entry that is logically closing but not terminal.
+    #[must_use]
+    pub fn entry_count(&self) -> usize {
+        self.owner.entry_count()
+    }
+
+    /// Number of caller exchanges and entry-owned liveness registrations still
+    /// held by the shared lifecycle.
+    #[must_use]
+    pub fn in_flight_exchanges(&self) -> usize {
+        self.owner.in_flight_exchanges()
+    }
+
+    /// Closes admission and drains every shared connection generation.
+    pub async fn close(&self) -> CloseResult {
+        self.owner.close().await
+    }
+
+    /// Runs one DoQ query over a leased shared connection stream.
+    pub async fn exchange(
+        &self,
+        request: ExchangeRequest<'_>,
+        context: ExchangeContext,
+    ) -> Result<crate::secure::SecureResponse, SecureError> {
+        if request.query().len() > usize::from(u16::MAX) {
+            return Err(UpstreamError::FrameTooLarge.into());
+        }
+        let control = self.owner.exchange_control(context);
+        control.check_at(Instant::now(), SideEffectState::NotSent)?;
+        let registration = self.owner.register()?;
+        let key = QuicReuseKey::from_doq(&self.endpoint, &self.tls);
+        let lease = self
+            .owner
+            .admit(registration, key.clone(), &control)
+            .await?;
+        let generation = lease.generation();
+        let Some(shared) = lease.doq_connection() else {
+            return Err(UpstreamError::Closed(SideEffectState::NotSent).into());
+        };
+        let request_id = request.request_id();
+        let deadline = control.context().deadline();
+
+        let opened = race_control(&control, SideEffectState::NotSent, deadline, async {
+            shared
+                .connection
+                .open_bi()
+                .await
+                .map_err(|_| UpstreamError::Connect)
+        })
+        .await;
+        let (mut send, mut recv) = match opened {
+            Ok(streams) => streams,
+            Err(error) => {
+                if !is_local_control(&error) {
+                    self.owner
+                        .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
+                }
+                return Err(error.into());
+            }
+        };
+
+        let mut outbound = request.query().to_vec();
+        crate::quic::zero_outbound_query_id(&mut outbound);
+        let written = race_control(&control, SideEffectState::MaybeSent, deadline, async {
+            write_frame(&mut send, &outbound).await
+        })
+        .await;
+        if let Err(error) = written {
+            if !is_local_control(&error) && shared.connection.close_reason().is_some() {
+                self.owner
+                    .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
+            }
+            stop_doq_stream_if_local(&mut recv, &error);
+            return Err(error.into());
+        }
+
+        let finished = race_control(&control, SideEffectState::MaybeSent, deadline, async {
+            send.finish()
+                .map_err(|_| UpstreamError::Send(SideEffectState::MaybeSent))
+        })
+        .await;
+        if let Err(error) = finished {
+            if !is_local_control(&error) && shared.connection.close_reason().is_some() {
+                self.owner
+                    .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
+            }
+            stop_doq_stream_if_local(&mut recv, &error);
+            return Err(error.into());
+        }
+
+        let received = race_control(&control, SideEffectState::Sent, deadline, async {
+            recv.read_to_end(MAX_DOQ_MESSAGE)
+                .await
+                .map_err(DoqReadFailure::Read)
+        })
+        .await;
+        let complete = match received {
+            Ok(complete) => complete,
+            Err(DoqReadFailure::Control(error)) => {
+                let _ = recv.stop(quinn::VarInt::from_u32(crate::quic::DOQ_REQUEST_CANCELLED));
+                return Err(error.into());
+            }
+            Err(DoqReadFailure::Read(error)) => {
+                let entry_terminal = classify_quinn_read_to_end_error(&error)
+                    == QuicErrorClass::EntryTerminal
+                    || shared.connection.close_reason().is_some();
+                if entry_terminal {
+                    self.owner
+                        .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
+                }
+                return Err(crate::quic::classify_doq_read_error(error));
+            }
+        };
+
+        let (body, truncated) = crate::quic::validate_doq_payload(&complete, request_id)?;
+        self.owner.lifecycle().commit_final_response(
+            &control.caller_cancellation(),
+            deadline,
+            SideEffectState::Sent,
+        )?;
+        Ok(crate::secure::SecureResponse::doq(
+            body, request_id, truncated,
+        ))
+    }
+}
+
+enum DoqReadFailure {
+    Control(UpstreamError),
+    Read(quinn::ReadToEndError),
+}
+
+impl From<UpstreamError> for DoqReadFailure {
+    fn from(error: UpstreamError) -> Self {
+        Self::Control(error)
+    }
+}
+
+fn is_local_control(error: &UpstreamError) -> bool {
+    matches!(
+        error,
+        UpstreamError::Closed(_) | UpstreamError::Cancelled(_) | UpstreamError::DeadlineExceeded(_)
+    )
+}
+
+fn stop_doq_stream_if_local(recv: &mut quinn::RecvStream, error: &UpstreamError) {
+    if is_local_control(error) {
+        let _ = recv.stop(quinn::VarInt::from_u32(crate::quic::DOQ_REQUEST_CANCELLED));
     }
 }
 

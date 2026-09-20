@@ -562,54 +562,12 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     let read = race_control(&control, SideEffectState::Sent, deadline, async {
         recv.read_to_end(MAX_DOQ_MESSAGE)
             .await
-            .map_err(classify_read_error)
+            .map_err(classify_doq_read_error)
     })
     .await;
     let complete = prepared.settle_after_open(&mut recv, read).await?;
 
-    // A response shorter than a prefix cannot be framed; a zero-length body is
-    // malformed. The peer's wire ID MUST be zero (RFC 9250 §4.2.1), checked
-    // before the caller's original ID is restored.
-    if complete.len() < 2 {
-        return Err(UpstreamError::TruncatedFrame.into());
-    }
-    let length = usize::from(u16::from_be_bytes([complete[0], complete[1]]));
-    if length == 0 {
-        return Err(UpstreamError::MalformedResponse.into());
-    }
-    let Some(framed_body) = complete.get(2..2 + length) else {
-        return Err(UpstreamError::TruncatedFrame.into());
-    };
-    // RFC 9250 §4.2 permits exactly one response per stream. The whole stream
-    // was read up to the peer response-side FIN, so any byte after the first
-    // declared frame — a second complete response or a partial trailing frame —
-    // is a terminal protocol violation, never silently ignored.
-    if complete.len() != 2 + length {
-        return Err(SecureError::DoqProtocolTrailingResponse);
-    }
-    let mut body = framed_body.to_vec();
-    if body.len() < 2 {
-        return Err(UpstreamError::MalformedResponse.into());
-    }
-    // RFC 9250 §4.2.1: the peer's wire ID MUST be zero. A nonzero peer ID is the
-    // DoQ `PROTOCOL_ERROR` (0x2) case, terminal and never committed, and it is
-    // reported as a typed DoQ protocol error rather than a plain DNS mismatch.
-    if u16::from_be_bytes([body[0], body[1]]) != 0 {
-        return Err(SecureError::DoqProtocolNonzeroResponseId);
-    }
-
-    // Restore the caller's original ID into the owned response copy before any
-    // dns-core validation, so the committed wire carries the caller's ID.
-    body[0..2].copy_from_slice(&request_id.to_be_bytes());
-
-    let header = inspect_response_header(&body)
-        .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
-    if header.id != request_id {
-        return Err(UpstreamError::ResponseMismatch.into());
-    }
-    if validate_response(&body).is_err() {
-        return Err(UpstreamError::MalformedResponse.into());
-    }
+    let (body, truncated) = validate_doq_payload(&complete, request_id)?;
 
     // Phase 5: the single control-aware commit. Priority is owner, then caller,
     // then the original absolute deadline, then success; a committed response
@@ -628,7 +586,7 @@ async fn exchange_inner(prepared: &PreparedDoq<'_>) -> Result<SecureResponse, Se
     endpoint.close(0u32.into(), b"");
     endpoint.wait_idle().await;
 
-    Ok(SecureResponse::doq(body, request_id, header.truncated))
+    Ok(SecureResponse::doq(body, request_id, truncated))
 }
 
 /// Whether a secure error is one of the three local control outcomes that can
@@ -690,7 +648,7 @@ fn classify_handshake_failure(_error: quinn::ConnectionError) -> SecureError {
 /// same holds for `INTERNAL_ERROR` (`0x1`), `PROTOCOL_ERROR` (`0x2`), and
 /// `REQUEST_CANCELLED` (`0x3`): all are terminal and never committed. The
 /// `Slice3` suite exercises each code on the wire.
-fn classify_read_error(error: quinn::ReadToEndError) -> SecureError {
+pub(crate) fn classify_doq_read_error(error: quinn::ReadToEndError) -> SecureError {
     match error {
         quinn::ReadToEndError::TooLong => SecureError::from(UpstreamError::FrameTooLarge),
         quinn::ReadToEndError::Read(
@@ -700,6 +658,47 @@ fn classify_read_error(error: quinn::ReadToEndError) -> SecureError {
             SecureError::from(UpstreamError::Receive(SideEffectState::Sent))
         }
     }
+}
+
+/// Validates one complete DoQ response stream and restores its caller ID.
+///
+/// Both the one-shot and shared-connection DoQ paths use this helper so the
+/// RFC 9250 framing, zero wire-ID, DNS validation, and original-ID contract
+/// cannot drift between transports.
+pub(crate) fn validate_doq_payload(
+    complete: &[u8],
+    request_id: u16,
+) -> Result<(Vec<u8>, bool), SecureError> {
+    if complete.len() < 2 {
+        return Err(UpstreamError::TruncatedFrame.into());
+    }
+    let length = usize::from(u16::from_be_bytes([complete[0], complete[1]]));
+    if length == 0 {
+        return Err(UpstreamError::MalformedResponse.into());
+    }
+    let Some(framed_body) = complete.get(2..2 + length) else {
+        return Err(UpstreamError::TruncatedFrame.into());
+    };
+    if complete.len() != 2 + length {
+        return Err(SecureError::DoqProtocolTrailingResponse);
+    }
+    let mut body = framed_body.to_vec();
+    if body.len() < 2 {
+        return Err(UpstreamError::MalformedResponse.into());
+    }
+    if u16::from_be_bytes([body[0], body[1]]) != 0 {
+        return Err(SecureError::DoqProtocolNonzeroResponseId);
+    }
+    body[0..2].copy_from_slice(&request_id.to_be_bytes());
+    let header = inspect_response_header(&body)
+        .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
+    if header.id != request_id {
+        return Err(UpstreamError::ResponseMismatch.into());
+    }
+    if validate_response(&body).is_err() {
+        return Err(UpstreamError::MalformedResponse.into());
+    }
+    Ok((body, header.truncated))
 }
 
 // ---------------------------------------------------------------------------
