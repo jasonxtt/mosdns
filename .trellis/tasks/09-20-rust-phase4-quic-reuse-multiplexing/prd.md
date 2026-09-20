@@ -19,38 +19,32 @@ numeric target 或最终 response commit 契约。
 
 ## Confirmed repository facts
 
-- `rust/upstream-core/src/quic.rs:1-66` and the `DoqUpstream` /
-  `Doh3Upstream` definitions (`:210-217`, `:725-738`) intentionally
-  implement fresh, one-shot connections. QUIC pooling, reuse, and multiplexing
-  are explicitly deferred there; this task is the next independent scope.
+- `rust/upstream-core/src/quic.rs:1-66` and the `DoqUpstream`/`Doh3Upstream`
+  definitions (`:210-217`, `:725-738`) implement fresh one-shot connections;
+  pooling, reuse, and multiplexing are explicitly deferred there.
 - `Lifecycle` in `rust/upstream-core/src/lib.rs:585-826` serializes owner
   admission with `Open -> Closing`, provides shared liveness registration for
   children, and exposes the only crate-level final response commit gate.
-- `ExchangeContext` / `ExchangeControl` and `SideEffectState` are already
-  the shared absolute-deadline, caller-cancellation, owner-cancellation, and
-  send-state vocabulary. The new owner must consume them rather than create a
-  second control race.
-- `rust/upstream-core/src/reuse.rs:1-27` defines the existing owner as
-  serial-per-connection TCP/DoT/DoH reuse. Its `MAX_PENDING_PER_CONNECTION = 1`
-  and idle pool are not a QUIC design; this task must use a separate owner and
-  separate key/state model.
-- `DoqEndpoint` and the one-shot DoQ path already enforce numeric dial plus
-  separate `ServerIdentity`, exact `doq` ALPN, zeroed outbound DNS ID,
-  stream FIN, response ID validation, and original-ID restoration.
-- The one-shot DoH3 path already reuses `DohEndpoint::get_request_target`,
-  exact `h3` ALPN, the bounded DoH response validator, and a tracked short-lived
-  H3 driver. Its one-shot `H2ScopeLease`-style teardown is not a long-lived
-  connection owner and must not be copied as the reuse abstraction.
+- `ExchangeContext`/`ExchangeControl` and `SideEffectState` are the shared
+  absolute-deadline, caller/owner-cancellation, and send-state vocabulary; the new
+  owner consumes them rather than creating a second control race.
+- `rust/upstream-core/src/reuse.rs:1-27` limits the existing owner to serial
+  TCP/DoT/DoH reuse; its `MAX_PENDING_PER_CONNECTION = 1` and idle pool are not a
+  QUIC design, so this task needs a separate owner and key/state model.
+- `DoqEndpoint` and the one-shot DoQ path already enforce numeric dial plus separate
+  `ServerIdentity`, exact `doq` ALPN, zeroed outbound DNS ID, stream FIN, response
+  ID validation, and original-ID restoration.
+- The one-shot DoH3 path already reuses `DohEndpoint::get_request_target`, exact
+  `h3` ALPN, the bounded DoH response validator, and a tracked short-lived H3
+  driver; its `H2ScopeLease`-style teardown is not a long-lived connection owner.
 - `ResolverComposition::doq_endpoint` in
-  `rust/upstream-core/src/resolver/owner.rs:900-915` already consumes only
-  `PublishedTarget::dial()` while preserving the caller's identity. DoH3 can
-  use the existing `doh_endpoint` composition because its endpoint type is the
-  existing `DohEndpoint`.
-- `TlsPolicy` carries an explicit verification mode and opaque `roots_revision`
-  for reuse identity; its current contract keeps 0-RTT early data and session
-  resumption disabled.
-- The locked QUIC/H3 graph is already present in `rust/upstream-core/Cargo.toml`;
-  Slice 0 is model-only and should not add dependencies.
+  `rust/upstream-core/src/resolver/owner.rs:900-915` consumes only
+  `PublishedTarget::dial()` while preserving caller identity; DoH3 uses the
+  existing `doh_endpoint` composition with `DohEndpoint`.
+- `TlsPolicy` carries a verification mode and opaque `roots_revision` for reuse
+  identity, keeping 0-RTT early data and session resumption disabled.
+- The locked QUIC/H3 graph is already in `rust/upstream-core/Cargo.toml`; Slice 0 is
+  model-only and adds no dependency.
 
 ## Requirements
 
@@ -176,12 +170,16 @@ completes does not satisfy this requirement. Pure validation failures that
 construct no entry at all (for example an invalid key or zero port) are pre-I/O
 errors, not entry teardown, and are resolved before this section.
 
-This is the **sole map-side admission-vs-close linearization**: an exchange that
-completed `Lifecycle::register` but reaches this section after close set
-`accepting=false` must release that registration and any local liveness guard
-before returning `Closed(NotSent)` — no reservation or initializer, no second
-generation, zero liveness/slot residue — while an admission installed inside the
-lock is ordered against close and captured as `Closing`/`TeardownRequested`.
+This is the **sole map-side admission-vs-close linearization** (first of the
+two-stage owner close, R6): an exchange that completed `Lifecycle::register` but
+reaches this section after close set `accepting=false` must release that
+registration and any local liveness guard before returning `Closed(NotSent)` — no
+reservation or initializer, no second generation, zero liveness/slot residue —
+while an admission installed inside the lock is ordered against close and captured
+as `Closing`/`TeardownRequested`. Publication into `Active` likewise requires
+`Lifecycle == Open`, `accepting == true`, and this exact generation still
+`Initializing` under that same lock; the real `Lifecycle` state and the map
+admission gate are independent and neither substitutes.
 
 A same-key lookup resolves by the found entry state: an `Active` entry is leased
 normally; an `Initializing` entry is joined through the single-flight initializer
@@ -198,13 +196,15 @@ terminal removal.
 - A reservation is installed as an explicit `Initializing` placeholder with a
   generation identity under the owner-map/state lock; a `Closing` entry stays
   discoverable but unleasable.
-- Owner close linearizes in order: `begin_close` transitions the `Lifecycle` and
-  rejects further `register` calls; the owner-map critical section then sets
-  `accepting=false` (the sole map-side admission-vs-close gate), marks every
-  `Initializing`/`Active` entry `Closing`/`TeardownRequested` without removing its
-  reservation/generation, and starts its exactly-once supervised teardown. Since
-  `accepting=false` is set in the same lock, an exchange still between registration
-  and map admission is rejected rather than stranded.
+- Owner close is **two-stage**. **Stage one:** `Lifecycle::begin_close` turns the
+  real `Lifecycle` `Open -> Closing` and rejects further `register` calls, before
+  any map lock is taken (`begin_close` is never executed inside it). **Stage two:**
+  the owner-map critical section sets `accepting=false` (the sole map-side
+  admission-vs-close gate), marks every `Initializing`/`Active` entry
+  `Closing`/`TeardownRequested` without removing its reservation/generation, and
+  starts its exactly-once supervised teardown. Since `accepting=false` is set in
+  the same lock, an exchange still between registration and map admission is
+  rejected rather than stranded.
 - Installing the reservation starts and holds one **entry-owned initializer task
   with a `JoinHandle`** (or equivalent entry-owned shared future plus guard); no
   exchange caller owns, polls, or drives it. All same-key callers only await the
@@ -214,13 +214,16 @@ terminal removal.
   exactly one completion and an aborted leader caller can never strand an
   `Initializing`/`Closing` entry.
 - The initializer builds outside the lock and hands its single result to the
-  entry-owned teardown/owner state under the same lock/handoff protocol: with the
-  owner still `Open` and this exact generation still `Initializing` it may publish
-  `Active` (the only publication point); already `Closing`/`TeardownRequested`
-  means it never publishes `Active` and never leaves a resource in a removed
-  generation — the whole result, including a late-acquired resource, goes to the
-  supervised teardown, and a failed initializer still delivers its completion so
-  teardown finishes promptly on one explicit terminal outcome.
+  entry-owned teardown/owner state under the same lock/handoff protocol: it may
+  publish `Active` (the only publication point) only when `Lifecycle == Open`,
+  `accepting == true`, and this exact generation is still `Initializing` all hold.
+  Because stage one alone already makes `Lifecycle != Open`, an initializer that
+  wins the lock after `begin_close` but before `accepting=false` still must not
+  publish `Active`; in either order it never publishes `Active` and never leaves a
+  resource in a removed generation — the whole result, including a late-acquired
+  resource, goes to the supervised teardown, and a failed initializer still
+  delivers its completion so teardown finishes promptly on one explicit terminal
+  outcome.
 - Entering `Closing` starts exactly one entry-owned supervised teardown task owning
   the initializer completion/handoff, H3 driver/`JoinHandle`, shutdown signal,
   liveness guard, and shared completion. Concurrent `close()` calls are idempotent,
@@ -367,10 +370,10 @@ removal (R3/R6) — specified in `design.md` §3/§4/§7 and not deferred.
       reusable early. A deterministic same-key test
       proves that a lookup finding `Closing` returns `Closed(NotSent)` with no
       wait on drain, creates no second generation, and does not lease the
-      `Closing` slot. A deterministic post-close admission test proves that an
+      `Closing` slot. A post-close admission test proves that an
       exchange registered but not yet admitted when `accepting=false` is
       linearized returns `Closed(NotSent)` with no reservation, initializer,
-      second generation, or liveness/slot residue.
+      second generation, or residue.
 - [ ] A7. Idle expiry transitions an unused connection to `Closing` under the
       owner-map lock according to the injected clock/maintenance path, so it is
       no longer leasable while it stays discoverable until `Drained`/`Failed`;
@@ -415,15 +418,15 @@ removal (R3/R6) — specified in `design.md` §3/§4/§7 and not deferred.
       around.
 - [ ] A13. Owner admission and entry teardown are covered by deterministic
       Slice 0 model tests: the multi-key cap test (A6), the same-key `Closing`
-      lookup test (A6), the post-close register-but-not-yet-installed admission
-      race test (A6), the init-vs-owner-close barrier test (A8, including
-      initializer-caller abort with zero surviving waiters and
-      close-wins-then-late-resource acquisition), and the
+      lookup test (A6), the post-close admission race test (A6), the
+      init-vs-owner-close barrier test (A8, including initializer-caller abort
+      with zero surviving waiters, close-wins-then-late-resource acquisition, and
+      the begin_close-to-accepting=false publication race), and the
       aborted-at-barrier/no-surviving-caller supervised-teardown test (A5) all
       fail if the atomic no-await admission section with its `accepting` gate,
       the single initialization crossing/handoff protocol, the entry-owned
-      cancellation-safe initializer execution, or the entry-owned supervised
-      teardown contract is removed.
+      cancellation-safe initializer execution, or the supervised teardown
+      contract is removed.
 
 ## Out of scope
 
@@ -488,33 +491,27 @@ removal (R3/R6) — specified in `design.md` §3/§4/§7 and not deferred.
 
 ## Blocking open questions
 
-There are **no unresolved product/scope questions** that block planning. The
-latest user decision fixed the task name, four-slice scope, exclusions, reuse-key
-dimensions, lifecycle vocabulary, and external-executor/web-review routing. The
-proposed numeric bounds are implementation-level choices recorded for review, not
-unresolved product behavior.
-
-There are, however, **open technical questions that are explicitly blocking
-Slice 1** and are assigned to the R0 pre-start gate rather than left implicit:
+No unresolved product/scope question blocks planning: the user decision fixed the
+task name, four-slice scope, exclusions, reuse-key dimensions, lifecycle
+vocabulary, and external-executor/web-review routing, and the numeric bounds are
+implementation-level choices, not unresolved product behavior. Four technical
+questions are explicitly blocking Slice 1 under the R0 pre-start gate:
 
 - **BQ1 (R0a).** Which exact per-phase cancellation sequence is safe through the
   pinned `h3 0.0.8` / `h3-quinn 0.0.10` API, given that an aborted `poll_data`
   leaves the internal receive stream as `None` and a subsequent `stop_sending`
-  unwraps it? R0 must answer this for the four phases and provide the Slice 0
-  decision/state-model test. If no safe per-phase cancellation exists for a
-  phase, that phase is drop-only teardown and the task stops for re-review.
+  unwraps it? R0 must answer for the four phases with the Slice 0
+  decision/state-model test; a phase with no safe cancellation is drop-only.
 - **BQ2 (R0b).** Which pinned `h3`/`h3-quinn`/`quinn` error variants prove the
-  physical connection is terminal versus stream-local? R0 must enumerate the
-  mapping and later slices must consume it.
-- **BQ3 (R0c).** Do the recorded API assumptions still hold against the
-  locked local registry source? Any mismatch is a re-review stop, not a
-  dependency change.
+  physical connection terminal versus stream-local? R0 enumerates the mapping.
+- **BQ3 (R0c).** Do the recorded API assumptions still hold against the locked
+  local registry source? A mismatch is a re-review stop, not a dependency change.
 - **BQ4.** Do the proposed numeric bounds survive the loopback peer stream-limit
-  fixtures? The numeric values may be tuned during implementation while keeping
-  the bounded/no-queue and atomic-admission contracts fixed.
+  fixtures? Values may be tuned while keeping the bounded/no-queue and
+  atomic-admission contracts fixed.
 
-None of these may be answered by silently adding, removing, or bumping a
-dependency, and none may be deferred to a post-Slice-0 follow-up task.
+None may be answered by adding, removing, or bumping a dependency, and none may be
+deferred to a post-Slice-0 follow-up task.
 
 ## Planning notes
 
