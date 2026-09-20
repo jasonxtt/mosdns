@@ -6,8 +6,10 @@ Concise cross-session handover for the Rust migration on branch `rust`.
 
 ## Source of truth (precedence)
 
-1. **Live execution** — `python3 ./.trellis/scripts/task.py current`, plus the
-   active task's `prd.md`, `design.md`, and `implement.md`.
+1. **Live execution** — `python3 ./.trellis/scripts/task.py current` and
+   `python3 ./.trellis/scripts/task.py list`, plus the selected task's `prd.md`,
+   `design.md`, and `implement.md`. An empty current pointer does not mean no
+   task is in progress.
 2. **Evidence** — archived task artifacts under `.trellis/tasks/archive/`.
 3. **Architecture** — `docs/ai/rust-rewrite-plan.md`.
 4. This file is a **concise handover only**. It summarizes current state and
@@ -35,10 +37,13 @@ Concise cross-session handover for the Rust migration on branch `rust`.
 
 ## Status as of 2026-09-20
 
-**Active Trellis task:** `09-20-rust-phase4-quic-reuse-multiplexing`
-(planning only; implementation not authorized until the planning summary is
-approved and `task.py start` is run). Existing Go live behavior is unchanged and
-no Rust path is enabled by default.
+At this documentation check, `task.py current` has no selected task;
+`09-20-rust-phase4-quic-reuse-multiplexing/task.json` is `in_progress`, and
+Slice 0 model implementation is present. This is not evidence that the whole
+task or an outstanding review gate has passed. Resume from the task's actual
+artifacts and evidence; do not treat the earlier “planning only” summary as
+current. Existing Go live behavior is unchanged and no Rust path is enabled
+by default.
 
 Completed milestones (all archived; each archive holds its own evidence):
 
@@ -81,17 +86,38 @@ one-shot, fresh-connection** transport work. The current task adds QUIC-specific
 connection reuse/multiplexing; it is not host wiring or completion of the Phase 4
 data plane.
 
-## Next frontier
+## Product priorities and next frontier
 
-The active planning task is **QUIC reuse/multiplexing**
-(`.trellis/tasks/09-20-rust-phase4-quic-reuse-multiplexing/`, planning only).
-The one-shot QUIC/HTTP3 foundation, resolver/bootstrap, dual-stack selection,
-and serial connection reuse are completed and archived (see milestone table).
-Later scopes, each needing its own task and review, include outbound socket
-policy, UDP retransmission, server listeners, then Phase 5 Rust-native host and
-Phase 6 hybrid retirement. This ordering is a direction, **not** an approved
-task sequence. No implementation beyond the active task's reviewed scope is
-authorized.
+The user confirmed Linux amd64 as the primary platform. Full backend feature
+compatibility and correctness are prerequisites; query latency (especially
+p95/p99), sustainable useful throughput, overload recovery, and long-running
+stability are the primary improvements. Memory is secondary with no required
+reduction percentage; bounded, reclaimable extra memory is acceptable when
+measurements justify the performance benefit.
+
+The architecture plan now brings **Phase 5A minimal native host** forward:
+after the current QUIC reuse task closes within its existing scope, prioritize
+YAML subset -> UDP/TCP listener -> async sequence -> matcher/cache/real upstream
+-> response and basic audit/metrics. Do not wait for every remaining Phase 4
+protocol or tuning task before validating this composition. Reject unsupported
+configuration explicitly; this early host is isolated and experimental.
+
+Remaining Phase 4 foundations compose with **5B full query features**; **5C full
+control plane** covers APIs, existing UI, persistent state and updates; **5D**
+validates full-system performance and stability; **Phase 6** retires hybrid
+scaffolding before production replacement. Current sequence foundation and
+serial transport reuse are not evidence of completed async host wiring or
+final concurrency performance.
+
+- Architecture, dependencies, and gates: `docs/ai/rust-rewrite-plan.md`.
+- Feature ownership and native acceptance inventory:
+  `docs/rust/feature-coverage.md`.
+- Reproducible performance/stability workloads and threshold-freeze rules:
+  `docs/rust/performance-validation.md`.
+
+This roadmap update does not change the existing QUIC task, close its gates,
+create/start another task, or authorize runtime changes or deployment. Later
+implementation needs its own scoped task and review.
 
 ## Non-negotiable constraints
 
