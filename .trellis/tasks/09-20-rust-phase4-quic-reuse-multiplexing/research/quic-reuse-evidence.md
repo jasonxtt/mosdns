@@ -133,11 +133,19 @@ re-review stop and never a dependency change.
    entries `Closing` (without removal), capacity-check counting
    `Initializing`/`Closing`/`Active` as occupied until terminal `Drained`/`Failed`,
    and reservation/join/reuse together. This is the sole map-side
-   admission-vs-close linearization: owner close sets `accepting=false` in the same
-   lock before marking entries, so an exchange registered but not yet admitted is
-   rejected and must release its registration plus any local liveness guard with no
-   residue. A check-then-insert split, installing without checking `accepting`, or
-   reusing a `Closing` slot before terminal, is a concurrency bug.
+   admission-vs-close linearization and stage two of the two-stage owner close:
+   stage one is `Lifecycle::begin_close` turning the real `Lifecycle` `Open ->
+   Closing` and rejecting `register`, never executed inside the map lock; stage two
+   sets `accepting=false` in that lock before marking entries, so an exchange
+   registered but not yet admitted is rejected and must release its registration
+   plus any local liveness guard with no residue. `Initializing -> Active`
+   publication requires `Lifecycle == Open`, `accepting == true`, and the exact
+   generation still `Initializing` under the same lock — the real `Lifecycle` state
+   and the map gate are independent, so neither alone suffices and the
+   begin_close-to-accepting=false window can never publish `Active`. A
+   check-then-insert split, installing without checking `accepting`, checking only
+   one of the two gates, or reusing a `Closing` slot before terminal, is a
+   concurrency bug.
 8. Make `Initializing` an explicit state and freeze one crossing protocol with
    cancellation-safe execution ownership: installing the reservation starts and
    holds one **entry-owned initializer task with a `JoinHandle`** (or an

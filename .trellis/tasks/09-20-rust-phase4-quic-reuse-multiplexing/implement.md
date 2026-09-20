@@ -116,11 +116,17 @@ Checklist:
       transition of dead/idle-expired entries to `Closing` (without removal), the
       capacity check counting `Initializing`/`Closing`/`Active` entries as
       occupied until the terminal `Drained`/`Failed`, and reservation/join/reuse.
-      This is the sole map-side admission-vs-close linearization: an exchange
-      already registered but not yet admitted when close sets `accepting=false`
-      must release that registration plus any local liveness guard before
-      returning `Closed(NotSent)`, leaving zero liveness/slot residue and no new
-      generation.
+      This is the sole map-side admission-vs-close linearization and stage two of
+      the two-stage owner close (`design.md` §7.3): stage one is
+      `Lifecycle::begin_close` turning the real `Lifecycle` `Open -> Closing` and
+      rejecting `register`, never executed inside the map lock. An exchange already
+      registered but not yet admitted when close sets `accepting=false` must
+      release that registration plus any local liveness guard before returning
+      `Closed(NotSent)`, leaving zero liveness/slot residue and no new generation.
+      `Initializing -> Active` publication requires `Lifecycle == Open`,
+      `accepting == true`, and the exact generation `Initializing` under the one
+      map/state lock; the real `Lifecycle` state and the map gate are independent,
+      so neither check alone is sufficient.
 - [ ] Implement the same-key lookup behavior (`design.md` §4.3): `Active` leased,
       `Initializing` joined by awaiting the **entry-owned** initializer under the
       caller deadline (cancelling only that wait, returning `Closed(NotSent)` if
@@ -147,6 +153,14 @@ Checklist:
       `Closed(NotSent)`, installs no reservation/initializer/second generation,
       leaks no `Lifecycle` liveness or slot, and the entries captured by close
       still finish through the existing `Closing -> Drained`/`Failed` protocol.
+- [ ] Add the **begin_close-to-accepting=false publication race test**
+      (`design.md` §3.1/§7.3/§11.3): with an installed `Initializing` entry, run
+      only stage one (`Lifecycle::begin_close`) while the map critical section is
+      parked at a barrier so `accepting` is still `true`; the initializer's
+      publication attempt must fail the three-way condition and never publish
+      `Active`, taking the late-resource/supervised-teardown path instead. Then
+      release the map barrier and assert the same non-`Active` outcome plus exactly
+      one teardown to terminal; the inverse order must fail at the gate too.
 - [ ] Add the **same-key `Closing` lookup test** (`design.md` §4.3):
       `Closed(NotSent)` with no drain wait, no second generation, no slot reuse,
       and a successful fresh-generation admission only after terminal removal.
@@ -351,9 +365,11 @@ For each external-executor slice:
   stop and return to planning review instead of changing `Cargo.toml`/`Cargo.lock`.
 - If an admission can install a reservation after owner close sets
   `accepting=false`, if a rejected post-close admission leaks a `Lifecycle`
-  registration/liveness/slot, or if close's scan can miss an entry that installed
-  before `accepting=false`, stop Slice 0 and fix the admission-vs-close
-  linearization before anything else.
+  registration/liveness/slot, if close's scan can miss an entry that installed
+  before `accepting=false`, if `Lifecycle::begin_close` runs inside the map lock,
+  or if publication checks only `accepting` or only `Lifecycle` (so a stage-one
+  close could still be followed by `Active`), stop Slice 0 and fix the
+  admission-vs-close linearization and publication gate before anything else.
 - If concurrent first users can create two connections for one key, if an
   `Initializing` entry can publish `Active` after close wins the shared lock, if a
   late-acquired resource is orphaned or a `Closing` reservation is removed before
