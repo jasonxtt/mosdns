@@ -2,8 +2,11 @@
 
 Status: planning only. Do not run `task.py start`, dispatch implementation, or edit
 runtime code until the final planning summary is approved in a later user
-message. The selected executor is MCP DSH Web; the selected reviewer is the
-user-provided ChatGPT web conversation.
+message. No executor is selected; the selected reviewer is the user-provided
+ChatGPT web conversation. MCP DSH is disabled; DSH Web remains available as
+the browser-backed executor and is the default recommendation when discovery
+finds a running endpoint. Before execution, explicitly select and validate
+the executor target.
 
 ## 0. Pre-start gates
 
@@ -12,18 +15,34 @@ user-provided ChatGPT web conversation.
 - [ ] Review `prd.md`, `design.md`, and this file in full; resolve any
       material plan change before starting.
 - [ ] Validate routing with `python3 ./.trellis/scripts/codex_routing.py validate`;
-      executor must be `dsh:provider-managed` and reviewer must remain the
-      selected ChatGPT conversation.
+      executor must be an explicitly validated `dsh-web`, Codex, or Herdr
+      target and reviewer must remain the selected ChatGPT conversation.
 - [ ] Preserve all pre-existing dirty files. Record exact task-scoped paths before
-      each DSH apply; never use `git add -A`, reset, checkout, rebase, or broad
-      cleanup.
+      each external-worker apply; never use `git add -A`, reset, checkout, rebase,
+      or broad cleanup.
 - [ ] The existing locked QUIC/H3 dependency graph passes the Slice 0 audit. Any
       dependency change pauses the task for a revised planning/review gate.
+- [ ] **R0 gates are closed before any Slice 1 network work.** R0a: the per-phase
+      H3 request-stream cancellation contract (section 0.1 of `design.md`) is
+      implemented and tested at the model level, including the explicit drop-only
+      phases. R0b: the connection-level versus stream-level error classification
+      table (section 0.2) is complete over the pinned `h3`/`h3-quinn`/`quinn`
+      vocabulary and is the only source later slices use for eviction. R0c: every
+      pinned API assumption in `research/quic-reuse-evidence.md` is verified
+      against the vendored locked sources with an exact citation and a
+      holds/does-not-hold result. R0 is **not** optional follow-up; Slice 1 does
+      not start until R0 is reviewed PASS.
+- [ ] If any pinned API cannot satisfy R0a/R0b/R0c, **stop and return to
+      planning review**. Do not add, remove, or version-bump a dependency to work
+      around it.
+- [ ] The atomic multi-key admission contract (`design.md` §4.1) and the
+      cancellation-safe `Active -> Closing -> Drained | Failed` entry lifecycle
+      (`design.md` §7) are implemented in Slice 0 with their deterministic tests.
 - [ ] After the user approves this plan, run `python3 ./.trellis/scripts/task.py start
       rust-phase4-quic-reuse-multiplexing` (or the repository-equivalent start
       command) and only then dispatch Slice 0.
 
-## 1. Slice 0 — QUIC reuse model, no network I/O
+## 1. Slice 0 — QUIC reuse model, R0 gates, no network I/O
 
 Allowed implementation surface:
 
@@ -33,18 +52,47 @@ Allowed implementation surface:
 
 Checklist:
 
+- [ ] **R0a.** Record the per-phase H3 request-stream cancellation contract against
+      the pinned `h3 0.0.8` / `h3-quinn 0.0.10` sources: before send, after
+      request FIN, during response head, during body read. Mark each phase
+      active-stop or drop-only, cite the pinned hazard
+      (`RecvStream::poll_data` takes the `Option`; `stop_sending` unwraps it), and
+      add the model-level four-phase test. No dependency change is allowed.
+- [ ] **R0b.** Complete the connection-level versus stream-level error
+      classification table over the pinned `h3`/`h3-quinn`/`quinn` vocabulary,
+      independent of the `SideEffectState` decision. Later slices must consume
+      this table rather than classifying errors at call sites.
+- [ ] **R0c.** Verify every pinned API assumption in
+      `research/quic-reuse-evidence.md` against the vendored locked sources with
+      an exact file/line citation and an explicit holds/does-not-hold result.
+      Record `quinn 0.11.7`, `h3 0.0.8`, `h3-quinn 0.0.10` unchanged. A mismatch
+      stops the task for re-review.
 - [ ] Define the closed protocol/ALPN discriminator and validated
       `QuicReuseKey` constructors for DoQ and DoH3.
 - [ ] Include numeric dial, canonical identity, DoH3 authority where applicable,
       TLS mode, and roots revision; prove key equality/isolation deterministically.
-- [ ] Define owner/entry state transitions, generation identity, stream-slot
-      reservation, health/dead/closing states, idle timestamps, and typed
+- [ ] Define owner/entry state transitions with the explicit
+      `Active -> Closing -> Drained | Failed` lifecycle, generation identity,
+      stream-slot reservation, health states, idle timestamps, and typed
       backpressure/closed errors without opening a socket.
+- [ ] Implement the atomic multi-key admission section (`design.md` §4.1): one
+      no-await map critical section performing lookup, transition of
+      dead/idle-expired entries to `Closing` (without removal), the capacity
+      check counting `Closing` entries as occupied until `Drained`/`Failed`, and
+      placeholder/generation reservation.
+- [ ] Implement the shared idempotent per-entry teardown completion and the
+      abort-safe driver ownership rule (`design.md` §7.2/§7.3), keeping
+      `Closing` entries discoverable until drain completes.
 - [ ] Freeze task-local bounds as finite non-configurable constants. Keep the
       proposed values (32 streams, 8 entries, 30 seconds lazy idle) explicitly
       implementation-only.
 - [ ] Add pure tests for close/admission races, stale-generation eviction,
       permit release, idle expiry, and no queue growth.
+- [ ] Add the **multi-key cap concurrency test** (`design.md` §4.1): concurrent
+      distinct-key admissions never exceed `MAX_CONNECTIONS_PER_OWNER`.
+- [ ] Add the **aborted-at-barrier/concurrent-close test** (`design.md` §11.1):
+      aborting the first close future does not detach the driver/`JoinHandle`,
+      does not lose liveness, and still reaches `Drained` via a second caller.
 - [ ] Run the focused model tests, `cargo fmt --check`, and
       `cargo clippy -p mosdns-upstream-core --all-targets -- -D warnings`.
 - [ ] Parent inspects the complete DSH diff and exact changed paths, reruns the
@@ -55,12 +103,12 @@ Checklist:
 
 Suggested focused commands:
 
-`bash
+```bash
 cargo test -p mosdns-upstream-core --test quic_reuse_model --locked
 cargo fmt --all -- --check
 cargo clippy -p mosdns-upstream-core --all-targets -- -D warnings
 python3 ./.trellis/scripts/task.py validate rust-phase4-quic-reuse-multiplexing
-`
+```
 
 ## 2. Slice 1 — shared DoQ connection
 
@@ -85,19 +133,19 @@ Checklist:
 - [ ] Prove stream-local reset/malformed response remains stream-local when the
       shared connection is healthy.
 - [ ] Rerun focused DoQ reuse tests plus all archived one-shot DoQ/QUIC tests.
-- [ ] Parent inspects and applies only the reviewed DSH patch, reruns tests in the
+- [ ] Parent inspects and applies only the reviewed patch, reruns tests in the
       parent worktree, and requests the same web reviewer’s scoped PASS.
 - [ ] Stop after reviewer PASS. Slice 2 is separately authorized.
 
 Suggested focused commands:
 
-`bash
+```bash
 cargo test -p mosdns-upstream-core --test quic_reuse_doq --locked
 cargo test -p mosdns-upstream-core --test slice1_doq --locked
 cargo test -p mosdns-upstream-core --test slice3_quic --locked
 cargo fmt --all -- --check
 cargo clippy -p mosdns-upstream-core --all-targets -- -D warnings
-`
+```
 
 ## 3. Slice 2 — shared DoH3 connection and owned driver
 
@@ -126,19 +174,19 @@ Checklist:
 - [ ] Add deterministic close barriers for driver and stream drain, concurrent
       close/idempotence tests, and zero-residue assertions.
 - [ ] Rerun focused DoH3 reuse tests plus one-shot DoH3 and secure lifecycle tests.
-- [ ] Parent inspects/applies the exact DSH patch, reruns focused tests, and sends
+- [ ] Parent inspects/applies the exact reviewed patch, reruns focused tests, and sends
       the scoped evidence to the selected web reviewer.
 - [ ] Stop after reviewer PASS. Slice 3 is separately authorized.
 
 Suggested focused commands:
 
-`bash
+```bash
 cargo test -p mosdns-upstream-core --test quic_reuse_doh3 --locked
 cargo test -p mosdns-upstream-core --test slice2_doh3 --locked
 cargo test -p mosdns-upstream-core --test slice3_quic --locked
 cargo fmt --all -- --check
 cargo clippy -p mosdns-upstream-core --all-targets -- -D warnings
-`
+```
 
 ## 4. Slice 3 — bounds, teardown, resolver composition, and stress
 
@@ -155,9 +203,11 @@ Checklist:
       pre-send backpressure and no unbounded queue.
 - [ ] Add peer advertised stream-limit tests. The pending open path must obey the
       original deadline/cancellation and must not create duplicate connections.
-- [ ] Add idle expiry using the injected clock/maintenance path, dead-entry
-      replacement, close-vs-return race, concurrent close, and aborted exchange
-      tests.
+- [ ] Add idle expiry using the injected clock/maintenance path: the expired
+      entry transitions to `Closing` under the owner-map lock (never removed),
+      stops being leasable, stays discoverable until `Drained`/`Failed`, and its
+      slot is not reusable early. Add dead-entry replacement, close-vs-return
+      race, concurrent close, and aborted exchange tests.
 - [ ] Add A/AAAA `PublishedTarget` composition tests proving the selected
       numeric dial changes the key while identity/authority remain unchanged.
 - [ ] Add bounded concurrent stress for DoQ and DoH3, checking connection count,
@@ -171,14 +221,14 @@ Checklist:
 
 Suggested final commands:
 
-`bash
+```bash
 cargo metadata --locked --format-version 1
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 git diff --check
 python3 ./.trellis/scripts/task.py validate rust-phase4-quic-reuse-multiplexing
-`
+```
 
 The isolated Linux/MSRV run must use the repository's established Debian/Rust
 1.85 evidence path. Do not claim an MSRV runtime test that was not actually
@@ -210,8 +260,17 @@ For each DSH slice:
 
 - If the key cannot identify TLS/ALPN/authority isolation without exposing trust
   material, stop Slice 0 and revise the model.
-- If concurrent first users can create two connections for one key, stop before
-  DoQ/H3 integration and fix single-flight ownership.
+- If R0a cannot express a safe per-phase cancellation for a phase, that phase is
+  drop-only and is recorded as such; do not work around it with a pin change.
+  If R0b cannot classify an error, that is a Slice 0 gap that blocks Slice 1.
+- If a pinned API assumption from `research/quic-reuse-evidence.md` does not hold,
+  stop and return to planning review instead of changing `Cargo.toml`/`Cargo.lock`.
+- If concurrent first users can create two connections for one key, or if
+  concurrent distinct-key admissions can exceed `MAX_CONNECTIONS_PER_OWNER`, stop
+  before DoQ/H3 integration and fix the atomic admission section.
+- If aborting the first close caller can detach the H3 driver/`JoinHandle`, strand
+  an entry in `Closing`, or make `Lifecycle` report drained early, stop Slice 0
+  and fix the shared teardown ownership.
 - If a query cancellation closes a healthy shared connection, stop that slice;
   do not weaken the test.
 - If the H3 driver can outlive owner close or a request can commit after close,
@@ -227,7 +286,9 @@ For each DSH slice:
 
 Before any future archive/finish action, all of the following must be present:
 
-- [ ] A1-A11 in `prd.md` mapped to focused/full evidence.
+- [ ] A1-A13 in `prd.md` mapped to focused/full evidence, including the R0
+      pre-start gates (A12) and the two deterministic Slice 0 concurrency tests
+      (A13).
 - [ ] Slice-by-slice DSH reports and parent diff inspection.
 - [ ] Explicit scoped PASS from the selected web reviewer.
 - [ ] Linux/MSRV and bounded stress evidence recorded without overclaiming.
