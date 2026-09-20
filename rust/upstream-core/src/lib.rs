@@ -6,6 +6,7 @@
 
 mod composite;
 pub mod quic;
+pub mod quic_reuse;
 pub mod resolver;
 mod reuse;
 pub mod secure;
@@ -29,6 +30,18 @@ pub use reuse::{
 pub use secure::{
     DohEndpoint, DotEndpoint, IdentityError, SecureError, ServerIdentity, ServiceUrlError,
     TlsPolicy,
+};
+// Additive QUIC reuse surface (Phase 4 Slice 0 model only): the QUIC-specific
+// owner, its validated key and closed protocol discriminator, the entry
+// lifecycle/error-classification vocabulary, and the confirmed task-local
+// bounds. The model seams, entry observations, and the pinned `classify_*`
+// functions stay in `quic_reuse` and are deliberately not re-exported here, so
+// the crate root surface stays the headline contract.
+pub use quic_reuse::{
+    EntryHealth, EntryObservation, EntryPhase, EntryRecord, EntryTerminal, ExchangeRegistration,
+    MAX_CONNECTIONS_PER_OWNER, MAX_STREAMS_PER_CONNECTION, PINNED_ERROR_CLASSIFICATION_TABLE,
+    PinnedErrorClassRow, QUIC_IDLE_TIMEOUT, QuicErrorClass, QuicErrorOutcome, QuicExchangePhase,
+    QuicProtocol, QuicReuseKey, QuicReuseOwner, StreamLease,
 };
 
 use std::fmt;
@@ -420,6 +433,13 @@ pub enum UpstreamError {
     Connect,
     Send(SideEffectState),
     Receive(SideEffectState),
+    /// A typed, pre-send local-capacity rejection: a bounded local resource
+    /// (for example the QUIC reuse owner's stream-slot or connection-entry
+    /// bound) is exhausted, so the exchange was refused before any stream or
+    /// request byte existed. It is never a queue, never a retry, and never
+    /// proves anything about a shared connection's health, so the recorded
+    /// side-effect state is `NotSent`.
+    Backpressure(SideEffectState),
     MalformedResponse,
     UnexpectedPeer,
     ResponseMismatch,
@@ -456,6 +476,7 @@ impl UpstreamError {
             | Self::Send(state)
             | Self::Receive(state)
             | Self::Closed(state)
+            | Self::Backpressure(state)
             | Self::Runtime(state) => *state,
             Self::MalformedResponse
             | Self::UnexpectedPeer
@@ -500,6 +521,7 @@ impl fmt::Display for UpstreamError {
             Self::Connect => "connect failure",
             Self::Send(_) => "send failure",
             Self::Receive(_) => "receive failure",
+            Self::Backpressure(_) => "local backpressure",
             Self::MalformedResponse => "malformed response",
             Self::UnexpectedPeer => "unexpected peer",
             Self::ResponseMismatch => "response mismatch",
