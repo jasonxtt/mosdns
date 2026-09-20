@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-09-18`
+Last verified: `2026-09-20`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
@@ -33,12 +33,12 @@ Concise cross-session handover for the Rust migration on branch `rust`.
   `rust` branch is a future pure Rust-native replacement, not an intermediate
   production runtime.
 
-## Status as of 2026-09-18
+## Status as of 2026-09-20
 
-**Active Trellis task:** `09-18-rust-phase4-quic-http3-doq-foundation`
-(planning only; implementation not authorized until reviewer approves the plan
-and `task.py start` is run). Existing Go live behavior is unchanged and no Rust
-path is enabled by default.
+**Active Trellis task:** `09-20-rust-phase4-quic-reuse-multiplexing`
+(planning only; implementation not authorized until the planning summary is
+approved and `task.py start` is run). Existing Go live behavior is unchanged and
+no Rust path is enabled by default.
 
 Completed milestones (all archived; each archive holds its own evidence):
 
@@ -53,6 +53,7 @@ Completed milestones (all archived; each archive holds its own evidence):
 | Phase 4 resolver/bootstrap | `rust/upstream-core` resolver module: single-family numeric-address resolution through a numeric bootstrap peer, TTL/cache/refresh, single-flight publication, close/drain. | `.trellis/tasks/archive/2026-09/09-17-rust-phase4-endpoint-resolution-foundation/` |
 | Phase 4 dual-stack selection | Resolver extension: explicit `bootstrap_version=0` A+AAAA candidate collection, A-preferred selection, per-family TTL/state. No connection fallback or Happy Eyeballs. | `.trellis/tasks/archive/2026-09/09-18-rust-phase4-dual-stack-endpoint-selection/` |
 | Phase 4 connection reuse | `rust/upstream-core` reuse owner: explicit reuse key over numeric dial + transport + secure identity/authority/ALPN, serial-per-connection minimum, bounded idle/pending limits, typed errors. | `.trellis/tasks/archive/2026-09/09-18-rust-phase4-connection-reuse-pipeline/` |
+| Phase 4 QUIC/HTTP3/DoQ foundation | `rust/upstream-core` fresh one-shot DoQ and DoH3 clients with exact ALPN, identity separation, bounded response validation, lifecycle/commit semantics, and no fallback. | `.trellis/tasks/archive/2026-09/09-18-rust-phase4-quic-http3-doq-foundation/` |
 
 The workspace also holds `rust/runtime`, the transitional single `staticlib`
 from the earlier hybrid work. New Phase 3B+ modules compose as plain Rust
@@ -75,21 +76,22 @@ Two evidence caveats carried from that review:
 - The task's `research/secure-upstream-evidence.md` is **evidence-only**, not
   normative; the reviewed code and `implement.md` are authoritative.
 
-Scope of what exists: the DoT/DoH foundation is **bounded one-shot,
-fresh-connection** transport work. It is not host wiring, not connection reuse,
-and not completion of the Phase 4 data plane.
+Scope of what exists: the DoT/DoH and QUIC/HTTP3 foundations are **bounded
+one-shot, fresh-connection** transport work. The current task adds QUIC-specific
+connection reuse/multiplexing; it is not host wiring or completion of the Phase 4
+data plane.
 
 ## Next frontier
 
-The active planning task is **QUIC/HTTP3/DoQ**
-(`.trellis/tasks/09-18-rust-phase4-quic-http3-doq-foundation/`, planning only).
-Resolver/bootstrap, dual-stack selection, and connection reuse are completed
-and archived (see milestone table); they are not candidates anymore. Later
-scopes, each needing its own task and review, include socket policy such as
-SOCKS/local bind and protocol retransmission where separately scoped, server
-listeners, then Phase 5 Rust-native host and Phase 6 hybrid retirement. This
-ordering is a direction, **not** an approved task sequence. No implementation
-beyond the active task's reviewed scope is authorized.
+The active planning task is **QUIC reuse/multiplexing**
+(`.trellis/tasks/09-20-rust-phase4-quic-reuse-multiplexing/`, planning only).
+The one-shot QUIC/HTTP3 foundation, resolver/bootstrap, dual-stack selection,
+and serial connection reuse are completed and archived (see milestone table).
+Later scopes, each needing its own task and review, include outbound socket
+policy, UDP retransmission, server listeners, then Phase 5 Rust-native host and
+Phase 6 hybrid retirement. This ordering is a direction, **not** an approved
+task sequence. No implementation beyond the active task's reviewed scope is
+authorized.
 
 ## Non-negotiable constraints
 

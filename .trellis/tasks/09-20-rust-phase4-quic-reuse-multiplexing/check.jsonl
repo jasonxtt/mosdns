@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/rust-migration.md","reason":"Check that the completed diff remains pure Rust upstream-core work and does not add hybrid migration wiring or production cutover."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Run the repository's test, lint, format, Linux/MSRV, diff, and dirty-worktree quality expectations."}
+{"file":".trellis/tasks/09-20-rust-phase4-quic-reuse-multiplexing/prd.md","reason":"Map every acceptance criterion and forbidden scope item to the final diff and evidence before review."}
+{"file":".trellis/tasks/09-20-rust-phase4-quic-reuse-multiplexing/design.md","reason":"Verify key dimensions, stream/driver ownership, backpressure, generation eviction, resolver composition, close/drain, and final commit ordering."}
+{"file":".trellis/tasks/09-20-rust-phase4-quic-reuse-multiplexing/research/quic-reuse-evidence.md","reason":"Recheck locked h3/quinn API assumptions, stream cancellation safety, connection-vs-stream failure classification, and single-flight/close races."}
+{"file":".trellis/tasks/archive/2026-09/09-18-rust-phase4-quic-http3-doq-foundation/design.md","reason":"Confirm one-shot QUIC protocol behavior and security exclusions remain intact while adding reuse."}
+{"file":".trellis/tasks/archive/2026-09/09-18-rust-phase4-connection-reuse-pipeline/design.md","reason":"Check that no serial TCP assumptions were silently generalized and that existing identity/deadline/commit contracts remain preserved."}
