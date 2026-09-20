@@ -842,6 +842,113 @@ error[E0599]: no variant named `PeerStreamTerminated` found for enum
   rust-phase4-quic-http3-doq-foundation`: `All validations passed` (exit 0; the
   `rust-migration.md` size warning is pre-existing and informational).
 
+## Slice 4 implementation record — 2026-09-20 (resolver DoQ composition entry)
+
+- Executor: DSH was the executor; no sub-task split was used. The parent retains
+  diff inspection, the quality gates, and the external review round.
+- Context: the Slice 3 remediations are committed at `051a920`. This record
+  covers only the Slice 4 resolver composition entry (acceptance A2's resolver
+  piece). The Slice 4 full gate sweep, isolated Linux/Rust 1.85.x loopback/MSRV
+  evidence, and the external reviewer round are **not** covered or claimed here.
+- Worktree state: this change is left **uncommitted and unpushed** in the
+  current worktree (`051a920` HEAD) for the parent to inspect. `task.json`
+  stays `in_progress`. Nothing here claims a commit, push, full gate, Linux
+  evidence, or reviewer PASS.
+
+### RED baseline (before the Slice 4 implementation)
+
+`cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test
+resolver_dual_stack --locked` failed to compile with three copies of
+
+```text
+error[E0599]: no function or associated item named `doq_endpoint` found for
+struct `ResolverComposition` in the current scope
+```
+
+proving the read-only resolver composition entry and its public capability were
+absent before the slice.
+
+### Implementation
+
+- `rust/upstream-core/src/resolver/owner.rs`:
+  - imports `DoqEndpoint` from `crate::quic` and `ServerIdentity` from
+    `crate::secure`;
+  - adds `ResolverComposition::doq_endpoint(&PublishedTarget, &ServerIdentity)
+    -> Result<DoqEndpoint, ResolverError>`, same shape as `dot_endpoint`: it
+    consumes only `PublishedTarget::dial()` and clones the caller identity
+    through `DoqEndpoint::new`, mapping a rejected endpoint to
+    `ResolverError::ZeroPort`. No resolver internals, existing endpoint
+    contracts, pooling, fallback, host/config/UI wiring, or production
+    selection are touched.
+- `rust/upstream-core/tests/resolver_dual_stack.rs`:
+  - two new deterministic public tests reuse the existing `dual_fixture` /
+    `dual_resolver` / `ManualClock` / `bounded` helpers and their bounded
+    async handshakes:
+    `a_dual_a_selection_composes_a_doq_endpoint_without_rewriting_identity`
+    (A preferred, IPv4) and
+    `a_dual_aaaa_selection_composes_a_doq_endpoint_without_rewriting_identity`
+    (only AAAA answers, IPv6). Each asserts the selected numeric address is the
+    DoQ dial address and that `doq.identity() == &identity` with a preserved
+    DNS name, so the numeric address never replaces the identity.
+  - the stale
+    `the_deferred_quic_boundary_is_a_numeric_selection_plus_caller_identity`
+    test is replaced by
+    `the_quic_composition_boundary_is_a_numeric_selection_plus_caller_identity`,
+    which keeps the numeric-selection assertions and now exercises the
+    available `doq_endpoint` entry; the file-level "deliberately does NOT cover"
+    note now scopes the exclusion to QUIC/HTTP3 transport and connection policy
+    rather than QUIC/HTTP3 composition. No other existing test changed.
+
+### Evidence (this worktree, uncommitted)
+
+- RED: the three E0599 errors above on the new `resolver_dual_stack` tests.
+- Focused resolver integration tests (`resolver_slice1` 14, `resolver_slice2` 7,
+  `resolver_slice3` 10, `resolver_slice4` 7, `resolver_slice5` 6,
+  `resolver_dual_stack` 27, `resolver_remediation` 24): all passed / 0 failed,
+  exit 0.
+- `cargo test -p mosdns-upstream-core --lib resolver --locked`: 25 passed /
+  0 failed (includes the existing in-crate `dot`/`doh` composition tests).
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`: clean (exit 0).
+- `cargo clippy -p mosdns-upstream-core --all-targets --all-features --locked
+  -- -D warnings`: clean (exit 0). `git diff --check`: clean (exit 0).
+- `python3 ./.trellis/scripts/task.py validate
+  rust-phase4-quic-http3-doq-foundation`: `All validations passed` (exit 0; the
+  `rust-migration.md` size warning is pre-existing and informational).
+- Not run/claiming: the workspace `--all-targets` / `--all-features` sweep,
+  `cargo tree`, the isolated Linux/Rust 1.85.x evidence, or any reviewer PASS.
+  Slice 4 stays open on those.
+- Changed paths: `rust/upstream-core/src/resolver/owner.rs`,
+  `rust/upstream-core/tests/resolver_dual_stack.rs`, and this record. No Cargo
+  manifest/`Cargo.lock` change, no new dependency, no production `sleep`, private
+  timer, or hidden timeout.
+
+### Parent verification — 2026-09-20
+
+- Independent local verification passed: `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`; `cargo test --manifest-path
+  rust/Cargo.toml -p mosdns-upstream-core --test resolver_dual_stack --locked`
+  (27/27); `cargo test --manifest-path rust/Cargo.toml -p
+  mosdns-upstream-core --all-targets --all-features --locked`; and `cargo test
+  --manifest-path rust/Cargo.toml --workspace --all-targets --all-features
+  --locked` all exited 0. The existing 23-case `slice3_quic` classifier took
+  224.78s to finish its explicit fixture cleanup and passed.
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets
+  --all-features --locked -- -D warnings` exited 0; `cargo tree
+  --manifest-path rust/Cargo.toml --workspace -e features --locked` exited 0;
+  task validation reported `All validations passed` with only the pre-existing
+  `rust-migration.md` context-size warning; `git diff --check` is clean.
+- Linux/MSRV evidence passed on the isolated Debian VM via `ssh mosdns-rust`:
+  `rustc +1.85.1` ran
+  `cargo +1.85.1 test --manifest-path
+  /root/mosdns-rust-slice4-linux-20260920/rust/Cargo.toml -p
+  mosdns-upstream-core --test resolver_dual_stack --locked`, with 27/27 tests
+  passed. The VM is Linux x86_64; the run used only ephemeral loopback ports,
+  did not bind port 53, and did not mutate installed `mosdns`/`mos-test`
+  services.
+- The full Slice 4 reviewer gate is still pending: no reviewer PASS is claimed,
+  and the task remains `in_progress` until the selected GPT Web conversation
+  returns an explicit scoped decision.
+
 ## Slice 3 remediation record 4 — 2026-09-20 (DoH3 `0x103`/`0x10f` context mapping, review P1)
 
 - Executor: DSH Web, single executor with no sub-task split, no second session,

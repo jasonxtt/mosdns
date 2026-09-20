@@ -23,7 +23,8 @@ use super::{
     ResolutionPolicy, ResolutionSnapshot, ResolutionTarget, ResolvedDestination, ResolverError,
     ResolverState,
 };
-use crate::secure::{DohEndpoint, DotEndpoint};
+use crate::quic::DoqEndpoint;
+use crate::secure::{DohEndpoint, DotEndpoint, ServerIdentity};
 use crate::{
     CloseCompletion, CloseResult, CloseTransition, Endpoint, ExchangeContext, Lifecycle,
     LifecycleState, Transport, TransportCancellation, Upstream,
@@ -894,6 +895,23 @@ impl ResolverComposition {
         service_url: &str,
     ) -> Result<DohEndpoint, ResolverError> {
         DohEndpoint::new(service_url, published.dial()).map_err(|_| ResolverError::ZeroPort)
+    }
+
+    /// Builds a DoQ endpoint that dials the resolved numeric address while
+    /// keeping the caller's original TLS service identity.
+    ///
+    /// Only [`PublishedTarget::dial`] is consumed, so resolution never rewrites
+    /// the SNI/verification identity: the caller's identity is cloned through
+    /// unchanged, and the numeric dial address never replaces it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolverError::ZeroPort`] when the published port is zero.
+    pub fn doq_endpoint(
+        published: &PublishedTarget,
+        identity: &ServerIdentity,
+    ) -> Result<DoqEndpoint, ResolverError> {
+        DoqEndpoint::new(published.dial(), identity.clone()).map_err(|_| ResolverError::ZeroPort)
     }
 }
 

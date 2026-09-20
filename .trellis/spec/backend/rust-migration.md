@@ -918,3 +918,80 @@ if target.is_numeric() {
 }
 // Only the owner commits state; a correlated TC reply is terminal.
 ```
+
+## Scenario: Phase 4 resolver composition into a DoQ endpoint
+
+### 1. Scope / Trigger
+
+Use this contract when a completed `PublishedTarget` is handed to the one-shot
+DoQ transport. The composition boundary is read-only: it consumes the
+published numeric destination and a caller-owned service identity, without
+adding resolver refresh, host/config wiring, pooling, fallback, or listeners.
+
+### 2. Signatures
+
+- `ResolverComposition::doq_endpoint(
+  published: &PublishedTarget,
+  identity: &ServerIdentity,
+) -> Result<DoqEndpoint, ResolverError>`
+- `DoqEndpoint::new(dial: SocketAddr, identity: ServerIdentity) ->
+  Result<DoqEndpoint, SecureError>` remains the construction and zero-port
+  validation boundary.
+
+### 3. Contracts
+
+- `doq_endpoint` passes exactly `PublishedTarget::dial()` as the numeric QUIC
+  destination and clones the caller's `ServerIdentity` unchanged.
+- Resolver output never rewrites SNI/certificate identity to the selected IPv4
+  or IPv6 address, and the hostname never enters the socket dial path.
+- A/AAAA selection is already complete before composition; the helper performs
+  no DNS lookup, bootstrap I/O, address racing, retry, fallback, or mutation of
+  resolver state.
+- Existing `endpoint`, `dot_endpoint`, and `doh_endpoint` contracts remain
+  unchanged; a future DoH3 consumer continues to reuse `DohEndpoint`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| fresh A or AAAA `PublishedTarget` | `DoqEndpoint` dials its numeric address and retains the supplied identity |
+| numeric literal publication | same read-only composition; no bootstrap traffic |
+| zero published port | `ResolverError::ZeroPort`; no endpoint is returned |
+| identity differs from dial address | identity remains the caller's validated name; no numeric substitution |
+| resolver refresh/selection not complete | composition is not attempted; caller must provide a published target |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `DoqEndpoint::new(published.dial(), identity.clone())` and a typed
+  `SecureError` to `ResolverError` mapping at the resolver boundary.
+- Base: deterministic A and AAAA loopback fixtures prove the selected family
+  reaches `dial()` while the DNS name remains unchanged.
+- Bad: resolve the service name again during construction, put the numeric
+  address in SNI, mutate `PublishedTarget`, or add connection policy to this
+  read-only helper.
+
+### 6. Tests Required
+
+- Public dual-stack tests cover an A-preferred selection and an AAAA-only
+  selection, asserting numeric dial address, preserved identity, and the
+  absence of numeric identity substitution.
+- Existing endpoint and resolver tests remain green, including zero-port
+  validation and numeric-target DNS bypass.
+- Focused Linux/MSRV evidence uses the isolated Debian VM and an ephemeral
+  loopback fixture; it must not mutate installed services or bind port 53.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Re-resolves the identity or authenticates the selected address itself.
+let endpoint = DoqEndpoint::new(resolve(identity.dns_name())?, identity);
+```
+
+#### Correct
+
+```rust
+let endpoint = DoqEndpoint::new(published.dial(), identity.clone())
+    .map_err(|_| ResolverError::ZeroPort)?;
+```
