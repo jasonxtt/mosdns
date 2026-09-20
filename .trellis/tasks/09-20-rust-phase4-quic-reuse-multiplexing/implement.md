@@ -3,10 +3,11 @@
 Status: planning only. Do not run `task.py start`, dispatch implementation, or edit
 runtime code until the final planning summary is approved in a later user
 message. No executor is selected; the selected reviewer is the user-provided
-ChatGPT web conversation. MCP DSH is disabled; DSH Web remains available as
-the browser-backed executor and is the default recommendation when discovery
-finds a running endpoint. Before execution, explicitly select and validate
-the executor target.
+ChatGPT web conversation. The route is chosen and validated at dispatch time:
+the executor must be an explicitly validated external-executor target (for
+example `dsh-web`, Codex, or Herdr) and the reviewer must remain the selected
+ChatGPT conversation. Before execution, explicitly select and validate the
+executor target.
 
 ## 0. Pre-start gates
 
@@ -15,29 +16,35 @@ the executor target.
 - [ ] Review `prd.md`, `design.md`, and this file in full; resolve any
       material plan change before starting.
 - [ ] Validate routing with `python3 ./.trellis/scripts/codex_routing.py validate`;
-      executor must be an explicitly validated `dsh-web`, Codex, or Herdr
-      target and reviewer must remain the selected ChatGPT conversation.
+      the executor must be an explicitly validated external-executor target
+      (`dsh-web`, Codex, or Herdr) and the reviewer must remain the selected
+      ChatGPT conversation.
 - [ ] Preserve all pre-existing dirty files. Record exact task-scoped paths before
-      each external-worker apply; never use `git add -A`, reset, checkout, rebase,
-      or broad cleanup.
+      each external-executor apply; never use `git add -A`, reset, checkout,
+      rebase, or broad cleanup.
 - [ ] The existing locked QUIC/H3 dependency graph passes the Slice 0 audit. Any
       dependency change pauses the task for a revised planning/review gate.
 - [ ] **R0 gates are closed before any Slice 1 network work.** R0a: the per-phase
       H3 request-stream cancellation contract (section 0.1 of `design.md`) is
-      implemented and tested at the model level, including the explicit drop-only
-      phases. R0b: the connection-level versus stream-level error classification
-      table (section 0.2) is complete over the pinned `h3`/`h3-quinn`/`quinn`
-      vocabulary and is the only source later slices use for eviction. R0c: every
-      pinned API assumption in `research/quic-reuse-evidence.md` is verified
-      against the vendored locked sources with an exact citation and a
-      holds/does-not-hold result. R0 is **not** optional follow-up; Slice 1 does
-      not start until R0 is reviewed PASS.
+      implemented and exercised by the Slice 0 **decision/state model only**,
+      including the explicit drop-only phases; the real pinned-stack H3 loopback
+      health proof is deferred to Slice 2/A5. R0b: the connection-level versus
+      stream-level error classification table (section 0.2) is complete over the
+      pinned `h3`/`h3-quinn`/`quinn` vocabulary and is the only source later
+      slices use for logical deactivation. R0c: every pinned API assumption in
+      `research/quic-reuse-evidence.md` is verified against the locked local
+      registry source with an exact citation and a holds/does-not-hold result.
+      R0 is **not** optional follow-up; Slice 1 does not start until R0 is
+      reviewed PASS.
 - [ ] If any pinned API cannot satisfy R0a/R0b/R0c, **stop and return to
       planning review**. Do not add, remove, or version-bump a dependency to work
       around it.
-- [ ] The atomic multi-key admission contract (`design.md` §4.1) and the
-      cancellation-safe `Active -> Closing -> Drained | Failed` entry lifecycle
-      (`design.md` §7) are implemented in Slice 0 with their deterministic tests.
+- [ ] The atomic multi-key admission contract (`design.md` §4.1), the
+      `Initializing` state and publication/early-release rules (`design.md` §3),
+      and the entry-owned supervised
+      `Initializing/Active -> Closing -> Drained | Failed` teardown
+      (`design.md` §7) are implemented in Slice 0 with their deterministic
+      model tests.
 - [ ] After the user approves this plan, run `python3 ./.trellis/scripts/task.py start
       rust-phase4-quic-reuse-multiplexing` (or the repository-equivalent start
       command) and only then dispatch Slice 0.
@@ -57,14 +64,21 @@ Checklist:
       request FIN, during response head, during body read. Mark each phase
       active-stop or drop-only, cite the pinned hazard
       (`RecvStream::poll_data` takes the `Option`; `stop_sending` unwraps it), and
-      add the model-level four-phase test. No dependency change is allowed.
+      add the **decision/state-model** four-phase test. Slice 0 has no socket or
+      QUIC/H3 I/O, so this is model evidence only: it proves the model never
+      selects the panic path and keeps the logical shared-entry state healthy. Do
+      not claim real H3 health here; Slice 2/A5 owns that loopback proof. No
+      dependency change is allowed.
 - [ ] **R0b.** Complete the connection-level versus stream-level error
       classification table over the pinned `h3`/`h3-quinn`/`quinn` vocabulary,
-      independent of the `SideEffectState` decision. Later slices must consume
-      this table rather than classifying errors at call sites.
+      independent of the `SideEffectState` decision. Entry-terminal errors
+      logically deactivate by exact key+generation `Active -> Closing`; physical
+      map removal stays a terminal `Drained`/`Failed` concern. Later slices must
+      consume this table rather than classifying errors at call sites.
 - [ ] **R0c.** Verify every pinned API assumption in
-      `research/quic-reuse-evidence.md` against the vendored locked sources with
-      an exact file/line citation and an explicit holds/does-not-hold result.
+      `research/quic-reuse-evidence.md` against the locked local registry
+      source with an exact file/line citation and an explicit
+      holds/does-not-hold result.
       Record `quinn 0.11.7`, `h3 0.0.8`, `h3-quinn 0.0.10` unchanged. A mismatch
       stops the task for re-review.
 - [ ] Define the closed protocol/ALPN discriminator and validated
@@ -72,32 +86,59 @@ Checklist:
 - [ ] Include numeric dial, canonical identity, DoH3 authority where applicable,
       TLS mode, and roots revision; prove key equality/isolation deterministically.
 - [ ] Define owner/entry state transitions with the explicit
-      `Active -> Closing -> Drained | Failed` lifecycle, generation identity,
-      stream-slot reservation, health states, idle timestamps, and typed
-      backpressure/closed errors without opening a socket.
+      `Initializing -> Active -> Closing -> Drained | Failed` lifecycle,
+      generation identity, stream-slot reservation, health states, idle
+      timestamps, and typed backpressure/closed errors without opening a socket.
+- [ ] Implement the `Initializing` reservation and the single-lock
+      `Initializing -> Active` publication rule (`design.md` §3.1): an initializer
+      publishes `Active` only while the owner is still `Open` and the same
+      generation is still `Initializing`; otherwise it never publishes and joins
+      the shared teardown.
+- [ ] Implement initialization-failure classification (`design.md` §3.2): no
+      acquired transport/H3 resource releases the reservation immediately by
+      key+generation; any acquired resource takes the supervised
+      `Closing -> Drained/Failed` teardown.
 - [ ] Implement the atomic multi-key admission section (`design.md` §4.1): one
       no-await map critical section performing lookup, transition of
       dead/idle-expired entries to `Closing` (without removal), the capacity
-      check counting `Closing` entries as occupied until `Drained`/`Failed`, and
-      placeholder/generation reservation.
-- [ ] Implement the shared idempotent per-entry teardown completion and the
-      abort-safe driver ownership rule (`design.md` §7.2/§7.3), keeping
-      `Closing` entries discoverable until drain completes.
+      check counting `Initializing`/`Closing`/`Active` entries as occupied until
+      `Drained`/`Failed` (or the no-resource early release), and
+      reservation/join/reuse.
+- [ ] Implement the same-key lookup behavior (`design.md` §4.3): `Active` leased,
+      `Initializing` joined through the single-flight initializer under the
+      caller deadline (returning `Closed(NotSent)` if close wins), `Closing`
+      returns `Closed(NotSent)` with no wait on drain, no second generation, and
+      no lease of the `Closing` slot, and the same key may retry to admit a fresh
+      generation only after the old entry reaches terminal removal.
+- [ ] Implement the entry-owned supervised teardown task (`design.md` §7.2):
+      started exactly once at the `Closing` transition; it owns the driver/
+      `JoinHandle`, shutdown signal, liveness guard, shared completion, and
+      terminal-only map removal. Close callers only await the completion, and the
+      admission path never awaits a drain (idle expiry detection is
+      non-blocking; only the explicit maintenance path may await the completion).
 - [ ] Freeze task-local bounds as finite non-configurable constants. Keep the
       proposed values (32 streams, 8 entries, 30 seconds lazy idle) explicitly
       implementation-only.
-- [ ] Add pure tests for close/admission races, stale-generation eviction,
+- [ ] Add pure tests for close/admission races, stale-generation deactivation,
       permit release, idle expiry, and no queue growth.
 - [ ] Add the **multi-key cap concurrency test** (`design.md` §4.1): concurrent
       distinct-key admissions never exceed `MAX_CONNECTIONS_PER_OWNER`.
-- [ ] Add the **aborted-at-barrier/concurrent-close test** (`design.md` §11.1):
-      aborting the first close future does not detach the driver/`JoinHandle`,
-      does not lose liveness, and still reaches `Drained` via a second caller.
+- [ ] Add the **same-key `Closing` lookup test** (`design.md` §4.3):
+      `Closed(NotSent)` with no drain wait, no second generation, no slot reuse,
+      and a successful fresh-generation admission only after terminal removal.
+- [ ] Add the **init-vs-owner-close barrier test** (`design.md` §3.1): an
+      initializer that observes close never publishes `Active`; with no acquired
+      resource it releases the reservation immediately, and with an acquired
+      resource it joins the shared supervised teardown to a terminal state.
+- [ ] Add the **aborted-at-barrier/no-surviving-caller supervised-teardown test**
+      (`design.md` §11.1): abort the first close waiter, then drop all close
+      waiter futures, and assert exactly one teardown runs to `Drained`/`Failed`
+      with the driver supervised and terminal-only removal.
 - [ ] Run the focused model tests, `cargo fmt --check`, and
       `cargo clippy -p mosdns-upstream-core --all-targets -- -D warnings`.
-- [ ] Parent inspects the complete DSH diff and exact changed paths, reruns the
-      focused checks, and sends the scoped Slice 0 evidence to the selected web
-      reviewer.
+- [ ] Parent inspects the complete external-executor diff and exact changed
+      paths, reruns the focused checks, and sends the scoped Slice 0 evidence to
+      the selected web reviewer.
 - [ ] Stop after reviewer PASS. Slice 1 requires a new explicit user
       authorization; an internal Slice 0 PASS does not authorize it.
 
@@ -128,8 +169,10 @@ Checklist:
       per-stream permits, caller-owned control/deadline races, and no replay.
 - [ ] Prove one stream cancellation/timeout does not kill a healthy connection or
       another query; use the existing DoQ stream cancellation semantics.
-- [ ] Prove a connection-level failure evicts only the exact key generation and
-      the next independent query establishes one replacement.
+- [ ] Prove a connection-level failure only logically deactivates the exact key
+      generation (`Active -> Closing`, immediately unleasable; map removal only
+      at `Drained`/`Failed`) and the next independent query establishes one
+      replacement after that terminal.
 - [ ] Prove stream-local reset/malformed response remains stream-local when the
       shared connection is healthy.
 - [ ] Rerun focused DoQ reuse tests plus all archived one-shot DoQ/QUIC tests.
@@ -161,18 +204,24 @@ Checklist:
       stream IDs, unchanged authority/path/headers, matching response markers,
       and original-ID restoration.
 - [ ] Implement one-time H3 build per key, cloneable request sender, and a
-      long-lived driver task with explicit health, shutdown command, join, and
-      drain ownership.
+      long-lived driver task whose `JoinHandle` is handed to the entry-owned
+      supervised teardown task before the entry publishes `Active`.
 - [ ] Keep the H3 driver alive between requests; do not reuse the one-shot
       `H2ScopeLease` as the owner abstraction.
-- [ ] Implement phase-aware request-stream cancellation. Avoid the pinned
-      h3-quinn missing-stream panic path and prove canceled requests do not
-      close the shared connection.
-- [ ] Implement owner close ordering: stop admission, cancel request streams,
-      signal driver shutdown, close/force-close the QUIC connection if needed,
-      await driver/stream cleanup, then allow `Lifecycle` to finish.
-- [ ] Add deterministic close barriers for driver and stream drain, concurrent
-      close/idempotence tests, and zero-residue assertions.
+- [ ] Implement phase-aware request-stream cancellation against the R0a decision
+      contract. Avoid the pinned h3-quinn missing-stream panic path and prove,
+      with real pinned-stack loopback, that canceled requests do not close the
+      shared connection, the driver, or another concurrent request (this is the
+      Slice 2/A5 real-H3 evidence, not the Slice 0 model).
+- [ ] Implement the entry-owned supervised teardown task (`design.md` §7.2) and
+      owner close ordering: stop admission, transition
+      `Initializing`/`Active -> Closing`, let the supervised task cancel request
+      streams, signal driver shutdown, close/force-close the QUIC connection if
+      needed, await driver/stream cleanup, and let `Lifecycle` finish; close
+      callers only await the shared completion.
+- [ ] Add deterministic close barriers for the supervised teardown, driver and
+      stream drain, no-surviving-caller progress, concurrent close/idempotence
+      tests, and zero-residue assertions.
 - [ ] Rerun focused DoH3 reuse tests plus one-shot DoH3 and secure lifecycle tests.
 - [ ] Parent inspects/applies the exact reviewed patch, reruns focused tests, and sends
       the scoped evidence to the selected web reviewer.
@@ -206,8 +255,9 @@ Checklist:
 - [ ] Add idle expiry using the injected clock/maintenance path: the expired
       entry transitions to `Closing` under the owner-map lock (never removed),
       stops being leasable, stays discoverable until `Drained`/`Failed`, and its
-      slot is not reusable early. Add dead-entry replacement, close-vs-return
-      race, concurrent close, and aborted exchange tests.
+      slot is not reusable early. Add connection-level logical deactivation,
+      same-key-`Closing` retry-after-terminal, init-vs-close, close-vs-return
+      race, concurrent close, no-surviving-caller, and aborted exchange tests.
 - [ ] Add A/AAAA `PublishedTarget` composition tests proving the selected
       numeric dial changes the key while identity/authority remain unchanged.
 - [ ] Add bounded concurrent stress for DoQ and DoH3, checking connection count,
@@ -237,16 +287,17 @@ cannot provide it.
 
 ## 5. Review and handoff protocol
 
-For each DSH slice:
+For each external-executor slice:
 
 1. Send a prompt beginning with the exact active task path and naming only the
    current slice, allowed files, required red-to-green checks, and forbidden
    scope.
-2. Use bounded asynchronous DSH waits; do not duplicate a still-running job.
-3. After completion, inspect the complete DSH diff, changed-path list, base, and
-   task scope before applying anything.
+2. Use bounded asynchronous external-executor waits; do not duplicate a
+   still-running job.
+3. After completion, inspect the complete external-executor diff, changed-path
+   list, base, and task scope before applying anything.
 4. Rerun focused tests in the parent worktree after applying the exact reviewed
-   patch. A DSH summary is not evidence by itself.
+   patch. An external-executor summary is not evidence by itself.
 5. Send the full slice diff, commands, exit statuses, and explicit forbidden-scope
    statement to the selected web reviewer URL.
 6. Treat only an explicit scoped `PASS` as closure. Active, pending,
@@ -265,12 +316,17 @@ For each DSH slice:
   If R0b cannot classify an error, that is a Slice 0 gap that blocks Slice 1.
 - If a pinned API assumption from `research/quic-reuse-evidence.md` does not hold,
   stop and return to planning review instead of changing `Cargo.toml`/`Cargo.lock`.
-- If concurrent first users can create two connections for one key, or if
-  concurrent distinct-key admissions can exceed `MAX_CONNECTIONS_PER_OWNER`, stop
-  before DoQ/H3 integration and fix the atomic admission section.
-- If aborting the first close caller can detach the H3 driver/`JoinHandle`, strand
-  an entry in `Closing`, or make `Lifecycle` report drained early, stop Slice 0
-  and fix the shared teardown ownership.
+- If concurrent first users can create two connections for one key, if an
+  `Initializing` entry can publish `Active` after close wins the shared lock, or
+  if concurrent distinct-key admissions can exceed `MAX_CONNECTIONS_PER_OWNER`,
+  stop before DoQ/H3 integration and fix the admission/publication section.
+- If a same-key lookup finding `Closing` blocks on drain, opens a second
+  generation, or leases the `Closing` slot, stop Slice 0 and fix the lookup
+  contract.
+- If the entry-owned supervised teardown can be stopped by aborting the first
+  close waiter or all close waiters, if it detaches the H3 driver/`JoinHandle`,
+  strands an entry in `Closing`, or makes `Lifecycle` report drained early, stop
+  Slice 0 and fix the teardown ownership.
 - If a query cancellation closes a healthy shared connection, stop that slice;
   do not weaken the test.
 - If the H3 driver can outlive owner close or a request can commit after close,
@@ -287,9 +343,9 @@ For each DSH slice:
 Before any future archive/finish action, all of the following must be present:
 
 - [ ] A1-A13 in `prd.md` mapped to focused/full evidence, including the R0
-      pre-start gates (A12) and the two deterministic Slice 0 concurrency tests
-      (A13).
-- [ ] Slice-by-slice DSH reports and parent diff inspection.
+      pre-start gates (A12), the Slice 0 decision/state-model boundary, and the
+      deterministic Slice 0 model tests (A13).
+- [ ] Slice-by-slice external-executor reports and parent diff inspection.
 - [ ] Explicit scoped PASS from the selected web reviewer.
 - [ ] Linux/MSRV and bounded stress evidence recorded without overclaiming.
 - [ ] `task.py validate`, final quality checks, and `git diff --check` pass.

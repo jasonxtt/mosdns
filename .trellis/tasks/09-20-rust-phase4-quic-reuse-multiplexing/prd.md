@@ -2,7 +2,7 @@
 
 Status: planning only. This task authorizes no implementation until the final
 planning summary is explicitly approved, `task.py start` is run, and the
-selected DSH executor receives a bounded slice assignment.
+selected external executor receives a bounded slice assignment.
 
 ## Goal
 
@@ -103,15 +103,18 @@ outlive owner close. Owner close must stop admission, cancel/finish request
 streams, send the driver's shutdown signal, and drain the driver and all
 request streams before the owner reports closed.
 
-Owner teardown is cancellation-safe. An entry moves through an explicit
-`Active -> Closing -> Drained | Failed` lifecycle and remains discoverable
-until it reaches `Drained` or `Failed`. Concurrent close callers await one
-shared, idempotent teardown completion. Aborting the future of the first caller
-into close must not detach the owned H3 driver task, drop its `JoinHandle`
-without supervision, or lose the liveness hold that keeps the owner from
-reporting drained; the driver must still be driven to completion by an owner
-that survives the abort, so liveness is never lost even if every close caller
-goes away.
+Owner teardown is cancellation-safe through an **entry-owned supervised teardown
+task**. An entry moves through an explicit
+`Initializing -> Active -> Closing -> Drained | Failed` lifecycle and stays
+discoverable until it reaches `Drained` or `Failed`. When an entry enters
+`Closing`, exactly one entry-owned supervised teardown task starts and owns the
+H3 driver/`JoinHandle`, the driver shutdown signal, the entry's `Lifecycle`
+liveness guard, and the shared completion. Every close caller (including the
+owner close path) merely awaits that one shared completion. Aborting the first
+close caller's future, or **all** close caller futures, cannot stop teardown
+progress, cannot detach the driver, and cannot lose liveness: the supervised task
+reaches `Drained`/`Failed` and removes the entry from the map on its own, with no
+surviving caller and without relying on a later close/drain pass.
 
 ### R4. Lifecycle and final commit
 
@@ -148,42 +151,74 @@ task-local calibration choices, not product contract or Go parity claims.
 `MAX_CONNECTIONS_PER_OWNER = 8` admission is **atomic across keys**. A single
 no-await owner-map critical section performs, in order: lookup for the key,
 transition of dead and idle-expired entries to `Closing` **without removal**,
-capacity check against the entry bound while **counting `Closing` entries as
-occupied capacity until they reach `Drained`/`Failed`**, and
-placeholder/generation reservation for the key being admitted. No `await` may
-occur inside that section, and no two concurrent admissions for different keys
-may both observe a below-capacity map and over-commit. A separate map lock, a
+capacity check against the entry bound while **counting `Initializing`,
+`Closing`, and `Active` entries as occupied capacity until they reach
+`Drained`/`Failed`** (or are released by the no-resource initialization-failure
+path in R6), and either reuse/join of the existing entry or installation of a new
+`Initializing` placeholder with a generation identity. No `await` may occur
+inside that section, and no two concurrent admissions for different keys may both
+observe a below-capacity map and over-commit. A separate map lock, a
 check-then-insert split, a per-key lock, or reusing a `Closing` entry's slot
 before its drain completes does not satisfy this requirement.
 
+A same-key lookup resolves by the found entry state: an `Active` entry is leased
+normally; an `Initializing` entry is joined through the single-flight initializer
+under the caller's own deadline/control race; a `Closing` entry returns the
+repository's existing typed pre-send closed result
+`UpstreamError::Closed(SideEffectState::NotSent)` without waiting on drain,
+without opening a second generation for that key, and without leasing the
+`Closing` entry's slots. The caller may retry the same key in a later independent
+admission, which may admit a fresh generation after the old entry reaches
+terminal removal.
+
 ### R6. Failure, replacement, and teardown
 
-- Handshake/setup failure before DNS application bytes is `NotSent`; the failed
-  initialization is removed (it never became `Active` and has no drain to await)
-  so a later independent exchange can establish a replacement. This is distinct
-  from entries that served leases, which are removed only at `Drained`/`Failed`.
+- A reservation is installed as an explicit `Initializing` placeholder with a
+  generation identity. It becomes `Active` only when, under the same
+  owner-map/state lock, the owner is still `Open` and this exact generation is
+  still `Initializing`. If owner close, idle expiry, or a connection-level
+  logical deactivation wins that lock first, initialization must never publish
+  `Active` and never returns an entry. The reservation's fate then follows the
+  single resource rule below, not a second rule: if no transport/H3 resource was
+  acquired yet, the initializer releases the reservation immediately by exact
+  key+generation identity; if a resource was acquired, it joins the entry's
+  shared supervised `Closing -> Drained | Failed` teardown.
+- Initialization failure, or close observed during initialization, is classified
+  by resource acquisition:
+  **before acquiring any endpoint, QUIC connection, or H3 driver/handle**
+  (`NotSent`, released immediately by exact key+generation identity; it never
+  became `Active`, has nothing to drain, and frees its capacity slot at once)
+  versus **after a transport/H3 resource exists** (including a resource created
+  after teardown started, which must use the same `Closing -> Drained | Failed`
+  supervised teardown as a served entry). The early no-resource release is the
+  only removal path outside `Drained`/`Failed`.
 - A stream-local reset, malformed response, or local query cancellation does
-  not evict a healthy connection merely because the query failed.
+  not deactivate a healthy connection merely because the query failed.
 - A QUIC connection close, H3 driver terminal failure, endpoint failure, or
-  unusable shared transport evicts the exact key/generation. No current query
-  is replayed after bytes may have been sent.
+  unusable shared transport **logically deactivates** the exact key/generation:
+  under the map/state lock it transitions `Active -> Closing`, which makes it
+  immediately unleasable. Physical map removal happens only at `Drained`/`Failed`
+  through the supervised teardown task. No current query is replayed after bytes
+  may have been sent.
 - Idle expiry and explicit close transition the entry to `Closing` under the
-  owner-map lock. Only an `Active` entry is leasable, so a `Closing` entry
-  rejects new leases without being removed. The `Closing` entry stays
-  discoverable while its drain runs and is removed from the map only after it
-  reaches `Drained` or `Failed`. No new lease can race back into a closing
-  connection, and no concurrent close caller races a missing entry.
-- An entry exposes an explicit `Active -> Closing -> Drained | Failed`
-  lifecycle. A `Closing` entry stays discoverable by the owner until its drain
-  reaches a terminal state, so a concurrent close caller can observe and join
-  the in-progress teardown instead of racing a missing entry.
-- Concurrent `close()` calls are idempotent and converge through the existing
-  lifecycle state machine; all of them await one shared teardown completion.
-- Aborting the future of the first close caller must not detach the owned H3
-  driver/`JoinHandle`, must not drop the entry's liveness registration without
-  draining it, and must not strand the entry in `Closing`. The teardown work is
-  owned by state that outlives any single caller future, so a later close caller
-  (or the owner's own drain) still drives the driver to completion.
+  owner-map lock. Only an `Initializing -> Active` published entry is leasable,
+  so a `Closing` entry rejects new leases without being removed. The `Closing`
+  entry stays discoverable while its drain runs and is removed from the map only
+  after it reaches `Drained` or `Failed`. No new lease can race back into a
+  closing connection, and no concurrent close caller races a missing entry.
+- An entry exposes an explicit
+  `Initializing -> Active -> Closing -> Drained | Failed` lifecycle.
+- When an entry enters `Closing`, exactly one entry-owned supervised teardown
+  task starts and owns the H3 driver/`JoinHandle`, the shutdown signal, the
+  liveness guard, and the shared completion. Concurrent `close()` calls are
+  idempotent and converge through the existing lifecycle state machine; all of
+  them merely await that one shared completion.
+- Aborting the future of the first close caller, or **all** close caller futures,
+  must not detach the owned H3 driver/`JoinHandle`, must not drop the entry's
+  liveness registration before drain, and must not strand the entry in
+  `Closing`. Teardown progress is owned by the supervised task, never by a caller
+  future, so the task still reaches `Drained`/`Failed` and removes the map entry
+  with no surviving caller and without relying on a later close/drain pass.
 - No response may commit after close wins.
 
 ### R7. Resolver composition
@@ -208,8 +243,8 @@ R0 produces the pinned-API evidence and the two classification contracts that
 every later slice consumes. It is in scope for this task and is not optional
 follow-up.
 
-R0a. **H3 request cancellation is core.** Define and evidence the safe
-per-phase local cancellation of one H3 request stream across the pinned
+R0a. **H3 request cancellation is core.** Define the safe per-phase local
+cancellation of one H3 request stream across the pinned
 `h3 0.0.8` / `h3-quinn 0.0.10` API: before send, after request FIN, during
 response head, and during body read. Cancellation must reset or stop only the
 offending request stream where the pinned API permits it, must not invoke the
@@ -220,26 +255,38 @@ express a safe per-phase cancellation for a phase, that phase's contract is an
 explicit documented drop-only teardown, and the task stops for re-review rather
 than changing dependencies.
 
+The R0a evidence boundary is precise: **Slice 0 proves the four-phase
+decision/state model only** — no socket, no QUIC/H3 I/O — by showing the model
+never selects the pinned `Option::None` `stop_sending` path and keeps the logical
+shared-entry state healthy. The **real pinned-stack H3 loopback proof** that
+canceling one actual request leaves the shared connection, the driver, and
+another concurrent request healthy belongs to Slice 2/A5 and must not be claimed
+as Slice 0 or R0 evidence.
+
 R0b. **Connection-level versus stream-level error classification is core.**
 Produce the authoritative mapping from the pinned `h3`/`h3-quinn`/`quinn` error
 vocabulary to exactly one of: stream-local (keep a healthy entry), or
-connection/entry-terminal (evict the exact key+generation). Every DoQ and DoH3
-path in later slices must use this mapping; no path may infer eviction from an
-arbitrary error or from a bare `Result` shape, and no path may replay a query
-whose bytes may have been sent.
+connection/entry-terminal (logically deactivate the exact key+generation by
+`Active -> Closing`, with physical map removal only at `Drained`/`Failed`). Every
+DoQ and DoH3 path in later slices must use this mapping; no path may infer
+deactivation from an arbitrary error or from a bare `Result` shape, and no path
+may replay a query whose bytes may have been sent.
 
 R0c. **Pinned API assumptions are frozen.** The API facts recorded in
 `research/quic-reuse-evidence.md` for `quinn 0.11.7`, `h3 0.0.8`, and
-`h3-quinn 0.0.10` are the assumptions R0 verifies against the vendored locked
-sources. R0 must pin each assumption to an exact source location and record
-whether it holds. **No dependency may be added, removed, or version-bumped to
-satisfy this contract.** If a pinned API demonstrably cannot satisfy R0a or
-R0b, the task stops and returns to planning review with the evidence.
+`h3-quinn 0.0.10` are the assumptions R0 verifies against the locked
+local registry source. R0 must pin each assumption to an exact source location
+and record whether it holds. **No dependency may be added, removed, or
+version-bumped to satisfy this contract.** If a pinned API demonstrably cannot
+satisfy R0a or R0b, the task stops and returns to planning review with the
+evidence.
 
-R0d. **Atomic admission and teardown contracts are fixed here, implemented in
-Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
-`Active -> Closing -> Drained/Failed` entry lifecycle (R6) are specified in
-`design.md` §4 and §7 and must be implemented in Slice 0, not deferred.
+R0d. **Atomic admission, initialization, and teardown contracts are fixed here,
+implemented in Slice 0.** The one-lock admission rule (R5), the
+`Initializing -> Active` publication and early-release rules (R6), and the
+entry-owned supervised teardown
+`Initializing/Active -> Closing -> Drained/Failed` (R3/R6) are specified in
+`design.md` §3, §4, and §7 and must be implemented in Slice 0, not deferred.
 
 ## Acceptance criteria
 
@@ -254,8 +301,13 @@ Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
 - [ ] A3. Canceling or timing out one in-flight DoQ stream produces only that
       query's typed control error, leaves a healthy connection usable, and
       permits a later query to reuse the same connection. A connection-level
-      failure is instead evicted and the next independent query establishes a
-      replacement without replaying the failed query.
+      failure instead logically deactivates the exact key+generation by
+      `Active -> Closing` (immediately unleasable; physical map removal only at
+      `Drained`/`Failed`), and the next independent query establishes a
+      replacement without replaying the failed query. A same-key admission that
+      lands while the old entry is still `Closing` returns `Closed(NotSent)`
+      with no drain wait and opens no second generation; the replacement becomes
+      admissible only after the old entry reaches terminal removal.
 - [ ] A4. DoH3 loopback accepts one QUIC/H3 connection for multiple concurrent
       GET request streams, preserves `:authority`/path and the existing DoH
       response contract, restores each original ID, and proves the driver stays
@@ -264,10 +316,15 @@ Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
       stream, rejects new admissions, converges under concurrent/repeated close,
       and leaves zero registered child/stream residue. A canceled request does
       not close a healthy connection used by another request. A deterministic
-      aborted-at-barrier test proves that aborting the first close caller's
-      future does not detach the driver/`JoinHandle`, does not lose the entry's
-      liveness hold, and still reaches `Drained` through a second close caller or
-      the owner's own drain.
+      aborted-at-barrier/no-surviving-caller test proves the strong contract:
+      entering `Closing` starts exactly one entry-owned supervised teardown task
+      that owns the driver/`JoinHandle`, the shutdown signal, the liveness guard,
+      and the shared completion; aborting the first close waiter and then dropping
+      **all** close waiter futures cannot stop teardown, and the task reaches
+      `Drained`/`Failed` and removes the entry with no surviving caller and
+      without a later close/drain pass. The real pinned-stack H3 loopback proof
+      (one canceled request leaves the shared connection, the driver, and another
+      concurrent request healthy) is part of this criterion.
 - [ ] A6. Local stream-slot and owner-entry bounds are finite and observable;
       exhaustion returns a typed pre-send backpressure result without an
       unbounded queue. Peer stream-limit exhaustion is controlled by the caller's
@@ -275,8 +332,12 @@ Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
       test proves `MAX_CONNECTIONS_PER_OWNER` cannot be exceeded: many
       simultaneous admissions for distinct keys never leave more than the cap of
       live entries, and the admitted-key count equals the cap exactly when the
-      cap is reached. A `Closing` entry still occupies its slot until it reaches
-      `Drained`/`Failed`, so its slot is not reusable early.
+      cap is reached. `Initializing` and `Closing` entries still occupy their
+      slots until terminal removal (or the no-resource initialization-failure
+      release), so a slot is not reusable early. A deterministic same-key test
+      proves that a lookup finding `Closing` returns `Closed(NotSent)` with no
+      wait on drain, creates no second generation, and does not lease the
+      `Closing` slot.
 - [ ] A7. Idle expiry transitions an unused connection to `Closing` under the
       owner-map lock according to the injected clock/maintenance path, so it is
       no longer leasable while it stays discoverable until `Drained`/`Failed`;
@@ -285,6 +346,9 @@ Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
 - [ ] A8. Existing lifecycle precedence and final commit behavior remain
       observable for DoQ and DoH3: owner close, caller cancellation, deadline,
       and a successful final response cannot be reordered into a late success.
+      An initialization-versus-owner-close barrier test proves that an
+      `Initializing` entry can never publish `Active` once close wins the shared
+      lock, and that it joins the shared teardown outcome instead.
 - [ ] A9. Resolver composition tests prove A/AAAA `PublishedTarget::dial()`
       feeds the key while the validated identity/authority remains unchanged;
       no hostname enters the socket dial path.
@@ -299,16 +363,22 @@ Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
       changes entered this task.
 - [ ] A12. R0 pre-start gates are closed before any Slice 1 network work:
       the per-phase H3 request-stream cancellation contract (R0a) is documented
-      with pinned-source evidence and a Slice 0 test, the connection-level versus
-      stream-level error classification is enumerated against the pinned
-      `h3`/`h3-quinn`/`quinn` vocabulary (R0b), and every pinned API assumption
-      is verified against the vendored locked sources (R0c). The dependency graph
-      is unchanged; a pinned API that cannot satisfy the contract is reported for
-      re-review rather than worked around.
+      and exercised by the Slice 0 **decision/state model only** (no socket or
+      QUIC/H3 I/O), which proves the model never selects the pinned `Option::None`
+      `stop_sending` path and keeps the logical shared-entry state healthy; the
+      real pinned-stack H3 health proof is deferred to Slice 2/A5 and is not
+      claimed here. The connection-level versus stream-level error classification
+      is enumerated against the pinned `h3`/`h3-quinn`/`quinn` vocabulary (R0b),
+      and every pinned API assumption is verified against the locked local
+      registry source (R0c). The dependency graph is unchanged; a pinned API that
+      cannot satisfy the contract is reported for re-review rather than worked
+      around.
 - [ ] A13. Owner admission and entry teardown are covered by deterministic
-      Slice 0 concurrency tests: the multi-key cap test (A6) and the
-      aborted-at-barrier/concurrent-close test (A5) both fail if the atomic
-      no-await admission section or the shared idempotent teardown completion is
+      Slice 0 model tests: the multi-key cap test (A6), the same-key `Closing`
+      lookup test (A6), the init-vs-owner-close barrier test (A8), and the
+      aborted-at-barrier/no-surviving-caller supervised-teardown test (A5) all
+      fail if the atomic no-await admission section, the `Initializing`
+      publication rule, or the entry-owned supervised teardown contract is
       removed.
 
 ## Out of scope
@@ -338,21 +408,38 @@ Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
 - H3 driver ownership is the highest lifecycle risk. The implementation must
   prove driver admission, shutdown, stream cancellation, and drain with real
   loopback tests; one-shot H2 scope machinery is evidence, not the new owner.
-  Teardown is cancellation-safe: a `Closing` entry stays discoverable, all
-  concurrent close callers await one shared idempotent completion, and aborting
-  the first close future must not detach the driver/`JoinHandle` or lose
-  liveness.
+  Teardown is cancellation-safe through one entry-owned supervised teardown task:
+  a `Closing` entry stays discoverable, the task owns the driver/`JoinHandle`,
+  shutdown signal, liveness guard, and shared completion, every close caller only
+  awaits that completion, and aborting one or all close futures cannot stop the
+  task.
 - H3 request cancellation (R0a) and connection-versus-stream error
   classification (R0b) are core blockers. They are resolved by pinned-API
   evidence in Slice 0 before any Slice 1 network work, and a pinned API that
   cannot satisfy them stops the task for re-review instead of a dependency
-  change.
+  change. Slice 0 resolves R0a at the decision/state-model level; the real
+  pinned-stack H3 health proof belongs to Slice 2/A5.
+- Initialization is an explicit `Initializing` state, not an invisible
+  placeholder. `Initializing -> Active` publication and the owner/entry close
+  decision share one lock linearization point, so an initializer that observes
+  close can never publish `Active` and instead joins the shared teardown.
+  Initialization failure before any transport/H3 resource exists is released
+  immediately by key+generation; failure after a resource exists takes the
+  supervised teardown.
+- A same-key lookup finding `Closing` returns the existing
+  `Closed(NotSent)` vocabulary with no wait on drain, no second generation, and
+  no lease of the `Closing` slot; it may retry after terminal removal.
 - `MAX_CONNECTIONS_PER_OWNER` is enforced by one no-await map critical section
   that performs lookup, transition of dead/idle-expired entries to `Closing`
-  (without removal), the capacity check counting `Closing` entries as occupied
-  until `Drained`/`Failed`, and placeholder/generation reservation together. A
-  check-then-insert split, or reusing a `Closing` entry's slot early, would be a
-  concurrency bug, not a stylistic choice.
+  (without removal), the capacity check counting `Initializing`/`Closing`/`Active`
+  entries as occupied until `Drained`/`Failed` (or the no-resource early
+  release), and reservation/join/reuse together. A check-then-insert split, or
+  reusing a `Closing` entry's slot early, would be a concurrency bug, not a
+  stylistic choice.
+- A served or `Active` entry that hits a connection-level failure is logically
+  deactivated by exact key+generation `Active -> Closing` and is immediately
+  unleasable; physical map removal happens only at `Drained`/`Failed`. The one
+  other removal path is an initialization failure that never acquired a resource.
 - The exact task-local bounds are not product behavior. If implementation
   evidence shows the proposed values are unsuitable, the slice may revise the
   constants without changing the public contract, but it must keep the bounds
@@ -362,8 +449,8 @@ Slice 0.** The one-lock admission rule (R5) and the cancellation-safe
 
 There are **no unresolved product/scope questions** that block planning. The
 latest user decision fixed the task name, four-slice scope, exclusions, reuse-key
-dimensions, lifecycle vocabulary, and DSH/web review routing. The proposed
-numeric bounds are implementation-level choices recorded for review, not
+dimensions, lifecycle vocabulary, and external-executor/web-review routing. The
+proposed numeric bounds are implementation-level choices recorded for review, not
 unresolved product behavior.
 
 There are, however, **open technical questions that are explicitly blocking
@@ -373,13 +460,14 @@ Slice 1** and are assigned to the R0 pre-start gate rather than left implicit:
   pinned `h3 0.0.8` / `h3-quinn 0.0.10` API, given that an aborted `poll_data`
   leaves the internal receive stream as `None` and a subsequent `stop_sending`
   unwraps it? R0 must answer this for the four phases and provide the Slice 0
-  test. If no safe per-phase cancellation exists for a phase, that phase is
-  drop-only teardown and the task stops for re-review.
+  decision/state-model test. If no safe per-phase cancellation exists for a
+  phase, that phase is drop-only teardown and the task stops for re-review.
 - **BQ2 (R0b).** Which pinned `h3`/`h3-quinn`/`quinn` error variants prove the
   physical connection is terminal versus stream-local? R0 must enumerate the
   mapping and later slices must consume it.
-- **BQ3 (R0c).** Do the recorded API assumptions still hold against the vendored
-  locked sources? Any mismatch is a re-review stop, not a dependency change.
+- **BQ3 (R0c).** Do the recorded API assumptions still hold against the
+  locked local registry source? Any mismatch is a re-review stop, not a
+  dependency change.
 - **BQ4.** Do the proposed numeric bounds survive the loopback peer stream-limit
   fixtures? The numeric values may be tuned during implementation while keeping
   the bounded/no-queue and atomic-admission contracts fixed.

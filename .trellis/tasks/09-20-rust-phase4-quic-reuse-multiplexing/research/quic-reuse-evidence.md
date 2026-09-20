@@ -54,8 +54,8 @@ the implementation contract in `prd.md` or the design in `design.md`.
 ## Local locked-crate API evidence
 
 The local Cargo registry was inspected at the locked versions. Each item below
-carries the exact vendored source location that R0c must re-verify (paths are
-relative to `~/.cargo/registry/src/<registry>/<crate>-<version>/`):
+carries the exact locked local registry source location that R0c must
+re-verify (paths are relative to `~/.cargo/registry/src/<registry>/<crate>-<version>/`):
 
 - `h3 0.0.8` `client::Builder::build` returns a driver and
   cloneable `SendRequest`; `SendRequest::send_request` takes
@@ -76,14 +76,24 @@ relative to `~/.cargo/registry/src/<registry>/<crate>-<version>/`):
   internal `Option::None` (`h3-quinn-0.0.10/src/lib.rs:375-387`), after which
   `stop_sending` unwraps that option
   (`h3-quinn-0.0.10/src/lib.rs:391-397`).
-- `quinn 0.11.7` `Endpoint` is cloneable and its endpoint driver is
-  spawned by the crate's endpoint construction; the owner must keep the endpoint
-  handle alive and use `close` / `wait_idle` during teardown.
-  `quinn::Connection` is cloneable, `open_bi` is per-stream, and
-  `closed` / `close` provide connection-level health/teardown.
-- Quinn's local `RecvStream::Drop` stops unread receive data with code
-  zero. This is evidence that H3 cancellation needs an explicit phase-aware
-  stream teardown test; it is not permission to close the shared connection.
+- `quinn 0.11.7` `Endpoint` is cloneable (`#[derive(Debug, Clone)]`, and a
+  refcounted `EndpointRef` whose `clone` bumps the count) and its endpoint driver
+  is spawned by the crate's endpoint construction; the owner must keep the
+  endpoint handle alive and use `close` / `wait_idle` during teardown
+  (`quinn-0.11.7/src/endpoint.rs:47`, `:292`, `:316`, `:669-708`).
+- `quinn 0.11.7` `quinn::Connection` is cloneable
+  (`#[derive(Debug, Clone)] pub struct Connection(ConnectionRef)`), `open_bi` is
+  per-stream, and `closed` / `close` provide connection-level health/teardown
+  (`quinn-0.11.7/src/connection.rs:291`, `:316`, `:361`, `:420`).
+- Quinn's local `RecvStream::Drop` stops unread receive data with code zero
+  (`conn.inner.recv_stream(self.stream).stop(0u32.into())`) when the stream was
+  not fully read (`quinn-0.11.7/src/recv_stream.rs:500-515`). This is evidence
+  that H3 cancellation needs an explicit phase-aware stream teardown test; it is
+  not permission to close the shared connection.
+
+All Quinn/H3 citations above are paths inside the **locked local registry
+source** (`~/.cargo/registry/src/<registry>/`), not files copied into this
+repository.
 
 `h3 0.0.8` / `h3-quinn 0.0.10` are pinned with `default-features = false` in
 `rust/upstream-core/Cargo.toml:81-82`, and `rust/Cargo.lock:377-380` locks
@@ -95,11 +105,14 @@ re-review stop and never a dependency change.
 1. Use a new QUIC-specific key/owner and do not extend the serial TCP pool.
 2. Keep one physical connection per key in this task. Use per-stream permits
    for bounded concurrency and use generation identity to select the exact entry
-   for `Closing`/eviction (the entry is removed from the map only at
-   `Drained`/`Failed`, never before its drain).
+   for logical deactivation/`Closing`. A served entry is never removed from the
+   map before its drain; removal happens only at `Drained`/`Failed`, with the one
+   exception of an initialization failure that never acquired a resource.
 3. Make H3 driver lifetime a connection-entry responsibility. A request stream
-   may fail without killing a healthy H3 connection; driver/connection failure
-   evicts the entry.
+   may fail without killing a healthy H3 connection; a driver/connection
+   terminal failure logically deactivates the exact key+generation
+   (`Active -> Closing`, immediately unleasable) and the supervised teardown
+   removes it only at `Drained`/`Failed`.
 4. Keep the existing final commit gate after response validation and before
    releasing the request permit.
 5. Use resolver-selected numeric `PublishedTarget::dial()` only in the
@@ -108,41 +121,62 @@ re-review stop and never a dependency change.
    listener, host, config, and production wiring.
 7. Enforce `MAX_CONNECTIONS_PER_OWNER` in one no-await owner-map critical section
    that does lookup, transition of dead/idle-expired entries to `Closing`
-   (without removal), the capacity check counting `Closing` entries as occupied
-   until `Drained`/`Failed`, and placeholder/generation reservation together; a
-   check-then-insert split, or reusing a `Closing` slot early, is a concurrency
-   bug.
-8. Give each entry an explicit `Active -> Closing -> Drained | Failed` lifecycle;
-   keep `Closing` entries discoverable until drain completes, share one idempotent
-   teardown completion across concurrent close callers, and never let an aborted
-   close future detach the H3 driver or drop its liveness hold.
+   (without removal), the capacity check counting `Initializing`/`Closing`/
+   `Active` entries as occupied until `Drained`/`Failed` (or the no-resource
+   early release), and reservation/join/reuse together; a check-then-insert
+   split, or reusing a `Closing` slot early, is a concurrency bug.
+8. Make `Initializing` an explicit state: the reservation is installed under the
+   map lock, and `Initializing -> Active` publication and the owner/entry close
+   decision share one linearization point. An initializer that observes close
+   never publishes `Active` and never returns an entry; the reservation then
+   follows the single resource rule: no acquired transport/H3 resource is
+   released immediately by key+generation, while an acquired resource joins the
+   entry's shared supervised teardown.
+9. Give each entry an explicit
+   `Initializing -> Active -> Closing -> Drained | Failed` lifecycle. Entering
+   `Closing` starts exactly one entry-owned supervised teardown task that owns
+   the driver/`JoinHandle`, shutdown signal, liveness guard, shared completion,
+   and terminal-only map removal. Close callers only await the shared completion,
+   so aborting one or all of them cannot stop teardown or detach the driver, and
+   teardown never relies on a later close/drain pass.
+10. Resolve a same-key lookup by state: `Active` leases, `Initializing` joins the
+    single-flight initializer under the caller deadline, and `Closing` returns
+    the existing `Closed(NotSent)` vocabulary with no drain wait, no second
+    generation, and no lease of the `Closing` slot.
 
 ## R0 gate items (blocking, resolved in Slice 0)
 
 These are **not** deferred follow-up work. They are R0 pre-start gates and must
 be closed before any Slice 1 network work:
 
-- **R0a.** Confirm the exact safe h3 request-stream cancellation sequence for each
+- **R0a.** Confirm the safe h3 request-stream cancellation decision for each
   phase (before send, after request FIN, during response head, and during body
   read) without invoking the pinned `Option::None` unwrap panic. Record which
-  phases are active-stop and which are drop-only, and add the model-level
-  four-phase test. A phase with no safe active stop is documented as drop-only;
-  it is not a dependency-change trigger.
+  phases are active-stop and which are drop-only, and add the Slice 0
+  **decision/state-model** four-phase test. Slice 0 has no socket or QUIC/H3 I/O,
+  so this is model evidence only: it proves the model never selects the panic
+  path and keeps the logical shared-entry state healthy. The real pinned-stack
+  H3 loopback proof belongs to Slice 2/A5 and must not be claimed here. A phase
+  with no safe active stop is documented as drop-only; it is not a
+  dependency-change trigger.
 - **R0b.** Enumerate which Quinn/H3 errors prove the physical connection is dead
   versus only terminating one request stream, as the single classification table
-  later slices consume. Derive it from the pinned sources, not from a `Result`
-  shape.
-- **R0c.** Re-verify every pinned API assumption above against the vendored
-  locked sources with the cited file/line, and record holds/does-not-hold. A
-  mismatch stops the task for re-review; the dependency graph is never changed
-  to work around it.
+  later slices consume. Entry-terminal errors logically deactivate by exact
+  key+generation `Active -> Closing`; physical map removal stays a terminal
+  `Drained`/`Failed` concern. Derive the table from the pinned sources, not from
+  a `Result` shape.
+- **R0c.** Re-verify every pinned API assumption above against the locked
+  local registry source with the cited file/line, and record
+  holds/does-not-hold. A mismatch stops the task for re-review; the dependency
+  graph is never changed to work around it.
 
 ## Later implementation checks (non-blocking after R0)
 
-- Confirm the single-flight entry lifecycle race (Active -> Closing ->
-  Drained/Failed), the atomic multi-key admission section, and the owner close
-  race under concurrent first-use and dead-generation replacement, including the
-  aborted-at-barrier close case.
+- Confirm the single-flight entry lifecycle race
+  (`Initializing -> Active -> Closing -> Drained/Failed`), the atomic multi-key
+  admission section, the same-key `Closing` lookup, and the owner close race
+  under concurrent first-use and terminal replacement, including the
+  aborted-at-barrier and no-surviving-caller close cases.
 - Confirm the chosen finite bounds with loopback peer stream-limit fixtures. The
   numeric values are implementation-only and may be tuned while preserving the
   bounded/no-queue contract.
