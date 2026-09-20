@@ -848,12 +848,13 @@ error[E0599]: no variant named `PeerStreamTerminated` found for enum
   diff inspection, the quality gates, and the external review round.
 - Context: the Slice 3 remediations are committed at `051a920`. This record
   covers only the Slice 4 resolver composition entry (acceptance A2's resolver
-  piece). The Slice 4 full gate sweep, isolated Linux/Rust 1.85.x loopback/MSRV
-  evidence, and the external reviewer round are **not** covered or claimed here.
-- Worktree state: this change is left **uncommitted and unpushed** in the
-  current worktree (`051a920` HEAD) for the parent to inspect. `task.json`
-  stays `in_progress`. Nothing here claims a commit, push, full gate, Linux
-  evidence, or reviewer PASS.
+  piece). The implementation is committed and pushed as
+  `6b9cf86829fbe20bd97a16eb734b37141aa51f82` on `origin/rust`; the parent
+  verification and selected GPT Web review are recorded below. `task.json`
+  stays `in_progress` as the phase-state marker.
+- Worktree state: the implementation commit is complete and pushed. This
+  record now reflects the final implementation, verification, and review
+  status; no Slice 5 work or production wiring is implied.
 
 ### RED baseline (before the Slice 4 implementation)
 
@@ -899,7 +900,7 @@ absent before the slice.
     note now scopes the exclusion to QUIC/HTTP3 transport and connection policy
     rather than QUIC/HTTP3 composition. No other existing test changed.
 
-### Evidence (this worktree, uncommitted)
+### Evidence (implementation commit `6b9cf868`, pushed)
 
 - RED: the three E0599 errors above on the new `resolver_dual_stack` tests.
 - Focused resolver integration tests (`resolver_slice1` 14, `resolver_slice2` 7,
@@ -914,13 +915,14 @@ absent before the slice.
 - `python3 ./.trellis/scripts/task.py validate
   rust-phase4-quic-http3-doq-foundation`: `All validations passed` (exit 0; the
   `rust-migration.md` size warning is pre-existing and informational).
-- Not run/claiming: the workspace `--all-targets` / `--all-features` sweep,
-  `cargo tree`, the isolated Linux/Rust 1.85.x evidence, or any reviewer PASS.
-  Slice 4 stays open on those.
-- Changed paths: `rust/upstream-core/src/resolver/owner.rs`,
-  `rust/upstream-core/tests/resolver_dual_stack.rs`, and this record. No Cargo
-  manifest/`Cargo.lock` change, no new dependency, no production `sleep`, private
-  timer, or hidden timeout.
+- Parent verification below covers the workspace `--all-targets` /
+  `--all-features` sweep, `cargo tree`, isolated Linux/Rust 1.85.x evidence,
+  and the reviewer gate. No Cargo manifest/`Cargo.lock` change, no new
+  dependency, no production `sleep`, private timer, or hidden timeout was
+  added.
+- Changed paths in the implementation commit: `rust/upstream-core/src/resolver/owner.rs`,
+  `rust/upstream-core/tests/resolver_dual_stack.rs`, this record, and
+  `.trellis/spec/backend/rust-migration.md`.
 
 ### Parent verification — 2026-09-20
 
@@ -945,9 +947,12 @@ absent before the slice.
   passed. The VM is Linux x86_64; the run used only ephemeral loopback ports,
   did not bind port 53, and did not mutate installed `mosdns`/`mos-test`
   services.
-- The full Slice 4 reviewer gate is still pending: no reviewer PASS is claimed,
-  and the task remains `in_progress` until the selected GPT Web conversation
-  returns an explicit scoped decision.
+- GPT Web completed the scoped root review of
+  `051a9201e81a7b71547dc7ece405b55868b71e9f..6b9cf86829fbe20bd97a16eb734b37141aa51f82`
+  with `P0=0`, `P1=0`, `P2=1`, `FINAL: PASS`. The sole P2 was the stale
+  commit-status wording and omitted `rust-migration.md` path corrected by this
+  follow-up record update. The task remains `in_progress` as the phase-state
+  marker; this does not authorize Slice 5 or production wiring.
 
 ## Slice 3 remediation record 4 — 2026-09-20 (DoH3 `0x103`/`0x10f` context mapping, review P1)
 
