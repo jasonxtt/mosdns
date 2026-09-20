@@ -144,10 +144,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use hyper::body::Buf;
+use mosdns_dns_core::{inspect_response_header, validate_response};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::secure::{DohEndpoint, SecureError, TlsPolicy};
+use crate::secure::{DohEndpoint, SecureError, SecureResponse, TlsPolicy};
 use crate::tcp::{race_control, write_frame};
 use crate::{
     CloseCompletion, CloseResult, CloseTransition, ExchangeContext, ExchangeControl,
@@ -1405,6 +1407,7 @@ pub struct EntryTransport {
     closed: AtomicBool,
     close_calls: AtomicUsize,
     doq: Option<Arc<DoqConnection>>,
+    doh3: Option<Arc<Doh3Connection>>,
 }
 
 impl std::fmt::Debug for EntryTransport {
@@ -1427,6 +1430,7 @@ impl EntryTransport {
             closed: AtomicBool::new(false),
             close_calls: AtomicUsize::new(0),
             doq: None,
+            doh3: None,
         }
     }
 
@@ -1436,6 +1440,17 @@ impl EntryTransport {
             closed: AtomicBool::new(false),
             close_calls: AtomicUsize::new(0),
             doq: Some(Arc::new(connection)),
+            doh3: None,
+        }
+    }
+
+    fn from_doh3(connection: Doh3Connection) -> Self {
+        Self {
+            id: 0,
+            closed: AtomicBool::new(false),
+            close_calls: AtomicUsize::new(0),
+            doq: None,
+            doh3: Some(Arc::new(connection)),
         }
     }
 
@@ -1461,6 +1476,9 @@ impl EntryTransport {
         if let Some(connection) = &self.doq {
             connection.close();
         }
+        if let Some(connection) = &self.doh3 {
+            connection.close();
+        }
         self.closed.store(true, Ordering::SeqCst);
         self.close_calls.fetch_add(1, Ordering::SeqCst);
     }
@@ -1470,10 +1488,17 @@ impl EntryTransport {
         if let Some(connection) = &self.doq {
             connection.wait_for_drain().await;
         }
+        if let Some(connection) = &self.doh3 {
+            connection.wait_for_drain().await;
+        }
     }
 
     fn doq_connection(&self) -> Option<DoqConnectionHandle> {
         self.doq.as_ref().map(DoqConnection::acquire)
+    }
+
+    fn doh3_connection(&self) -> Option<Doh3ConnectionHandle> {
+        self.doh3.as_ref().map(Doh3Connection::acquire)
     }
 }
 
@@ -1536,6 +1561,89 @@ impl Drop for DoqConnectionHandle {
             .active_handles
             .fetch_sub(1, Ordering::SeqCst);
         debug_assert!(previous > 0, "DoQ handle count underflow");
+        if previous == 1 {
+            self.connection.handles_done.notify_waiters();
+        }
+    }
+}
+
+/// The physical DoH3 resource kept alive by one entry generation.
+struct Doh3Connection {
+    endpoint: quinn::Endpoint,
+    connection: quinn::Connection,
+    sender: crate::quic::H3Sender,
+    driver: Mutex<Option<JoinHandle<()>>>,
+    driver_terminal: Arc<Doh3DriverState>,
+    active_handles: AtomicUsize,
+    handles_done: Notify,
+}
+
+impl Doh3Connection {
+    fn close(&self) {
+        self.connection.close(0u32.into(), b"");
+        self.endpoint.close(0u32.into(), b"");
+    }
+
+    fn acquire(self: &Arc<Self>) -> Doh3ConnectionHandle {
+        self.active_handles.fetch_add(1, Ordering::SeqCst);
+        Doh3ConnectionHandle {
+            connection: Arc::clone(self),
+        }
+    }
+
+    fn driver_is_terminal(&self) -> bool {
+        self.driver_terminal.terminal.load(Ordering::SeqCst)
+    }
+
+    async fn wait_for_drain(&self) {
+        loop {
+            let notified = self.handles_done.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.active_handles.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            notified.await;
+        }
+
+        let driver = self
+            .driver
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(driver) = driver {
+            let _ = driver.await;
+        }
+        self.endpoint.wait_idle().await;
+    }
+}
+
+/// State observed by request call sites when the owned H3 driver reaches its
+/// authoritative terminal `poll_close` outcome.
+struct Doh3DriverState {
+    terminal: AtomicBool,
+}
+
+/// A caller-owned reference to a shared DoH3 connection.
+struct Doh3ConnectionHandle {
+    connection: Arc<Doh3Connection>,
+}
+
+impl Deref for Doh3ConnectionHandle {
+    type Target = Doh3Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.connection
+    }
+}
+
+impl Drop for Doh3ConnectionHandle {
+    fn drop(&mut self) {
+        let previous = self
+            .connection
+            .active_handles
+            .fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0, "DoH3 handle count underflow");
         if previous == 1 {
             self.connection.handles_done.notify_waiters();
         }
@@ -1633,6 +1741,37 @@ impl EntryInitializer for DoqEntryInitializer {
     }
 }
 
+/// Entry-owned initializer for a shared DoH3 connection and long-lived driver.
+struct Doh3EntryInitializer {
+    endpoint: DohEndpoint,
+    tls: TlsPolicy,
+}
+
+impl EntryInitializer for Doh3EntryInitializer {
+    fn initialize(&self, key: QuicReuseKey, generation: u64) -> InitializeFuture {
+        let future = self.initialize_result(key, generation);
+        Box::pin(async move {
+            match future.await {
+                InitializationResult::Ready(transport) => Some(transport),
+                InitializationResult::Failed(_) | InitializationResult::NoResource => None,
+            }
+        })
+    }
+
+    fn initialize_result(&self, _key: QuicReuseKey, _generation: u64) -> InitializeResultFuture {
+        let endpoint = self.endpoint.clone();
+        let tls = self.tls.clone();
+        Box::pin(async move {
+            match build_doh3_connection(&endpoint, &tls).await {
+                Ok(connection) => {
+                    InitializationResult::Ready(Arc::new(EntryTransport::from_doh3(connection)))
+                }
+                Err(error) => InitializationResult::Failed(error),
+            }
+        })
+    }
+}
+
 /// Builds one authenticated DoQ connection outside the owner-map lock.
 async fn build_doq_connection(
     endpoint: &crate::quic::DoqEndpoint,
@@ -1658,6 +1797,83 @@ async fn build_doq_connection(
     Ok(DoqConnection {
         endpoint: client,
         connection,
+        active_handles: AtomicUsize::new(0),
+        handles_done: Notify::const_new(),
+    })
+}
+
+/// Builds one authenticated DoH3 connection and starts its owned driver
+/// outside the owner-map lock.
+async fn build_doh3_connection(
+    endpoint: &DohEndpoint,
+    tls: &TlsPolicy,
+) -> Result<Doh3Connection, UpstreamError> {
+    let rustls_config = tls
+        .client_config_with_alpn(&[crate::quic::H3_ALPN])
+        .map_err(|_| UpstreamError::Connect)?;
+    let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config)
+        .map_err(|_| UpstreamError::Connect)?;
+    let client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
+    let local = if endpoint.dial().is_ipv4() {
+        SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
+    } else {
+        SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
+    };
+    let mut client = quinn::Endpoint::client(local).map_err(|_| UpstreamError::Connect)?;
+    client.set_default_client_config(client_config);
+    let connecting = match client.connect(endpoint.dial(), endpoint.identity().as_str()) {
+        Ok(connecting) => connecting,
+        Err(_) => {
+            client.close(0u32.into(), b"");
+            client.wait_idle().await;
+            return Err(UpstreamError::Connect);
+        }
+    };
+    let connection = match connecting.await {
+        Ok(connection) => connection,
+        Err(_) => {
+            client.close(0u32.into(), b"");
+            client.wait_idle().await;
+            return Err(UpstreamError::Connect);
+        }
+    };
+
+    let h3_connection = h3_quinn::Connection::new(connection.clone());
+    let mut builder = h3::client::builder();
+    builder.max_field_section_size(
+        u64::try_from(crate::secure::MAX_RESPONSE_HEADER_BYTES).unwrap_or(u64::MAX),
+    );
+    let (driver, sender) = match builder
+        .build::<_, _, crate::quic::H3Body>(h3_connection)
+        .await
+    {
+        Ok(parts) => parts,
+        Err(_) => {
+            connection.close(0u32.into(), b"");
+            client.close(0u32.into(), b"");
+            client.wait_idle().await;
+            return Err(UpstreamError::Connect);
+        }
+    };
+    let driver_terminal = Arc::new(Doh3DriverState {
+        terminal: AtomicBool::new(false),
+    });
+    let driver_state = Arc::clone(&driver_terminal);
+    let driver = tokio::spawn(async move {
+        let error = crate::quic::drive_h3_connection(driver).await;
+        if classify_h3_connection_error(&error) == QuicErrorClass::EntryTerminal {
+            // The completed driver is the authoritative H3 connection-level
+            // signal; the request path consumes this state through the R0b
+            // model seam.
+            driver_state.terminal.store(true, Ordering::SeqCst);
+        }
+    });
+    Ok(Doh3Connection {
+        endpoint: client,
+        connection,
+        sender,
+        driver: Mutex::new(Some(driver)),
+        driver_terminal,
         active_handles: AtomicUsize::new(0),
         handles_done: Notify::const_new(),
     })
@@ -2194,6 +2410,15 @@ impl StreamLease {
             return None;
         }
         entry.transport.as_ref()?.doq_connection()
+    }
+
+    fn doh3_connection(&self) -> Option<Doh3ConnectionHandle> {
+        let state = self.shared.lock();
+        let entry = state.entries.get(&self.key)?;
+        if entry.generation != self.generation {
+            return None;
+        }
+        entry.transport.as_ref()?.doh3_connection()
     }
 }
 
@@ -2849,6 +3074,263 @@ impl DoqReuseUpstream {
             body, request_id, truncated,
         ))
     }
+}
+
+/// A shared-connection DoH3 upstream built on [`QuicReuseOwner`].
+///
+/// The owner creates one authenticated HTTP/3 connection per validated DoH3
+/// key. Each exchange clones the connection's h3 sender and opens one fresh
+/// request stream; the entry-owned driver remains alive until supervised
+/// teardown drains every caller handle and the Quinn endpoint.
+#[derive(Clone)]
+pub struct Doh3ReuseUpstream {
+    endpoint: DohEndpoint,
+    tls: TlsPolicy,
+    owner: QuicReuseOwner,
+}
+
+impl Doh3ReuseUpstream {
+    /// Creates a shared DoH3 owner and validates the exact `h3` TLS policy
+    /// before any entry can start an entry-owned connection initializer.
+    pub fn new(endpoint: DohEndpoint, tls: TlsPolicy) -> Result<Self, SecureError> {
+        tls.client_config_with_alpn(&[H3_ALPN])?;
+        let lifecycle = Arc::new(Lifecycle::new());
+        let initializer = Arc::new(Doh3EntryInitializer {
+            endpoint: endpoint.clone(),
+            tls: tls.clone(),
+        });
+        let owner = QuicReuseOwner::with_parts(
+            lifecycle,
+            Arc::new(SystemOwnerClock),
+            initializer,
+            ModelSeams::default(),
+        );
+        Ok(Self {
+            endpoint,
+            tls,
+            owner,
+        })
+    }
+
+    /// The validated DoH endpoint whose authority and target encoder are
+    /// shared by every request on this owner's key.
+    #[must_use]
+    pub const fn endpoint(&self) -> &DohEndpoint {
+        &self.endpoint
+    }
+
+    /// Number of physical connection generations still present in the owner
+    /// map, including an entry that is logically closing but not terminal.
+    #[must_use]
+    pub fn entry_count(&self) -> usize {
+        self.owner.entry_count()
+    }
+
+    /// Number of caller exchanges and entry-owned liveness registrations still
+    /// held by the shared lifecycle.
+    #[must_use]
+    pub fn in_flight_exchanges(&self) -> usize {
+        self.owner.in_flight_exchanges()
+    }
+
+    /// Closes admission and drains every shared connection generation.
+    pub async fn close(&self) -> CloseResult {
+        self.owner.close().await
+    }
+
+    /// Runs one DoH3 query over a fresh request stream on the shared
+    /// connection. The target, authority, response checks, and ID restoration
+    /// are the same helpers used by the one-shot DoH3 implementation.
+    pub async fn exchange(
+        &self,
+        request: ExchangeRequest<'_>,
+        context: ExchangeContext,
+    ) -> Result<SecureResponse, SecureError> {
+        let target = self.endpoint.get_request_target(request)?;
+        let authority = self.endpoint.authority();
+        let control = self.owner.exchange_control(context);
+        control.check_at(Instant::now(), SideEffectState::NotSent)?;
+        let registration = self.owner.register()?;
+        let key = QuicReuseKey::from_doh3(&self.endpoint, &self.tls);
+        let lease = self
+            .owner
+            .admit(registration, key.clone(), &control)
+            .await?;
+        let generation = lease.generation();
+        let Some(shared) = lease.doh3_connection() else {
+            return Err(UpstreamError::Closed(SideEffectState::NotSent).into());
+        };
+        if shared.driver_is_terminal() || shared.connection.connection.close_reason().is_some() {
+            self.owner
+                .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
+            return Err(UpstreamError::Closed(SideEffectState::NotSent).into());
+        }
+
+        let deadline = control.context().deadline();
+        let request_id = request.request_id();
+        let mut sender = shared.sender.clone();
+        let h3_request = crate::quic::build_h3_get_request(&target, &authority)?;
+        let mut stream = match race_control(&control, SideEffectState::MaybeSent, deadline, async {
+            sender.send_request(h3_request).await.map_err(|error| {
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_send_error)
+            })
+        })
+        .await
+        {
+            Ok(stream) => stream,
+            Err(error) => {
+                apply_doh3_failure(&self.owner, &key, generation, &shared, error.class);
+                return Err(error.error);
+            }
+        };
+
+        if let Err(error) = race_control(&control, SideEffectState::MaybeSent, deadline, async {
+            stream.finish().await.map_err(|error| {
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_send_error)
+            })
+        })
+        .await
+        {
+            apply_doh3_failure(&self.owner, &key, generation, &shared, error.class);
+            return Err(error.error);
+        }
+
+        let response = match race_control(&control, SideEffectState::Sent, deadline, async {
+            stream.recv_response().await.map_err(|error| {
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_head_error)
+            })
+        })
+        .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                apply_doh3_failure(&self.owner, &key, generation, &shared, error.class);
+                return Err(error.error);
+            }
+        };
+        let declared =
+            crate::quic::validate_h3_response_head(response.status(), response.headers())?;
+        let body = read_reused_h3_body(&control, deadline, &mut stream, declared)
+            .await
+            .map_err(|error| {
+                apply_doh3_failure(&self.owner, &key, generation, &shared, error.class);
+                error.error
+            })?;
+        if body.is_empty() || body.len() < 12 {
+            return Err(SecureError::DohProtocol(
+                crate::secure::DohProtocolError::IncompleteBody,
+            ));
+        }
+        let header = inspect_response_header(&body)
+            .map_err(|_| SecureError::from(UpstreamError::MalformedResponse))?;
+        let restored = crate::secure::restore_request_id(&body, request_id)?;
+        if validate_response(&restored).is_err() {
+            return Err(SecureError::from(UpstreamError::MalformedResponse));
+        }
+        self.owner.lifecycle().commit_final_response(
+            &control.caller_cancellation(),
+            deadline,
+            SideEffectState::Sent,
+        )?;
+        Ok(SecureResponse::doh3(restored, request_id, header.truncated))
+    }
+}
+
+struct Doh3ExchangeFailure {
+    error: SecureError,
+    class: QuicErrorClass,
+}
+
+impl Doh3ExchangeFailure {
+    fn stream(
+        error: h3::error::StreamError,
+        classify: fn(h3::error::StreamError) -> SecureError,
+    ) -> Self {
+        let class = classify_h3_stream_error(&error);
+        Self {
+            error: classify(error),
+            class,
+        }
+    }
+}
+
+impl From<UpstreamError> for Doh3ExchangeFailure {
+    fn from(error: UpstreamError) -> Self {
+        Self {
+            error: error.into(),
+            class: QuicErrorClass::StreamLocal,
+        }
+    }
+}
+
+fn apply_doh3_failure(
+    owner: &QuicReuseOwner,
+    key: &QuicReuseKey,
+    generation: u64,
+    shared: &Doh3ConnectionHandle,
+    class: QuicErrorClass,
+) {
+    let class = if class == QuicErrorClass::EntryTerminal
+        || shared.driver_is_terminal()
+        || shared.connection.connection.close_reason().is_some()
+    {
+        QuicErrorClass::EntryTerminal
+    } else {
+        QuicErrorClass::StreamLocal
+    };
+    owner.apply_error_class(key, generation, class);
+}
+
+async fn read_reused_h3_body(
+    control: &ExchangeControl,
+    deadline: Instant,
+    stream: &mut crate::quic::H3Stream,
+    declared: Option<u64>,
+) -> Result<Vec<u8>, Doh3ExchangeFailure> {
+    let collected = race_control(control, SideEffectState::Sent, deadline, async {
+        let mut collected = Vec::new();
+        loop {
+            let Some(frame) = stream.recv_data().await.map_err(|error| {
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_body_error)
+            })?
+            else {
+                break;
+            };
+            let data = frame.chunk();
+            if collected.len().saturating_add(data.len()) > crate::secure::MAX_DNS_BODY {
+                return Err(Doh3ExchangeFailure {
+                    error: SecureError::DohProtocol(crate::secure::DohProtocolError::BodyTooLarge),
+                    class: QuicErrorClass::StreamLocal,
+                });
+            }
+            collected.extend_from_slice(data);
+        }
+        match stream.recv_trailers().await.map_err(|error| {
+            Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_body_error)
+        })? {
+            None => Ok(collected),
+            Some(_) => Err(Doh3ExchangeFailure {
+                error: SecureError::DohProtocol(crate::secure::DohProtocolError::IncompleteBody),
+                class: QuicErrorClass::StreamLocal,
+            }),
+        }
+    })
+    .await?;
+    if collected.is_empty() {
+        return Err(Doh3ExchangeFailure {
+            error: SecureError::DohProtocol(crate::secure::DohProtocolError::IncompleteBody),
+            class: QuicErrorClass::StreamLocal,
+        });
+    }
+    if let Some(declared) = declared {
+        if u64::try_from(collected.len()) != Ok(declared) {
+            return Err(Doh3ExchangeFailure {
+                error: SecureError::DohProtocol(crate::secure::DohProtocolError::IncompleteBody),
+                class: QuicErrorClass::StreamLocal,
+            });
+        }
+    }
+    Ok(collected)
 }
 
 enum DoqReadFailure {
