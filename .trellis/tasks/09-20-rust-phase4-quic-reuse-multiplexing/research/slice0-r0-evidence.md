@@ -70,11 +70,15 @@ Stream-local: per-request stream outcomes and framing/validation bounds
 (`quinn` `Stopped`/`Reset`/`ClosedStream`/`IllegalOrderedRead`/`TooLong`,
 `h3-quinn` `StreamTerminated`/`Unknown`, this crate's framing/validation
 errors), plus the `h3 0.0.8` request-stream struct-shaped variants and an
-unobserved `#[non_exhaustive]` remainder with no connection evidence.
+unobserved `#[non_exhaustive]` remainder with no connection evidence. The
+`quinn::ReadToEndError::Read` wrapper is expanded into exact nested rows, so
+`Read(ConnectionLost)` remains entry-terminal while `Read(Reset)` remains
+stream-local.
 
 BQ2 conclusion (not a blocker): `h3 0.0.8` marks its whole `StreamError` enum
-**and** every variant `#[non_exhaustive]` with no opt-out feature, so a
-downstream crate can only pattern-match the struct-shaped variants and can never
+**and** every variant `#[non_exhaustive]` while the locked dependency
+configuration leaves h3's opt-out feature disabled (`h3-0.0.8/src/lib.rs:20-21`),
+so a downstream crate can only pattern-match the struct-shaped variants and can never
 construct or match the tuple/unit variants `ConnectionError(_)`,
 `RemoteClosing`, or `Undefined(_)` at all. The current
 `classify_h3_stream_error` therefore cannot structurally route those three. This
@@ -87,10 +91,10 @@ from a string or a bare enum shape.
 - A normal peer GOAWAY sets the shared `is_closing` flag through
   `process_goaway` (`connection.rs:663-701`) and returns `Ok`; it can therefore
   produce `RemoteClosing` while `poll_close` remains `Pending`. The explicit
-  `peer_closing_observed` flag is entry-terminal in that case.
+  `H3ErrorObservation::PeerClosing` provenance is entry-terminal in that case.
 - A driver-reported connection error is entry-terminal; otherwise a
-  struct-shaped stream error or an unobserved remainder with all three
-  connection flags false is stream-local under the pinned producer paths
+  struct-shaped stream error or an `H3ErrorObservation::Unobserved` remainder
+  with no connection observation is stream-local under the pinned producer paths
   (`connection_error_creators.rs:191-209` and `h3-quinn-0.0.10/src/lib.rs:407-435,
   486, 505`).
 
@@ -126,8 +130,9 @@ evidence):
   `cfg_attr` blocks at `:24-27`, `:33-36`, `:84-87`, `:94-99`, `:105-110`,
   `:114-121`, `:126-131`, `:134-139`); downstream construction of
   `ConnectionError::Timeout` is still possible, matching of the tuple/unit
-  variants is not. Recorded as the BQ2 conclusion above (R0b holds through the
-  explicit observation model; no dependency change).
+  variants is not. The opt-out feature exists and is deliberately disabled by
+  the locked current configuration (`h3-0.0.8/src/lib.rs:20-21`; no dependency
+  change). Recorded as the BQ2 conclusion above.
 - A clean `H3_NO_ERROR` close is still a closed connection, hence terminal for
   reuse.
 
@@ -160,7 +165,8 @@ Result: `21 passed; 0 failed`.
   publication condition, with exactly one teardown to terminal (A8/A13).
 - H3 non-exhaustive error observation model: known stream-scoped, unobserved
   remainder, backend connection, peer GOAWAY closing, and driver connection
-  evidence each route through an explicit discriminator with no string match.
+  evidence each route through an explicit provenance discriminator with no
+  string match.
 - Aborted-at-barrier/no-surviving-caller (§11.1): first and all close waiters
   aborted, exactly one teardown reaches terminal autonomously with
   terminal-only removal (A5).

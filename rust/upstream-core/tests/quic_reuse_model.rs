@@ -449,6 +449,7 @@ fn r0a_stream_local_failure_leaves_the_shared_entry_healthy_and_leasable() {
 // ---------------------------------------------------------------------------
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn r0b_connection_level_and_stream_level_classification() {
     // quinn connection-level: every constructible variant is entry-terminal. The
     // `TransportError` variant carries a type this crate cannot name, so its
@@ -517,6 +518,16 @@ fn r0b_connection_level_and_stream_level_classification() {
         QuicErrorClass::StreamLocal
     );
     assert_eq!(
+        classify_quinn_read_to_end_error(&ReadToEndError::Read(ReadError::ConnectionLost(
+            ConnectionError::TimedOut,
+        ))),
+        QuicErrorClass::EntryTerminal
+    );
+    assert_eq!(
+        classify_quinn_read_to_end_error(&ReadToEndError::Read(ReadError::ZeroRttRejected)),
+        QuicErrorClass::EntryTerminal
+    );
+    assert_eq!(
         classify_quinn_read_to_end_error(&ReadToEndError::TooLong),
         QuicErrorClass::StreamLocal
     );
@@ -573,12 +584,7 @@ fn r0b_connection_level_and_stream_level_classification() {
 
 #[test]
 fn r0b_h3_observation_model_distinguishes_stream_and_connection_evidence() {
-    let known_stream = H3ErrorObservation {
-        backend_connection_error: false,
-        peer_closing_observed: false,
-        driver_reported_connection_error: false,
-        unobserved_stream_error: false,
-    };
+    let known_stream = H3ErrorObservation::StreamScoped;
     assert_eq!(
         h3_error_shape_for_observation(known_stream),
         H3ErrorShape::StreamScoped
@@ -588,10 +594,7 @@ fn r0b_h3_observation_model_distinguishes_stream_and_connection_evidence() {
         QuicErrorClass::StreamLocal
     );
 
-    let unknown_stream = H3ErrorObservation {
-        unobserved_stream_error: true,
-        ..known_stream
-    };
+    let unknown_stream = H3ErrorObservation::Unobserved;
     assert_eq!(
         h3_error_shape_for_observation(unknown_stream),
         H3ErrorShape::Unobserved
@@ -603,25 +606,13 @@ fn r0b_h3_observation_model_distinguishes_stream_and_connection_evidence() {
 
     for (observation, shape) in [
         (
-            H3ErrorObservation {
-                backend_connection_error: true,
-                ..known_stream
-            },
+            H3ErrorObservation::BackendConnection,
             H3ErrorShape::BackendConnection,
         ),
+        (H3ErrorObservation::PeerClosing, H3ErrorShape::PeerClosing),
         (
-            H3ErrorObservation {
-                peer_closing_observed: true,
-                ..known_stream
-            },
-            H3ErrorShape::PeerClosing,
-        ),
-        (
-            H3ErrorObservation {
-                driver_reported_connection_error: true,
-                ..known_stream
-            },
-            H3ErrorShape::BackendConnection,
+            H3ErrorObservation::DriverConnection,
+            H3ErrorShape::DriverConnection,
         ),
     ] {
         assert_eq!(h3_error_shape_for_observation(observation), shape);
@@ -723,8 +714,16 @@ fn r0b_table_covers_the_pinned_vocabulary() {
         Some(StreamLocal)
     );
     assert_eq!(
-        pinned_error_class("quinn", "quinn::ReadToEndError", "Read"),
+        pinned_error_class("quinn", "quinn::ReadToEndError", "Read(Reset)"),
         Some(StreamLocal)
+    );
+    assert_eq!(
+        pinned_error_class("quinn", "quinn::ReadToEndError", "Read(ConnectionLost)"),
+        Some(EntryTerminal)
+    );
+    assert_eq!(
+        pinned_error_class("quinn", "quinn::ReadToEndError", "Read(ZeroRttRejected)"),
+        Some(EntryTerminal)
     );
     assert_eq!(
         pinned_error_class("quinn", "quinn::ReadError", "IllegalOrderedRead"),
