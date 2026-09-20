@@ -109,11 +109,18 @@ Checklist:
       stop the initializer. Its guard is released only at terminal, so exactly one
       completion is always delivered to the supervised teardown and an
       `Initializing`/`Closing` entry can never be stranded.
-- [ ] Implement the atomic multi-key admission section (`design.md` §4.1): one
-      no-await map critical section performing lookup, transition of
-      dead/idle-expired entries to `Closing` (without removal), the capacity
-      check counting `Initializing`/`Closing`/`Active` entries as occupied until
-      the terminal `Drained`/`Failed`, and reservation/join/reuse.
+- [ ] Implement the atomic multi-key admission section with its model-only
+      `accepting` (Open) gate (`design.md` §4.1): one no-await map critical
+      section that **checks `accepting` first** (reject with `Closed(NotSent)`,
+      installing nothing and starting no initializer), then performs lookup,
+      transition of dead/idle-expired entries to `Closing` (without removal), the
+      capacity check counting `Initializing`/`Closing`/`Active` entries as
+      occupied until the terminal `Drained`/`Failed`, and reservation/join/reuse.
+      This is the sole map-side admission-vs-close linearization: an exchange
+      already registered but not yet admitted when close sets `accepting=false`
+      must release that registration plus any local liveness guard before
+      returning `Closed(NotSent)`, leaving zero liveness/slot residue and no new
+      generation.
 - [ ] Implement the same-key lookup behavior (`design.md` §4.3): `Active` leased,
       `Initializing` joined by awaiting the **entry-owned** initializer under the
       caller deadline (cancelling only that wait, returning `Closed(NotSent)` if
@@ -134,6 +141,12 @@ Checklist:
       permit release, idle expiry, and no queue growth.
 - [ ] Add the **multi-key cap concurrency test** (`design.md` §4.1): concurrent
       distinct-key admissions never exceed `MAX_CONNECTIONS_PER_OWNER`.
+- [ ] Add the **post-close admission race test** (`design.md` §4.1/§7.3/§11.2):
+      an exchange that completed `Lifecycle::register` parks before map admission;
+      close linearizes `accepting=false`; on release the admission returns
+      `Closed(NotSent)`, installs no reservation/initializer/second generation,
+      leaks no `Lifecycle` liveness or slot, and the entries captured by close
+      still finish through the existing `Closing -> Drained`/`Failed` protocol.
 - [ ] Add the **same-key `Closing` lookup test** (`design.md` §4.3):
       `Closed(NotSent)` with no drain wait, no second generation, no slot reuse,
       and a successful fresh-generation admission only after terminal removal.
@@ -336,6 +349,11 @@ For each external-executor slice:
   If R0b cannot classify an error, that is a Slice 0 gap that blocks Slice 1.
 - If a pinned API assumption from `research/quic-reuse-evidence.md` does not hold,
   stop and return to planning review instead of changing `Cargo.toml`/`Cargo.lock`.
+- If an admission can install a reservation after owner close sets
+  `accepting=false`, if a rejected post-close admission leaks a `Lifecycle`
+  registration/liveness/slot, or if close's scan can miss an entry that installed
+  before `accepting=false`, stop Slice 0 and fix the admission-vs-close
+  linearization before anything else.
 - If concurrent first users can create two connections for one key, if an
   `Initializing` entry can publish `Active` after close wins the shared lock, if a
   late-acquired resource is orphaned or a `Closing` reservation is removed before

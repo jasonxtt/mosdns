@@ -128,11 +128,16 @@ re-review stop and never a dependency change.
 6. Keep the dependency graph locked and defer all socket policy, retransmission,
    listener, host, config, and production wiring.
 7. Enforce `MAX_CONNECTIONS_PER_OWNER` in one no-await owner-map critical section
-   that does lookup, marking dead/idle-expired entries `Closing` (without
-   removal), the capacity check counting `Initializing`/`Closing`/`Active` as
-   occupied until terminal `Drained`/`Failed`, and reservation/join/reuse
-   together; a check-then-insert split, or reusing a `Closing` slot before
-   terminal, is a concurrency bug.
+   carrying a model-only `accepting` (Open) gate: check it first (reject with
+   `Closed(NotSent)` and start no initializer), then lookup, mark dead/idle-expired
+   entries `Closing` (without removal), capacity-check counting
+   `Initializing`/`Closing`/`Active` as occupied until terminal `Drained`/`Failed`,
+   and reservation/join/reuse together. This is the sole map-side
+   admission-vs-close linearization: owner close sets `accepting=false` in the same
+   lock before marking entries, so an exchange registered but not yet admitted is
+   rejected and must release its registration plus any local liveness guard with no
+   residue. A check-then-insert split, installing without checking `accepting`, or
+   reusing a `Closing` slot before terminal, is a concurrency bug.
 8. Make `Initializing` an explicit state and freeze one crossing protocol with
    cancellation-safe execution ownership: installing the reservation starts and
    holds one **entry-owned initializer task with a `JoinHandle`** (or an
