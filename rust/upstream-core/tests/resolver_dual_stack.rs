@@ -11,7 +11,8 @@
 //!
 //! What these tests deliberately do NOT cover, because the task forbids it:
 //! Happy Eyeballs, target connection racing, connection-failure cross-family
-//! fallback, protocol fallback, QUIC/HTTP3, pools, or a system resolver.
+//! fallback, protocol fallback, QUIC/HTTP3 transport or connection policy,
+//! pools, or a system resolver.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -1243,22 +1244,101 @@ fn a_dual_aaaa_selection_still_keeps_the_secure_identity() {
     });
 }
 
-/// The deferred QUIC/HTTP3 consumer boundary, recorded as an assertion rather
-/// than implemented here.
-///
-/// A dual-stack selection is already a complete numeric result, so a future
-/// QUIC/HTTP3 transport consumes exactly the same `PublishedTarget` as UDP/TCP
-/// and DoT/DoH: the numeric dial address plus the caller's own service identity.
-/// What is deliberately NOT provided by this foundation, and must be designed by
-/// a separate QUIC/HTTP3 task, is connection racing, per-protocol fallback,
-/// connection pooling/reuse, and 0-RTT/address-racing policy. This test pins the
-/// boundary so a later task extends the result type rather than replacing it.
 #[test]
-fn the_deferred_quic_boundary_is_a_numeric_selection_plus_caller_identity() {
+fn a_dual_a_selection_composes_a_doq_endpoint_without_rewriting_identity() {
+    block_on(async {
+        // Both families answer; A is preferred, so the IPv4 address is selected.
+        let fixture = dual_fixture(
+            Answer::Address(IpAddr::V4(V4), 600),
+            Answer::Address(IpAddr::V6(V6), 600),
+        );
+        let clock = ManualClock::new();
+        let resolver = dual_resolver(
+            "adoq.example.org",
+            fixture.address,
+            clock,
+            ResolutionMode::PreferIpv4Dual,
+        );
+        let published = bounded(resolver.resolve(context(5)))
+            .await
+            .expect("resolved");
+        assert_eq!(published.address(), IpAddr::V4(V4), "A is preferred");
+
+        let identity = ServerIdentity::new("adoq.example.org").expect("identity");
+        let doq = mosdns_upstream_core::ResolverComposition::doq_endpoint(&published, &identity)
+            .expect("doq");
+        assert_eq!(
+            doq.dial(),
+            SocketAddr::new(IpAddr::V4(V4), 853),
+            "the selected A address is the DoQ dial address"
+        );
+        assert_eq!(
+            doq.identity(),
+            &identity,
+            "the caller's DNS identity is cloned unchanged"
+        );
+        assert_eq!(
+            doq.identity().dns_name(),
+            Some("adoq.example.org"),
+            "the original DNS identity is preserved, not replaced by the numeric address"
+        );
+        fixture.stop().await;
+    });
+}
+
+#[test]
+fn a_dual_aaaa_selection_composes_a_doq_endpoint_without_rewriting_identity() {
+    block_on(async {
+        // Only AAAA answers, so the IPv6 address is what composes.
+        let fixture = dual_fixture(Answer::Rcode(3), Answer::Address(IpAddr::V6(V6), 600));
+        let clock = ManualClock::new();
+        let resolver = dual_resolver(
+            "aaaadoq.example.org",
+            fixture.address,
+            clock,
+            ResolutionMode::PreferIpv4Dual,
+        );
+        let published = bounded(resolver.resolve(context(5)))
+            .await
+            .expect("resolved");
+        assert_eq!(published.family(), AddressFamily::Ipv6);
+
+        let identity = ServerIdentity::new("aaaadoq.example.org").expect("identity");
+        let doq = mosdns_upstream_core::ResolverComposition::doq_endpoint(&published, &identity)
+            .expect("doq");
+        assert_eq!(
+            doq.dial(),
+            SocketAddr::new(IpAddr::V6(V6), 853),
+            "the selected AAAA address is the DoQ dial address"
+        );
+        assert_eq!(
+            doq.identity(),
+            &identity,
+            "the caller's DNS identity is cloned unchanged"
+        );
+        assert_eq!(
+            doq.identity().dns_name(),
+            Some("aaaadoq.example.org"),
+            "resolution never rewrites the DNS identity to the numeric address"
+        );
+        fixture.stop().await;
+    });
+}
+
+/// The QUIC composition boundary: a numeric selection plus caller identity.
+///
+/// The `doq_endpoint` composition entry consumes exactly the same
+/// `PublishedTarget` as UDP/TCP and DoT/DoH: the numeric dial address plus the
+/// caller's own service identity. What remains deliberately deferred to a
+/// separate design is connection racing, per-protocol fallback, connection
+/// pooling/reuse, and 0-RTT/address-racing policy. This test pins the boundary
+/// so those later concerns extend the result type rather than replace it.
+#[test]
+fn the_quic_composition_boundary_is_a_numeric_selection_plus_caller_identity() {
     let published = mosdns_upstream_core::resolve_numeric("192.0.2.55:853".parse().expect("addr"))
         .expect("literal");
-    // The result a future QUIC consumer would receive is exactly the same shape
-    // as for the existing transports: one numeric address, one caller port.
+    // The result the DoQ consumer receives is exactly the same shape as for the
+    // existing transports: one numeric address, one caller port.
     assert_eq!(
         published.dial(),
         "192.0.2.55:853".parse::<SocketAddr>().expect("addr")
@@ -1266,6 +1346,15 @@ fn the_deferred_quic_boundary_is_a_numeric_selection_plus_caller_identity() {
     assert_eq!(published.family(), AddressFamily::Ipv4);
     // And it carries no protocol or connection policy of its own.
     assert!(published.ttl().is_zero());
+
+    let identity = ServerIdentity::new("doq.example.org").expect("identity");
+    let doq = mosdns_upstream_core::ResolverComposition::doq_endpoint(&published, &identity)
+        .expect("doq");
+    assert_eq!(
+        doq.dial(),
+        "192.0.2.55:853".parse::<SocketAddr>().expect("addr")
+    );
+    assert_eq!(doq.identity(), &identity);
 }
 
 // ---------------------------------------------------------------------------
