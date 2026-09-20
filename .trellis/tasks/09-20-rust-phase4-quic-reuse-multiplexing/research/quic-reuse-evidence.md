@@ -133,17 +133,24 @@ re-review stop and never a dependency change.
    occupied until terminal `Drained`/`Failed`, and reservation/join/reuse
    together; a check-then-insert split, or reusing a `Closing` slot before
    terminal, is a concurrency bug.
-8. Make `Initializing` an explicit state and freeze one crossing protocol:
-   owner close marks every `Initializing`/`Active` entry `Closing`/
-   `TeardownRequested` at the shared map/state linearization point without
-   removing the reservation, and entering `Closing` starts the supervised
-   teardown exactly once. The initializer builds outside the lock and hands one
-   result back under that same lock/handoff protocol: it publishes `Active` only
-   while the owner is `Open` and the generation is still `Initializing`;
-   otherwise it never publishes and hands the whole result, including a
-   late-acquired resource, to the supervised teardown. No resource yields a
-   terminal `Failed` with nothing to drain, and only terminal `Drained`/`Failed`
-   removes the exact key+generation and releases slot+liveness.
+8. Make `Initializing` an explicit state and freeze one crossing protocol with
+   cancellation-safe execution ownership: installing the reservation starts and
+   holds one **entry-owned initializer task with a `JoinHandle`** (or an
+   equivalent entry-owned shared future plus guard), never a caller-owned future
+   and never spawn-and-forget. Same-key callers only await the shared completion,
+   and a caller's cancellation/deadline/`ExchangeControl` ends only its own wait,
+   so dropping the last waiter or every caller cannot stop the initializer. Owner
+   close marks every `Initializing`/`Active` entry `Closing`/`TeardownRequested`
+   at the shared map/state linearization point without removing the reservation,
+   and entering `Closing` starts the supervised teardown exactly once. The
+   initializer builds outside the lock and hands one result back under that same
+   lock/handoff protocol: it publishes `Active` only while the owner is `Open`
+   and the generation is still `Initializing`; otherwise it never publishes and
+   hands the whole result, including a late-acquired resource, to the supervised
+   teardown. No resource yields a terminal `Failed` with nothing to drain, and
+   only terminal `Drained`/`Failed` removes the exact key+generation and releases
+   slot+liveness, so an aborted leader caller can never strand an
+   `Initializing`/`Closing` entry.
 9. Give each entry an explicit
    `Initializing -> Active -> Closing -> Drained | Failed` lifecycle. Entering
    `Closing` starts exactly one entry-owned supervised teardown task that owns the
