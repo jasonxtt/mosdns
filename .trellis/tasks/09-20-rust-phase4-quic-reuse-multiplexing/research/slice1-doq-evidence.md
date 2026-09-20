@@ -1,7 +1,7 @@
 # Slice 1 DoQ reuse evidence
 
-Status: implementation complete in the shared worktree; no commit or push was
-performed. This record covers Slice 1 only.
+Status: implementation and reviewer-remediation complete in the shared
+worktree. This record covers Slice 1 only.
 
 ## Implementation boundary
 
@@ -15,8 +15,13 @@ Changed implementation paths:
 The shared DoQ adapter uses the existing `QuicReuseOwner` admission/lifecycle
 model, `tcp::write_frame`, the existing DoQ response validator, and one
 entry-owned QUIC endpoint/connection per validated DoQ key. It opens one fresh
-bidirectional stream per leased query. No Cargo manifest/lockfile, Go/cgo/FFI,
-config/API/WebUI, TCP pool, H3, driver, or production wiring was changed.
+bidirectional stream per leased query. Initializer connect/TLS failures retain
+the typed `UpstreamError::Connect` (`NotSent`) result through generation
+terminal removal. DoQ teardown force-closes the physical connection, then
+waits for every caller-owned connection handle and Quinn endpoint idle state
+before recording `Drained` and removing the generation. No Cargo
+manifest/lockfile, Go/cgo/FFI, config/API/WebUI, TCP pool, H3, driver, or
+production wiring was changed.
 
 ## RED-to-green evidence
 
@@ -26,7 +31,7 @@ After implementation, the same target passed with exit status `0`:
 
 ```text
 cargo test -p mosdns-upstream-core --test quic_reuse_doq --locked
-5 passed; 0 failed; exit 0
+7 passed; 0 failed; exit 0
 ```
 
 The loopback suite proves:
@@ -39,6 +44,10 @@ The loopback suite proves:
 - reset and malformed responses remain stream-local;
 - connection failure deactivates the exact generation, keeps it discoverable
   until terminal removal, and permits one later replacement connection;
+- TLS initialization failure returns `UpstreamError::Connect` to the waiting
+  exchange and reaches terminal removal without lifecycle residue;
+- owner close force-closes a held stream and waits for its caller-owned DoQ
+  handle to drain before terminal removal;
 - no query is replayed by the adapter.
 
 ## Required commands
@@ -57,9 +66,9 @@ All commands were run from `/Users/tom/github/mosdns-rust/rust` unless noted.
 | `python3 ./.trellis/scripts/task.py validate rust-phase4-quic-reuse-multiplexing` | 0 |
 
 The full crate run included 104 unit tests, all upstream-core integration
-targets, the five new DoQ reuse tests, and doc tests; all passed. The complete
-`slice3_quic` run passed 23/23; its existing exhaustive peer-code case takes
-approximately 225 seconds.
+targets, the seven DoQ reuse tests, and doc tests; all passed. The focused
+`quic_reuse_model` run also passed 21/21. The complete `slice3_quic` run passed
+23/23; its existing exhaustive peer-code case takes approximately 225 seconds.
 
 Pre-existing dirty files outside the Slice 1 boundary were preserved and are
 not part of this evidence or implementation change.

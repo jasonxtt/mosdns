@@ -139,7 +139,7 @@ impl DoqServer {
                     };
                     accepts_thread.fetch_add(1, Ordering::SeqCst);
                     let Ok(connection) = incoming.await else {
-                        return;
+                        continue;
                     };
 
                     let mut tasks = Vec::new();
@@ -220,17 +220,20 @@ impl DoqServer {
     }
 }
 
-fn upstream(set: &FixtureSet, address: SocketAddr) -> DoqReuseUpstream {
+fn upstream_with_tls(address: SocketAddr, tls: TlsPolicy) -> DoqReuseUpstream {
     let endpoint = mosdns_upstream_core::quic::DoqEndpoint::new(
         address,
         ServerIdentity::new("dns.example").expect("valid identity"),
     )
     .expect("valid DoQ endpoint");
-    DoqReuseUpstream::new(
-        endpoint,
+    DoqReuseUpstream::new(endpoint, tls).expect("shared DoQ owner constructs")
+}
+
+fn upstream(set: &FixtureSet, address: SocketAddr) -> DoqReuseUpstream {
+    upstream_with_tls(
+        address,
         TlsPolicy::verified(set.root_store_a()).expect("verified TLS policy"),
     )
-    .expect("shared DoQ owner constructs")
 }
 
 #[test]
@@ -462,4 +465,95 @@ fn doq_connection_failure_replaces_only_after_terminal_removal() {
     );
     let (accepts, _) = server.join();
     assert_eq!(accepts, 2, "only the replacement opens a second connection");
+}
+
+#[test]
+fn doq_initialization_failure_returns_connect_and_removes_failed_generation() {
+    let set = FixtureSet::generate();
+    let server = DoqServer::start(&set, 1, FirstStreamMode::Normal);
+    let upstream = Arc::new(upstream_with_tls(
+        server.address,
+        TlsPolicy::verified(set.root_store_b()).expect("verified TLS policy"),
+    ));
+
+    let results = block_on(async {
+        let mut tasks = Vec::new();
+        for id in [0x3801, 0x3802] {
+            let upstream = Arc::clone(&upstream);
+            tasks.push(tokio::spawn(async move {
+                let query = query_wire(id);
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                let context = ExchangeContext::new(
+                    Instant::now() + EXCHANGE_DEADLINE,
+                    TransportCancellation::new(),
+                );
+                upstream.exchange(request, context).await
+            }));
+        }
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.expect("initializer waiter joins"));
+        }
+        results
+    });
+    assert!(
+        results
+            .into_iter()
+            .all(|result| matches!(result, Err(SecureError::Transport(UpstreamError::Connect))))
+    );
+    assert_eq!(upstream.entry_count(), 0, "failed generation is removed");
+    assert_eq!(
+        upstream.in_flight_exchanges(),
+        0,
+        "no lifecycle residue remains"
+    );
+
+    block_on(upstream.close());
+    let (accepts, evidence) = server.join();
+    assert_eq!(accepts, 1, "the failed generation attempted one connection");
+    assert!(evidence.is_empty(), "TLS failure sends no DoQ stream");
+}
+
+#[test]
+fn doq_owner_close_waits_for_outstanding_stream_drain() {
+    let set = FixtureSet::generate();
+    let server = DoqServer::start(&set, 1, FirstStreamMode::Hold);
+    let upstream = Arc::new(upstream(&set, server.address));
+    let query = query_wire(0x3901);
+    let exchange_upstream = Arc::clone(&upstream);
+
+    let result = block_on(async {
+        let exchange = tokio::spawn(async move {
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            let context = ExchangeContext::new(
+                Instant::now() + EXCHANGE_DEADLINE,
+                TransportCancellation::new(),
+            );
+            exchange_upstream.exchange(request, context).await
+        });
+        timeout(TEST_TIMEOUT, server.ready.notified())
+            .await
+            .expect("the held request reaches the server");
+
+        timeout(TEST_TIMEOUT, upstream.close())
+            .await
+            .expect("owner close waits for the real DoQ stream drain");
+        assert_eq!(upstream.entry_count(), 0, "terminal removal follows drain");
+        assert_eq!(
+            upstream.in_flight_exchanges(),
+            0,
+            "close leaves no liveness"
+        );
+        timeout(TEST_TIMEOUT, exchange)
+            .await
+            .expect("the force-closed exchange returns")
+            .expect("the exchange task joins")
+    });
+    assert!(
+        result.is_err(),
+        "owner close cannot report a held query success"
+    );
+
+    let (accepts, _) = server.join();
+    assert_eq!(accepts, 1, "close drains the existing generation in place");
 }

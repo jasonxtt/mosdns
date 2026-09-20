@@ -138,6 +138,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -1464,8 +1465,15 @@ impl EntryTransport {
         self.close_calls.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn doq_connection(&self) -> Option<Arc<DoqConnection>> {
-        self.doq.clone()
+    async fn close_and_wait(&self) {
+        self.close();
+        if let Some(connection) = &self.doq {
+            connection.wait_for_drain().await;
+        }
+    }
+
+    fn doq_connection(&self) -> Option<DoqConnectionHandle> {
+        self.doq.as_ref().map(DoqConnection::acquire)
     }
 }
 
@@ -1473,6 +1481,8 @@ impl EntryTransport {
 struct DoqConnection {
     endpoint: quinn::Endpoint,
     connection: quinn::Connection,
+    active_handles: AtomicUsize,
+    handles_done: Notify,
 }
 
 impl DoqConnection {
@@ -1480,11 +1490,76 @@ impl DoqConnection {
         self.connection.close(0u32.into(), b"");
         self.endpoint.close(0u32.into(), b"");
     }
+
+    fn acquire(self: &Arc<Self>) -> DoqConnectionHandle {
+        self.active_handles.fetch_add(1, Ordering::SeqCst);
+        DoqConnectionHandle {
+            connection: Arc::clone(self),
+        }
+    }
+
+    async fn wait_for_drain(&self) {
+        loop {
+            let notified = self.handles_done.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.active_handles.load(Ordering::SeqCst) == 0 {
+                self.endpoint.wait_idle().await;
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+/// A caller-owned reference to a shared DoQ connection.
+///
+/// The reference is counted separately from the transport's owning `Arc`, so
+/// supervised teardown can close the QUIC connection and then wait until every
+/// exchange has released its streams before recording the generation terminal.
+struct DoqConnectionHandle {
+    connection: Arc<DoqConnection>,
+}
+
+impl Deref for DoqConnectionHandle {
+    type Target = DoqConnection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.connection
+    }
+}
+
+impl Drop for DoqConnectionHandle {
+    fn drop(&mut self) {
+        let previous = self
+            .connection
+            .active_handles
+            .fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0, "DoQ handle count underflow");
+        if previous == 1 {
+            self.connection.handles_done.notify_waiters();
+        }
+    }
 }
 
 /// The boxed future one entry-owned initializer returns.
 pub type InitializeFuture =
     Pin<Box<dyn Future<Output = Option<Arc<EntryTransport>>> + Send + 'static>>;
+
+/// The typed result of an entry-owned initializer.
+#[derive(Debug)]
+pub enum InitializationResult {
+    /// The authenticated transport was acquired successfully.
+    Ready(Arc<EntryTransport>),
+    /// Initialization failed before a resource was acquired.
+    Failed(UpstreamError),
+    /// Legacy/model initializer completed without a resource or typed cause.
+    NoResource,
+}
+
+/// The boxed future used by the supervised initializer task.
+pub type InitializeResultFuture =
+    Pin<Box<dyn Future<Output = InitializationResult> + Send + 'static>>;
 
 /// Builds one entry's physical transport **outside** the owner-map lock, on the
 /// entry-owned initializer task.
@@ -1496,6 +1571,21 @@ pub type InitializeFuture =
 pub trait EntryInitializer: Send + Sync + 'static {
     /// Builds the transport for `key`/`generation`.
     fn initialize(&self, key: QuicReuseKey, generation: u64) -> InitializeFuture;
+
+    /// Builds the transport with a typed initialization failure.
+    ///
+    /// The legacy `initialize` surface remains the model/test seam. Real
+    /// transports override this method when a connect or TLS failure must be
+    /// returned to the joining exchange instead of being folded into `None`.
+    fn initialize_result(&self, key: QuicReuseKey, generation: u64) -> InitializeResultFuture {
+        let future = self.initialize(key, generation);
+        Box::pin(async move {
+            match future.await {
+                Some(transport) => InitializationResult::Ready(transport),
+                None => InitializationResult::NoResource,
+            }
+        })
+    }
 }
 
 /// The Slice 0 default initializer: acquires one inert token immediately and
@@ -1519,12 +1609,26 @@ struct DoqEntryInitializer {
 }
 
 impl EntryInitializer for DoqEntryInitializer {
-    fn initialize(&self, _key: QuicReuseKey, _generation: u64) -> InitializeFuture {
+    fn initialize(&self, key: QuicReuseKey, generation: u64) -> InitializeFuture {
+        let future = self.initialize_result(key, generation);
+        Box::pin(async move {
+            match future.await {
+                InitializationResult::Ready(transport) => Some(transport),
+                InitializationResult::Failed(_) | InitializationResult::NoResource => None,
+            }
+        })
+    }
+
+    fn initialize_result(&self, _key: QuicReuseKey, _generation: u64) -> InitializeResultFuture {
         let endpoint = self.endpoint.clone();
         let tls = self.tls.clone();
         Box::pin(async move {
-            let connection = build_doq_connection(&endpoint, &tls).await?;
-            Some(Arc::new(EntryTransport::from_doq(connection)))
+            match build_doq_connection(&endpoint, &tls).await {
+                Ok(connection) => {
+                    InitializationResult::Ready(Arc::new(EntryTransport::from_doq(connection)))
+                }
+                Err(error) => InitializationResult::Failed(error),
+            }
         })
     }
 }
@@ -1533,24 +1637,29 @@ impl EntryInitializer for DoqEntryInitializer {
 async fn build_doq_connection(
     endpoint: &crate::quic::DoqEndpoint,
     tls: &TlsPolicy,
-) -> Option<DoqConnection> {
-    let rustls_config = tls.client_config_with_alpn(&[DOQ_ALPN]).ok()?;
-    let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config).ok()?;
+) -> Result<DoqConnection, UpstreamError> {
+    let rustls_config = tls
+        .client_config_with_alpn(&[DOQ_ALPN])
+        .map_err(|_| UpstreamError::Connect)?;
+    let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config)
+        .map_err(|_| UpstreamError::Connect)?;
     let client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
     let local = if endpoint.dial().is_ipv4() {
         SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
     } else {
         SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
     };
-    let mut client = quinn::Endpoint::client(local).ok()?;
+    let mut client = quinn::Endpoint::client(local).map_err(|_| UpstreamError::Connect)?;
     client.set_default_client_config(client_config);
     let connecting = client
         .connect(endpoint.dial(), endpoint.identity().as_str())
-        .ok()?;
-    let connection = connecting.await.ok()?;
-    Some(DoqConnection {
+        .map_err(|_| UpstreamError::Connect)?;
+    let connection = connecting.await.map_err(|_| UpstreamError::Connect)?;
+    Ok(DoqConnection {
         endpoint: client,
         connection,
+        active_handles: AtomicUsize::new(0),
+        handles_done: Notify::const_new(),
     })
 }
 
@@ -1566,6 +1675,7 @@ pub struct EntryRecord {
     key: QuicReuseKey,
     generation: u64,
     terminal: Mutex<Option<EntryTerminal>>,
+    initialization_error: Mutex<Option<UpstreamError>>,
     initialization_completions: AtomicUsize,
     teardown_runs: AtomicUsize,
     resource_closes: AtomicUsize,
@@ -1579,6 +1689,7 @@ impl EntryRecord {
             key,
             generation,
             terminal: Mutex::new(None),
+            initialization_error: Mutex::new(None),
             initialization_completions: AtomicUsize::new(0),
             teardown_runs: AtomicUsize::new(0),
             resource_closes: AtomicUsize::new(0),
@@ -1609,6 +1720,15 @@ impl EntryRecord {
     #[must_use]
     pub fn initialization_completions(&self) -> usize {
         self.initialization_completions.load(Ordering::SeqCst)
+    }
+
+    /// The typed failure produced by the entry-owned initializer, if any.
+    #[must_use]
+    pub fn initialization_error(&self) -> Option<UpstreamError> {
+        self.initialization_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// How many supervised teardowns were started. At most one.
@@ -1647,6 +1767,14 @@ impl EntryRecord {
     fn note_initialization_completion(&self) {
         self.initialization_completions
             .fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn set_initialization_error(&self, error: UpstreamError) {
+        let mut slot = self
+            .initialization_error
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        *slot = Some(error);
     }
 
     fn note_teardown_run(&self) {
@@ -1810,16 +1938,21 @@ impl InitializationGuard {
         }
     }
 
-    fn deliver(mut self, transport: Option<Arc<EntryTransport>>) {
+    fn deliver(mut self, result: InitializationResult) {
         self.delivered = true;
-        complete_initialization(&self.shared, &self.key, self.generation, transport);
+        complete_initialization(&self.shared, &self.key, self.generation, result);
     }
 }
 
 impl Drop for InitializationGuard {
     fn drop(&mut self) {
         if !self.delivered {
-            complete_initialization(&self.shared, &self.key, self.generation, None);
+            complete_initialization(
+                &self.shared,
+                &self.key,
+                self.generation,
+                InitializationResult::NoResource,
+            );
         }
     }
 }
@@ -1834,8 +1967,13 @@ fn complete_initialization(
     shared: &Arc<OwnerShared>,
     key: &QuicReuseKey,
     generation: u64,
-    transport: Option<Arc<EntryTransport>>,
+    result: InitializationResult,
 ) {
+    let (transport, initialization_error) = match result {
+        InitializationResult::Ready(transport) => (Some(transport), None),
+        InitializationResult::Failed(error) => (None, Some(error)),
+        InitializationResult::NoResource => (None, None),
+    };
     let mut state = shared.lock();
     // The single publication point: the real `Lifecycle` state and the map
     // admission gate are independent, so neither substitutes for the other, and
@@ -1855,11 +1993,13 @@ fn complete_initialization(
         }
         entry.record.note_initialization_completion();
         entry.initialized = true;
-        let publish = entry.phase == EntryPhase::Initializing && accepting && lifecycle_open;
+        let publish = entry.phase == EntryPhase::Initializing
+            && accepting
+            && lifecycle_open
+            && transport.is_some()
+            && initialization_error.is_none();
         if publish {
-            if let Some(transport) = transport {
-                entry.transport = Some(transport);
-            }
+            entry.transport = transport;
             entry.phase = EntryPhase::Active;
             entry.health = EntryHealth::Healthy;
             entry.last_used = shared.clock.now();
@@ -1869,6 +2009,14 @@ fn complete_initialization(
             // supervised teardown.
             if let Some(transport) = transport {
                 entry.transport = Some(transport);
+            }
+            if let Some(error) = initialization_error {
+                // A typed initializer error is visible to joiners only when
+                // initialization itself won the lock. If close already won,
+                // the caller must observe the stronger pre-send Closed result.
+                if entry.phase == EntryPhase::Initializing && accepting && lifecycle_open {
+                    entry.record.set_initialization_error(error);
+                }
             }
             entry.phase = EntryPhase::Closing;
             entry.health = EntryHealth::Dead;
@@ -1929,7 +2077,11 @@ fn mark_started_teardown(shared: &Arc<OwnerShared>, state: &mut OwnerState, key:
         }
         let terminal = match transport {
             Some(transport) => {
-                transport.close();
+                // Closing the transport is only the force-close request. The
+                // generation is not terminal until the physical DoQ
+                // connection has observed every caller handle release and the
+                // endpoint has reached its real idle state.
+                transport.close_and_wait().await;
                 record.note_resource_close();
                 EntryTerminal::Drained
             }
@@ -1950,11 +2102,11 @@ fn spawn_initializer(
     tokio::spawn(async move {
         let guard =
             InitializationGuard::new(Arc::clone(&task_shared), task_key.clone(), generation);
-        let transport = task_shared
+        let result = task_shared
             .initializer
-            .initialize(task_key, generation)
+            .initialize_result(task_key, generation)
             .await;
-        guard.deliver(transport);
+        guard.deliver(result);
     })
 }
 
@@ -2035,7 +2187,7 @@ impl StreamLease {
         &self.record
     }
 
-    fn doq_connection(&self) -> Option<Arc<DoqConnection>> {
+    fn doq_connection(&self) -> Option<DoqConnectionHandle> {
         let state = self.shared.lock();
         let entry = state.entries.get(&self.key)?;
         if entry.generation != self.generation {
@@ -2059,6 +2211,7 @@ enum Admission {
     },
     Joined {
         generation: u64,
+        record: Arc<EntryRecord>,
     },
 }
 
@@ -2226,7 +2379,7 @@ impl QuicReuseOwner {
                         _registration: registration,
                     });
                 }
-                Admission::Joined { generation } => {
+                Admission::Joined { generation, record } => {
                     let shared = Arc::clone(&self.shared);
                     let wait_key = key.clone();
                     let io = async move {
@@ -2240,7 +2393,7 @@ impl QuicReuseOwner {
                         io,
                     )
                     .await?;
-                    admission = self.after_join(&key, generation);
+                    admission = self.after_join(&key, generation, &record);
                 }
             }
         }
@@ -2286,6 +2439,7 @@ impl QuicReuseOwner {
                 EntryPhase::Initializing => {
                     return Admission::Joined {
                         generation: entry.generation,
+                        record: Arc::clone(&entry.record),
                     };
                 }
                 // A same-key `Closing` lookup: the existing typed pre-send
@@ -2329,17 +2483,31 @@ impl QuicReuseOwner {
                 record: Arc::clone(&record),
             },
         );
-        Admission::Joined { generation }
+        Admission::Joined { generation, record }
     }
 
     /// Re-checks the entry after an `Initializing` join wait.
-    fn after_join(&self, key: &QuicReuseKey, generation: u64) -> Admission {
+    fn after_join(
+        &self,
+        key: &QuicReuseKey,
+        generation: u64,
+        record: &Arc<EntryRecord>,
+    ) -> Admission {
         let mut state = self.shared.lock();
         let Some(entry) = state.entries.get_mut(key) else {
+            if let Some(error) = record.initialization_error() {
+                return Admission::Rejected(error);
+            }
             return Admission::Rejected(UpstreamError::Closed(SideEffectState::NotSent));
         };
         if entry.generation != generation {
+            if let Some(error) = record.initialization_error() {
+                return Admission::Rejected(error);
+            }
             return Admission::Rejected(UpstreamError::Closed(SideEffectState::NotSent));
+        }
+        if let Some(error) = record.initialization_error() {
+            return Admission::Rejected(error);
         }
         match entry.phase {
             EntryPhase::Active if entry.health == EntryHealth::Healthy => {
@@ -2354,7 +2522,10 @@ impl QuicReuseOwner {
                     generation,
                 }
             }
-            EntryPhase::Initializing => Admission::Joined { generation },
+            EntryPhase::Initializing => Admission::Joined {
+                generation,
+                record: Arc::clone(record),
+            },
             // Close won the shared lock, or the entry was logically deactivated:
             // the typed pre-send closed result, never a late lease.
             EntryPhase::Active | EntryPhase::Closing => {
@@ -2598,6 +2769,7 @@ impl DoqReuseUpstream {
         let opened = race_control(&control, SideEffectState::NotSent, deadline, async {
             shared
                 .connection
+                .connection
                 .open_bi()
                 .await
                 .map_err(|_| UpstreamError::Connect)
@@ -2621,7 +2793,7 @@ impl DoqReuseUpstream {
         })
         .await;
         if let Err(error) = written {
-            if !is_local_control(&error) && shared.connection.close_reason().is_some() {
+            if !is_local_control(&error) && shared.connection.connection.close_reason().is_some() {
                 self.owner
                     .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
             }
@@ -2635,7 +2807,7 @@ impl DoqReuseUpstream {
         })
         .await;
         if let Err(error) = finished {
-            if !is_local_control(&error) && shared.connection.close_reason().is_some() {
+            if !is_local_control(&error) && shared.connection.connection.close_reason().is_some() {
                 self.owner
                     .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
             }
@@ -2658,7 +2830,7 @@ impl DoqReuseUpstream {
             Err(DoqReadFailure::Read(error)) => {
                 let entry_terminal = classify_quinn_read_to_end_error(&error)
                     == QuicErrorClass::EntryTerminal
-                    || shared.connection.close_reason().is_some();
+                    || shared.connection.connection.close_reason().is_some();
                 if entry_terminal {
                     self.owner
                         .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
