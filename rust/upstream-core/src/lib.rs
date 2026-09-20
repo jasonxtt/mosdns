@@ -39,9 +39,9 @@ pub use secure::{
 // the crate root surface stays the headline contract.
 pub use quic_reuse::{
     EntryHealth, EntryObservation, EntryPhase, EntryRecord, EntryTerminal, ExchangeRegistration,
-    MAX_CONNECTIONS_PER_OWNER, MAX_STREAMS_PER_CONNECTION, PINNED_ERROR_CLASSIFICATION_TABLE,
-    PinnedErrorClassRow, QUIC_IDLE_TIMEOUT, QuicErrorClass, QuicErrorOutcome, QuicExchangePhase,
-    QuicProtocol, QuicReuseKey, QuicReuseOwner, StreamLease,
+    H3ErrorObservation, H3ErrorShape, MAX_CONNECTIONS_PER_OWNER, MAX_STREAMS_PER_CONNECTION,
+    PINNED_ERROR_CLASSIFICATION_TABLE, PinnedErrorClassRow, QUIC_IDLE_TIMEOUT, QuicErrorClass,
+    QuicErrorOutcome, QuicExchangePhase, QuicProtocol, QuicReuseKey, QuicReuseOwner, StreamLease,
 };
 
 use std::fmt;

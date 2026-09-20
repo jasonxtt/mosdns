@@ -36,8 +36,9 @@ use std::time::{Duration, Instant};
 use h3::quic::{ConnectionErrorIncoming, StreamErrorIncoming};
 use mosdns_upstream_core::quic::DoqEndpoint;
 use mosdns_upstream_core::quic_reuse::{
-    EntryHealth, EntryInitializer, EntryPhase, EntryTerminal, EntryTransport, InitializeFuture,
-    PINNED_ERROR_CLASSIFICATION_TABLE, pinned_error_class,
+    EntryHealth, EntryInitializer, EntryPhase, EntryTerminal, EntryTransport, H3ErrorObservation,
+    H3ErrorShape, InitializeFuture, PINNED_ERROR_CLASSIFICATION_TABLE, classify_h3_request_outcome,
+    h3_error_shape_for_observation, pinned_error_class,
 };
 use mosdns_upstream_core::quic_reuse::{
     H3CancellationAction, H3RequestPhase, ImmediateInitializer, MAX_CONNECTIONS_PER_OWNER,
@@ -556,11 +557,11 @@ fn r0b_connection_level_and_stream_level_classification() {
     // The `h3` error enums mark the enum and every variant `#[non_exhaustive]`
     // (error.rs:16-19 and per-variant cfg_attr blocks), so a downstream crate
     // can neither construct nor pattern-match any `h3` error value. Both `h3`
-    // rules are therefore type-level and total; the frozen-table rows assert them
-    // in `r0b_table_covers_the_pinned_vocabulary` together with the
-    // non-weakening note: tuple/unit variants cannot reach the wildcard without
-    // the paired connection observation, because the call sites that own a real
-    // driver (Slice 2) observe the driver outcome for the same event.
+    // rules are therefore type-level and total; the frozen-table rows and the
+    // explicit observation-model test below assert the non-weakening rule:
+    // tuple/unit variants are routed by backend, GOAWAY, or driver evidence,
+    // while an unobserved remainder stays stream-local until Slice 2 binds the
+    // real call-site observation.
     let h3_connection_rule: fn(&h3::error::ConnectionError) -> QuicErrorClass =
         classify_h3_connection_error;
     let h3_stream_rule: fn(&h3::error::StreamError) -> QuicErrorClass = classify_h3_stream_error;
@@ -571,10 +572,75 @@ fn r0b_connection_level_and_stream_level_classification() {
 }
 
 #[test]
+fn r0b_h3_observation_model_distinguishes_stream_and_connection_evidence() {
+    let known_stream = H3ErrorObservation {
+        backend_connection_error: false,
+        peer_closing_observed: false,
+        driver_reported_connection_error: false,
+        unobserved_stream_error: false,
+    };
+    assert_eq!(
+        h3_error_shape_for_observation(known_stream),
+        H3ErrorShape::StreamScoped
+    );
+    assert_eq!(
+        classify_h3_request_outcome(known_stream),
+        QuicErrorClass::StreamLocal
+    );
+
+    let unknown_stream = H3ErrorObservation {
+        unobserved_stream_error: true,
+        ..known_stream
+    };
+    assert_eq!(
+        h3_error_shape_for_observation(unknown_stream),
+        H3ErrorShape::Unobserved
+    );
+    assert_eq!(
+        classify_h3_request_outcome(unknown_stream),
+        QuicErrorClass::StreamLocal
+    );
+
+    for (observation, shape) in [
+        (
+            H3ErrorObservation {
+                backend_connection_error: true,
+                ..known_stream
+            },
+            H3ErrorShape::BackendConnection,
+        ),
+        (
+            H3ErrorObservation {
+                peer_closing_observed: true,
+                ..known_stream
+            },
+            H3ErrorShape::PeerClosing,
+        ),
+        (
+            H3ErrorObservation {
+                driver_reported_connection_error: true,
+                ..known_stream
+            },
+            H3ErrorShape::BackendConnection,
+        ),
+    ] {
+        assert_eq!(h3_error_shape_for_observation(observation), shape);
+        assert_eq!(
+            classify_h3_request_outcome(observation),
+            QuicErrorClass::EntryTerminal
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
 fn r0b_table_covers_the_pinned_vocabulary() {
     use mosdns_upstream_core::quic_reuse::QuicErrorClass::{EntryTerminal, StreamLocal};
 
-    // Every row cites its pinned source and carries exactly one class.
+    // Every row cites its pinned source and carries exactly one class, and
+    // the table has no ambiguous identity: the key is the full
+    // (vocabulary, error_type, item) triple.
+    let mut seen = std::collections::HashSet::new();
     for row in PINNED_ERROR_CLASSIFICATION_TABLE {
         assert!(
             row.citation.contains(".rs:") || row.citation.contains("-0.11.18"),
@@ -583,6 +649,21 @@ fn r0b_table_covers_the_pinned_vocabulary() {
             row.item
         );
         assert!(matches!(row.class, EntryTerminal | StreamLocal));
+        assert!(
+            seen.insert((row.vocabulary, row.error_type, row.item)),
+            "ambiguous table identity for {} / {} / {}",
+            row.vocabulary,
+            row.error_type,
+            row.item
+        );
+        assert_eq!(
+            pinned_error_class(row.vocabulary, row.error_type, row.item),
+            Some(row.class),
+            "table row {} / {} / {} is not reachable by its exact identity",
+            row.vocabulary,
+            row.error_type,
+            row.item
+        );
     }
 
     // quinn connection-level vocabulary: complete, all terminal.
@@ -597,72 +678,142 @@ fn r0b_table_covers_the_pinned_vocabulary() {
         "CidsExhausted",
     ] {
         assert_eq!(
-            pinned_error_class("quinn", item),
+            pinned_error_class("quinn", "quinn::ConnectionError", item),
             Some(EntryTerminal),
             "quinn::ConnectionError::{item}"
         );
     }
 
     // quinn stream-level vocabulary.
-    assert_eq!(pinned_error_class("quinn", "Stopped"), Some(StreamLocal));
+    // Connection `Reset` and read `Reset` share a name but not a class: the
+    // exact triple keeps them distinct (P1-2 regression).
     assert_eq!(
-        pinned_error_class("quinn", "ConnectionLost"),
+        pinned_error_class("quinn", "quinn::ConnectionError", "Reset"),
         Some(EntryTerminal)
     );
     assert_eq!(
-        pinned_error_class("quinn", "ClosedStream"),
+        pinned_error_class("quinn", "quinn::ReadError", "Reset"),
+        Some(StreamLocal)
+    );
+    // Same-name items across read/write types resolve per type, never by
+    // first-row match.
+    for error_type in ["quinn::WriteError", "quinn::ReadError"] {
+        assert_eq!(
+            pinned_error_class("quinn", error_type, "ClosedStream"),
+            Some(StreamLocal),
+            "{error_type}::ClosedStream"
+        );
+        assert_eq!(
+            pinned_error_class("quinn", error_type, "ConnectionLost"),
+            Some(EntryTerminal),
+            "{error_type}::ConnectionLost"
+        );
+        assert_eq!(
+            pinned_error_class("quinn", error_type, "ZeroRttRejected"),
+            Some(EntryTerminal),
+            "{error_type}::ZeroRttRejected"
+        );
+    }
+    assert_eq!(
+        pinned_error_class("quinn", "quinn::WriteError", "Stopped"),
         Some(StreamLocal)
     );
     assert_eq!(
-        pinned_error_class("quinn", "IllegalOrderedRead"),
+        pinned_error_class("quinn", "quinn::ReadToEndError", "TooLong"),
         Some(StreamLocal)
     );
     assert_eq!(
-        pinned_error_class("quinn", "ZeroRttRejected"),
-        Some(EntryTerminal)
+        pinned_error_class("quinn", "quinn::ReadToEndError", "Read"),
+        Some(StreamLocal)
     );
-    assert_eq!(pinned_error_class("quinn", "TooLong"), Some(StreamLocal));
+    assert_eq!(
+        pinned_error_class("quinn", "quinn::ReadError", "IllegalOrderedRead"),
+        Some(StreamLocal)
+    );
 
     // h3-quinn backend vocabulary.
     for item in ["ApplicationClose", "Timeout", "InternalError", "Undefined"] {
         assert_eq!(
-            pinned_error_class("h3-quinn", item),
+            pinned_error_class("h3-quinn", "h3::quic::ConnectionErrorIncoming", item),
             Some(EntryTerminal),
             "h3::quic::ConnectionErrorIncoming::{item}"
         );
     }
     assert_eq!(
-        pinned_error_class("h3-quinn", "ConnectionErrorIncoming"),
+        pinned_error_class(
+            "h3-quinn",
+            "h3::quic::StreamErrorIncoming",
+            "ConnectionErrorIncoming"
+        ),
         Some(EntryTerminal)
     );
     assert_eq!(
-        pinned_error_class("h3-quinn", "StreamTerminated"),
+        pinned_error_class(
+            "h3-quinn",
+            "h3::quic::StreamErrorIncoming",
+            "StreamTerminated"
+        ),
         Some(StreamLocal)
     );
-    assert_eq!(pinned_error_class("h3-quinn", "Unknown"), Some(StreamLocal));
+    assert_eq!(
+        pinned_error_class("h3-quinn", "h3::quic::StreamErrorIncoming", "Unknown"),
+        Some(StreamLocal)
+    );
 
     // This crate's own framing/response-validation errors stay stream-local.
-    for item in [
-        "DoqProtocolTrailingResponse",
-        "DoqProtocolMissingResponseFin",
-        "DoqProtocolNonzeroResponseId",
-        "PeerStreamTerminated",
-        "ResponseHeadTooLarge",
-        "IncompleteBody",
+    for (error_type, item) in [
+        ("SecureError", "DoqProtocolTrailingResponse"),
+        ("SecureError", "DoqProtocolMissingResponseFin"),
+        ("SecureError", "DoqProtocolNonzeroResponseId"),
+        ("DohProtocolError", "PeerStreamTerminated"),
+        ("DohProtocolError", "ResponseHeadTooLarge"),
+        ("DohProtocolError", "IncompleteBody"),
     ] {
         assert_eq!(
-            pinned_error_class("mosdns-upstream-core", item),
+            pinned_error_class("mosdns-upstream-core", error_type, item),
             Some(StreamLocal),
-            "{item}"
+            "{error_type}::{item}"
         );
     }
-    assert_eq!(pinned_error_class("quinn", "NoSuchVariant"), None);
     assert_eq!(
-        pinned_error_class("h3", "any request-stream outcome"),
+        pinned_error_class("quinn", "quinn::ConnectionError", "NoSuchVariant"),
+        None
+    );
+    // Same name + same vocabulary but different type must not alias either.
+    assert_ne!(
+        pinned_error_class("quinn", "quinn::ConnectionError", "Reset"),
+        pinned_error_class("quinn", "quinn::ReadError", "Reset")
+    );
+    assert_eq!(
+        pinned_error_class(
+            "h3",
+            "h3::error::StreamError",
+            "struct-shaped variants only"
+        ),
         Some(StreamLocal)
     );
     assert_eq!(
-        pinned_error_class("h3", "any driver poll_close outcome"),
+        pinned_error_class(
+            "h3",
+            "h3::error::StreamError",
+            "ConnectionError(_) or RemoteClosing (discriminator model)"
+        ),
+        Some(EntryTerminal)
+    );
+    assert_eq!(
+        pinned_error_class(
+            "h3",
+            "h3::error::StreamError",
+            "Undefined(_) remainder (no connection evidence)"
+        ),
+        Some(StreamLocal)
+    );
+    assert_eq!(
+        pinned_error_class(
+            "h3",
+            "h3::error::ConnectionError",
+            "any driver poll_close outcome"
+        ),
         Some(EntryTerminal)
     );
 }
@@ -1015,7 +1166,24 @@ fn same_key_closing_lookup_is_closed_not_sent_without_a_drain_wait() {
 
 #[test]
 fn stage_two_only_gate_rejects_a_registered_but_unadmitted_exchange() {
+    // P1-3 note: the gate-only composition (withdrawing the map-side admission
+    // gate with the real `Lifecycle` still `Open`) is not reachable through
+    // any public production API — `linearize_close` is `pub(crate)`, so only
+    // the crate-internal model coverage may drive it (see
+    // `inverse_order_publication_fails_without_a_public_stage_two` in
+    // `quic_reuse.rs`). The production-reachable part of this behavior is the
+    // gate rule itself: an exchange that registered while `Open` but reaches
+    // map admission after the gate withdrew is rejected with `Closed(NotSent)`
+    // and leaves zero residue. That rule is covered here through the real
+    // close path: `begin_close` (stage one) then a spawned `close`, which runs
+    // the crate-side stage two and parks on this test's `close_after_linearize`
+    // barrier; the arrival is the deterministic linearization signal.
     block_on(async {
+        // A dedicated `close_after_linearize` barrier is installed for exactly
+        // this test, so the spawned `close` parks right after crate-side stage
+        // two; its arrival is the deterministic linearization signal, with no
+        // yield or sleep involved.
+        let close_barrier = Arc::new(ModelBarrier::new());
         let factory = Arc::new(TransportFactory::default());
         let initializer = Arc::new(ModelInitializer::new(
             None,
@@ -1023,26 +1191,35 @@ fn stage_two_only_gate_rejects_a_registered_but_unadmitted_exchange() {
             true,
             Arc::clone(&factory),
         ));
-        let h = harness_with(initializer.clone(), ModelSeams::default());
+        let h = harness_with(
+            initializer.clone(),
+            ModelSeams {
+                close_after_linearize: Some(Arc::clone(&close_barrier)),
+                teardown_before_terminal: None,
+            },
+        );
         let key = doq_key(1502);
 
-        // The exchange registers while the owner is `Open`, then parks before the
-        // owner-map admission section (design §11.2 step 1).
+        // The exchange registers while the owner is `Open`, then parks before
+        // the owner-map admission section (design §11.2 step 1).
         let registration = h.owner.register().expect("the owner is open");
         assert_eq!(h.owner.in_flight_exchanges(), 1);
         assert_eq!(initializer.calls(), 0);
         assert_eq!(h.owner.entry_count(), 0);
 
-        // Only the map-side admission gate is withdrawn: `accepting = false` with
-        // the real `Lifecycle` still `Open`, so this exchange's own registration
-        // would still succeed if the gate were not checked first.
-        let captured = h.owner.linearize_close();
-        assert!(captured.is_empty());
-        assert!(!h.owner.is_accepting());
+        // The real close runs stage one, then parks right after crate-side
+        // stage two, proving the gate withdrew before the exchange below is
+        // released.
         assert_eq!(
-            h.owner.lifecycle_state(),
-            mosdns_upstream_core::LifecycleState::Open
+            h.owner.begin_close(),
+            mosdns_upstream_core::CloseTransition::BeganClosing
         );
+        let close_task = tokio::spawn({
+            let owner = Arc::clone(&h.owner);
+            async move { owner.close().await }
+        });
+        bounded(close_barrier.wait_arrived()).await;
+        assert!(!h.owner.is_accepting());
 
         // The gate must reject before installing anything: no reservation, no
         // initializer task, no liveness or slot residue.
@@ -1055,6 +1232,12 @@ fn stage_two_only_gate_rejects_a_registered_but_unadmitted_exchange() {
         assert_eq!(h.owner.entry_count(), 0);
         assert_eq!(h.owner.in_flight_exchanges(), 0, "zero liveness residue");
         assert!(!h.owner.is_accepting());
+        close_barrier.release();
+        assert_eq!(
+            bounded(close_task).await.expect("the close waiter joins"),
+            mosdns_upstream_core::CloseResult::Closed,
+            "the real close protocol completes after the rejection"
+        );
     });
 }
 
@@ -1083,15 +1266,18 @@ fn post_close_admission_race_leaves_no_residue() {
         let captured_record = Arc::clone(captured_lease.record());
         drop(captured_lease);
 
-        // Owner close: stage one then stage two, in the frozen order.
+        // Owner close through the real two-stage protocol: `begin_close`
+        // (stage one) then a spawned `close`, which runs the crate-side stage
+        // two and waits for terminal. The composition order itself is covered
+        // crate-internally in `close_protocol_tests`.
         assert_eq!(
             h.owner.begin_close(),
             mosdns_upstream_core::CloseTransition::BeganClosing
         );
-        let captured = h.owner.linearize_close();
-        assert!(!h.owner.is_accepting());
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].generation(), captured_record.generation());
+        let close_task = tokio::spawn({
+            let owner = Arc::clone(&h.owner);
+            async move { owner.close().await }
+        });
 
         // Release A: rejected at the gate, installing nothing.
         let control = control();
@@ -1115,9 +1301,13 @@ fn post_close_admission_race_leaves_no_residue() {
             bounded(captured_record.wait_terminal()).await,
             EntryTerminal::Drained
         );
+        assert_eq!(
+            bounded(close_task).await.expect("the close waiter joins"),
+            mosdns_upstream_core::CloseResult::Closed,
+            "the real close protocol drains after terminal"
+        );
         assert_eq!(h.owner.entry_count(), 0);
         assert_eq!(h.owner.in_flight_exchanges(), 0);
-        assert_eq!(h.lifecycle.finish_close(), CloseCompletion::Closed);
         assert_eq!(
             h.owner.lifecycle_state(),
             mosdns_upstream_core::LifecycleState::Closed
@@ -1134,6 +1324,7 @@ fn init_vs_owner_close_hands_the_late_resource_to_teardown() {
     block_on(async {
         let init_barrier = Arc::new(ModelBarrier::new());
         let teardown_barrier = Arc::new(ModelBarrier::new());
+        let close_barrier = Arc::new(ModelBarrier::new());
         let factory = Arc::new(TransportFactory::default());
         let initializer = Arc::new(ModelInitializer::new(
             Some(Arc::clone(&init_barrier)),
@@ -1144,7 +1335,7 @@ fn init_vs_owner_close_hands_the_late_resource_to_teardown() {
         let h = harness_with(
             initializer.clone(),
             ModelSeams {
-                close_after_linearize: None,
+                close_after_linearize: Some(Arc::clone(&close_barrier)),
                 teardown_before_terminal: Some(Arc::clone(&teardown_barrier)),
             },
         );
@@ -1172,27 +1363,17 @@ fn init_vs_owner_close_hands_the_late_resource_to_teardown() {
         assert_eq!(h.owner.entry_count(), 1, "the reservation survives");
         assert_eq!(record.initialization_completions(), 0);
 
-        // Close wins the shared lock first: stage one then stage two.
+        // Stage one wins the lifecycle first. Stage two is intentionally held
+        // back until the entry-owned initializer has observed the closing
+        // lifecycle and handed its late resource to teardown.
         assert_eq!(
             h.owner.begin_close(),
             mosdns_upstream_core::CloseTransition::BeganClosing
         );
-        let captured = h.owner.linearize_close();
-        assert!(!h.owner.is_accepting());
-        assert_eq!(captured.len(), 1);
-        assert_eq!(record.teardown_runs(), 1, "exactly one teardown");
-        assert_eq!(record.terminal(), None);
-        assert_eq!(
-            h.owner.observe(&key).expect("discoverable").phase,
-            EntryPhase::Closing
-        );
-        assert_eq!(
-            h.owner.in_flight_exchanges(),
-            1,
-            "liveness held to terminal"
-        );
+        assert!(h.owner.is_accepting(), "stage two has not linearized yet");
 
-        // The initializer completes and acquires its resource *after* close won.
+        // The initializer completes and acquires its resource after stage one
+        // has won, so publication fails and the late resource enters teardown.
         init_barrier.release();
         bounded(teardown_barrier.wait_arrived()).await;
         assert_eq!(record.initialization_completions(), 1);
@@ -1204,12 +1385,33 @@ fn init_vs_owner_close_hands_the_late_resource_to_teardown() {
         assert!(!transport.is_closed(), "teardown has not closed it yet");
         assert_eq!(record.terminal(), None, "removal is terminal-only");
 
+        // Finish through the real close path. The entry is already `Closing`,
+        // so no second teardown is started.
+        let close_task = tokio::spawn({
+            let owner = Arc::clone(&h.owner);
+            async move { owner.close().await }
+        });
+        bounded(close_barrier.wait_arrived()).await;
+        assert!(!h.owner.is_accepting());
+        assert_eq!(record.teardown_runs(), 1, "exactly one teardown");
+        assert_eq!(
+            h.owner.in_flight_exchanges(),
+            1,
+            "liveness held to terminal"
+        );
+
         // Release teardown: the late resource is taken over and closed exactly
         // once, then the entry is removed and liveness released.
         teardown_barrier.release();
+        close_barrier.release();
         assert_eq!(
             bounded(record.wait_terminal()).await,
             EntryTerminal::Drained
+        );
+        assert_eq!(
+            bounded(close_task).await.expect("the close waiter joins"),
+            mosdns_upstream_core::CloseResult::Closed,
+            "the real close protocol drains after terminal"
         );
         assert!(transport.is_closed());
         assert_eq!(transport.close_calls(), 1);
@@ -1331,6 +1533,7 @@ fn begin_close_without_stage_two_already_fails_publication() {
     block_on(async {
         let init_barrier = Arc::new(ModelBarrier::new());
         let teardown_barrier = Arc::new(ModelBarrier::new());
+        let close_barrier = Arc::new(ModelBarrier::new());
         let factory = Arc::new(TransportFactory::default());
         let initializer = Arc::new(ModelInitializer::new(
             None,
@@ -1341,7 +1544,7 @@ fn begin_close_without_stage_two_already_fails_publication() {
         let h = harness_with(
             initializer,
             ModelSeams {
-                close_after_linearize: None,
+                close_after_linearize: Some(Arc::clone(&close_barrier)),
                 teardown_before_terminal: Some(Arc::clone(&teardown_barrier)),
             },
         );
@@ -1390,87 +1593,28 @@ fn begin_close_without_stage_two_already_fails_publication() {
         assert_eq!(record.teardown_runs(), 1);
         assert_eq!(record.terminal(), None);
 
-        // Stage two now runs: the entry is already `Closing`, so no second
-        // teardown is started and the outcome is unchanged.
-        let captured = h.owner.linearize_close();
+        // Finish through the real close path. The entry is already `Closing`,
+        // so no second teardown is started and the outcome is unchanged.
+        let close_task = tokio::spawn({
+            let owner = Arc::clone(&h.owner);
+            async move { owner.close().await }
+        });
+        bounded(close_barrier.wait_arrived()).await;
         assert!(!h.owner.is_accepting());
-        assert_eq!(captured.len(), 1);
         assert_eq!(record.teardown_runs(), 1);
 
         teardown_barrier.release();
+        close_barrier.release();
         assert_eq!(
             bounded(record.wait_terminal()).await,
             EntryTerminal::Drained
         );
+        assert_eq!(
+            bounded(close_task).await.expect("the close waiter joins"),
+            mosdns_upstream_core::CloseResult::Closed
+        );
         assert_eq!(record.resource_closes(), 1);
         assert!(h.owner.observe(&key).is_none());
-        assert_closed_not_sent(&bounded(leader).await.expect("leader joins"));
-    });
-}
-
-#[test]
-fn stage_two_without_stage_one_also_fails_publication() {
-    block_on(async {
-        let init_barrier = Arc::new(ModelBarrier::new());
-        let teardown_barrier = Arc::new(ModelBarrier::new());
-        let factory = Arc::new(TransportFactory::default());
-        let initializer = Arc::new(ModelInitializer::new(
-            None,
-            Some(Arc::clone(&init_barrier)),
-            true,
-            Arc::clone(&factory),
-        ));
-        let h = harness_with(
-            initializer,
-            ModelSeams {
-                close_after_linearize: None,
-                teardown_before_terminal: Some(Arc::clone(&teardown_barrier)),
-            },
-        );
-        let key = doq_key(1801);
-
-        let leader = tokio::spawn({
-            let owner = Arc::clone(&h.owner);
-            let key = key.clone();
-            async move {
-                let registration = owner.register().expect("the owner is open");
-                let control = control();
-                owner.admit(registration, key, &control).await
-            }
-        });
-        bounded(init_barrier.wait_arrived()).await;
-        assert_eq!(
-            h.owner.observe(&key).expect("reservation").phase,
-            EntryPhase::Initializing
-        );
-
-        // The inverse order: the map admission gate closes while the real
-        // `Lifecycle` is still `Open`. Neither check alone is sufficient.
-        let captured = h.owner.linearize_close();
-        assert!(!h.owner.is_accepting());
-        assert_eq!(
-            h.owner.lifecycle_state(),
-            mosdns_upstream_core::LifecycleState::Open
-        );
-        assert_eq!(captured.len(), 1);
-
-        init_barrier.release();
-        bounded(teardown_barrier.wait_arrived()).await;
-        let observed = h.owner.observe(&key).expect("discoverable");
-        assert_eq!(observed.phase, EntryPhase::Closing, "never Active");
-        let record = Arc::clone(&observed.record);
-        assert_eq!(record.teardown_runs(), 1, "exactly one teardown");
-        assert_eq!(record.initialization_completions(), 1);
-
-        teardown_barrier.release();
-        assert_eq!(
-            bounded(record.wait_terminal()).await,
-            EntryTerminal::Drained
-        );
-        assert_eq!(record.resource_closes(), 1);
-        assert_eq!(factory.produced(), 1);
-        assert!(h.owner.observe(&key).is_none());
-        assert_eq!(h.owner.in_flight_exchanges(), 0);
         assert_closed_not_sent(&bounded(leader).await.expect("leader joins"));
     });
 }
@@ -1619,6 +1763,7 @@ fn stream_slot_backpressure_and_permit_release() {
 fn owner_close_cancels_streams_and_waits_for_exchange_registrations() {
     block_on(async {
         let teardown_barrier = Arc::new(ModelBarrier::new());
+        let close_barrier = Arc::new(ModelBarrier::new());
         let factory = Arc::new(TransportFactory::default());
         let initializer = Arc::new(ModelInitializer::new(
             None,
@@ -1629,7 +1774,7 @@ fn owner_close_cancels_streams_and_waits_for_exchange_registrations() {
         let h = harness_with(
             initializer,
             ModelSeams {
-                close_after_linearize: None,
+                close_after_linearize: Some(Arc::clone(&close_barrier)),
                 teardown_before_terminal: Some(Arc::clone(&teardown_barrier)),
             },
         );
@@ -1644,12 +1789,11 @@ fn owner_close_cancels_streams_and_waits_for_exchange_registrations() {
             "entry liveness plus the lease"
         );
 
-        assert_eq!(
-            h.owner.begin_close(),
-            mosdns_upstream_core::CloseTransition::BeganClosing
-        );
-        let captured = h.owner.linearize_close();
-        assert_eq!(captured.len(), 1);
+        let close_task = tokio::spawn({
+            let owner = Arc::clone(&h.owner);
+            async move { owner.close().await }
+        });
+        bounded(close_barrier.wait_arrived()).await;
 
         // Held barrier: the entry is `Closing` and discoverable, teardown has
         // already cancelled the generation's outstanding request streams, and the
@@ -1681,14 +1825,18 @@ fn owner_close_cancels_streams_and_waits_for_exchange_registrations() {
         );
 
         teardown_barrier.release();
+        close_barrier.release();
         assert_eq!(
             bounded(record.wait_terminal()).await,
             EntryTerminal::Drained
+        );
+        assert_eq!(
+            bounded(close_task).await.expect("the close waiter joins"),
+            mosdns_upstream_core::CloseResult::Closed
         );
         assert_eq!(record.resource_closes(), 1);
         assert!(factory.last().is_closed());
         assert!(h.owner.observe(&key).is_none(), "terminal-only removal");
         assert_eq!(h.owner.in_flight_exchanges(), 0);
-        assert_eq!(h.lifecycle.finish_close(), CloseCompletion::Closed);
     });
 }

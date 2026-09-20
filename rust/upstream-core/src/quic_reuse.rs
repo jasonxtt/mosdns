@@ -78,18 +78,13 @@
 //! match the tuple/unit ones (`ConnectionError(_)`, `RemoteClosing`,
 //! `Undefined(_)`). For exactly this reason the R0b evidence records a second,
 //! equivalent, classification rule that needs no variant name (see
-//! [`classify_h3_stream_error`]): **a per-request `h3::error::StreamError`
-//! reaches our call sites only together with the driver's error-shared state,
-//! and the same pinned code that produces a connection-carrying stream error
-//! (`ConnectionError(_, reason)`) or refuses new work (`RemoteClosing`) also
-//! records a connection error on that state, so the independently terminal
-//! [`classify_h3_connection_error`] (the driver's `poll_close` outcome) or
-//! [`classify_h3_quinn_connection_error`] (the backend `ConnectionErrorIncoming`)
-//! fires for the same event.** No variant is folded into the stream-local arm,
-//! and no future `#[non_exhaustive]` variant can slip through: any tuple/unit
-//! outcome reaches `StreamLocal` only after the shared-state rule has had its
-//! say in a later slice, whose call sites must pair the stream error with the
-//! driver observation.
+//! [`classify_h3_request_outcome`]): **call sites that own a real H3 driver
+//! pass an explicit [`H3ErrorObservation`] — the backend error shape, the
+//! shared GOAWAY-closing flag, and the driver's `poll_close` outcome for the
+//! same event.** The GOAWAY case is the proof this is load-bearing: a normal
+//! peer GOAWAY makes `RemoteClosing` observable while `poll_close` may still be
+//! `Pending`, so the entry-terminal class comes from the flag, not from an
+//! unwritten driver error.
 //!
 //! A `SendRequest`-level failure on its own proves neither health nor death, so
 //! it is stream-local until the connection layer independently reports terminal.
@@ -517,6 +512,160 @@ pub enum QuicErrorClass {
     StreamLocal,
 }
 
+/// The shape of one pinned error: whether the failure is scoped to a single
+/// stream, derived from lines a downstream crate can actually read, or only
+/// visible through a paired observation.
+///
+/// This is the discriminator the single-argument classifiers cannot carry for
+/// `h3 0.0.8`, because that crate marks the whole `StreamError` enum and every
+/// one of its variants `#[non_exhaustive]` with no opt-out feature. A
+/// downstream crate can match the three struct-shaped variants and nothing
+/// else, so [`classify_h3_stream_error`] alone cannot route
+/// `ConnectionError(_)`, `RemoteClosing`, or `Undefined(_)`. Call sites that
+/// own a real H3 driver therefore pass an explicit [`H3ErrorObservation`]:
+/// the stream error plus the independently observable driver/backend state for
+/// the same event, including whether the error was only an unnameable
+/// non-exhaustive remainder.
+///
+/// Pinned grounding (`h3 0.0.8`):
+///
+/// - A stream error produced by a connection error records that connection
+///   error on the entry's shared `Arc<SharedState>` and wakes the driver
+///   (`src/error/connection_error_creators.rs:22-27` for `handle_connection_error`,
+///   `:110-123` for the stream-error mapping). `poll_close` surfaces a recorded
+///   connection error ahead of control frames (`src/connection.rs:514`), so the
+///   driver's `poll_close` outcome for the same event is observable.
+/// - `RemoteClosing` is produced by `check_peer_connection_closing`
+///   (`src/error/connection_error_creators.rs:133-139`), which reads only the
+///   shared `is_closing` flag. A normal peer GOAWAY sets exactly that flag via
+///   `process_goaway` (`src/connection.rs:663-701`) and returns `Ok`, writing
+///   no connection error — so `RemoteClosing` is observable while
+///   `poll_close` may still be `Pending`.
+/// - The `h3` backend vocabulary is structurally routable without any variant
+///   name: `h3-quinn` produces `StreamErrorIncoming::ConnectionErrorIncoming`
+///   only for connection failures (`h3-quinn-0.0.10/src/lib.rs:148, 170, 215,
+///   237, 413, 429, 505`), and `StreamTerminated`/`Unknown` for stream-scoped
+///   ones. A `StreamErrorIncoming` that crossed the backend boundary therefore
+///   proves the level it crossed on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum H3ErrorShape {
+    /// The failure is provably scoped to one request/response stream: the
+    /// pinned `StreamError{..}` / `RemoteTerminate{..}` / `HeaderTooBig{..}`
+    /// variants (`error.rs:84-121`), or the backend `StreamTerminated` /
+    /// `Unknown` routed through the stream arm of `handle_quic_stream_error`
+    /// (`connection_error_creators.rs:122-131`).
+    StreamScoped,
+    /// The failure is provably a connection error that crossed into a stream
+    /// context: the backend `StreamErrorIncoming::ConnectionErrorIncoming`
+    /// arm, which `h3` itself maps to `StreamError::ConnectionError` while
+    /// recording it on the shared state (`connection_error_creators.rs:120-123`).
+    BackendConnection,
+    /// The peer's GOAWAY set the shared `is_closing` flag
+    /// (`connection.rs:663-701`), so `check_peer_connection_closing` refuses
+    /// new work with `RemoteClosing` (`connection_error_creators.rs:133-139`).
+    /// A closing peer sends no more request-acceptable state changes; the
+    /// pinned client records only the flag, not a connection error.
+    PeerClosing,
+    /// A stream error reached the call site with no nameable variant and no
+    /// paired backend/GOAWAY discriminator — the downstream `#[non_exhaustive]`
+    /// remainder (`Undefined(_)`, or a future variant).
+    Unobserved,
+}
+
+/// What a call site that owns a real H3 driver observed for one failed request.
+///
+/// This is the explicit observation the single-argument
+/// [`classify_h3_stream_error`] cannot carry: `h3 0.0.8` never lets a
+/// downstream crate write down `ConnectionError(_)`, `RemoteClosing`, or
+/// `Undefined(_)` in a pattern, so those outcomes must be identified by the
+/// discriminator the pinned code itself routes on — the backend error shape,
+/// the shared closing flag, or the driver's `poll_close` outcome.
+///
+/// Slice 0 has no driver and no H3 I/O, so this model's callers are the
+/// deterministic tests below and (from Slice 2 on) the real request paths,
+/// which must fill in every field they can read from the pinned API rather
+/// than inferring a level from a bare `Result` shape or a reason string.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct H3ErrorObservation {
+    /// Whether the pinned backend handed the failure up as
+    /// `StreamErrorIncoming::ConnectionErrorIncoming { .. }` (rather than
+    /// `StreamTerminated` / `Unknown`).
+    pub backend_connection_error: bool,
+    /// Whether the peer's GOAWAY had set the entry's shared `is_closing` flag
+    /// when the request failed (the pinned `process_goaway` writes exactly
+    /// that flag and returns `Ok`).
+    pub peer_closing_observed: bool,
+    /// Whether the entry's driver `poll_close` had already surfaced a
+    /// connection error for this event (an independently
+    /// [`QuicErrorClass::EntryTerminal`] outcome).
+    pub driver_reported_connection_error: bool,
+    /// Whether the stream error was only an unnameable
+    /// `#[non_exhaustive]` remainder (`Undefined(_)` or a future variant),
+    /// rather than one of the pinned struct-shaped stream variants. This is a
+    /// discriminator for [`H3ErrorShape::Unobserved`], not a string match.
+    pub unobserved_stream_error: bool,
+}
+
+/// Classifies one request-stream failure together with its explicit
+/// discriminator ([`H3ErrorObservation`]).
+///
+/// Routing table (no string matching, no `Result`-shape inference):
+///
+/// - `backend_connection_error == true` → the failure crossed the backend
+///   boundary as a connection error ([`H3ErrorShape::BackendConnection`]) →
+///   [`QuicErrorClass::EntryTerminal`].
+/// - `peer_closing_observed == true` → the peer is in GOAWAY shutdown for new
+///   work ([`H3ErrorShape::PeerClosing`]) → [`QuicErrorClass::EntryTerminal`].
+///   This is the normal-GOAWAY case the reviewer verified: `process_goaway`
+///   returns `Ok` and `poll_close` may still be `Pending`, so the class comes
+///   from the flag, not from a driver error that may not exist yet.
+/// - `driver_reported_connection_error == true` → the driver independently
+///   proved the connection terminal → [`QuicErrorClass::EntryTerminal`].
+/// - otherwise → the failure is either a nameable stream-scoped variant
+///   ([`H3ErrorShape::StreamScoped`]) or an unobserved `#[non_exhaustive]`
+///   remainder with no connection evidence ([`H3ErrorShape::Unobserved`]) →
+///   [`QuicErrorClass::StreamLocal`]. The remainder is stream-local here for
+///   exactly one pinned reason: every producer of it in the locked tree
+///   (`h3-quinn-0.0.10/src/lib.rs:407-435, 486, 505`, `h3-0.0.8` frame-error
+///   and unexpected-end mappings in
+///   `connection_error_creators.rs:191-209`) funnels quinn read/write/frame
+///   failures through `handle_quic_stream_error` /
+///   `handle_frame_stream_error_on_request_stream`, and any connection-carrying
+///   one of those simultaneously records the connection error on the shared
+///   state and wakes the driver — which would flip one of the three connection
+///   flags above. The separate `unobserved_stream_error` flag records the
+///   non-exhaustive shape without changing that connection-level proof.
+#[must_use]
+pub const fn classify_h3_request_outcome(observation: H3ErrorObservation) -> QuicErrorClass {
+    if observation.backend_connection_error {
+        return QuicErrorClass::EntryTerminal;
+    }
+    if observation.peer_closing_observed {
+        return QuicErrorClass::EntryTerminal;
+    }
+    if observation.driver_reported_connection_error {
+        return QuicErrorClass::EntryTerminal;
+    }
+    QuicErrorClass::StreamLocal
+}
+
+/// Names the shape of one request-stream failure for a call site that must
+/// also record the matching [`H3ErrorObservation`].
+#[must_use]
+pub const fn h3_error_shape_for_observation(observation: H3ErrorObservation) -> H3ErrorShape {
+    if observation.backend_connection_error {
+        H3ErrorShape::BackendConnection
+    } else if observation.peer_closing_observed {
+        H3ErrorShape::PeerClosing
+    } else if observation.driver_reported_connection_error {
+        H3ErrorShape::BackendConnection
+    } else if observation.unobserved_stream_error {
+        H3ErrorShape::Unobserved
+    } else {
+        H3ErrorShape::StreamScoped
+    }
+}
+
 /// The recorded effect of applying one [`QuicErrorClass`] to the owner.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum QuicErrorOutcome {
@@ -531,6 +680,12 @@ pub enum QuicErrorOutcome {
 }
 
 /// One row of the authoritative R0b classification table.
+///
+/// The identity of a row is the exact triple
+/// `(vocabulary, error_type, item)`: lookups must not match on `item` alone,
+/// because the pinned vocabularies reuse variant names across types (for
+/// example `quinn` `Reset` is both a `ConnectionError` variant and a
+/// `ReadError` variant, with different classes).
 #[derive(Clone, Copy, Debug)]
 pub struct PinnedErrorClassRow {
     /// The pinned vocabulary this row belongs to: `quinn`, `h3-quinn`, `h3`, or
@@ -742,16 +897,14 @@ pub const PINNED_ERROR_CLASSIFICATION_TABLE: &[PinnedErrorClassRow] = &[
     // R0b non-weakening note: `h3::error::StreamError` marks the enum and every
     // variant `#[non_exhaustive]` with no opt-out (`error.rs:16-19` and each
     // variant's `cfg_attr`), so a downstream crate cannot match
-    // `ConnectionError(_)`, `RemoteClosing`, or `Undefined(_)` at all. Those
-    // outcomes are connection-carrying by pinned construction — a connection
-    // error is recorded on the shared `Arc<SharedState>` that the entry's driver
-    // polls (`connection_error_creators.rs:22-27, 110-123`), with `poll_close`
-    // surfacing it ahead of control frames (`connection.rs:514`) — and they
-    // reach the entry as the independently-terminal
-    // `h3::error::ConnectionError` (driver outcome) or the backend
-    // `h3::quic::StreamErrorIncoming::ConnectionErrorIncoming { .. }` arm, never
-    // folded into the stream-local wildcard. No pinned variant is silently
-    // reclassified.
+    // `ConnectionError(_)`, `RemoteClosing`, or `Undefined(_)` at all. Because a
+    // normal peer GOAWAY writes only the shared `is_closing` flag and returns
+    // `Ok` (`connection.rs:663-701`), the tuple/unit outcomes are classified by
+    // the explicit discriminator model instead: see `H3ErrorShape`,
+    // `H3ErrorObservation`, and `classify_h3_request_outcome`, where
+    // `peer_closing_observed` is entry-terminal even while `poll_close` is still
+    // `Pending`. They are never folded into the stream-local wildcard of
+    // `classify_h3_stream_error`. No pinned variant is silently reclassified.
     PinnedErrorClassRow {
         vocabulary: "h3",
         error_type: "h3::error::ConnectionError",
@@ -762,8 +915,22 @@ pub const PINNED_ERROR_CLASSIFICATION_TABLE: &[PinnedErrorClassRow] = &[
     PinnedErrorClassRow {
         vocabulary: "h3",
         error_type: "h3::error::StreamError",
-        item: "any request-stream outcome",
-        citation: "h3-0.0.8/src/error/error.rs:79-136; h3-0.0.8/src/client/stream.rs:225-260",
+        item: "struct-shaped variants only",
+        citation: "h3-0.0.8/src/error/error.rs:79-136",
+        class: QuicErrorClass::StreamLocal,
+    },
+    PinnedErrorClassRow {
+        vocabulary: "h3",
+        error_type: "h3::error::StreamError",
+        item: "ConnectionError(_) or RemoteClosing (discriminator model)",
+        citation: "h3-0.0.8/src/error/connection_error_creators.rs:22-27, 110-123, 133-139; h3-0.0.8/src/connection.rs:514, 663-701",
+        class: QuicErrorClass::EntryTerminal,
+    },
+    PinnedErrorClassRow {
+        vocabulary: "h3",
+        error_type: "h3::error::StreamError",
+        item: "Undefined(_) remainder (no connection evidence)",
+        citation: "h3-quinn-0.0.10/src/lib.rs:407-435, 486, 505; h3-0.0.8/src/error/connection_error_creators.rs:191-209",
         class: QuicErrorClass::StreamLocal,
     },
     // ---- this crate's own response/framing validation ---------------------
@@ -812,11 +979,21 @@ pub const PINNED_ERROR_CLASSIFICATION_TABLE: &[PinnedErrorClassRow] = &[
 ];
 
 /// Looks up one frozen row of [`PINNED_ERROR_CLASSIFICATION_TABLE`].
+///
+/// The identity is the exact triple `(vocabulary, error_type, item)`: matching
+/// on `item` alone is ambiguous (pinned variant names repeat across types with
+/// different classes), so there is no `item`-only lookup.
 #[must_use]
-pub fn pinned_error_class(vocabulary: &str, item: &str) -> Option<QuicErrorClass> {
+pub fn pinned_error_class(
+    vocabulary: &str,
+    error_type: &str,
+    item: &str,
+) -> Option<QuicErrorClass> {
     PINNED_ERROR_CLASSIFICATION_TABLE
         .iter()
-        .find(|row| row.vocabulary == vocabulary && row.item == item)
+        .find(|row| {
+            row.vocabulary == vocabulary && row.error_type == error_type && row.item == item
+        })
         .map(|row| row.class)
 }
 
@@ -951,27 +1128,22 @@ pub fn classify_h3_connection_error(_error: &h3::error::ConnectionError) -> Quic
 /// 2. `h3 0.0.8` marks the enum and every variant `#[non_exhaustive]`
 ///    (`error.rs:16-19, 84-87, 94-99, 105-110, 114-121, 126-131, 134-139`) with
 ///    no opt-out, so the tuple/unit variants `ConnectionError(_)`,
-///    `RemoteClosing`, and `Undefined(_)` **cannot be matched downstream**. The
-///    same pinned code that produces those variants also records the connection
-///    condition on the shared `Arc<SharedState>` that the entry's long-lived
-///    driver polls: a stream error produced by a connection error calls
-///    `set_conn_error_and_wake` on the way out
-///    (`connection_error_creators.rs:22-27, 110-123`), and `poll_close` surfaces
-///    any recorded connection error ahead of control frames
-///    (`connection.rs:514`). Therefore any `RemoteClosing`-refusing state (its
-///    producer `check_peer_connection_closing` reads only the shared
-///    `is_closing` flag, `connection_error_creators.rs:133-139`) is paired with
-///    the driver's independently-terminal [`classify_h3_connection_error`]
-///    outcome, and with the backend [`classify_h3_quinn_connection_error`]
-///    outcome for errors that cross the `h3-quinn` trait boundary
-///    (`StreamErrorIncoming::ConnectionErrorIncoming { .. }`).
+///    `RemoteClosing`, and `Undefined(_)` **cannot be matched downstream**.
+///    Those outcomes are therefore classified by the explicit discriminator
+///    model instead: see [`classify_h3_request_outcome`], whose
+///    [`H3ErrorObservation`] records the backend error shape, the shared
+///    GOAWAY-closing flag, and the driver's `poll_close` outcome for the same
+///    event. In particular a normal peer GOAWAY makes `RemoteClosing`
+///    observable while `poll_close` may still be `Pending` — that case is
+///    [`QuicErrorClass::EntryTerminal`] via the `peer_closing_observed` flag,
+///    not via this wildcard.
 ///
 /// The wildcard arm below is `StreamLocal` only because the wildcard is
-/// unreachable without the paired connection observation: a call site that
-/// routes an `h3::error::StreamError` to this function must route its entry
-/// through the driver observation first (Slice 2 owns the binding, where a real
-/// driver exists). If the pinned API ever allowed matching the tuple/unit
-/// variants, those arms would classify `ConnectionError(_)` via
+/// unreachable without the paired observation: a call site that routes an
+/// `h3::error::StreamError` to this function must route its entry through the
+/// observation model first (Slice 2 owns the binding, where a real driver
+/// exists). If the pinned API ever allowed matching the tuple/unit variants,
+/// those arms would classify `ConnectionError(_)` via
 /// [`classify_h3_connection_error`] and `RemoteClosing` as terminal — neither
 /// would reach `StreamLocal`.
 ///
@@ -1777,6 +1949,10 @@ enum Admission {
 /// deactivation) must be called from within the caller's Tokio runtime context,
 /// exactly like the crate's other transports; the owner still creates no
 /// runtime of its own.
+///
+/// The owner handle is cheaply cloneable: clones share the same map, lifecycle,
+/// and admission/close linearization.
+#[derive(Clone)]
 pub struct QuicReuseOwner {
     shared: Arc<OwnerShared>,
 }
@@ -2163,9 +2339,15 @@ impl QuicReuseOwner {
     /// removing its reservation, and starts each entry's exactly-once supervised
     /// teardown. It returns the captured records so a caller can await their
     /// shared terminal completion. [`Self::close`] runs it automatically right
-    /// after stage one; it is exposed so the deterministic model test can order
-    /// the two stages explicitly.
-    pub fn linearize_close(&self) -> Vec<Arc<EntryRecord>> {
+    /// after stage one.
+    ///
+    /// This is `pub(crate)`, never `pub`: stage two is only reachable through
+    /// the real two-stage [`Self::close`] path (stage one first), so no
+    /// out-of-crate caller can run stage two against an `Open` lifecycle. The
+    /// deterministic inverse-order coverage (stage two with the lifecycle still
+    /// `Open`) lives in the crate's own model: see the `test linearize`
+    /// coverage note on [`Self::close`] and the focused test below.
+    pub(crate) fn linearize_close(&self) -> Vec<Arc<EntryRecord>> {
         let mut state = self.shared.lock();
         state.accepting = false;
         let keys: Vec<QuicReuseKey> = state.entries.keys().cloned().collect();
@@ -2206,5 +2388,217 @@ impl QuicReuseOwner {
             CloseCompletion::Closed | CloseCompletion::AlreadyClosed => CloseResult::Closed,
             CloseCompletion::NotClosing | CloseCompletion::InFlight => CloseResult::AlreadyClosing,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice 0 model-only coverage of the close protocol (P1-3).
+//
+// This `#[cfg(test)]` module is the only caller of `linearize_close` outside
+// `close` itself. Stage two is `pub(crate)` precisely so that no out-of-crate
+// (and no future Slice 1/2 production) code can run stage two against an
+// `Open` lifecycle: the complete close path is `begin_close` (stage one, real
+// `Lifecycle`) followed by `linearize_close` (stage two, map gate), composed
+// only by `close`. These unit tests drive the two compositions the protocol
+// allows — the real order and, through the crate boundary, the explicitly
+// disallowed inverse order — without exposing stage two to any production
+// caller.
+#[cfg(test)]
+mod close_protocol_tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use super::{
+        EntryPhase, ImmediateInitializer, LifecycleState, ManualClock, ModelBarrier, ModelSeams,
+        QuicErrorClass, QuicReuseKey, QuicReuseOwner,
+    };
+    use crate::secure::TlsPolicy;
+    use crate::{CloseTransition, ExchangeContext, Lifecycle, TransportCancellation};
+
+    fn owner() -> (QuicReuseOwner, Arc<ManualClock>) {
+        let clock = Arc::new(ManualClock::new(Instant::now()));
+        let owner = QuicReuseOwner::with_parts(
+            Arc::new(Lifecycle::new()),
+            clock.clone(),
+            Arc::new(ImmediateInitializer::default()),
+            ModelSeams::default(),
+        );
+        (owner, clock)
+    }
+
+    fn key(port: u16) -> QuicReuseKey {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+        use crate::secure::ServerIdentity;
+
+        let identity = ServerIdentity::new("dns.example").expect("synthetic identity");
+        let endpoint = crate::quic::DoqEndpoint::new(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+            identity,
+        )
+        .expect("synthetic endpoint");
+        QuicReuseKey::from_doq(&endpoint, &TlsPolicy::insecure_skip_verify())
+    }
+
+    fn control() -> crate::ExchangeControl {
+        crate::ExchangeControl::new(
+            ExchangeContext::new(
+                Instant::now() + Duration::from_secs(20),
+                TransportCancellation::new(),
+            ),
+            TransportCancellation::new(),
+        )
+    }
+
+    /// The real close protocol: stage one (`Lifecycle::begin_close`) first,
+    /// stage two (`linearize_close`, crate-only) second. This runs on the
+    /// current-thread Tokio runtime the model tests provide, since admitting a
+    /// lease spawns the entry-owned initializer task.
+    #[test]
+    fn close_protocol_is_begin_close_then_linearize_close() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("model runtime");
+        runtime.block_on(async {
+            let (owner, _clock) = owner();
+            let key = key(9001);
+            let control = control();
+
+            let registration = owner.register().expect("open");
+            let lease = owner
+                .admit(registration, key.clone(), &control)
+                .await
+                .expect("lease");
+            let record = Arc::clone(lease.record());
+            drop(lease);
+
+            assert_eq!(owner.begin_close(), CloseTransition::BeganClosing);
+            assert_eq!(owner.lifecycle_state(), LifecycleState::Closing);
+            assert!(owner.is_accepting());
+
+            let captured = owner.linearize_close();
+            assert!(!owner.is_accepting());
+            assert_eq!(captured.len(), 1);
+            assert_eq!(
+                owner.observe(&key).expect("entry").phase,
+                EntryPhase::Closing,
+                "stage two marks without removing"
+            );
+            assert_eq!(record.wait_terminal().await, super::EntryTerminal::Drained);
+            assert!(owner.observe(&key).is_none(), "terminal-only removal");
+        });
+    }
+
+    /// The disallowed inverse order (stage two with the lifecycle still
+    /// `Open`) is reachable only inside the crate, and the publication gate
+    /// still fails: the initializer hands its late resource to teardown and no
+    /// `Active` is published. This is the model coverage the public API must
+    /// not offer to production callers.
+    #[test]
+    fn inverse_order_publication_fails_without_a_public_stage_two() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("model runtime");
+        runtime.block_on(async {
+            // Install an `Initializing` reservation whose initializer parks
+            // before it produces anything, so the inverse order is observable
+            // deterministically.
+            let init_barrier = Arc::new(ModelBarrier::new());
+            let teardown_barrier = Arc::new(ModelBarrier::new());
+            let parked = QuicReuseOwner::with_parts(
+                Arc::new(Lifecycle::new()),
+                Arc::new(ManualClock::new(Instant::now())),
+                Arc::new(BarrierInitializer {
+                    barrier: Arc::clone(&init_barrier),
+                }),
+                ModelSeams {
+                    close_after_linearize: None,
+                    teardown_before_terminal: Some(Arc::clone(&teardown_barrier)),
+                },
+            );
+            let key = key(9002);
+            let control = control();
+
+            let registration = parked.register().expect("open");
+            let joiner = tokio::spawn({
+                let parked = parked.clone();
+                let key = key.clone();
+                async move { parked.admit(registration, key, &control).await }
+            });
+            init_barrier.wait_arrived().await;
+            assert_eq!(
+                parked.observe(&key).expect("reservation").phase,
+                EntryPhase::Initializing
+            );
+
+            // Inverse order: stage two while the real `Lifecycle` is still
+            // `Open`. No production caller can do this; only this crate's own
+            // model coverage can.
+            assert_eq!(parked.lifecycle_state(), LifecycleState::Open);
+            let captured = parked.linearize_close();
+            assert!(!parked.is_accepting());
+            assert_eq!(captured.len(), 1);
+
+            // Release the initializer: the `accepting` arm of the three-way
+            // publication condition is already false, so no `Active` can be
+            // published even though the lifecycle is still `Open`.
+            init_barrier.release();
+            teardown_barrier.wait_arrived().await;
+            let record = parked.observe(&key).expect("entry").record;
+            assert_eq!(
+                parked.observe(&key).expect("entry").phase,
+                EntryPhase::Closing
+            );
+            teardown_barrier.release();
+            assert_eq!(
+                record.wait_terminal().await,
+                super::EntryTerminal::Failed,
+                "no resource was ever produced"
+            );
+            assert!(parked.observe(&key).is_none());
+            let outcome = joiner.await.expect("joiner");
+            assert!(
+                matches!(
+                    outcome,
+                    Err(crate::UpstreamError::Closed(
+                        crate::SideEffectState::NotSent
+                    ))
+                ),
+                "the joiner sees only the typed pre-send closed result"
+            );
+        });
+    }
+
+    /// An initializer that parks on a barrier before producing anything, so the
+    /// inverse-order publication attempt is deterministic.
+    struct BarrierInitializer {
+        barrier: Arc<ModelBarrier>,
+    }
+
+    impl super::EntryInitializer for BarrierInitializer {
+        fn initialize(&self, _key: QuicReuseKey, _generation: u64) -> super::InitializeFuture {
+            let barrier = Arc::clone(&self.barrier);
+            Box::pin(async move {
+                barrier.check().await;
+                None
+            })
+        }
+    }
+
+    #[test]
+    fn terminal_classification_refuses_after_owner_close() {
+        use crate::CloseTransition;
+
+        let (owner, _clock) = owner();
+        let key = key(9003);
+        assert_eq!(owner.begin_close(), CloseTransition::BeganClosing);
+        let captured = owner.linearize_close();
+        assert!(captured.is_empty(), "no entries were installed");
+        assert_eq!(
+            owner.apply_error_class(&key, 1, QuicErrorClass::StreamLocal),
+            super::QuicErrorOutcome::NoMatchingEntry
+        );
     }
 }

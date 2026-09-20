@@ -35,11 +35,6 @@ on the entry in `r0a_stream_local_failure_leaves_the_shared_entry_healthy_and_le
 This is the Slice 0 decision/state model only; it is not the pinned-stack H3
 health proof, which belongs to Slice 2/A5.
 
-The model never selects the pinned `Option::None` `stop_sending` path, and the
-logical shared-entry state stays healthy (`h3_cancellation_effect` is
-stream-local for every phase). This is the Slice 0 decision/state model only;
-it is not the pinned-stack H3 health proof, which belongs to Slice 2/A5.
-
 Pinned hazard lines, each verified holds:
 
 | # | Assumption | Locked source | Result |
@@ -67,13 +62,15 @@ Connection/entry-terminal: every `quinn::ConnectionError` variant
 `Reset`, `TimedOut`, `LocallyClosed`, `CidsExhausted` — `EntryTerminal`),
 `read`/`write` `ConnectionLost`, every
 `h3::quic::ConnectionErrorIncoming` variant, any `h3::error::ConnectionError`
-(driver `poll_close` outcome), and the connection-carrying part of
-`h3::error::StreamError`.
+(driver `poll_close` outcome), and the request-stream cases whose explicit
+observation says backend connection error, peer GOAWAY closing, or driver
+connection error.
 
 Stream-local: per-request stream outcomes and framing/validation bounds
 (`quinn` `Stopped`/`Reset`/`ClosedStream`/`IllegalOrderedRead`/`TooLong`,
 `h3-quinn` `StreamTerminated`/`Unknown`, this crate's framing/validation
-errors), plus the `h3 0.0.8` request-stream struct-shaped variants.
+errors), plus the `h3 0.0.8` request-stream struct-shaped variants and an
+unobserved `#[non_exhaustive]` remainder with no connection evidence.
 
 BQ2 conclusion (not a blocker): `h3 0.0.8` marks its whole `StreamError` enum
 **and** every variant `#[non_exhaustive]` with no opt-out feature, so a
@@ -81,27 +78,27 @@ downstream crate can only pattern-match the struct-shaped variants and can never
 construct or match the tuple/unit variants `ConnectionError(_)`,
 `RemoteClosing`, or `Undefined(_)` at all. The current
 `classify_h3_stream_error` therefore cannot structurally route those three. This
-is **not** a silent weakening and not an R0b blocker, for three pinned-source
-reasons recorded in the code (`classify_h3_stream_error` docs, the module R0b
-section, and the `PINNED_ERROR_CLASSIFICATION_TABLE` R0b note):
+is **not** a silent weakening: Slice 0 records the required discriminator model
+in `H3ErrorObservation` and `classify_h3_request_outcome` instead of guessing
+from a string or a bare enum shape.
 
-- The pinned code that produces a connection-carrying stream error also records
-  the same connection error on the entry's shared `Arc<SharedState>` and wakes
-  the driver (`connection_error_creators.rs:22-27, 110-123`), with `poll_close`
-  surfacing it ahead of control frames (`connection.rs:514`).
-- The producer that refuses new work (`check_peer_connection_closing`,
-  `connection_error_creators.rs:133-139`) reads only the shared `is_closing`
-  flag, so the refusal is always paired with the driver's own
-  connection-level observation.
-- Both observations reach the entry as terminal without any variant name: the
-  driver's `poll_close` outcome via `classify_h3_connection_error`, or the
-  backend `h3::quic::StreamErrorIncoming::ConnectionErrorIncoming { .. }` arm
-  via `classify_h3_quinn_stream_error`.
+- A backend `ConnectionErrorIncoming` is an explicit connection discriminator
+  and is entry-terminal.
+- A normal peer GOAWAY sets the shared `is_closing` flag through
+  `process_goaway` (`connection.rs:663-701`) and returns `Ok`; it can therefore
+  produce `RemoteClosing` while `poll_close` remains `Pending`. The explicit
+  `peer_closing_observed` flag is entry-terminal in that case.
+- A driver-reported connection error is entry-terminal; otherwise a
+  struct-shaped stream error or an unobserved remainder with all three
+  connection flags false is stream-local under the pinned producer paths
+  (`connection_error_creators.rs:191-209` and `h3-quinn-0.0.10/src/lib.rs:407-435,
+  486, 505`).
 
 No nameable variant is folded into the wildcard, no future `#[non_exhaustive]`
 variant can slip through silently (new matchable variants fail exhaustiveness
 at compile time), and no dependency change was made to work around it. Slice 2
-binds the two observations at call sites that own a real driver.
+must bind the observation fields at call sites that own the real driver and
+backend state.
 
 ## R0c — pinned API verification (holds/does-not-hold)
 
@@ -130,7 +127,7 @@ evidence):
   `:114-121`, `:126-131`, `:134-139`); downstream construction of
   `ConnectionError::Timeout` is still possible, matching of the tuple/unit
   variants is not. Recorded as the BQ2 conclusion above (R0b holds through the
-  paired-observation rule; no dependency change).
+  explicit observation model; no dependency change).
 - A clean `H3_NO_ERROR` close is still a closed connection, hence terminal for
   reuse.
 
@@ -140,6 +137,8 @@ Same-run command and result:
 
 ```text
 cargo test -p mosdns-upstream-core --test quic_reuse_model --locked
+
+Result: `21 passed; 0 failed`.
 ```
 
 - Multi-key cap concurrency: many simultaneous distinct-key admissions never
@@ -153,11 +152,15 @@ cargo test -p mosdns-upstream-core --test quic_reuse_model --locked
   (A6/A13).
 - Init-vs-owner-close barrier (§11.1): the first initializer caller is aborted
   and every exchange waiter dropped, yet the entry-owned initializer yields
-  exactly one completion; close wins first; no `Active` is published; the
+  exactly one completion; lifecycle stage one wins before publication and the
+  real close path then performs stage two; no `Active` is published; the
   late-acquired resource is closed by the supervised teardown; removal plus
   slot/liveness release happen only at terminal (A8).
 - begin_close-to-accepting=false race (§11.3): both orders fail the three-way
   publication condition, with exactly one teardown to terminal (A8/A13).
+- H3 non-exhaustive error observation model: known stream-scoped, unobserved
+  remainder, backend connection, peer GOAWAY closing, and driver connection
+  evidence each route through an explicit discriminator with no string match.
 - Aborted-at-barrier/no-surviving-caller (§11.1): first and all close waiters
   aborted, exactly one teardown reaches terminal autonomously with
   terminal-only removal (A5).
