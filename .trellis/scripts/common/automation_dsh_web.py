@@ -81,14 +81,14 @@ def discover_dsh_web(
 
 
 def available(target: dict[str, Any] | None, inventory: DshWebInventory | None = None) -> bool:
-    """Return whether an explicit browser endpoint is usable or well-formed."""
+    """Return whether an explicit browser endpoint is present in discovery."""
     if not isinstance(target, dict) or str(target.get("provider", "")).strip().lower() != "dsh-web":
         return False
     reference = target.get("reference")
     if not isinstance(reference, str) or not reference.strip():
         return False
     if inventory is None:
-        return True
+        inventory = discover_dsh_web()
     if inventory.error and not inventory.candidates:
         return False
     normalized = normalize_reference(reference)
@@ -102,17 +102,28 @@ def _transport_call(transport: Any, method: str, *args: Any) -> Any:
     return operation(*args)
 
 
-def dispatch(unit_prompt: str, *, target: dict[str, Any], transport: Any = None) -> Any:
+def dispatch(
+    unit_prompt: str,
+    *,
+    target: dict[str, Any],
+    inventory: DshWebInventory | None = None,
+    transport: Any = None,
+) -> Any:
     """Dispatch one authorized unit through a supplied browser transport."""
     if not isinstance(unit_prompt, str) or not unit_prompt.strip():
         raise ValueError("DSH Web unit prompt must be non-empty")
-    if not available(target):
+    if not available(target, inventory):
         raise ValueError("DSH Web dispatch requires an explicit endpoint target")
     return _transport_call(transport, "dispatch", target, unit_prompt)
 
 
-def collect(*, target: dict[str, Any], transport: Any = None) -> Any:
+def collect(
+    *,
+    target: dict[str, Any],
+    inventory: DshWebInventory | None = None,
+    transport: Any = None,
+) -> Any:
     """Collect a result through the supplied browser transport."""
-    if not available(target):
+    if not available(target, inventory):
         raise ValueError("DSH Web collection requires an explicit endpoint target")
     return _transport_call(transport, "collect", target)

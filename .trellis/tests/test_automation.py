@@ -21,6 +21,7 @@ from common.automation import (
     validate_target,
 )
 from common.automation_dsh_web import (
+    DshWebInventory,
     available as dsh_web_available,
     collect as dsh_web_collect,
     dispatch as dsh_web_dispatch,
@@ -277,7 +278,7 @@ class ExplicitAdapterTest(unittest.TestCase):
         ) as run:
             inventory = discover_herdr(("herdr", "agent", "list"))
         run.assert_called_once()
-        target = {"provider": "herdr", "reference": "w1:p2", "workspace_id": "w1"}
+        target = {"provider": "herdr", "reference": "w1:p2"}
         self.assertTrue(herdr_available(target, inventory))
         self.assertTrue(
             herdr_available(
@@ -289,7 +290,19 @@ class ExplicitAdapterTest(unittest.TestCase):
                 inventory,
             )
         )
+        self.assertFalse(
+            herdr_available(
+                {"provider": "herdr", "reference": "w1:p2", "workspace_id": "w2"},
+                inventory,
+            )
+        )
         self.assertFalse(herdr_available({"provider": "herdr", "reference": "w1:p9", "workspace_id": "w1"}, inventory))
+
+        with mock.patch("common.automation_herdr.discover_herdr", return_value=inventory) as discover:
+            self.assertTrue(herdr_available({"provider": "herdr", "reference": "w1:p2"}))
+            discover.assert_called_once_with()
+        with mock.patch("common.automation_herdr.discover_herdr", return_value=inventory):
+            self.assertFalse(herdr_available({"provider": "herdr", "reference": "w1:p9"}))
 
         class FakeTransport:
             def __init__(self):
@@ -319,6 +332,12 @@ class ExplicitAdapterTest(unittest.TestCase):
         self.assertTrue(dsh_web_available(target, inventory))
         self.assertFalse(dsh_web_available({"provider": "dsh-web", "reference": "https://other.test/"}, inventory))
 
+        with mock.patch("common.automation_dsh_web.discover_dsh_web", return_value=inventory) as discover:
+            self.assertTrue(dsh_web_available(target))
+            discover.assert_called_once_with()
+        with mock.patch("common.automation_dsh_web.discover_dsh_web", return_value=inventory):
+            self.assertFalse(dsh_web_available({"provider": "dsh-web", "reference": "https://other.test/"}))
+
         class FakeTransport:
             def dispatch(self, selected, prompt):
                 return (selected["reference"], prompt)
@@ -328,18 +347,23 @@ class ExplicitAdapterTest(unittest.TestCase):
 
         transport = FakeTransport()
         self.assertEqual(
-            dsh_web_dispatch("review Slice 1", target=target, transport=transport),
+            dsh_web_dispatch("review Slice 1", target=target, inventory=inventory, transport=transport),
             (target["reference"], "review Slice 1"),
         )
-        self.assertEqual(dsh_web_collect(target=target, transport=transport), target["reference"])
+        self.assertEqual(
+            dsh_web_collect(target=target, inventory=inventory, transport=transport),
+            target["reference"],
+        )
 
     def test_adapters_do_not_fake_transport_when_not_supplied(self):
         herdr_target = {"provider": "herdr", "reference": "w1:p2", "workspace_id": "w1"}
         dsh_target = {"provider": "dsh-web", "reference": "https://dsh.example.test/"}
         with self.assertRaisesRegex(RuntimeError, "transport is not available"):
             herdr_dispatch("prompt", target=herdr_target)
-        with self.assertRaisesRegex(RuntimeError, "transport is not available"):
-            dsh_web_dispatch("prompt", target=dsh_target)
+        dsh_inventory = DshWebInventory([dsh_target])
+        with mock.patch("common.automation_dsh_web.discover_dsh_web", return_value=dsh_inventory):
+            with self.assertRaisesRegex(RuntimeError, "transport is not available"):
+                dsh_web_dispatch("prompt", target=dsh_target)
 
 
 if __name__ == "__main__":

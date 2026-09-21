@@ -60,23 +60,30 @@ def discover_herdr(command: tuple[str, ...] = ("herdr", "agent", "list")) -> Her
 
 
 def available(target: dict[str, Any] | None, inventory: HerdrInventory | None = None) -> bool:
-    """Return whether an explicit Herdr target is present in the inventory."""
+    """Return whether an explicit Herdr target is present in the inventory.
+
+    A generic executor target only needs a provider and reference. Workspace
+    metadata, when present, is an additional constraint rather than part of
+    the target's required identity.
+    """
     if not isinstance(target, dict) or str(target.get("provider", "")).strip().lower() != "herdr":
         return False
     metadata = target.get("metadata") if isinstance(target.get("metadata"), dict) else {}
     reference = target.get("executor_pane_id") or metadata.get("executor_pane_id") or target.get("reference")
     workspace_id = target.get("workspace_id") or metadata.get("workspace_id")
-    if (
-        not isinstance(reference, str)
-        or not reference.strip()
-        or not isinstance(workspace_id, str)
-        or not workspace_id.strip()
-    ):
+    if not isinstance(reference, str) or not reference.strip():
         return False
-    if inventory is None or inventory.error or inventory.current is None:
+    if workspace_id is not None and (not isinstance(workspace_id, str) or not workspace_id.strip()):
         return False
+    if inventory is None:
+        inventory = discover_herdr()
+    if inventory.error or inventory.current is None:
+        return False
+    reference = reference.strip()
+    workspace_id = workspace_id.strip() if isinstance(workspace_id, str) else None
     return any(
-        item.get("pane_id") == reference and item.get("workspace_id") == workspace_id
+        item.get("pane_id") == reference
+        and (workspace_id is None or item.get("workspace_id") == workspace_id)
         for item in inventory.candidates
     )
 
