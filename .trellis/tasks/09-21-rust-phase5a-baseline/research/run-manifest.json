@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "official_frozen": false,
+  "purpose": "Slice 0 schema/template only; official Linux amd64 values are frozen after the bounded pilot.",
+  "source_anchor": "e70a2408e2dcd2141e48bcc84765c5adfa406fe4",
+  "platform": {
+    "os": "linux",
+    "arch": "amd64"
+  },
+  "sut": {
+    "binary_path": "",
+    "binary_sha256": "",
+    "git_sha": "",
+    "go_version": "",
+    "build_command": "SKIP_UI_BUILD=1 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO_TAGS='' OUTPUT=<isolated-output>/mosdns-go ./scripts/build-local.sh",
+    "rust_backend_selectors": {}
+  },
+  "fixed_inputs": {
+    "configs": [],
+    "workloads": [],
+    "hash_algorithm": "sha256"
+  },
+  "official_schedule": {
+    "scenario_order": [],
+    "repetitions": 0,
+    "offered_qps": [],
+    "stage_duration_seconds": 0,
+    "warmup_seconds": 0,
+    "request_deadline_ms": 0,
+    "late_drain_ms": 0,
+    "fixture_delay_ms": 0
+  },
+  "isolation": {
+    "sut_cpu_set": "",
+    "harness_cpu_set": "",
+    "memory_limit": "",
+    "fd_limit": "",
+    "affinity_authoritative": false
+  },
+  "results_root": ".trellis/tasks/09-21-rust-phase5a-baseline/research/results"
+}

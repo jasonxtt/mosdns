@@ -1,18 +1,18 @@
 # Implementation plan — Rust Phase 5A Go-only whole-process baseline
 
-Status: **planning only**. Do not run `task.py start`, modify implementation paths, execute official benchmarks, or create a later Phase 5A host task until this plan receives an explicit root-review `PASS`.
+Status: **in progress — Slice 0 complete, awaiting scoped root review**. Official Linux baseline execution remains gated on the Slice 0 review.
 
 ## 0. Pre-start gates
 
-- [ ] Verify branch is `rust` and record current HEAD.
-- [ ] Verify planning source anchor `e70a2408e2dcd2141e48bcc84765c5adfa406fe4` is an ancestor of the task revision.
-- [ ] Verify `.trellis/tasks/` has no unrelated active task and this task is `planning`.
-- [ ] Read `AGENTS.md`, `docs/ai/rust-rewrite-plan.md`, `docs/ai/rust-handover.md`, `docs/rust/feature-coverage.md`, `docs/rust/performance-validation.md`, `.trellis/spec/backend/rust-migration.md`, and repository quality/error guidance.
-- [ ] Review `prd.md`, `design.md`, and `research/baseline-evidence.md` in full.
-- [ ] Preserve all unrelated dirty files; stage exact paths only. Never use `git add -A`, broad checkout/reset, rebase, or cleanup.
-- [ ] Validate the selected executor/reviewer routing under the repository's current Trellis process.
-- [ ] Root reviewer returns explicit planning `PASS` with P0/P1=0.
-- [ ] Only after that `PASS`, run the repository-equivalent `task.py start rust-phase5a-baseline`.
+- [x] Verify branch is `rust`; planning HEAD and implementation activation are recorded in the task history.
+- [x] Verify planning source anchor `e70a2408e2dcd2141e48bcc84765c5adfa406fe4` is an ancestor of the task revision.
+- [x] Verify `.trellis/tasks/` has no unrelated active task; this task was `planning` before activation.
+- [x] Read the required project, Rust migration, performance, and backend quality guidance.
+- [x] Review `prd.md`, `design.md`, and `research/baseline-evidence.md` in full.
+- [x] Preserve all unrelated dirty files; only task-scoped paths are staged for task commits.
+- [x] Validate executor `codex:current` and reviewer `chatgpt:6ab0d3ff-8e70-83e8-af40-3beb029ab52c` routing.
+- [x] Root reviewer returned planning `PASS` with P0/P1=0 at `bc08b9d76e9b49822c237567637471cd6d9f3cb0`.
+- [x] Run `python3 ./.trellis/scripts/task.py start .trellis/tasks/09-21-rust-phase5a-baseline`; task status is now `in_progress`.
 
 ## 1. Slice 0 — freeze fixture/harness contract and correctness smoke
 
@@ -29,21 +29,57 @@ No existing product source or dependency manifest is allowed.
 
 ### Checklist
 
-- [ ] Add `tests/phase5a-baseline/README.md` documenting the one authoritative runner interface and explicit non-goals.
-- [ ] Add four committed YAML fixtures: W1 UDP, W1 TCP, W2 cache, W3 routing.
-- [ ] Derive YAML semantics from current Go source; do not invent future Rust behavior.
-- [ ] Add fixed line-oriented workload files with stable case IDs and expected outcome/route fields.
-- [ ] Add the narrow Go helper command inside the existing module, with only deterministic upstream fixture, correctness-aware request replay, fixed-rate stage machinery, histogram/counters, and Linux process sampling primitives needed by this task.
-- [ ] Add no new module dependency; prove `go.mod` and `go.sum` unchanged.
-- [ ] Controlled upstream supports only committed UDP/TCP fixture behavior, deterministic answer maps, optional manifest-frozen delay, counters, and clean shutdown.
-- [ ] Implement response association and correctness checks; wrong answers are never counted as useful throughput.
-- [ ] Implement the replaceable `MOSDNS_BINARY`/explicit binary interface and record binary SHA-256.
-- [ ] Prove the same Go SUT copied to a second executable path passes the same correctness smoke without code/config changes.
-- [ ] Implement cleanup traps; after an injected failure no SUT/upstream/listener process remains.
-- [ ] Produce `research/run-manifest.json` schema/template, but do not yet freeze official QPS values until the Linux pilot in Slice 1.
-- [ ] Run focused Go tests for helper/parser/histogram/accounting logic plus YAML startup/correctness smoke with the Go-only SUT.
-- [ ] Run repository formatting/static checks applicable to added Go/shell files.
-- [ ] Record exact changed paths, commands, results, and limitations in this file.
+- [x] Add `tests/phase5a-baseline/README.md` with the one authoritative runner interface and explicit non-goals.
+- [x] Add four YAML fixtures: W1 UDP, W1 TCP, W2 cache, and W3 routing.
+- [x] Derive the YAML from current Go `udp_server`, `tcp_server`, `forward`, `cache`, `domain_set`, `resp_ip`, and sequence contracts.
+- [x] Add fixed JSONL workloads with stable case IDs, expected rcode/answer/route class, deadline, and weight fields.
+- [x] Add the narrow Go helper for deterministic upstreams, correctness-aware replay, fixed-rate stages, latency samples/counters, and Linux `/proc` sampling.
+- [x] Add no new module dependency; `go.mod` and `go.sum` are unchanged.
+- [x] Controlled upstream supports only the committed UDP/TCP identities, deterministic answer table, fixed delay flag, counters, and signal shutdown.
+- [x] Implement response ID/question/rcode/answer validation; wrong/protocol results never count as useful throughput.
+- [x] Implement `MOSDNS_BINARY` validation and SHA-256 recording without rebuilding the SUT.
+- [x] The same Go SUT copied to a second executable path passed the unchanged W1-UDP smoke.
+- [x] Cleanup trap was exercised by interrupting a live smoke; no fixture/helper/SUT process remained.
+- [x] Produce `research/run-manifest.json` as a non-official schema/template; QPS and official values remain unfrozen.
+- [x] Focused helper tests, `go vet`, shell syntax checks, JSON/JSONL parsing, and all four local startup/correctness smokes passed.
+- [x] Run `gofmt`, `git diff --check`, and the applicable helper static checks.
+- [x] Record exact changed paths, commands, results, and limitations below.
+
+### Slice 0 execution record
+
+Implementation commit is pending the scoped review. The task-scoped changed
+paths are:
+
+```text
+tests/phase5a-baseline/README.md
+tests/phase5a-baseline/configs/{forward-udp,forward-tcp,cache,routing}.yaml
+tests/phase5a-baseline/workloads/{forward,cache,routing}.jsonl
+tests/phase5a-baseline/cmd/phase5a-baseline/{main.go,main_test.go}
+scripts/run-phase5a-baseline.sh
+.trellis/tasks/09-21-rust-phase5a-baseline/research/run-manifest.json
+```
+
+Validation completed on the local macOS arm64 host (not authoritative Linux
+baseline evidence):
+
+```text
+go test ./tests/phase5a-baseline/cmd/phase5a-baseline        PASS
+go vet ./tests/phase5a-baseline/cmd/phase5a-baseline         PASS
+bash -n scripts/run-phase5a-baseline.sh                      PASS
+git diff --check                                              PASS
+JSON/JSONL fixture parsing                                      PASS
+Go-only SUT build (SKIP_UI_BUILD=1, CGO_ENABLED=0)              PASS
+W1-UDP/W1-TCP/W2/W3 local correctness smoke                     PASS
+same Go binary copied to second path, W1-UDP smoke               PASS
+interrupted smoke cleanup: no fixture/helper/SUT processes      PASS
+```
+
+Each local smoke completed with `scheduled=sent=received=correct_on_time=20`
+and zero wrong/protocol/transport/timeout counters. W3 counters showed the
+three route identities: domain and IP-rule hit on `route-a`, IP-rule miss on
+`route-b` followed by `route-c`. The local host cannot provide the required
+Linux amd64 `/proc` resource evidence; Slice 1 must run in the isolated Linux
+environment and will not treat this smoke as the official baseline.
 
 ### Slice 0 exit gate
 

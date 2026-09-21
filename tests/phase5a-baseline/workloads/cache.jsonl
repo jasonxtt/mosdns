@@ -1,0 +1,2 @@
+{"case_id":"cache-a","scenario":"w2","transport":"udp","qname":"cache-a.test.","qtype":"A","expected_rcode":0,"expected_answer_class":"A","expected_answer":"198.51.100.20","expected_route_class":"cache","request_deadline_ms":500,"weight":1}
+{"case_id":"cache-b","scenario":"w2","transport":"udp","qname":"cache-b.test.","qtype":"A","expected_rcode":0,"expected_answer_class":"A","expected_answer":"198.51.100.21","expected_route_class":"cache","request_deadline_ms":500,"weight":1}

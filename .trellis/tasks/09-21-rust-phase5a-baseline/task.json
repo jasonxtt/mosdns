@@ -3,7 +3,7 @@
   "name": "rust-phase5a-baseline",
   "title": "Rust Phase 5A Go-only whole-process baseline",
   "description": "Freeze the first Phase 5A comparison YAML corpus and establish a reproducible Go-only Linux amd64 whole-process baseline for minimal UDP/TCP forwarding, cache, and domain/IP rule routing before native-host implementation.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "baseline-only test tooling, frozen YAML/workload fixtures, controlled local upstreams, Linux amd64 process-level measurement, raw result manifests, and acceptance report; no Rust native host implementation, no transport feature work, no production deployment, no API/WebUI work, no Go product-path behavior changes, and no generic benchmark platform",
   "package": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Planning only until root review approves this task. Source anchor at planning time: e70a2408e2dcd2141e48bcc84765c5adfa406fe4.",
+  "notes": "Planning review PASS at bc08b9d76e9b49822c237567637471cd6d9f3cb0. Slice 0 is implemented and awaits scoped review; official Linux baseline remains gated. Source anchor at planning time: e70a2408e2dcd2141e48bcc84765c5adfa406fe4.",
   "meta": {}
 }
