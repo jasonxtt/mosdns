@@ -218,10 +218,26 @@ def submit_review(
         raise AutomationRunError(f"review unit is not current and authorized: {unit}")
     if not parent_sha or not head_sha or not validate_target(submitted_to):
         raise ValueError("review submission requires parent/head SHA and reviewer target")
-    kind = request_kind or ("bootstrap" if not run.reviewer_bootstrap_sent else "rereview")
+    expected_kind = "bootstrap" if not run.reviewer_bootstrap_sent else "rereview"
+    kind = request_kind or expected_kind
     if kind not in {"bootstrap", "rereview"}:
         raise ValueError("request kind must be bootstrap or rereview")
+    if kind != expected_kind:
+        raise AutomationRunError(f"review request kind must be {expected_kind}")
     previous = run.units[unit]["submission"]
+    if kind == "rereview":
+        if not previous.get("head_sha") or parent_sha != previous["head_sha"]:
+            raise AutomationRunError("rereview parent must equal the previous review head")
+        open_findings = _open_findings(run.units[unit])
+        if not all(
+            _remediation_ready_for_previous_submission(finding, previous)
+            and finding["remediation"].get("parent_sha") == parent_sha
+            and finding["remediation"].get("head_sha") == head_sha
+            for finding in open_findings
+        ):
+            raise AutomationRunError(
+                "rereview requires recorded remediation evidence for every open finding"
+            )
     review_round = 0 if kind == "bootstrap" else int(previous.get("review_round", 0)) + 1
     run.units[unit]["submission"] = {
         "parent_sha": parent_sha,
@@ -242,15 +258,126 @@ def _normalize_root_cause(value: Any) -> str:
     return re.sub(r"^p[0-3]-\d+\s*[-:—]?\s*", "", text)
 
 
+def _root_cause_key(finding: dict[str, Any]) -> str | None:
+    value = finding.get("root_cause_key") or finding.get("semantic_root_cause")
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
+
+
 def _find_existing(ledger: dict[str, Any], finding: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
     finding_id = str(finding.get("id") or "")
+    semantic_key = _root_cause_key(finding)
     if finding_id in ledger:
-        return finding_id, ledger[finding_id]
-    normalized = _normalize_root_cause(finding.get("root_cause"))
-    for key, current in ledger.items():
-        if current.get("normalized_root_cause") == normalized:
-            return key, current
+        current = ledger[finding_id]
+        current_key = _root_cause_key(current)
+        if current_key is None and semantic_key is None:
+            return finding_id, current
+        if semantic_key is not None and (current_key is None or semantic_key == current_key):
+            return finding_id, current
+        # A stable reviewer ID is not enough to conflate two controller-judged
+        # semantic roots. Let the caller allocate a distinct ledger key.
+        return None, None
+    if semantic_key is not None:
+        for key, current in ledger.items():
+            if _root_cause_key(current) == semantic_key:
+                return key, current
     return None, None
+
+
+def _new_finding_key(ledger: dict[str, Any], requested: str) -> str:
+    base = requested or f"finding-{len(ledger) + 1}"
+    candidate = base
+    suffix = 2
+    while candidate in ledger:
+        candidate = f"{base}#{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _open_findings(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        finding
+        for finding in state.get("findings", {}).values()
+        if isinstance(finding, dict) and finding.get("status") == "open"
+    ]
+
+
+def _remediation_ready_for_previous_submission(
+    finding: dict[str, Any],
+    previous_submission: dict[str, Any],
+) -> bool:
+    remediation = finding.get("remediation")
+    previous_head = previous_submission.get("head_sha")
+    return (
+        isinstance(remediation, dict)
+        and remediation.get("executed") is True
+        and remediation.get("consumed") is False
+        and remediation.get("parent_sha") == previous_head
+        and isinstance(remediation.get("head_sha"), str)
+        and remediation["head_sha"] != previous_head
+    )
+
+
+def _remediation_ready_for_current_submission(
+    finding: dict[str, Any],
+    submission: dict[str, Any],
+) -> bool:
+    remediation = finding.get("remediation")
+    return (
+        isinstance(remediation, dict)
+        and remediation.get("executed") is True
+        and remediation.get("consumed") is False
+        and remediation.get("head_sha") == submission.get("head_sha")
+        and remediation.get("parent_sha") == submission.get("parent_sha")
+    )
+
+
+def record_remediation(
+    run: AutomationRun,
+    unit: str,
+    *,
+    parent_sha: str,
+    head_sha: str,
+    finding_id: str | None = None,
+    root_cause_key: str | None = None,
+    summary: str = "",
+) -> AutomationRun:
+    """Record controller evidence for a new remediation commit.
+
+    The evidence is attached to one open semantic finding and must be based on
+    the previous review head. A later rereview consumes it exactly once.
+    """
+
+    if unit not in run.authorized_units or run.current_unit != unit:
+        raise AutomationRunError(f"review unit is not current and authorized: {unit}")
+    if not parent_sha or not head_sha or parent_sha == head_sha:
+        raise AutomationRunError("remediation evidence requires distinct parent/head SHA")
+    state = run.units[unit]
+    previous_head = state.get("submission", {}).get("head_sha")
+    if not previous_head or parent_sha != previous_head:
+        raise AutomationRunError("remediation parent must equal the previous review head")
+    query: dict[str, Any] = {}
+    if finding_id:
+        query["id"] = finding_id
+    if root_cause_key:
+        query["root_cause_key"] = root_cause_key
+    key, finding = _find_existing(state.get("findings", {}), query)
+    if finding is None or finding.get("status") != "open":
+        raise AutomationRunError("remediation evidence must target one open finding")
+    existing = finding.get("remediation")
+    if isinstance(existing, dict) and existing.get("head_sha") == head_sha and not existing.get("consumed", False):
+        raise AutomationRunError("remediation evidence is already recorded for this finding and head")
+    finding["remediation"] = {
+        "executed": True,
+        "parent_sha": parent_sha,
+        "head_sha": head_sha,
+        "root_cause_key": _root_cause_key(finding),
+        "summary": str(summary),
+        "consumed": False,
+    }
+    state["phase"] = "remediating"
+    return run
 
 
 def record_review_result(
@@ -284,11 +411,12 @@ def record_review_result(
         key, existing = _find_existing(ledger, raw)
         was_existing = existing is not None
         if existing is None:
-            key = str(raw.get("id") or f"finding-{len(ledger) + 1}")
+            key = _new_finding_key(ledger, str(raw.get("id") or ""))
             existing = {
                 "finding_id": key,
                 "root_cause": str(raw.get("root_cause") or key),
                 "normalized_root_cause": _normalize_root_cause(raw.get("root_cause") or key),
+                "root_cause_key": _root_cause_key(raw),
                 "failed_remediation_rounds": 0,
                 "status": "open",
                 "aliases": [],
@@ -304,18 +432,26 @@ def record_review_result(
             and review_round > 0
             and existing.get("status") == "open"
         ):
-            existing["failed_remediation_rounds"] = int(existing.get("failed_remediation_rounds", 0)) + 1
+            if _remediation_ready_for_current_submission(existing, state["submission"]):
+                existing["failed_remediation_rounds"] = int(existing.get("failed_remediation_rounds", 0)) + 1
+                existing["remediation"]["consumed"] = True
         existing["root_cause"] = str(raw.get("root_cause") or existing.get("root_cause"))
         existing["normalized_root_cause"] = _normalize_root_cause(existing["root_cause"])
+        semantic_key = _root_cause_key(raw)
+        if semantic_key is not None:
+            existing["root_cause_key"] = semantic_key
         existing["status"] = "closed" if raw.get("status") == "closed" else "open"
         if existing["failed_remediation_rounds"] >= run.max_same_finding_rounds and existing["status"] == "open":
             run.status = "blocked"
             run.blocked_reason = f"finding {existing['finding_id']} reached {run.max_same_finding_rounds} remediation rounds"
     if status == "pass":
-        for finding in ledger.values():
-            if finding.get("status") == "open":
-                finding["status"] = "closed"
-        state["phase"] = "passed"
+        open_findings = _open_findings(state)
+        if open_findings:
+            run.status = "blocked"
+            run.blocked_reason = "reviewer returned PASS with an open finding"
+            state["phase"] = "remediating"
+        else:
+            state["phase"] = "passed"
     elif status == "fail":
         state["phase"] = "remediating"
     state["result"] = copy.deepcopy(result)
