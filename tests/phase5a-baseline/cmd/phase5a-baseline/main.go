@@ -517,6 +517,7 @@ func verifyCounters(args []string) error {
 	workload := fs.String("workload", "", "fixed workload JSONL")
 	counter := fs.String("counter", "", "single fixture counter JSON")
 	baseline := fs.String("baseline", "", "prefill counter JSON for warm-cache equality")
+	expectDelta := fs.Bool("expect-delta", false, "require the counter delta to equal one request per workload case")
 	routeA := fs.String("route-a", "", "route-a counter JSON")
 	routeB := fs.String("route-b", "", "route-b counter JSON")
 	routeC := fs.String("route-c", "", "route-c counter JSON")
@@ -542,29 +543,49 @@ func verifyCounters(args []string) error {
 	if *counter == "" {
 		return errors.New("counter path is required for w1/w2")
 	}
+	if *expectDelta && *baseline == "" {
+		return errors.New("--expect-delta requires --baseline")
+	}
 	actual, err := readCounterFile(*counter)
 	if err != nil {
 		return err
 	}
-	for _, c := range cases {
-		key := strings.ToLower(dns.Fqdn(c.QName)) + "|" + strings.ToUpper(c.QType)
-		if actual.Counts[key] <= 0 {
-			return fmt.Errorf("fixture counter missing %s for case %s", key, c.CaseID)
-		}
-	}
-	if *scenario == "w2" && *baseline != "" {
+	expected := expectedCounterDeltas(cases)
+	if *baseline != "" {
 		before, err := readCounterFile(*baseline)
 		if err != nil {
 			return err
 		}
-		for _, c := range cases {
-			key := strings.ToLower(dns.Fqdn(c.QName)) + "|" + strings.ToUpper(c.QType)
-			if actual.Counts[key] != before.Counts[key] {
+		for key, want := range expected {
+			delta := actual.Counts[key] - before.Counts[key]
+			if *expectDelta {
+				if delta != want {
+					return fmt.Errorf("counter delta mismatch for %s: expected=%d actual=%d", key, want, delta)
+				}
+			} else if *scenario == "w2" && delta != 0 {
 				return fmt.Errorf("warm cache miss for %s: prefill=%d final=%d", key, before.Counts[key], actual.Counts[key])
 			}
 		}
+		return nil
+	}
+	for key := range expected {
+		if actual.Counts[key] <= 0 {
+			return fmt.Errorf("fixture counter missing %s", key)
+		}
 	}
 	return nil
+}
+
+func expectedCounterDeltas(cases []workloadCase) map[string]int64 {
+	expected := make(map[string]int64, len(cases))
+	for _, c := range cases {
+		expected[counterKey(c)]++
+	}
+	return expected
+}
+
+func counterKey(c workloadCase) string {
+	return strings.ToLower(dns.Fqdn(c.QName)) + "|" + strings.ToUpper(c.QType)
 }
 
 func verifyRoutingCounters(cases []workloadCase, routeAPath, routeBPath, routeCPath string) error {
@@ -581,7 +602,7 @@ func verifyRoutingCounters(cases []workloadCase, routeAPath, routeBPath, routeCP
 		return err
 	}
 	for _, c := range cases {
-		key := strings.ToLower(dns.Fqdn(c.QName)) + "|" + strings.ToUpper(c.QType)
+		key := counterKey(c)
 		counts := map[string]int64{"route-a": routeA.Counts[key], "route-b": routeB.Counts[key], "route-c": routeC.Counts[key]}
 		var required []string
 		var forbidden []string
