@@ -7,6 +7,10 @@ RUN_MODE="${RUN_MODE:-smoke}"
 MOSDNS_BINARY="${MOSDNS_BINARY:-}"
 RESULT_DIR="${RESULT_DIR:-}"
 HELPER_BINARY="${HELPER_BINARY:-}"
+OFFERED_QPS="${OFFERED_QPS:-}"
+MANIFEST_SHA256="${MANIFEST_SHA256:-}"
+SUT_CPU_SET="${SUT_CPU_SET:-}"
+HARNESS_CPU_SET="${HARNESS_CPU_SET:-}"
 
 if [[ -z "${MOSDNS_BINARY}" || -z "${SCENARIO}" ]]; then
   echo "MOSDNS_BINARY and SCENARIO are required" >&2
@@ -127,6 +131,16 @@ if [[ "${RUN_MODE}" == "official" ]]; then
     echo "official mode requires an immutable official_frozen manifest" >&2
     exit 2
   fi
+  if [[ -z "${OFFERED_QPS}" || -z "${MANIFEST_SHA256}" ]]; then
+    echo "official mode requires OFFERED_QPS and MANIFEST_SHA256" >&2
+    exit 2
+  fi
+  actual_manifest_sha256="$(sha256sum "${MANIFEST}" | awk '{print $1}')"
+  if [[ "${actual_manifest_sha256}" != "${MANIFEST_SHA256}" ]]; then
+    echo "manifest SHA-256 mismatch: expected ${MANIFEST_SHA256}, got ${actual_manifest_sha256}" >&2
+    exit 2
+  fi
+  printf '%s  %s\n' "${actual_manifest_sha256}" "${MANIFEST}" > "${RESULT_DIR}/manifest.sha256"
 fi
 
 "${HELPER_BINARY}" validate-binary --path "${MOSDNS_BINARY}" > "${RESULT_DIR}/sut.json"
@@ -154,7 +168,11 @@ for spec in "${FIXTURE_SPECS[@]}"; do
 done
 
 start_sut() {
-  "${MOSDNS_BINARY}" start -c "${SCENARIO_CONFIG}" >> "${TMP_DIR}/mosdns.stdout" 2>> "${TMP_DIR}/mosdns.stderr" &
+  if [[ -n "${SUT_CPU_SET}" ]]; then
+    taskset --cpu-list "${SUT_CPU_SET}" "${MOSDNS_BINARY}" start -c "${SCENARIO_CONFIG}" >> "${TMP_DIR}/mosdns.stdout" 2>> "${TMP_DIR}/mosdns.stderr" &
+  else
+    "${MOSDNS_BINARY}" start -c "${SCENARIO_CONFIG}" >> "${TMP_DIR}/mosdns.stdout" 2>> "${TMP_DIR}/mosdns.stderr" &
+  fi
   SUT_PID="$!"
   # Startup is outside every measured stage. Probe the TCP listener as a
   # bounded readiness barrier when the scenario uses TCP. UDP has no
@@ -197,15 +215,19 @@ copy_fixture_counters() {
 verify_counter_delta() {
   local counter_path="$1"
   local baseline_path="$2"
+  local stage_result_path="$3"
+  local stage_name="$4"
   for _ in $(seq 1 50); do
     if "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" \
-      --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta; then
+      --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta \
+      --stage-result "${stage_result_path}" --stage "${stage_name}"; then
       return 0
     fi
     sleep 0.1
   done
   "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" \
-    --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta
+    --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta \
+    --stage-result "${stage_result_path}" --stage "${stage_name}"
 }
 
 duration="1s"
@@ -216,7 +238,9 @@ if [[ "${RUN_MODE}" == "pilot" ]]; then
 fi
 if [[ "${RUN_MODE}" == "official" ]]; then
   duration="10s"
-  qps="100"
+  qps="${OFFERED_QPS}"
+elif [[ -n "${OFFERED_QPS}" ]]; then
+  qps="${OFFERED_QPS}"
 fi
 
 workload_scenario="w3"
@@ -226,15 +250,20 @@ elif [[ "${SCENARIO}" == w2 ]]; then
   workload_scenario="w2"
 fi
 
+ONE_PASS_ARGS=()
+if [[ "${RUN_MODE}" == "smoke" ]]; then
+  ONE_PASS_ARGS+=(--one-pass)
+fi
+
 start_sut
 if [[ "${SCENARIO}" == w2 ]]; then
   IFS='|' read -r _ _ _ CACHE_COUNTER <<<"${FIXTURE_SPECS[0]}"
   cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-before-counter.json"
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
     --stage "${RUN_MODE}-w2-cold" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
-    --one-pass --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
+    "${ONE_PASS_ARGS[@]}" --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
   stop_sut
-  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-before-counter.json"
+  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-before-counter.json" "${RESULT_DIR}/stages.jsonl" "${RUN_MODE}-w2-cold"
   cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-after-counter.json"
 
   start_sut
@@ -243,7 +272,7 @@ if [[ "${SCENARIO}" == w2 ]]; then
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
     --stage warm-prefill --qps "${qps}" --duration 1s --deadline 500ms --late-drain 100ms \
     --one-pass --fail-on-error --result "${PREFILL_DIR}" --sut-pid "${SUT_PID}"
-  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-before-counter.json"
+  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-before-counter.json" "${PREFILL_DIR}/stages.jsonl" warm-prefill
   cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-counter.json"
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
     --stage "${RUN_MODE}-w2-warm" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
@@ -270,3 +299,4 @@ fi
 cp "${TMP_DIR}/mosdns.stdout" "${RESULT_DIR}/sut.stdout.log"
 cp "${TMP_DIR}/mosdns.stderr" "${RESULT_DIR}/sut.stderr.log"
 printf '%s\n' "scenario=${SCENARIO}" "run_mode=${RUN_MODE}" "config=${SCENARIO_CONFIG}" "workload=${WORKLOAD}" > "${RESULT_DIR}/run-metadata.txt"
+printf '%s\n' "offered_qps=${qps}" "sut_cpu_set=${SUT_CPU_SET}" "harness_cpu_set=${HARNESS_CPU_SET}" >> "${RESULT_DIR}/run-metadata.txt"
