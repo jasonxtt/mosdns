@@ -43,6 +43,7 @@ GOOS/GOARCH:    linux/amd64
 CGO_ENABLED:    0
 GO_TAGS:        empty
 Rust selectors: none
+task revision:   1072824b1878ec07f0dd6cecde2a1bea81c5dd11
 ```
 
 The build command was:
@@ -124,6 +125,10 @@ Repeat that command with the frozen scenario/QPS pairs and a distinct result
 directory; the runner interface is environment-variable based, not
 positional arguments. `SUT_CPU_SET`, `HARNESS_CPU_SET`, and `HELPER_BINARY`
 are set by the approved environment when required.
+
+The unchanged Go SUT was also copied to a second executable path and passed
+the same W1-UDP smoke, proving that the runner does not depend on a particular
+build-path name or hidden Go implementation wiring.
 
 The Go helper uses an open-loop fixed-rate sender. Useful throughput includes
 only correct responses received before the deadline; late, wrong, protocol,
@@ -279,19 +284,19 @@ different host and call that a binary-only comparison.
 
 | PRD item | Evidence in this task |
 |---|---|
-| A1: frozen scenario corpus | Four YAML fixtures and three JSONL workloads with hashes above |
-| A2: controlled upstream | Loopback UDP/TCP fixture and deterministic counters in `main.go` |
-| A3: replaceable SUT | `MOSDNS_BINARY`, recorded SUT hash, no implicit rebuild |
-| A4: correctness | ID/question/rcode/answer checks, expected negatives, W2 deltas, W3 route legs |
-| A5: fixed-rate method | Open-loop sender and frozen 10-second schedule |
-| A6: latency | Raw samples and p50/p95/p99 for all 45 measured rows |
-| A7: effective throughput | Scheduled/sent/received/correct-on-time and `Eff` for all rows |
-| A8: failure accounting | Wrong/protocol/transport/timeout/sender-shortfall columns, all zero in final matrix |
-| A9: CPU/RSS | Independent SUT `/proc` sampler, 11 samples per stage, CPU/query and RSS columns |
-| A10: repeatability | 3 repetitions at each of 3 offered rates and 5 measured stages |
-| A11: invalid-run retention | Invalid attempts and pilot failures retained with reasons |
-| A12: reproducibility | Manifest, input hashes, build identity, environment record, runner, raw evidence |
-| A13: scope closure | Go-only controlled-local baseline; no Rust host, transport, product, deployment, or generic platform change |
+| A1: planning/scope integrity | Exact task diff is limited to the baseline report, task records, frozen fixtures/tooling, and retained evidence; product-path audit is clean and module manifests are unchanged. |
+| A2: Go-only identity is auditable | Source anchor/task revision, build command, Go/toolchain identity, SUT hash, `CGO_ENABLED=0`, empty selectors, module hashes, and product-path audit are recorded above. |
+| A3: three workload groups are frozen | Four YAML fixtures cover W1 UDP/TCP, W2 cache, and W3 routing; three JSONL workloads and all hashes are recorded in the manifest. |
+| A4: controlled upstream evidence | Loopback UDP/TCP fixtures, deterministic counters, exact W2/W3 path checks, graceful final flush, and cleanup evidence are recorded. No public DNS is used. |
+| A5: replaceable binary contract | `MOSDNS_BINARY` is explicit, the hash is recorded, no implicit rebuild occurs, and the same Go binary passed the unchanged W1-UDP smoke from a second executable path. |
+| A6: correctness is part of throughput | DNS identity/rcode/answer validation, expected negatives, W2 deltas, W3 route legs, and separate correct-on-time/error counters define useful throughput. |
+| A7: fixed-rate evidence | Open-loop fixed-rate scheduling and the frozen 10-second QPS ladder are recorded; sender shortfall is a dedicated counter. |
+| A8: latency evidence | Raw latency samples and p50/p95/p99 are recorded for all 45 measured rows together with their failure counters. |
+| A9: CPU/RSS evidence | Independent SUT `/proc` sampling provides 11 samples per stage, CPU/query, RSS median, and RSS peak. |
+| A10: repetition/no cherry-pick | Three repetitions at each of three offered rates and five stages are retained and summarized; invalid history is retained with reasons rather than silently selected away. |
+| A11: reproducible Linux amd64 report | The report records environment, commands, hashes, fixed inputs, raw locations, limitations, and the exact environment-variable rerun using `MOSDNS_BINARY`. |
+| A12: no overclaim | The result is explicitly Go-only controlled-local Linux amd64 evidence; it makes no Rust performance, full 5A compatibility, public-network, or production-readiness claim. |
+| A13: stop boundary | The closure statement and task exit gate prohibit native-host implementation, next-task start, production wiring, and deployment after acceptance. |
 
 ## Scope and closure statement
 
