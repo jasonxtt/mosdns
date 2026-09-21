@@ -3,7 +3,7 @@
   "name": "trellis-automation-simplification",
   "title": "Simplify Trellis execution and review automation",
   "description": "Remove the Codex executor/reviewer routing state machine (surface detection, host_routes, provider dispatch modes, provider-specific workflow-state) from Trellis core; establish a simple automatic execution + independent review loop with current-conversation default executor, generic reviewer target, snapshotted unit authorization, auto-advance, bounded auto-remediation, and no auto-archive.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "Trellis infrastructure only: .trellis scripts/hooks/config/workflow/spec/tests and .codex hooks. No MosDNS runtime code, Cargo manifests, WebUI, DNS behavior, Phase 5A benchmark semantics, production wiring, or deployment.",
   "package": null,
