@@ -8,6 +8,7 @@
 
 mod fixtures;
 
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -69,6 +70,7 @@ fn response_wire(id: u16, marker: u8) -> Vec<u8> {
 fn server_config(
     cert: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
+    max_bidi: Option<u32>,
 ) -> quinn::ServerConfig {
     let mut tls =
         ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
@@ -79,7 +81,13 @@ fn server_config(
             .expect("synthetic certificate and key");
     tls.alpn_protocols = vec![b"h3".to_vec()];
     let quic = QuicServerConfig::try_from(tls).expect("QUIC TLS config");
-    quinn::ServerConfig::with_crypto(Arc::new(quic))
+    let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic));
+    if let Some(max_bidi) = max_bidi {
+        let mut transport = quinn::TransportConfig::default();
+        transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(max_bidi));
+        config.transport_config(Arc::new(transport));
+    }
+    config
 }
 
 #[derive(Debug)]
@@ -97,6 +105,10 @@ struct ReuseServer {
 
 impl ReuseServer {
     fn start(set: &FixtureSet) -> Self {
+        Self::start_with_limit(set, 2, None)
+    }
+
+    fn start_with_limit(set: &FixtureSet, streams: usize, max_bidi: Option<u32>) -> Self {
         let cert = set.good.cert.clone();
         let key = set.good.key.clone_key();
         let (address_tx, address_rx) = std::sync::mpsc::channel();
@@ -107,7 +119,7 @@ impl ReuseServer {
                 .expect("build server runtime");
             runtime.block_on(async move {
                 let endpoint = quinn::Endpoint::server(
-                    server_config(cert, key),
+                    server_config(cert, key, max_bidi),
                     SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 )
                 .expect("bind QUIC server");
@@ -124,15 +136,17 @@ impl ReuseServer {
                     .build::<_, Bytes>(h3_quinn::Connection::new(connection))
                     .await
                     .expect("build server h3 connection");
-                let barrier = Arc::new(Barrier::new(2));
+                let barrier = (max_bidi != Some(1)).then(|| Arc::new(Barrier::new(streams)));
                 let mut handlers = Vec::new();
-                for index in 0..2u8 {
+                for index in 0..streams {
+                    let marker = 0x20
+                        + u8::try_from(index).expect("stress stream index fits response marker");
                     let resolver = timeout(TEST_TIMEOUT, h3.accept())
                         .await
                         .expect("accept request bounded")
                         .expect("accept request")
                         .expect("request stream remains open");
-                    let barrier = Arc::clone(&barrier);
+                    let barrier = barrier.clone();
                     handlers.push(tokio::spawn(async move {
                         let (request, mut stream) =
                             resolver.resolve_request().await.expect("resolve request");
@@ -155,9 +169,11 @@ impl ReuseServer {
                                 Err(_) => break false,
                             }
                         };
-                        barrier.wait().await;
+                        if let Some(barrier) = barrier {
+                            barrier.wait().await;
+                        }
 
-                        let body = response_wire(0, 0x20 + index);
+                        let body = response_wire(0, marker);
                         let response = hyper::Response::builder()
                             .status(200)
                             .header("content-type", "application/dns-message")
@@ -262,7 +278,7 @@ impl CancellationServer {
                 .expect("build server runtime");
             runtime.block_on(async move {
                 let endpoint = quinn::Endpoint::server(
-                    server_config(cert, key),
+                    server_config(cert, key, None),
                     SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 )
                 .expect("bind QUIC server");
@@ -390,7 +406,7 @@ impl ScriptedServer {
                 .expect("build server runtime");
             runtime.block_on(async move {
                 let endpoint = quinn::Endpoint::server(
-                    server_config(cert, key),
+                    server_config(cert, key, None),
                     SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 )
                 .expect("bind QUIC server");
@@ -500,7 +516,7 @@ impl GoAwayServer {
                 .expect("build server runtime");
             runtime.block_on(async move {
                 let endpoint = quinn::Endpoint::server(
-                    server_config(cert, key),
+                    server_config(cert, key, None),
                     SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 )
                 .expect("bind QUIC server");
@@ -606,6 +622,109 @@ fn doh3_reuse_multiplexes_two_streams_on_one_connection() {
         assert_eq!(evidence[0].path, evidence[1].path);
         assert!(evidence.iter().all(|item| item.request_body.is_empty()));
         assert!(evidence.iter().all(|item| item.request_fin));
+    });
+}
+
+#[test]
+fn doh3_peer_advertised_stream_limit_serializes_without_replacement() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let streams = 2;
+        let server = ReuseServer::start_with_limit(&set, streams, Some(1));
+        let upstream = Arc::new(owner(&set, server.address));
+        let first = tokio::spawn(exchange(Arc::clone(&upstream), query_wire(0x1251)));
+        let second = tokio::spawn(exchange(Arc::clone(&upstream), query_wire(0x1252)));
+
+        let first = timeout(TEST_TIMEOUT, first)
+            .await
+            .expect("first exchange bounded")
+            .expect("first exchange task")
+            .expect("first DoH3 response");
+        let second = timeout(TEST_TIMEOUT, second)
+            .await
+            .expect("second exchange bounded")
+            .expect("second exchange task")
+            .expect("second DoH3 response");
+
+        let ids = [first.request_id(), second.request_id()];
+        assert!(ids.contains(&0x1251));
+        assert!(ids.contains(&0x1252));
+        assert_eq!(first.response_id(), first.request_id());
+        assert_eq!(second.response_id(), second.request_id());
+        assert_eq!(upstream.entry_count(), 1);
+        assert_eq!(upstream.in_flight_exchanges(), 1);
+
+        upstream.close().await;
+        let evidence = server.join();
+        assert_eq!(evidence.len(), streams);
+        assert_eq!(
+            evidence
+                .iter()
+                .map(|item| item.authority.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            1,
+            "both requests use the configured authority"
+        );
+    });
+}
+
+#[test]
+fn doh3_bounded_concurrent_stress_keeps_one_generation() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let streams = 8;
+        let server = ReuseServer::start_with_limit(&set, streams, None);
+        let upstream = Arc::new(owner(&set, server.address));
+        let mut tasks = Vec::new();
+        for index in 0..streams {
+            let upstream = Arc::clone(&upstream);
+            tasks.push(tokio::spawn(async move {
+                let id = 0x1300 + u16::try_from(index).expect("stress index fits u16");
+                exchange(upstream, query_wire(id)).await
+            }));
+        }
+
+        let mut responses = Vec::new();
+        for task in tasks {
+            responses.push(
+                timeout(TEST_TIMEOUT, task)
+                    .await
+                    .expect("stress exchange bounded")
+                    .expect("stress exchange task")
+                    .expect("stress DoH3 response"),
+            );
+        }
+
+        let mut ids = BTreeSet::new();
+        let mut markers = BTreeSet::new();
+        for response in responses {
+            ids.insert(response.response_id());
+            markers.insert(*response.wire().last().expect("DNS response has an address"));
+        }
+        let expected_ids = (0..streams)
+            .map(|index| 0x1300 + u16::try_from(index).expect("stress index fits u16"))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            ids, expected_ids,
+            "stress responses keep independent DNS IDs"
+        );
+        assert_eq!(markers.len(), streams, "stress responses never cross-talk");
+        assert_eq!(upstream.entry_count(), 1);
+        assert_eq!(upstream.in_flight_exchanges(), 1);
+
+        upstream.close().await;
+        let evidence = server.join();
+        assert_eq!(evidence.len(), streams);
+        assert_eq!(
+            evidence
+                .iter()
+                .map(|item| item.authority.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            1,
+            "all stress streams use one authority"
+        );
     });
 }
 
