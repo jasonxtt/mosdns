@@ -45,6 +45,12 @@
     "sut_startup_margin_seconds": 3,
     "warm_prefill": "one-pass over the committed W2 hot set, outside measured timing, with exact upstream counter delta barrier"
   },
+  "runtime_environment": {
+    "MOSDNS_CONFIG_PACKAGE_URL": "/dev/null",
+    "GOMAXPROCS": "2",
+    "GOGC": "100",
+    "GOMEMLIMIT": "<unset>"
+  },
   "isolation": {
     "runtime": "Colima QEMU Linux VM, docker container --platform linux/amd64",
     "container_cpus": 4,
