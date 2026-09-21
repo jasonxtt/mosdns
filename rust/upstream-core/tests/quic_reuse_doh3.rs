@@ -8,6 +8,7 @@
 
 mod fixtures;
 
+use base64::Engine as _;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -49,6 +50,26 @@ fn query_wire(id: u16) -> Vec<u8> {
     wire.extend_from_slice(&[0x03, b'o', b'r', b'g', 0]);
     wire.extend_from_slice(&[0, 1, 0, 1]);
     wire
+}
+
+fn query_wire_with_marker(id: u16, marker: u8) -> Vec<u8> {
+    let mut wire = query_wire(id);
+    wire[13..20].copy_from_slice(&[b'm', b'a', b'r', b'k', b'e', b'r', b'0' + marker]);
+    wire
+}
+
+fn marker_from_wire(wire: &[u8]) -> Option<u8> {
+    (wire.get(13..19)? == b"marker")
+        .then(|| wire.get(19).copied()?.checked_sub(b'0'))
+        .flatten()
+}
+
+fn marker_from_path(path: &str) -> Option<u8> {
+    let encoded = path.split_once("?dns=")?.1;
+    let wire = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded)
+        .ok()?;
+    marker_from_wire(&wire)
 }
 
 fn response_wire(id: u16, marker: u8) -> Vec<u8> {
@@ -100,18 +121,38 @@ struct RequestEvidence {
 
 struct ReuseServer {
     address: SocketAddr,
+    first_ready: Arc<tokio::sync::Notify>,
+    release_first: Arc<tokio::sync::Notify>,
     handle: thread::JoinHandle<Vec<RequestEvidence>>,
 }
 
 impl ReuseServer {
     fn start(set: &FixtureSet) -> Self {
-        Self::start_with_limit(set, 2, None)
+        Self::start_with_options(set, 2, None, false)
     }
 
     fn start_with_limit(set: &FixtureSet, streams: usize, max_bidi: Option<u32>) -> Self {
+        Self::start_with_options(set, streams, max_bidi, false)
+    }
+
+    fn start_with_hold(set: &FixtureSet) -> Self {
+        Self::start_with_options(set, 1, Some(1), true)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn start_with_options(
+        set: &FixtureSet,
+        streams: usize,
+        max_bidi: Option<u32>,
+        hold_first: bool,
+    ) -> Self {
         let cert = set.good.cert.clone();
         let key = set.good.key.clone_key();
         let (address_tx, address_rx) = std::sync::mpsc::channel();
+        let first_ready = Arc::new(tokio::sync::Notify::new());
+        let first_ready_thread = Arc::clone(&first_ready);
+        let release_first = Arc::new(tokio::sync::Notify::new());
+        let release_first_thread = Arc::clone(&release_first);
         let handle = thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -146,7 +187,11 @@ impl ReuseServer {
                         .expect("accept request bounded")
                         .expect("accept request")
                         .expect("request stream remains open");
+                    if hold_first && index == 0 {
+                        first_ready_thread.notify_one();
+                    }
                     let barrier = barrier.clone();
+                    let release_first = Arc::clone(&release_first_thread);
                     handlers.push(tokio::spawn(async move {
                         let (request, mut stream) =
                             resolver.resolve_request().await.expect("resolve request");
@@ -172,7 +217,11 @@ impl ReuseServer {
                         if let Some(barrier) = barrier {
                             barrier.wait().await;
                         }
+                        if hold_first && index == 0 {
+                            release_first.notified().await;
+                        }
 
+                        let marker = marker_from_path(&path).unwrap_or(marker);
                         let body = response_wire(0, marker);
                         let response = hyper::Response::builder()
                             .status(200)
@@ -206,7 +255,12 @@ impl ReuseServer {
         let address = address_rx
             .recv_timeout(TEST_TIMEOUT)
             .expect("server binds within timeout");
-        Self { address, handle }
+        Self {
+            address,
+            first_ready,
+            release_first,
+            handle,
+        }
     }
 
     fn join(self) -> Vec<RequestEvidence> {
@@ -670,6 +724,57 @@ fn doh3_peer_advertised_stream_limit_serializes_without_replacement() {
 }
 
 #[test]
+fn doh3_peer_stream_limit_honors_pending_open_cancellation_without_replacement() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let server = ReuseServer::start_with_hold(&set);
+        let upstream = Arc::new(owner(&set, server.address));
+        let first = tokio::spawn(exchange(Arc::clone(&upstream), query_wire(0x1261)));
+        timeout(TEST_TIMEOUT, server.first_ready.notified())
+            .await
+            .expect("first H3 stream reaches the held server");
+
+        let second_cancellation = TransportCancellation::new();
+        let second = tokio::spawn(exchange_with_cancellation(
+            Arc::clone(&upstream),
+            query_wire(0x1262),
+            second_cancellation.clone(),
+        ));
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        second_cancellation.cancel();
+        let second = timeout(TEST_TIMEOUT, second)
+            .await
+            .expect("pending peer-credit exchange is bounded")
+            .expect("second exchange task joins");
+        assert!(matches!(
+            second,
+            Err(SecureError::Transport(UpstreamError::Cancelled(
+                SideEffectState::MaybeSent,
+            )))
+        ));
+
+        server.release_first.notify_one();
+        let first = timeout(TEST_TIMEOUT, first)
+            .await
+            .expect("held first exchange is released")
+            .expect("first exchange task joins")
+            .expect("first response succeeds");
+        assert_eq!(first.request_id(), 0x1261);
+        assert_eq!(upstream.entry_count(), 1);
+
+        upstream.close().await;
+        let evidence = server.join();
+        assert_eq!(
+            evidence.len(),
+            1,
+            "the canceled pending stream never reaches the server"
+        );
+    });
+}
+
+#[test]
 fn doh3_bounded_concurrent_stress_keeps_one_generation() {
     block_on(async {
         let set = FixtureSet::generate();
@@ -681,26 +786,33 @@ fn doh3_bounded_concurrent_stress_keeps_one_generation() {
             let upstream = Arc::clone(&upstream);
             tasks.push(tokio::spawn(async move {
                 let id = 0x1300 + u16::try_from(index).expect("stress index fits u16");
-                exchange(upstream, query_wire(id)).await
+                let marker = u8::try_from(index).expect("stress marker fits u8");
+                (
+                    marker,
+                    exchange(upstream, query_wire_with_marker(id, marker)).await,
+                )
             }));
         }
 
         let mut responses = Vec::new();
         for task in tasks {
-            responses.push(
-                timeout(TEST_TIMEOUT, task)
-                    .await
-                    .expect("stress exchange bounded")
-                    .expect("stress exchange task")
-                    .expect("stress DoH3 response"),
-            );
+            let (marker, response) = timeout(TEST_TIMEOUT, task)
+                .await
+                .expect("stress exchange bounded")
+                .expect("stress exchange task");
+            responses.push((marker, response.expect("stress DoH3 response")));
         }
 
         let mut ids = BTreeSet::new();
         let mut markers = BTreeSet::new();
-        for response in responses {
+        for (expected_marker, response) in responses {
             ids.insert(response.response_id());
-            markers.insert(*response.wire().last().expect("DNS response has an address"));
+            assert_eq!(
+                response.wire().last().copied(),
+                Some(expected_marker),
+                "each caller receives the marker encoded in its own query"
+            );
+            markers.insert(expected_marker);
         }
         let expected_ids = (0..streams)
             .map(|index| 0x1300 + u16::try_from(index).expect("stress index fits u16"))

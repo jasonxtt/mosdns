@@ -46,9 +46,18 @@ and close cleanly. The tests are:
 - `doq_peer_advertised_stream_limit_serializes_without_replacement`
 - `doh3_peer_advertised_stream_limit_serializes_without_replacement`
 
-These prove that pending peer stream credit is bounded by the original
-exchange deadline/cancellation path and does not create a duplicate
-connection.
+The companion cancellation tests hold the first stream open while the peer
+advertises only one bidirectional stream, start a second real exchange, and
+cancel that exchange after the server has accepted the first stream. They
+assert the typed cancellation result and one accepted connection/generation:
+
+- `doq_peer_stream_limit_honors_pending_open_cancellation_without_replacement`
+- `doh3_peer_stream_limit_honors_pending_open_cancellation_without_replacement`
+
+These prove that pending peer stream credit is bounded by the original caller
+cancellation path and does not create a duplicate connection. The DoH3 path
+retains its pinned `MaybeSent` side-effect classification at the request-stream
+boundary; the DoQ path remains `NotSent` before its bidirectional stream opens.
 
 ## Bounded concurrent stress
 
@@ -58,14 +67,18 @@ generation:
 - `doq_bounded_concurrent_stress_keeps_one_generation` runs up to
   `MAX_STREAMS_PER_CONNECTION` (capped at eight for bounded test cost), checks
   one accepted QUIC connection, one independent stream per query, one active
-  owner entry/liveness registration, and unique response markers.
+  owner entry/liveness registration, and the marker encoded in each caller's
+  query is returned to that same caller.
 - `doh3_bounded_concurrent_stress_keeps_one_generation` runs eight concurrent
   HTTP/3 request streams, checks one active entry/liveness registration, unique
-  response IDs and markers, and one authority across all requests.
+  response IDs, and that each request's marker decoded from its `dns=` GET
+  target returns to that exact caller, plus one authority across all requests.
 
-The server response marker is independent per accepted stream; a complete
-marker set and the caller response-ID checks therefore detect cross-query
-response mixups rather than merely checking aggregate success.
+The stress query itself carries a unique `markerN.example.org` question that
+the loopback server decodes and reflects. The assertions compare each caller's
+expected marker with its own response body, so a marker permutation across
+concurrent streams fails even when the aggregate marker set and response-ID
+set remain valid.
 
 ## Resolver composition boundary
 
@@ -88,8 +101,8 @@ dependency graph:
 
 | Command | Result |
 |---|---:|
-| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test quic_reuse_doq --locked -- --test-threads=1` | 0; 9 passed |
-| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test quic_reuse_doh3 --locked -- --test-threads=1` | 0; 7 passed |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test quic_reuse_doq --locked -- --test-threads=1` | 0; 10 passed |
+| `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test quic_reuse_doh3 --locked -- --test-threads=1` | 0; 8 passed |
 | `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test quic_reuse_model --locked -- --test-threads=1` | 0; 21 passed |
 | `cargo test --manifest-path rust/Cargo.toml -p mosdns-upstream-core --test resolver_dual_stack --test resolver_slice4 --locked -- --test-threads=1` | 0; 34 passed |
 | `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` | 0 |

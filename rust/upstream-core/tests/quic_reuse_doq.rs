@@ -51,6 +51,22 @@ fn query_wire(id: u16) -> Vec<u8> {
     wire
 }
 
+fn query_wire_with_marker(id: u16, marker: u8) -> Vec<u8> {
+    let mut wire = query_wire(id);
+    wire[13..20].copy_from_slice(&[b'm', b'a', b'r', b'k', b'e', b'r', b'0' + marker]);
+    wire
+}
+
+fn marker_from_wire(wire: &[u8]) -> Option<u8> {
+    (wire.get(13..19)? == b"marker")
+        .then(|| wire.get(19).copied()?.checked_sub(b'0'))
+        .flatten()
+}
+
+fn marker_from_doq_frame(frame: &[u8]) -> Option<u8> {
+    marker_from_wire(frame.get(2..)?)
+}
+
 fn response_wire(id: u16, marker: u8) -> Vec<u8> {
     let mut wire = Vec::new();
     wire.extend_from_slice(&id.to_be_bytes());
@@ -193,7 +209,9 @@ impl DoqServer {
                                     FirstStreamMode::Normal => {}
                                 }
                             }
-                            let marker = u8::try_from(index).expect("test stream index fits u8");
+                            let marker = marker_from_doq_frame(&request).unwrap_or_else(|| {
+                                u8::try_from(index).expect("test stream index fits u8")
+                            });
                             let response = frame(&response_wire(0, marker));
                             send.write_all(&response).await.ok()?;
                             send.finish().ok()?;
@@ -355,6 +373,72 @@ fn doq_peer_advertised_stream_limit_serializes_without_replacement() {
 }
 
 #[test]
+fn doq_peer_stream_limit_honors_pending_open_cancellation_without_replacement() {
+    let set = FixtureSet::generate();
+    let server = DoqServer::start_with_limit(&set, 1, FirstStreamMode::Hold, Some(1));
+    let upstream = Arc::new(upstream(&set, server.address));
+    let second_cancellation = TransportCancellation::new();
+
+    let (first, second) = block_on(async {
+        let first_upstream = Arc::clone(&upstream);
+        let first = tokio::spawn(async move {
+            let query = query_wire(0x1551);
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            let context = ExchangeContext::new(
+                Instant::now() + EXCHANGE_DEADLINE,
+                TransportCancellation::new(),
+            );
+            first_upstream.exchange(request, context).await
+        });
+        timeout(TEST_TIMEOUT, server.ready.notified())
+            .await
+            .expect("first stream reaches the held server");
+
+        let second_upstream = Arc::clone(&upstream);
+        let second_control = second_cancellation.clone();
+        let second = tokio::spawn(async move {
+            let query = query_wire(0x1552);
+            let request = ExchangeRequest::new(&query).expect("valid query");
+            let context = ExchangeContext::new(Instant::now() + EXCHANGE_DEADLINE, second_control);
+            second_upstream.exchange(request, context).await
+        });
+        for _ in 0..3 {
+            tokio::task::yield_now().await;
+        }
+        second_cancellation.cancel();
+        let second = timeout(TEST_TIMEOUT, second)
+            .await
+            .expect("pending peer-credit exchange is bounded")
+            .expect("second exchange task joins");
+
+        upstream.close().await;
+        let first = timeout(TEST_TIMEOUT, first)
+            .await
+            .expect("held first exchange is released by owner close")
+            .expect("first exchange task joins");
+        (first, second)
+    });
+
+    assert!(matches!(
+        second,
+        Err(SecureError::Transport(UpstreamError::Cancelled(
+            SideEffectState::NotSent,
+        )))
+    ));
+    assert!(first.is_err(), "owner close ends the held first exchange");
+    let (accepts, evidence) = server.join();
+    assert_eq!(
+        accepts, 1,
+        "cancellation never opens a replacement connection"
+    );
+    assert_eq!(
+        evidence.len(),
+        1,
+        "the canceled pending stream never reaches the server"
+    );
+}
+
+#[test]
 fn doq_bounded_concurrent_stress_keeps_one_generation() {
     let set = FixtureSet::generate();
     let streams = MAX_STREAMS_PER_CONNECTION.min(8);
@@ -366,8 +450,9 @@ fn doq_bounded_concurrent_stress_keeps_one_generation() {
         for index in 0..streams {
             let upstream = Arc::clone(&upstream);
             tasks.push(tokio::spawn(async move {
+                let marker = u8::try_from(index).expect("stress marker fits u8");
                 let index = u16::try_from(index).expect("test stream index fits u16");
-                let query = query_wire(0x1600 + index);
+                let query = query_wire_with_marker(0x1600 + index, marker);
                 let request = ExchangeRequest::new(&query).expect("valid query");
                 let context = ExchangeContext::new(
                     Instant::now() + EXCHANGE_DEADLINE,
@@ -387,9 +472,15 @@ fn doq_bounded_concurrent_stress_keeps_one_generation() {
     for (index, result) in results.into_iter().enumerate() {
         let response = result.expect("bounded concurrent DoQ exchange succeeds");
         let index = u16::try_from(index).expect("test stream index fits u16");
+        let marker = u8::try_from(index).expect("stress marker fits u8");
         assert_eq!(response.request_id(), 0x1600 + index);
         assert_eq!(response.response_id(), 0x1600 + index);
-        markers.insert(*response.wire().last().expect("DNS response has an address"));
+        assert_eq!(
+            response.wire().last().copied(),
+            Some(marker),
+            "each caller receives the marker encoded in its own query"
+        );
+        markers.insert(marker);
     }
     assert_eq!(markers.len(), streams, "markers never cross-talk");
     assert_eq!(upstream.entry_count(), 1);
