@@ -1705,6 +1705,19 @@ impl Drop for Doh3ConnectionHandle {
     }
 }
 
+/// A debug-only integration-test hold for one real caller-owned DoH3
+/// connection handle and stream lease.
+///
+/// The hold intentionally performs no request I/O. Keeping it alive while the
+/// public owner is closed proves that supervised teardown waits for the
+/// caller-owned physical-connection handle before recording terminal removal.
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub struct Doh3ConnectionHandleHold {
+    _connection: Doh3ConnectionHandle,
+    _lease: StreamLease,
+}
+
 /// The boxed future one entry-owned initializer returns.
 pub type InitializeFuture =
     Pin<Box<dyn Future<Output = Option<Arc<EntryTransport>>> + Send + 'static>>;
@@ -3213,6 +3226,43 @@ impl Doh3ReuseUpstream {
     /// Closes admission and drains every shared connection generation.
     pub async fn close(&self) -> CloseResult {
         self.owner.close().await
+    }
+
+    /// Acquires a real shared DoH3 connection handle for pinned-stack teardown
+    /// evidence. This debug-only seam is not part of the release API; the
+    /// returned opaque hold keeps both the caller-owned handle and its stream
+    /// lease alive until dropped by the integration test.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub async fn hold_connection_handle_for_test(
+        &self,
+    ) -> Result<Doh3ConnectionHandleHold, SecureError> {
+        let control = self.owner.exchange_control(ExchangeContext::new(
+            Instant::now() + Duration::from_secs(30),
+            TransportCancellation::new(),
+        ));
+        control.check_at(Instant::now(), SideEffectState::NotSent)?;
+        let registration = self.owner.register()?;
+        let key = QuicReuseKey::from_doh3(&self.endpoint, &self.tls);
+        let lease = self
+            .owner
+            .admit(registration, key.clone(), &control)
+            .await?;
+        let generation = lease.generation();
+        let Some(connection) = lease.doh3_connection() else {
+            return Err(UpstreamError::Closed(SideEffectState::NotSent).into());
+        };
+        if connection.driver_is_terminal()
+            || connection.connection.connection.close_reason().is_some()
+        {
+            self.owner
+                .apply_error_class(&key, generation, QuicErrorClass::EntryTerminal);
+            return Err(UpstreamError::Closed(SideEffectState::NotSent).into());
+        }
+        Ok(Doh3ConnectionHandleHold {
+            _connection: connection,
+            _lease: lease,
+        })
     }
 
     /// Runs one DoH3 query over a fresh request stream on the shared
