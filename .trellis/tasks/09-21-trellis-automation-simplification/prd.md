@@ -182,6 +182,24 @@ remediation parent/head, exact diff scope, validation, scoped re-review
 request. **A new task on the same reviewer conversation always gets a fresh
 full bootstrap.**
 
+### 5.5 Reviewer transport contract (the loop must be real)
+
+A persisted `provider=chatgpt` reviewer target is only meaningful if the
+controller can actually reach it:
+
+- The concrete reference comes from a platform-resolved `@` conversation
+  target supplied by the user.
+- The controller sends requests and waits/reads responses through the
+  **platform-native** ChatGPT conversation capability of the host it runs
+  on.
+- Repo Python code MUST NOT call unofficial ChatGPT APIs and MUST NOT
+  browser-automate ChatGPT.
+- Before `task.py start` (see §8.1), the controller verifies the target is
+  actually send/read-able.
+- If the current host cannot send/read that plain ChatGPT conversation →
+  major issue → ask the user.
+- Reviewer transport unavailable NEVER degrades into silent self-review.
+
 ## 6. Review Loop Requirements
 
 Per authorized Slice:
@@ -218,15 +236,26 @@ closed findings are explicitly marked closed; new findings get new IDs. The
 controller must recognize the same root cause semantically even if the
 reviewer renames an ID — renaming must not bypass the counter.
 
-### 6.3 Five-round same-finding limit
+### 6.3 Five-round same-finding limit (exact counter semantics)
 
-If the same substantive finding/root cause survives **5 consecutive
-remediation rounds** (reviewer still says unresolved after the 5th fix), the
-run becomes `BLOCKED` and asks the user. This is a per-finding consecutive
-counter, **not** a global "5 reviews per task" cap. A new finding (P1-2)
-gets its own counter; a closed finding stops counting. Reviewer
-self-contradiction or oscillating requirements is a major issue immediately —
-no need to mechanically wait for 5.
+The counter field is `failed_remediation_rounds`, per finding/root cause:
+
+- The initial review that **discovers** a finding does NOT increment it —
+  discovery leaves the counter at 0.
+- It increments by 1 only when ALL three hold: a remediation for that root
+  cause was actually executed, the resulting new commit was submitted for
+  re-review, and the reviewer still judges the same root cause unresolved.
+- When the counter reaches 5 and the reviewer still fails that finding, the
+  run becomes `BLOCKED` and asks the user.
+
+Worked example: initial FAIL (0) → fix #1 + re-review FAIL (1) → fix #2 (2)
+→ fix #3 (3) → fix #4 (4) → fix #5 + re-review FAIL (5) → BLOCKED. This is
+a per-finding consecutive counter, **not** a global "5 reviews per task"
+cap. A new finding (P1-2) gets its own counter; a closed finding stops
+counting. Tests must cover the initial FAIL plus exactly five remediations
+to pin the boundary (blocking at 5, not at 4). Reviewer self-contradiction
+or oscillating requirements is a major issue immediately — no need to
+mechanically wait for 5.
 
 ### 6.4 Auto-advance
 
@@ -280,6 +309,50 @@ from `implement.md` at start; a Slice 4 added later is not implicitly
 authorized. "Finish the current task" snapshots all implementation units
 planned at that moment; later additions still need new authorization.
 
+### 8.1 Activation order (planning gate is preserved)
+
+An automation run may only be created after the Trellis planning gate, in
+this fixed order:
+
+1. planning artifacts complete for the task;
+2. planning review PASS, where the task requires it;
+3. reviewer target resolved (§5) AND its transport verified usable (§5.5) —
+   this MUST happen before `task.py start`; a missing or unusable reviewer
+   blocks here, never after start;
+4. user explicitly authorizes the unit range → snapshot `authorized_units`;
+5. `task.py start` exactly once → confirm `task.json.status == in_progress`;
+6. only then create/start the automation run;
+7. implementation begins.
+
+A task still in `status=planning` must never enter implementation through an
+automation run. Automation state never writes task status — `task.py
+start/finish/archive` remain the only writers — but the run refuses to start
+until `task.py start` has happened.
+
+### 8.2 Run durability and fail-closed corruption handling
+
+The run state must be sufficient to resume idempotently across turns and
+conversation compaction. Per unit it durably records at least:
+
+- a unit phase distinguishing: not started / implementing / ready for review
+  / awaiting review / remediating / passed;
+- the current submission: parent SHA, head SHA, review round, request kind
+  (`bootstrap` vs `rereview`), and the reviewer target it was submitted to;
+- whether the full reviewer bootstrap has already been sent for this task.
+
+A resumed turn must be able to tell "review request already sent, still
+waiting" from "not yet sent", and must never re-send a duplicate review,
+re-review the wrong SHA, treat a first review as a remediation, re-bootstrap
+a reviewer, or re-commit/re-advance a unit.
+
+**Corruption policy differs by state kind.** Corrupt *conversation context*
+fails to safe defaults (`executor_override=null`, `reviewer=null`) and never
+blocks read-only work. Corrupt *active automation run* is fail-CLOSED: it
+carries the user's authorization snapshot, per-unit progress, and remediation
+counters, so treating it as absent could bypass the authorized range or the
+5-round limit. A corrupt/unparseable run ⇒ `BLOCKED`: no implementation, no
+auto-advance, ask the user / require explicit recovery.
+
 ## 9. Config / Workflow / Provider Requirements
 
 - These semantics leave the core: `CLI -> Herdr`, `Desktop -> ask`,
@@ -290,10 +363,18 @@ planned at that moment; later additions still need new authorization.
   `inline` / current conversation. It must no longer express Herdr / DSH Web
   / reviewer.
 - Herdr and DSH Web become **optional explicit executor adapters** — only
-  relevant when the user explicitly picks them. Review granularity comes from
-  the user's authorized units / `implement.md`, never from the executor
-  provider. Whatever the executor (current Codex, Herdr, DSH Web, native
-  sub-agent), an authorized Slice 0–3 runs the same Slice review loop.
+  relevant when the user explicitly picks them — **but the providers that are
+  supported today must remain operational**. An explicit "use Herdr w6:p2"
+  or "use DSH Web" must still actually execute; a schema that can store
+  `provider=herdr` without any working adapter is a regression. The minimum
+  set is: `current` (built-in), `herdr` (keep the necessary
+  available/dispatch/collect capability), `dsh-web` (keep the browser
+  endpoint adapter). Do NOT speculatively add providers with no real
+  capability (no `codex-thread` in this task).
+- Review granularity comes from the user's authorized units / `implement.md`,
+  never from the executor provider. Whatever the executor (current Codex,
+  Herdr, DSH Web, native sub-agent), an authorized Slice 0–3 runs the same
+  Slice review loop.
 - No session-start auto-discovery of Herdr/DSH Web; discovery must not change
   the executor or block the current conversation. Discovery happens only when
   the user explicitly requests that provider.
@@ -309,14 +390,30 @@ planned at that moment; later additions still need new authorization.
 Old state: `.trellis/.runtime/routing/<context>.json`. New implementation
 needs one small, explicit, one-way, tested migration:
 
-- **Preserve**: old reviewer with a concrete target that was an explicit user
-  choice → new conversation automation context. Old executor that was an
-  explicit user choice with a still-supported provider → `executor_override`.
+- **Preserve** only proven explicit user choices: a legacy target migrates
+  automatically only when its recorded provenance is `selected_by="user"`.
+  - Legacy reviewer with `selected_by="user"` and a concrete reference → new
+    conversation automation context.
+  - Legacy executor with `selected_by="user"` and a still-supported provider
+    → `executor_override`.
+- **Ambiguous provenance is never silently bound**: any legacy reviewer or
+  executor whose provenance is `migration`, `policy`, `auto`, or unknown —
+  including reviewers produced by the legacy v1→v2 in-memory migration —
+  must NOT become the new persisted reviewer/override. It is either shown to
+  the user as a candidate requiring one explicit confirmation, or dropped to
+  `null` (`reviewer=null` ⇒ the normal ask-once flow; `executor_override=
+  null` ⇒ default current). Silent binding of an unconfirmed reviewer is
+  forbidden because the reviewer is exactly the role the user must confirm
+  once.
 - **Discard**: surface, CLI/Desktop detection results, host_routes results,
   auto-selected providers, retired MCP DSH, implicit Herdr selection,
   provider-specific workflow modes.
-- If a legacy executor cannot be confirmed as an explicit user choice →
-  `executor_override = null` (back to default current).
+- **Rollback safety**: the legacy file MUST be left in place byte-for-byte.
+  The new system reads it once, records a migration marker plus a source
+  fingerprint (e.g. content hash) in the new automation context, and never
+  depends on the legacy file again. Renaming or deleting the legacy file is
+  forbidden: an old checkout must still find its routing state intact after a
+  rollback. Cleanup of legacy files is a separate future task.
 
 ## 11. Acceptance Criteria
 
@@ -334,34 +431,46 @@ needs one small, explicit, one-way, tested migration:
 4. **Authorization**: "Slice 0–3" snapshots exactly 0/1/2/3; PASS advances
    0→1→2→3 and never enters 4; final PASS → `authorized_scope_complete`, no
    archive.
-5. **Remediation**: scoped FAIL → automatic fix; same-finding consecutive
-   failures 1–4 continue, failure at round 5 → BLOCKED + user; new finding →
-   independent counter; closed finding stops counting; ID renaming cannot
-   bypass the counter.
-6. **Scope/major issues**: out-of-scope reviewer demand or any §7 condition →
+5. **Remediation**: scoped FAIL → automatic fix; the initial discovering
+   FAIL leaves `failed_remediation_rounds = 0`; each completed remediation +
+   re-review still failing the same root cause increments it; rounds 1–4
+   continue, round 5 → BLOCKED + user; new finding → independent counter;
+   closed finding stops counting; ID renaming cannot bypass the counter.
+6. **Activation order**: no automation run exists before `task.py start`;
+   reviewer resolution + transport verification happen before `task.py
+   start`; `status=planning` can never enter implementation via a run;
+   automation never writes task status.
+7. **Reviewer transport**: the default ChatGPT reviewer is reachable through
+   a platform-native conversation send/read/wait capability; repo code never
+   calls unofficial ChatGPT APIs or browser-automates ChatGPT; unusable
+   transport before start → ask user; transport failure never degrades into
+   silent self-review.
+8. **Scope/major issues**: out-of-scope reviewer demand or any §7 condition →
    immediate STOP + user question.
-7. **Pending is not PASS**: idle/pending/silence/partial responses never
+9. **Pending is not PASS**: idle/pending/silence/partial responses never
    count as PASS; only explicit `FINAL: PASS`.
-8. **Bootstrap**: new task's first request is self-contained (§5.4 list);
+10. **Bootstrap**: new task's first request is self-contained (§5.4 list);
    same-task remediation requests are compact; same reviewer + new task →
    fresh full bootstrap.
-9. **Migration**: legacy surface/host-route/auto executor state has no effect
-   on the new executor; legacy explicit reviewer is preserved; legacy explicit
-   supported executor follows §10 rules; retired MCP DSH is not preserved.
-10. **Negative tests** prove the old behavior is gone: CLI marker does NOT
+11. **Migration**: legacy surface/host-route/auto executor state has no effect
+   on the new executor; legacy reviewer/executor migrates only with
+   `selected_by="user"` provenance (ambiguous provenance → confirm-or-null,
+   never silent); retired MCP DSH is not preserved; the legacy file is left
+   in place and the migration marker + fingerprint live in the new context.
+12. **Negative tests** prove the old behavior is gone: CLI marker does NOT
     imply Herdr; Desktop marker does NOT imply DSH Web; absence of Herdr does
     NOT block the current executor; absence of DSH Web does NOT block the
     current executor; routing defaults cannot override an explicit user
     target; provider type cannot alter Slice review granularity; final Slice
     PASS does NOT archive.
-11. **Anti-complexity invariant**: the new implementation keeps only three
+13. **Anti-complexity invariant**: the new implementation keeps only three
     concepts — conversation automation context (executor override +
     reviewer), task authorization (task + authorized units), review loop
     state (current unit, PASS/FAIL, finding remediation counters). No
     surface-specific policy, host routes, provider-specific workflow-state,
     provider-specific review semantics, auto provider election, or
     candidate-election-as-permission.
-12. **Scope guard**: full Trellis test suite passes; no MosDNS runtime code,
+14. **Scope guard**: full Trellis test suite passes; no MosDNS runtime code,
     Cargo manifests, WebUI, DNS behavior, Phase 5A benchmark semantics, or
     deployment files are modified.
 

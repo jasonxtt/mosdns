@@ -89,3 +89,44 @@ Evidence gathered 2026-09-21 by direct code inspection of branch `rust`
 - Test runner used by this repo: `python3 -m unittest` style
   (`test_codex_routing.py` uses `unittest`); confirm discover command in
   Slice 0 before writing new tests.
+
+---
+
+## Addendum — Planning review remediation (2026-09-21)
+
+Root reviewer returned FINAL: FAIL on planning commit e632a41 (P0:0, P1:7,
+P2:1). All findings were planning-artifact gaps; remediation stayed inside
+the task directory. How each was addressed:
+
+- **P1-1 (planning gate not wired)**: fixed activation order added —
+  artifacts → planning PASS → reviewer resolved AND transport-verified →
+  unit authorization snapshot → `task.py start` once → confirm
+  `in_progress` → create run (prd §8.1, design §2.3 entry gate, implement
+  Slice 2). A `planning` task can never enter implementation via a run.
+- **P1-2 (no reviewer transport)**: narrow ChatGPT reviewer transport
+  contract added (prd §5.5, design §2.4a, implement Slice 3): platform-native
+  send/read/wait, no unofficial APIs / no browser automation, transport
+  verified before `task.py start`, failure ⇒ ask user, never silent
+  self-review; fake-adapter unit tests.
+- **P1-3 (adapters promised but not planned)**: Herdr/DSH Web discovery and
+  dispatch helpers are MOVED into adapter modules
+  (`automation_herdr.py` / `automation_dsh_web.py`), not deleted; explicit
+  overrides stay operational (design §2.2, implement Slice 1/4).
+  Speculative `codex-thread` dropped.
+- **P1-4 (run state not resumable)**: durable per-unit review state added —
+  `phase`, `submission{parent_sha, head_sha, review_round, request_kind,
+  submitted_to}`, run-level `reviewer_bootstrap_sent` (design §2.1(B),
+  implement Slice 2).
+- **P1-5 (corrupt run treated as absent)**: split corruption policy —
+  conversation context → safe defaults; active run → fail-CLOSED `BLOCKED`
+  (prd §8.2, design §4).
+- **P1-6 (5-round off-by-one)**: counter renamed `failed_remediation_rounds`;
+  initial discovery = 0; +1 only after executed + resubmitted remediation
+  still fails; boundary test pins BLOCKED at round 5 (prd §6.3, implement
+  Slice 3).
+- **P1-7 (migration provenance + rollback)**: auto-migrate only
+  `selected_by="user"`; ambiguous provenance (incl. legacy v1-migrated
+  reviewers stamped `migration`) → confirm-or-null, never silent; legacy
+  file left in place byte-for-byte with `migrated_from: {path, sha256}`
+  fingerprint in the new context (prd §10, design §2.5, implement Slice 0).
+- **P2 (jsonl `_example` seed lines)**: removed from both manifests.
