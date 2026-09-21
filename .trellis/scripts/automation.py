@@ -29,6 +29,7 @@ from common.automation_run import (
     record_fail,
     record_pass,
 )
+from common.automation_review import parse_review_result, persist_review_result
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -79,6 +80,11 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--context")
         command.add_argument("--unit")
         command.add_argument("--result", help="JSON result payload")
+
+    review = sub.add_parser("record-review", help="parse and persist one reviewer response")
+    review.add_argument("--context")
+    review.add_argument("--unit", required=True)
+    review.add_argument("--text", required=True)
 
     complete_command = sub.add_parser("complete", help="advance after a recorded PASS")
     complete_command.add_argument("--context")
@@ -146,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
         context = record_pass(root, key, unit=args.unit, result=_result(args.result))
     elif args.command == "record-fail":
         context = record_fail(root, key, unit=args.unit, result=_result(args.result))
+    elif args.command == "record-review":
+        context = persist_review_result(root, key, args.unit, parse_review_result(args.text))
     elif args.command == "complete":
         context = complete(root, key)
     elif args.command == "migrate":

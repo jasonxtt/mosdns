@@ -223,6 +223,17 @@ only to the next pre-authorized unit. Final PASS never authorizes extra work,
 archive/finish, a new task, production, or deployment. Stop for a major issue
 or the five-round remediation limit; otherwise continue through the authorized
 range and leave task lifecycle writes to `task.py`.
+
+Automation runbook: before `task.py start`, resolve the reviewer, verify its
+platform-native transport, and snapshot the user-authorized unit range. The
+post-start run may be created only from that frozen snapshot. For each unit,
+record the exact parent/head SHA and reviewer target before sending a request;
+send the full self-contained bootstrap once per task, then use compact
+re-review requests. Pending, idle, silent, or partial reviewer responses are
+not PASS. A scoped FAIL records its finding ledger and is remediated only
+within the current unit; the initial finding count is zero and the same root
+cause blocks at five failed remediation rounds. Out-of-scope findings and
+reviewer transport failures are immediate blocked/major-issue stops.
 [/workflow-state:in_progress]
 
 ### Phase 3: Finish
