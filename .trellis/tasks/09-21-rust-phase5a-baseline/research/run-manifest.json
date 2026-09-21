@@ -1,42 +1,58 @@
 {
   "schema_version": 1,
-  "official_frozen": false,
-  "purpose": "Slice 0 schema/template only; official Linux amd64 values are frozen after the bounded pilot.",
+  "official_frozen": true,
+  "purpose": "Frozen Linux amd64 Go-only baseline schedule after bounded pilot; all official runs use this manifest unchanged.",
   "source_anchor": "e70a2408e2dcd2141e48bcc84765c5adfa406fe4",
+  "task_revision": "5b1eca69e0668ad1ddb6db88c0f39202557d5b98",
   "platform": {
     "os": "linux",
     "arch": "amd64"
   },
   "sut": {
-    "binary_path": "",
-    "binary_sha256": "",
-    "git_sha": "",
-    "go_version": "",
+    "binary_path": ".trellis/tasks/09-21-rust-phase5a-baseline/research/results/official-build-20260921/mosdns-go",
+    "binary_sha256": "50ff4ff29a2ac23ede0dc8722672c428ceb441dde0b98bf47032e709427a3183",
+    "git_sha": "5b1eca69e0668ad1ddb6db88c0f39202557d5b98",
+    "go_version": "go1.26.5 linux/amd64",
     "build_command": "SKIP_UI_BUILD=1 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO_TAGS='' OUTPUT=<isolated-output>/mosdns-go ./scripts/build-local.sh",
     "rust_backend_selectors": {}
   },
   "fixed_inputs": {
-    "configs": [],
-    "workloads": [],
+    "configs": [
+      {"path": "tests/phase5a-baseline/configs/forward-udp.yaml", "sha256": "f6758fb2b2eb8056d6d1c2aef320a3357d005b92685136dec457d5543bd9d729"},
+      {"path": "tests/phase5a-baseline/configs/forward-tcp.yaml", "sha256": "1a2280f44ad07ec2111eeb09f6d1904e66b65d52a20f2df1bb14fff22458b8a1"},
+      {"path": "tests/phase5a-baseline/configs/cache.yaml", "sha256": "7f521ae011c28b4e102ff75437ebb943ba11f4bdc09aa656c41290ccde4b61c7"},
+      {"path": "tests/phase5a-baseline/configs/routing.yaml", "sha256": "66f358dbe2315df2aab1ad81668cec980b2f11aa68f863acad522c8e0c9fc651"}
+    ],
+    "workloads": [
+      {"path": "tests/phase5a-baseline/workloads/forward.jsonl", "sha256": "32ae1a43cae5f4e85b0a058d389d2071a8d7cf844aad98b31137f95b57715aa2"},
+      {"path": "tests/phase5a-baseline/workloads/cache.jsonl", "sha256": "7680cd55ccf477972cd700c05e72c83c52ab1a55643b9a98bb610629035214ed"},
+      {"path": "tests/phase5a-baseline/workloads/routing.jsonl", "sha256": "dbb582dc9d623af54e501639b7a52538b1e1d9e493fa0f0f6a4f4714ea0176c1"}
+    ],
+    "runner": {"path": "scripts/run-phase5a-baseline.sh", "sha256": "6bc9331d6b85f65ee347e52f6fbd2079304b500582a6bfbc21fcef19116f1782"},
+    "helper_source": {"path": "tests/phase5a-baseline/cmd/phase5a-baseline/main.go", "sha256": "0b53a45a0b6035ff806282d8655e91a561b30d2eac50d7a9d651661aa228d309"},
     "hash_algorithm": "sha256"
   },
   "official_schedule": {
-    "scenario_order": [],
-    "repetitions": 0,
-    "offered_qps": [],
-    "stage_duration_seconds": 0,
+    "scenario_order": ["w1-udp", "w1-tcp", "w2", "w3"],
+    "repetitions": 3,
+    "offered_qps": [5, 10, 20],
+    "stage_duration_seconds": 10,
     "warmup_seconds": 0,
-    "request_deadline_ms": 0,
-    "late_drain_ms": 0,
+    "request_deadline_ms": 500,
+    "late_drain_ms": 100,
     "fixture_delay_ms": 0,
-    "tcp_connection_policy": "fresh-connection-per-request (Slice 0 helper default; freeze before official runs)"
+    "tcp_connection_policy": "fresh-connection-per-request",
+    "sut_startup_margin_seconds": 3,
+    "warm_prefill": "one-pass over the committed W2 hot set, outside measured timing, with exact upstream counter delta barrier"
   },
   "isolation": {
-    "sut_cpu_set": "",
-    "harness_cpu_set": "",
-    "memory_limit": "",
-    "fd_limit": "",
-    "affinity_authoritative": false
+    "runtime": "Colima QEMU Linux VM, docker container --platform linux/amd64",
+    "container_cpus": 4,
+    "sut_cpu_set": "0,1",
+    "harness_cpu_set": "2,3",
+    "memory_limit": "6 GiB VM/container",
+    "fd_limit": 1024,
+    "affinity_authoritative": true
   },
-  "results_root": ".trellis/tasks/09-21-rust-phase5a-baseline/research/results"
+  "results_root": ".trellis/tasks/09-21-rust-phase5a-baseline/research/results/official-20260921"
 }
