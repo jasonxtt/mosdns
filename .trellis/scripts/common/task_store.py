@@ -151,15 +151,15 @@ def _has_subagent_platform(repo_root: Path) -> bool:
     """Return True if any sub-agent-capable platform is configured.
 
     Detected by probing well-known config directories at the repo root. Codex
-    counts by default through ``codex.dispatch_mode: auto`` (including the
-    legacy ``sub-agent`` alias); explicit inline mode loads context through
-    skills, not JSONL.
+    counts only when ``codex.dispatch_mode`` is explicitly ``sub-agent``
+    (with legacy ``auto`` normalized by the config helper); inline mode loads
+    context through skills, not JSONL.
     """
     for config_dir in _SUBAGENT_CONFIG_DIRS:
         if (repo_root / config_dir).is_dir():
             return True
     if (repo_root / _CODEX_CONFIG_DIR).is_dir():
-        return get_codex_dispatch_mode(repo_root) == "auto"
+        return get_codex_dispatch_mode(repo_root) == "sub-agent"
     return False
 
 

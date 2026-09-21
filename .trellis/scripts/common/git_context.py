@@ -28,9 +28,6 @@ from .packages_context import (
     get_context_packages_json,
 )
 from .trellis_config import read_trellis_config
-from .active_task import resolve_context_key
-from .codex_routing import detect_surface, load_state, resolve_codex_provider
-from .paths import get_repo_root
 from .workflow_phase import (
     filter_platform,
     get_phase_index,
@@ -40,20 +37,6 @@ from .workflow_phase import (
 
 # Backward-compatible alias — external modules import this name
 _run_git_command = run_git
-
-
-def _resolve_codex_routing():
-    """Use conversation targets/overrides before detecting the current host."""
-    detected = detect_surface()
-    root = get_repo_root()
-    key = resolve_context_key(platform="codex")
-    state = {}
-    if key:
-        state = load_state(root, key)
-        persisted = state.get("surface")
-        if isinstance(persisted, dict):
-            detected = persisted
-    return detected, resolve_codex_provider(root, detected, state)
 
 
 # =============================================================================
@@ -107,12 +90,8 @@ def main() -> None:
             else:
                 parser.exit(2, "Phase Index section not found in workflow.md\n")
         if args.platform:
-            surface = None
-            provider = None
-            if args.platform == "codex":
-                surface, provider = _resolve_codex_routing()
             effective = resolve_effective_platform(
-                args.platform, read_trellis_config(), surface=surface, provider=provider
+                args.platform, read_trellis_config()
             )
             content = filter_platform(content, effective)
         print(content, end="")

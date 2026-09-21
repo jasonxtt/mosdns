@@ -147,78 +147,23 @@ def resolve_effective_platform(
     surface: str | dict | None = None,
     provider: str | None = None,
 ) -> str:
-    """Map ``codex`` to a dispatch-mode-namespaced virtual platform name.
+    """Map Codex to the one of two generic workflow execution modes.
 
-    When ``--platform codex`` is passed, return ``"codex-sub-agent"`` by
-    default for compatibility. When a detected ``surface`` is supplied,
-    ``auto`` resolves to the configured host provider and returns
-    ``codex-herdr``, ``codex-dsh-web``, or ``codex-auto``. The retired MCP
-    ``dsh`` mode fails closed.
-    ``filter_platform`` then surfaces blocks whose marker lists include the
-    namespaced name (e.g. ``[codex-sub-agent, ...]``, ``[codex-inline, Kilo,
-    Antigravity, Devin]``, ``[codex-dsh-web, codex-auto]``, or
-    ``[codex-herdr]``).
-
-    Native Codex context injection supports the ``auto`` default. Invalid
-    explicit values resolve to ``codex-auto`` safely; this renderer
-    deliberately does not warn because it can run in normal CLI output flows.
-
-    Other platforms are returned unchanged.
+    ``surface`` and ``provider`` remain ignored keyword parameters for callers
+    that have not yet migrated, but they never influence lifecycle or phase
+    filtering. Other platforms are returned unchanged.
     """
+    del surface, provider
     if platform == "codex":
-        if provider == "codex":
-            return "codex-inline"
-        if provider == "herdr":
-            return "codex-herdr"
-        if provider == "dsh-web":
-            return "codex-dsh-web"
-        if provider in {"ask", "dsh", "unsupported"}:
-            return "codex-auto"
-        mode = "auto"
+        mode = "inline"
         codex_cfg = config.get("codex") if isinstance(config, dict) else None
-        if codex_cfg is not None:
-            if not isinstance(codex_cfg, dict):
-                mode = "ask"
-            else:
-                cfg_mode = str(codex_cfg.get("dispatch_mode", mode)).strip().lower()
-                if cfg_mode == "inline":
-                    mode = "inline"
-                elif cfg_mode == "herdr":
-                    mode = "herdr"
-                elif cfg_mode == "dsh-web":
-                    mode = "dsh-web"
-                elif cfg_mode in ("auto", "sub-agent"):
-                    mode = "auto"
-                elif cfg_mode == "dsh":
-                    mode = "ask"
-                elif cfg_mode == "ask":
-                    mode = "ask"
-                else:
-                    mode = "ask"
-        if mode == "auto":
-            if surface is None:
-                return "codex-sub-agent"
-            if isinstance(surface, dict):
-                surface_kind = str(surface.get("kind", "unknown"))
-            else:
-                surface_kind = str(surface)
-            routes = codex_cfg.get("host_routes", {}) if isinstance(codex_cfg, dict) else {}
-            defaults = {"cli": "herdr", "desktop": "ask", "unknown": "ask"}
-            route = routes.get(surface_kind, defaults.get(surface_kind, "ask")) if isinstance(routes, dict) else defaults.get(surface_kind, "ask")
-            if route == "herdr":
-                return "codex-herdr"
-            if route == "dsh-web":
-                return "codex-dsh-web"
-            if route in ("codex", "inline"):
-                return "codex-inline"
-            return "codex-auto"
-        if mode in ("codex", "inline"):
-            return "codex-inline"
-        if mode == "herdr":
-            return "codex-herdr"
-        if mode == "dsh-web":
-            return "codex-dsh-web"
-        return "codex-auto"
+        if isinstance(codex_cfg, dict):
+            cfg_mode = str(codex_cfg.get("dispatch_mode", mode)).strip().lower()
+            if cfg_mode in {"auto", "sub-agent"}:
+                mode = "sub-agent"
+            elif cfg_mode == "inline":
+                mode = "inline"
+        return f"codex-{mode}"
     return platform
 
 

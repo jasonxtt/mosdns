@@ -3,6 +3,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from common.automation import (
     AutomationContext,
@@ -17,6 +19,18 @@ from common.automation import (
     set_executor,
     set_reviewer,
     validate_target,
+)
+from common.automation_dsh_web import (
+    available as dsh_web_available,
+    collect as dsh_web_collect,
+    dispatch as dsh_web_dispatch,
+    discover_dsh_web,
+)
+from common.automation_herdr import (
+    available as herdr_available,
+    collect as herdr_collect,
+    dispatch as herdr_dispatch,
+    discover_herdr,
 )
 
 
@@ -245,6 +259,87 @@ class AutomationContextTest(unittest.TestCase):
         self.assertEqual(second.reviewer["reference"], "new-reviewer")
         self.assertEqual(second.executor_override["reference"], "w1:p2")
         self.assertEqual(second.migrated_from["sha256"], hashlib.sha256(raw).hexdigest())
+
+
+class ExplicitAdapterTest(unittest.TestCase):
+    def test_herdr_discovery_and_availability_use_fake_transport_boundary(self):
+        payload = {
+            "result": {
+                "agents": [
+                    {"pane_id": "w1:p1", "workspace_id": "w1", "agent": "codex", "focused": True},
+                    {"pane_id": "w1:p2", "workspace_id": "w1", "agent": "claude", "focused": False},
+                ]
+            }
+        }
+        completed = SimpleNamespace(stdout=json.dumps(payload))
+        with mock.patch(
+            "common.automation_herdr.subprocess.run", return_value=completed
+        ) as run:
+            inventory = discover_herdr(("herdr", "agent", "list"))
+        run.assert_called_once()
+        target = {"provider": "herdr", "reference": "w1:p2", "workspace_id": "w1"}
+        self.assertTrue(herdr_available(target, inventory))
+        self.assertTrue(
+            herdr_available(
+                {
+                    "provider": "herdr",
+                    "reference": "w1:p2",
+                    "metadata": {"workspace_id": "w1", "executor_pane_id": "w1:p2"},
+                },
+                inventory,
+            )
+        )
+        self.assertFalse(herdr_available({"provider": "herdr", "reference": "w1:p9", "workspace_id": "w1"}, inventory))
+
+        class FakeTransport:
+            def __init__(self):
+                self.calls = []
+
+            def dispatch(self, selected, prompt):
+                self.calls.append(("dispatch", selected, prompt))
+                return "sent"
+
+            def collect(self, selected):
+                self.calls.append(("collect", selected))
+                return "result"
+
+        transport = FakeTransport()
+        self.assertEqual(herdr_dispatch("review Slice 1", target=target, transport=transport), "sent")
+        self.assertEqual(herdr_collect(target=target, transport=transport), "result")
+        self.assertEqual([call[0] for call in transport.calls], ["dispatch", "collect"])
+
+    def test_dsh_web_discovery_normalizes_explicit_browser_target(self):
+        completed = SimpleNamespace(
+            stdout="3003 node /opt/dsh web --port 3080 --trusted-host dsh.example.test\n"
+        )
+        with mock.patch("common.automation_dsh_web.subprocess.run", return_value=completed) as run:
+            inventory = discover_dsh_web(("ps", "-axo", "pid=,command="))
+        run.assert_called_once()
+        target = {"provider": "dsh-web", "reference": "https://dsh.example.test/"}
+        self.assertTrue(dsh_web_available(target, inventory))
+        self.assertFalse(dsh_web_available({"provider": "dsh-web", "reference": "https://other.test/"}, inventory))
+
+        class FakeTransport:
+            def dispatch(self, selected, prompt):
+                return (selected["reference"], prompt)
+
+            def collect(self, selected):
+                return selected["reference"]
+
+        transport = FakeTransport()
+        self.assertEqual(
+            dsh_web_dispatch("review Slice 1", target=target, transport=transport),
+            (target["reference"], "review Slice 1"),
+        )
+        self.assertEqual(dsh_web_collect(target=target, transport=transport), target["reference"])
+
+    def test_adapters_do_not_fake_transport_when_not_supplied(self):
+        herdr_target = {"provider": "herdr", "reference": "w1:p2", "workspace_id": "w1"}
+        dsh_target = {"provider": "dsh-web", "reference": "https://dsh.example.test/"}
+        with self.assertRaisesRegex(RuntimeError, "transport is not available"):
+            herdr_dispatch("prompt", target=herdr_target)
+        with self.assertRaisesRegex(RuntimeError, "transport is not available"):
+            dsh_web_dispatch("prompt", target=dsh_target)
 
 
 if __name__ == "__main__":

@@ -166,6 +166,47 @@ def _resolve_context_key(project_dir: Path, hook_input: dict) -> str | None:
     return resolve_context_key(hook_input, platform="codex")
 
 
+def _automation_summary(project_dir: Path, hook_input: dict) -> str | None:
+    """Return one line for an existing conversation automation context.
+
+    This is intentionally a file read only. It does not inspect the host,
+    discover providers, or create an automation context for a new session.
+    """
+    scripts_dir = project_dir / ".trellis" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from common.automation import (  # type: ignore[import-not-found]
+            context_path,
+            legacy_routing_path,
+            load_context,
+            resolve_executor,
+        )
+    except Exception:
+        return None
+
+    key = _resolve_context_key(project_dir, hook_input)
+    if not key:
+        return None
+    if not context_path(project_dir, key).is_file() and not legacy_routing_path(project_dir, key).is_file():
+        return None
+
+    try:
+        context = load_context(project_dir, key)
+        executor = resolve_executor(context)
+        if executor == "current":
+            executor_summary = "current"
+        elif isinstance(executor, dict):
+            executor_summary = "explicit override"
+        else:
+            executor_summary = "current"
+        reviewer = context.reviewer
+        reviewer_summary = "selected" if isinstance(reviewer, dict) else "missing"
+        return f"Automation: executor={executor_summary}; reviewer={reviewer_summary}; run=none."
+    except Exception:
+        return "Automation: executor=current; reviewer=missing; run=none."
+
+
 def _resolve_active_task(trellis_dir: Path, hook_input: dict):
     scripts_dir = trellis_dir / "scripts"
     if str(scripts_dir) not in sys.path:
@@ -396,6 +437,10 @@ def _build_compact_current_state(
         lines.append(f"Current task: {_repo_relative(repo_root, task_dir)}; status={status}.")
     else:
         lines.append("Current task: none.")
+
+    automation_summary = _automation_summary(repo_root, hook_input)
+    if automation_summary:
+        lines.append(automation_summary)
 
     if get_tasks_dir and iter_active_tasks:
         try:
