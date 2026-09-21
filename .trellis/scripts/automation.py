@@ -19,6 +19,15 @@ from common.automation import (
     set_executor,
     set_reviewer,
 )
+from common.automation_run import (
+    ActivationError,
+    AutomationRunError,
+    authorize,
+    complete,
+    load_run,
+    record_fail,
+    record_pass,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -46,6 +55,28 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("clear-executor", "clear-reviewer"):
         command = sub.add_parser(name)
         command.add_argument("--context")
+
+    authorize_command = sub.add_parser("authorize", help="snapshot authorized implementation units")
+    authorize_command.add_argument("task")
+    authorize_command.add_argument("--units", default="all")
+    authorize_command.add_argument("--context")
+    authorize_command.add_argument(
+        "--reviewer-verified",
+        action="store_true",
+        help="assert that the host-level reviewer transport probe already passed",
+    )
+
+    status = sub.add_parser("run-status", help="show the active automation run")
+    status.add_argument("--context")
+
+    for name in ("record-pass", "record-fail"):
+        command = sub.add_parser(name)
+        command.add_argument("--context")
+        command.add_argument("--unit")
+        command.add_argument("--result", help="JSON result payload")
+
+    complete_command = sub.add_parser("complete", help="advance after a recorded PASS")
+    complete_command.add_argument("--context")
 
     return parser
 
@@ -78,12 +109,39 @@ def _metadata(raw: str | None) -> dict[str, Any] | None:
     return value
 
 
+def _result(raw: str | None) -> Any:
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--result must be valid JSON: {exc}") from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     root = _root()
     key = _context_key(args)
 
-    if args.command == "migrate":
+    if args.command == "authorize":
+        context = authorize(
+            root,
+            args.task,
+            args.units,
+            context_key=key,
+            reviewer_transport_verified=args.reviewer_verified,
+        )
+    elif args.command == "run-status":
+        run = load_run(root, key)
+        print(json.dumps(run.to_dict() if run is not None else {"status": "none"}, indent=2, ensure_ascii=False))
+        return 0
+    elif args.command == "record-pass":
+        context = record_pass(root, key, unit=args.unit, result=_result(args.result))
+    elif args.command == "record-fail":
+        context = record_fail(root, key, unit=args.unit, result=_result(args.result))
+    elif args.command == "complete":
+        context = complete(root, key)
+    elif args.command == "migrate":
         context = migrate_legacy_routing(root, key)
     else:
         context = load_context(root, key)
@@ -120,6 +178,6 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (RuntimeError, ValueError) as exc:
+    except (ActivationError, AutomationRunError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
