@@ -33,6 +33,13 @@ from common.automation_herdr import (
     dispatch as herdr_dispatch,
     discover_herdr,
 )
+from common.codex_routing import (
+    RoutingDeprecatedError,
+    detect_surface,
+    load_state as legacy_load_state,
+    resolve_codex_provider,
+    set_target as legacy_set_target,
+)
 
 
 class AutomationContextTest(unittest.TestCase):
@@ -260,6 +267,38 @@ class AutomationContextTest(unittest.TestCase):
         self.assertEqual(second.reviewer["reference"], "new-reviewer")
         self.assertEqual(second.executor_override["reference"], "w1:p2")
         self.assertEqual(second.migrated_from["sha256"], hashlib.sha256(raw).hexdigest())
+
+    def test_legacy_routing_shim_forwards_explicit_targets_to_automation_context(self):
+        executor = legacy_set_target(
+            self.root,
+            "codex_one",
+            "executor",
+            "herdr",
+            "w1:p2",
+            label="worker",
+        )
+        self.assertEqual(executor["executor_override"]["provider"], "herdr")
+        self.assertTrue((self.root / ".trellis/.runtime/automation/codex_one.json").exists())
+
+        reviewer = legacy_set_target(
+            self.root,
+            "codex_one",
+            "reviewer",
+            "chatgpt",
+            "conversation-1",
+            label="root review",
+        )
+        self.assertEqual(reviewer["reviewer"]["reference"], "conversation-1")
+        loaded = legacy_load_state(self.root, "codex_one")
+        self.assertNotIn("surface", loaded)
+        self.assertNotIn("executor", loaded)
+        self.assertEqual(loaded["executor_override"]["reference"], "w1:p2")
+
+    def test_legacy_surface_and_provider_policy_shims_fail_closed(self):
+        for operation in (detect_surface, resolve_codex_provider):
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaises(RoutingDeprecatedError):
+                    operation(self.root, "desktop")
 
 
 class ExplicitAdapterTest(unittest.TestCase):

@@ -37,9 +37,10 @@ acceptance review, or an explicit user request to have a ChatGPT web
 conversation review the work. It applies to planning documents and to
 implementation changes that must be reviewed through GitHub.
 
-The local Codex task is the controller; execution follows the conversation's
-selected mode (self/inline, native sub-agent, Herdr, or browser-backed DSH Web).
-MCP DSH is retired and must not be dispatched.
+The local Codex task is the controller; execution defaults to the current
+conversation and may use a user-selected native sub-agent, Herdr, or
+browser-backed DSH Web adapter. No provider is selected from host surface, and
+retired MCP DSH is never dispatched.
 The selected reviewer may be a ChatGPT web conversation or the current Codex
 conversation when the user explicitly chooses self-review. The user remains
 the authority for which executor/reviewer is used and whether the next phase
@@ -55,8 +56,9 @@ may begin.
   conversation must review the GitHub commit and repository evidence; an
   explicitly selected current-Codex reviewer performs the same evidence-based
   self-review locally. Either must return an explicit PASS or FAIL and identify
-  the next authorized scope. Review is not authorization to silently start
-  later phases.
+  the next authorized scope. An active run may advance only to the next unit
+  already frozen in the user's authorization snapshot; review never authorizes
+  work beyond that range.
 - The user selects or confirms the destination conversation. Conversations may
   change between review rounds, but Codex must ask the user for confirmation
   before sending work to a different conversation or when the destination is
@@ -101,8 +103,10 @@ evidence, Codex stops and asks the user before continuing.
 - When the reviewer returns a `FAIL` that requires a scope change, missing
   evidence, user choice, or a different conversation, Codex stops and asks the
   user. It must not widen the diff or change review destinations on its own.
-- When the reviewer returns `PASS`, Codex records the result and stops at the
-  authorized boundary. `PASS` never automatically authorizes the next Slice.
+- When the reviewer returns `PASS`, Codex records the result and advances only
+  within an active pre-authorized run. A final PASS stops at the authorized
+  boundary; PASS never authorizes a new task, production, deployment, or
+  unrelated scope.
 
 ### 4. Validation and error matrix
 
@@ -112,7 +116,7 @@ evidence, Codex stops and asks the user before continuing.
 | Reviewer returns FAIL with scoped fixes | Apply only those fixes, rerun focused checks, commit/push, and request another review |
 | Reviewer returns FAIL requiring a scope change | Stop and ask the user; do not widen the diff |
 | Reviewer is active or has not returned a formal result | Wait/read again; do not modify or start the next phase |
-| Reviewer returns PASS | Record the result and stop at the approved boundary |
+| Reviewer returns PASS | Record it; advance only to the next frozen unit, or stop at the approved boundary |
 | Push fails or remote differs from local | Diagnose the push/branch state; do not claim review requested |
 | Unrelated dirty files are present | Preserve them and stage exact task files only |
 
@@ -133,12 +137,13 @@ The normal loop is:
 8. On a scoped FAIL, automatically return to step 1 and repeat only the
    bounded remediation loop; on a scope-changing FAIL or user-input request,
    stop and ask the user.
-9. On PASS, stop. Do not automatically run task.py start, begin a later Slice,
-   advance the phase, wire production, or create a follow-up task.
+9. On PASS, advance only to the next unit in the already-authorized run. Do not
+   run `task.py start` again, exceed the frozen range, wire production, deploy,
+   archive/finish, or create a follow-up task.
 
-The user explicitly decides when a passed review should become the next phase.
-Review PASS authorizes only the scope stated by the reviewer and never implies
-automatic continuation.
+The user's pre-start authorization decides the maximum range. Review PASS
+authorizes only the next unit inside that snapshot and never implies
+continuation beyond it.
 
 ### 6. Required checks and evidence
 
@@ -170,280 +175,53 @@ scoped commit, send its GitHub evidence, read the explicit reviewer result,
 repeat bounded fixes until PASS, then stop and wait for the user's next-phase
 decision.
 
-## Host-aware Codex routing and explicit self-selection
+## Conversation-scoped automation contract
 
-When `codex.dispatch_mode: auto` is active, detect the execution surface from
-strong host evidence only: Codex CLI maps to the Herdr provider and Codex
-Desktop/App fails closed to an explicit choice. Discovery may recommend a
-running DSH Web browser endpoint, but the repository policy selects only a
-provider class, not a Herdr pane, DSH Web URL, model, or reviewer. Persist
-concrete targets under the current Codex conversation identity and never infer
-them from pane position, terminal title, cwd, executable presence, or recency.
+Trellis keeps three separate concerns: the conversation automation context,
+task authorization, and the active review loop. The context lives under
+`.trellis/.runtime/automation/<context>.json` and contains only an optional
+explicit `executor_override` plus a generic `reviewer` target. A fresh context
+uses the current conversation as executor and has no reviewer; missing optional
+providers never change that default or block read-only work.
 
-The user may override either role in the conversation with an explicit target,
-including `executor=codex` and `reviewer=codex`. That means the current Codex
-session owns implementation and the independent self-review gate for this
-authorized task; it is not an implicit fallback when an external provider is
-missing. A reviewer replacement or invalidation changes only the reviewer
-slot, and an executor failure changes only the executor slot. Unknown or
-conflicting surface evidence resolves to `ask` and must be handled with one
-combined selection question before implementation/review.
+An explicit target wins over the default, regardless of host surface or
+provider availability. Herdr and DSH Web are narrow explicit adapters: their
+`available`, `dispatch`, and `collect` operations run only when the user has
+selected that provider and a host transport is supplied. Adapter discovery is
+not performed by session-start or per-turn hooks, and an unavailable explicit
+target is not silently replaced.
 
-### 1. Scope / Trigger
+Task authorization snapshots the user-approved implementation units before
+`task.py start`; activation after the task is `in_progress` creates the run
+from that immutable snapshot. The automation run never writes task lifecycle
+state. Review granularity comes from the authorized Slice range, not from the
+executor provider or host surface.
 
-This contract applies when the Codex CLI/Desktop distinction, conversation
-target state, hook banner, workflow filtering, or provider policy changes. It
-is an infrastructure boundary, not MosDNS runtime behavior.
+Each authorized unit follows implement → validate → exact commit/push →
+independent reviewer. The first request is a self-contained bootstrap; same-
+task re-reviews are compact and pinned to exact parent/head SHAs. Only an
+explicit `FINAL: PASS` advances to the next pre-authorized unit. Pending,
+partial, idle, or silent responses are not PASS. A scoped FAIL may be
+remediated and resubmitted, but the initial discovery is round zero and the
+same semantic root cause blocks after five executed remediation rounds. Open
+findings, out-of-scope requests, contradictory PASS results, corrupt run state,
+or transport failure fail closed. Final PASS leaves the task `in_progress` and
+never archives, finishes, starts another task, wires production, or deploys.
 
-### 2. Signatures
+Legacy routing imports are compatibility-only. The deprecated shim forwards
+context reads/writes to `common.automation` and raises for removed surface,
+dispatch, or provider-policy operations. Existing Herdr and DSH Web discovery
+names re-export their explicit adapter implementations so callers can migrate
+without restoring host-aware routing semantics.
 
-- `detect_surface(environ: dict | None = None, *, explicit: str | None = None)`
-  returns `SurfaceEvidence(kind, source, evidence, reason)`.
-- `resolve_codex_provider(repo_root, surface, state: dict | None = None)` returns
-  a provider class (`codex`, `dsh-web`, `herdr`, `ask`, or `unsupported`) and
-  never a concrete pane, browser endpoint, worker, model, or conversation.
-- `codex_routing.py set-executor --provider <name> --reference <opaque-ref>`
-  and `set-reviewer` persist only the named conversation slot; `set-surface`
-  persists an explicit `cli`, `desktop`, or `unknown` override.
+### Required regressions
 
-### 3. Contracts
-
-- Routing state is v2 JSON at `.trellis/.runtime/routing/<context>.json` with
-  `surface`, `executor`, and `reviewer` slots. Each target has `provider`,
-  `reference`, `label`, and `selected_by`; provider metadata is optional.
-- Strong host evidence is name-only: `CODEX_SURFACE`/
-  `CODEX_HOST_SURFACE`, `CODEX_APP_TOOLS_PIPE_PATH` (Desktop/App), and
-  `CODEX_CLI_SURFACE`/`CODEX_CLI` (CLI). Values and paths are never emitted.
-- `auto` maps `cli -> herdr`, `desktop -> ask`, and `unknown -> ask` through
-  `codex.host_routes`; a valid persisted executor override takes precedence.
-  `dsh-web` means the explicitly selected browser UI endpoint and is distinct
-  from the retired MCP `dsh` provider.
-- `executor=codex` and `reviewer=codex` mean explicit current-session
-  self-execution/self-review, not an implicit fallback.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|---|---|
-| App-only marker | `desktop`, evidence contains marker name |
-| CLI-only marker | `cli`, evidence contains marker name |
-| Missing or conflicting markers | `unknown`, provider `ask`, combined prompt |
-| Invalid policy/provider | `ask`/`unsupported`; never choose another target |
-| Missing Herdr pane or invalid reviewer target | Invalidate only the affected slot |
-| Valid v1 state | Migrate in memory to v2; preserve identity/metadata |
-
-### 5. Good/Base/Bad Cases
-
-- Good: Desktop evidence resolves to `ask`; discovery recommends a running
-  `dsh-web:<browser-url>` endpoint when present, and the parent requests an
-  explicit executor while keeping the reviewer selection independent.
-- Base: unknown evidence leaves both slots unresolved and asks one combined
-  question while allowing planning/read-only investigation.
-- Bad: choose the only Herdr pane, infer CLI from missing App state, or use a
-  fixed ChatGPT URL/title as the reviewer.
-
-### 6. Tests Required
-
-- Surface fixtures assert `desktop`, `cli`, `unknown`, conflicting evidence,
-  and marker names without private values.
-- State tests assert v1 migration, generic provider/reference targets,
-  Codex self targets, independent invalidation, and provider fail-closedness.
-- Hook/workflow tests assert Desktop does not emit Herdr, DSH Web uses its
-  browser-specific workflow content, explicit Codex overrides use inline
-  workflow content, and missing slots are combined.
-- CLI smoke checks assert `discover`, `set-*`, `clear-*`, `validate`, and
-  `show` use the same conversation-scoped state.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-Treat `CODEX_APP_TOOLS_PIPE_PATH`'s absence as proof of CLI, auto-select a
-Herdr pane, or silently replace an unavailable reviewer.
-
-#### Correct
-
-Record only strong marker names, resolve the provider class, request explicit
-provider/reference targets. When a running browser endpoint is discovered,
-recommend `dsh-web` without selecting it silently. Let `executor=codex` /
-`reviewer=codex` be deliberate user overrides that follow the inline self-review
-gate.
-
-### 9. Dispatch granularity, slice closure, and task completion
-
-Dispatch granularity follows the selected executor. Native sub-agent workflows
-use explicit behavior slices: one behavior/job, one red-to-green loop, and a
-reviewer gate for the named slice. A slice `PASS` closes only that slice;
-the task remains `in_progress` and the next slice still needs user authorization.
-
-Herdr is different: the selected pane receives one bounded assignment for the
-active task, including all remaining work authorized by its reviewed `prd.md`,
-`design.md`, and `implement.md`. The executor may use the plan's Slice headings
-as internal RED-to-GREEN milestones, but the controller does not require a
-handoff or web-review round between those internal milestones. A final explicit
-reviewer `PASS` for the active task closes that task's authorized implementation
-scope; the task still remains `in_progress` until the explicit finish/archive
-gate. A Herdr task `PASS` never authorizes another task, production wiring, or a
-different review destination.
-
-## DSH Web browser execution and MCP DSH retirement
-
-DSH Web is a browser-backed executor discovered from an explicit running `dsh
-web` endpoint. It is selected as `dsh-web:<browser-url>` only after the user
-confirms the discovery recommendation; the parent controls the browser UI
-handoff and keeps the ChatGPT Web reviewer as a separate target. Do not expose
-secrets or rely on a provider-managed reference.
-
-MCP DSH is disabled in the Codex host configuration and rejected by the local
-routing layer. Do not call DSH MCP tools, dispatch a `dsh` executor, or treat a
-`dsh:provider-managed` target as valid. Existing MCP references are historical
-context only; if DSH Web is unavailable, use an explicitly selected Codex or
-Herdr executor, or remain in planning/read-only mode until the user chooses
-one.
-
-## Herdr-hosted Codex controller and selected executor
-
-### 1. Scope / Trigger
-
-Use this routing contract when `codex.dispatch_mode` is `herdr`, or when the
-host-aware `auto` policy resolves a Codex CLI conversation to the Herdr
-provider. The executor is a pane explicitly selected by the user for the
-current Codex conversation;
-it may have any position, agent label, title, state, or initial cwd. Discovery
-makes panes candidates and never authorizes one automatically.
-
-### 2. Signatures, detectable roles and routing contract
-
-At session start, inspect the Herdr inventory and detection evidence:
-
-```text
-herdr agent list
-herdr agent explain <current-pane>
-herdr agent explain <executor-pane>
-```
-
-Herdr mode may dispatch only when the current/focused pane is uniquely detected
-as Codex and the stored executor pane still exists in the same Herdr workspace.
-All other panes in that workspace are candidates, including non-Claude panes
-and panes outside the right/adjacent position. Display pane ID, agent, state,
-cwd, and title and ask the user which pane to use; do not auto-select even when
-there is exactly one candidate.
-
-`herdr agent explain` is the authoritative detection evidence. A matching
-terminal title or the mere presence of the `herdr` executable is not enough.
-If only the current Codex pane exists, ask whether to use inline mode or wait
-for another pane. Combine this with any missing reviewer decision in one user
-question. Persist the answer under the Codex conversation identity and reuse
-it until the user replaces it or validation fails.
-
-When the contract is active:
-
-- Codex remains the dispatcher/controller: it owns scope, worktree safety,
-  exact diff inspection, validation, commit/push verification, and the root
-  review loop.
-- The selected Herdr pane is the implementation executor. It may edit all paths
-  authorized by the active task, including its planned internal slices, and
-  must stop at the active-task boundary. It may run the task's RED-to-GREEN
-  milestones without returning control at every Slice heading; it must not
-  start a different task or production wiring.
-- The user-selected conversation-scoped ChatGPT conversation is the
-  reviewer/root gate. It may be an existing conversation or a newly created
-  project/non-project conversation.
-- The executor reports through its selected Herdr pane and identifies its pane
-  ID. The report includes changed paths, validation, exact commit/push state,
-  and a review request. Do not depend on an agent-specific phrase.
-
-### 3. Prompt approval contract
-
-The Codex controller may automatically approve a visible Claude confirmation
-only after reading the exact command or action. Safe approval includes:
-
-- repository-local reads, searches, status/log/show/diff and metadata checks;
-- explicit read-only inspection of the local Cargo registry or other pinned
-  dependency sources when needed to verify an API or ownership contract;
-- repository-local format, build, test, clippy, task validation and other
-  explicitly requested checks;
-- edits confined to the user-authorized source, test, fixture, and task-evidence
-  whitelist for the active task (or, for native sliced workflows, the current
-  slice);
-- creating or removing unique temporary files under a task-scoped temporary
-  directory, with cleanup scoped to those exact paths; and
-- the authorized exact-path commit and push to the requested branch.
-
-The controller must reject or redirect a prompt when it contains any of the
-following:
-
-- broad or unresolved deletion, overwrite, or recursive cleanup;
-- `git reset`, rebase, force-push, branch switching, or history rewriting;
-- `git add -A` or staging unrelated dirty files;
-- secrets, credentials, private keys, or any write outside the repository;
-- writes of marker/temp files at the repository root or other fixed paths that
-  can collide with user files; or
-- a command whose scope cannot be determined from the visible prompt.
-
-For a rejected fixed-path temporary write, redirect Claude to an explicit
-`mktemp -d` directory or a unique task-scoped path and a narrowly scoped
-cleanup trap. Never approve first and inspect the resulting damage later.
-
-The normal monitoring loop is:
-
-```text
-herdr agent wait <executor-pane> --until blocked --timeout 60000
-herdr agent read <executor-pane> --source visible --lines 20
-herdr agent send-keys <executor-pane> enter       # safe, reviewed prompt
-herdr agent send-keys <executor-pane> 2 enter     # reject/choose safe alternative
-```
-
-Use bounded waits rather than busy polling. An idle/finished executor pane is a
-handoff state, not permission to start a different task or archive the active
-task; the reviewer must still return an explicit PASS for the active-task
-assignment and the finish gate remains separate.
-
-### 4. Validation and error matrix
-
-| Condition | Required action |
-|---|---|
-| One or more same-workspace candidate panes detected, no stored choice | List all candidates and ask once with reviewer choices |
-| Only current Codex pane detected | Ask once: inline or wait, plus any missing reviewer choice |
-| Selected pane missing or moved to another workspace | Invalidate executor only and ask for a replacement; never fall back silently |
-| Selected pane cwd differs | Report it and require the executor to enter the exact repository before work |
-| Visible command is read/build/test/fmt/clippy/validate or exact scoped Git action | Inspect it, then approve if scope is exact |
-| Fixed-path write, broad delete, reset/rebase/force-push, secret access, or unknown command | Reject and request a bounded safe alternative |
-| Executor omits pane identity or commit/evidence | Treat as incomplete handoff and request a corrected report |
-| Reviewer active/pending or no explicit PASS | Wait; do not modify or start another task |
-| Reviewer explicit scoped FAIL | Apply only the requested remediation, then repeat review |
-
-### 5. Good / Base / Bad cases
-
-- Good: inventory shows Codex `w6:p1`, Claude `w6:p2`, and ZCode `w6:p3`;
-  the user selects `w6:p3`; a visible `cargo test --locked` prompt and a read-only
-  pinned Hyper source inspection are inspected and approved; a root-level
-  marker write is rejected and replaced with a unique temporary path.
-- Base: the selected executor is idle after pushing the active-task commit;
-  Codex reads the pane, independently verifies the complete task diff, sends it
-  to the selected reviewer conversation, and waits.
-- Bad: choose the only candidate without asking, approve every executor prompt,
-  stage `.DS_Store` files, or start another task merely because an internal
-  milestone passed.
-
-### 6. Tests and evidence required
-
-- Record the Herdr detection evidence (`agent list`/`agent explain`) when this
-  routing is activated.
-- Before review, inspect `git status`, exact changed paths, complete diff,
-  `git diff --check`, focused/full required checks, branch and pushed commit.
-- Preserve unrelated dirty files and never claim a reviewer PASS from local
-  green output, an idle pane, or a successful push alone.
-
-### 7. Wrong vs Correct
-
-Wrong: see the `herdr` command, assume a pane is authorized by its position or
-agent label, press Enter on every confirmation, and let it continue.
-
-Correct: identify every candidate, obtain one explicit conversation-scoped
-executor/reviewer choice, revalidate the chosen pane, inspect each visible
-command, reject unsafe operations, and stop at the explicit review and
-user-authorization boundary.
+- CLI/Desktop markers never select Herdr or DSH Web.
+- Missing providers do not block the current conversation; explicit targets
+  remain authoritative and provider type does not change Slice granularity.
+- Legacy migration preserves only explicit user choices and leaves the source
+  file byte-for-byte unchanged.
+- A final reviewer PASS never archives or changes task lifecycle.
 
 ## Scenario: native DoH HTTP/2 child ownership
 
