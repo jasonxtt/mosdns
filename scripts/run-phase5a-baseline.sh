@@ -277,7 +277,7 @@ if [[ "${SCENARIO}" == w2 ]]; then
   cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-counter.json"
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
     --stage "${RUN_MODE}-w2-warm" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
-    --one-pass --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
+    --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
 else
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario "${workload_scenario}" --transport "${TRANSPORT}" \
     --addr "${SUT_ADDR}" --stage "${RUN_MODE}-${SCENARIO}" --qps "${qps}" --duration "${duration}" \
