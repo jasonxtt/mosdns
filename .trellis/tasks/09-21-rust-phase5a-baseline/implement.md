@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A Go-only whole-process baseline
 
-Status: **in progress — Slice 0 complete, awaiting scoped root review**. Official Linux baseline execution remains gated on the Slice 0 review.
+Status: **in progress — Slice 0 remediation complete, awaiting scoped root re-review**. Official Linux baseline execution remains gated on the Slice 0 review.
 
 ## 0. Pre-start gates
 
@@ -37,6 +37,11 @@ No existing product source or dependency manifest is allowed.
 - [x] Add no new module dependency; `go.mod` and `go.sum` are unchanged.
 - [x] Controlled upstream supports only the committed UDP/TCP identities, deterministic answer table, fixed delay flag, counters, and signal shutdown.
 - [x] Implement response ID/question/rcode/answer validation; wrong/protocol results never count as useful throughput.
+- [x] Gate smoke/helper success on wrong-response, protocol, transport, timeout, and sender-shortfall counters; retain a deliberate no-listener failure regression.
+- [x] Verify W3 route-class semantics against fixture counter deltas: domain hit `A`, IP-rule hit `B→A`, and IP-rule miss `B→C`.
+- [x] Run W2 as separate measured cold-miss and warm-hot stages, with unmeasured prefill and a counter barrier before warm timing.
+- [x] Keep fixture counter updates in memory on the hot path, serialize snapshots, and flush only after clean fixture shutdown.
+- [x] Freeze the Slice 0 TCP policy as one fresh TCP connection per request in the run manifest.
 - [x] Implement `MOSDNS_BINARY` validation and SHA-256 recording without rebuilding the SUT.
 - [x] The same Go SUT copied to a second executable path passed the unchanged W1-UDP smoke.
 - [x] Cleanup trap was exercised by interrupting a live smoke; no fixture/helper/SUT process remained.
@@ -47,8 +52,9 @@ No existing product source or dependency manifest is allowed.
 
 ### Slice 0 execution record
 
-Implementation commit is pending the scoped review. The task-scoped changed
-paths are:
+The initial implementation commit was `1f270b3ce05de9d0d29a7eebcd322325ae668578`.
+The scoped re-review remediation is now complete and is pending its own commit.
+The task-scoped changed paths are:
 
 ```text
 tests/phase5a-baseline/README.md
@@ -63,23 +69,28 @@ Validation completed on the local macOS arm64 host (not authoritative Linux
 baseline evidence):
 
 ```text
-go test ./tests/phase5a-baseline/cmd/phase5a-baseline        PASS
-go vet ./tests/phase5a-baseline/cmd/phase5a-baseline         PASS
+go test ./tests/phase5a-baseline/...                         PASS
+go vet ./tests/phase5a-baseline/...                          PASS
 bash -n scripts/run-phase5a-baseline.sh                      PASS
 git diff --check                                              PASS
 JSON/JSONL fixture parsing                                      PASS
 Go-only SUT build (SKIP_UI_BUILD=1, CGO_ENABLED=0)              PASS
-W1-UDP/W1-TCP/W2/W3 local correctness smoke                     PASS
+W1-UDP/W1-TCP/W2-cold/W2-warm/W3 local correctness smoke        PASS
 same Go binary copied to second path, W1-UDP smoke               PASS
+deliberate no-listener failure gate                             PASS
 interrupted smoke cleanup: no fixture/helper/SUT processes      PASS
 ```
 
-Each local smoke completed with `scheduled=sent=received=correct_on_time=20`
-and zero wrong/protocol/transport/timeout counters. W3 counters showed the
-three route identities: domain and IP-rule hit on `route-a`, IP-rule miss on
-`route-b` followed by `route-c`. The local host cannot provide the required
-Linux amd64 `/proc` resource evidence; Slice 1 must run in the isolated Linux
-environment and will not treat this smoke as the official baseline.
+The remediation smoke completed with zero wrong/protocol/transport/timeout or
+sender-shortfall counters. W2 emitted distinct cold and warm stages; warm
+prefill was unmeasured and the cache upstream counter stayed at its prefill
+baseline during the measured warm stage. W3 counter verification showed the
+three route identities: domain hit on `route-a`, IP-rule hit on `route-b`
+followed by `route-a`, and IP-rule miss on `route-b` followed by `route-c`.
+The copied-binary-path smoke used the same unchanged SUT from a second path.
+The local host cannot provide the required Linux amd64 `/proc` resource
+evidence; Slice 1 must run in the isolated Linux environment and will not
+treat this smoke as the official baseline.
 
 ### Slice 0 exit gate
 
@@ -89,7 +100,8 @@ Stop and request scoped root review of the exact Slice 0 commit. Review must con
 - all three workload groups exist with deterministic correctness semantics;
 - replaceable-binary contract does not rely on Go internals;
 - no generic benchmark/platform scope creep;
-- cleanup and wrong-response accounting are real, not documentation-only.
+- cleanup, route-counter accounting, cold/warm lifecycle, and failure gating
+  are real, not documentation-only.
 
 `PASS` authorizes Slice 1 only.
 

@@ -5,7 +5,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -110,6 +112,8 @@ func main() {
 		err = runFixture(os.Args[2:])
 	case "run":
 		err = runStage(os.Args[2:])
+	case "verify-counters":
+		err = verifyCounters(os.Args[2:])
 	case "validate-binary":
 		err = validateBinary(os.Args[2:])
 	case "version":
@@ -193,12 +197,14 @@ func runFixture(args []string) error {
 	defer signal.Stop(stop)
 
 	var wg sync.WaitGroup
+	var connectionWG sync.WaitGroup
+	var closeFixture func()
 	if opts.network == "udp" {
 		conn, err := net.ListenUDP("udp", mustResolveUDP(opts.addr))
 		if err != nil {
 			return fmt.Errorf("listen UDP fixture: %w", err)
 		}
-		defer conn.Close()
+		closeFixture = func() { _ = conn.Close() }
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -209,15 +215,36 @@ func runFixture(args []string) error {
 		if err != nil {
 			return fmt.Errorf("listen TCP fixture: %w", err)
 		}
-		defer listener.Close()
+		closeFixture = func() { _ = listener.Close() }
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			serveTCPFixture(listener, opts, counts)
+			serveTCPFixture(listener, opts, counts, &connectionWG)
 		}()
 	}
 
+	writerStop := make(chan struct{})
+	var writerWG sync.WaitGroup
+	writerWG.Add(1)
+	go func() {
+		defer writerWG.Done()
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-writerStop:
+				return
+			case <-ticker.C:
+				_ = counts.write()
+			}
+		}
+	}()
 	<-stop
+	closeFixture()
+	wg.Wait()
+	connectionWG.Wait()
+	close(writerStop)
+	writerWG.Wait()
 	return counts.write()
 }
 
@@ -231,19 +258,21 @@ func mustResolveUDP(addr string) *net.UDPAddr {
 
 type counterStore struct {
 	mu       sync.Mutex
+	writeMu  sync.Mutex
 	upstream string
 	path     string
 	values   map[string]int64
 }
 
-func (c *counterStore) add(qname string, qtype uint16) error {
+func (c *counterStore) add(qname string, qtype uint16) {
 	c.mu.Lock()
 	c.values[strings.ToLower(dns.Fqdn(qname))+"|"+dns.TypeToString[qtype]]++
 	c.mu.Unlock()
-	return c.write()
 }
 
 func (c *counterStore) write() error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	c.mu.Lock()
 	values := make(map[string]int64, len(c.values))
 	for k, v := range c.values {
@@ -285,13 +314,15 @@ func serveUDPFixture(conn *net.UDPConn, opts fixtureOptions, counts *counterStor
 	}
 }
 
-func serveTCPFixture(listener net.Listener, opts fixtureOptions, counts *counterStore) {
+func serveTCPFixture(listener net.Listener, opts fixtureOptions, counts *counterStore, connectionWG *sync.WaitGroup) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
+		connectionWG.Add(1)
 		go func() {
+			defer connectionWG.Done()
 			defer conn.Close()
 			var length uint16
 			if err := binary.Read(conn, binary.BigEndian, &length); err != nil || length == 0 || length > dns.MaxMsgSize {
@@ -323,7 +354,7 @@ func fixtureResponse(wire []byte, opts fixtureOptions, counts *counterStore) ([]
 		return nil, false
 	}
 	question := query.Question[0]
-	_ = counts.add(question.Name, question.Qtype)
+	counts.add(question.Name, question.Qtype)
 	response := new(dns.Msg)
 	response.SetReply(query)
 	response.RecursionAvailable = true
@@ -395,6 +426,8 @@ func runStage(args []string) error {
 	lateDrain := fs.Duration("late-drain", defaultLateDrain, "bounded late response drain")
 	resultDir := fs.String("result", "", "result directory")
 	sutPID := fs.Int("sut-pid", 0, "SUT PID for Linux resource sampling")
+	failOnError := fs.Bool("fail-on-error", false, "return non-zero when a stage has a correctness or sender failure")
+	onePass := fs.Bool("one-pass", false, "send exactly one deterministic pass over the filtered workload")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -418,17 +451,19 @@ func runStage(args []string) error {
 		return errors.New("workload has no matching cases")
 	}
 	return executeStage(stageOptions{
-		workload:  cases,
-		addr:      *addr,
-		transport: *transport,
-		scenario:  *scenario,
-		stage:     *stageName,
-		qps:       *qps,
-		duration:  *duration,
-		deadline:  *deadline,
-		lateDrain: *lateDrain,
-		resultDir: *resultDir,
-		sutPID:    *sutPID,
+		workload:    cases,
+		addr:        *addr,
+		transport:   *transport,
+		scenario:    *scenario,
+		stage:       *stageName,
+		qps:         *qps,
+		duration:    *duration,
+		deadline:    *deadline,
+		lateDrain:   *lateDrain,
+		resultDir:   *resultDir,
+		sutPID:      *sutPID,
+		failOnError: *failOnError,
+		onePass:     *onePass,
 	})
 }
 
@@ -471,18 +506,139 @@ func readWorkload(path, scenario, transport string) ([]workloadCase, error) {
 	return expanded, nil
 }
 
+type counterFile struct {
+	Upstream string           `json:"upstream"`
+	Counts   map[string]int64 `json:"counts"`
+}
+
+func verifyCounters(args []string) error {
+	fs := flag.NewFlagSet("verify-counters", flag.ContinueOnError)
+	scenario := fs.String("scenario", "", "w1, w2, or w3")
+	workload := fs.String("workload", "", "fixed workload JSONL")
+	counter := fs.String("counter", "", "single fixture counter JSON")
+	baseline := fs.String("baseline", "", "prefill counter JSON for warm-cache equality")
+	routeA := fs.String("route-a", "", "route-a counter JSON")
+	routeB := fs.String("route-b", "", "route-b counter JSON")
+	routeC := fs.String("route-c", "", "route-c counter JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *scenario == "" || *workload == "" {
+		return errors.New("verify-counters requires --scenario and --workload")
+	}
+	cases, err := readWorkload(*workload, *scenario, "")
+	if err != nil {
+		return err
+	}
+	if len(cases) == 0 {
+		return errors.New("verify-counters workload has no cases")
+	}
+	if *scenario == "w3" {
+		if *routeA == "" || *routeB == "" || *routeC == "" {
+			return errors.New("w3 counter verification requires route-a, route-b, and route-c")
+		}
+		return verifyRoutingCounters(cases, *routeA, *routeB, *routeC)
+	}
+	if *counter == "" {
+		return errors.New("counter path is required for w1/w2")
+	}
+	actual, err := readCounterFile(*counter)
+	if err != nil {
+		return err
+	}
+	for _, c := range cases {
+		key := strings.ToLower(dns.Fqdn(c.QName)) + "|" + strings.ToUpper(c.QType)
+		if actual.Counts[key] <= 0 {
+			return fmt.Errorf("fixture counter missing %s for case %s", key, c.CaseID)
+		}
+	}
+	if *scenario == "w2" && *baseline != "" {
+		before, err := readCounterFile(*baseline)
+		if err != nil {
+			return err
+		}
+		for _, c := range cases {
+			key := strings.ToLower(dns.Fqdn(c.QName)) + "|" + strings.ToUpper(c.QType)
+			if actual.Counts[key] != before.Counts[key] {
+				return fmt.Errorf("warm cache miss for %s: prefill=%d final=%d", key, before.Counts[key], actual.Counts[key])
+			}
+		}
+	}
+	return nil
+}
+
+func verifyRoutingCounters(cases []workloadCase, routeAPath, routeBPath, routeCPath string) error {
+	routeA, err := readCounterFile(routeAPath)
+	if err != nil {
+		return err
+	}
+	routeB, err := readCounterFile(routeBPath)
+	if err != nil {
+		return err
+	}
+	routeC, err := readCounterFile(routeCPath)
+	if err != nil {
+		return err
+	}
+	for _, c := range cases {
+		key := strings.ToLower(dns.Fqdn(c.QName)) + "|" + strings.ToUpper(c.QType)
+		counts := map[string]int64{"route-a": routeA.Counts[key], "route-b": routeB.Counts[key], "route-c": routeC.Counts[key]}
+		var required []string
+		var forbidden []string
+		switch c.ExpectedRouteClass {
+		case "DOMAIN_HIT":
+			required, forbidden = []string{"route-a"}, []string{"route-b", "route-c"}
+		case "IP_RULE_HIT":
+			required, forbidden = []string{"route-b", "route-a"}, []string{"route-c"}
+		case "IP_RULE_MISS":
+			required, forbidden = []string{"route-b", "route-c"}, []string{"route-a"}
+		default:
+			return fmt.Errorf("unknown expected route class %q for %s", c.ExpectedRouteClass, c.CaseID)
+		}
+		for _, route := range required {
+			if counts[route] <= 0 {
+				return fmt.Errorf("route counter missing %s for %s (%s)", route, c.CaseID, c.ExpectedRouteClass)
+			}
+		}
+		for _, route := range forbidden {
+			if counts[route] != 0 {
+				return fmt.Errorf("unexpected route %s for %s (%s): %d", route, c.CaseID, c.ExpectedRouteClass, counts[route])
+			}
+		}
+	}
+	return nil
+}
+
+func readCounterFile(path string) (counterFile, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return counterFile{}, fmt.Errorf("open counter %s: %w", path, err)
+	}
+	defer f.Close()
+	var counter counterFile
+	if err := json.NewDecoder(f).Decode(&counter); err != nil {
+		return counterFile{}, fmt.Errorf("decode counter %s: %w", path, err)
+	}
+	if counter.Counts == nil {
+		counter.Counts = make(map[string]int64)
+	}
+	return counter, nil
+}
+
 type stageOptions struct {
-	workload  []workloadCase
-	addr      string
-	transport string
-	scenario  string
-	stage     string
-	qps       float64
-	duration  time.Duration
-	deadline  time.Duration
-	lateDrain time.Duration
-	resultDir string
-	sutPID    int
+	workload    []workloadCase
+	addr        string
+	transport   string
+	scenario    string
+	stage       string
+	qps         float64
+	duration    time.Duration
+	deadline    time.Duration
+	lateDrain   time.Duration
+	resultDir   string
+	sutPID      int
+	failOnError bool
+	onePass     bool
 }
 
 func executeStage(opts stageOptions) error {
@@ -506,7 +662,7 @@ func executeStage(opts stageOptions) error {
 	}
 	end := time.Now().Add(opts.duration)
 	next := time.Now()
-	for index := 0; next.Before(end); index++ {
+	for index := 0; (opts.onePass && index < len(opts.workload)) || (!opts.onePass && next.Before(end)); index++ {
 		if sleep := time.Until(next); sleep > 0 {
 			time.Sleep(sleep)
 		}
@@ -564,7 +720,13 @@ func executeStage(opts stageOptions) error {
 	if err != nil {
 		return err
 	}
-	return closeErr
+	if closeErr != nil {
+		return closeErr
+	}
+	if opts.failOnError && hasStageFailure(result.Counters) {
+		return fmt.Errorf("stage %s has correctness failures: %+v", opts.stage, result.Counters)
+	}
+	return nil
 }
 
 func executeRequest(opts stageOptions, c workloadCase, stats *runStats) {
@@ -731,6 +893,10 @@ func percentile(values []int64, p float64) int64 {
 	return values[index]
 }
 
+func hasStageFailure(c stageCounters) bool {
+	return c.WrongResponse > 0 || c.ProtocolError > 0 || c.TransportError > 0 || c.Timeout > 0 || c.SenderShortfall > 0
+}
+
 func readResourceSample(pid int) (resourceSample, bool) {
 	if runtime.GOOS != "linux" {
 		return resourceSample{}, false
@@ -807,16 +973,16 @@ func sampleProcess(pid int, path string, stop <-chan struct{}) int {
 }
 
 func sha256File(path string) (string, error) {
-	cmd := exec.Command("shasum", "-a", "256", path)
-	out, err := cmd.Output()
+	f, err := os.Open(path)
 	if err != nil {
+		return "", fmt.Errorf("open %s for sha256: %w", path, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
 		return "", fmt.Errorf("sha256 %s: %w", path, err)
 	}
-	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
-		return "", fmt.Errorf("empty sha256 output for %s", path)
-	}
-	return fields[0], nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func writeJSON(w io.Writer, value any) error {

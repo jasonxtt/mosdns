@@ -28,7 +28,8 @@
     "warmup_seconds": 0,
     "request_deadline_ms": 0,
     "late_drain_ms": 0,
-    "fixture_delay_ms": 0
+    "fixture_delay_ms": 0,
+    "tcp_connection_policy": "fresh-connection-per-request (Slice 0 helper default; freeze before official runs)"
   },
   "isolation": {
     "sut_cpu_set": "",
