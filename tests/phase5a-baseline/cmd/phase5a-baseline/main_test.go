@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -99,6 +101,41 @@ func TestStageFailureGateRejectsNonCorrectOutcomes(t *testing.T) {
 	}
 	if hasStageFailure(stageCounters{CorrectOnTime: 1, ExpectedNegativeOnTime: 1}) {
 		t.Fatal("correct expected negative must not fail smoke gate")
+	}
+}
+
+func TestVerifyRoutingCountersRejectsMismatch(t *testing.T) {
+	dir := t.TempDir()
+	routeAPath := filepath.Join(dir, "route-a.json")
+	routeBPath := filepath.Join(dir, "route-b.json")
+	routeCPath := filepath.Join(dir, "route-c.json")
+	writeCounterTestFile(t, routeAPath, "route-a", map[string]int64{
+		"domain-hit.test.|A": 1,
+		"ip-hit.test.|A":     1,
+	})
+	writeCounterTestFile(t, routeBPath, "route-b", map[string]int64{})
+	writeCounterTestFile(t, routeCPath, "route-c", map[string]int64{})
+	cases := []workloadCase{
+		{CaseID: "domain-hit", QName: "domain-hit.test.", QType: "A", ExpectedRouteClass: "DOMAIN_HIT"},
+		{CaseID: "ip-rule-hit", QName: "ip-hit.test.", QType: "A", ExpectedRouteClass: "IP_RULE_HIT"},
+	}
+	if err := verifyRoutingCounters(cases, routeAPath, routeBPath, routeCPath); err == nil {
+		t.Fatal("route mismatch must fail counter verification")
+	}
+}
+
+func writeCounterTestFile(t *testing.T, path, upstream string, counts map[string]int64) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.NewEncoder(f).Encode(counterFile{Upstream: upstream, Counts: counts}); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

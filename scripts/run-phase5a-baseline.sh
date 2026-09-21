@@ -136,6 +136,23 @@ for spec in "${FIXTURE_SPECS[@]}"; do
   FIXTURE_PIDS+=("$!")
 done
 
+wait_for_counter_file() {
+  local counter_path="$1"
+  for _ in $(seq 1 100); do
+    if [[ -s "${counter_path}" ]]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "counter did not become ready: ${counter_path}" >&2
+  return 1
+}
+
+for spec in "${FIXTURE_SPECS[@]}"; do
+  IFS='|' read -r _ _ _ counter <<<"${spec}"
+  wait_for_counter_file "${counter}"
+done
+
 start_sut() {
   "${MOSDNS_BINARY}" start -c "${SCENARIO_CONFIG}" >> "${TMP_DIR}/mosdns.stdout" 2>> "${TMP_DIR}/mosdns.stderr" &
   SUT_PID="$!"
@@ -177,6 +194,20 @@ copy_fixture_counters() {
   done
 }
 
+verify_counter_delta() {
+  local counter_path="$1"
+  local baseline_path="$2"
+  for _ in $(seq 1 50); do
+    if "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" \
+      --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" \
+    --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta
+}
+
 duration="1s"
 qps="20"
 if [[ "${RUN_MODE}" == "pilot" ]]; then
@@ -197,20 +228,23 @@ fi
 
 start_sut
 if [[ "${SCENARIO}" == w2 ]]; then
+  IFS='|' read -r _ _ _ CACHE_COUNTER <<<"${FIXTURE_SPECS[0]}"
+  cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-before-counter.json"
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
     --stage "${RUN_MODE}-w2-cold" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
     --one-pass --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
   stop_sut
+  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-before-counter.json"
+  cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-after-counter.json"
 
   start_sut
+  cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-before-counter.json"
   PREFILL_DIR="${TMP_DIR}/prefill"
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
     --stage warm-prefill --qps "${qps}" --duration 1s --deadline 500ms --late-drain 100ms \
     --one-pass --fail-on-error --result "${PREFILL_DIR}" --sut-pid "${SUT_PID}"
-  sleep 0.25
-  IFS='|' read -r _ _ _ CACHE_COUNTER <<<"${FIXTURE_SPECS[0]}"
+  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-before-counter.json"
   cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-counter.json"
-  "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" --counter "${CACHE_COUNTER}"
   "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
     --stage "${RUN_MODE}-w2-warm" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
     --one-pass --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"

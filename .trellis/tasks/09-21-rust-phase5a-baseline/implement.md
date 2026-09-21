@@ -38,8 +38,8 @@ No existing product source or dependency manifest is allowed.
 - [x] Controlled upstream supports only the committed UDP/TCP identities, deterministic answer table, fixed delay flag, counters, and signal shutdown.
 - [x] Implement response ID/question/rcode/answer validation; wrong/protocol results never count as useful throughput.
 - [x] Gate smoke/helper success on wrong-response, protocol, transport, timeout, and sender-shortfall counters; retain a deliberate no-listener failure regression.
-- [x] Verify W3 route-class semantics against fixture counter deltas: domain hit `A`, IP-rule hit `B→A`, and IP-rule miss `B→C`.
-- [x] Run W2 as separate measured cold-miss and warm-hot stages, with unmeasured prefill and a counter barrier before warm timing.
+- [x] Verify W3 route-class semantics against fixture counter deltas: domain hit `A`, IP-rule hit `B→A`, and IP-rule miss `B→C`; add a tampered-counter failure regression.
+- [x] Run W2 as separate measured cold-miss and warm-hot stages, with unmeasured prefill and a counter barrier before warm timing; verify exact cold/prefill deltas and zero warm delta.
 - [x] Keep fixture counter updates in memory on the hot path, serialize snapshots, and flush only after clean fixture shutdown.
 - [x] Freeze the Slice 0 TCP policy as one fresh TCP connection per request in the run manifest.
 - [x] Implement `MOSDNS_BINARY` validation and SHA-256 recording without rebuilding the SUT.
@@ -53,7 +53,9 @@ No existing product source or dependency manifest is allowed.
 ### Slice 0 execution record
 
 The initial implementation commit was `1f270b3ce05de9d0d29a7eebcd322325ae668578`.
-The scoped re-review remediation is now complete and is pending its own commit.
+The first scoped re-review remediation was `e361cc2edcd2122fcca009920b546f60e7229856`.
+The counter-delta and route-regression follow-up is now complete and is pending
+its own commit.
 The task-scoped changed paths are:
 
 ```text
@@ -78,16 +80,19 @@ Go-only SUT build (SKIP_UI_BUILD=1, CGO_ENABLED=0)              PASS
 W1-UDP/W1-TCP/W2-cold/W2-warm/W3 local correctness smoke        PASS
 same Go binary copied to second path, W1-UDP smoke               PASS
 deliberate no-listener failure gate                             PASS
+W2 cold/prefill exact counter deltas and zero warm delta           PASS
+tampered W3 route-counter verifier regression                     PASS
 interrupted smoke cleanup: no fixture/helper/SUT processes      PASS
 ```
 
 The remediation smoke completed with zero wrong/protocol/transport/timeout or
-sender-shortfall counters. W2 emitted distinct cold and warm stages; warm
-prefill was unmeasured and the cache upstream counter stayed at its prefill
-baseline during the measured warm stage. W3 counter verification showed the
+sender-shortfall counters. W2 emitted distinct cold and warm stages; the
+upstream counter delta was exactly one per case for both cold and unmeasured
+prefill, then zero during the measured warm stage. W3 counter verification showed the
 three route identities: domain hit on `route-a`, IP-rule hit on `route-b`
 followed by `route-a`, and IP-rule miss on `route-b` followed by `route-c`.
-The copied-binary-path smoke used the same unchanged SUT from a second path.
+The tampered-counter unit regression rejected a missing route leg. The
+copied-binary-path smoke used the same unchanged SUT from a second path.
 The local host cannot provide the required Linux amd64 `/proc` resource
 evidence; Slice 1 must run in the isolated Linux environment and will not
 treat this smoke as the official baseline.
