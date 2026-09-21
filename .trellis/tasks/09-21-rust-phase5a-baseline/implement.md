@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A Go-only whole-process baseline
 
-Status: **in progress — Slice 1 complete, awaiting scoped root re-review**. Slice 2 report/closure remains gated on the Slice 1 review.
+Status: **in progress — Slice 2 report complete, awaiting final root review**.
 
 ## 0. Pre-start gates
 
@@ -54,8 +54,8 @@ No existing product source or dependency manifest is allowed.
 
 The initial implementation commit was `1f270b3ce05de9d0d29a7eebcd322325ae668578`.
 The first scoped re-review remediation was `e361cc2edcd2122fcca009920b546f60e7229856`.
-The counter-delta and route-regression follow-up is now complete and is pending
-its own commit.
+The counter-delta and route-regression follow-up was accepted by the scoped
+reviewer in commit `481bb1ecee2aaf8572ee3c1a9f4c347303b77660`.
 The task-scoped changed paths are:
 
 ```text
@@ -174,8 +174,9 @@ included in the final matrix.
 Validation and audit commands included `task.py validate`, Go test/vet,
 `bash -n`, JSON parsing, exact manifest/input hash checks, fixed-rate/counter
 assertions over all 36 final runs, resource-sample coverage checks, and a
-post-run process/listener cleanup check. The final report is intentionally
-deferred until this Slice 1 evidence receives scoped root `PASS`.
+post-run process/listener cleanup check. The scoped root reviewer accepted
+this evidence in the internal Codex review as `SLICE 1: PASS`; the immutable
+evidence commit was `e3338226be28ad99b5d621dfd5ccf972d13e32b2`.
 
 ### Slice 1 exit gate
 
@@ -197,15 +198,32 @@ No benchmark semantic changes in this slice. If the report reveals invalid metho
 
 ### Checklist
 
-- [ ] Write `docs/rust/phase5a-go-baseline.md` with source/binary identity, environment, manifest/config/workload hashes, exact commands, scenario descriptions, and raw evidence locations.
-- [ ] Summarize every official repetition, not just the best one.
-- [ ] Report p50/p95/p99, offered/sent/correct-on-time effective throughput, wrong/error/timeout/sender-shortfall counts, CPU/query, stable/peak RSS for every stage.
-- [ ] Report spread/variation and any invalid runs with reason.
-- [ ] State explicitly that the result is Go-only, controlled-local, Linux amd64 baseline evidence; no Rust performance or full Phase 5A compatibility claim is made.
-- [ ] Document the exact future rerun command using `MOSDNS_BINARY` and state that later Go/Rust comparison must rerun Go in the same environment/session.
-- [ ] Confirm no public DNS dependency, production deployment, API/WebUI work, Rust host code, transport feature work, or feature-coverage ownership change occurred.
-- [ ] Map final evidence to PRD A1–A13.
-- [ ] Run final diff/path audit proving only authorized paths changed and `go.mod`/`go.sum` remain untouched.
+- [x] Write `docs/rust/phase5a-go-baseline.md` with source/binary identity, environment, manifest/config/workload hashes, exact commands, scenario descriptions, and raw evidence locations.
+- [x] Summarize every official repetition, not just the best one.
+- [x] Report p50/p95/p99, offered/sent/correct-on-time effective throughput, wrong/error/timeout/sender-shortfall counts, CPU/query, stable/peak RSS for every stage.
+- [x] Report spread/variation and every retained invalid run with its reason.
+- [x] State explicitly that the result is Go-only, controlled-local, Linux amd64 baseline evidence; no Rust performance or full Phase 5A compatibility claim is made.
+- [x] Document the exact future rerun command using `MOSDNS_BINARY` and state that later Go/Rust comparison must rerun Go in the same environment/session.
+- [x] Confirm no public DNS dependency, production deployment, API/WebUI work, Rust host code, transport feature work, or feature-coverage ownership change occurred.
+- [x] Map final evidence to PRD A1–A13.
+- [x] Run final diff/path audit proving only authorized paths changed and `go.mod`/`go.sum` remain untouched.
+
+### Slice 2 execution record
+
+The report is `docs/rust/phase5a-go-baseline.md`. It records all 45 final
+measured rows, the 15 cross-repetition spread rows, the frozen input/build
+identity, the exact rerun entry point, raw evidence locations, invalid-run
+history, and PRD A1–A13 mapping. The report explicitly treats
+`environment-frozen.json` as authoritative, identifies `environment-final.json`
+as superseded metadata, and records that future execution must use the
+approved SSH Linux workflow rather than starting a local VM.
+
+The final quality pass before review includes task validation, focused Go
+test/vet, shell syntax, JSON/JSONL parsing, exact frozen-evidence assertions,
+`git diff --check`, and an authorized-path/product-path audit. The Trellis
+spec-update review found no reusable production coding convention to add: the
+baseline contracts are task-local and already captured by `prd.md`,
+`design.md`, and the report, so `.trellis/spec/` remains unchanged.
 
 ### Final exit gate
 

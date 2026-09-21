@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Planning review PASS at bc08b9d76e9b49822c237567637471cd6d9f3cb0. Slice 0 is implemented and awaits scoped review; official Linux baseline remains gated. Source anchor at planning time: e70a2408e2dcd2141e48bcc84765c5adfa406fe4.",
+  "notes": "Planning review PASS at bc08b9d76e9b49822c237567637471cd6d9f3cb0. Slice 0 PASS at 481bb1ecee2aaf8572ee3c1a9f4c347303b77660. Slice 1 evidence commit e3338226be28ad99b5d621dfd5ccf972d13e32b2 received scoped reviewer PASS; Slice 2 report is complete and awaits final review. Source anchor at planning time: e70a2408e2dcd2141e48bcc84765c5adfa406fe4.",
   "meta": {}
 }
