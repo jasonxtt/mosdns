@@ -71,21 +71,14 @@
 //!   reusable because a pinned connection error, when one exists, is recorded
 //!   on the same shared state and reported by the driver's `poll_close` outcome.
 //!
-//! The one exception to "name everything by variant" is forced by the pinned API
-//! itself: `h3 0.0.8` marks the whole `StreamError` enum **and** every one of its
-//! variants `#[non_exhaustive]` while the locked dependency configuration leaves
-//! h3's opt-out feature disabled, so a downstream crate can only pattern-match
-//! the struct-shaped variants and can never construct or match the tuple/unit
-//! ones (`ConnectionError(_)`, `RemoteClosing`,
-//! `Undefined(_)`). For exactly this reason the R0b evidence records a second,
-//! equivalent, classification rule that needs no variant name (see
-//! [`classify_h3_request_outcome`]): **call sites that own a real H3 driver
-//! pass an explicit [`H3ErrorObservation`] — the backend/operation provenance
-//! and the driver's `poll_close` outcome for the same event.** The GOAWAY case
-//! is the proof this is load-bearing: a normal peer GOAWAY makes
-//! `RemoteClosing` observable while `poll_close` may still be `Pending`, so the
-//! entry-terminal class comes from the `PeerClosing` provenance, not from an
-//! unwritten driver error.
+//! Slice 2 enables h3's reviewed opt-in API feature, so a real request
+//! operation can name `ConnectionError(_)` and `RemoteClosing`. The R0b
+//! evidence still records an explicit [`H3ErrorObservation`], because the
+//! operation boundary must bind the error to shared H3 connection state rather
+//! than infer it from a string or from a later driver outcome. The GOAWAY case
+//! is load-bearing: a normal peer GOAWAY makes `RemoteClosing` observable while
+//! `poll_close` may still be `Pending`, so the entry-terminal class comes from
+//! the `PeerClosing` provenance, not from an unwritten driver error.
 //!
 //! A `SendRequest`-level failure on its own proves neither health nor death, so
 //! it is stream-local until the connection layer independently reports terminal.
@@ -525,16 +518,12 @@ pub enum QuicErrorClass {
 /// visible through a paired observation.
 ///
 /// This is the discriminator the single-argument classifiers cannot carry for
-/// `h3 0.0.8`, because that crate marks the whole `StreamError` enum and every
-/// one of its variants `#[non_exhaustive]` while the locked dependency
-/// configuration leaves h3's opt-out feature disabled. A downstream crate can
-/// match the three struct-shaped variants and nothing
-/// else, so [`classify_h3_stream_error`] alone cannot route
-/// `ConnectionError(_)`, `RemoteClosing`, or `Undefined(_)`. Call sites that
-/// own a real H3 driver therefore pass an explicit [`H3ErrorObservation`]:
-/// the stream error plus the independently observable driver/backend state for
-/// the same event, including whether the error was only an unnameable
-/// non-exhaustive remainder.
+/// `Undefined(_)` or a future non-exhaustive variant. Slice 2's real call sites
+/// pass an explicit [`H3ErrorObservation`]: the stream error plus the
+/// independently observable driver/backend state for the same event. Named
+/// `ConnectionError(_)` and `RemoteClosing` values are bound directly at that
+/// operation boundary, while the shared state proves a backend error for an
+/// otherwise opaque stream outcome.
 ///
 /// Pinned grounding (`h3 0.0.8`):
 ///
@@ -587,11 +576,10 @@ pub enum H3ErrorShape {
 /// What a call site that owns a real H3 driver observed for one failed request.
 ///
 /// This is the explicit observation the single-argument
-/// [`classify_h3_stream_error`] cannot carry: `h3 0.0.8` never lets a
-/// downstream crate write down `ConnectionError(_)`, `RemoteClosing`, or
-/// `Undefined(_)` in a pattern, so those outcomes must be identified by the
-/// discriminator the pinned code itself routes on — the backend error shape,
-/// the peer-closing operation result, or the driver's `poll_close` outcome.
+/// [`classify_h3_stream_error`] cannot carry for opaque outcomes. The named
+/// `ConnectionError(_)` and `RemoteClosing` cases are identified at the
+/// operation boundary; the remaining discriminator is the backend error shape,
+/// the shared connection state, or the driver's `poll_close` outcome.
 ///
 /// The variants are provenance labels, not booleans inferred from a rendered
 /// error. `BackendConnection` comes from the public
@@ -929,18 +917,14 @@ pub const PINNED_ERROR_CLASSIFICATION_TABLE: &[PinnedErrorClassRow] = &[
     },
     // ---- h3 0.0.8 driver and request stream -------------------------------
     //
-    // R0b non-weakening note: `h3::error::StreamError` marks the enum and every
-    // variant `#[non_exhaustive]` while the locked dependency configuration
-    // leaves h3's opt-out feature disabled (`h3/src/lib.rs:20-21` and each
-    // variant's `cfg_attr` in `error.rs:16-19`), so a downstream crate cannot match
-    // `ConnectionError(_)`, `RemoteClosing`, or `Undefined(_)` at all. Because a
-    // normal peer GOAWAY writes only the shared `is_closing` flag and returns
-    // `Ok` (`connection.rs:663-701`), the tuple/unit outcomes are classified by
-    // the explicit discriminator model instead: see `H3ErrorShape`,
-    // `H3ErrorObservation`, and `classify_h3_request_outcome`, where the
+    // R0b non-weakening note: Slice 2 enables h3's opt-in API feature, so the
+    // named `ConnectionError(_)` and `RemoteClosing` outcomes are matched at
+    // the request boundary. A normal peer GOAWAY writes only the shared
+    // `is_closing` flag and returns `Ok` (`connection.rs:663-701`), so its
     // `PeerClosing` provenance is entry-terminal even while `poll_close` is
-    // still `Pending`. They are never folded into the stream-local wildcard of
-    // `classify_h3_stream_error`. No pinned variant is silently reclassified.
+    // still `Pending`. `Undefined(_)` and future variants remain stream-local
+    // only when the shared state carries no backend connection error. No pinned
+    // variant is silently reclassified.
     PinnedErrorClassRow {
         vocabulary: "h3",
         error_type: "h3::error::ConnectionError",
@@ -1143,10 +1127,8 @@ pub fn classify_h3_quinn_stream_error(error: &h3::quic::StreamErrorIncoming) -> 
 /// `Timeout` — means the H3 connection is closed, so the entry must never be
 /// reused. A clean `H3_NO_ERROR` close is still a closed connection.
 ///
-/// The classification is deliberately **type-level**: `h3` 0.0.8 marks both the
-/// enum and each variant `#[non_exhaustive]`, so a downstream crate cannot name
-/// the variants in a pattern. That is harmless here because the type itself
-/// already carries the connection-level meaning.
+/// The classification is deliberately **type-level**: every value of
+/// `h3::error::ConnectionError` is the driver's terminal outcome.
 #[must_use]
 pub fn classify_h3_connection_error(_error: &h3::error::ConnectionError) -> QuicErrorClass {
     QuicErrorClass::EntryTerminal
@@ -1161,27 +1143,12 @@ pub fn classify_h3_connection_error(_error: &h3::error::ConnectionError) -> Quic
 ///    exactly the struct-shaped variants: `StreamError{..}`, `RemoteTerminate{..}`
 ///    (a reset on one stream direction), and `HeaderTooBig{..}` — all
 ///    [`QuicErrorClass::StreamLocal`].
-/// 2. `h3 0.0.8` marks the enum and every variant `#[non_exhaustive]` while the
-///    locked dependency configuration leaves h3's opt-out feature disabled
-///    (`h3/src/lib.rs:20-21`; `error.rs:16-19, 84-87, 94-99, 105-110, 114-121,
-///    126-131, 134-139`), so the tuple/unit variants `ConnectionError(_)`,
-///    `RemoteClosing`, and `Undefined(_)` **cannot be matched downstream**.
-///    Those outcomes are therefore classified by the explicit discriminator
-///    model instead: see [`classify_h3_request_outcome`], whose
-///    [`H3ErrorObservation`] records the backend/operation provenance and the
-///    driver's `poll_close` outcome for the same event. In particular a normal
-///    peer GOAWAY makes `RemoteClosing` observable while `poll_close` may still
-///    be `Pending` — that case is [`QuicErrorClass::EntryTerminal`] via the
-///    `PeerClosing` provenance, not via this wildcard.
-///
-/// The wildcard arm below is `StreamLocal` only because the wildcard is
-/// unreachable without the paired observation: a call site that routes an
-/// `h3::error::StreamError` to this function must route its entry through the
-/// observation model first (Slice 2 owns the binding, where a real driver
-/// exists). If the pinned API ever allowed matching the tuple/unit variants,
-/// those arms would classify `ConnectionError(_)` via
-/// [`classify_h3_connection_error`] and `RemoteClosing` as terminal — neither
-/// would reach `StreamLocal`.
+/// 2. Slice 2 enables h3's reviewed opt-in API feature, which removes the
+///    per-variant `non_exhaustive` barrier. Therefore `ConnectionError(_)` and
+///    `RemoteClosing` are routed terminal directly; `Undefined(_)` remains
+///    stream-local unless the paired connection state proves a backend error.
+///    The operation-boundary helper below records that paired provenance in
+///    [`H3ErrorObservation`].
 ///
 /// # Safety (R0b non-weakening proof)
 ///
@@ -1195,8 +1162,47 @@ pub fn classify_h3_stream_error(error: &h3::error::StreamError) -> QuicErrorClas
     match error {
         h3::error::StreamError::StreamError { .. }
         | h3::error::StreamError::RemoteTerminate { .. }
-        | h3::error::StreamError::HeaderTooBig { .. } => QuicErrorClass::StreamLocal,
+        | h3::error::StreamError::HeaderTooBig { .. }
+        | h3::error::StreamError::Undefined(_) => QuicErrorClass::StreamLocal,
+        h3::error::StreamError::ConnectionError(_) | h3::error::StreamError::RemoteClosing => {
+            QuicErrorClass::EntryTerminal
+        }
+        // h3 keeps the enum itself non-exhaustive for future variants. A new
+        // variant is not connection evidence until the paired operation state
+        // says so, which is exactly what `observe_h3_stream_error` does.
         _ => QuicErrorClass::StreamLocal,
+    }
+}
+
+/// Binds one real h3 stream error to the connection state observed at the same
+/// request operation boundary.
+fn observe_h3_stream_error<S: h3::ConnectionState>(
+    state: &S,
+    error: &h3::error::StreamError,
+) -> H3ErrorObservation {
+    match error {
+        h3::error::StreamError::ConnectionError(_) => H3ErrorObservation::BackendConnection,
+        h3::error::StreamError::RemoteClosing => H3ErrorObservation::PeerClosing,
+        h3::error::StreamError::StreamError { .. }
+        | h3::error::StreamError::RemoteTerminate { .. }
+        | h3::error::StreamError::HeaderTooBig { .. }
+        | h3::error::StreamError::Undefined(_) => {
+            if state.get_conn_error().is_some() {
+                H3ErrorObservation::BackendConnection
+            } else {
+                match error {
+                    h3::error::StreamError::Undefined(_) => H3ErrorObservation::Unobserved,
+                    _ => H3ErrorObservation::StreamScoped,
+                }
+            }
+        }
+        _ => {
+            if state.get_conn_error().is_some() {
+                H3ErrorObservation::BackendConnection
+            } else {
+                H3ErrorObservation::Unobserved
+            }
+        }
     }
 }
 
@@ -1500,6 +1506,18 @@ impl EntryTransport {
     fn doh3_connection(&self) -> Option<Doh3ConnectionHandle> {
         self.doh3.as_ref().map(Doh3Connection::acquire)
     }
+
+    fn doh3_driver_is_terminal(&self) -> bool {
+        self.doh3
+            .as_ref()
+            .is_some_and(|connection| connection.driver_is_terminal())
+    }
+
+    fn install_doh3_terminal_callback(&self, callback: Doh3TerminalCallback) {
+        if let Some(connection) = &self.doh3 {
+            connection.install_terminal_callback(callback);
+        }
+    }
 }
 
 /// The physical DoQ resource kept alive by one entry generation.
@@ -1595,6 +1613,10 @@ impl Doh3Connection {
         self.driver_terminal.terminal.load(Ordering::SeqCst)
     }
 
+    fn install_terminal_callback(&self, callback: Doh3TerminalCallback) {
+        self.driver_terminal.install_callback(callback);
+    }
+
     async fn wait_for_drain(&self) {
         loop {
             let notified = self.handles_done.notified();
@@ -1622,6 +1644,39 @@ impl Doh3Connection {
 /// authoritative terminal `poll_close` outcome.
 struct Doh3DriverState {
     terminal: AtomicBool,
+    callback: Mutex<Option<Doh3TerminalCallback>>,
+}
+
+type Doh3TerminalCallback = Arc<dyn Fn() + Send + Sync + 'static>;
+
+impl Doh3DriverState {
+    fn mark_terminal(&self) {
+        if self.terminal.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let callback = self
+            .callback
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(callback) = callback {
+            callback();
+        }
+    }
+
+    fn install_callback(&self, callback: Doh3TerminalCallback) {
+        let mut callback_slot = self.callback.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.terminal.load(Ordering::SeqCst) {
+            drop(callback_slot);
+            // The initializer may be installing the callback after the driver
+            // already ended. Defer the exact-generation deactivation so an
+            // initializer task never waits on a teardown task that is waiting
+            // on that initializer's own JoinHandle.
+            tokio::spawn(async move { callback() });
+        } else {
+            *callback_slot = Some(callback);
+        }
+    }
 }
 
 /// A caller-owned reference to a shared DoH3 connection.
@@ -1857,15 +1912,16 @@ async fn build_doh3_connection(
     };
     let driver_terminal = Arc::new(Doh3DriverState {
         terminal: AtomicBool::new(false),
+        callback: Mutex::new(None),
     });
     let driver_state = Arc::clone(&driver_terminal);
     let driver = tokio::spawn(async move {
         let error = crate::quic::drive_h3_connection(driver).await;
         if classify_h3_connection_error(&error) == QuicErrorClass::EntryTerminal {
             // The completed driver is the authoritative H3 connection-level
-            // signal; the request path consumes this state through the R0b
-            // model seam.
-            driver_state.terminal.store(true, Ordering::SeqCst);
+            // signal. Marking it terminal also invokes the exact-generation
+            // callback installed by the initializer.
+            driver_state.mark_terminal();
         }
     });
     Ok(Doh3Connection {
@@ -2213,6 +2269,9 @@ fn complete_initialization(
             && accepting
             && lifecycle_open
             && transport.is_some()
+            && !transport
+                .as_ref()
+                .is_some_and(|resource| resource.doh3_driver_is_terminal())
             && initialization_error.is_none();
         if publish {
             entry.transport = transport;
@@ -2320,8 +2379,26 @@ fn spawn_initializer(
             InitializationGuard::new(Arc::clone(&task_shared), task_key.clone(), generation);
         let result = task_shared
             .initializer
-            .initialize_result(task_key, generation)
+            .initialize_result(task_key.clone(), generation)
             .await;
+        let result = match result {
+            InitializationResult::Ready(transport) => {
+                let callback_key = task_key.clone();
+                let weak_shared = Arc::downgrade(&task_shared);
+                let callback: Doh3TerminalCallback = Arc::new(move || {
+                    if let Some(shared) = weak_shared.upgrade() {
+                        QuicReuseOwner { shared }.apply_error_class(
+                            &callback_key,
+                            generation,
+                            QuicErrorClass::EntryTerminal,
+                        );
+                    }
+                });
+                transport.install_doh3_terminal_callback(callback);
+                InitializationResult::Ready(transport)
+            }
+            other => other,
+        };
         guard.deliver(result);
     })
 }
@@ -3172,7 +3249,7 @@ impl Doh3ReuseUpstream {
         let h3_request = crate::quic::build_h3_get_request(&target, &authority)?;
         let mut stream = match race_control(&control, SideEffectState::MaybeSent, deadline, async {
             sender.send_request(h3_request).await.map_err(|error| {
-                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_send_error)
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_send_error, &sender)
             })
         })
         .await
@@ -3186,7 +3263,7 @@ impl Doh3ReuseUpstream {
 
         if let Err(error) = race_control(&control, SideEffectState::MaybeSent, deadline, async {
             stream.finish().await.map_err(|error| {
-                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_send_error)
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_send_error, &sender)
             })
         })
         .await
@@ -3197,7 +3274,7 @@ impl Doh3ReuseUpstream {
 
         let response = match race_control(&control, SideEffectState::Sent, deadline, async {
             stream.recv_response().await.map_err(|error| {
-                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_head_error)
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_head_error, &sender)
             })
         })
         .await
@@ -3210,7 +3287,7 @@ impl Doh3ReuseUpstream {
         };
         let declared =
             crate::quic::validate_h3_response_head(response.status(), response.headers())?;
-        let body = read_reused_h3_body(&control, deadline, &mut stream, declared)
+        let body = read_reused_h3_body(&control, deadline, &mut stream, &sender, declared)
             .await
             .map_err(|error| {
                 apply_doh3_failure(&self.owner, &key, generation, &shared, error.class);
@@ -3242,11 +3319,13 @@ struct Doh3ExchangeFailure {
 }
 
 impl Doh3ExchangeFailure {
-    fn stream(
+    fn stream<S: h3::ConnectionState>(
         error: h3::error::StreamError,
         classify: fn(h3::error::StreamError) -> SecureError,
+        state: &S,
     ) -> Self {
-        let class = classify_h3_stream_error(&error);
+        let observation = observe_h3_stream_error(state, &error);
+        let class = classify_h3_request_outcome(observation);
         Self {
             error: classify(error),
             class,
@@ -3285,13 +3364,14 @@ async fn read_reused_h3_body(
     control: &ExchangeControl,
     deadline: Instant,
     stream: &mut crate::quic::H3Stream,
+    sender: &crate::quic::H3Sender,
     declared: Option<u64>,
 ) -> Result<Vec<u8>, Doh3ExchangeFailure> {
     let collected = race_control(control, SideEffectState::Sent, deadline, async {
         let mut collected = Vec::new();
         loop {
             let Some(frame) = stream.recv_data().await.map_err(|error| {
-                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_body_error)
+                Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_body_error, sender)
             })?
             else {
                 break;
@@ -3306,7 +3386,7 @@ async fn read_reused_h3_body(
             collected.extend_from_slice(data);
         }
         match stream.recv_trailers().await.map_err(|error| {
-            Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_body_error)
+            Doh3ExchangeFailure::stream(error, crate::quic::classify_h3_body_error, sender)
         })? {
             None => Ok(collected),
             Some(_) => Err(Doh3ExchangeFailure {
