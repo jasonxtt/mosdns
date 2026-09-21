@@ -11,6 +11,7 @@ OFFERED_QPS="${OFFERED_QPS:-}"
 MANIFEST_SHA256="${MANIFEST_SHA256:-}"
 SUT_CPU_SET="${SUT_CPU_SET:-}"
 HARNESS_CPU_SET="${HARNESS_CPU_SET:-}"
+SUT_STARTUP_MARGIN="${SUT_STARTUP_MARGIN:-3}"
 
 if [[ -z "${MOSDNS_BINARY}" || -z "${SCENARIO}" ]]; then
   echo "MOSDNS_BINARY and SCENARIO are required" >&2
@@ -179,7 +180,7 @@ start_sut() {
   # connectable readiness signal, so use a bounded startup margin there.
   sut_port="${SUT_ADDR##*:}"
   if [[ "${TRANSPORT}" != "tcp" ]]; then
-    sleep 1
+    sleep "${SUT_STARTUP_MARGIN}"
     if ! kill -0 "${SUT_PID}" 2>/dev/null; then
       echo "SUT exited during startup" >&2
       return 1
@@ -299,4 +300,4 @@ fi
 cp "${TMP_DIR}/mosdns.stdout" "${RESULT_DIR}/sut.stdout.log"
 cp "${TMP_DIR}/mosdns.stderr" "${RESULT_DIR}/sut.stderr.log"
 printf '%s\n' "scenario=${SCENARIO}" "run_mode=${RUN_MODE}" "config=${SCENARIO_CONFIG}" "workload=${WORKLOAD}" > "${RESULT_DIR}/run-metadata.txt"
-printf '%s\n' "offered_qps=${qps}" "sut_cpu_set=${SUT_CPU_SET}" "harness_cpu_set=${HARNESS_CPU_SET}" >> "${RESULT_DIR}/run-metadata.txt"
+printf '%s\n' "offered_qps=${qps}" "sut_cpu_set=${SUT_CPU_SET}" "harness_cpu_set=${HARNESS_CPU_SET}" "sut_startup_margin=${SUT_STARTUP_MARGIN}" >> "${RESULT_DIR}/run-metadata.txt"
