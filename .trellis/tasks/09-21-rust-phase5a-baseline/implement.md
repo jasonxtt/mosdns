@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A Go-only whole-process baseline
 
-Status: **in progress — Slice 0 remediation complete, awaiting scoped root re-review**. Official Linux baseline execution remains gated on the Slice 0 review.
+Status: **in progress — Slice 1 complete, awaiting scoped root re-review**. Slice 2 report/closure remains gated on the Slice 1 review.
 
 ## 0. Pre-start gates
 
@@ -126,22 +126,56 @@ Evidence paths:
 
 ### Checklist
 
-- [ ] Use a Linux amd64 isolated environment, not macOS and not production `mosdns`.
-- [ ] Build the Go-only SUT with `SKIP_UI_BUILD=1`, `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH=amd64`, empty `GO_TAGS`, and no Rust backend selector.
-- [ ] Record task SHA, source anchor, product-path diff check, toolchain/build command, `go.mod`/`go.sum` hashes, binary SHA-256, GOMAXPROCS/GOGC/GOMEMLIMIT, kernel/CPU/memory/FD environment.
-- [ ] Run preflight and correctness smoke for W1-UDP, W1-TCP, W2, W3.
-- [ ] Run the bounded pilot only to select a useful fixed-rate range; do not report pilot as official capacity evidence.
-- [ ] Freeze `run-manifest.json` with official offered-QPS ladder, stage durations, request deadline, warm-up/prefill procedure, fixture delay, CPU affinity/isolation, scenario order, and file hashes **before** official repetitions.
-- [ ] Compute and record manifest SHA-256; official execution refuses a hash mismatch.
-- [ ] Run at least three complete official repetitions per measured variant with the fixed order and ladder.
-- [ ] Retain every valid/invalid run. Never overwrite or delete a poor result.
-- [ ] Store per-stage counters/histograms/percentiles, sender shortfall, upstream counter deltas, and resource samples.
-- [ ] Verify W2 cold/warm upstream counters and W3 route counters match the frozen correctness model.
-- [ ] Verify no wrong response/mixup is silently counted as useful throughput.
-- [ ] Verify CPU and RSS samples cover each official stage.
-- [ ] Verify harness/upstream headroom and document any sender-limited point as invalid/limited rather than SUT capacity.
-- [ ] Verify cleanup leaves no benchmark/SUT process or listener.
-- [ ] Record exact commands and evidence paths in this file.
+- [x] Use a Linux amd64 isolated environment, not macOS and not production `mosdns`.
+- [x] Build the Go-only SUT with `SKIP_UI_BUILD=1`, `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH=amd64`, empty `GO_TAGS`, and no Rust backend selector.
+- [x] Record task SHA, source anchor, product-path diff check, toolchain/build command, `go.mod`/`go.sum` hashes, binary SHA-256, GOMAXPROCS/GOGC/GOMEMLIMIT, kernel/CPU/memory/FD environment.
+- [x] Run preflight and correctness smoke for W1-UDP, W1-TCP, W2, W3.
+- [x] Run the bounded pilot only to select a useful fixed-rate range; do not report pilot as official capacity evidence.
+- [x] Freeze `run-manifest.json` with official offered-QPS ladder, stage durations, request deadline, warm-up/prefill procedure, fixture delay, CPU affinity/isolation, scenario order, offline SUT startup environment, and file hashes before official repetitions.
+- [x] Compute and record manifest SHA-256; official execution refuses a hash mismatch.
+- [x] Run at least three complete official repetitions per measured variant with the fixed order and ladder.
+- [x] Retain every valid/invalid run. Never overwrite or delete a poor result.
+- [x] Store per-stage counters/histograms/percentiles, sender shortfall, upstream counter deltas, and resource samples.
+- [x] Verify W2 cold/warm upstream counters and W3 route counters match the frozen correctness model.
+- [x] Verify no wrong response/mixup is silently counted as useful throughput.
+- [x] Verify CPU and RSS samples cover each official stage.
+- [x] Verify harness/upstream headroom and document any sender-limited point as invalid/limited rather than SUT capacity.
+- [x] Verify cleanup leaves no benchmark/SUT process or listener.
+- [x] Record exact commands and evidence paths in this file.
+
+### Slice 1 execution record
+
+The final frozen manifest is `afa071f1cb2fd05bf2f3727ffaa706715019526a`
+with SHA-256 `a5cd4d791ca9a88f4a1217e86f5b46b89d71625d344263c222f8eab0a797d8d7`.
+The final official evidence is under:
+
+```text
+.trellis/tasks/09-21-rust-phase5a-baseline/research/results/official-20260921/frozen-*
+```
+
+The matrix contains 36 retained final run directories: 3 repetitions × 3
+offered QPS values (`5`, `10`, `20`) × W1-UDP/W1-TCP/W2/W3. W2 has separate
+10-second fixed-rate cold and warm measured stages plus an unmeasured one-pass
+prefill. There are 45 final measured stage rows in total. Every final stage
+has zero wrong/protocol/transport/timeout/sender-shortfall counters, all
+scheduled requests are correct-on-time, and every stage has `/proc` resource
+samples. W2 counter deltas and W3 route counters were verified by the runner
+after graceful fixture shutdown.
+
+Pilot and remediation history is retained beside the final evidence. The
+100-QPS and 50-QPS pilot points were not selected: 100 QPS produced W1-UDP
+transport errors, while 50 QPS produced a W2 cold counter delta inconsistent
+with the frozen cache model. Earlier official attempts are retained as
+invalid/non-final evidence with their reasons: missing `rg` in the minimal
+container, W2 warm one-pass methodology before its fix, and public config
+package startup attempts before `/dev/null` was frozen. No invalid attempt is
+included in the final matrix.
+
+Validation and audit commands included `task.py validate`, Go test/vet,
+`bash -n`, JSON parsing, exact manifest/input hash checks, fixed-rate/counter
+assertions over all 36 final runs, resource-sample coverage checks, and a
+post-run process/listener cleanup check. The final report is intentionally
+deferred until this Slice 1 evidence receives scoped root `PASS`.
 
 ### Slice 1 exit gate
 

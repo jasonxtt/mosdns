@@ -1,0 +1,9 @@
+linux
+amd64
+1
+v1
+
+/go
+/workspace/go.mod
+/go/pkg/mod
+/root/.cache/go-build

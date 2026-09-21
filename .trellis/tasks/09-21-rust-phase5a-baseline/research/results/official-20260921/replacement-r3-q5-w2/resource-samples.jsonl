@@ -1,0 +1,12 @@
+{"timestamp":"2026-09-21T08:58:07.112978388Z","pid":2431,"user_ticks":48,"system_ticks":99,"clock_ticks_per_second":100,"user_seconds":0.48,"system_seconds":0.99,"rss_kib":30632}
+{"timestamp":"2026-09-21T08:58:08.12874771Z","pid":2431,"user_ticks":50,"system_ticks":100,"clock_ticks_per_second":100,"user_seconds":0.5,"system_seconds":1,"rss_kib":31220}
+{"timestamp":"2026-09-21T08:58:09.13089096Z","pid":2431,"user_ticks":50,"system_ticks":100,"clock_ticks_per_second":100,"user_seconds":0.5,"system_seconds":1,"rss_kib":31220}
+{"timestamp":"2026-09-21T08:58:10.129822184Z","pid":2431,"user_ticks":50,"system_ticks":101,"clock_ticks_per_second":100,"user_seconds":0.5,"system_seconds":1.01,"rss_kib":31228}
+{"timestamp":"2026-09-21T08:58:11.128284393Z","pid":2431,"user_ticks":51,"system_ticks":102,"clock_ticks_per_second":100,"user_seconds":0.51,"system_seconds":1.02,"rss_kib":31228}
+{"timestamp":"2026-09-21T08:58:12.130427603Z","pid":2431,"user_ticks":51,"system_ticks":102,"clock_ticks_per_second":100,"user_seconds":0.51,"system_seconds":1.02,"rss_kib":31236}
+{"timestamp":"2026-09-21T08:58:13.130298792Z","pid":2431,"user_ticks":51,"system_ticks":102,"clock_ticks_per_second":100,"user_seconds":0.51,"system_seconds":1.02,"rss_kib":31244}
+{"timestamp":"2026-09-21T08:58:14.130470968Z","pid":2431,"user_ticks":52,"system_ticks":103,"clock_ticks_per_second":100,"user_seconds":0.52,"system_seconds":1.03,"rss_kib":31264}
+{"timestamp":"2026-09-21T08:58:15.127254116Z","pid":2431,"user_ticks":52,"system_ticks":103,"clock_ticks_per_second":100,"user_seconds":0.52,"system_seconds":1.03,"rss_kib":31264}
+{"timestamp":"2026-09-21T08:58:16.14035132Z","pid":2431,"user_ticks":52,"system_ticks":104,"clock_ticks_per_second":100,"user_seconds":0.52,"system_seconds":1.04,"rss_kib":31272}
+{"timestamp":"2026-09-21T08:58:17.127127401Z","pid":2431,"user_ticks":53,"system_ticks":104,"clock_ticks_per_second":100,"user_seconds":0.53,"system_seconds":1.04,"rss_kib":31280}
+{"timestamp":"2026-09-21T08:58:21.745211331Z","pid":2466,"user_ticks":50,"system_ticks":172,"clock_ticks_per_second":100,"user_seconds":0.5,"system_seconds":1.72,"rss_kib":31504}

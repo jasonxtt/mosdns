@@ -1,0 +1,1 @@
+{"fixture_mode":"controlled loopback upstreams","delay_ms":0,"w1_udp":"127.0.0.1:15453","w1_tcp":"127.0.0.1:15454","w2":"127.0.0.1:15455","w3":{"route-a":"127.0.0.1:15456","route-b":"127.0.0.1:15457","route-c":"127.0.0.1:15458"},"counter_format":"per-upstream/name/type JSON"}

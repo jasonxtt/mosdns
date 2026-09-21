@@ -1,0 +1,8 @@
+scenario=w3
+run_mode=pilot
+config=/workspace/tests/phase5a-baseline/configs/routing.yaml
+workload=/workspace/tests/phase5a-baseline/workloads/routing.jsonl
+offered_qps=20
+sut_cpu_set=0,1
+harness_cpu_set=2,3
+sut_startup_margin=3

@@ -1,0 +1,6 @@
+{"timestamp":"2026-09-21T08:35:48.277634187Z","pid":289,"user_ticks":48,"system_ticks":128,"clock_ticks_per_second":100,"user_seconds":0.48,"system_seconds":1.28,"rss_kib":26844}
+{"timestamp":"2026-09-21T08:35:49.315799065Z","pid":289,"user_ticks":52,"system_ticks":135,"clock_ticks_per_second":100,"user_seconds":0.52,"system_seconds":1.35,"rss_kib":27356}
+{"timestamp":"2026-09-21T08:35:50.324765199Z","pid":289,"user_ticks":55,"system_ticks":140,"clock_ticks_per_second":100,"user_seconds":0.55,"system_seconds":1.4,"rss_kib":27452}
+{"timestamp":"2026-09-21T08:35:51.28846973Z","pid":289,"user_ticks":58,"system_ticks":146,"clock_ticks_per_second":100,"user_seconds":0.58,"system_seconds":1.46,"rss_kib":27508}
+{"timestamp":"2026-09-21T08:35:52.287000955Z","pid":289,"user_ticks":61,"system_ticks":151,"clock_ticks_per_second":100,"user_seconds":0.61,"system_seconds":1.51,"rss_kib":27628}
+{"timestamp":"2026-09-21T08:35:53.289056149Z","pid":289,"user_ticks":64,"system_ticks":156,"clock_ticks_per_second":100,"user_seconds":0.64,"system_seconds":1.56,"rss_kib":27704}

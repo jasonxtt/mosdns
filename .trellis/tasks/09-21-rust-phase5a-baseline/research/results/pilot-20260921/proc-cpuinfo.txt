@@ -1,0 +1,112 @@
+processor	: 0
+vendor_id	: AuthenticAMD
+cpu family	: 6
+model		: 6
+model name	: QEMU TCG CPU version 2.5+
+stepping	: 3
+microcode	: 0x1000065
+cpu MHz		: 1000.059
+cache size	: 512 KB
+physical id	: 0
+siblings	: 4
+core id		: 0
+cpu cores	: 4
+apicid		: 0
+initial apicid	: 0
+fpu		: yes
+fpu_exception	: yes
+cpuid level	: 13
+wp		: yes
+flags		: fpu de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush acpi mmx fxsr sse sse2 ss ht syscall nx mmxext rdtscp lm 3dnowext 3dnow nopl cpuid pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a 3dnowprefetch vmmcall fsgsbase bmi1 avx2 smep bmi2 erms mpx rdseed adx smap clflushopt clwb sha_ni xsaveopt xgetbv1 xsaveerptr wbnoinvd arat npt vgif umip pku ospke vaes la57 rdpid fsrm
+bugs		: sysret_ss_attrs spectre_v1 spectre_v2 spec_store_bypass
+bogomips	: 2000.11
+TLB size	: 1024 4K pages
+clflush size	: 64
+cache_alignment	: 64
+address sizes	: 40 bits physical, 57 bits virtual
+power management:
+
+processor	: 1
+vendor_id	: AuthenticAMD
+cpu family	: 6
+model		: 6
+model name	: QEMU TCG CPU version 2.5+
+stepping	: 3
+microcode	: 0x1000065
+cpu MHz		: 1000.059
+cache size	: 512 KB
+physical id	: 0
+siblings	: 4
+core id		: 1
+cpu cores	: 4
+apicid		: 1
+initial apicid	: 1
+fpu		: yes
+fpu_exception	: yes
+cpuid level	: 13
+wp		: yes
+flags		: fpu de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush acpi mmx fxsr sse sse2 ss ht syscall nx mmxext rdtscp lm 3dnowext 3dnow nopl cpuid pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a 3dnowprefetch vmmcall fsgsbase bmi1 avx2 smep bmi2 erms mpx rdseed adx smap clflushopt clwb sha_ni xsaveopt xgetbv1 xsaveerptr wbnoinvd arat npt vgif umip pku ospke vaes la57 rdpid fsrm
+bugs		: sysret_ss_attrs spectre_v1 spectre_v2 spec_store_bypass
+bogomips	: 3017.84
+TLB size	: 1024 4K pages
+clflush size	: 64
+cache_alignment	: 64
+address sizes	: 40 bits physical, 57 bits virtual
+power management:
+
+processor	: 2
+vendor_id	: AuthenticAMD
+cpu family	: 6
+model		: 6
+model name	: QEMU TCG CPU version 2.5+
+stepping	: 3
+microcode	: 0x1000065
+cpu MHz		: 1000.059
+cache size	: 512 KB
+physical id	: 0
+siblings	: 4
+core id		: 2
+cpu cores	: 4
+apicid		: 2
+initial apicid	: 2
+fpu		: yes
+fpu_exception	: yes
+cpuid level	: 13
+wp		: yes
+flags		: fpu de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush acpi mmx fxsr sse sse2 ss ht syscall nx mmxext rdtscp lm 3dnowext 3dnow nopl cpuid pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a 3dnowprefetch vmmcall fsgsbase bmi1 avx2 smep bmi2 erms mpx rdseed adx smap clflushopt clwb sha_ni xsaveopt xgetbv1 xsaveerptr wbnoinvd arat npt vgif umip pku ospke vaes la57 rdpid fsrm
+bugs		: sysret_ss_attrs spectre_v1 spectre_v2 spec_store_bypass
+bogomips	: 3017.80
+TLB size	: 1024 4K pages
+clflush size	: 64
+cache_alignment	: 64
+address sizes	: 40 bits physical, 57 bits virtual
+power management:
+
+processor	: 3
+vendor_id	: AuthenticAMD
+cpu family	: 6
+model		: 6
+model name	: QEMU TCG CPU version 2.5+
+stepping	: 3
+microcode	: 0x1000065
+cpu MHz		: 1000.059
+cache size	: 512 KB
+physical id	: 0
+siblings	: 4
+core id		: 3
+cpu cores	: 4
+apicid		: 3
+initial apicid	: 3
+fpu		: yes
+fpu_exception	: yes
+cpuid level	: 13
+wp		: yes
+flags		: fpu de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush acpi mmx fxsr sse sse2 ss ht syscall nx mmxext rdtscp lm 3dnowext 3dnow nopl cpuid pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a 3dnowprefetch vmmcall fsgsbase bmi1 avx2 smep bmi2 erms mpx rdseed adx smap clflushopt clwb sha_ni xsaveopt xgetbv1 xsaveerptr wbnoinvd arat npt vgif umip pku ospke vaes la57 rdpid fsrm
+bugs		: sysret_ss_attrs spectre_v1 spectre_v2 spec_store_bypass
+bogomips	: 3008.32
+TLB size	: 1024 4K pages
+clflush size	: 64
+cache_alignment	: 64
+address sizes	: 40 bits physical, 57 bits virtual
+power management:
+

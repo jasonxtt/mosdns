@@ -1,0 +1,3 @@
+2026-09-21T09:13:45.515Z	WARN	配置自动升级失败，继续使用原配置	{"error": "download config package: Get \"https://raw.githubusercontent.com/jasonxtt/file/main/mosdns/config/config_up.zip\": net/http: TLS handshake timeout"}
+2026-09-21T09:13:45.538Z	INFO	main config base directory set	{"path": "/workspace/tests/phase5a-baseline/configs"}
+2026-09-21T09:13:45.591Z	INFO	main config loaded	{"file": "/workspace/tests/phase5a-baseline/configs/forward-udp.yaml"}
