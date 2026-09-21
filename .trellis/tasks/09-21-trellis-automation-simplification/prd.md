@@ -200,6 +200,39 @@ controller can actually reach it:
   major issue → ask the user.
 - Reviewer transport unavailable NEVER degrades into silent self-review.
 
+### 5.6 Transport feasibility is a pre-implementation exit gate
+
+The ChatGPT reviewer transport is a **required external capability**, not an
+assumption. There is currently no verified evidence that the Codex host
+exposes a send/read/wait action into a plain ChatGPT conversation, so this
+capability MUST be proven before any implementation Slice mutates the
+existing working routing system.
+
+**Feasibility gate (runs before Slice 0, or as the first part of Slice 0,
+strictly before any de-routing change):**
+
+1. Resolve a real, user-selected plain ChatGPT conversation.
+2. Perform a real host-level probe proving that the host can: send a message
+   to that exact conversation; later read the reviewer response; and keep
+   the target identity stable across the round trip.
+3. No browser/UI automation and no unofficial API may be used for this
+   proof.
+4. Record the observed capability/API/tool contract as research evidence in
+   this task.
+
+**Outcomes:**
+
+- Probe succeeds → continue with the planned ChatGPT reviewer adapter.
+- Probe fails (the host exposes no supported plain-ChatGPT conversation
+  transport) → **STOP before any de-routing mutation** and ask the user to
+  choose a revised reviewer transport/design. Acceptable alternatives at that
+  point (user's decision, never silently chosen by Trellis) include an
+  official browser-use driver for the ChatGPT UI, a Codex detached reviewer,
+  another reviewer transport, or a temporary manual relay.
+
+The default reviewer requirement (plain ChatGPT conversation) is unchanged;
+only the proof obligation is added.
+
 ## 6. Review Loop Requirements
 
 Per authorized Slice:
@@ -289,7 +322,8 @@ After the final authorized Slice PASSes:
   access, destructive external actions.
 - **Reviewer failure**: reviewer target vanished, conversation cannot be
   sent/read, reviewer demands a different conversation, ambiguous review
-  destination.
+  destination, or the §5.6 feasibility probe shows the host has no supported
+  plain-ChatGPT conversation transport.
 
 ## 8. Authorization Model Requirements
 
@@ -444,7 +478,10 @@ needs one small, explicit, one-way, tested migration:
    a platform-native conversation send/read/wait capability; repo code never
    calls unofficial ChatGPT APIs or browser-automates ChatGPT; unusable
    transport before start → ask user; transport failure never degrades into
-   silent self-review.
+   silent self-review. The §5.6 feasibility probe runs and passes (recorded
+   as research evidence) BEFORE any Slice mutates the existing routing
+   system; on probe failure the task stops pre-mutation and waits for the
+   user's transport decision.
 8. **Scope/major issues**: out-of-scope reviewer demand or any §7 condition →
    immediate STOP + user question.
 9. **Pending is not PASS**: idle/pending/silence/partial responses never

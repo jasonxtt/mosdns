@@ -18,7 +18,49 @@ Common rules for every slice:
 
 ---
 
+## Slice G — ChatGPT reviewer transport feasibility gate (pre-implementation)
+
+**Goal**: prove the required external capability exists before any Slice
+mutates the working routing system. This is a spike/exit gate, not a feature
+slice — it produces research evidence only and commits no production change.
+
+**Order**: strictly before Slice 0. No de-routing, state-model, hook, config,
+or workflow change may land until this gate passes.
+
+**Steps**:
+
+1. Resolve a real, user-selected plain ChatGPT conversation (the user @ an
+   existing conversation).
+2. Run a real host-level probe proving all three: the host can send a message
+   to that exact conversation; the host can later read the reviewer response;
+   the target identity is stable across the round trip.
+3. No browser/UI automation and no unofficial ChatGPT API may be used for
+   this proof.
+4. Record the observed capability/API/tool contract in
+   `research/chatgpt-transport-probe.md` (what works, exact mechanism,
+   limitations).
+
+**Exit**:
+
+- **Pass** → proceed to Slice 0 with the planned ChatGPT reviewer adapter.
+- **Fail** (host exposes no supported plain-ChatGPT conversation transport) →
+  **STOP before any de-routing mutation**, leave the working system
+  untouched, and ask the user to choose the reviewer transport: official
+  browser-use driver for the ChatGPT UI / Codex detached reviewer / another
+  transport / temporary manual relay. Trellis never chooses silently.
+
+**Acceptance**: `research/chatgpt-transport-probe.md` documents a successful
+real round trip (or the task stops here for a user decision). The probe
+itself changes no runtime file.
+
+---
+
 ## Slice 0 — Automation context foundation
+
+**Precondition**: Slice G probe passed and recorded in
+`research/chatgpt-transport-probe.md`. (Slice 0 builds state/migration only
+and does not yet de-route, but it must still not start on an unproven
+transport.)
 
 **Goal**: new state model + migration, with CLI, replacing
 `common/codex_routing.py` as the source of truth (shim kept).
@@ -54,6 +96,10 @@ Slice 4 wiring; callers switch in Slice 1).
 ---
 
 ## Slice 1 — Workflow/hook de-routing
+
+**Precondition**: Slice G probe passed. This is the first slice that mutates
+the working routing system; it must not start on an unproven reviewer
+transport.
 
 **Goal**: remove surface/host routing from config, hooks, workflow text.
 
