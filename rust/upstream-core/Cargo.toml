@@ -73,12 +73,15 @@ tokio-rustls = { version = "=0.26.4", default-features = false, features = ["rin
 # from the caller's task - not another runtime; see the Slice 0 audit doc).
 # quinn's rustls is 0.23.5, the same 0.23 line the workspace `rustls` builds
 # the frozen `TlsPolicy` from, so no second rustls major enters the graph.
-# h3/h3-quinn have their default features disabled and no optional feature
-# (`tracing`, `datagram`) is enabled.
+# h3/h3-quinn have their default features disabled. The h3 opt-in API feature
+# is intentionally enabled for Slice 2: the shared DoH3 owner must bind the
+# pinned `RemoteClosing`/`ConnectionError` provenance at the real
+# `SendRequest` boundary rather than infer it from a wildcard or a rendered
+# error. This does not change the locked version or enable tracing/datagram.
 # Slice 0 resolves and audits this graph only; no QUIC socket I/O is
 # implemented by this slice.
 quinn = { version = "=0.11.7", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
-h3 = { version = "=0.0.8", default-features = false }
+h3 = { version = "=0.0.8", default-features = false, features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"] }
 h3-quinn = { version = "=0.0.10", default-features = false }
 
 [dev-dependencies]
