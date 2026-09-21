@@ -288,8 +288,10 @@ def _resolve_codex_dispatch_mode(config: dict) -> str:
                 mode = "inline"
             elif cfg_mode == "herdr":
                 mode = "herdr"
+            elif cfg_mode == "dsh-web":
+                mode = "dsh-web"
             elif cfg_mode == "dsh":
-                mode = "dsh"
+                mode = "ask"
             elif cfg_mode == "codex":
                 mode = "codex"
             elif cfg_mode == "ask":
@@ -306,9 +308,9 @@ def _codex_mode_banner(config: dict, provider: str | None = None) -> str:
 
     Reads `codex.dispatch_mode` from .trellis/config.yaml; defaults to
     `auto`, which distinguishes Codex CLI and Desktop/App provider routes.
-    `inline`/`codex`, `herdr`, and `dsh` are explicit provider policies; the
-    legacy `sub-agent` value is an alias for `auto`. Invalid explicit values
-    fall back to `ask` without per-turn warnings. The banner makes the
+    `inline`/`codex`, `herdr`, and `dsh-web` values are explicit provider
+    policies; the legacy `sub-agent` value is an alias for `auto`. Invalid
+    explicit values fall back to `ask` without per-turn warnings. The banner makes the
     active mode explicit to Codex AI per turn, complementing the workflow-state
     body which is per-status. Mode tells AI which dispatch protocol to follow;
     workflow-state tells AI what step it's at.
@@ -316,12 +318,12 @@ def _codex_mode_banner(config: dict, provider: str | None = None) -> str:
     mode = _resolve_codex_dispatch_mode(config)
     if provider == "codex":
         mode = "inline"
-    elif provider in {"herdr", "dsh", "ask", "unsupported"}:
-        mode = "ask" if provider in {"ask", "unsupported"} else provider
+    elif provider in {"herdr", "dsh-web", "dsh", "ask", "unsupported"}:
+        mode = "ask" if provider in {"dsh", "ask", "unsupported"} else provider
     if mode == "auto":
         meaning = (
             "auto: distinguish the Codex CLI and Desktop/App surfaces; CLI defaults "
-            "to the Herdr provider and Desktop/App defaults to MCP DSH. The host "
+            "to the Herdr provider and Desktop/App fails closed to an explicit choice. The host "
             "policy selects only a provider class; the conversation still needs "
             "explicit executor/reviewer targets, and unknown evidence fails closed."
         )
@@ -330,15 +332,16 @@ def _codex_mode_banner(config: dict, provider: str | None = None) -> str:
             "inline: the main session implements/checks directly; "
             "do not dispatch implement/check sub-agents."
         )
-    elif mode == "dsh":
-        meaning = (
-            "dsh: use the MCP DSH provider selected by the user or host policy; "
-            "do not auto-select a worker, model, or reviewer."
-        )
     elif mode == "ask":
         meaning = (
             "ask: Codex surface or policy is unresolved; fail closed and ask the "
             "user to choose executor and reviewer targets before implementation/review."
+        )
+    elif mode == "dsh-web":
+        meaning = (
+            "dsh-web: use the explicitly selected browser-backed DSH Web executor "
+            "through its web UI; never call the retired MCP dsh provider. Keep the "
+            "selected ChatGPT Web reviewer independent and explicit."
         )
     else:
         meaning = (
@@ -372,28 +375,32 @@ def resolve_breadcrumb_key(
             return f"{status}-inline"
         if provider == "herdr":
             return f"{status}-herdr"
+        if provider == "dsh-web":
+            return f"{status}-dsh-web"
         if provider == "dsh":
-            return f"{status}-dsh"
+            return f"{status}-auto"
         if provider in {"ask", "unsupported"}:
             return f"{status}-auto"
         if mode in ("inline", "codex"):
             return f"{status}-inline"
         if mode == "herdr":
             return f"{status}-herdr"
+        if mode == "dsh-web":
+            return f"{status}-dsh-web"
         if mode == "dsh":
-            return f"{status}-dsh"
+            return f"{status}-auto"
         if mode == "ask":
             return f"{status}-auto"
         if surface is not None:
             kind = surface.get("kind") if isinstance(surface, dict) else str(surface)
             codex_cfg = config.get("codex") if isinstance(config, dict) else None
             routes = codex_cfg.get("host_routes", {}) if isinstance(codex_cfg, dict) else {}
-            defaults = {"cli": "herdr", "desktop": "dsh", "unknown": "ask"}
+            defaults = {"cli": "herdr", "desktop": "ask", "unknown": "ask"}
             route = routes.get(kind, defaults.get(kind, "ask")) if isinstance(routes, dict) else defaults.get(kind, "ask")
             if route == "herdr":
                 return f"{status}-herdr"
-            if route == "dsh":
-                return f"{status}-dsh"
+            if route == "dsh-web":
+                return f"{status}-dsh-web"
             if route in ("codex", "inline"):
                 return f"{status}-inline"
             return f"{status}-auto"

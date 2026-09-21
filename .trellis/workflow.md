@@ -121,13 +121,15 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
     [workflow-state:no_task]      → no active task; before Phase 1
     [workflow-state:planning]     → all of Phase 1 (status='planning')
     [workflow-state:planning-inline] → Codex inline variant of Phase 1
-    [workflow-state:planning-dsh]    → Codex Desktop/App MCP DSH variant of Phase 1
+    [workflow-state:planning-dsh-web] → explicit browser-backed DSH Web variant of Phase 1
+    [workflow-state:planning-dsh]    → retired MCP route; use planning-dsh-web
     [workflow-state:planning-auto]   → Codex unresolved-surface variant of Phase 1
     [workflow-state:in_progress]  → Phase 2 + Phase 3.2-3.4
                                     (status stays 'in_progress' from
                                     task.py start until task.py archive)
     [workflow-state:in_progress-inline] → Codex inline variant of Phase 2/3
-    [workflow-state:in_progress-dsh]    → Codex MCP DSH variant of Phase 2/3
+    [workflow-state:in_progress-dsh-web] → explicit browser-backed DSH Web variant
+    [workflow-state:in_progress-dsh]    → retired MCP route; use in_progress-dsh-web
     [workflow-state:in_progress-auto]   → Codex unresolved-surface variant of Phase 2/3
     [workflow-state:completed]    → currently DEAD: cmd_archive flips
                                     status and moves the dir in the same
@@ -217,20 +219,21 @@ Multi-deliverable scope: consider a parent task plus independently verifiable ch
 Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-before-dev`.
 [/workflow-state:planning-inline]
 
-[workflow-state:planning-dsh]
-Load `trellis-brainstorm`; stay in planning.
-Finish and review the planning artifacts before implementation. Desktop/App
-auto policy resolves only to the MCP DSH provider; it does not select a DSH
-worker or reviewer. Resolve any missing conversation-scoped targets together
-before execution, or explicitly choose `executor=codex` / `reviewer=codex`.
-[/workflow-state:planning-dsh]
-
 [workflow-state:planning-auto]
 Load `trellis-brainstorm`; stay in planning.
 The Codex surface or host route is unresolved. Finish the planning artifacts,
-then ask for an explicit executor and reviewer; do not infer CLI, Desktop,
-Herdr, DSH, a pane, a worker, or a reviewer from weak signals.
+then ask for an explicit executor and reviewer; discovery may recommend a
+running DSH Web browser endpoint, but do not silently select CLI, Desktop,
+Herdr, DSH Web, a pane, a worker, or a reviewer from weak signals.
 [/workflow-state:planning-auto]
+
+[workflow-state:planning-dsh-web]
+Load `trellis-brainstorm`; stay in planning.
+DSH Web is the explicitly selected browser executor, not the retired MCP DSH
+provider. Finish and review all planning artifacts before `task.py start`,
+keep the ChatGPT Web reviewer selection independent, and use the browser UI
+for any later executor handoff.
+[/workflow-state:planning-dsh-web]
 
 [workflow-state:planning-herdr]
 Load `trellis-brainstorm`; stay in planning.
@@ -257,12 +260,10 @@ Sub-agent dispatch protocol applies to all platforms and all sub-agents, includi
 Flow: choose one behavior -> red test -> green implementation -> refactor while green -> `trellis-check` -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
 Main-session default: dispatch implement/check sub-agents. Sub-agent self-exemption: if already running as `trellis-implement`, do NOT spawn another `trellis-implement` or `trellis-check`; if already running as `trellis-check`, do NOT spawn another `trellis-check` or `trellis-implement`. Dispatch is main session only.
 Dispatch prompt starts with `Active task: <task path from task.py current>`. Read context: jsonl entries -> `prd.md` -> `design.md if present` -> `implement.md if present`.
-When the user authorizes MCP DSH as the executor, follow the project-local
-MCP DSH controlled execution protocol in
-`.trellis/spec/backend/quality-guidelines.md`: clean isolated worktree,
-bounded asynchronous waits, one scoped behavior per job, complete diff review
-before explicit apply, parent-owned verification/commit, and the same-
-conversation one-minute root-review loop.
+MCP DSH is retired. DSH Web remains supported only as an explicitly selected
+browser executor; resolve the executor and reviewer before implementation
+dispatch or external review. Planning/read-only work may continue while those
+choices are missing.
 [/workflow-state:in_progress]
 
 <!-- Per-turn breadcrumb: shown while status='in_progress' when
@@ -274,38 +275,44 @@ conversation one-minute root-review loop.
 Flow: `trellis-before-dev` -> choose one behavior -> red test -> green implementation -> refactor while green -> `trellis-check` -> validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
 Do not dispatch implement/check sub-agents in inline mode.
 Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, plus relevant spec/research loaded by skills.
-When the user authorizes MCP DSH as the executor, the parent session remains
-responsible for clean-worktree safety, exact diff inspection/apply, verification,
-commit/push, and the bounded same-conversation root-review loop described in
-`.trellis/spec/backend/quality-guidelines.md`.
+MCP DSH is retired. Use the explicitly selected browser DSH Web executor (or
+the selected supported alternative) and keep the parent responsible for
+clean-worktree safety, exact diff inspection, verification, commit/push, and
+the bounded same-conversation root-review loop.
 [/workflow-state:in_progress-inline]
-
-[workflow-state:in_progress-dsh]
-Flow: `trellis-before-dev` -> choose one behavior -> red test -> green
-implementation -> refactor while green -> parent-owned `trellis-check` and
-validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.
-For MCP DSH execution, preserve the clean isolated worktree, bounded waits,
-exact diff inspection, explicit apply, parent verification/commit, and the
-same-conversation root-review loop from
-`.trellis/spec/backend/quality-guidelines.md`. The host default never selects
-a worker or reviewer; explicit `executor=codex` remains available.
-[/workflow-state:in_progress-dsh]
 
 [workflow-state:in_progress-auto]
 Resolve the Codex surface and conversation-scoped executor/reviewer targets
 before implementation or review. Unknown or conflicting host evidence is
 fail-closed: ask one combined question and never silently fall back to Herdr,
-MCP DSH, a native sub-agent, inline execution, or a reviewer.
+DSH Web, MCP DSH, a native sub-agent, inline execution, or a reviewer.
 After explicit routing, follow the selected provider's contract, then run
 `trellis-check`, `trellis-update-spec`, validation, and the commit gate.
 [/workflow-state:in_progress-auto]
 
+[workflow-state:in_progress-dsh-web]
+Flow: `trellis-before-dev` -> use the explicitly selected DSH Web browser UI
+for the bounded active-task assignment -> independently inspect and validate
+the exact diff -> send the verified commit to the selected ChatGPT Web
+reviewer -> `trellis-update-spec` -> commit and `/trellis:finish-work` when the
+task gate permits.
+Never call MCP DSH or treat `dsh:provider-managed` as valid. The parent owns
+scope, safe browser handoff, worktree safety, exact changed paths, validation,
+push/review evidence, and the one-minute bounded review loop. A reviewer PASS
+does not authorize the next Slice.
+[/workflow-state:in_progress-dsh-web]
+
 [workflow-state:in_progress-herdr]
 Flow: `trellis-before-dev` -> verify conversation routing -> dispatch one bounded
-behavior/slice to the user-selected Herdr pane -> monitor with bounded
-`herdr agent wait/read` -> independently inspect and validate -> send the
-verified commit to the selected reviewer -> `trellis-update-spec` -> commit and
-`/trellis:finish-work` when the task gate permits.
+assignment for the active task (all remaining work authorized by its reviewed
+artifacts) to the user-selected Herdr pane -> monitor with bounded `herdr agent
+wait/read` -> independently inspect and validate the complete task diff -> send
+the verified commit to the selected reviewer -> `trellis-update-spec` -> commit
+and `/trellis:finish-work` when the task gate permits.
+The executor may use Slice headings as internal RED-to-GREEN milestones, but
+Herdr does not require a controller handoff or web-review round between those
+milestones. Native sub-agent workflows retain their one-behavior / one-slice
+dispatch rules.
 Do not implement directly and do not launch native Codex implement/check
 sub-agents. If executor or reviewer is missing, run
 `python3 .trellis/scripts/codex_routing.py discover` and ask one combined user
@@ -361,7 +368,7 @@ When a user request matches one of these intents inside an active task, route fi
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
-[codex-dsh, codex-auto]
+[codex-dsh-web, codex-auto]
 
 - Planning or unclear requirements -> `trellis-brainstorm`.
 - Before editing or dispatch -> resolve the detected surface and generic
@@ -369,7 +376,7 @@ When a user request matches one of these intents inside an active task, route fi
 - After editing -> `trellis-check`; repeated debugging -> `trellis-break-loop`;
   spec updates -> `trellis-update-spec`.
 
-[/codex-dsh, codex-auto]
+[/codex-dsh-web, codex-auto]
 
 [codex-herdr]
 
@@ -463,13 +470,13 @@ Do the research in the main session directly and write findings into `{TASK_DIR}
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
-[codex-dsh, codex-auto]
+[codex-dsh-web, codex-auto]
 
 Do read-only research in the controller session and persist findings under
 `{TASK_DIR}/research/`; provider/resource selection is not required until
 implementation dispatch or external review.
 
-[/codex-dsh, codex-auto]
+[/codex-dsh-web, codex-auto]
 
 [codex-herdr]
 
@@ -544,14 +551,14 @@ Skip this step. Context is loaded directly by the `trellis-before-dev` skill in 
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
-[codex-dsh, codex-auto]
+[codex-dsh-web, codex-auto]
 
 Resolve the generic routing target before implementation dispatch when the
 selected provider requires a resource. Keep `implement.jsonl` and
 `check.jsonl` aligned with the task artifacts when the selected route uses
 sub-agents; inline self-execution may skip those manifests.
 
-[/codex-dsh, codex-auto]
+[/codex-dsh-web, codex-auto]
 
 [codex-herdr]
 
@@ -671,23 +678,26 @@ The platform prelude auto-handles the context load requirement:
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
-[codex-dsh, codex-auto]
+[codex-dsh-web, codex-auto]
 
-Use one behavior slice at a time. For MCP DSH, the parent owns exact diff
-inspection, explicit apply, verification, and commit; for an unresolved
-surface, obtain an explicit route before editing.
+Use one behavior slice at a time. For an unresolved surface, obtain an
+explicit route before editing; the parent owns exact diff inspection,
+verification, and commit.
 
-[/codex-dsh, codex-auto]
+[/codex-dsh-web, codex-auto]
 
 [codex-herdr]
 
 1. Load `trellis-before-dev` and the active task artifacts in the controller.
 2. Validate or obtain the conversation-scoped executor and reviewer choice.
-3. Dispatch exactly one authorized behavior/slice to the selected pane with
-   the repository path, allowed files, checks, prohibitions, and report shape.
+3. Dispatch exactly one authorized active-task assignment to the selected pane
+   with the repository path, the full allowed task boundary, checks,
+   prohibitions, and report shape. The executor may progress through all
+   planned internal slices in one handoff; do not split Herdr work into
+   per-slice prompts or gates.
 4. Monitor with bounded `herdr agent wait/read`; inspect every approval.
-5. Independently inspect the complete diff and rerun appropriate checks before
-   accepting the handoff or sending a verified commit to review.
+5. Independently inspect the complete task diff and rerun appropriate checks
+   before accepting the handoff or sending a verified commit to review.
 
 [/codex-herdr]
 
@@ -725,13 +735,13 @@ If issues are found → fix → re-check, until green.
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
-[codex-dsh, codex-auto]
+[codex-dsh-web, codex-auto]
 
 Load `trellis-check` and perform the full-scope quality check. Preserve the
 provider contract, verify routing targets independently, and fix findings in
 the parent session before the final commit gate.
 
-[/codex-dsh, codex-auto]
+[/codex-dsh-web, codex-auto]
 
 [codex-herdr]
 

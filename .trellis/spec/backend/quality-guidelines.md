@@ -38,7 +38,8 @@ conversation review the work. It applies to planning documents and to
 implementation changes that must be reviewed through GitHub.
 
 The local Codex task is the controller; execution follows the conversation's
-selected mode (self/inline, native sub-agent, MCP DSH, or a Herdr executor).
+selected mode (self/inline, native sub-agent, Herdr, or browser-backed DSH Web).
+MCP DSH is retired and must not be dispatched.
 The selected reviewer may be a ChatGPT web conversation or the current Codex
 conversation when the user explicitly chooses self-review. The user remains
 the authority for which executor/reviewer is used and whether the next phase
@@ -92,7 +93,7 @@ evidence, Codex stops and asks the user before continuing.
   this bounded cadence while the review remains active. Each read must use the
   latest cursor when one is available.
 - A pending review is an expected wait state, not permission to speculate,
-  modify code, start another slice, archive the task, or claim acceptance.
+  modify code, start another task, archive the task, or claim acceptance.
 - When the reviewer returns a scoped `FAIL`, Codex automatically applies only
   the requested remediation, runs the focused checks, inspects the exact diff,
   stages exact paths, commits, pushes, and sends a new review request to the
@@ -173,10 +174,11 @@ decision.
 
 When `codex.dispatch_mode: auto` is active, detect the execution surface from
 strong host evidence only: Codex CLI maps to the Herdr provider and Codex
-Desktop/App maps to MCP DSH. The repository policy selects a provider class,
-not a Herdr pane, DSH worker, model, or reviewer. Persist concrete targets
-under the current Codex conversation identity and never infer them from pane
-position, terminal title, cwd, executable presence, or recency.
+Desktop/App fails closed to an explicit choice. Discovery may recommend a
+running DSH Web browser endpoint, but the repository policy selects only a
+provider class, not a Herdr pane, DSH Web URL, model, or reviewer. Persist
+concrete targets under the current Codex conversation identity and never infer
+them from pane position, terminal title, cwd, executable presence, or recency.
 
 The user may override either role in the conversation with an explicit target,
 including `executor=codex` and `reviewer=codex`. That means the current Codex
@@ -198,8 +200,8 @@ is an infrastructure boundary, not MosDNS runtime behavior.
 - `detect_surface(environ: dict | None = None, *, explicit: str | None = None)`
   returns `SurfaceEvidence(kind, source, evidence, reason)`.
 - `resolve_codex_provider(repo_root, surface, state: dict | None = None)` returns
-  a provider class (`codex`, `herdr`, `dsh`, `ask`, or `unsupported`) and never
-  a concrete pane, worker, model, or conversation.
+  a provider class (`codex`, `dsh-web`, `herdr`, `ask`, or `unsupported`) and
+  never a concrete pane, browser endpoint, worker, model, or conversation.
 - `codex_routing.py set-executor --provider <name> --reference <opaque-ref>`
   and `set-reviewer` persist only the named conversation slot; `set-surface`
   persists an explicit `cli`, `desktop`, or `unknown` override.
@@ -212,8 +214,10 @@ is an infrastructure boundary, not MosDNS runtime behavior.
 - Strong host evidence is name-only: `CODEX_SURFACE`/
   `CODEX_HOST_SURFACE`, `CODEX_APP_TOOLS_PIPE_PATH` (Desktop/App), and
   `CODEX_CLI_SURFACE`/`CODEX_CLI` (CLI). Values and paths are never emitted.
-- `auto` maps `cli -> herdr`, `desktop -> dsh`, and `unknown -> ask` through
+- `auto` maps `cli -> herdr`, `desktop -> ask`, and `unknown -> ask` through
   `codex.host_routes`; a valid persisted executor override takes precedence.
+  `dsh-web` means the explicitly selected browser UI endpoint and is distinct
+  from the retired MCP `dsh` provider.
 - `executor=codex` and `reviewer=codex` mean explicit current-session
   self-execution/self-review, not an implicit fallback.
 
@@ -225,13 +229,14 @@ is an infrastructure boundary, not MosDNS runtime behavior.
 | CLI-only marker | `cli`, evidence contains marker name |
 | Missing or conflicting markers | `unknown`, provider `ask`, combined prompt |
 | Invalid policy/provider | `ask`/`unsupported`; never choose another target |
-| Missing Herdr pane or invalid DSH/reviewer target | Invalidate only the affected slot |
+| Missing Herdr pane or invalid reviewer target | Invalidate only the affected slot |
 | Valid v1 state | Migrate in memory to v2; preserve identity/metadata |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: Desktop evidence resolves to DSH, the user selects
-  `dsh:provider-managed`, and the parent still owns diff inspection and review.
+- Good: Desktop evidence resolves to `ask`; discovery recommends a running
+  `dsh-web:<browser-url>` endpoint when present, and the parent requests an
+  explicit executor while keeping the reviewer selection independent.
 - Base: unknown evidence leaves both slots unresolved and asks one combined
   question while allowing planning/read-only investigation.
 - Bad: choose the only Herdr pane, infer CLI from missing App state, or use a
@@ -243,8 +248,9 @@ is an infrastructure boundary, not MosDNS runtime behavior.
   and marker names without private values.
 - State tests assert v1 migration, generic provider/reference targets,
   Codex self targets, independent invalidation, and provider fail-closedness.
-- Hook/workflow tests assert Desktop does not emit Herdr, explicit Codex
-  overrides use inline workflow content, and missing slots are combined.
+- Hook/workflow tests assert Desktop does not emit Herdr, DSH Web uses its
+  browser-specific workflow content, explicit Codex overrides use inline
+  workflow content, and missing slots are combined.
 - CLI smoke checks assert `discover`, `set-*`, `clear-*`, `validate`, and
   `show` use the same conversation-scoped state.
 
@@ -253,88 +259,47 @@ is an infrastructure boundary, not MosDNS runtime behavior.
 #### Wrong
 
 Treat `CODEX_APP_TOOLS_PIPE_PATH`'s absence as proof of CLI, auto-select a
-Herdr pane/DSH worker, or silently replace an unavailable reviewer.
+Herdr pane, or silently replace an unavailable reviewer.
 
 #### Correct
 
 Record only strong marker names, resolve the provider class, request explicit
-provider/reference targets, and let `executor=codex` / `reviewer=codex` be a
-deliberate user override that follows the inline self-review gate.
+provider/reference targets. When a running browser endpoint is discovered,
+recommend `dsh-web` without selecting it silently. Let `executor=codex` /
+`reviewer=codex` be deliberate user overrides that follow the inline self-review
+gate.
 
-### 9. Slice closure versus task completion
+### 9. Dispatch granularity, slice closure, and task completion
 
-An explicit reviewer `PASS` closes only the slice it names. Record the closure in
-the task artifacts — reviewer, exact reviewed revision, review run, and findings
-disposition — but leave the task `in_progress`, because a closed slice is not a
-finished task. Starting the next slice and finishing/archiving the task each need
-their own explicit user authorization; neither follows from a slice `PASS`.
+Dispatch granularity follows the selected executor. Native sub-agent workflows
+use explicit behavior slices: one behavior/job, one red-to-green loop, and a
+reviewer gate for the named slice. A slice `PASS` closes only that slice;
+the task remains `in_progress` and the next slice still needs user authorization.
 
-## MCP DSH controlled execution
+Herdr is different: the selected pane receives one bounded assignment for the
+active task, including all remaining work authorized by its reviewed `prd.md`,
+`design.md`, and `implement.md`. The executor may use the plan's Slice headings
+as internal RED-to-GREEN milestones, but the controller does not require a
+handoff or web-review round between those internal milestones. A final explicit
+reviewer `PASS` for the active task closes that task's authorized implementation
+scope; the task still remains `in_progress` until the explicit finish/archive
+gate. A Herdr task `PASS` never authorizes another task, production wiring, or a
+different review destination.
 
-Use this protocol when the user authorizes MCP DSH as the implementation
-executor. DSH is a bounded worker, not an authority to widen scope, commit,
-push, start a later slice, or change the project's review destination.
+## DSH Web browser execution and MCP DSH retirement
 
-### Safety and ownership
+DSH Web is a browser-backed executor discovered from an explicit running `dsh
+web` endpoint. It is selected as `dsh-web:<browser-url>` only after the user
+confirms the discovery recommendation; the parent controls the browser UI
+handoff and keeps the ChatGPT Web reviewer as a separate target. Do not expose
+secrets or rely on a provider-managed reference.
 
-- The parent Codex verifies repository path, branch, status, remote, and
-  worktree state before dispatch. It preserves unrelated dirty files and
-  requires a clean isolated worktree for normal DSH execution.
-- Prefer `workspace_mode: clean`; use `snapshot` only when the user explicitly
-  requires current uncommitted or ignored state to be included.
-- Every dispatch prompt names the active task, one behavior/blocker/slice, an
-  exact allowed-file list, required checks, and forbidden paths/actions.
-- DSH must not use destructive broad commands, `git add -A`, commit, push,
-  production wiring, or files outside the repository. The parent inspects the
-  complete DSH diff and calls `dsh_apply` explicitly; a DSH summary is never
-  sufficient evidence for applying changes.
-- If the DSH changed-file list, base, patch, or scope check is unexpected, do
-  not apply it. End the session, preserve the main tree, and investigate the
-  exact discrepancy.
-
-### Dispatch and timeout contract
-
-- Use read-only `dsh_investigate` only when the implementation choice or
-  repository state is genuinely ambiguous. Otherwise use one focused execute
-  job directly.
-- One job handles one behavior or one narrowly related blocker. Do not send a
-  whole phase or several independent remediation families to one job.
-- For work that may take longer than one MCP request, use asynchronous
-  `dsh_start`, then bounded `dsh_wait` calls of at most about 60 seconds. A
-  still-running result is not a failure and must not cause a duplicate job.
-- After an idle execute session, call `dsh_diff` once, inspect changed paths
-  and the complete patch, apply only the reviewed whitelist, then run checks in
-  the parent worktree and call `dsh_end`.
-- Keep prompts and reports concise: return changed paths, diff summary,
-  commands, exit status, and failures; do not dump unrelated source or ignored
-  build output. Do not assume DSH is free or outside Codex usage accounting;
-  verify actual usage in the product billing/usage view when cost matters.
-
-### Verification and review loop
-
-- DSH first writes the RED test for the selected behavior and records the real
-  focused failure. It then implements the minimum GREEN change and runs only
-  the focused checks needed for that behavior.
-- The parent reruns focused tests after apply, then runs the full workspace
-  checks only at the final slice boundary: tests, warnings-denied clippy,
-  format, manifest/tree inspection, task validation, and diff checks as
-  applicable.
-- Before commit, stage exact reviewed paths only. After push, send one compact
-  review request containing the full commit, diff scope, evidence, status, and
-  forbidden follow-on scope to the same confirmed ChatGPT conversation.
-- Wait/read that review at approximately one-minute intervals. Active,
-  pending, unchanged, or timed-out reads are not PASS. A scoped FAIL starts a
-  new clean DSH job for only that remediation; a scope-changing FAIL requires
-  user input; an explicit PASS closes the current slice and stops.
-
-### Good / bad examples
-
-- Good: `dsh_start(clean)` for one TCP framing behavior, bounded waits, one
-  complete diff inspection, exact apply, focused test, final full checks, and
-  root review before stopping.
-- Bad: a single monolithic DSH job for all Phase4 slices, a synchronous MCP
-  call held for many minutes, applying a patch without reading it, or letting
-  DSH continue from Slice1 into Slice2 without a new user authorization.
+MCP DSH is disabled in the Codex host configuration and rejected by the local
+routing layer. Do not call DSH MCP tools, dispatch a `dsh` executor, or treat a
+`dsh:provider-managed` target as valid. Existing MCP references are historical
+context only; if DSH Web is unavailable, use an explicitly selected Codex or
+Herdr executor, or remain in planning/read-only mode until the user chooses
+one.
 
 ## Herdr-hosted Codex controller and selected executor
 
@@ -376,8 +341,11 @@ When the contract is active:
 - Codex remains the dispatcher/controller: it owns scope, worktree safety,
   exact diff inspection, validation, commit/push verification, and the root
   review loop.
-- The selected Herdr pane is the implementation executor. It
-  may edit only the authorized slice and must stop at that slice boundary.
+- The selected Herdr pane is the implementation executor. It may edit all paths
+  authorized by the active task, including its planned internal slices, and
+  must stop at the active-task boundary. It may run the task's RED-to-GREEN
+  milestones without returning control at every Slice heading; it must not
+  start a different task or production wiring.
 - The user-selected conversation-scoped ChatGPT conversation is the
   reviewer/root gate. It may be an existing conversation or a newly created
   project/non-project conversation.
@@ -396,7 +364,8 @@ only after reading the exact command or action. Safe approval includes:
 - repository-local format, build, test, clippy, task validation and other
   explicitly requested checks;
 - edits confined to the user-authorized source, test, fixture, and task-evidence
-  whitelist for the active slice;
+  whitelist for the active task (or, for native sliced workflows, the current
+  slice);
 - creating or removing unique temporary files under a task-scoped temporary
   directory, with cleanup scoped to those exact paths; and
 - the authorized exact-path commit and push to the requested branch.
@@ -426,8 +395,9 @@ herdr agent send-keys <executor-pane> 2 enter     # reject/choose safe alternati
 ```
 
 Use bounded waits rather than busy polling. An idle/finished executor pane is a
-handoff state, not permission to start the next slice; the reviewer must still
-return an explicit PASS and the user must authorize the next slice.
+handoff state, not permission to start a different task or archive the active
+task; the reviewer must still return an explicit PASS for the active-task
+assignment and the finish gate remains separate.
 
 ### 4. Validation and error matrix
 
@@ -440,7 +410,7 @@ return an explicit PASS and the user must authorize the next slice.
 | Visible command is read/build/test/fmt/clippy/validate or exact scoped Git action | Inspect it, then approve if scope is exact |
 | Fixed-path write, broad delete, reset/rebase/force-push, secret access, or unknown command | Reject and request a bounded safe alternative |
 | Executor omits pane identity or commit/evidence | Treat as incomplete handoff and request a corrected report |
-| Reviewer active/pending or no explicit PASS | Wait; do not modify or begin another slice |
+| Reviewer active/pending or no explicit PASS | Wait; do not modify or start another task |
 | Reviewer explicit scoped FAIL | Apply only the requested remediation, then repeat review |
 
 ### 5. Good / Base / Bad cases
@@ -449,12 +419,12 @@ return an explicit PASS and the user must authorize the next slice.
   the user selects `w6:p3`; a visible `cargo test --locked` prompt and a read-only
   pinned Hyper source inspection are inspected and approved; a root-level
   marker write is rejected and replaced with a unique temporary path.
-- Base: the selected executor is idle after pushing a scoped commit; Codex
-  reads the pane, independently verifies the commit, sends it to the selected
-  reviewer conversation, and waits.
+- Base: the selected executor is idle after pushing the active-task commit;
+  Codex reads the pane, independently verifies the complete task diff, sends it
+  to the selected reviewer conversation, and waits.
 - Bad: choose the only candidate without asking, approve every executor prompt,
-  stage `.DS_Store` files, or start Slice2 merely
-  because Slice1 passed.
+  stage `.DS_Store` files, or start another task merely because an internal
+  milestone passed.
 
 ### 6. Tests and evidence required
 

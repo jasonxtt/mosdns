@@ -27,7 +27,7 @@ class CodexHookTest(unittest.TestCase):
         (self.root / ".trellis").mkdir()
         (self.root / ".trellis/config.yaml").write_text(
             "codex:\n  dispatch_mode: auto\n  host_routes:\n"
-            "    cli: herdr\n    desktop: dsh\n    unknown: ask\n",
+            "    cli: herdr\n    desktop: ask\n    unknown: ask\n",
             encoding="utf-8",
         )
         self.input_data = {
@@ -38,24 +38,29 @@ class CodexHookTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_auto_banner_names_both_host_defaults(self):
+    def test_auto_banner_names_fail_closed_desktop_policy(self):
         banner = HOOK._codex_mode_banner({"codex": {"dispatch_mode": "auto"}})
         self.assertIn("Codex CLI", banner)
         self.assertIn("Desktop/App", banner)
-        self.assertIn("MCP DSH", banner)
+        self.assertIn("fails closed", banner)
+        self.assertNotIn("MCP DSH", banner)
         self.assertIn("explicit executor/reviewer targets", banner)
         self.assertIn("inline: the main session", HOOK._codex_mode_banner({}, "codex"))
 
-    def test_desktop_routing_banner_is_generic_and_not_herdr(self):
-        set_target(self.root, "codex_hook-conversation", "executor", "dsh", "provider-managed")
-        set_target(self.root, "codex_hook-conversation", "reviewer", "codex", "current")
-        surface = {"kind": "desktop", "source": "env_marker", "evidence": ["CODEX_APP_TOOLS_PIPE_PATH"]}
-        banner = HOOK._codex_routing_banner(self.root, self.input_data, surface)
-        self.assertIn("executor=dsh:provider-managed", banner)
-        self.assertIn("reviewer=codex:current", banner)
-        self.assertIn("surface=desktop", banner)
-        self.assertIn("policy=dsh", banner)
-        self.assertNotIn("Herdr", banner)
+    def test_dsh_executor_is_rejected(self):
+        with self.assertRaises(ValueError):
+            set_target(self.root, "codex_hook-conversation", "executor", "dsh", "provider-managed")
+
+    def test_dsh_web_mode_uses_browser_executor_contract(self):
+        banner = HOOK._codex_mode_banner({"codex": {"dispatch_mode": "dsh-web"}})
+        self.assertIn("browser-backed DSH Web executor", banner)
+        self.assertIn("never call the retired MCP dsh provider", banner)
+        self.assertEqual(
+            HOOK.resolve_breadcrumb_key(
+                "in_progress", "codex", {"codex": {"dispatch_mode": "dsh-web"}}
+            ),
+            "in_progress-dsh-web",
+        )
 
     def test_unknown_surface_reports_both_missing_slots_together(self):
         surface = {"kind": "unknown", "source": "none", "evidence": []}
@@ -68,11 +73,11 @@ class CodexHookTest(unittest.TestCase):
         config = {
             "codex": {
                 "dispatch_mode": "auto",
-                "host_routes": {"cli": "herdr", "desktop": "dsh", "unknown": "ask"},
+                "host_routes": {"cli": "herdr", "desktop": "ask", "unknown": "ask"},
             }
         }
         self.assertEqual(HOOK.resolve_breadcrumb_key("in_progress", "codex", config, "cli"), "in_progress-herdr")
-        self.assertEqual(HOOK.resolve_breadcrumb_key("in_progress", "codex", config, "desktop"), "in_progress-dsh")
+        self.assertEqual(HOOK.resolve_breadcrumb_key("in_progress", "codex", config, "desktop"), "in_progress-auto")
         self.assertEqual(HOOK.resolve_breadcrumb_key("in_progress", "codex", config, "unknown"), "in_progress-auto")
         self.assertEqual(
             HOOK.resolve_breadcrumb_key("in_progress", "codex", config, "desktop", "codex"),
@@ -80,8 +85,8 @@ class CodexHookTest(unittest.TestCase):
         )
 
     def test_workflow_filter_keeps_only_resolved_provider_block(self):
-        content = "[codex-dsh]\nDSH instructions\n[/codex-dsh]\n[codex-herdr]\nHerdr instructions\n[/codex-herdr]"
-        self.assertEqual(filter_platform(content, "codex-dsh").strip(), "DSH instructions")
+        content = "[codex-dsh-web]\nDSH Web instructions\n[/codex-dsh-web]\n[codex-herdr]\nHerdr instructions\n[/codex-herdr]"
+        self.assertEqual(filter_platform(content, "codex-dsh-web").strip(), "DSH Web instructions")
 
 
 if __name__ == "__main__":
