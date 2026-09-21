@@ -1,0 +1,48 @@
+log:
+  level: error
+
+plugins:
+  - tag: phase5a_route_domains
+    type: domain_set
+    args:
+      exps:
+        - "full:domain-hit.test"
+
+  - tag: phase5a_route_a
+    type: forward
+    args:
+      upstreams:
+        - tag: route_a
+          addr: "udp://127.0.0.1:15456"
+
+  - tag: phase5a_route_b
+    type: forward
+    args:
+      upstreams:
+        - tag: route_b
+          addr: "udp://127.0.0.1:15457"
+
+  - tag: phase5a_route_c
+    type: forward
+    args:
+      upstreams:
+        - tag: route_c
+          addr: "udp://127.0.0.1:15458"
+
+  - tag: phase5a_entry
+    type: sequence
+    args:
+      - matches: ["qname $phase5a_route_domains"]
+        exec: ["$phase5a_route_a", "exit"]
+      - exec: $phase5a_route_b
+      - matches: ["resp_ip 192.0.2.10"]
+        exec: ["$phase5a_route_a", "exit"]
+      - matches: ["_true"]
+        exec: ["$phase5a_route_c", "exit"]
+
+  - tag: phase5a_udp
+    type: udp_server
+    args:
+      entry: phase5a_entry
+      listen: "127.0.0.1:15356"
+      enable_audit: false

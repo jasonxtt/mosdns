@@ -1,0 +1,3 @@
+{"case_id":"domain-hit","scenario":"w3","transport":"udp","qname":"domain-hit.test.","qtype":"A","expected_rcode":0,"expected_answer_class":"A","expected_answer":"192.0.2.11","expected_route_class":"DOMAIN_HIT","request_deadline_ms":500,"weight":1}
+{"case_id":"ip-rule-hit","scenario":"w3","transport":"udp","qname":"ip-hit.test.","qtype":"A","expected_rcode":0,"expected_answer_class":"A","expected_answer":"192.0.2.11","expected_route_class":"IP_RULE_HIT","request_deadline_ms":500,"weight":1}
+{"case_id":"ip-rule-miss","scenario":"w3","transport":"udp","qname":"ip-miss.test.","qtype":"A","expected_rcode":0,"expected_answer_class":"A","expected_answer":"192.0.2.12","expected_route_class":"IP_RULE_MISS","request_deadline_ms":500,"weight":1}
