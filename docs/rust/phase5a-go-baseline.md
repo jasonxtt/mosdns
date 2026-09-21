@@ -109,22 +109,36 @@ SUT startup margin:    3 seconds
 
 The runner is `scripts/run-phase5a-baseline.sh`. It accepts a replacement
 binary through `MOSDNS_BINARY`, validates and records its SHA-256, and does
-not implicitly rebuild the SUT. The exact shape for a future official rerun is:
+not implicitly rebuild the SUT. The exact shape for a future official rerun,
+when an approved Linux machine actually provides the historical four-CPU
+topology, is:
 
 ```text
+taskset --cpu-list 2,3 env \
+GOMAXPROCS=2 \
+GOGC=100 \
+MOSDNS_CONFIG_PACKAGE_URL=/dev/null \
 MOSDNS_BINARY=/absolute/path/to/mosdns-go \
 SCENARIO=w1-udp \
 RUN_MODE=official \
 OFFERED_QPS=5 \
 MANIFEST_SHA256=a5cd4d791ca9a88f4a1217e86f5b46b89d71625d344263c222f8eab0a797d8d7 \
 RESULT_DIR=/absolute/path/to/run-dir \
+SUT_CPU_SET=0,1 \
+HARNESS_CPU_SET=2,3 \
+SUT_STARTUP_MARGIN=3 \
   bash scripts/run-phase5a-baseline.sh
 ```
 
 Repeat that command with the frozen scenario/QPS pairs and a distinct result
 directory; the runner interface is environment-variable based, not
-positional arguments. `SUT_CPU_SET`, `HARNESS_CPU_SET`, and `HELPER_BINARY`
-are set by the approved environment when required.
+positional arguments. The outer `taskset` pins the harness to CPUs `2,3` and
+the runner pins the SUT to `0,1`; `HARNESS_CPU_SET` is also recorded in run
+metadata. This command is a reproduction contract, not a request to start a
+local VM. It must not be run on the current two-CPU `ssh mosdns-rust` host and
+reported as equivalent to the historical frozen environment; any new run
+there would require a newly frozen environment/manifest and the corresponding
+review gate.
 
 The unchanged Go SUT was also copied to a second executable path and passed
 the same W1-UDP smoke, proving that the runner does not depend on a particular
