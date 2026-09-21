@@ -240,15 +240,21 @@ Each response is associated with its request and checked online. Minimum checks:
 - answer class/value sufficient to distinguish the expected controlled route;
 - response arrives before the frozen request deadline for `correct_on_time`.
 
-Counters are disjoint and explicit:
+Separate aggregate counters from the per-request terminal classification. The
+aggregate counters are totals and are not mutually exclusive:
 
 ```text
 scheduled
 sent
 received
+```
+
+Each request that reaches a terminal outcome has exactly one mutually
+exclusive classification:
+
+```text
 correct_on_time
 correct_late
-expected_negative_on_time
 wrong_response
 protocol_error
 transport_error
@@ -256,7 +262,22 @@ timeout
 sender_shortfall
 ```
 
-Expected-negative answers may be part of `correct_on_time` but also receive a separate counter for transparency.
+`expected_negative_on_time` is a transparent annotation/sub-counter of
+`correct_on_time`, not another mutually exclusive outcome. It must never be
+added to `correct_on_time` as a second request. A valid expected-negative
+response that arrives after the deadline is classified as `correct_late` and
+does not receive the on-time annotation.
+
+The deadline boundary is deterministic: a valid expected response received by
+the frozen request deadline is `correct_on_time`; a valid expected response
+received after that deadline but before the bounded late-drain end is
+`correct_late`; if no terminal response is observed by the late-drain end, the
+request is `timeout`. A wrong or malformed response observed in either window
+is `wrong_response` or `protocol_error`, respectively, rather than an
+additional timeout. A send that the driver cannot issue at its scheduled point
+is `sender_shortfall` and is not also a timeout. Only `correct_on_time` is the
+effective-throughput numerator; all aggregate and classification counters are
+reported together so failures cannot be hidden.
 
 ## 11. Latency representation
 
