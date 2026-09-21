@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use fixtures::FixtureSet;
 use mosdns_upstream_core::quic::DOQ_ALPN;
-use mosdns_upstream_core::quic_reuse::DoqReuseUpstream;
+use mosdns_upstream_core::quic_reuse::{DoqReuseUpstream, MAX_STREAMS_PER_CONNECTION};
 use mosdns_upstream_core::secure::{SecureError, SecureResponse, TlsPolicy};
 use mosdns_upstream_core::{
     ExchangeContext, ExchangeRequest, ServerIdentity, SideEffectState, TransportCancellation,
@@ -75,7 +75,7 @@ fn frame(body: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn server_config(set: &FixtureSet) -> quinn::ServerConfig {
+fn server_config(set: &FixtureSet, max_bidi: Option<u32>) -> quinn::ServerConfig {
     let mut tls =
         ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
             .with_protocol_versions(&[&rustls::version::TLS13])
@@ -85,7 +85,13 @@ fn server_config(set: &FixtureSet) -> quinn::ServerConfig {
             .expect("synthetic certificate and key match");
     tls.alpn_protocols = vec![DOQ_ALPN.to_vec()];
     let quic = QuicServerConfig::try_from(tls).expect("TLS config converts to QUIC");
-    quinn::ServerConfig::with_crypto(Arc::new(quic))
+    let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic));
+    if let Some(max_bidi) = max_bidi {
+        let mut transport = quinn::TransportConfig::default();
+        transport.max_concurrent_bidi_streams(quinn::VarInt::from_u32(max_bidi));
+        config.transport_config(Arc::new(transport));
+    }
+    config
 }
 
 struct DoqServer {
@@ -107,7 +113,16 @@ enum FirstStreamMode {
 
 impl DoqServer {
     fn start(set: &FixtureSet, streams: usize, mode: FirstStreamMode) -> Self {
-        let config = server_config(set);
+        Self::start_with_limit(set, streams, mode, None)
+    }
+
+    fn start_with_limit(
+        set: &FixtureSet,
+        streams: usize,
+        mode: FirstStreamMode,
+        max_bidi: Option<u32>,
+    ) -> Self {
+        let config = server_config(set, max_bidi);
         let (address_tx, address_rx) = std::sync::mpsc::channel();
         let (evidence_tx, evidence_rx) = oneshot::channel();
         let accepts = Arc::new(AtomicUsize::new(0));
@@ -290,6 +305,109 @@ fn doq_reuse_multiplexes_concurrent_queries_on_one_connection() {
     for (_, request) in evidence {
         assert_eq!(&request[2..4], &[0, 0], "wire DNS IDs are zeroed");
     }
+}
+
+#[test]
+fn doq_peer_advertised_stream_limit_serializes_without_replacement() {
+    let set = FixtureSet::generate();
+    let streams = 2;
+    let server = DoqServer::start_with_limit(&set, streams, FirstStreamMode::Normal, Some(1));
+    let upstream = Arc::new(upstream(&set, server.address));
+
+    let results = block_on(async {
+        let mut tasks = Vec::new();
+        for index in 0..streams {
+            let upstream = Arc::clone(&upstream);
+            tasks.push(tokio::spawn(async move {
+                let index = u16::try_from(index).expect("test stream index fits u16");
+                let query = query_wire(0x1500 + index);
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                let context = ExchangeContext::new(
+                    Instant::now() + EXCHANGE_DEADLINE,
+                    TransportCancellation::new(),
+                );
+                upstream.exchange(request, context).await
+            }));
+        }
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.expect("query task joins"));
+        }
+        results
+    });
+
+    for (index, result) in results.into_iter().enumerate() {
+        let response = result.expect("peer stream credit eventually opens each stream");
+        let index = u16::try_from(index).expect("test stream index fits u16");
+        assert_eq!(response.request_id(), 0x1500 + index);
+        assert_eq!(response.response_id(), 0x1500 + index);
+    }
+    assert_eq!(upstream.entry_count(), 1);
+    assert_eq!(upstream.in_flight_exchanges(), 1);
+    block_on(upstream.close());
+
+    let (accepts, evidence) = server.join();
+    assert_eq!(
+        accepts, 1,
+        "peer stream credit does not create a replacement"
+    );
+    assert_eq!(evidence.len(), streams);
+}
+
+#[test]
+fn doq_bounded_concurrent_stress_keeps_one_generation() {
+    let set = FixtureSet::generate();
+    let streams = MAX_STREAMS_PER_CONNECTION.min(8);
+    let server = DoqServer::start(&set, streams, FirstStreamMode::Normal);
+    let upstream = Arc::new(upstream(&set, server.address));
+
+    let results = block_on(async {
+        let mut tasks = Vec::new();
+        for index in 0..streams {
+            let upstream = Arc::clone(&upstream);
+            tasks.push(tokio::spawn(async move {
+                let index = u16::try_from(index).expect("test stream index fits u16");
+                let query = query_wire(0x1600 + index);
+                let request = ExchangeRequest::new(&query).expect("valid query");
+                let context = ExchangeContext::new(
+                    Instant::now() + EXCHANGE_DEADLINE,
+                    TransportCancellation::new(),
+                );
+                upstream.exchange(request, context).await
+            }));
+        }
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await.expect("query task joins"));
+        }
+        results
+    });
+
+    let mut markers = BTreeSet::new();
+    for (index, result) in results.into_iter().enumerate() {
+        let response = result.expect("bounded concurrent DoQ exchange succeeds");
+        let index = u16::try_from(index).expect("test stream index fits u16");
+        assert_eq!(response.request_id(), 0x1600 + index);
+        assert_eq!(response.response_id(), 0x1600 + index);
+        markers.insert(*response.wire().last().expect("DNS response has an address"));
+    }
+    assert_eq!(markers.len(), streams, "markers never cross-talk");
+    assert_eq!(upstream.entry_count(), 1);
+    assert_eq!(upstream.in_flight_exchanges(), 1);
+    block_on(upstream.close());
+
+    let (accepts, evidence) = server.join();
+    assert_eq!(accepts, 1, "stress stays on one physical connection");
+    assert_eq!(evidence.len(), streams);
+    assert_eq!(
+        evidence
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        streams,
+        "stress uses one independent stream per query"
+    );
 }
 
 #[test]
