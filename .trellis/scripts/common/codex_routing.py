@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,9 +17,10 @@ from .config import get_codex_dispatch_mode, get_codex_host_routes
 
 STATE_VERSION = 2
 VALID_SURFACES = {"cli", "desktop", "unknown"}
-VALID_DISPATCH_MODES = {"auto", "ask", "codex", "dsh", "herdr", "inline"}
-SUPPORTED_EXECUTOR_PROVIDERS = {"codex", "dsh", "herdr"}
+VALID_DISPATCH_MODES = {"auto", "ask", "codex", "dsh-web", "herdr", "inline"}
+SUPPORTED_EXECUTOR_PROVIDERS = {"codex", "dsh-web", "herdr"}
 SUPPORTED_REVIEWER_PROVIDERS = {"codex", "chatgpt"}
+_CODEX_THREAD_REFERENCE = re.compile(r"^codex://threads/[A-Za-z0-9-]+$")
 
 
 def _utc_now() -> str:
@@ -50,6 +52,12 @@ def empty_state(context_key: str) -> dict[str, Any]:
 
 def _nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _is_codex_executor_reference(value: Any) -> bool:
+    return value in {"current", "codex/current"} or (
+        isinstance(value, str) and _CODEX_THREAD_REFERENCE.fullmatch(value) is not None
+    )
 
 
 def _valid_target(value: Any) -> bool:
@@ -150,14 +158,11 @@ def _migrate_v1(data: dict[str, Any], context_key: str) -> dict[str, Any]:
                     "executor_pane_id": dispatch["executor_pane_id"],
                 },
             )
-        elif mode == "dsh" and _nonempty_string(dispatch.get("reference")):
-            state["executor"] = _target(
-                "dsh",
-                dispatch["reference"],
-                label=dispatch.get("label", "MCP DSH"),
-                selected_by=selected_by,
-                metadata={"legacy_dispatch": dict(dispatch)},
-            )
+        elif mode == "dsh":
+            # Retired MCP DSH state is intentionally not migrated into an
+            # executor target. Execution must be selected again from a
+            # supported non-MCP provider.
+            pass
 
     reviewer = data.get("reviewer")
     if isinstance(reviewer, dict) and _nonempty_string(reviewer.get("conversation_id")):
@@ -220,6 +225,9 @@ def set_target(
 ) -> dict[str, Any]:
     if role not in {"executor", "reviewer"}:
         raise ValueError("role must be executor or reviewer")
+    normalized_provider = provider.strip().lower()
+    if role == "executor" and normalized_provider == "dsh":
+        raise ValueError("MCP DSH executor is disabled; choose dsh-web, codex, or herdr")
     state = load_state(repo_root, context_key)
     state[role] = _target(
         provider,
@@ -275,15 +283,17 @@ def set_dispatch(
             label="Codex",
             metadata={"mode": "inline"},
         )
-    if mode == "dsh":
+    if mode == "dsh-web":
+        if not reference:
+            raise ValueError("dsh-web mode requires an explicit browser URL reference")
         return set_target(
             repo_root,
             context_key,
             "executor",
-            "dsh",
-            reference or "provider-managed",
-            label="MCP DSH",
-            metadata={"mode": "dsh"},
+            "dsh-web",
+            reference,
+            label="DSH Web",
+            metadata={"mode": "dsh-web", "transport": "browser-ui"},
         )
     if mode == "herdr":
         if not workspace_id or not executor_pane_id:
@@ -453,7 +463,7 @@ def resolve_codex_provider(
     mode = get_codex_dispatch_mode(repo_root)
     if mode in {"codex", "inline"}:
         return "codex"
-    if mode in {"herdr", "dsh", "ask"}:
+    if mode in {"herdr", "dsh-web", "ask"}:
         return mode
     if mode == "auto":
         return get_codex_host_routes(repo_root).get(_surface_kind(surface), "ask")
@@ -465,6 +475,65 @@ class HerdrInventory:
     current: dict[str, Any] | None
     candidates: list[dict[str, Any]]
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class DshWebInventory:
+    candidates: list[dict[str, Any]]
+    error: str | None = None
+
+
+def _dsh_web_reference(command: str) -> tuple[str, int]:
+    port_match = re.search(r"(?:^|\s)--port\s+(\d+)(?:\s|$)", command)
+    port = int(port_match.group(1)) if port_match else 3080
+    trusted_hosts = re.findall(r"(?:^|\s)--trusted-host\s+([^\s]+)", command)
+    public_host = next(
+        (host for host in trusted_hosts if host not in {"localhost", "127.0.0.1", "0.0.0.0"}),
+        None,
+    )
+    if public_host:
+        return f"https://{public_host.rstrip('/')}/", port
+    return f"http://127.0.0.1:{port}/", port
+
+
+def discover_dsh_web(
+    command: tuple[str, ...] = ("ps", "-axo", "pid=,command="),
+) -> DshWebInventory:
+    """Discover running DSH Web browser endpoints without using MCP."""
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return DshWebInventory([], f"DSH Web process discovery failed: {exc}")
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_line in completed.stdout.splitlines():
+        line = raw_line.strip()
+        if not line or not re.search(r"\bdsh\s+web\b", line):
+            continue
+        match = re.match(r"(\d+)\s+(.*)$", line)
+        pid = int(match.group(1)) if match else None
+        command_text = match.group(2) if match else line
+        reference, port = _dsh_web_reference(command_text)
+        if reference in seen:
+            continue
+        seen.add(reference)
+        candidates.append(
+            {
+                "provider": "dsh-web",
+                "reference": reference,
+                "label": f"DSH Web ({reference})",
+                "pid": pid,
+                "port": port,
+                "transport": "browser-ui",
+            }
+        )
+
+    if candidates:
+        return DshWebInventory(candidates)
+    if shutil.which("dsh"):
+        return DshWebInventory([], "dsh is installed but no dsh web process is running")
+    return DshWebInventory([], "dsh executable is unavailable")
 
 
 def parse_herdr_inventory(payload: Any, current_pane_id: str | None = None) -> HerdrInventory:
@@ -523,16 +592,39 @@ def _executor_target(state: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def executor_validity(inventory: HerdrInventory, state: dict[str, Any]) -> tuple[bool, str]:
+def _normalize_dsh_web_reference(value: Any) -> str:
+    return str(value).strip().rstrip("/")
+
+
+def executor_validity(
+    inventory: HerdrInventory,
+    state: dict[str, Any],
+    dsh_web: DshWebInventory | None = None,
+) -> tuple[bool, str]:
     target = _executor_target(state)
     if target is None:
         return False, "executor selection is missing"
     provider = target.get("provider")
     reference = target.get("reference")
-    if provider == "codex" and reference in {"current", "codex/current"}:
+    if provider == "codex" and _is_codex_executor_reference(reference):
         return True, "current Codex was explicitly selected"
-    if provider == "dsh" and _nonempty_string(reference):
-        return True, f"MCP DSH target {reference} is selected"
+    if provider == "dsh-web":
+        if dsh_web is None:
+            return False, "DSH Web inventory was not collected"
+        if dsh_web.error and not dsh_web.candidates:
+            return False, dsh_web.error
+        normalized_reference = _normalize_dsh_web_reference(reference)
+        match = next(
+            (
+                item
+                for item in dsh_web.candidates
+                if _normalize_dsh_web_reference(item.get("reference")) == normalized_reference
+            ),
+            None,
+        )
+        if match is None:
+            return False, "selected DSH Web browser endpoint is unavailable"
+        return True, candidate_summary(match)
     if provider != "herdr":
         return False, f"unsupported executor provider: {provider}"
     if inventory.error or inventory.current is None:
@@ -569,8 +661,8 @@ def routing_missing_slots(state: dict[str, Any]) -> list[str]:
     executor_valid = False
     if _valid_target(executor):
         if executor is not None and executor.get("provider") == "codex":
-            executor_valid = executor.get("reference") in {"current", "codex/current"}
-        elif executor is not None and executor.get("provider") == "dsh":
+            executor_valid = _is_codex_executor_reference(executor.get("reference"))
+        elif executor is not None and executor.get("provider") == "dsh-web":
             executor_valid = _nonempty_string(executor.get("reference"))
         elif executor is not None and executor.get("provider") == "herdr":
             executor_valid = _nonempty_string(executor.get("workspace_id")) and _nonempty_string(
@@ -591,6 +683,8 @@ def routing_missing_slots(state: dict[str, Any]) -> list[str]:
 
 
 def candidate_summary(item: dict[str, Any]) -> str:
+    if item.get("provider") == "dsh-web":
+        return f"{item.get('label') or 'DSH Web'} | {item.get('reference') or 'unknown'}"
     return " | ".join(
         str(item.get(key) or "unknown")
         for key in ("pane_id", "agent", "agent_status", "foreground_cwd", "terminal_title_stripped")
@@ -609,6 +703,7 @@ def selection_prompt(
     *,
     surface: SurfaceEvidence | dict[str, Any] | str | None = None,
     provider: str | None = None,
+    dsh_web: DshWebInventory | None = None,
 ) -> str:
     parts: list[str] = []
     selected_surface = surface or state.get("surface")
@@ -627,10 +722,37 @@ def selection_prompt(
             else:
                 listed = "\n".join(f"- {candidate_summary(candidate)}" for candidate in inventory.candidates)
                 parts.append("Choose one Herdr executor pane (no candidate is auto-selected):\n" + listed)
+        elif resolved_provider == "dsh-web":
+            if dsh_web is None or not dsh_web.candidates:
+                reason = dsh_web.error if dsh_web is not None else "DSH Web discovery was not run"
+                parts.append(f"DSH Web browser executor unresolved ({reason}); start DSH Web or choose another provider.")
+            else:
+                listed = "\n".join(
+                    f"- {candidate.get('reference')} ({candidate.get('label', 'DSH Web')})"
+                    for candidate in dsh_web.candidates
+                )
+                parts.append(
+                    "Choose one DSH Web browser executor (no candidate is auto-selected; this is not MCP):\n"
+                    + listed
+                )
         elif resolved_provider == "dsh":
-            parts.append("MCP DSH is the host default; choose its provider-managed reference explicitly. No worker is auto-selected.")
+            parts.append("MCP DSH is disabled; choose dsh-web, executor=codex, or an explicit Herdr target.")
         elif resolved_provider == "ask":
-            parts.append("Surface/policy is unresolved; choose the executor provider explicitly. No fallback is allowed.")
+            if dsh_web is not None and dsh_web.candidates:
+                listed = "\n".join(
+                    f"- dsh-web:{candidate.get('reference')} ({candidate.get('label', 'DSH Web')})"
+                    for candidate in dsh_web.candidates
+                )
+                parts.append(
+                    "Surface policy is ask. Recommended executor: DSH Web browser UI (not MCP); "
+                    "explicit confirmation is still required:\n" + listed
+                )
+            else:
+                reason = dsh_web.error if dsh_web is not None else "DSH Web discovery was not run"
+                parts.append(
+                    "Surface/policy is ask; no DSH Web browser endpoint is currently available "
+                    f"({reason}). Choose the executor provider explicitly. No fallback is allowed."
+                )
     if "reviewer" in routing_missing_slots(state):
         parts.append(
             "Choose one ChatGPT reviewer or explicitly set reviewer=codex for self-review: "

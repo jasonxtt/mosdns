@@ -4,8 +4,10 @@ from pathlib import Path
 
 from common.config import get_codex_dispatch_mode, get_codex_host_routes
 from common.codex_routing import (
+    DshWebInventory,
     HerdrInventory,
     detect_surface,
+    discover_dsh_web,
     executor_validity,
     invalidate,
     load_state,
@@ -108,9 +110,54 @@ class CodexRoutingTest(unittest.TestCase):
         self.assertEqual(get_codex_dispatch_mode(self.root), "herdr")
         self.assertEqual(resolve_effective_platform("codex", {"codex": {"dispatch_mode": "herdr"}}), "codex-herdr")
 
-    def test_dsh_is_an_explicit_codex_mode(self):
-        self.assertEqual(get_codex_dispatch_mode(self.root), "auto")
-        self.assertEqual(resolve_effective_platform("codex", {"codex": {"dispatch_mode": "dsh"}}), "codex-dsh")
+    def test_retired_dsh_policy_fails_closed(self):
+        config_dir = self.root / ".trellis"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.yaml").write_text("codex:\n  dispatch_mode: dsh\n", encoding="utf-8")
+        self.assertEqual(get_codex_dispatch_mode(self.root), "ask")
+        self.assertEqual(resolve_effective_platform("codex", {"codex": {"dispatch_mode": "dsh"}}), "codex-auto")
+
+    def test_dsh_web_is_explicit_browser_executor_and_validates_against_discovery(self):
+        endpoint = "https://dsh.959527.xyz/"
+        state = set_target(self.root, "codex_one", "executor", "dsh-web", endpoint)
+        inventory = DshWebInventory(
+            [{"provider": "dsh-web", "reference": endpoint, "label": "DSH Web", "transport": "browser-ui"}]
+        )
+        valid, reason = executor_validity(HerdrInventory(None, [], "not needed"), state, inventory)
+        self.assertTrue(valid, reason)
+        self.assertEqual(resolve_codex_provider(self.root, "desktop", state), "dsh-web")
+        self.assertEqual(
+            resolve_effective_platform("codex", {"codex": {"dispatch_mode": "dsh-web"}}),
+            "codex-dsh-web",
+        )
+
+    def test_dsh_web_discovery_is_process_based_and_not_mcp(self):
+        inventory = discover_dsh_web(
+            (
+                "echo",
+                "3003 node /opt/homebrew/bin/dsh web --port 3080 --no-open --trusted-host dsh.959527.xyz",
+            )
+        )
+        self.assertEqual(len(inventory.candidates), 1)
+        self.assertEqual(inventory.candidates[0]["provider"], "dsh-web")
+        self.assertEqual(inventory.candidates[0]["reference"], "https://dsh.959527.xyz/")
+        self.assertEqual(inventory.candidates[0]["transport"], "browser-ui")
+
+    def test_ask_prompt_recommends_running_dsh_web_without_selecting_it(self):
+        inventory = DshWebInventory(
+            [{"provider": "dsh-web", "reference": "https://dsh.959527.xyz/", "label": "DSH Web"}]
+        )
+        prompt = selection_prompt(
+            HerdrInventory(None, [], "not needed"),
+            load_state(self.root, "codex_one"),
+            surface="desktop",
+            provider="ask",
+            dsh_web=inventory,
+        )
+        self.assertIn("Recommended executor", prompt)
+        self.assertIn("dsh-web:https://dsh.959527.xyz/", prompt)
+        self.assertIn("not MCP", prompt)
+        self.assertIn("Choose one ChatGPT reviewer", prompt)
 
     def test_existing_codex_modes_remain_compatible(self):
         self.assertEqual(resolve_effective_platform("codex", {"codex": {"dispatch_mode": "auto"}}), "codex-sub-agent")
@@ -161,6 +208,12 @@ class CodexRoutingTest(unittest.TestCase):
         valid, reason = executor_validity(HerdrInventory(None, [], "not needed"), state)
         self.assertTrue(valid, reason)
 
+    def test_user_can_select_a_specific_codex_thread_executor(self):
+        reference = "codex://threads/01a0bf45-21be-7543-a49d-88f037640f18"
+        state = set_target(self.root, "codex_one", "executor", "codex", reference, label="Codex Slice executor")
+        valid, reason = executor_validity(HerdrInventory(None, [], "not needed"), state)
+        self.assertTrue(valid, reason)
+
     def test_unknown_provider_target_is_representable_but_not_dispatchable(self):
         state = set_target(self.root, "codex_one", "executor", "future-agent", "opaque-123")
         valid, reason = executor_validity(HerdrInventory(None, [], "not needed"), state)
@@ -195,12 +248,12 @@ class CodexRoutingTest(unittest.TestCase):
         config_dir.mkdir(parents=True)
         (config_dir / "config.yaml").write_text(
             "codex:\n  dispatch_mode: auto\n  host_routes:\n"
-            "    cli: herdr\n    desktop: dsh\n    unknown: ask\n",
+            "    cli: herdr\n    desktop: ask\n    unknown: ask\n",
             encoding="utf-8",
         )
-        self.assertEqual(get_codex_host_routes(self.root)["desktop"], "dsh")
+        self.assertEqual(get_codex_host_routes(self.root)["desktop"], "ask")
         self.assertEqual(resolve_codex_provider(self.root, "cli"), "herdr")
-        self.assertEqual(resolve_codex_provider(self.root, "desktop"), "dsh")
+        self.assertEqual(resolve_codex_provider(self.root, "desktop"), "ask")
         self.assertEqual(resolve_codex_provider(self.root, "unknown"), "ask")
 
         selected = set_target(self.root, "codex_one", "executor", "codex", "current")
@@ -220,7 +273,7 @@ class CodexRoutingTest(unittest.TestCase):
                 {"codex": {"dispatch_mode": "auto"}},
                 surface="desktop",
             ),
-            "codex-dsh",
+            "codex-auto",
         )
         self.assertEqual(
             resolve_effective_platform(

@@ -11,6 +11,7 @@ from pathlib import Path
 from common.codex_routing import (
     VALID_SURFACES,
     detect_surface,
+    discover_dsh_web,
     discover_herdr,
     executor_validity,
     invalidate,
@@ -92,7 +93,7 @@ def _set_executor(root: Path, key: str, args: argparse.Namespace) -> dict:
         if provider == "codex":
             reference = "current"
         elif provider == "dsh":
-            reference = "provider-managed"
+            raise ValueError("MCP DSH executor is disabled; use --provider dsh-web with the browser URL")
         else:
             raise ValueError("set-executor requires --reference for this provider")
     if provider == "codex" and reference == "codex":
@@ -169,20 +170,39 @@ def main() -> int:
         output = state
     elif args.command == "discover":
         inventory = discover_herdr()
+        dsh_web = discover_dsh_web()
         missing = routing_missing_slots(state)
+        recommendations = []
+        if dsh_web.candidates:
+            candidate = dsh_web.candidates[0]
+            recommendations.append(
+                {
+                    "role": "executor",
+                    "provider": "dsh-web",
+                    "reference": candidate["reference"],
+                    "label": candidate.get("label", "DSH Web"),
+                    "reason": "running browser-backed DSH Web endpoint; MCP DSH remains disabled",
+                }
+            )
         output = {
             "surface": surface.as_dict() if hasattr(surface, "as_dict") else surface,
             "policy_provider": provider,
             "current": inventory.current,
             "candidates": inventory.candidates,
             "error": inventory.error,
+            "dsh_web": {
+                "candidates": dsh_web.candidates,
+                "error": dsh_web.error,
+            },
+            "recommendations": recommendations,
             "executor": state.get("executor"),
             "reviewer": state.get("reviewer"),
             "missing": missing,
         }
     elif args.command == "validate":
         inventory = discover_herdr()
-        executor_ok, executor_reason = executor_validity(inventory, state)
+        dsh_web = discover_dsh_web()
+        executor_ok, executor_reason = executor_validity(inventory, state, dsh_web)
         reviewer_ok, reviewer_reason = reviewer_validity(state)
         invalidated = []
         if state.get("executor") is not None and not executor_ok:
@@ -205,7 +225,8 @@ def main() -> int:
         }
     elif args.command == "prompt":
         inventory = discover_herdr()
-        print(selection_prompt(inventory, state, surface=surface, provider=provider))
+        dsh_web = discover_dsh_web()
+        print(selection_prompt(inventory, state, surface=surface, provider=provider, dsh_web=dsh_web))
         return 0
     elif args.command == "set-inline":
         output = set_dispatch(root, key, "inline")

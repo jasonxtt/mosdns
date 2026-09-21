@@ -152,11 +152,12 @@ def resolve_effective_platform(
     When ``--platform codex`` is passed, return ``"codex-sub-agent"`` by
     default for compatibility. When a detected ``surface`` is supplied,
     ``auto`` resolves to the configured host provider and returns
-    ``codex-herdr``, ``codex-dsh``, or ``codex-auto``. Explicit ``inline``,
-    ``herdr``, and ``dsh`` modes remain stable.
+    ``codex-herdr``, ``codex-dsh-web``, or ``codex-auto``. The retired MCP
+    ``dsh`` mode fails closed.
     ``filter_platform`` then surfaces blocks whose marker lists include the
     namespaced name (e.g. ``[codex-sub-agent, ...]``, ``[codex-inline, Kilo,
-    Antigravity, Devin]``, or ``[codex-herdr]``).
+    Antigravity, Devin]``, ``[codex-dsh-web, codex-auto]``, or
+    ``[codex-herdr]``).
 
     Native Codex context injection supports the ``auto`` default. Invalid
     explicit values resolve to ``codex-auto`` safely; this renderer
@@ -169,9 +170,9 @@ def resolve_effective_platform(
             return "codex-inline"
         if provider == "herdr":
             return "codex-herdr"
-        if provider == "dsh":
-            return "codex-dsh"
-        if provider in {"ask", "unsupported"}:
+        if provider == "dsh-web":
+            return "codex-dsh-web"
+        if provider in {"ask", "dsh", "unsupported"}:
             return "codex-auto"
         mode = "auto"
         codex_cfg = config.get("codex") if isinstance(config, dict) else None
@@ -184,10 +185,12 @@ def resolve_effective_platform(
                     mode = "inline"
                 elif cfg_mode == "herdr":
                     mode = "herdr"
+                elif cfg_mode == "dsh-web":
+                    mode = "dsh-web"
                 elif cfg_mode in ("auto", "sub-agent"):
                     mode = "auto"
                 elif cfg_mode == "dsh":
-                    mode = "dsh"
+                    mode = "ask"
                 elif cfg_mode == "ask":
                     mode = "ask"
                 else:
@@ -200,12 +203,12 @@ def resolve_effective_platform(
             else:
                 surface_kind = str(surface)
             routes = codex_cfg.get("host_routes", {}) if isinstance(codex_cfg, dict) else {}
-            defaults = {"cli": "herdr", "desktop": "dsh", "unknown": "ask"}
+            defaults = {"cli": "herdr", "desktop": "ask", "unknown": "ask"}
             route = routes.get(surface_kind, defaults.get(surface_kind, "ask")) if isinstance(routes, dict) else defaults.get(surface_kind, "ask")
             if route == "herdr":
                 return "codex-herdr"
-            if route == "dsh":
-                return "codex-dsh"
+            if route == "dsh-web":
+                return "codex-dsh-web"
             if route in ("codex", "inline"):
                 return "codex-inline"
             return "codex-auto"
@@ -213,8 +216,8 @@ def resolve_effective_platform(
             return "codex-inline"
         if mode == "herdr":
             return "codex-herdr"
-        if mode == "dsh":
-            return "codex-dsh"
+        if mode == "dsh-web":
+            return "codex-dsh-web"
         return "codex-auto"
     return platform
 
