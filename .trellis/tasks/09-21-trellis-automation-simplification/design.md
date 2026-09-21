@@ -56,6 +56,9 @@ one JSON file per conversation under a new directory
   policy semantics beyond provenance metadata; selection legitimacy is
   enforced by who can write the file (the user-facing CLI/commands), not by
   stored policy.
+- **Migration metadata**: after a one-way legacy read the context records
+  `migrated_from: {path, sha256}` as a source fingerprint; the legacy file
+  itself is never renamed or deleted (see §2.5).
 - Effective-executor resolution is a pure function:
 
 ```
@@ -76,24 +79,53 @@ conversation (or per task; keyed by context):
   "authorized_units": ["Slice 0", "Slice 1", "Slice 2", "Slice 3"],
   "authorized_at": "...",
   "current_unit": "Slice 0",
-  "unit_results": {"Slice 0": {"status": "pass", "head_sha": "...", "rounds": 2}},
+  "reviewer_bootstrap_sent": false,
   "auto_advance": true,
   "auto_remediate": true,
   "max_same_finding_rounds": 5,
   "auto_finish": false,
-  "findings": {"P1-1": {"consecutive_failures": 2, "status": "open"}},
-  "status": "running | blocked | authorized_scope_complete"
+  "status": "running | blocked | authorized_scope_complete",
+  "units": {
+    "Slice 0": {
+      "phase": "pending | implementing | ready_for_review | awaiting_review | remediating | passed",
+      "submission": {
+        "parent_sha": null,
+        "head_sha": null,
+        "review_round": 0,
+        "request_kind": null,
+        "submitted_to": null
+      },
+      "findings": {
+        "P1-1": {"root_cause": "...", "failed_remediation_rounds": 2, "status": "open"}
+      },
+      "result": null
+    }
+  }
 }
 ```
 
 - `authorized_units` is a **snapshot** taken from `implement.md` (or the
   user's explicit list) at authorization time. Later edits to `implement.md`
   never extend it.
-- `findings` implements the per-finding consecutive-failure counters.
-  Identity is the reviewer's stable ID plus a normalized root-cause summary;
-  a renamed ID with the same root cause maps to the same counter (semantic
-  match performed by the controller when recording results — it is an LLM
-  judgment recorded in state, not a fuzzy string algorithm).
+- **Durable per-unit review state** (this is what makes compaction/restart
+  recovery idempotent): `phase` distinguishes not-started vs implementing vs
+  submitted-and-waiting vs remediating vs passed; `submission` pins the exact
+  parent/head SHAs, the review round, whether the request was a full
+  `bootstrap` or a compact `rereview`, and which reviewer target it went to;
+  `reviewer_bootstrap_sent` (run-level, per task) records whether the
+  reviewer already received this task's full bootstrap. A fresh turn
+  reconstructs "what am I doing?" from these fields alone: it must never
+  re-send a duplicate review, re-review the wrong SHA, mistake a first
+  review for a remediation, re-bootstrap a reviewer, or re-commit/advance a
+  unit that is already recorded.
+- `findings` implements the per-finding `failed_remediation_rounds` counters
+  with the exact semantics of PRD §6.3: discovering a finding leaves the
+  counter at 0; it increments only when a remediation was executed AND
+  resubmitted AND the reviewer still fails the same root cause; BLOCKED at
+  5. Identity is the reviewer's stable ID plus a normalized root-cause
+  summary; a renamed ID with the same root cause maps to the same counter
+  (semantic match performed by the controller when recording results — an
+  LLM judgment recorded in state, not a fuzzy string algorithm).
 
 **(C) Task lifecycle** — unchanged Trellis `task.json.status`
 (`planning` / `in_progress` / completed-by-archive). Automation never writes
@@ -101,11 +133,22 @@ task status; `task.py start/finish/archive` stay the only writers.
 
 ### 2.2 Executor / reviewer model
 
-- **Executor providers**: `current` (implicit, never stored), plus explicit
-  adapters `herdr`, `dsh-web`, `codex-thread` (another Codex conversation),
-  extensible. Each adapter is a thin module with
-  `available(target) -> bool`, `dispatch(unit_prompt)`, `collect()`; the
-  review loop around them is identical.
+- **Executor providers**: `current` (implicit, never stored, built-in), plus
+  explicit adapters `herdr` and `dsh-web`. No other providers are added in
+  this task — extensibility is a seam, not a deliverable, and speculative
+  providers with no real capability (e.g. `codex-thread`) are out of scope.
+- **Currently supported explicit providers must stay operational.** The
+  existing Herdr helpers (`discover_herdr` / `parse_herdr_inventory` /
+  candidate validation) and the DSH Web browser-endpoint helper
+  (`discover_dsh_web` / reference normalization) are **moved** into their
+  respective adapter modules — not deleted. The Slice 1/4 cleanup removes
+  their *policy* role (auto-selection, surface routing, per-turn/session
+  discovery), never their *transport* capability. A persisted
+  `provider=herdr` override must still actually dispatch; schema without a
+  working adapter is a regression.
+- Each adapter is a thin module with `available(target) -> bool`,
+  `dispatch(unit_prompt)`, `collect()`; the review loop around them is
+  identical.
 - **Reviewer providers**: default `chatgpt` (plain conversation reference),
   plus any user-specified provider. Same generic target shape.
 - **Granularity rule**: review/dispatch granularity = user's authorized units
@@ -116,6 +159,22 @@ task status; `task.py start/finish/archive` stay the only writers.
   provider. Nothing scans processes at session start or per turn.
 
 ### 2.3 Review loop (controller algorithm)
+
+**Entry gate (fixed order, closes the planning-gate hole).** The loop's step
+1 is reachable only after ALL of:
+
+1. planning artifacts complete;
+2. planning review PASS where the task requires it;
+3. reviewer target resolved AND its transport verified usable (§2.4a) —
+   before `task.py start`, never after;
+4. user authorized the unit range → `authorized_units` snapshot persisted;
+5. `task.py start` run exactly once AND `task.json.status == in_progress`
+   confirmed by re-reading the file;
+6. automation run created with `status=running`.
+
+`authorize`/run-creation refuses while task status is `planning`. Automation
+state never writes task status — `task.py start/finish/archive` remain the
+only writers — but a run cannot start until step 5 has happened.
 
 Per authorized unit, the controller (the current conversation, or the
 explicit executor under controller supervision):
@@ -145,7 +204,26 @@ explicit executor under controller supervision):
    archive/finish.
 
 The loop is driven by the controller conversation turn-by-turn; the run-state
-file is the durable memory across turns/compaction.
+file is the durable memory across turns/compaction (§2.1(B)).
+
+### 2.4a Reviewer transport contract (ChatGPT)
+
+The reviewer is real I/O, not just a prompt template:
+
+- The concrete `reference` comes from a platform-resolved `@` conversation
+  target supplied by the user.
+- Send/wait/read go through the host's **platform-native** ChatGPT
+  conversation capability. Repo Python code never calls unofficial ChatGPT
+  APIs and never browser-automates ChatGPT.
+- A `verify_reviewer_transport(target)` check runs before `task.py start`
+  (entry gate step 3): if the current host cannot send/read that plain
+  ChatGPT conversation → major issue → ask the user.
+- Transport failure never degrades into silent self-review; there is no
+  fallback reviewer.
+- In code this is a narrow adapter interface (`send(request)`,
+  `wait_result(timeout)`, `read()`) with the platform-native implementation
+  provided by the controller host; the repo-side contract, request builders,
+  and result parser are unit-tested against a fake adapter.
 
 ### 2.4 Reviewer bootstrap content (first request per task)
 
@@ -160,21 +238,33 @@ validation evidence; explicit forbidden scope; required output format
 (`FINAL: PASS` or `FINAL: FAIL` + stable finding IDs with closed/open
 markers).
 
-### 2.5 Migration (one-way, tested)
+### 2.5 Migration (one-way, tested, rollback-safe)
 
 New module function `migrate_legacy_routing(repo_root, context_key)`:
 
-- Reads old `.trellis/.runtime/routing/<ctx>.json` (v1 or v2).
-- `reviewer` with a concrete reference → preserved as generic reviewer target
-  (legacy v1 migration already maps it to provider `chatgpt`).
-- `executor`: preserve only if provider ∈ {herdr, dsh-web, codex-thread-like}
-  **and** `selected_by == "user"`; `codex/current` executor ⇒ `null`
-  (it is the default anyway); anything else (auto/policy-derived,
-  `selected_by` ∈ {migration, policy, auto}) ⇒ `null`.
+- Reads old `.trellis/.runtime/routing/<ctx>.json` (v1 or v2) exactly once.
+- **Provenance-gated preserve**: a legacy target migrates automatically ONLY
+  when its stored provenance is `selected_by == "user"`.
+  - Legacy reviewer `selected_by="user"` + concrete reference → new
+    `reviewer` target.
+  - Legacy executor `selected_by="user"` + still-supported provider
+    (`herdr`, `dsh-web`) → `executor_override`; `codex/current` ⇒ `null`
+    (that is the default anyway).
+  - **Ambiguous provenance — `migration`, `policy`, `auto`, missing, or
+    produced by the legacy v1→v2 in-memory migration (which stamps
+    `selected_by="migration"`) — is NEVER silently bound.** Such a reviewer
+    is either surfaced to the user as a candidate requiring one explicit
+    confirmation or dropped to `null` (⇒ the normal ask-once flow); such an
+    executor becomes `executor_override = null`. The reviewer is precisely
+    the role the user must confirm once, so silent migration of an
+    unconfirmed reviewer is forbidden.
 - `surface`, host-route results, MCP `dsh` ⇒ dropped, not represented in the
   new schema at all.
-- After successful migration the legacy file is renamed to
-  `<ctx>.json.migrated` (kept for audit; never read again).
+- **Legacy file is left in place byte-for-byte.** The new context records
+  `migrated_from: {path, sha256}` (source fingerprint) and never reads the
+  legacy file again. No rename, no `.migrated` suffix: renaming would make
+  the old state invisible to a rolled-back checkout, breaking the promised
+  rollback. Cleanup of legacy files is a separate future task.
 - Unreadable/corrupt legacy state ⇒ treated as empty (`executor_override =
   null`, `reviewer = null`); never blocks.
 
@@ -226,19 +316,26 @@ errors or no-op with a clear message, per the final implement plan.
 
 ```
 user: "执行 Slice 0-3"
-  -> controller parses implement.md -> snapshot authorized_units
-  -> writes automation run (status=running)
-  -> reviewer missing? ask once -> persist reviewer target
-  -> loop per unit (§2.3) with state persisted after each step
+  -> gate: artifacts complete + planning PASS (if required)
+  -> resolve reviewer target; verify transport usable (else ask once / stop)
+  -> snapshot authorized_units from implement.md
+  -> task.py start (exactly once); confirm task.status == in_progress
+  -> create automation run (status=running)
+  -> loop per unit (§2.3), persisting run state after every step
   -> status=authorized_scope_complete -> report -> stop
 ```
 
 ## 4. Error / Edge Handling
 
-- Corrupt automation/run state → treat as absent (fail to safe defaults:
-  current executor, no run); never blocks read-only work.
+- **Corrupt conversation context** → fail to safe defaults
+  (`executor_override=null`, `reviewer=null`); never blocks read-only work.
+- **Corrupt active automation run** → fail CLOSED. The run carries the
+  authorization snapshot, per-unit progress, and remediation counters;
+  treating it as absent could bypass the authorized range or the 5-round
+  limit. Unparseable run ⇒ `BLOCKED`: no implementation, no auto-advance,
+  ask the user / require explicit recovery.
 - Reviewer send/read failure or vanished target → `blocked`, ask user; never
-  auto-swap reviewer.
+  auto-swap reviewer, never degrade to self-review.
 - Executor override target unavailable → ask user once; no silent fallback.
 - Git safety conditions (force push, history rewrite, unrelated dirty paths,
   remote divergence) → stop and ask (§7 of PRD).
@@ -249,10 +346,11 @@ user: "执行 Slice 0-3"
 
 - Slices land independently on branch `rust`; each Slice is reviewed.
 - Rollback = revert the Slice's exact commit(s); legacy state files are
-  preserved (renamed) by migration, so no data is destroyed.
-- The old routing files may remain on disk unused; migration is lazy (runs on
-  first automation load per conversation), so mixed old/new checkouts do not
-  break.
+  preserved **in place** by migration (read-once + fingerprint marker in the
+  new context), so a rolled-back old checkout still finds its routing state
+  exactly where it expects it.
+- Migration is lazy (runs on first automation load per conversation), so
+  mixed old/new checkouts do not break.
 
 ## 6. Test Strategy (summary; full matrix in implement.md)
 

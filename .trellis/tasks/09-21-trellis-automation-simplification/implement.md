@@ -31,16 +31,21 @@ Common rules for every slice:
   - `resolve_executor(ctx)` → `current` or the override target;
   - generic target validation `{provider, reference, label?}`;
   - `migrate_legacy_routing(root, context_key)` per design §2.5
-    (preserve explicit-user reviewer/supported executor; drop surface,
-    host-route results, MCP dsh, policy-derived executors; rename legacy file
-    to `.migrated`; corrupt → empty).
+    (auto-migrate ONLY `selected_by="user"` reviewer/supported-executor;
+    ambiguous provenance (`migration`/`policy`/`auto`/missing, incl. legacy
+    v1-migrated reviewers) → confirm-or-null, never silent; drop surface,
+    host-route results, MCP dsh; leave the legacy file in place
+    byte-for-byte and record `migrated_from: {path, sha256}` in the new
+    context; corrupt → empty).
 - New `.trellis/scripts/automation.py` CLI: `show`, `set-executor`,
   `clear-executor`, `set-reviewer`, `clear-reviewer`, `migrate`
   (conversation-scoped via `resolve_context_key`, same as today).
 - Rewrite `.trellis/tests/test_codex_routing.py` → `test_automation.py`
   covering: fresh-conversation defaults (override null ⇒ current; reviewer
-  missing), precedence rules, persistence, migration preserve/discard matrix,
-  corrupt-state safety.
+  missing), precedence rules, persistence, migration preserve/discard matrix
+  (user-provenance migrates; ambiguous provenance does not bind silently;
+  legacy file untouched on disk + fingerprint recorded), corrupt-state
+  safety.
 
 **Acceptance**: new tests pass; legacy routing tests deleted/migrated with
 them; no other module imports `common.codex_routing` yet (shim added in
@@ -82,53 +87,88 @@ Slice 4 wiring; callers switch in Slice 1).
   session-start/per-turn hooks (mock `subprocess.run`, assert not called with
   `herdr`/`ps`).
 - Switch remaining `common.codex_routing` imports to `common.automation`.
+- **Adapter relocation (keep transports working)**: move the existing Herdr
+  helpers (`discover_herdr`, `parse_herdr_inventory`, pane validation) into
+  `.trellis/scripts/common/automation_herdr.py` and the DSH Web helper
+  (`discover_dsh_web`, reference normalization) into
+  `common/automation_dsh_web.py`, each exposing the narrow
+  `available / dispatch / collect` adapter surface from design §2.2. These
+  are moved, NOT deleted — an explicit user-selected Herdr/DSH Web override
+  must remain executable. Remove only their policy coupling (auto-selection,
+  surface routes, per-turn/session invocation); adapter tests use fake
+  subprocess output.
 
 **Acceptance**: full test suite green; grep shows no `host_routes`,
 `detect_surface`, `resolve_codex_provider`, `codex-herdr`, `codex-dsh-web`
-references outside the legacy shim file slated for Slice 4.
+references outside the legacy shim file slated for Slice 4; adapter
+availability/dispatch/collect paths covered by fake-transport tests.
 
 ---
 
 ## Slice 2 — Authorized execution loop state
 
-**Goal**: run-state model + snapshot semantics + auto-advance bookkeeping.
+**Goal**: run-state model + activation gate + snapshot semantics +
+auto-advance bookkeeping.
 
 **Changes**:
 
 - `common/automation.py` (or `common/automation_run.py`):
-  - `AutomationRun` load/save per design §2.1(B);
-  - `authorize(task_dir, units | "all")` → parse `implement.md` Slice
-    headings, snapshot list, persist;
+  - `AutomationRun` load/save per design §2.1(B), including per-unit
+    `phase` and `submission` (parent/head SHA, review round, request kind,
+    submitted-to) and run-level `reviewer_bootstrap_sent` so a fresh turn
+    after compaction can resume idempotently without duplicate
+    reviews/commits/bootstrap;
+  - **activation gate**: `authorize(task_dir, units | "all")` refuses while
+    `task.json.status == "planning"` and requires that the reviewer target
+    is resolved and transport-verified first (fixed order per design §2.3:
+    artifacts → planning PASS → reviewer resolved+verified → snapshot →
+    `task.py start` once → confirm `in_progress` → create run); automation
+    never writes task status;
+  - `authorize` parses `implement.md` Slice headings, snapshots the list;
   - `record_unit_result`, `advance()` (PASS → next pre-authorized unit or
     `authorized_scope_complete`), guard against advancing past the snapshot;
   - status transitions: `running | blocked | authorized_scope_complete`;
-    `auto_finish` is always false in v1.
+    `auto_finish` is always false in v1;
+  - **corrupt run file → `BLOCKED` fail-closed** (never treated as absent).
 - CLI: `automation.py authorize <task> --units "Slice 0-3"`,
   `run-status`, `record-pass`, `record-fail`, `complete`.
 - Tests: snapshot exactness (0–3 ⇒ exactly 4 units; later implement.md edits
   don't extend), no auto-entry into unauthorized units, final PASS ⇒
   `authorized_scope_complete` and **no archive/finish invoked** (assert
-  task.json status unchanged), compaction-resume (reload run mid-stream).
+  task.json status unchanged), compaction-resume (reload run mid-stream and
+  continue without duplicate submission), gate tests (authorize fails while
+  `planning`; reviewer missing/unverified blocks before start), corrupt-run
+  → blocked.
 
 **Acceptance**: unit tests green; no hook behavior change in this slice
 (state layer only).
 
 ---
 
-## Slice 3 — Reviewer bootstrap + remediation loop contract
+## Slice 3 — Reviewer transport + bootstrap + remediation loop contract
 
-**Goal**: codify the review protocol so the controller (LLM) and tests share
-one machine-readable contract.
+**Goal**: make the review loop real: a narrow reviewer transport contract
+plus the machine-readable bootstrap/remediation protocol shared by the
+controller and tests.
 
 **Changes**:
 
+- **Reviewer transport contract** (design §2.4a): a narrow adapter interface
+  `send(request) / wait_result(timeout) / read()` whose ChatGPT
+  implementation is the host's platform-native conversation capability. Repo
+  code NEVER calls unofficial ChatGPT APIs or browser-automates ChatGPT.
+  `verify_reviewer_transport(target)` runs before `task.py start`;
+  unavailable transport → major issue → ask user; never silent self-review.
+  Unit tests use a fake adapter — the contract is code + tests, not prose.
 - `common/automation.py`: bootstrap template builder
   `build_review_request(run, unit, evidence)` producing the full first-request
   payload (PRD §5.4 field list incl. automation-contract education) and the
   compact re-review variant; pure function of run state + git facts
   (base/head SHA, changed paths) → fully unit-testable.
 - Finding ledger: `record_review_result(run, findings[])` with stable IDs,
-  closed markers, consecutive-failure counters, semantic root-cause field;
+  closed markers, `failed_remediation_rounds` counters with the exact
+  semantics of PRD §6.3 (initial discovery = 0, +1 only after an executed +
+  resubmitted remediation still fails), semantic root-cause field;
   `is_blocked()` at 5 consecutive on the same root cause.
 - Review-result parser: extract `FINAL: PASS|FAIL` + findings from reviewer
   text; pending/idle/silence/partial ⇒ `pending`, never PASS.
@@ -136,10 +176,12 @@ one machine-readable contract.
   these helpers as the controller's per-unit checklist.
 - Tests: bootstrap contains all required fields for a new task; compact
   re-review omits history but keeps findings/parent-head/diff scope; new task
-  on same reviewer ⇒ full bootstrap again; counter matrix (1–4 continue, 5 ⇒
-  blocked, new finding independent, closed stops counting, renamed-ID same
-  root cause still counts); pending ≠ PASS; out-of-scope finding ⇒ blocked
-  immediately.
+  on same reviewer ⇒ full bootstrap again; **counter boundary test: initial
+  FAIL (counter 0) + five executed remediations each re-failed ⇒ BLOCKED
+  exactly at round 5, not 4**; new finding independent; closed stops
+  counting; renamed-ID same root cause still counts; pending ≠ PASS;
+  out-of-scope finding ⇒ blocked immediately; fake-transport send/wait/read
+  round trip; transport-unavailable ⇒ ask-user, never self-review.
 
 **Acceptance**: tests green; template output snapshot-reviewed.
 
@@ -153,8 +195,9 @@ one machine-readable contract.
 
 - `common/codex_routing.py` + `codex_routing.py`: reduce to deprecated
   forwarding shims (load/save → automation context with migration;
-  surface/dispatch/discovery APIs raise or no-op with guidance), or delete
-  outright if no imports remain.
+  surface/dispatch/policy APIs raise or no-op with guidance; discovery names
+  re-export the Slice 1 adapter modules so existing imports keep working), or
+  delete outright if no imports remain.
 - `.trellis/spec/backend/quality-guidelines.md`: replace "Host-aware Codex
   routing" section with the new automation contract.
 - Negative regression tests (PRD §24): CLI marker ⇏ herdr; Desktop ⇏
