@@ -1,13 +1,56 @@
 # Implement — Rust Phase 4 QUIC reuse and multiplexing
 
-Status: planning only. Do not run `task.py start`, dispatch implementation, or edit
-runtime code until the final planning summary is approved in a later user
-message. No executor is selected; the selected reviewer is the user-provided
-ChatGPT web conversation. The route is chosen and validated at dispatch time:
-the executor must be an explicitly validated external-executor target (for
-example `dsh-web`, Codex, or Herdr) and the reviewer must remain the selected
-ChatGPT conversation. Before execution, explicitly select and validate the
-executor target.
+Status: implementation complete; all four slices are accepted. The selected
+executor and reviewer were explicitly fixed for this task, and the remaining
+finish/archive gate is bookkeeping plus the separately recorded repository
+MSRV-clippy baseline issue. No later task or production wiring is authorized
+by this record.
+
+The user's task-level approval covers all four planned slices. Execution is
+sequential and automatic: dispatch the next slice only after the previous
+slice's parent verification and explicit scoped reviewer `PASS`. A reviewer
+`FAIL`, a planning/scope change, a pinned-API blocker, or an explicit user
+pause stops progression at the current slice; no extra user confirmation is
+required between scoped `PASS` results.
+
+## Acceptance record
+
+- **Slice 0 — ACCEPTED (2026-09-20):** parent verification passed, and the
+  selected web reviewer returned an explicit scoped `PASS` for commit
+  `4fe08c0eebed45efd304f9b197ce1d6e5d2608d5` against base
+  `44fe6bac98d604f1a691dc0df295fbb7bdfc45b9`, with `P0: 0` and `P1: 0`.
+  The reviewed scope was the four Slice 0 files only; Slice 1 is now the next
+  authorized boundary.
+
+- **Slice 1 — ACCEPTED (2026-09-21):** parent verification passed, and the
+  selected web reviewer returned an explicit scoped `PASS` for remediation
+  commit `399ccd625efc8e95f929eb266329fdd28603f3c9` against
+  `a596eb90897fa3fff38c8a4e69cc686fcd9b2a10`, with `P0: 0` and `P1: 0`.
+  The review confirmed the two remediation findings were closed and made no
+  judgment on Slice 2 or Slice 3; continuous execution may proceed to Slice 2.
+
+- **Slice 2 — ACCEPTED (2026-09-21):** parent verification passed, and the
+  selected web reviewer returned an explicit scoped `PASS` for the final
+  remediation commit `199892cebb4c634739c5cbd3cca3ebd2901dc8e5` against
+  `ed7ffd093e562d3a76c832e09cc8f573f07de0df`, with `P0: 0` and `P1: 0`.
+  The reviewed scope was exactly the three latest remediation paths:
+  `rust/upstream-core/src/quic_reuse.rs`,
+  `rust/upstream-core/tests/quic_reuse_doh3.rs`, and the Slice 2 evidence
+  record. The review confirmed the real pinned-stack owner-close/held-handle
+  terminal-ordering evidence and made no judgment on Slice 3; Slice 3 is now
+  the next authorized boundary.
+
+- **Slice 3 — ACCEPTED (2026-09-21):** parent verification passed, and the
+  selected web reviewer returned an explicit scoped `PASS` for remediation
+  commit `4e8972cca1e42f9d265725a5592593cfe193969a` against
+  `cb07a0425b6d4977b80802abd034649bdc5d75db`, with `P0: 0` and `P1: 0`.
+  The reviewed scope was exactly:
+  `rust/upstream-core/tests/quic_reuse_doq.rs`,
+  `rust/upstream-core/tests/quic_reuse_doh3.rs`, and the Slice 3 evidence
+  record. The review confirmed both prior P1 findings were closed: real
+  peer-credit pending-open cancellation and per-caller marker association for
+  cross-query mixup detection. It made no judgment on later tasks or other
+  slices.
 
 ## 0. Pre-start gates
 
@@ -16,9 +59,8 @@ executor target.
 - [ ] Review `prd.md`, `design.md`, and this file in full; resolve any
       material plan change before starting.
 - [ ] Validate routing with `python3 ./.trellis/scripts/codex_routing.py validate`;
-      the executor must be an explicitly validated external-executor target
-      (`dsh-web`, Codex, or Herdr) and the reviewer must remain the selected
-      ChatGPT conversation.
+      both the executor (`dsh-web`, Codex, or Herdr) and reviewer (ChatGPT or
+      Codex) must be explicitly selected and validated for this conversation.
 - [ ] Preserve all pre-existing dirty files. Record exact task-scoped paths before
       each external-executor apply; never use `git add -A`, reset, checkout,
       rebase, or broad cleanup.
@@ -183,8 +225,10 @@ Checklist:
 - [ ] Parent inspects the complete external-executor diff and exact changed
       paths, reruns the focused checks, and sends the scoped Slice 0 evidence to
       the selected web reviewer.
-- [ ] Stop after reviewer PASS. Slice 1 requires a new explicit user
-      authorization; an internal Slice 0 PASS does not authorize it.
+- [ ] Stop the current slice at reviewer `PASS`, then automatically begin Slice
+      1 using the same bounded executor/reviewer routing. Do not dispatch Slice
+      1 before the scoped Slice 0 `PASS`; no additional user authorization is
+      required unless scope changes or the user pauses.
 
 Suggested focused commands:
 
@@ -222,7 +266,10 @@ Checklist:
 - [ ] Rerun focused DoQ reuse tests plus all archived one-shot DoQ/QUIC tests.
 - [ ] Parent inspects and applies only the reviewed patch, reruns tests in the
       parent worktree, and requests the same web reviewer’s scoped PASS.
-- [ ] Stop after reviewer PASS. Slice 2 is separately authorized.
+- [ ] Stop the current slice at reviewer `PASS`, then automatically begin Slice
+      2 using the same bounded executor/reviewer routing. Do not dispatch Slice
+      2 before the scoped Slice 1 `PASS`; no additional user authorization is
+      required unless scope changes or the user pauses.
 
 Suggested focused commands:
 
@@ -271,7 +318,10 @@ Checklist:
 - [ ] Rerun focused DoH3 reuse tests plus one-shot DoH3 and secure lifecycle tests.
 - [ ] Parent inspects/applies the exact reviewed patch, reruns focused tests, and sends
       the scoped evidence to the selected web reviewer.
-- [ ] Stop after reviewer PASS. Slice 3 is separately authorized.
+- [ ] Stop the current slice at reviewer `PASS`, then automatically begin Slice
+      3 using the same bounded executor/reviewer routing. Do not dispatch Slice
+      3 before the scoped Slice 2 `PASS`; no additional user authorization is
+      required unless scope changes or the user pauses.
 
 Suggested focused commands:
 
@@ -413,3 +463,22 @@ Before any future archive/finish action, all of the following must be present:
 - [ ] Any durable new convention is handled through the separate spec-update
       workflow; do not silently overwrite unrelated spec changes.
 - [ ] User authorizes finish/archive as a separate action.
+
+## Finish gate closure record
+
+Recorded 2026-09-21 after the final Slice 3 review and the corrected Linux/MSRV
+run on `ssh mosdns-rust`:
+
+- A1-A13 are covered by the Slice 0–3 evidence records, the parent diff
+  inspections, and the four accepted slice records above.
+- The selected web reviewer returned scoped `PASS` for every slice, with
+  `P0: 0` and `P1: 0`; Slice 3 remediation commit `4e8972c` is the final
+  implementation commit and is pushed at `origin/rust`.
+- Debian 13 with Rust 1.85.1 passed locked metadata, formatting, and the full
+  workspace test suite, including the bounded QUIC stress coverage.
+- The repository's current-toolchain workspace clippy gate passed on Rust 1.95.
+  The separate Rust 1.85 `-D warnings` clippy probe reports only pre-existing
+  baseline findings outside this task's allowed paths; it is recorded without
+  overclaiming and is not folded into the Slice 3 diff.
+- `task.py validate` and `git diff --check` pass. No dependency, production,
+  configuration, Go/cgo/FFI, API/WebUI, or later-task changes were introduced.

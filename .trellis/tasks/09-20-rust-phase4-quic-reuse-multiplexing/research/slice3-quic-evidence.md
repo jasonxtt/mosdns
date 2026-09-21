@@ -1,8 +1,10 @@
 # Slice 3 QUIC reuse evidence
 
-Status: implementation and focused verification in progress; the scoped web
-review gate is pending. This record covers Slice 3 only and makes no claim
-about later task work.
+Status: implementation and focused verification complete; the scoped web
+review gate returned PASS. Linux/MSRV runtime verification is also complete;
+the separate Rust 1.85 warnings-denied clippy run is blocked by pre-existing
+workspace lint baseline findings recorded below. This record covers Slice 3
+only and makes no claim about later task work.
 
 ## Implementation boundary
 
@@ -113,11 +115,25 @@ dependency graph:
 | `python3 ./.trellis/scripts/task.py validate rust-phase4-quic-reuse-multiplexing` | 0; all validations passed |
 | `git diff --check` | 0 |
 
-The required Linux/MSRV SSH probe to the repository's `mos-test` Debian VM
-(`ssh -o BatchMode=yes -o ConnectTimeout=5 mos-test ...`) timed out before any
-remote command ran. This is recorded as unavailable evidence, not as a passing
-Linux/MSRV runtime test. Local toolchain is `rustc/cargo 1.95.0`; the workspace
-declares MSRV 1.85 and the locked metadata was resolved successfully.
+The isolated Linux/MSRV run on `mosdns-rust` completed on Debian 13 with
+`rustc/cargo 1.85.1`:
+
+| Command | Result |
+|---|---:|
+| `rustup run 1.85.1 cargo metadata --locked --format-version 1` | 0 |
+| `rustup run 1.85.1 cargo fmt --all -- --check` | 0 |
+| `rustup run 1.85.1 cargo test --workspace --locked` | 0; all workspace targets and doctests passed; `slice3_quic` 23/23, DoQ 10/10, DoH3 8/8, model 21/21 |
+| `rustup run 1.85.1 cargo clippy --workspace --all-targets --locked -- -D warnings` | non-zero; existing `dns-core` `clippy::precedence` findings (4) |
+| `rustup run 1.85.1 cargo clippy -p mosdns-upstream-core --all-targets --locked -- -D warnings` | non-zero; the same existing `dns-core` findings (4) |
+
+The MSRV clippy failures are outside the Slice 3 changed paths and were not
+modified. The successful MSRV test run is valid Linux/runtime evidence; the
+warnings-denied clippy baseline remains a separate repository quality issue.
+
+The previously attempted `mos-test` SSH probe is superseded for this task:
+the Rust branch test environment is `mosdns-rust`, which provided the Debian
+13 and Rust 1.85.1 evidence above. The workspace declares MSRV 1.85 and the
+locked metadata resolved successfully.
 
 Before review, the parent also inspected the full diff, exact changed-path
 boundary, and dirty-worktree preservation. No unrelated dirty file is staged.

@@ -1,8 +1,8 @@
 # Rust Phase 4 QUIC reuse and multiplexing
 
-Status: planning only. This task authorizes no implementation until the final
-planning summary is explicitly approved, `task.py start` is run, and the
-selected external executor receives a bounded slice assignment.
+Status: implementation complete. All four planned slices have explicit scoped
+review `PASS` records; this task has no authorization for later production
+wiring or follow-up socket-policy work.
 
 ## Goal
 
