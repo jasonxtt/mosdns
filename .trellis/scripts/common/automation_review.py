@@ -183,7 +183,8 @@ def build_review_request(
                 f"Task goal: {_field(evidence, 'task_goal')}",
                 "Scope/contracts:\n" + _field(evidence, "scope_contracts"),
                 "User-authorized unit range:\n" + ", ".join(run.authorized_units),
-                "Automation contract: review only the submitted unit; scoped FAILs are automatically remediated and resubmitted; PASS advances only within the pre-authorized range; final PASS does not archive, finish, start a new task, wire production, or authorize work beyond the range.",
+                "Automation contract: review only the submitted unit; scoped FAILs are automatically remediated and resubmitted; PASS authorizes the controller to enter only the next pre-authorized Slice; PASS does not authorize work beyond the original range; final Slice PASS does not authorize archive/finish, a new task, production wiring, deployment, or unrelated scope.",
+                "Finding output contract: assign stable IDs such as P1-1 and P1-2; keep the same ID for the same substantive finding on every re-review; mark each finding explicitly open or closed; assign a new unused ID only to a genuinely new finding. Renaming an ID or rephrasing a root cause must not be used to evade the controller's same-root-cause remediation counter.",
                 "\n\n".join(common),
                 "Return an explicit FINAL: PASS or FINAL: FAIL. Pending, idle, silence, or partial responses are not PASS.",
             ]

@@ -110,7 +110,18 @@ class ReviewerContractTest(unittest.TestCase):
         target = {"provider": "chatgpt", "reference": "conversation-1"}
         request = build_review_request(run, "Slice 2", self._evidence())
         self.assertEqual(request["kind"], "bootstrap")
-        for required in ("Task goal", "User-authorized unit range", "Base full SHA", "Forbidden scope", "FINAL: PASS"):
+        for required in (
+            "Task goal",
+            "User-authorized unit range",
+            "Base full SHA",
+            "Forbidden scope",
+            "FINAL: PASS",
+            "stable IDs such as P1-1 and P1-2",
+            "same ID for the same substantive finding",
+            "open or closed",
+            "new unused ID",
+            "Renaming an ID",
+        ):
             self.assertIn(required, request["text"])
 
         submit_review(
