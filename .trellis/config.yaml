@@ -110,26 +110,12 @@ channel:
 #-------------------------------------------------------------------------------
 # Codex (dispatch behavior)
 #-------------------------------------------------------------------------------
-# Codex-only knob; other platforms ignore it. Default ("auto") distinguishes
-# Codex CLI from Desktop/App: CLI routes to the Herdr provider and Desktop/App
-# fails closed to an explicit choice; discovery may recommend a running DSH Web
-# browser endpoint. MCP DSH is disabled for this project.
-# "inline" keeps implementation/checks in the main session.
-# "herdr" and "dsh-web" select provider classes explicitly; dsh-web means the
-# browser UI and legacy/MCP "dsh" is rejected.
-# Provider targets and
-# reviewers remain conversation-scoped user choices and are never auto-selected.
-# "sub-agent" remains a backwards-compatible alias for "auto". Provider
-# execution details belong to the selected Herdr/DSH Web/Codex contract; this
-# policy does not pin a model, pane, worker, or review conversation.
-# Invalid explicit values safely resolve to ask/fail-closed.
+# Codex-only knob; other platforms ignore it. Keep execution in the current
+# conversation by default. `sub-agent` remains available for explicit native
+# sub-agent dispatch; provider and reviewer targets are conversation-scoped.
 #
 codex:
-  dispatch_mode: auto
-  host_routes:
-    cli: herdr
-    desktop: ask
-    unknown: ask
+  dispatch_mode: inline
 
 #-------------------------------------------------------------------------------
 # Sub-agent context injection limits

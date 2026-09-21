@@ -5,15 +5,19 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .active_task import resolve_context_key
-from .config import get_codex_dispatch_mode, get_codex_host_routes
+from .config import get_codex_dispatch_mode
+from .automation_dsh_web import (
+    DshWebInventory,
+    discover_dsh_web,
+    normalize_reference as _normalize_dsh_web_reference,
+)
+from .automation_herdr import HerdrInventory, discover_herdr, parse_herdr_inventory
 
 STATE_VERSION = 2
 VALID_SURFACES = {"cli", "desktop", "unknown"}
@@ -21,6 +25,12 @@ VALID_DISPATCH_MODES = {"auto", "ask", "codex", "dsh-web", "herdr", "inline"}
 SUPPORTED_EXECUTOR_PROVIDERS = {"codex", "dsh-web", "herdr"}
 SUPPORTED_REVIEWER_PROVIDERS = {"codex", "chatgpt"}
 _CODEX_THREAD_REFERENCE = re.compile(r"^codex://threads/[A-Za-z0-9-]+$")
+
+
+def get_codex_host_routes(repo_root: Path | None = None) -> dict[str, str]:
+    """Deprecated compatibility value; active code no longer routes by host."""
+    del repo_root
+    return {"cli": "ask", "desktop": "ask", "unknown": "ask"}
 
 
 def _utc_now() -> str:
@@ -470,107 +480,6 @@ def resolve_codex_provider(
     return "ask"
 
 
-@dataclass(frozen=True)
-class HerdrInventory:
-    current: dict[str, Any] | None
-    candidates: list[dict[str, Any]]
-    error: str | None = None
-
-
-@dataclass(frozen=True)
-class DshWebInventory:
-    candidates: list[dict[str, Any]]
-    error: str | None = None
-
-
-def _dsh_web_reference(command: str) -> tuple[str, int]:
-    port_match = re.search(r"(?:^|\s)--port\s+(\d+)(?:\s|$)", command)
-    port = int(port_match.group(1)) if port_match else 3080
-    trusted_hosts = re.findall(r"(?:^|\s)--trusted-host\s+([^\s]+)", command)
-    public_host = next(
-        (host for host in trusted_hosts if host not in {"localhost", "127.0.0.1", "0.0.0.0"}),
-        None,
-    )
-    if public_host:
-        return f"https://{public_host.rstrip('/')}/", port
-    return f"http://127.0.0.1:{port}/", port
-
-
-def discover_dsh_web(
-    command: tuple[str, ...] = ("ps", "-axo", "pid=,command="),
-) -> DshWebInventory:
-    """Discover running DSH Web browser endpoints without using MCP."""
-    try:
-        completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return DshWebInventory([], f"DSH Web process discovery failed: {exc}")
-
-    candidates: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for raw_line in completed.stdout.splitlines():
-        line = raw_line.strip()
-        if not line or not re.search(r"\bdsh\s+web\b", line):
-            continue
-        match = re.match(r"(\d+)\s+(.*)$", line)
-        pid = int(match.group(1)) if match else None
-        command_text = match.group(2) if match else line
-        reference, port = _dsh_web_reference(command_text)
-        if reference in seen:
-            continue
-        seen.add(reference)
-        candidates.append(
-            {
-                "provider": "dsh-web",
-                "reference": reference,
-                "label": f"DSH Web ({reference})",
-                "pid": pid,
-                "port": port,
-                "transport": "browser-ui",
-            }
-        )
-
-    if candidates:
-        return DshWebInventory(candidates)
-    if shutil.which("dsh"):
-        return DshWebInventory([], "dsh is installed but no dsh web process is running")
-    return DshWebInventory([], "dsh executable is unavailable")
-
-
-def parse_herdr_inventory(payload: Any, current_pane_id: str | None = None) -> HerdrInventory:
-    if not isinstance(payload, dict):
-        return HerdrInventory(None, [], "invalid Herdr response")
-    result = payload.get("result")
-    agents = result.get("agents") if isinstance(result, dict) else None
-    if not isinstance(agents, list):
-        return HerdrInventory(None, [], "Herdr response has no agent inventory")
-    valid = [item for item in agents if isinstance(item, dict) and isinstance(item.get("pane_id"), str)]
-    if current_pane_id:
-        current_matches = [item for item in valid if item.get("pane_id") == current_pane_id]
-    else:
-        current_matches = [item for item in valid if item.get("focused") is True and item.get("agent") == "codex"]
-    if len(current_matches) != 1:
-        return HerdrInventory(None, [], "cannot uniquely identify the current Codex pane")
-    current = current_matches[0]
-    if current.get("agent") != "codex":
-        return HerdrInventory(None, [], "current Herdr pane is not detected as Codex")
-    workspace = current.get("workspace_id")
-    candidates = [
-        item
-        for item in valid
-        if item.get("workspace_id") == workspace and item.get("pane_id") != current.get("pane_id")
-    ]
-    return HerdrInventory(current, candidates)
-
-
-def discover_herdr(command: tuple[str, ...] = ("herdr", "agent", "list")) -> HerdrInventory:
-    try:
-        completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=10)
-        payload = json.loads(completed.stdout)
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-        return HerdrInventory(None, [], f"Herdr discovery failed: {exc}")
-    return parse_herdr_inventory(payload, os.environ.get("HERDR_PANE_ID"))
-
-
 def _executor_target(state: dict[str, Any]) -> dict[str, Any] | None:
     target = state.get("executor")
     if isinstance(target, dict):
@@ -590,10 +499,6 @@ def _executor_target(state: dict[str, Any]) -> dict[str, Any] | None:
         )
         return migrated.get("executor")
     return None
-
-
-def _normalize_dsh_web_reference(value: Any) -> str:
-    return str(value).strip().rstrip("/")
 
 
 def executor_validity(

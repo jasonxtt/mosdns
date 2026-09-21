@@ -168,14 +168,8 @@ def _next_content_line(lines: list[str], start: int) -> tuple[int, str]:
 DEFAULT_SESSION_COMMIT_MESSAGE = "chore: record journal"
 DEFAULT_MAX_JOURNAL_LINES = 2000
 DEFAULT_SESSION_AUTO_COMMIT = True
-DEFAULT_CODEX_DISPATCH_MODE = "auto"
-DEFAULT_CODEX_HOST_ROUTES = {
-    "cli": "herdr",
-    "desktop": "ask",
-    "unknown": "ask",
-}
-VALID_CODEX_POLICY_MODES = {"auto", "ask", "codex", "dsh-web", "herdr", "inline"}
-VALID_CODEX_PROVIDERS = {"ask", "codex", "dsh-web", "herdr"}
+DEFAULT_CODEX_DISPATCH_MODE = "inline"
+VALID_CODEX_DISPATCH_MODES = {"inline", "sub-agent"}
 
 CONFIG_FILE = "config.yaml"
 
@@ -253,20 +247,16 @@ def get_session_auto_commit(repo_root: Path | None = None) -> bool:
 
 
 def get_codex_dispatch_mode(repo_root: Path | None = None) -> str:
-    """Return Codex dispatch mode.
+    """Return the simple Codex execution mode.
 
-    Default is ``auto``, which dispatches Trellis sub-agents and uses native
-    context injection with a child-side fallback. ``inline`` runs in the main
-    session. ``herdr`` selects a user-chosen external Herdr pane while Codex
-    remains controller. ``dsh-web`` selects the browser-backed DSH Web
-    executor only when explicitly selected; it is distinct from the retired
-    MCP ``dsh`` provider. ``ask`` is a fail-closed policy. ``sub-agent``
-    remains an alias for ``auto``.
+    ``inline`` keeps work in the current conversation. ``sub-agent`` enables
+    native sub-agent context injection. ``auto`` is accepted as a legacy
+    spelling of ``sub-agent`` so older project files remain readable; it does
+    not select a provider or inspect the execution surface.
 
-    Invalid explicit configuration falls back to ``ask`` rather than
-    unexpectedly selecting an executor. This CLI-facing parser is the only
-    place that emits a warning for invalid values; hook readers fail safely
-    without producing per-turn warning noise.
+    Invalid values fall back to the safe project default. This parser is the
+    only place that emits a warning; hook readers fail safely without per-turn
+    warning noise.
     """
     config = _load_config(repo_root)
     codex = config.get("codex")
@@ -274,55 +264,22 @@ def get_codex_dispatch_mode(repo_root: Path | None = None) -> str:
         return DEFAULT_CODEX_DISPATCH_MODE
     if not isinstance(codex, dict):
         print(
-            f"[WARN] invalid codex config: {codex!r}; using ask",
+            f"[WARN] invalid codex config: {codex!r}; using inline",
             file=sys.stderr,
         )
-        return "ask"
+        return DEFAULT_CODEX_DISPATCH_MODE
 
     raw = codex.get("dispatch_mode", DEFAULT_CODEX_DISPATCH_MODE)
     mode = str(raw).strip().lower()
-    if mode in VALID_CODEX_POLICY_MODES:
+    if mode in VALID_CODEX_DISPATCH_MODES:
         return mode
-    if mode == "sub-agent":
-        return "auto"
+    if mode == "auto":
+        return "sub-agent"
     print(
-        f"[WARN] invalid codex.dispatch_mode value: {raw!r}; using ask",
+        f"[WARN] invalid codex.dispatch_mode value: {raw!r}; using inline",
         file=sys.stderr,
     )
-    return "ask"
-
-
-def get_codex_host_routes(repo_root: Path | None = None) -> dict[str, str]:
-    """Return the configurable Codex surface-to-provider policy.
-
-    Route names identify provider classes only. They never identify a
-    concrete Herdr pane, DSH Web browser target, or reviewer conversation.
-    MCP DSH is retired and is never a default route.
-    """
-    result = dict(DEFAULT_CODEX_HOST_ROUTES)
-    config = _load_config(repo_root)
-    codex = config.get("codex")
-    if not isinstance(codex, dict):
-        return result
-    routes = codex.get("host_routes")
-    if not isinstance(routes, dict):
-        return result
-    for surface in result:
-        raw = routes.get(surface)
-        if raw is None:
-            continue
-        provider = str(raw).strip().lower()
-        if provider == "inline":
-            provider = "codex"
-        if provider in VALID_CODEX_PROVIDERS:
-            result[surface] = provider
-        else:
-            print(
-                f"[WARN] invalid codex.host_routes.{surface} value: {raw!r}; using ask",
-                file=sys.stderr,
-            )
-            result[surface] = "ask"
-    return result
+    return DEFAULT_CODEX_DISPATCH_MODE
 
 
 DEFAULT_CONTEXT_INJECTION_MAX_FILE_BYTES = 32768
