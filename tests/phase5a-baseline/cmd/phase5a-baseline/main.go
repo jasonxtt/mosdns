@@ -64,23 +64,24 @@ type stageCounters struct {
 }
 
 type stageResult struct {
-	Stage               string        `json:"stage"`
-	Scenario            string        `json:"scenario"`
-	Transport           string        `json:"transport"`
-	TargetQPS           float64       `json:"target_qps"`
-	DurationMS          int64         `json:"duration_ms"`
-	RequestDeadlineMS   int           `json:"request_deadline_ms"`
-	LateDrainMS         int           `json:"late_drain_ms"`
-	Counters            stageCounters `json:"counters"`
-	LatencySamplesUS    []int64       `json:"latency_samples_us"`
-	P50US               int64         `json:"p50_us"`
-	P95US               int64         `json:"p95_us"`
-	P99US               int64         `json:"p99_us"`
-	EffectiveThroughput float64       `json:"effective_throughput_qps"`
-	SenderLagMaxUS      int64         `json:"sender_lag_max_us"`
-	StartedAt           time.Time     `json:"started_at"`
-	FinishedAt          time.Time     `json:"finished_at"`
-	ResourceSampleCount int           `json:"resource_sample_count"`
+	Stage               string           `json:"stage"`
+	Scenario            string           `json:"scenario"`
+	Transport           string           `json:"transport"`
+	TargetQPS           float64          `json:"target_qps"`
+	DurationMS          int64            `json:"duration_ms"`
+	RequestDeadlineMS   int              `json:"request_deadline_ms"`
+	LateDrainMS         int              `json:"late_drain_ms"`
+	Counters            stageCounters    `json:"counters"`
+	CaseScheduled       map[string]int64 `json:"case_scheduled,omitempty"`
+	LatencySamplesUS    []int64          `json:"latency_samples_us"`
+	P50US               int64            `json:"p50_us"`
+	P95US               int64            `json:"p95_us"`
+	P99US               int64            `json:"p99_us"`
+	EffectiveThroughput float64          `json:"effective_throughput_qps"`
+	SenderLagMaxUS      int64            `json:"sender_lag_max_us"`
+	StartedAt           time.Time        `json:"started_at"`
+	FinishedAt          time.Time        `json:"finished_at"`
+	ResourceSampleCount int              `json:"resource_sample_count"`
 }
 
 type resourceSample struct {
@@ -518,6 +519,8 @@ func verifyCounters(args []string) error {
 	counter := fs.String("counter", "", "single fixture counter JSON")
 	baseline := fs.String("baseline", "", "prefill counter JSON for warm-cache equality")
 	expectDelta := fs.Bool("expect-delta", false, "require the counter delta to equal one request per workload case")
+	stageResultPath := fs.String("stage-result", "", "stage JSONL used to derive expected per-case request counts")
+	stageName := fs.String("stage", "", "stage name within --stage-result")
 	routeA := fs.String("route-a", "", "route-a counter JSON")
 	routeB := fs.String("route-b", "", "route-b counter JSON")
 	routeC := fs.String("route-c", "", "route-c counter JSON")
@@ -551,6 +554,13 @@ func verifyCounters(args []string) error {
 		return err
 	}
 	expected := expectedCounterDeltas(cases)
+	if *stageResultPath != "" {
+		measuredStage, err := readStageResult(*stageResultPath, *stageName)
+		if err != nil {
+			return err
+		}
+		expected = expectedCounterDeltasFromStage(cases, measuredStage)
+	}
 	if *baseline != "" {
 		before, err := readCounterFile(*baseline)
 		if err != nil {
@@ -582,6 +592,48 @@ func expectedCounterDeltas(cases []workloadCase) map[string]int64 {
 		expected[counterKey(c)]++
 	}
 	return expected
+}
+
+func expectedCounterDeltasFromStage(cases []workloadCase, result stageResult) map[string]int64 {
+	expected := make(map[string]int64, len(result.CaseScheduled))
+	seen := make(map[string]struct{}, len(result.CaseScheduled))
+	for _, c := range cases {
+		if _, ok := seen[c.CaseID]; ok {
+			continue
+		}
+		seen[c.CaseID] = struct{}{}
+		if count := result.CaseScheduled[c.CaseID]; count > 0 {
+			expected[counterKey(c)] += count
+		}
+	}
+	return expected
+}
+
+func readStageResult(path, stageName string) (stageResult, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return stageResult{}, fmt.Errorf("open stage result %s: %w", path, err)
+	}
+	defer f.Close()
+	var found *stageResult
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var result stageResult
+		if err := json.Unmarshal(scanner.Bytes(), &result); err != nil {
+			return stageResult{}, fmt.Errorf("decode stage result %s: %w", path, err)
+		}
+		if stageName == "" || result.Stage == stageName {
+			copy := result
+			found = &copy
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return stageResult{}, fmt.Errorf("read stage result %s: %w", path, err)
+	}
+	if found == nil {
+		return stageResult{}, fmt.Errorf("stage %q not found in %s", stageName, path)
+	}
+	return *found, nil
 }
 
 func counterKey(c workloadCase) string {
@@ -665,6 +717,7 @@ type stageOptions struct {
 func executeStage(opts stageOptions) error {
 	started := time.Now().UTC()
 	stats := new(runStats)
+	caseScheduled := make(map[string]int64)
 	resourcePath := filepath.Join(opts.resultDir, "resource-samples.jsonl")
 	resourceCount := 0
 	stopSamples := make(chan struct{})
@@ -701,6 +754,7 @@ func executeStage(opts stageOptions) error {
 		caseValue := opts.workload[index%len(opts.workload)]
 		stats.mu.Lock()
 		stats.counters.Scheduled++
+		caseScheduled[caseValue.CaseID]++
 		stats.mu.Unlock()
 		go executeRequest(opts, caseValue, stats)
 		next = next.Add(interval)
@@ -719,6 +773,7 @@ func executeStage(opts stageOptions) error {
 		TargetQPS: opts.qps, DurationMS: opts.duration.Milliseconds(),
 		RequestDeadlineMS: int(opts.deadline / time.Millisecond),
 		LateDrainMS:       int(opts.lateDrain / time.Millisecond), Counters: stats.counters,
+		CaseScheduled:    caseScheduled,
 		LatencySamplesUS: append([]int64(nil), stats.latenciesUS...),
 		SenderLagMaxUS:   stats.maxLagUS, StartedAt: started, FinishedAt: finished,
 		ResourceSampleCount: resourceCount,
