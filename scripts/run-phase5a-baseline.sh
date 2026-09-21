@@ -215,19 +215,19 @@ copy_fixture_counters() {
 verify_counter_delta() {
   local counter_path="$1"
   local baseline_path="$2"
-  local stage_result_path="$3"
-  local stage_name="$4"
+  local stage_result_path="${3:-}"
+  local stage_name="${4:-}"
+  local verify_args=(verify-counters --scenario w2 --workload "${WORKLOAD}" --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta)
+  if [[ -n "${stage_result_path}" ]]; then
+    verify_args+=(--stage-result "${stage_result_path}" --stage "${stage_name}")
+  fi
   for _ in $(seq 1 50); do
-    if "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" \
-      --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta \
-      --stage-result "${stage_result_path}" --stage "${stage_name}"; then
+    if "${HELPER_BINARY}" "${verify_args[@]}"; then
       return 0
     fi
     sleep 0.1
   done
-  "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" \
-    --counter "${counter_path}" --baseline "${baseline_path}" --expect-delta \
-    --stage-result "${stage_result_path}" --stage "${stage_name}"
+  "${HELPER_BINARY}" "${verify_args[@]}"
 }
 
 duration="1s"
@@ -263,7 +263,7 @@ if [[ "${SCENARIO}" == w2 ]]; then
     --stage "${RUN_MODE}-w2-cold" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
     "${ONE_PASS_ARGS[@]}" --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
   stop_sut
-  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-before-counter.json" "${RESULT_DIR}/stages.jsonl" "${RUN_MODE}-w2-cold"
+  verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-before-counter.json"
   cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-cold-after-counter.json"
 
   start_sut
