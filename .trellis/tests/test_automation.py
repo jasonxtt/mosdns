@@ -36,6 +36,7 @@ from common.automation_herdr import (
 from common.codex_routing import (
     RoutingDeprecatedError,
     detect_surface,
+    invalidate as legacy_invalidate,
     load_state as legacy_load_state,
     resolve_codex_provider,
     set_target as legacy_set_target,
@@ -299,6 +300,18 @@ class AutomationContextTest(unittest.TestCase):
             with self.subTest(operation=operation.__name__):
                 with self.assertRaises(RoutingDeprecatedError):
                     operation(self.root, "desktop")
+
+    def test_legacy_dispatch_invalidation_cannot_clear_explicit_executor(self):
+        state = legacy_set_target(
+            self.root,
+            "codex_one",
+            "executor",
+            "herdr",
+            "w1:p2",
+        )
+        with self.assertRaises(RoutingDeprecatedError):
+            legacy_invalidate(state, "dispatch")
+        self.assertEqual(legacy_load_state(self.root, "codex_one")["executor_override"]["reference"], "w1:p2")
 
 
 class ExplicitAdapterTest(unittest.TestCase):

@@ -172,7 +172,7 @@ def invalidate(state: dict[str, Any], part: str) -> dict[str, Any]:
     """Clear a context slot in memory through the legacy helper name."""
 
     if part == "dispatch":
-        part = "executor"
+        _deprecated("dispatch invalidation")
     context = _context_from_state(state)
     if part == "executor":
         clear_executor(context)

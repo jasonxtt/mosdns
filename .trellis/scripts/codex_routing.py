@@ -113,7 +113,11 @@ def main(argv: list[str] | None = None) -> int:
         (clear_executor if args.clear_role == "executor" else clear_reviewer)(context)
         save_context(root, context)
     elif args.command == "invalidate":
-        if args.part in {"executor", "dispatch"}:
+        if args.part == "dispatch":
+            raise RoutingDeprecatedError(
+                "dispatch invalidation is deprecated; clear an explicit executor target by name"
+            )
+        if args.part == "executor":
             clear_executor(context)
         else:
             clear_reviewer(context)
