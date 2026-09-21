@@ -174,9 +174,9 @@ included in the final matrix.
 Validation and audit commands included `task.py validate`, Go test/vet,
 `bash -n`, JSON parsing, exact manifest/input hash checks, fixed-rate/counter
 assertions over all 36 final runs, resource-sample coverage checks, and a
-post-run process/listener cleanup check. The scoped root reviewer accepted
-this evidence in the internal Codex review as `SLICE 1: PASS`; the immutable
-evidence commit was `e3338226be28ad99b5d621dfd5ccf972d13e32b2`.
+post-run process/listener cleanup check. The authoritative scoped root reviewer
+accepted this evidence as `SLICE 1: PASS`; the immutable evidence commit was
+`e3338226be28ad99b5d621dfd5ccf972d13e32b2`.
 
 ### Slice 1 exit gate
 
