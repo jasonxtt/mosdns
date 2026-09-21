@@ -3,7 +3,7 @@
   "official_frozen": true,
   "purpose": "Frozen Linux amd64 Go-only baseline schedule after bounded pilot; all official runs use this manifest unchanged.",
   "source_anchor": "e70a2408e2dcd2141e48bcc84765c5adfa406fe4",
-  "task_revision": "1382f4d447a29c9e339d26f9cec01b533382f063",
+  "task_revision": "1072824b1878ec07f0dd6cecde2a1bea81c5dd11",
   "platform": {
     "os": "linux",
     "arch": "amd64"
@@ -28,7 +28,7 @@
       {"path": "tests/phase5a-baseline/workloads/cache.jsonl", "sha256": "7680cd55ccf477972cd700c05e72c83c52ab1a55643b9a98bb610629035214ed"},
       {"path": "tests/phase5a-baseline/workloads/routing.jsonl", "sha256": "dbb582dc9d623af54e501639b7a52538b1e1d9e493fa0f0f6a4f4714ea0176c1"}
     ],
-    "runner": {"path": "scripts/run-phase5a-baseline.sh", "sha256": "53987f5eace988af85ac49a505ba72b59c8535ca1adb379e499272cb5d6b273b"},
+    "runner": {"path": "scripts/run-phase5a-baseline.sh", "sha256": "977658509360ee3b17ef44933a22afd7a8272b81351e2322a34b6657d2b27a33"},
     "helper_source": {"path": "tests/phase5a-baseline/cmd/phase5a-baseline/main.go", "sha256": "0b53a45a0b6035ff806282d8655e91a561b30d2eac50d7a9d651661aa228d309"},
     "hash_algorithm": "sha256"
   },
