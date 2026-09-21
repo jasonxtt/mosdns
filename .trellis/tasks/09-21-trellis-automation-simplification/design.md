@@ -225,6 +225,21 @@ The reviewer is real I/O, not just a prompt template:
   provided by the controller host; the repo-side contract, request builders,
   and result parser are unit-tested against a fake adapter.
 
+**Feasibility gate (design-level exit criterion).** The interface above is
+necessary but not sufficient: there is no verified evidence yet that the
+Codex host actually exposes send/read/wait into a plain ChatGPT conversation.
+Therefore a real probe (PRD §5.6) is a hard precondition, sequenced before
+Slice 0 or as its first step and strictly before any de-routing mutation:
+prove send + later read + stable target identity against a real user-selected
+plain ChatGPT conversation, using no browser/UI automation and no unofficial
+API, and record the observed capability contract under `research/`. A fake
+adapter only proves interface logic — it cannot prove the end-to-end loop —
+so a failed probe means STOP (before touching the working routing system)
+and escalate the reviewer-transport decision to the user. The fallback
+options (official browser-use driver, Codex detached reviewer, another
+transport, manual relay) are a user decision; Trellis never picks one
+silently.
+
 ### 2.4 Reviewer bootstrap content (first request per task)
 
 Template sections: reviewer role; repo + branch + task dir; task goal;
@@ -344,6 +359,10 @@ user: "执行 Slice 0-3"
 
 ## 5. Rollout / Rollback
 
+- **Slice G (feasibility gate) precedes all mutation.** Until the §2.4a
+  probe passes and is recorded, no Slice 0–4 change may be committed to
+  scripts/hooks/config/workflow; if the probe fails the repo is untouched
+  and rollback is trivially "nothing changed".
 - Slices land independently on branch `rust`; each Slice is reviewed.
 - Rollback = revert the Slice's exact commit(s); legacy state files are
   preserved **in place** by migration (read-once + fingerprint marker in the

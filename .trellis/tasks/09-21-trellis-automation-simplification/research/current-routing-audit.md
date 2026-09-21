@@ -130,3 +130,21 @@ the task directory. How each was addressed:
   file left in place byte-for-byte with `migrated_from: {path, sha256}`
   fingerprint in the new context (prd §10, design §2.5, implement Slice 0).
 - **P2 (jsonl `_example` seed lines)**: removed from both manifests.
+
+## Addendum 2 — Remediation round 2 (2026-09-21)
+
+Re-review of 7cc275d: P0:0, P1:1, P2:0. The single remaining finding:
+
+- **P1 (ChatGPT transport assumed, not proven)**: there is no verified
+  evidence the Codex host exposes send/read/wait into a plain ChatGPT
+  conversation; a fake adapter proves interface logic only, not the
+  end-to-end loop. Fixed by adding a pre-implementation feasibility exit
+  gate — implement.md "Slice G" (real host-level probe of send + read +
+  stable identity against a real user-selected conversation, no UI
+  automation / no unofficial API, evidence recorded in
+  `research/chatgpt-transport-probe.md`, sequenced strictly before Slice 0
+  and before any de-routing mutation) — plus PRD §5.6 and design §2.4a /
+  §5. On probe failure the task stops pre-mutation and the reviewer
+  transport choice (browser-use driver / Codex detached reviewer / other
+  transport / manual relay) is escalated to the user; Trellis never picks
+  silently. Slice 0 and Slice 1 both carry the Slice G precondition.
