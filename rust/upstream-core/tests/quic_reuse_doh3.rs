@@ -716,6 +716,58 @@ fn doh3_stream_failures_keep_generation_active_for_next_request() {
 }
 
 #[test]
+fn doh3_owner_close_waits_for_held_connection_handle_before_removal() {
+    block_on(async {
+        let set = FixtureSet::generate();
+        let server = ScriptedServer::start(&set, &[ScriptedResponse::Valid]);
+        let upstream = Arc::new(owner(&set, server.address));
+        let held = upstream
+            .hold_connection_handle_for_test()
+            .await
+            .expect("acquire real caller-owned DoH3 handle");
+
+        let response = exchange(Arc::clone(&upstream), query_wire(0x2351))
+            .await
+            .expect("request succeeds while the extra handle is held");
+        assert_eq!(response.request_id(), 0x2351);
+        assert_eq!(response.response_id(), 0x2351);
+        assert_eq!(upstream.entry_count(), 1);
+        assert_eq!(
+            upstream.in_flight_exchanges(),
+            2,
+            "the held caller handle and entry liveness registration remain"
+        );
+
+        let close_upstream = Arc::clone(&upstream);
+        let mut close = tokio::spawn(async move { close_upstream.close().await });
+        assert!(
+            timeout(Duration::from_millis(100), &mut close)
+                .await
+                .is_err(),
+            "owner close must wait for the caller-owned H3 handle"
+        );
+        assert_eq!(upstream.entry_count(), 1);
+        assert_eq!(
+            upstream.in_flight_exchanges(),
+            2,
+            "close cannot drain while the caller-owned handle remains held"
+        );
+
+        drop(held);
+        assert_eq!(
+            timeout(TEST_TIMEOUT, &mut close)
+                .await
+                .expect("owner close completes after handle release")
+                .expect("owner close task joined"),
+            mosdns_upstream_core::CloseResult::Closed
+        );
+        assert_eq!(upstream.entry_count(), 0);
+        assert_eq!(upstream.in_flight_exchanges(), 0);
+        server.join();
+    });
+}
+
+#[test]
 fn doh3_goaway_send_error_deactivates_exact_generation() {
     block_on(async {
         let set = FixtureSet::generate();

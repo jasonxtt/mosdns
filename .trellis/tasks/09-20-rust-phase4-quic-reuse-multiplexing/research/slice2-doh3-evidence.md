@@ -5,13 +5,19 @@ This record covers Slice 2 only and does not claim Slice 3.
 
 ## Implementation boundary
 
-Changed implementation paths:
+The parent Slice 2 implementation established the following baseline paths:
 
 - `rust/upstream-core/src/quic_reuse.rs`
 - `rust/upstream-core/src/quic.rs`
 - `rust/upstream-core/src/lib.rs`
 - `rust/upstream-core/tests/quic_reuse_doh3.rs`
+
+The current remediation commit changes exactly these four paths:
+
 - `rust/upstream-core/Cargo.toml` (user-authorized opt-in h3 API feature only)
+- `rust/upstream-core/src/quic_reuse.rs`
+- `rust/upstream-core/tests/quic_reuse_doh3.rs`
+- `.trellis/tasks/09-20-rust-phase4-quic-reuse-multiplexing/research/slice2-doh3-evidence.md`
 
 The locked `h3 =0.0.8` dependency now enables
 `i-implement-a-third-party-backend-and-opt-into-breaking-changes`; the version,
@@ -56,6 +62,11 @@ connection:
 - a server GOAWAY makes the next `send_request` return the pinned
   `RemoteClosing` path, deactivates the exact key+generation, and reaches map
   removal only after supervised teardown.
+- a debug-only real-stack hold keeps a caller-owned DoH3 connection handle and
+  stream lease alive while `owner.close()` runs; close remains pending and the
+  generation remains discoverable with the held caller registration plus the
+  entry liveness registration, then the
+  handle release allows driver/endpoint drain and exact map removal.
 
 ## Required commands
 
@@ -69,6 +80,6 @@ All commands were run from `/Users/tom/github/mosdns-rust/rust` unless noted.
 | `cargo fmt --all -- --check` | 0 |
 | `cargo clippy -p mosdns-upstream-core --all-targets --locked -- -D warnings` | 0 |
 
-The focused reuse test passed 4/4, the existing one-shot H3 suite passed 22/22,
+The focused reuse test passed 5/5, the existing one-shot H3 suite passed 22/22,
 and the existing Slice 3 QUIC suite passed 23/23. The full crate run and task
 validation remain part of the pre-review gate.
