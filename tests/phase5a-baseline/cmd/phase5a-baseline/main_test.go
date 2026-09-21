@@ -45,6 +45,10 @@ func TestResponseMatchesExpectedPositiveAndNegative(t *testing.T) {
 	if !responseMatches(negative, query, negativeCase) {
 		t.Fatal("expected negative answer should be correct")
 	}
+	positive.Answer[0].(*dns.A).A = net.ParseIP("198.51.100.99").To4()
+	if responseMatches(positive, query, positiveCase) {
+		t.Fatal("wrong answer must not be counted as correct")
+	}
 }
 
 func TestFixtureAnswerTable(t *testing.T) {
@@ -84,6 +88,18 @@ func TestStageCountersClassificationNamesAreStable(t *testing.T) {
 		t.Fatal("counter fields changed unexpectedly")
 	}
 	_ = time.Second
+}
+
+func TestStageFailureGateRejectsNonCorrectOutcomes(t *testing.T) {
+	if !hasStageFailure(stageCounters{WrongResponse: 1}) {
+		t.Fatal("wrong response must fail smoke gate")
+	}
+	if !hasStageFailure(stageCounters{Timeout: 1}) {
+		t.Fatal("timeout must fail smoke gate")
+	}
+	if hasStageFailure(stageCounters{CorrectOnTime: 1, ExpectedNegativeOnTime: 1}) {
+		t.Fatal("correct expected negative must not fail smoke gate")
+	}
 }
 
 func writeFile(path, content string) error {

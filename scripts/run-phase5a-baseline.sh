@@ -38,18 +38,33 @@ HELPER_TMP="${TMP_DIR}/phase5a-baseline-helper"
 SUT_PID=""
 FIXTURE_PIDS=()
 
-cleanup() {
-  set +e
+stop_sut() {
   if [[ -n "${SUT_PID}" ]] && kill -0 "${SUT_PID}" 2>/dev/null; then
-    kill -TERM "${SUT_PID}" 2>/dev/null
-    wait "${SUT_PID}" 2>/dev/null
+    kill -TERM "${SUT_PID}" 2>/dev/null || true
+    wait "${SUT_PID}" 2>/dev/null || true
   fi
+  SUT_PID=""
+}
+
+stop_fixtures() {
+  local pid
   for pid in "${FIXTURE_PIDS[@]:-}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-      kill -TERM "${pid}" 2>/dev/null
-      wait "${pid}" 2>/dev/null
+      kill -TERM "${pid}" 2>/dev/null || true
     fi
   done
+  for pid in "${FIXTURE_PIDS[@]:-}"; do
+    if [[ -n "${pid}" ]]; then
+      wait "${pid}" 2>/dev/null || true
+    fi
+  done
+  FIXTURE_PIDS=()
+}
+
+cleanup() {
+  set +e
+  stop_sut
+  stop_fixtures
 }
 trap cleanup EXIT INT TERM
 
@@ -102,13 +117,6 @@ case "${SCENARIO}" in
     ;;
 esac
 
-"${HELPER_BINARY}" validate-binary --path "${MOSDNS_BINARY}" > "${RESULT_DIR}/sut.json"
-for spec in "${FIXTURE_SPECS[@]}"; do
-  IFS='|' read -r network addr upstream counter <<<"${spec}"
-  "${HELPER_BINARY}" fixture --network "${network}" --addr "${addr}" --upstream-id "${upstream}" --counter "${counter}" > "${TMP_DIR}/${upstream}.stdout" 2> "${TMP_DIR}/${upstream}.stderr" &
-  FIXTURE_PIDS+=("$!")
-done
-
 if [[ "${RUN_MODE}" == "official" ]]; then
   MANIFEST="${ROOT_DIR}/.trellis/tasks/09-21-rust-phase5a-baseline/research/run-manifest.json"
   if [[ ! -f "${MANIFEST}" ]]; then
@@ -121,20 +129,53 @@ if [[ "${RUN_MODE}" == "official" ]]; then
   fi
 fi
 
-"${MOSDNS_BINARY}" start -c "${SCENARIO_CONFIG}" > "${TMP_DIR}/mosdns.stdout" 2> "${TMP_DIR}/mosdns.stderr" &
-SUT_PID="$!"
-
-sut_port="${SUT_ADDR##*:}"
-for _ in $(seq 1 100); do
-  if kill -0 "${SUT_PID}" 2>/dev/null && (echo >/dev/tcp/127.0.0.1/"${sut_port}") 2>/dev/null; then
-    break
-  fi
-  sleep 0.05
+"${HELPER_BINARY}" validate-binary --path "${MOSDNS_BINARY}" > "${RESULT_DIR}/sut.json"
+for spec in "${FIXTURE_SPECS[@]}"; do
+  IFS='|' read -r network addr upstream counter <<<"${spec}"
+  "${HELPER_BINARY}" fixture --network "${network}" --addr "${addr}" --upstream-id "${upstream}" --counter "${counter}" > "${TMP_DIR}/${upstream}.stdout" 2> "${TMP_DIR}/${upstream}.stderr" &
+  FIXTURE_PIDS+=("$!")
 done
-if ! kill -0 "${SUT_PID}" 2>/dev/null; then
-  echo "SUT exited during startup" >&2
-  exit 1
-fi
+
+start_sut() {
+  "${MOSDNS_BINARY}" start -c "${SCENARIO_CONFIG}" >> "${TMP_DIR}/mosdns.stdout" 2>> "${TMP_DIR}/mosdns.stderr" &
+  SUT_PID="$!"
+  # Startup is outside every measured stage. Probe the TCP listener as a
+  # bounded readiness barrier when the scenario uses TCP. UDP has no
+  # connectable readiness signal, so use a bounded startup margin there.
+  sut_port="${SUT_ADDR##*:}"
+  if [[ "${TRANSPORT}" != "tcp" ]]; then
+    sleep 1
+    if ! kill -0 "${SUT_PID}" 2>/dev/null; then
+      echo "SUT exited during startup" >&2
+      return 1
+    fi
+    return 0
+  fi
+  for _ in $(seq 1 100); do
+    if kill -0 "${SUT_PID}" 2>/dev/null && (echo >/dev/tcp/127.0.0.1/"${sut_port}") 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  if ! kill -0 "${SUT_PID}" 2>/dev/null; then
+    echo "SUT exited during startup" >&2
+  else
+    echo "SUT did not become ready during startup" >&2
+  fi
+  return 1
+}
+
+copy_fixture_counters() {
+  local spec upstream counter
+  for spec in "${FIXTURE_SPECS[@]}"; do
+    IFS='|' read -r _ _ upstream counter <<<"${spec}"
+    if [[ ! -f "${counter}" ]]; then
+      echo "missing final fixture counter for ${upstream}" >&2
+      return 1
+    fi
+    cp "${counter}" "${RESULT_DIR}/fixture-${upstream}.json"
+  done
+}
 
 duration="1s"
 qps="20"
@@ -154,23 +195,44 @@ elif [[ "${SCENARIO}" == w2 ]]; then
   workload_scenario="w2"
 fi
 
-"${HELPER_BINARY}" run \
-  --workload "${WORKLOAD}" \
-  --scenario "${workload_scenario}" \
-  --transport "${TRANSPORT}" \
-  --addr "${SUT_ADDR}" \
-  --stage "${RUN_MODE}-${SCENARIO}" \
-  --qps "${qps}" \
-  --duration "${duration}" \
-  --deadline 500ms \
-  --late-drain 100ms \
-  --result "${RESULT_DIR}" \
-  --sut-pid "${SUT_PID}"
+start_sut
+if [[ "${SCENARIO}" == w2 ]]; then
+  "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
+    --stage "${RUN_MODE}-w2-cold" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
+    --one-pass --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
+  stop_sut
+
+  start_sut
+  PREFILL_DIR="${TMP_DIR}/prefill"
+  "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
+    --stage warm-prefill --qps "${qps}" --duration 1s --deadline 500ms --late-drain 100ms \
+    --one-pass --fail-on-error --result "${PREFILL_DIR}" --sut-pid "${SUT_PID}"
+  sleep 0.25
+  IFS='|' read -r _ _ _ CACHE_COUNTER <<<"${FIXTURE_SPECS[0]}"
+  cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-counter.json"
+  "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" --counter "${CACHE_COUNTER}"
+  "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" \
+    --stage "${RUN_MODE}-w2-warm" --qps "${qps}" --duration "${duration}" --deadline 500ms --late-drain 100ms \
+    --one-pass --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
+else
+  "${HELPER_BINARY}" run --workload "${WORKLOAD}" --scenario "${workload_scenario}" --transport "${TRANSPORT}" \
+    --addr "${SUT_ADDR}" --stage "${RUN_MODE}-${SCENARIO}" --qps "${qps}" --duration "${duration}" \
+    --deadline 500ms --late-drain 100ms --fail-on-error --result "${RESULT_DIR}" --sut-pid "${SUT_PID}"
+fi
+
+stop_sut
+stop_fixtures
+copy_fixture_counters
+
+if [[ "${SCENARIO}" == w2 ]]; then
+  "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" --counter "${RESULT_DIR}/fixture-cache.json" --baseline "${TMP_DIR}/w2-prefill-counter.json"
+elif [[ "${SCENARIO}" == w3 ]]; then
+  "${HELPER_BINARY}" verify-counters --scenario w3 --workload "${WORKLOAD}" \
+    --route-a "${RESULT_DIR}/fixture-route-a.json" --route-b "${RESULT_DIR}/fixture-route-b.json" --route-c "${RESULT_DIR}/fixture-route-c.json"
+else
+  "${HELPER_BINARY}" verify-counters --scenario w1 --workload "${WORKLOAD}" --counter "${RESULT_DIR}/fixture-forward.json"
+fi
 
 cp "${TMP_DIR}/mosdns.stdout" "${RESULT_DIR}/sut.stdout.log"
 cp "${TMP_DIR}/mosdns.stderr" "${RESULT_DIR}/sut.stderr.log"
-for spec in "${FIXTURE_SPECS[@]}"; do
-  IFS='|' read -r _ _ upstream counter <<<"${spec}"
-  [[ -f "${counter}" ]] && cp "${counter}" "${RESULT_DIR}/fixture-${upstream}.json"
-done
-printf '%s\n' "scenario=${SCENARIO}" "run_mode=${RUN_MODE}" "config=${SCENARIO_CONFIG}" "workload=${WORKLOAD}" "sut_pid=${SUT_PID}" > "${RESULT_DIR}/run-metadata.txt"
+printf '%s\n' "scenario=${SCENARIO}" "run_mode=${RUN_MODE}" "config=${SCENARIO_CONFIG}" "workload=${WORKLOAD}" > "${RESULT_DIR}/run-metadata.txt"
