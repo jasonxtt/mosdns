@@ -1,0 +1,6 @@
+2026-09-21T08:55:49.130Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-21T08:55:49.157Z	INFO	main config base directory set	{"path": "/workspace/tests/phase5a-baseline/configs"}
+2026-09-21T08:55:49.210Z	INFO	main config loaded	{"file": "/workspace/tests/phase5a-baseline/configs/cache.yaml"}
+2026-09-21T08:56:02.803Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-21T08:56:02.828Z	INFO	main config base directory set	{"path": "/workspace/tests/phase5a-baseline/configs"}
+2026-09-21T08:56:02.892Z	INFO	main config loaded	{"file": "/workspace/tests/phase5a-baseline/configs/cache.yaml"}

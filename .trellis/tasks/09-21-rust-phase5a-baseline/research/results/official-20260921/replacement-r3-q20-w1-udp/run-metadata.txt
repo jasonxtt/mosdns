@@ -1,0 +1,8 @@
+scenario=w1-udp
+run_mode=official
+config=/workspace/tests/phase5a-baseline/configs/forward-udp.yaml
+workload=/workspace/tests/phase5a-baseline/workloads/forward.jsonl
+offered_qps=20
+sut_cpu_set=0,1
+harness_cpu_set=2,3
+sut_startup_margin=3

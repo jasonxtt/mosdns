@@ -1,0 +1,11 @@
+{"timestamp":"2026-09-21T08:57:19.848645584Z","pid":2188,"user_ticks":47,"system_ticks":54,"clock_ticks_per_second":100,"user_seconds":0.47,"system_seconds":0.54,"rss_kib":26168}
+{"timestamp":"2026-09-21T08:57:20.876280635Z","pid":2188,"user_ticks":51,"system_ticks":58,"clock_ticks_per_second":100,"user_seconds":0.51,"system_seconds":0.58,"rss_kib":27184}
+{"timestamp":"2026-09-21T08:57:21.921261755Z","pid":2188,"user_ticks":53,"system_ticks":61,"clock_ticks_per_second":100,"user_seconds":0.53,"system_seconds":0.61,"rss_kib":27280}
+{"timestamp":"2026-09-21T08:57:22.872357401Z","pid":2188,"user_ticks":56,"system_ticks":63,"clock_ticks_per_second":100,"user_seconds":0.56,"system_seconds":0.63,"rss_kib":27344}
+{"timestamp":"2026-09-21T08:57:23.926676537Z","pid":2188,"user_ticks":58,"system_ticks":66,"clock_ticks_per_second":100,"user_seconds":0.58,"system_seconds":0.66,"rss_kib":27468}
+{"timestamp":"2026-09-21T08:57:24.866164099Z","pid":2188,"user_ticks":61,"system_ticks":68,"clock_ticks_per_second":100,"user_seconds":0.61,"system_seconds":0.68,"rss_kib":27548}
+{"timestamp":"2026-09-21T08:57:25.915215178Z","pid":2188,"user_ticks":65,"system_ticks":70,"clock_ticks_per_second":100,"user_seconds":0.65,"system_seconds":0.7,"rss_kib":27612}
+{"timestamp":"2026-09-21T08:57:26.925644055Z","pid":2188,"user_ticks":69,"system_ticks":74,"clock_ticks_per_second":100,"user_seconds":0.69,"system_seconds":0.74,"rss_kib":27692}
+{"timestamp":"2026-09-21T08:57:27.897945734Z","pid":2188,"user_ticks":71,"system_ticks":77,"clock_ticks_per_second":100,"user_seconds":0.71,"system_seconds":0.77,"rss_kib":27764}
+{"timestamp":"2026-09-21T08:57:28.870489401Z","pid":2188,"user_ticks":74,"system_ticks":80,"clock_ticks_per_second":100,"user_seconds":0.74,"system_seconds":0.8,"rss_kib":27860}
+{"timestamp":"2026-09-21T08:57:29.870370185Z","pid":2188,"user_ticks":78,"system_ticks":82,"clock_ticks_per_second":100,"user_seconds":0.78,"system_seconds":0.82,"rss_kib":27940}

@@ -1,0 +1,3 @@
+2026-09-21T09:19:22.150Z	WARN	配置自动升级失败，继续使用原配置	{"error": "empty config package"}
+2026-09-21T09:19:22.173Z	INFO	main config base directory set	{"path": "/workspace/tests/phase5a-baseline/configs"}
+2026-09-21T09:19:22.230Z	INFO	main config loaded	{"file": "/workspace/tests/phase5a-baseline/configs/forward-tcp.yaml"}

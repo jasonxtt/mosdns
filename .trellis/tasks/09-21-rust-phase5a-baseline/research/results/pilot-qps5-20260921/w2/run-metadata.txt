@@ -1,0 +1,8 @@
+scenario=w2
+run_mode=pilot
+config=/workspace/tests/phase5a-baseline/configs/cache.yaml
+workload=/workspace/tests/phase5a-baseline/workloads/cache.jsonl
+offered_qps=5
+sut_cpu_set=0,1
+harness_cpu_set=2,3
+sut_startup_margin=3

@@ -1,0 +1,12 @@
+{"timestamp":"2026-09-21T08:55:50.274787368Z","pid":1705,"user_ticks":45,"system_ticks":123,"clock_ticks_per_second":100,"user_seconds":0.45,"system_seconds":1.23,"rss_kib":30420}
+{"timestamp":"2026-09-21T08:55:51.291082818Z","pid":1705,"user_ticks":47,"system_ticks":125,"clock_ticks_per_second":100,"user_seconds":0.47,"system_seconds":1.25,"rss_kib":31192}
+{"timestamp":"2026-09-21T08:55:52.285920115Z","pid":1705,"user_ticks":48,"system_ticks":127,"clock_ticks_per_second":100,"user_seconds":0.48,"system_seconds":1.27,"rss_kib":31200}
+{"timestamp":"2026-09-21T08:55:53.285411423Z","pid":1705,"user_ticks":50,"system_ticks":127,"clock_ticks_per_second":100,"user_seconds":0.5,"system_seconds":1.27,"rss_kib":31208}
+{"timestamp":"2026-09-21T08:55:54.289697744Z","pid":1705,"user_ticks":52,"system_ticks":128,"clock_ticks_per_second":100,"user_seconds":0.52,"system_seconds":1.28,"rss_kib":31216}
+{"timestamp":"2026-09-21T08:55:55.287405007Z","pid":1705,"user_ticks":52,"system_ticks":130,"clock_ticks_per_second":100,"user_seconds":0.52,"system_seconds":1.3,"rss_kib":31232}
+{"timestamp":"2026-09-21T08:55:56.286536261Z","pid":1705,"user_ticks":53,"system_ticks":131,"clock_ticks_per_second":100,"user_seconds":0.53,"system_seconds":1.31,"rss_kib":31260}
+{"timestamp":"2026-09-21T08:55:57.289894524Z","pid":1705,"user_ticks":54,"system_ticks":133,"clock_ticks_per_second":100,"user_seconds":0.54,"system_seconds":1.33,"rss_kib":31260}
+{"timestamp":"2026-09-21T08:55:58.28844874Z","pid":1705,"user_ticks":55,"system_ticks":134,"clock_ticks_per_second":100,"user_seconds":0.55,"system_seconds":1.34,"rss_kib":31260}
+{"timestamp":"2026-09-21T08:55:59.287877945Z","pid":1705,"user_ticks":56,"system_ticks":135,"clock_ticks_per_second":100,"user_seconds":0.56,"system_seconds":1.35,"rss_kib":31280}
+{"timestamp":"2026-09-21T08:56:00.28691713Z","pid":1705,"user_ticks":57,"system_ticks":136,"clock_ticks_per_second":100,"user_seconds":0.57,"system_seconds":1.36,"rss_kib":31280}
+{"timestamp":"2026-09-21T08:56:04.836706081Z","pid":1741,"user_ticks":49,"system_ticks":172,"clock_ticks_per_second":100,"user_seconds":0.49,"system_seconds":1.72,"rss_kib":31052}

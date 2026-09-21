@@ -1,0 +1,6 @@
+2026-09-21T09:27:12.826Z	WARN	配置自动升级失败，继续使用原配置	{"error": "empty config package"}
+2026-09-21T09:27:12.847Z	INFO	main config base directory set	{"path": "/workspace/tests/phase5a-baseline/configs"}
+2026-09-21T09:27:12.909Z	INFO	main config loaded	{"file": "/workspace/tests/phase5a-baseline/configs/cache.yaml"}
+2026-09-21T09:27:27.182Z	WARN	配置自动升级失败，继续使用原配置	{"error": "empty config package"}
+2026-09-21T09:27:27.204Z	INFO	main config base directory set	{"path": "/workspace/tests/phase5a-baseline/configs"}
+2026-09-21T09:27:27.263Z	INFO	main config loaded	{"file": "/workspace/tests/phase5a-baseline/configs/cache.yaml"}

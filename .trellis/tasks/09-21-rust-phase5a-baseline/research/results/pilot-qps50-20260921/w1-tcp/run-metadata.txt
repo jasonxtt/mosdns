@@ -1,0 +1,8 @@
+scenario=w1-tcp
+run_mode=pilot
+config=/workspace/tests/phase5a-baseline/configs/forward-tcp.yaml
+workload=/workspace/tests/phase5a-baseline/workloads/forward.jsonl
+offered_qps=50
+sut_cpu_set=0,1
+harness_cpu_set=2,3
+sut_startup_margin=3

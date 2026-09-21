@@ -1,0 +1,7 @@
+linux
+amd64
+1
+v1
+
+/go
+/workspace/go.mod

@@ -1,0 +1,45 @@
+{
+  "build": {
+    "command": "SKIP_UI_BUILD=1 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO_TAGS= BUILD_VERSION=phase5a-go-5b1eca6 OUTPUT=<isolated-output>/mosdns-go ./scripts/build-local.sh",
+    "sut_sha256": "50ff4ff29a2ac23ede0dc8722672c428ceb441dde0b98bf47032e709427a3183",
+    "version": "phase5a-go-5b1eca6"
+  },
+  "container": {
+    "cpuset": "0-3",
+    "image": "golang:1.26-bookworm",
+    "memory_limit": "6 GiB Colima VM",
+    "platform": "linux/amd64"
+  },
+  "go": {
+    "env": "linux\namd64\n1\nv1\n\n/go\n/workspace/go.mod",
+    "version": "go version go1.26.5 linux/amd64"
+  },
+  "isolation": {
+    "affinity_authoritative": true,
+    "fd_limit": 1024,
+    "harness_cpu_set": "2,3",
+    "sut_cpu_set": "0,1"
+  },
+  "manifest": {
+    "official_frozen": true,
+    "path": ".trellis/tasks/09-21-rust-phase5a-baseline/research/run-manifest.json",
+    "sha256": "8f3eb52667443e075144628987cb755b0e80893e35eead2f5bca0099252f2838"
+  },
+  "module_hashes": {
+    "go.mod": "c00a26a0b60448ce0ffb45eb64ccd7ed3150ba69a675691479ea24729dae4728",
+    "go.sum": "312cc28ef8d6c3c1c492f4b60b1a90e6f5c41d84a5a95fd1b348488cfd195072"
+  },
+  "platform": {
+    "kernel_release": "6.8.0-117-generic",
+    "machine": "x86_64",
+    "system": "Linux"
+  },
+  "runtime_env": {
+    "GOGC": "<unset>",
+    "GOMAXPROCS": "<unset>",
+    "GOMEMLIMIT": "<unset>"
+  },
+  "rust_backend_selectors": {},
+  "source_anchor": "e70a2408e2dcd2141e48bcc84765c5adfa406fe4",
+  "source_git_sha": "0b106db687d186a7c4ba6c3e26276efa19d558a1"
+}
