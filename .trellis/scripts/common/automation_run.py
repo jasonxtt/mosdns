@@ -22,6 +22,7 @@ from .automation import load_context, validate_target
 
 
 RUN_VERSION = 1
+SNAPSHOT_VERSION = 1
 RUN_STATUSES = {"running", "blocked", "authorized_scope_complete"}
 UNIT_PHASES = {
     "pending",
@@ -43,6 +44,43 @@ class AutomationRunError(RuntimeError):
 
 class ActivationError(AutomationRunError):
     """The planning/reviewer/task activation gate is not satisfied."""
+
+
+@dataclass
+class AuthorizationSnapshot:
+    """The pre-start authorization frozen before ``task.py start``."""
+
+    context_key: str
+    task: str
+    authorized_units: list[str]
+    authorized_at: str
+    reviewer: dict[str, Any]
+    reviewer_transport_evidence: dict[str, Any]
+    version: int = SNAPSHOT_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": SNAPSHOT_VERSION,
+            "context_key": self.context_key,
+            "task": self.task,
+            "authorized_units": list(self.authorized_units),
+            "authorized_at": self.authorized_at,
+            "reviewer": copy.deepcopy(self.reviewer),
+            "reviewer_transport_evidence": copy.deepcopy(self.reviewer_transport_evidence),
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "AuthorizationSnapshot":
+        if not validate_snapshot(value):
+            raise ValueError("invalid authorization snapshot")
+        return cls(
+            context_key=value["context_key"],
+            task=value["task"],
+            authorized_units=list(value["authorized_units"]),
+            authorized_at=value["authorized_at"],
+            reviewer=copy.deepcopy(value["reviewer"]),
+            reviewer_transport_evidence=copy.deepcopy(value["reviewer_transport_evidence"]),
+        )
 
 
 @dataclass
@@ -121,6 +159,14 @@ def run_dir(repo_root: Path) -> Path:
 
 def run_path(repo_root: Path, context_key: str) -> Path:
     return run_dir(repo_root) / f"{_safe_key(context_key)}.json"
+
+
+def authorization_dir(repo_root: Path) -> Path:
+    return Path(repo_root) / ".trellis" / ".runtime" / "automation" / "authorizations"
+
+
+def authorization_path(repo_root: Path, context_key: str) -> Path:
+    return authorization_dir(repo_root) / f"{_safe_key(context_key)}.json"
 
 
 def parse_implementation_units(task_dir: Path) -> list[str]:
@@ -260,6 +306,43 @@ def validate_run(value: Any) -> bool:
     return not (set(value) - allowed)
 
 
+def validate_snapshot(value: Any) -> bool:
+    if not isinstance(value, dict) or value.get("version") != SNAPSHOT_VERSION:
+        return False
+    if not isinstance(value.get("context_key"), str) or not value["context_key"].strip():
+        return False
+    if not isinstance(value.get("task"), str) or not value["task"].strip():
+        return False
+    units = value.get("authorized_units")
+    if not isinstance(units, list) or not units or any(not isinstance(item, str) or not item for item in units):
+        return False
+    if len(set(units)) != len(units):
+        return False
+    if not isinstance(value.get("authorized_at"), str) or not value["authorized_at"].strip():
+        return False
+    if not validate_target(value.get("reviewer")) or value.get("reviewer") is None:
+        return False
+    evidence = value.get("reviewer_transport_evidence")
+    if not isinstance(evidence, dict) or evidence.get("verified") is not True:
+        return False
+    if evidence.get("target") != value.get("reviewer"):
+        return False
+    if not isinstance(evidence.get("mechanism"), str) or not evidence["mechanism"].strip():
+        return False
+    if not isinstance(evidence.get("verified_at"), str) or not evidence["verified_at"].strip():
+        return False
+    allowed = {
+        "version",
+        "context_key",
+        "task",
+        "authorized_units",
+        "authorized_at",
+        "reviewer",
+        "reviewer_transport_evidence",
+    }
+    return not (set(value) - allowed)
+
+
 def _blocked_run(context_key: str, reason: str, task: str = "unknown") -> AutomationRun:
     return AutomationRun(
         context_key=context_key,
@@ -312,6 +395,60 @@ def save_run(repo_root: Path, run: AutomationRun) -> None:
             pass
 
 
+def load_authorization(repo_root: Path, context_key: str) -> AuthorizationSnapshot | None:
+    """Load the pre-start snapshot; corruption fails closed."""
+
+    path = authorization_path(repo_root, context_key)
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return AuthorizationSnapshot.from_dict(value)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ActivationError(f"corrupt authorization snapshot: {exc}") from exc
+
+
+def save_authorization(repo_root: Path, snapshot: AuthorizationSnapshot) -> None:
+    value = snapshot.to_dict()
+    if not validate_snapshot(value):
+        raise ValueError("invalid authorization snapshot")
+    path = authorization_path(repo_root, snapshot.context_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def reviewer_transport_evidence(
+    target: dict[str, Any],
+    *,
+    mechanism: str,
+    verified_at: str | None = None,
+    probe_id: str | None = None,
+) -> dict[str, Any]:
+    """Build the durable evidence envelope supplied by a host-level probe."""
+
+    if not validate_target(target) or target is None:
+        raise ValueError("reviewer transport evidence requires a valid reviewer target")
+    if not isinstance(mechanism, str) or not mechanism.strip():
+        raise ValueError("reviewer transport evidence requires a mechanism")
+    evidence: dict[str, Any] = {
+        "verified": True,
+        "target": copy.deepcopy(target),
+        "mechanism": mechanism.strip(),
+        "verified_at": verified_at or _utc_now(),
+    }
+    if probe_id:
+        evidence["probe_id"] = probe_id
+    return evidence
+
+
 def _task_path(repo_root: Path, task_dir: Path | str) -> tuple[Path, str]:
     candidate = Path(task_dir)
     if not candidate.is_absolute():
@@ -338,43 +475,98 @@ def authorize(
     units: str | Iterable[str],
     *,
     context_key: str,
-    reviewer_transport_verified: bool = False,
-    transport_verifier: Callable[[dict[str, Any]], bool] | None = None,
-) -> AutomationRun:
-    """Create the immutable authorization snapshot after the activation gate."""
+    reviewer_transport_evidence: dict[str, Any] | None = None,
+    transport_verifier: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> AuthorizationSnapshot | AutomationRun:
+    """Freeze authorization before start, or activate it after start.
+
+    The planning branch writes only an authorization snapshot. The
+    post-start branch consumes that exact snapshot and never re-reads the
+    current implementation plan or accepts a fresh verification assertion.
+    """
 
     existing = load_run(repo_root, context_key)
     if existing is not None:
         if existing.status == "blocked":
             raise ActivationError(existing.blocked_reason or "automation run is blocked")
-        task_path, task_relative = _task_path(repo_root, task_dir)
+        _, task_relative = _task_path(repo_root, task_dir)
         if existing.task != task_relative:
             raise ActivationError("another automation run already exists for this context")
         return existing
 
     task_path, task_relative = _task_path(repo_root, task_dir)
-    if _task_status(task_path) != "in_progress":
-        raise ActivationError("task must be started with task.py before automation authorization")
-
     context = load_context(repo_root, context_key)
     if context.reviewer is None:
         raise ActivationError("reviewer target must be resolved before automation authorization")
-    verified = reviewer_transport_verified
-    if transport_verifier is not None:
-        verified = bool(transport_verifier(context.reviewer))
-    if not verified:
-        raise ActivationError("reviewer transport must be verified before automation authorization")
+    status = _task_status(task_path)
+    if status == "planning":
+        existing_snapshot = load_authorization(repo_root, context_key)
+        if existing_snapshot is not None:
+            if existing_snapshot.task != task_relative:
+                raise ActivationError("another authorization snapshot already exists for this context")
+            return existing_snapshot
 
-    authorized_units = _select_units(parse_implementation_units(task_path), units)
+        evidence = reviewer_transport_evidence
+        if transport_verifier is not None:
+            evidence = transport_verifier(context.reviewer)
+        if not _valid_reviewer_evidence(evidence, context.reviewer):
+            raise ActivationError("reviewer transport evidence must be verified before task.py start")
+        authorized_units = _select_units(parse_implementation_units(task_path), units)
+        snapshot = AuthorizationSnapshot(
+            context_key=context_key,
+            task=task_relative,
+            authorized_units=authorized_units,
+            authorized_at=_utc_now(),
+            reviewer=copy.deepcopy(context.reviewer),
+            reviewer_transport_evidence=copy.deepcopy(evidence),
+        )
+        save_authorization(repo_root, snapshot)
+        return snapshot
+
+    if status == "in_progress":
+        return activate(repo_root, task_dir, context_key=context_key)
+    raise ActivationError("task must be planning for authorization or in_progress for activation")
+
+
+def _valid_reviewer_evidence(evidence: Any, target: dict[str, Any]) -> bool:
+    if not isinstance(evidence, dict) or evidence.get("verified") is not True:
+        return False
+    if evidence.get("target") != target:
+        return False
+    return (
+        isinstance(evidence.get("mechanism"), str)
+        and bool(evidence["mechanism"].strip())
+        and isinstance(evidence.get("verified_at"), str)
+        and bool(evidence["verified_at"].strip())
+    )
+
+
+def activate(repo_root: Path, task_dir: Path | str, *, context_key: str) -> AutomationRun:
+    """Create a run from the pre-start snapshot after task.py confirms start."""
+
+    existing = load_run(repo_root, context_key)
+    if existing is not None:
+        return existing
+    task_path, task_relative = _task_path(repo_root, task_dir)
+    if _task_status(task_path) != "in_progress":
+        raise ActivationError("task.py must confirm in_progress before run activation")
+    snapshot = load_authorization(repo_root, context_key)
+    if snapshot is None:
+        raise ActivationError("pre-start authorization snapshot is missing")
+    if snapshot.task != task_relative:
+        raise ActivationError("authorization snapshot belongs to another task")
+    current_reviewer = load_context(repo_root, context_key).reviewer
+    if current_reviewer != snapshot.reviewer:
+        raise ActivationError("reviewer target changed after authorization; explicit re-authorization is required")
     run = AutomationRun(
         context_key=context_key,
-        task=task_relative,
-        authorized_units=authorized_units,
-        authorized_at=_utc_now(),
-        current_unit=authorized_units[0],
+        task=snapshot.task,
+        authorized_units=list(snapshot.authorized_units),
+        authorized_at=snapshot.authorized_at,
+        current_unit=snapshot.authorized_units[0],
         units={
             unit: _default_unit_state("implementing" if index == 0 else "pending")
-            for index, unit in enumerate(authorized_units)
+            for index, unit in enumerate(snapshot.authorized_units)
         },
     )
     save_run(repo_root, run)

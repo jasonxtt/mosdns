@@ -22,6 +22,7 @@ from common.automation import (
 from common.automation_run import (
     ActivationError,
     AutomationRunError,
+    activate,
     authorize,
     complete,
     load_run,
@@ -61,10 +62,14 @@ def _parser() -> argparse.ArgumentParser:
     authorize_command.add_argument("--units", default="all")
     authorize_command.add_argument("--context")
     authorize_command.add_argument(
-        "--reviewer-verified",
-        action="store_true",
-        help="assert that the host-level reviewer transport probe already passed",
+        "--reviewer-evidence",
+        required=False,
+        help="JSON evidence envelope returned by the host-level reviewer transport probe",
     )
+
+    activate_command = sub.add_parser("activate", help="create a run from a pre-start authorization snapshot")
+    activate_command.add_argument("task")
+    activate_command.add_argument("--context")
 
     status = sub.add_parser("run-status", help="show the active automation run")
     status.add_argument("--context")
@@ -129,8 +134,10 @@ def main(argv: list[str] | None = None) -> int:
             args.task,
             args.units,
             context_key=key,
-            reviewer_transport_verified=args.reviewer_verified,
+            reviewer_transport_evidence=_result(args.reviewer_evidence),
         )
+    elif args.command == "activate":
+        context = activate(root, args.task, context_key=key)
     elif args.command == "run-status":
         run = load_run(root, key)
         print(json.dumps(run.to_dict() if run is not None else {"status": "none"}, indent=2, ensure_ascii=False))
