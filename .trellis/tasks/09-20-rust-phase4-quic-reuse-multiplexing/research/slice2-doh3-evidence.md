@@ -1,7 +1,7 @@
 # Slice 2 DoH3 reuse evidence
 
-Status: remediation implementation complete; scoped reviewer gate is pending.
-This record covers Slice 2 only and does not claim Slice 3.
+Status: remediation implementation complete; the scoped reviewer returned
+PASS. This record covers Slice 2 only and does not claim Slice 3.
 
 ## Implementation boundary
 
@@ -81,5 +81,6 @@ All commands were run from `/Users/tom/github/mosdns-rust/rust` unless noted.
 | `cargo clippy -p mosdns-upstream-core --all-targets --locked -- -D warnings` | 0 |
 
 The focused reuse test passed 5/5, the existing one-shot H3 suite passed 22/22,
-and the existing Slice 3 QUIC suite passed 23/23. The full crate run and task
-validation remain part of the pre-review gate.
+and the existing Slice 3 QUIC suite passed 23/23. The full crate run, task
+validation, parent diff inspection, and scoped web review also completed with
+PASS; the reviewer made no judgment on Slice 3.
