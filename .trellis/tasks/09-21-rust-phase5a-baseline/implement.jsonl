@@ -1,0 +1,19 @@
+{"file": ".trellis/spec/backend/rust-migration.md", "reason": "Enforce the Phase 5A direction while keeping this predecessor baseline-only: no new Go/Rust hybrid wiring, no Rust host implementation, and no production cutover."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Apply repository quality, focused test, formatting/lint, exact-diff, and dirty-worktree preservation rules to the new baseline tooling."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Require deterministic runner/fixture failure propagation and cleanup; no panic/unwrap-style reachable failure in helper code, no hidden wrong response, and explicit invalid-run reasons."}
+{"file": "docs/ai/rust-rewrite-plan.md", "reason": "Authoritative phase ordering: after QUIC reuse closes, freeze process-level baseline and prioritize Phase 5A; this task must not implement the native host."}
+{"file": "docs/ai/rust-handover.md", "reason": "Carry forward branch/worktree safety, Linux-first target, pure-Rust future host direction, and the rule that current Go live behavior stays unchanged."}
+{"file": "docs/rust/feature-coverage.md", "reason": "Keep baseline corpus separate from feature ownership: using a Go plugin in W3 does not automatically move its native implementation into 5A or mark native acceptance complete."}
+{"file": "docs/rust/performance-validation.md", "reason": "Authoritative baseline method: controlled upstream, fixed workloads, independent process comparison shape, fixed-rate offered load, correctness-aware effective throughput, repeated samples, CPU/RSS, and complete evidence retention."}
+{"file": "scripts/build-local.sh", "reason": "Use the repository's established Linux Go-only build shape and CGO default instead of inventing a benchmark-only product build."}
+{"file": "coremain/config.go", "reason": "Read-only source evidence for top-level YAML/plugin loading contract; implementation must not modify it."}
+{"file": "plugin/server/udp_server/udp_server.go", "reason": "Read-only source evidence for current UDP listener YAML semantics used to freeze W1/W2/W3 configs."}
+{"file": "plugin/server/tcp_server/tcp_server.go", "reason": "Read-only source evidence for current TCP listener YAML semantics used to freeze W1-TCP."}
+{"file": "plugin/executable/forward/forward.go", "reason": "Read-only source evidence for current forward/upstream YAML semantics; no product behavior change is authorized."}
+{"file": "plugin/executable/cache/cache.go", "reason": "Read-only source evidence for cache YAML parameters and Go baseline behavior; dump/lazy/ECS scope stays excluded unless already required by the frozen W2 config."}
+{"file": "plugin/executable/sequence/config.go", "reason": "Read-only source evidence for sequence rule syntax and named plugin references used by the frozen baseline configs."}
+{"file": "plugin/data_provider/domain_set/domain_set.go", "reason": "Read-only source evidence for inline/fixed domain rule data used by W3; management/download behavior is out of scope."}
+{"file": "plugin/data_provider/ip_set/ip_set.go", "reason": "Read-only source evidence for inline/fixed IP prefixes used by W3; management/download behavior is out of scope."}
+{"file": ".trellis/tasks/09-21-rust-phase5a-baseline/prd.md", "reason": "Authoritative scope, workload contract, R1-R12 requirements, A1-A13 acceptance criteria, and stop boundary."}
+{"file": ".trellis/tasks/09-21-rust-phase5a-baseline/design.md", "reason": "Authoritative technical design for test-only paths, replaceable SUT entrypoint, controlled fixture, workload schema, fixed-rate schedule, correctness accounting, Linux resource sampling, isolation, evidence layout, and failure cleanup."}
+{"file": ".trellis/tasks/09-21-rust-phase5a-baseline/research/baseline-evidence.md", "reason": "Planning-time repository evidence and exact source anchor supporting this task's next-step ordering and no-product-change boundary."}
