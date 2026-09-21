@@ -128,7 +128,7 @@ if [[ "${RUN_MODE}" == "official" ]]; then
     echo "official mode requires run-manifest.json" >&2
     exit 2
   fi
-  if ! rg -q '"official_frozen"[[:space:]]*:[[:space:]]*true' "${MANIFEST}"; then
+  if ! grep -Eq '"official_frozen"[[:space:]]*:[[:space:]]*true' "${MANIFEST}"; then
     echo "official mode requires an immutable official_frozen manifest" >&2
     exit 2
   fi
