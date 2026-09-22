@@ -6,6 +6,7 @@ mod cache;
 mod cli;
 mod config;
 mod execution;
+mod matchers;
 mod tcp;
 mod udp;
 

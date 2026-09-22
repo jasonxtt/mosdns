@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 mosdns-cache-core = { path = "../cache-core" }
 mosdns-dns-core = { path = "../dns-core" }
+mosdns-matcher-core = { path = "../matcher-core" }
 mosdns-sequence-core = { path = "../sequence-core" }
 mosdns-upstream-core = { path = "../upstream-core" }
 serde = { version = "1", features = ["derive"] }

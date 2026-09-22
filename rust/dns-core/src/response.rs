@@ -19,6 +19,15 @@ pub enum ResponseError {
     BadName,
     TruncatedQuestion,
     TruncatedRecord,
+    InvalidRecordData,
+}
+
+/// DNS section containing a declared resource record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResponseSection {
+    Answer,
+    Authority,
+    Additional,
 }
 
 /// The observed TTL state of a response.
@@ -52,6 +61,55 @@ pub struct ResponseMetadata {
 const DNS_HEADER_LEN: usize = 12;
 const RR_FIXED_LEN: usize = 10;
 const TYPE_OPT: u16 = 41;
+const TYPE_A: u16 = 1;
+const TYPE_AAAA: u16 = 28;
+
+/// Returns ordinary A and AAAA addresses from the Answer section only.
+///
+/// All declared records are still walked, so a truncated Authority or
+/// Additional record rejects the response rather than publishing a partial
+/// observation. A and AAAA records must have their exact wire RDATA lengths
+/// wherever they occur; CNAME and every other record type are deliberately
+/// ignored as address candidates.
+///
+/// # Errors
+///
+/// Returns [`ResponseError`] when the response cannot be fully and safely
+/// observed.
+pub fn observe_answer_addresses(packet: &[u8]) -> Result<Vec<std::net::IpAddr>, ResponseError> {
+    let mut addresses = Vec::new();
+    walk_records(packet, |record| {
+        let expected_length = match record.rrtype {
+            TYPE_A => Some(4),
+            TYPE_AAAA => Some(16),
+            _ => None,
+        };
+        if let Some(expected_length) = expected_length {
+            if record.rdata.len() != expected_length {
+                return Err(ResponseError::InvalidRecordData);
+            }
+            if record.section == ResponseSection::Answer {
+                let address = match record.rrtype {
+                    TYPE_A => std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+                        record.rdata[0],
+                        record.rdata[1],
+                        record.rdata[2],
+                        record.rdata[3],
+                    )),
+                    TYPE_AAAA => {
+                        let mut octets = [0_u8; 16];
+                        octets.copy_from_slice(record.rdata);
+                        std::net::IpAddr::V6(std::net::Ipv6Addr::from(octets))
+                    }
+                    _ => unreachable!("address type was checked above"),
+                };
+                addresses.push(address);
+            }
+        }
+        Ok(())
+    })?;
+    Ok(addresses)
+}
 
 /// Validates a response and returns its raw TTL observation.
 ///
@@ -183,15 +241,17 @@ fn patch_ttls(packet: &[u8], transform: impl Fn(u32) -> u32) -> Result<Vec<u8>, 
 }
 
 /// Visits the TTL offset of every non-OPT record; returns the count visited.
-struct RecordMetadata {
+struct RecordMetadata<'a> {
+    section: ResponseSection,
     rrtype: u16,
     ttl: u32,
     ttl_offset: usize,
+    rdata: &'a [u8],
 }
 
-fn walk_records(
-    packet: &[u8],
-    mut visitor: impl FnMut(RecordMetadata) -> Result<(), ResponseError>,
+fn walk_records<'a>(
+    packet: &'a [u8],
+    mut visitor: impl FnMut(RecordMetadata<'a>) -> Result<(), ResponseError>,
 ) -> Result<usize, ResponseError> {
     if packet.len() < DNS_HEADER_LEN {
         return Err(ResponseError::TooShort);
@@ -204,10 +264,6 @@ fn walk_records(
     let ancount = usize::from(u16::from_be_bytes([packet[6], packet[7]]));
     let nscount = usize::from(u16::from_be_bytes([packet[8], packet[9]]));
     let arcount = usize::from(u16::from_be_bytes([packet[10], packet[11]]));
-    let record_count = ancount
-        .checked_add(nscount)
-        .and_then(|n| n.checked_add(arcount))
-        .ok_or(ResponseError::TruncatedRecord)?;
 
     let mut position = DNS_HEADER_LEN;
     for _ in 0..qdcount {
@@ -219,33 +275,46 @@ fn walk_records(
     }
 
     let mut visits = 0;
-    for _ in 0..record_count {
-        position = skip_name(packet, position).ok_or(ResponseError::BadName)?;
-        let fixed_end = position
-            .checked_add(RR_FIXED_LEN)
-            .ok_or(ResponseError::TruncatedRecord)?;
-        if fixed_end > packet.len() {
-            return Err(ResponseError::TruncatedRecord);
-        }
-        let rrtype = u16::from_be_bytes([packet[position], packet[position + 1]]);
-        let ttl = read_u32(packet, position + 4);
-        visitor(RecordMetadata {
-            rrtype,
-            ttl,
-            ttl_offset: position + 4,
-        })?;
-        if rrtype != TYPE_OPT {
-            visits += 1;
-        }
-        let data_len = usize::from(u16::from_be_bytes([
-            packet[position + 8],
-            packet[position + 9],
-        ]));
-        position = fixed_end
-            .checked_add(data_len)
-            .ok_or(ResponseError::TruncatedRecord)?;
-        if position > packet.len() {
-            return Err(ResponseError::TruncatedRecord);
+    let sections = [
+        (ResponseSection::Answer, ancount),
+        (ResponseSection::Authority, nscount),
+        (ResponseSection::Additional, arcount),
+    ];
+    for (section, count) in sections {
+        for _ in 0..count {
+            position = skip_name(packet, position).ok_or(ResponseError::BadName)?;
+            let fixed_end = position
+                .checked_add(RR_FIXED_LEN)
+                .ok_or(ResponseError::TruncatedRecord)?;
+            if fixed_end > packet.len() {
+                return Err(ResponseError::TruncatedRecord);
+            }
+            let rrtype = u16::from_be_bytes([packet[position], packet[position + 1]]);
+            let ttl = read_u32(packet, position + 4);
+            let data_len = usize::from(u16::from_be_bytes([
+                packet[position + 8],
+                packet[position + 9],
+            ]));
+            let rdata_end = fixed_end
+                .checked_add(data_len)
+                .ok_or(ResponseError::TruncatedRecord)?;
+            let rdata = packet
+                .get(fixed_end..rdata_end)
+                .ok_or(ResponseError::TruncatedRecord)?;
+            visitor(RecordMetadata {
+                section,
+                rrtype,
+                ttl,
+                ttl_offset: position + 4,
+                rdata,
+            })?;
+            if rrtype != TYPE_OPT {
+                visits += 1;
+            }
+            position = rdata_end;
+            if position > packet.len() {
+                return Err(ResponseError::TruncatedRecord);
+            }
         }
     }
     Ok(visits)
@@ -341,8 +410,8 @@ fn read_u32(packet: &[u8], offset: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ResponseError, TtlInfo, age_response_ttls, observe_response_ttl, replace_response_ttls,
-        validate_response,
+        ResponseError, TtlInfo, age_response_ttls, observe_answer_addresses, observe_response_ttl,
+        replace_response_ttls, validate_response,
     };
 
     const TYPE_OPT: u16 = 41;
@@ -377,6 +446,16 @@ mod tests {
         b.extend_from_slice(&ttl.to_be_bytes());
         b.extend_from_slice(&[0x00, 0x04]);
         b.extend_from_slice(ip);
+        b
+    }
+
+    fn rr(rrtype: u16, rdata: &[u8]) -> Vec<u8> {
+        let mut b = vec![0xc0, 0x0c]; // compressed owner
+        b.extend_from_slice(&rrtype.to_be_bytes());
+        b.extend_from_slice(&1_u16.to_be_bytes());
+        b.extend_from_slice(&10_u32.to_be_bytes());
+        b.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+        b.extend_from_slice(rdata);
         b
     }
 
@@ -451,6 +530,50 @@ mod tests {
         ] {
             validate_response(&wire).unwrap_or_else(|e| panic!("rejected: {e:?}"));
         }
+    }
+
+    #[test]
+    fn observes_only_answer_addresses_but_validates_every_declared_section() {
+        let wire = resp_wire(
+            &[
+                rr(5, &[0xc0, 0x0c]), // CNAME is never an address candidate.
+                a_rr(10, &[192, 0, 2, 10]),
+                rr(
+                    28,
+                    &[0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                ),
+            ],
+            &[a_rr(10, &[198, 51, 100, 1])],
+            &[rr(
+                28,
+                &[0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+            )],
+        );
+        assert_eq!(
+            observe_answer_addresses(&wire).expect("valid answer observation"),
+            vec![
+                "192.0.2.10".parse::<std::net::IpAddr>().expect("IPv4"),
+                "2001:db8::1".parse::<std::net::IpAddr>().expect("IPv6"),
+            ]
+        );
+
+        let malformed_answer = resp_wire(&[rr(1, &[192, 0, 2])], &[], &[]);
+        assert_eq!(
+            observe_answer_addresses(&malformed_answer),
+            Err(ResponseError::InvalidRecordData)
+        );
+        let malformed_authority = resp_wire(&[], &[rr(28, &[0; 15])], &[]);
+        assert_eq!(
+            observe_answer_addresses(&malformed_authority),
+            Err(ResponseError::InvalidRecordData)
+        );
+
+        let mut truncated_extra = resp_wire(&[a_rr(10, &[192, 0, 2, 10])], &[], &[]);
+        truncated_extra[10..12].copy_from_slice(&1_u16.to_be_bytes());
+        assert_eq!(
+            observe_answer_addresses(&truncated_extra),
+            Err(ResponseError::BadName)
+        );
     }
 
     #[test]
