@@ -9,6 +9,7 @@ RESULT_DIR="${RESULT_DIR:-}"
 HELPER_BINARY="${HELPER_BINARY:-}"
 OFFERED_QPS="${OFFERED_QPS:-}"
 MANIFEST_SHA256="${MANIFEST_SHA256:-}"
+MANIFEST_PATH="${MANIFEST_PATH:-${ROOT_DIR}/.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline/research/run-manifest.json}"
 SUT_CPU_SET="${SUT_CPU_SET:-}"
 HARNESS_CPU_SET="${HARNESS_CPU_SET:-}"
 SUT_STARTUP_MARGIN="${SUT_STARTUP_MARGIN:-3}"
@@ -123,7 +124,10 @@ case "${SCENARIO}" in
 esac
 
 if [[ "${RUN_MODE}" == "official" ]]; then
-  MANIFEST="${ROOT_DIR}/.trellis/tasks/09-21-rust-phase5a-baseline/research/run-manifest.json"
+  MANIFEST="${MANIFEST_PATH}"
+  if [[ "${MANIFEST}" != /* ]]; then
+    MANIFEST="${ROOT_DIR}/${MANIFEST}"
+  fi
   if [[ ! -f "${MANIFEST}" ]]; then
     echo "official mode requires run-manifest.json" >&2
     exit 2

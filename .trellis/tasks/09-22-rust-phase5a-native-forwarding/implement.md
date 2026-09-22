@@ -1,22 +1,23 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **planning only; awaiting root planning approval**.
+Status: **in progress — Slice 0 implementation**.
 
-This plan is executable only after the user/root reviewer approves the final
-planning summary and the task is explicitly started. The current planning
-turn must not run `task.py start`, edit production code, bind a listener,
-connect to `mosdns-rust`, start a VM, or rerun a benchmark.
+The root planning review returned `PLANNING: PASS` at
+`a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
+approved implementation and all five reviewed slices. The task is now
+`in_progress`. Each slice still requires its own root review before the next
+slice; no slice PASS authorizes work outside the frozen plan.
 
 ## 0. Pre-start gates
 
-- [ ] Root review confirms the task path, branch, source anchor, supported
+- [x] Root review confirms the task path, branch, source anchor, supported
   config subset, async-machine decision, dependency decision, and stop scope.
-- [ ] `task.py start` is run only after that approval and records the approved
+- [x] `task.py start` is run only after that approval and records the approved
   slice range; no implementation starts from a planning-only status.
-- [ ] The existing dirty files remain untouched:
+- [x] The existing dirty files remain untouched:
   `.trellis/workspace/tom/index.md`,
   `.trellis/workspace/tom/journal-1.md`, and the existing `.DS_Store` files.
-- [ ] Historical baseline archive, manifest, frozen environment, 36 raw
+- [x] Historical baseline archive, manifest, frozen environment, 36 raw
   evidence directories, configs, workloads, and report provenance are hashed
   and treated as read-only.
 - [ ] Every slice begins with a narrow RED test/fixture or invariant, then

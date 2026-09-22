@@ -1,8 +1,8 @@
 # Phase 5A Go-only whole-process baseline
 
-Status: **accepted baseline candidate pending final task review**
+Status: **FINAL: PASS — archived baseline**
 Date: 2026-09-21
-Task: `.trellis/tasks/09-21-rust-phase5a-baseline`
+Task: `.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline`
 
 This document records the frozen Go-only baseline for the first Phase 5A
 comparison corpus. It is controlled-local evidence on Linux amd64, not a
@@ -32,7 +32,7 @@ limits.
 
 The source anchor is `e70a2408e2dcd2141e48bcc84765c5adfa406fe4`. The final
 official build/source identity is recorded in
-`.trellis/tasks/09-21-rust-phase5a-baseline/research/results/official-20260921/environment-frozen.json`:
+`.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline/research/results/official-20260921/environment-frozen.json`:
 
 ```text
 source_git_sha: afa071f1cb2fd05bf2f3727ffaa706715019526a
@@ -69,7 +69,7 @@ Frozen input hashes, all SHA-256:
 | `go.sum` | `312cc28ef8d6c3c1c492f4b60b1a90e6f5c41d84a5a95fd1b348488cfd195072` |
 
 The frozen manifest is
-`.trellis/tasks/09-21-rust-phase5a-baseline/research/run-manifest.json`; its
+`.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline/research/run-manifest.json`; its
 SHA-256 is
 `a5cd4d791ca9a88f4a1217e86f5b46b89d71625d344263c222f8eab0a797d8d7`.
 Official runs were required to reject a manifest hash mismatch.
@@ -280,7 +280,7 @@ manifest are the authoritative identity records.
 ## Raw evidence locations
 
 The authoritative raw evidence is under
-`.trellis/tasks/09-21-rust-phase5a-baseline/research/results/official-20260921/`.
+`.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline/research/results/official-20260921/`.
 Each `frozen-*` directory contains `environment.json`, `run-metadata.txt`,
 `manifest.sha256`, `sut.json`, `fixture.json`, fixture counter snapshots,
 `stages.jsonl`, and `resource-samples.jsonl`, plus retained SUT logs. The
