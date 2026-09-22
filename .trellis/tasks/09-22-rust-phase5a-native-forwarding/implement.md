@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — Slice 2 remediation complete; awaiting root review**.
+Status: **in progress — Slice 3 implementation complete; awaiting root review**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -212,8 +212,10 @@ counts. No second parser or general DNS builder was introduced.
 Slice 2 checks and dependency evidence are recorded in
 `research/slice2-config-check.md`. All required focused checks passed; no
 listener bind, network/VM/SSH run, benchmark, production integration, or
-historical baseline mutation was performed. The task is stopped here pending
-the explicit root `SLICE 2: PASS`; Slice 3 is not authorized by this record.
+historical baseline mutation was performed. The first root review found two
+P1 gaps; the bounded remediation was recorded in commit `33318d7`, followed
+by documentation commit `48404a3`. Root re-review returned `SLICE 2: PASS`
+with P0/P1/P2 all zero and authorized Slice 3 only.
 
 The first Slice 2 root review returned `SLICE 2: FAIL` with P0=0, P1=2,
 P2=0. The bounded remediation commit is `33318d7` (`test(phase5a): close
@@ -221,8 +223,8 @@ slice2 rejection and DNS edge cases`). It adds independent tests for the
 missing fail-closed rejection categories and changes `dns-core` query parsing
 to retain a self-contained uncompressed question name, with a compressed-
 question SERVFAIL response regression validated by the existing response
-walker. The focused checks were rerun successfully; this task remains stopped
-pending the remediation root review, with no Slice 3 authorization yet.
+walker. The focused checks were rerun successfully. Root re-review then
+returned `SLICE 2: PASS` with P0/P1/P2 all zero and authorized Slice 3 only.
 
 ## 3. Slice 2 — native host config/CLI/assembly before I/O
 
@@ -336,6 +338,45 @@ comparison evidence.
 Request `SLICE 3: PASS` for real UDP response/NXDOMAIN/concurrency/timeout,
 malformed-input isolation, cancellation, shutdown, rebind, and no-leak
 evidence. A PASS authorizes Slice 4 only.
+
+## Slice 3 execution record
+
+Implementation commit: `0efb9db` (`feat(native-host): add phase5a UDP
+forwarding path`).
+
+The native host now owns one current-thread Tokio runtime plus a local task
+set, binds a real UDP listener, copies each datagram into an owned request,
+drives the canonical `ExecutionMachine` to the named forward dispatch, awaits
+the existing `upstream-core` exchange with one caller-owned deadline and
+cancellation scope, resumes the same machine, validates/patches the response,
+and sends it only to the original peer. Request tasks are tracked and joined;
+shutdown stops admission, cancels pending exchanges, closes the upstream, and
+releases the listener for rebinding. Malformed datagrams are dropped without
+affecting the listener. Execution/upstream/deadline failures synthesize
+SERVFAIL, while a completed sequence with no response maps to REFUSED.
+
+Focused coverage is in `rust/native-host/tests/w1_udp.rs` and the private UDP
+unit test. It proves positive response, NXDOMAIN, distinct concurrent IDs and
+qnames, malformed-input isolation, timeout-to-SERVFAIL, cancellation without
+a late write, shutdown/rebind, and the no-response REFUSED mapping. The test
+upstream is an independent local loopback mock; no baseline runner, remote
+host, VM, benchmark, deployment, or frozen evidence was used.
+
+Required checks:
+
+```text
+cargo fmt --manifest-path rust/Cargo.toml --all -- --check                    PASS
+cargo test --manifest-path rust/native-host/Cargo.toml --test w1_udp --locked PASS (4 tests)
+cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PASS (9 unit/integration tests)
+cargo clippy --manifest-path rust/native-host/Cargo.toml --all-targets --locked -- -D warnings PASS
+cargo test --manifest-path rust/dns-core/Cargo.toml --all-targets --locked  PASS (existing full suite)
+python3 ./.trellis/scripts/task.py validate rust-phase5a-native-forwarding   PASS
+git diff --check -- allowlisted Slice 3 paths                              PASS
+```
+
+The direct native-host Tokio manifest remains unchanged from Slice 2; no new
+dependency or lockfile change was needed. The task is stopped here pending
+the explicit root `SLICE 3: PASS`; Slice 4 is not authorized by this record.
 
 ## 5. Slice 4 — W1 TCP and final stop
 
