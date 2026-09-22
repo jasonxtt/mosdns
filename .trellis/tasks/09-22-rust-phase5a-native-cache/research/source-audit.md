@@ -11,7 +11,7 @@ Planning reads only; no Rust/product code, benchmark, VM or deployment run.
 | `rust/native-host/src/assembly.rs` | Host ownership/current-thread runtime pattern is retained; no multithread conversion needed. |
 | `rust/native-host/src/udp.rs::execute_request` and `tcp.rs` | Shared canonical machine dispatch already exists. Forward failure sets synthesized SERVFAIL and resumes Continue: completion is not sufficient proof of cacheability. Track upstream provenance. |
 | `rust/sequence-core/src/engine.rs` | Dispatch/resume and Accept/Continue/Complete suffice for the restricted flat W2 root. A scoped request token models store-after-continuation without a second interpreter or a speculative general callback ABI. |
-| `rust/dns-core/src/query.rs` | Exactly one standard question, zero answer/authority/additional counts; self-contained question labels. Keep EDNS boundary and bypass non-IN cache. |
+| `rust/dns-core/src/query.rs` | Exactly one standard question, zero answer/authority and ARCOUNT <= 1; self-contained question labels. W1 can forward EDNS. W2 must explicitly bypass lookup/store for ARCOUNT=1 and non-IN, preserving W1. |
 | `rust/dns-core/src/response.rs` | Existing response validation, minimum TTL observation, TTL aging helpers. Prefer a narrow metadata extension if OPT/RCODE observation needs it. |
 | `plugin/executable/cache/cache.go::Exec` | Hit stops continuation, miss executes remainder before store; lazy path alone has singleflight. No new cold singleflight guarantee. |
 | `plugin/executable/cache/cache.go::getMsgKeyBytes` | Key distinguishes AD/CD/DO, qtype and case-preserving qname; ID excluded. Old omission of qclass is not a new native collision contract; initial native cache eligibility is IN only. |
@@ -27,8 +27,11 @@ Planning reads only; no Rust/product code, benchmark, VM or deployment run.
 
 - New owned cache API is necessary; new general sequence continuation machinery
   is not necessary for the frozen flat W2 graph. Review this boundary before code.
-- Keep W1 supported inputs/results. Cache bypasses non-IN and OPT responses, and
-  still rejects EDNS queries through W1's existing parser; no implicit full-cache claim.
+- Keep W1 supported inputs/results. Cache bypasses non-IN, ARCOUNT=1 queries
+  (including EDNS), and OPT responses; no implicit full-cache claim.
+- Existing upstream source/ID/structure checks do not prove response-question
+  identity. Before cache publication, explicitly match decoded name/type/class
+  and require one QUERY response question; mismatch bypasses storage.
 - Cache retention and on-wire TTL are separate; floor applies only to computed
   zero retention. Test core aging behavior rather than copying Go internals.
 - No product decision remains unresolved within agreed W2. Broader policy changes,

@@ -38,7 +38,8 @@ Final PASS stops before finish/archive, a new task or deployment.
    ABI remain compatible for transitional users.
 3. Cache lookup is a sequence executable. A hit skips forward. A miss resumes
    the same canonical sequence machine and stores only after successful
-   completion with a validated upstream response. No listener shortcut or
+   completion with a validated upstream response whose question matches the
+   request name, type and class. No listener shortcut or
    separate sequence interpreter. Request failure/cancellation never publishes
    a cache entry; a legitimate upstream SERVFAIL is distinct from a locally
    synthesized failure.
@@ -46,7 +47,10 @@ Final PASS stops before finish/archive, a new task or deployment.
    single-question, no-additional-record IN queries. Non-IN queries keep W1
    forwarding behavior but bypass cache. Preserve qname case distinctions and
    isolate qtype and AD/CD bits; transaction ID is not part of the key. EDNS
-   queries remain rejected as in W1. Responses containing OPT bypass caching
+   queries accepted by W1 (ARCOUNT=1) explicitly bypass both cache lookup and
+   store in W2 while retaining W1 forwarding behavior. The W2 adapter checks
+   ARCOUNT=0 for cache eligibility; it must not depend on parser rejection.
+   Responses containing OPT bypass caching
    intact in this milestone; full EDNS handling is deferred, not approximated.
 5. Cache responses are immutable owned snapshots. Hits use request-private
    response bytes, current request ID, and TTL aging without cumulative mutation.
@@ -84,6 +88,7 @@ Final PASS stops before finish/archive, a new task or deployment.
   complete correctly without imposing singleflight; concurrent warm hits have
   zero upstream delta and no cross-request mutations.
 - [ ] A6: Upstream timeout/error, malformed response, TC, OPT, no response,
+  mismatched/missing response questions, EDNS-query cache bypass,
   cancellation before publication and shutdown prevent cache publication as
   specified. A valid upstream SERVFAIL follows its separate 5 s retention.
 - [ ] A7: W1 UDP/TCP and W2 integration tests pass on Linux amd64 with exact
