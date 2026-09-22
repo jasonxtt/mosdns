@@ -40,3 +40,31 @@ that exact idle reviewer thread before the authorization snapshot was written.
 The authorization snapshot covers only `Slice 0`, `Slice 1`, `Slice 2`, and
 `Slice 3`; no task start or automation activation had occurred when this
 record was created.
+
+## Slice 1 implementation evidence
+
+The Slice 1 implementation was committed and pushed on 2026-09-22:
+
+- Parent: `245404663f2039d1782fa3e611c9f0512f6fa9c4`
+- Pushed head: `f113590b55324476b222fe31f58df27696834125`
+- Commit: `feat(phase5a): add native cache execution adapter`
+- Changed paths are limited to `rust/native-host/**`, the one
+  `mosdns-native-host -> mosdns-cache-core` lockfile edge, the narrow
+  `rust/dns-core` response metadata helper, and this task's evidence/docs.
+- No `sequence-core`, Go/runtime, listener configuration, baseline archive, or
+  `tests/phase5a-baseline` path was changed.
+
+RED/GREEN and review-scope evidence:
+
+- Pre-implementation adapter tests failed at compile time for missing
+  `CacheTestClock`/`NativeCacheAdapter` symbols.
+- The final local run passed native-host all targets (15 unit, 8 adapter, 2
+  strict-config, 5 TCP, 4 UDP), cache-core 11, dns-core 55 unit plus 47
+  integration, and sequence-core 65 tests, all with `--locked`.
+- Native-host all-targets clippy with `-D warnings`, workspace format check,
+  task validation, `git diff --check`, and the native-host normal dependency
+  tree inspection passed. No native-host source reference to runtime/cgo,
+  ABI handles, or cache ABI entry points was found.
+- The implementation uses one HostAssembly-owned adapter and a shared
+  canonical `ExecutionMachine` driver; UDP and TCP only admit, frame, send,
+  and supervise requests.
