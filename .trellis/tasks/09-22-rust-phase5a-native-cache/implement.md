@@ -14,7 +14,7 @@ Planning review: `PLANNING: PASS` at
   context injection.
 - [x] Obtain explicit `PLANNING: PASS` from the designated reviewer against
   the exact pushed planning commit and all three planning artifacts.
-- [ ] Executor is current destination task `01a0c7fa-e0ea-7f52-adb0-f3789e7a7bdb`;
+- [x] Executor is current destination task `01a0c7fa-e0ea-7f52-adb0-f3789e7a7bdb`;
   reviewer is `01a0c7fe-fd97-7ce1-aed2-d389bbefa3e3`. Configure executor-session
   automation with that reviewer and snapshot only Slice 0–3 before task start.
   Use existing host thread transport/evidence; do not invent provider names,
@@ -24,10 +24,10 @@ Planning review: `PLANNING: PASS` at
   authorizes this bounded handoff/run; no additional process approval is needed.
   User scope changes override generic skill defaults. Material changes still
   require review and, if they expand scope, user approval.
-- [ ] Record initial dirty paths; preserve `.trellis/workflow.md`,
+- [x] Record initial dirty paths; preserve `.trellis/workflow.md`,
   `.trellis/spec/backend/quality-guidelines.md`, `.trellis/workspace/tom/**`
   and existing `.DS_Store` changes. Never stage unrelated files.
-- [ ] Hash the entire archived Go baseline and `tests/phase5a-baseline/**`;
+- [x] Hash the entire archived Go baseline and `tests/phase5a-baseline/**`;
   retain a task-local manifest for final immutability comparison. W1 archive is
   read-only. No baseline runner or benchmark is authorized.
 
@@ -57,17 +57,36 @@ Allowlist: `rust/cache-core/**`, `rust/runtime/**` only narrowly necessary bridg
 adaptation/tests, and this task directory. No new dependency, host wiring,
 Go source edit, listener/network or sequence-engine change.
 
-- [ ] RED: independent native cache instances, owned lookup/buffer isolation,
+- [x] RED: independent native cache instances, owned lookup/buffer isolation,
   overwrite/expiry, TTL copy-before-age, domain-set data and native/ABI parity
   at identical input times; retain ABI invalid-input/lifecycle tests.
-- [ ] GREEN: expose an owned safe cache object; share storage implementation
+- [x] GREEN: expose an owned safe cache object; share storage implementation
   with existing handle adapters. Native methods have no registry/raw ABI args.
-- [ ] Check bounded capacity after maintenance, no O(n) query scan and no new
+- [x] Check bounded capacity after maintenance, no O(n) query scan and no new
   global serialization. Preserve public ABI layout/status/ownership semantics.
-- [ ] Run cache-core and runtime tests/clippy with `--all-targets --locked`
+- [x] Run cache-core and runtime tests/clippy with `--all-targets --locked`
   (`clippy ... -- -D warnings`), common checks and dependency/diff inspection.
   Linux bridge integration is also mandatory in final Slice 3 before final PASS.
 - [ ] Commit/push and obtain `SLICE 0: PASS` before Slice 1.
+
+Slice 0 local evidence before review:
+
+- RED: the new public-API tests failed at compile time with unresolved
+  `NativeCache`, before implementation.
+- GREEN: `cargo test --manifest-path rust/cache-core/Cargo.toml --all-targets --locked`
+  passed 11/11 tests.
+- ABI regression: `cargo test --manifest-path rust/runtime/Cargo.toml
+  --all-targets --locked` passed 2 unit, 19 ABI, 11 query-ABI, and 6 valued-ABI
+  tests (38 total).
+- Clippy passed for cache-core and runtime with `--all-targets --locked --
+  -D warnings`; workspace fmt check, task context validation and `git diff
+  --check` passed.
+- `cargo tree --manifest-path rust/Cargo.toml -p mosdns-cache-core --edges
+  normal --locked` shows the existing bytes/dashmap/moka closure; no dependency
+  manifest or lockfile changed.
+- Implementation paths are limited to `rust/cache-core/src/lib.rs`; task
+  evidence is in `research/execution-state.md`. No runtime/ABI source was
+  changed.
 
 ## Slice 1 — native cache adapter and request completion
 
