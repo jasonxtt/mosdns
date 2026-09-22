@@ -12,11 +12,20 @@ pub(crate) struct FullQnameMatcher {
 
 impl FullQnameMatcher {
     #[allow(dead_code)]
-    pub(crate) fn new(domain: &str) -> Self {
+    pub(crate) fn new(domain: &str) -> Result<Self, MatcherBuildError> {
+        let domain = normalize_ascii_domain(domain)?;
         let mut domains = FullMatcher::new();
-        domains.add(domain, ());
-        Self { domains }
+        domains.add(&domain, ());
+        Ok(Self { domains })
     }
+}
+
+/// Configuration-time rejection for a matcher expression outside W3's
+/// ASCII full-domain grammar.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MatcherBuildError {
+    EmptyDomain,
+    InvalidDomain,
 }
 
 impl Matcher for FullQnameMatcher {
@@ -88,15 +97,37 @@ fn wire_name_to_ascii_domain(wire: &[u8]) -> Option<String> {
         }
         let end = position.checked_add(length)?;
         let label = wire.get(position..end)?;
-        if !label
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
-        {
+        if !valid_ascii_label(label) {
             return None;
         }
         labels.push(std::str::from_utf8(label).ok()?.to_owned());
         position = end;
     }
+}
+
+fn normalize_ascii_domain(domain: &str) -> Result<String, MatcherBuildError> {
+    let domain = domain.strip_suffix('.').unwrap_or(domain);
+    if domain.is_empty() {
+        return Err(MatcherBuildError::EmptyDomain);
+    }
+    if domain.len() > 253
+        || domain
+            .split('.')
+            .any(|label| !valid_ascii_label(label.as_bytes()))
+    {
+        return Err(MatcherBuildError::InvalidDomain);
+    }
+    Ok(domain.to_ascii_lowercase())
+}
+
+fn valid_ascii_label(label: &[u8]) -> bool {
+    !label.is_empty()
+        && label.len() <= 63
+        && label.first().is_some_and(u8::is_ascii_alphanumeric)
+        && label.last().is_some_and(u8::is_ascii_alphanumeric)
+        && label
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
 }
 
 #[cfg(test)]
@@ -106,7 +137,10 @@ mod tests {
     use mosdns_dns_core::parse_query;
     use mosdns_sequence_core::{ExecutionState, Matcher};
 
-    use super::{FullQnameMatcher, ResponseIpMatcher, TrueMatcher, wire_name_to_ascii_domain};
+    use super::{
+        FullQnameMatcher, MatcherBuildError, ResponseIpMatcher, TrueMatcher,
+        wire_name_to_ascii_domain,
+    };
 
     fn query(name: &[u8]) -> Vec<u8> {
         let mut wire = vec![0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
@@ -129,9 +163,15 @@ mod tests {
         response
     }
 
+    fn response_without_answers() -> Vec<u8> {
+        let mut response = query(&[7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0]);
+        response[2] = 0x81;
+        response
+    }
+
     #[test]
     fn qname_is_exact_case_insensitive_and_requires_plain_wire_labels() {
-        let matcher = FullQnameMatcher::new("EXAMPLE.test");
+        let matcher = FullQnameMatcher::new("EXAMPLE.test.").expect("valid domain");
         for name in [
             &[
                 7, b'E', b'x', b'A', b'm', b'p', b'l', b'e', 4, b'T', b'e', b'S', b't', 0,
@@ -158,6 +198,19 @@ mod tests {
         );
         assert_eq!(wire_name_to_ascii_domain(&[3, b'a', b'.', b'b', 0]), None);
         assert_eq!(wire_name_to_ascii_domain(&[1, 0xff, 0]), None);
+        for (domain, error) in [
+            ("", MatcherBuildError::EmptyDomain),
+            (".", MatcherBuildError::EmptyDomain),
+            ("bad..test", MatcherBuildError::InvalidDomain),
+            ("-bad.test", MatcherBuildError::InvalidDomain),
+            ("bad-.test", MatcherBuildError::InvalidDomain),
+            ("bad_.test", MatcherBuildError::InvalidDomain),
+        ] {
+            assert!(
+                matches!(FullQnameMatcher::new(domain), Err(actual) if actual == error),
+                "{domain}"
+            );
+        }
     }
 
     #[test]
@@ -172,6 +225,20 @@ mod tests {
         let before = state.clone();
         assert!(matcher.evaluate(&state).expect("raw matches").matched);
         assert_eq!(state, before);
+        state.set_synthesized_response(2).expect("valid rcode");
+        assert!(
+            !matcher
+                .evaluate(&state)
+                .expect("synthesized misses")
+                .matched
+        );
+        state.set_raw_response(response_without_answers());
+        assert!(
+            !matcher
+                .evaluate(&state)
+                .expect("empty answer misses")
+                .matched
+        );
         assert!(TrueMatcher.evaluate(&state).expect("true").matched);
     }
 }
