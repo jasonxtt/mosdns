@@ -4,6 +4,7 @@
 mod assembly;
 mod cli;
 mod config;
+mod udp;
 
 pub use assembly::{AssemblyError, ForwardAdapter, HostAssembly, HostOptions, HostRuntime};
 pub use cli::{CliCommand, CliError, parse_args};
@@ -11,6 +12,7 @@ pub use config::{
     CompiledConfig, ConfigError, ForwardConfig, ListenerConfig, ListenerKind, LogLevel,
     SequenceConfig, compile_yaml, load_yaml,
 };
+pub use udp::{UdpServer, UdpServerError};
 
 /// Parses and prepares a native host without opening a listener or an
 /// upstream socket.
