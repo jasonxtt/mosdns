@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — final evidence remediation complete; awaiting final root re-review**.
+Status: **final PASS — normal finish/archive authorized; stop after archive**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -450,7 +450,7 @@ Focused checks completed locally:
 ```text
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check                 PASS
 cargo test --manifest-path rust/native-host/Cargo.toml --test w1_tcp --locked PASS (5 tests)
-cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PASS (12 unit + 3 integration targets, 9 integration tests)
+cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PASS (12 unit + 3 integration targets, 11 integration tests)
 cargo clippy --manifest-path rust/native-host/Cargo.toml --all-targets --locked -- -D warnings PASS
 ```
 
@@ -472,7 +472,29 @@ ssh mosdns-rust Linux W1 correctness-only gate PASS
 ```
 
 No browser, VM, benchmark, deployment, or historical baseline mutation was
-performed. The task is stopped here pending final root re-review.
+performed.
+
+### Final root review record
+
+The final root review was performed in reviewer conversation `000`
+(`6ab11c18-980c-83ee-bf08-5e44c2e46162`) against the exact pushed range
+`bdfd01614b689fcc7eaabe868e8aeb5195008147` →
+`7af4dd3e3cae4405af0a7cf4451619e811b71674`.
+
+The first final review returned `FINAL: FAIL` with P0=0/P1=2/P2=0. The
+bounded task-document remediation was committed as `7af4dd3` and added the
+committed final workspace-gate results plus the authorized Linux W1
+correctness-only evidence. The reviewer then returned exactly:
+
+```text
+FINAL: PASS
+
+Authorized only for normal Trellis finish/archive after final task state recording. STOP.
+```
+
+This PASS closes the five approved slices and authorizes only normal
+`task.py` finish/archive. It does not authorize W2/W3, benchmark or
+performance work, deployment, production cutover, or a follow-up task.
 
 ### Required checks
 
@@ -493,11 +515,10 @@ and limitations under this task's research tree.
 
 ### Final exit gate and stop
 
-Request explicit `FINAL: PASS` for the complete W1 UDP/TCP path and exact
-allowlist. On `FINAL: PASS`, finish/archive through the normal Trellis process
-only when separately authorized, then stop. Do not run W2/W3, claim a
-performance verdict, deploy, start a next task, or remove migration
-scaffolding.
+The complete W1 UDP/TCP path and exact allowlist received the final root
+`FINAL: PASS` recorded above. Finish/archive through the normal Trellis
+process only; then stop. Do not run W2/W3, claim a performance verdict,
+deploy, start a next task, or remove migration scaffolding.
 
 ## 6. Remediation rule
 
