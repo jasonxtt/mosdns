@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::rc::Rc;
 use std::time::Duration;
 
 use mosdns_upstream_core::{
@@ -6,6 +8,7 @@ use mosdns_upstream_core::{
 };
 
 use crate::config::{CompiledConfig, ConfigError, compile_yaml};
+use crate::udp::{UdpServer, UdpServerError};
 
 /// Host-side options reserved for tests and the later request runner.
 /// Configuration files cannot override these values in this task.
@@ -63,13 +66,21 @@ impl HostRuntime {
     pub fn as_runtime(&self) -> &tokio::runtime::Runtime {
         &self.runtime
     }
+
+    /// Runs a future with a local task set on the host-owned runtime.
+    pub fn block_on<F>(&self, future: F) -> F::Output
+    where
+        F: Future,
+    {
+        tokio::task::LocalSet::new().block_on(&self.runtime, future)
+    }
 }
 
 /// Pre-I/O native host graph. It owns the single runtime and one async
 /// upstream owner, but deliberately does not bind the configured listener.
 pub struct HostAssembly {
-    config: CompiledConfig,
-    forward: ForwardAdapter,
+    config: Rc<CompiledConfig>,
+    forward: Rc<ForwardAdapter>,
     runtime: HostRuntime,
     options: HostOptions,
 }
@@ -93,9 +104,10 @@ impl HostAssembly {
         options: HostOptions,
     ) -> Result<Self, AssemblyError> {
         let endpoint = config.forward.endpoint;
+        let config = Rc::new(config);
         Ok(Self {
             config,
-            forward: ForwardAdapter::new(endpoint),
+            forward: Rc::new(ForwardAdapter::new(endpoint)),
             runtime: HostRuntime::new()?,
             options,
         })
@@ -116,6 +128,14 @@ impl HostAssembly {
         self.runtime.as_runtime()
     }
 
+    /// Runs a future on the host's current-thread runtime and local task set.
+    pub fn block_on<F>(&self, future: F) -> F::Output
+    where
+        F: Future,
+    {
+        self.runtime.block_on(future)
+    }
+
     #[must_use]
     pub const fn options(&self) -> &HostOptions {
         &self.options
@@ -124,8 +144,23 @@ impl HostAssembly {
     /// The configured upstream endpoint, exposed without exposing the owner
     /// internals or creating a second transport adapter.
     #[must_use]
-    pub const fn endpoint(&self) -> Endpoint {
+    pub fn endpoint(&self) -> Endpoint {
         self.forward.endpoint()
+    }
+
+    pub(crate) fn config_handle(&self) -> Rc<CompiledConfig> {
+        Rc::clone(&self.config)
+    }
+
+    pub(crate) fn forward_handle(&self) -> Rc<ForwardAdapter> {
+        Rc::clone(&self.forward)
+    }
+
+    /// Binds and serves the configured UDP listener. TCP remains a later
+    /// slice, so a TCP configuration is rejected without binding anything.
+    pub fn run_udp(&self) -> Result<(), UdpServerError> {
+        let server = self.block_on(UdpServer::bind_configured(self))?;
+        self.block_on(server.serve(TransportCancellation::new()))
     }
 }
 
