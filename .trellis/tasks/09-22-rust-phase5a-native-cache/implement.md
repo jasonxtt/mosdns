@@ -1,6 +1,9 @@
 # Implementation plan — Rust Phase 5A native cache
 
-Status: planning. Four implementation units; none started.
+Status: reviewed planning. Four implementation units; none started.
+Planning review: `PLANNING: PASS` at
+`d49da845b694ec39ce9ecb09fd51447350f06b97`; see
+`research/planning-review.md`. Executor still owns authorize/start/activate.
 
 ## Pre-start and review contract
 
@@ -9,7 +12,7 @@ Status: planning. Four implementation units; none started.
   Read the applicable Phase 5A/native-host sections of the long
   `.trellis/spec/backend/rust-migration.md` directly; do not rely on truncated
   context injection.
-- [ ] Obtain explicit `PLANNING: PASS` from the designated reviewer against
+- [x] Obtain explicit `PLANNING: PASS` from the designated reviewer against
   the exact pushed planning commit and all three planning artifacts.
 - [ ] Executor is current destination task `01a0c7fa-e0ea-7f52-adb0-f3789e7a7bdb`;
   reviewer is `01a0c7fe-fd97-7ce1-aed2-d389bbefa3e3`. Configure executor-session
