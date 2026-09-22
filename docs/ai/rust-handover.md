@@ -119,6 +119,16 @@ complete plugin/routing compatibility) remains a later Phase 5A/5B/5C gate;
 no production/default wiring was enabled. Any broader host work requires a
 separately scoped task and review.
 
+The follow-on `rust-phase5a-native-routing` Slice 3 evidence has now run on
+Linux amd64 at exact source `33e826ccd89a5db039bfc4d92aaf0593907dd95b`: the
+native-host W1/W2/W3 targets, Rust workspace tests/clippy, runtime ABI tests,
+and the real UDP W3 corpus passed. The evidence records exact `A`, `B -> A`,
+and `B -> C` route order, cancellation/close/rebind behavior, unchanged
+baseline/corpus digests, and the legacy tagged cgo matcher limitation. This
+remains a bounded W3 subset only; basic observability, comparable native
+performance, full plugin/routing compatibility, and the final reviewer result
+remain open. No production/default cutover or deployment was performed.
+
 Remaining Phase 4 foundations compose with **5B full query features**; **5C full
 control plane** covers APIs, existing UI, persistent state and updates; **5D**
 validates full-system performance and stability; **Phase 6** retires hybrid

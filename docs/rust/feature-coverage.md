@@ -154,6 +154,21 @@ expiry、W1 UDP/TCP forwarding preservation，以及 Go cgo regression。证据
 dump/持久化、API/WebUI/metrics、完整插件与跨模块组合仍保持“待验收”，归
 入后续 5B/5C/5D/Phase 6 门槛，不能由本次测试升级状态。
 
+### 6.2 5A bounded W3 evidence
+
+`rust-phase5a-native-routing` 的 Slice 3 Linux amd64 correctness evidence
+已在 reviewed source `33e826ccd89a5db039bfc4d92aaf0593907dd95b` 收集：严格
+W3 YAML、真实 UDP A/B/C 路由、冻结 `routing.jsonl` 三行语料、W1/W2 回归、
+关闭/取消/rebind 以及 sequence/runtime ABI tests 均通过。W3 事件 oracle
+验证了 `A`、`B -> A`、`B -> C` 的精确顺序和 forbidden-leg 计数；完整命令、
+远端环境、输入 digest 和实际限制见该任务的
+[implement.md](../../.trellis/tasks/09-22-rust-phase5a-native-routing/implement.md)。
+这只增加 P26/P27 与 C01/C02 的受限 5A native-routing evidence，不表示
+完整 matcher/plugin、观测、性能或生产就绪。Linux tagged cgo cache/query/
+matcher 组及 race 证据通过；未修改的 `matcher_adapter` typed-nil interface
+测试仍会 panic，因此不能声称完整 legacy cgo matcher suite 已通过。最终
+reviewer gate 尚待实际返回，且没有启用 production/default wiring。
+
 ## 6. 跨功能组合与关闭规则
 
 单项之外至少覆盖：规则/provider + sequence + cache + 上游组；ECS + cache 隔离；fallback/dual selection + 取消 + 最终审计；switch/fast mark + special_groups；规则热更新 + 在途查询；API 保存 + 配置生成 + 重启恢复；更新失败 + 用户数据保留。

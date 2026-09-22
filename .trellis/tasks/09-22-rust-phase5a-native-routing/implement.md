@@ -91,22 +91,69 @@ Allowlist: task directory, `docs/ai/rust-handover.md`,
 `docs/rust/feature-coverage.md` for bounded W3 status/evidence only.
 No product fixes in evidence-only slice; failures return to their owning slice.
 
-- [ ] On the previously designated `ssh mosdns-rust`, exact reviewed source in
+- [x] On the previously designated `ssh mosdns-rust`, exact reviewed source in
   fresh temporary directory, record architecture/toolchains/storage check.
   Use a task-owned disk-backed target; no production service/install change.
-- [ ] Run native-host W1 UDP/TCP, W2, W3 targets and Rust workspace fmt/tests/
+- [x] Run native-host W1 UDP/TCP, W2, W3 targets and Rust workspace fmt/tests/
   clippy with --locked, exact commands/env and result summaries. Baseline/corpus
   digests must match before/after; no benchmark runner or local VM.
-- [ ] Because shared DNS parsing is affected, run existing runtime ABI tests
+- [x] Because shared DNS parsing is affected, run existing runtime ABI tests
   and the repository's Linux staticlib + tagged Go cache/matcher tests; full
   `go test ./...` with serial UI build if required. No Go source edits. If unsafe
   or ABI implementation changes become necessary, stop/review scope first and
   add applicable focused memory-safety/race checks; ordinary tests are not Miri.
-- [ ] Record route counters/order, concurrency/lifecycle results, complete
+- [x] Record route counters/order, concurrency/lifecycle results, complete
   commands, any failed attempt/retry and cleanup of task-owned remote artifacts.
-- [ ] Update coverage/handover: bounded W3 only; 5A basic observability and
+- [x] Update coverage/handover: bounded W3 only; 5A basic observability and
   comparable native performance remain open. Keep final reviewer result pending
   until an actual response is received.
 - [ ] Commit/push evidence, obtain `FINAL: PASS` for A1–A7, record that actual
   response, report tested/evidence SHA, then stop before finish/archive,
   performance, deployment, additional tasks or full-feature expansion.
+
+### Slice 3 execution evidence (review pending)
+
+- The exact reviewed source `33e826ccd89a5db039bfc4d92aaf0593907dd95b` was
+  staged from `git archive` into the fresh remote artifact
+  `/tmp/mosdns-phase5a-slice3-w3-33e826c/repo` on `ssh mosdns-rust`; the
+  disk-backed Cargo target was `/root/mosdns-phase5a-slice3-w3-target-33e826c`.
+  Remote Linux was amd64 (`Linux mosdns-rust 7.0.9-x64v3-xanmod1`, `x86_64`),
+  with `rustc/cargo 1.95.0`, `go1.26.4 linux/amd64`, Python 3.13.5,
+  rustfmt 1.9.0-stable and clippy 0.1.95. `/tmp` was a 2 GiB tmpfs; all
+  compilation used the task-owned target on the 24 GiB root disk with
+  `CARGO_BUILD_JOBS=1`.
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` passed.
+  `cargo test --manifest-path rust/native-host/Cargo.toml --all-targets
+  --locked` passed 25 unit, 8 Slice 1, 8 config, 5 W1 TCP, 4 W1 UDP, 6 W2
+  and 6 W3 tests. The W3 run observed the three corpus paths exactly as
+  `A`, `B -> A`, and `B -> C`, with forbidden legs absent; malformed/mismatch,
+  failure, concurrent cancellation and listener rebind cases also passed.
+- `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets
+  --locked` passed every workspace target (including runtime ABI 20, query ABI
+  11, valued ABI 6, sequence-core 65, and all upstream-core targets), and the
+  corresponding workspace clippy command with `--locked -- -D warnings`
+  passed. The source tree digest excluding generated `rust/target` was
+  `3256 files / 70540315 bytes / c35d075a9b6b1a793aac98cdc50919095c5261c5cce6ddff790991773f095073`.
+- `go test ./...` and `go vet ./...` passed. The Linux staticlib was built with
+  `scripts/build-rust-cache.sh` using the disk-backed target and copied only
+  into the task checkout's `rust/target/release` for cgo; its SHA-256 was
+  `8847a4b6213a5920fb6d2b6fb863a90ee7cda437a5745024dfebce6218544187`.
+  Tagged cache/query/server and plugin/pkg matcher tests passed in normal and
+  race modes. Tagged data-provider matcher tests passed after excluding the
+  existing `plugin/data_provider/matcher_adapter` typed-nil interface case.
+- The official tagged data-provider command and its race counterpart were also
+  run exactly. Both fail only at
+  `TestSlice2RealDomainAdapterRejectsUnsafeRegexp`: the unchanged Go adapter
+  returns a typed-nil `*snapshot` inside the `DomainSnapshot` interface after
+  the expected unsafe-regexp rejection, and the test calls `Close()` at
+  `slice2_integration_linux_test.go:14`, panicking at `adapter_linux.go:187`.
+  No Go or ABI source changed in this task; the failure is recorded rather
+  than fixed in the evidence-only slice.
+- Before and after remote execution, the frozen-input digests were unchanged:
+  `.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline` = 2378 files,
+  60755103 bytes, `538733b18dd516df21c27b998830c97ceae760c85702bda07391d2984a82634e`;
+  `tests/phase5a-baseline` = 10 files, 41922 bytes,
+  `34678ca9acd6072ad2a01d429fd513d70e7dd48c899fbfc7cb7e4df160cc6b2d`.
+  The task-owned remote checkout and target were removed after validation. No
+  benchmark runner, VM, deployment, production/default cutover or UI build
+  was run; the final reviewer result remains pending.
