@@ -217,9 +217,8 @@ plugins:
     assert_eq!(reordered_config.forwards.len(), 3);
 }
 
-#[test]
-fn w3_negative_grammar_and_graph_matrix_fails_closed() {
-    let cases = [
+fn w3_negative_cases() -> Vec<(&'static str, String)> {
+    vec![
         (
             "domain suffix expression",
             ROUTING.replace("full:domain-hit.test", "suffix:domain-hit.test"),
@@ -289,11 +288,40 @@ fn w3_negative_grammar_and_graph_matrix_fails_closed() {
             ROUTING.replace("udp://127.0.0.1:15456", "tcp://127.0.0.1:15456"),
         ),
         (
+            "hostname W3 upstream",
+            ROUTING.replace("udp://127.0.0.1:15456", "udp://dns.example:53"),
+        ),
+        (
+            "zero W3 upstream port",
+            ROUTING.replace("udp://127.0.0.1:15456", "udp://127.0.0.1:0"),
+        ),
+        (
+            "zero W3 listener port",
+            ROUTING.replace("127.0.0.1:15356", "127.0.0.1:0"),
+        ),
+        (
+            "unknown W3 forward field",
+            ROUTING.replace(
+                "    args:\n      upstreams:",
+                "    args:\n      unsupported: true\n      upstreams:",
+            ),
+        ),
+        (
+            "cache plus W3",
+            format!(
+                "{ROUTING}  - tag: forbidden_cache\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n"
+            ),
+        ),
+        (
             "same A and C route",
             ROUTING.replace("$phase5a_route_c", "$phase5a_route_a"),
         ),
-    ];
-    for (name, yaml) in cases {
+    ]
+}
+
+#[test]
+fn w3_negative_grammar_and_graph_matrix_fails_closed() {
+    for (name, yaml) in w3_negative_cases() {
         assert!(compile_yaml(&yaml).is_err(), "W3 case {name} must reject");
     }
 }
