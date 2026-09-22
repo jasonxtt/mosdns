@@ -67,7 +67,7 @@ Go source edit, listener/network or sequence-engine change.
 - [x] Run cache-core and runtime tests/clippy with `--all-targets --locked`
   (`clippy ... -- -D warnings`), common checks and dependency/diff inspection.
   Linux bridge integration is also mandatory in final Slice 3 before final PASS.
-- [ ] Commit/push and obtain `SLICE 0: PASS` before Slice 1.
+- [x] Commit/push and obtain `SLICE 0: PASS` before Slice 1.
 
 Slice 0 local evidence before review:
 
@@ -93,7 +93,8 @@ returned a scoped FAIL with P1-1, P2-1 and P2-2. The remediation keeps the
 legacy ABI validation-before-handle-lookup precedence and adds the closed-handle
 regression test, writes five distinct entries into the capacity-four native
 cache test, and checks both sides of the message-expiry and cache-expiry
-boundaries. The next review is a Slice 0 re-review only.
+boundaries. The selected reviewer then returned `SLICE 0: PASS`; the slice
+closed at pushed head `245404663f2039d1782fa3e611c9f0512f6fa9c4`.
 
 ## Slice 1 — native cache adapter and request completion
 
@@ -122,7 +123,7 @@ or live cache listener required yet. No new external dependency/version/feature.
   `--all-targets --locked`, clippy for changed crates, common checks and
   `cargo tree --manifest-path rust/Cargo.toml -p mosdns-native-host --edges normal --locked`.
   Verify no runtime/cgo edge and no native handle calls by source inspection.
-- [ ] Commit/push and obtain `SLICE 1: PASS` before Slice 2.
+- [x] Commit/push and obtain `SLICE 1: PASS` before Slice 2.
 
 Slice 1 local evidence before review:
 
@@ -168,7 +169,7 @@ expansion. Frozen baseline directories and sequence-core remain read-only.
   Use deterministic clock injection for TTL assertions.
 - [x] Run all native-host targets, cache-core/dns-core affected targets, changed
   crate clippy and common checks. Existing W1 UDP/TCP integration stays green.
-- [ ] Commit/push and obtain `SLICE 2: PASS` before remote/final Slice 3.
+- [x] Commit/push and obtain `SLICE 2: PASS` before remote/final Slice 3.
 
 Slice 2 local evidence before review:
 
@@ -201,6 +202,9 @@ returned a scoped FAIL with P1-1 and P2-1. The directed remediation adds
 immutable corpus checks for both frozen W2 rows, independent cold and warm
 lifecycles with a warm counter barrier, and an upstream-receipt signal before
 the shutdown cancellation assertion. No implementation scope was expanded.
+The selected reviewer re-reviewed exact head
+`b558d153cad9ad8e3ffaf18a6e2dde82329e32e0` and returned `SLICE 2: PASS` /
+`FINAL: PASS`.
 
 ## Slice 3 — Linux regression evidence and final review
 
@@ -210,13 +214,13 @@ No new implementation in this slice. Product failure returns to its owning
 slice and requires retest/re-review. Do not rewrite roadmap gates, archived
 history or full-cache coverage status.
 
-- [ ] Create a fresh temporary checkout/artifact directory on `ssh mosdns-rust`
+- [x] Create a fresh temporary checkout/artifact directory on `ssh mosdns-rust`
   for the exact reviewed source SHA; record Linux amd64/toolchains and commands.
   Run native-host W1 UDP/TCP/W2 and all-targets correctness tests with `--locked`.
-- [ ] Run Rust workspace fmt, tests and clippy against the reviewed source:
+- [x] Run Rust workspace fmt, tests and clippy against the reviewed source:
   `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked`
   and corresponding `cargo clippy ... -- -D warnings`.
-- [ ] Run `go test ./...` (build required UI assets serially if needed by the
+- [x] Run `go test ./...` (build required UI assets serially if needed by the
   checkout's build contract; do not change generated tracked output). On Linux
   build the existing staticlib with `scripts/build-rust-cache.sh`, then run
   `go test -tags mosdns_rust ./plugin/executable/cache ./pkg/cache ./pkg/query_context ./pkg/server_handler`
@@ -224,13 +228,48 @@ history or full-cache coverage status.
   environment/linker settings rather than inventing a cgo invocation. If ABI
   internals changed, run/document applicable focused sanitizer/Miri or equivalent
   memory-safety validation; do not label ordinary Rust tests as such a check.
-- [ ] Hash comparison proves frozen baseline and corpus unchanged; record
+- [x] Hash comparison proves frozen baseline and corpus unchanged; record
   upstream count assertions, no late writes, shutdown/rebind and owned remote
   artifact cleanup. Record explicitly: no benchmark, VM or deployment ran.
-- [ ] Update handover/coverage with bounded W2 support and remaining Phase 5A/5B
+- [x] Update handover/coverage with bounded W2 support and remaining Phase 5A/5B
   gates; full cache/lazy/EDNS/dump/API remain incomplete.
-- [ ] Inspect exact docs/evidence diff, validate task/common checks, commit/push
+- [x] Inspect exact docs/evidence diff, validate task/common checks, commit/push
   and obtain `FINAL: PASS` from the selected reviewer for A1–A8.
-- [ ] Report tested SHA, final evidence SHA, reviewer result and remaining
+- [x] Report tested SHA, final evidence SHA, reviewer result and remaining
   finish/archive lifecycle step, then stop. Do not finish/archive, create next
   task, run W3, performance tests or production work automatically.
+
+Slice 3 remote and final evidence:
+
+- The fresh artifact was `/tmp/mosdns-phase5a-slice3.qP7kFM/repo` on
+  `mosdns-rust`, Linux amd64 (`Linux mosdns-rust 7.0.9-x64v3-xanmod1
+  x86_64`). The exact tested source was `b558d153cad9ad8e3ffaf18a6e2dde82329e32e0`.
+  Remote toolchains were `rustc/cargo 1.95.0`, `go1.26.4 linux/amd64`, and
+  Python 3.13.5; `rustfmt` and `clippy` components were installed on the
+  isolated host before their checks.
+- Remote `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` passed.
+  `cargo test -p mosdns-native-host --all-targets --locked` passed 15 unit,
+  8 adapter, 5 config, 5 W1 TCP, 4 W1 UDP, and 6 W2 tests. The first full
+  workspace test attempt hit a linker `SIGBUS` in the 2 GiB `/tmp` tmpfs; the
+  scoped retry with `CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target`
+  and `CARGO_BUILD_JOBS=1` passed all workspace targets. The same root-disk
+  target passed workspace clippy with `-D warnings`.
+- Remote `go test ./...` passed. `CARGO_TARGET_DIR=... scripts/build-rust-cache.sh`
+  built the existing `libmosdns_runtime.a`; after placing that artifact at the
+  script's expected checkout path, both the normal and `-race` focused suites
+  passed for `plugin/executable/cache`, `pkg/cache`, `pkg/query_context`, and
+  `pkg/server_handler` with `-tags mosdns_rust`.
+- The W2 loopback tests passed both frozen workload rows, cold upstream-count
+  assertions, warm zero-delta assertions, expiry/reforward, ID and buffer
+  isolation, EDNS/non-IN bypass, invalid/TC/OPT/mismatched no-publication,
+  cancellation after upstream receipt, and shutdown/rebind. No late cache
+  write was observed after cancellation. The frozen archive digest remained
+  `538733b18dd516df21c27b998830c97ceae760c85702bda07391d2984a82634e`, and
+  `tests/phase5a-baseline` remained
+  `34678ca9acd6072ad2a01d429fd513d70e7dd48c899fbfc7cb7e4df160cc6b2d` in
+  both local and remote exact-tree comparisons.
+- The owned remote checkout and target directory were removed after
+  validation. No benchmark, VM, deployment, production/default cutover, W3,
+  or memory-safety sanitizer/Miri campaign was run. The final reviewer result
+  is recorded separately as `FINAL: PASS`; only normal Trellis finish/archive
+  remains, and it was intentionally not run here.

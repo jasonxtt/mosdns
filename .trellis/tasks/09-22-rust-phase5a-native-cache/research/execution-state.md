@@ -116,3 +116,49 @@ The remediation is limited to `rust/native-host/tests/w2_cache.rs` plus this
 task evidence. Post-remediation native-host tests/clippy, format, and diff
 checks pass; no remote Linux, benchmark, VM, deployment or production work
 was run.
+
+## Slice 3 Linux and final evidence
+
+The exact pushed Slice 2 head reviewed for the Linux gate was
+`b558d153cad9ad8e3ffaf18a6e2dde82329e32e0`. A fresh archive artifact was
+created at `/tmp/mosdns-phase5a-slice3.qP7kFM/repo` on `mosdns-rust` (Linux
+amd64: `Linux mosdns-rust 7.0.9-x64v3-xanmod1 ... x86_64`) and removed after
+validation. The remote toolchains were `rustc 1.95.0`, `cargo 1.95.0`,
+`go1.26.4 linux/amd64`, and Python 3.13.5. The remote host initially lacked
+rustfmt/clippy; only those standard rustup components were installed.
+
+Commands and results:
+
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`: PASS.
+- `cargo test -p mosdns-native-host --all-targets --locked`: PASS, with 15
+  unit, 8 adapter, 5 config, 5 W1 TCP, 4 W1 UDP, and 6 W2 tests. The W2
+  tests directly consumed both immutable `workloads/cache.jsonl` rows and
+  asserted cold counts, warm zero-delta counts, expiry/reforward,
+  EDNS/non-IN bypass, invalid/TC/OPT/mismatched no-publication, cancellation
+  after upstream receipt, and shutdown/rebind with no late write.
+- `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets
+  --locked`: PASS. The first run in the fresh `/tmp` checkout hit a linker
+  `SIGBUS` while linking upstream tests because the 2 GiB tmpfs filled. After
+  removing only that checkout's target and retrying with
+  `CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target CARGO_BUILD_JOBS=1`,
+  every workspace target passed. The corresponding workspace clippy command
+  with `-D warnings` also passed using that root-disk target.
+- `go test ./...`: PASS. `CARGO_TARGET_DIR=... scripts/build-rust-cache.sh`
+  built `libmosdns_runtime.a`; copying that result to the checkout's expected
+  `rust/target/release` link path enabled both the normal and `-race` focused
+  commands required by the task for
+  `plugin/executable/cache`, `pkg/cache`, `pkg/query_context`, and
+  `pkg/server_handler`: PASS in both modes.
+
+The exact-tree digest comparison was run both locally and in the fresh remote
+artifact. Each matched the frozen values above: the archived baseline had
+2378 files / 60755103 bytes /
+`538733b18dd516df21c27b998830c97ceae760c85702bda07391d2984a82634e`,
+and `tests/phase5a-baseline` had 10 files / 41922 bytes /
+`34678ca9acd6072ad2a01d429fd513d70e7dd48c899fbfc7cb7e4df160cc6b2d`.
+
+No benchmark, VM, deployment, production/default cutover, W3, sanitizer, or
+Miri campaign was run. The selected reviewer is still the exact thread named
+in the authorization record; the final review request and its
+`FINAL: PASS` result are the final automation events for this task. Only
+normal Trellis finish/archive remains and is intentionally outside this run.
