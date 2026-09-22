@@ -129,7 +129,8 @@ rustfmt/clippy; only those standard rustup components were installed.
 
 Commands and results:
 
-- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`: PASS.
+- `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo && cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check'`: PASS.
 - `cargo test -p mosdns-native-host --all-targets --locked`: PASS, with 15
   unit, 8 adapter, 5 config, 5 W1 TCP, 4 W1 UDP, and 6 W2 tests. The W2
   tests directly consumed both immutable `workloads/cache.jsonl` rows and
@@ -141,14 +142,25 @@ Commands and results:
   `SIGBUS` while linking upstream tests because the 2 GiB tmpfs filled. After
   removing only that checkout's target and retrying with
   `CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target CARGO_BUILD_JOBS=1`,
-  every workspace target passed. The corresponding workspace clippy command
-  with `-D warnings` also passed using that root-disk target.
-- `go test ./...`: PASS. `CARGO_TARGET_DIR=... scripts/build-rust-cache.sh`
-  built `libmosdns_runtime.a`; copying that result to the checkout's expected
-  `rust/target/release` link path enabled both the normal and `-race` focused
-  commands required by the task for
-  `plugin/executable/cache`, `pkg/cache`, `pkg/query_context`, and
-  `pkg/server_handler`: PASS in both modes.
+  every workspace target passed. The exact retry command was
+  `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo &&
+  CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target CARGO_BUILD_JOBS=1
+  cargo test --manifest-path rust/Cargo.toml --workspace --all-targets
+  --locked'`. The exact corresponding workspace clippy command was
+  `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo &&
+  CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target CARGO_BUILD_JOBS=1
+  cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets
+  --locked -- -D warnings'`; PASS.
+- `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo && go test ./...'`:
+  PASS. The exact static-library command was
+  `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo &&
+  CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target CARGO_BUILD_JOBS=1
+  scripts/build-rust-cache.sh'`: PASS; the resulting library was copied to
+  `rust/target/release/libmosdns_runtime.a`. The exact focused commands were
+  `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo && CGO_ENABLED=1
+  go test -tags mosdns_rust ./plugin/executable/cache ./pkg/cache
+  ./pkg/query_context ./pkg/server_handler -count=1'` and the same command
+  with `go test -race`; PASS in both modes.
 
 The exact-tree digest comparison was run both locally and in the fresh remote
 artifact. Each matched the frozen values above: the archived baseline had
@@ -157,8 +169,16 @@ artifact. Each matched the frozen values above: the archived baseline had
 and `tests/phase5a-baseline` had 10 files / 41922 bytes /
 `34678ca9acd6072ad2a01d429fd513d70e7dd48c899fbfc7cb7e4df160cc6b2d`.
 
-No benchmark, VM, deployment, production/default cutover, W3, sanitizer, or
-Miri campaign was run. The selected reviewer is still the exact thread named
-in the authorization record; the final review request and its
-`FINAL: PASS` result are the final automation events for this task. Only
-normal Trellis finish/archive remains and is intentionally outside this run.
+The post-review focused memory-safety gate also passed locally: with
+`rustc 1.99.0-nightly`,
+`MIRIFLAGS='-Zmiri-tree-borrows -Zmiri-ignore-leaks' rustup run nightly cargo
+miri test --manifest-path rust/cache-core/Cargo.toml --all-targets` passed 11/11,
+and
+`MIRIFLAGS='-Zmiri-tree-borrows -Zmiri-ignore-leaks' rustup run nightly cargo
+miri test --manifest-path rust/runtime/Cargo.toml --test abi_contract` passed
+20/20.
+Miri emitted only known crossbeam-epoch/tagptr integer-pointer warnings and no
+Miri error. No benchmark, VM, deployment, production/default cutover, W3,
+sanitizer campaign, or final reviewer PASS has been recorded yet. The selected
+reviewer request is pending; normal Trellis finish/archive remains outside
+this run.

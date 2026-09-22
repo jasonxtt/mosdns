@@ -233,11 +233,13 @@ history or full-cache coverage status.
   artifact cleanup. Record explicitly: no benchmark, VM or deployment ran.
 - [x] Update handover/coverage with bounded W2 support and remaining Phase 5A/5B
   gates; full cache/lazy/EDNS/dump/API remain incomplete.
-- [x] Inspect exact docs/evidence diff, validate task/common checks, commit/push
-  and obtain `FINAL: PASS` from the selected reviewer for A1–A8.
-- [x] Report tested SHA, final evidence SHA, reviewer result and remaining
-  finish/archive lifecycle step, then stop. Do not finish/archive, create next
-  task, run W3, performance tests or production work automatically.
+- [x] Inspect exact docs/evidence diff, validate task/common checks, and
+  commit/push the evidence. The selected reviewer request for A1–A8 remains
+  pending after each remediation commit.
+- [ ] Obtain the selected reviewer's `FINAL: PASS`, then report the tested SHA,
+  final evidence SHA, reviewer result and remaining finish/archive lifecycle
+  step, and stop. Do not finish/archive, create next task, run W3, performance
+  tests or production work automatically.
 
 Slice 3 remote and final evidence:
 
@@ -247,18 +249,29 @@ Slice 3 remote and final evidence:
   Remote toolchains were `rustc/cargo 1.95.0`, `go1.26.4 linux/amd64`, and
   Python 3.13.5; `rustfmt` and `clippy` components were installed on the
   isolated host before their checks.
-- Remote `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` passed.
+- Remote `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo && cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check'` passed.
   `cargo test -p mosdns-native-host --all-targets --locked` passed 15 unit,
   8 adapter, 5 config, 5 W1 TCP, 4 W1 UDP, and 6 W2 tests. The first full
   workspace test attempt hit a linker `SIGBUS` in the 2 GiB `/tmp` tmpfs; the
   scoped retry with `CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target`
   and `CARGO_BUILD_JOBS=1` passed all workspace targets. The same root-disk
-  target passed workspace clippy with `-D warnings`.
-- Remote `go test ./...` passed. `CARGO_TARGET_DIR=... scripts/build-rust-cache.sh`
-  built the existing `libmosdns_runtime.a`; after placing that artifact at the
-  script's expected checkout path, both the normal and `-race` focused suites
-  passed for `plugin/executable/cache`, `pkg/cache`, `pkg/query_context`, and
-  `pkg/server_handler` with `-tags mosdns_rust`.
+  target passed the exact command
+  `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo &&
+  CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target CARGO_BUILD_JOBS=1
+  cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets
+  --locked -- -D warnings'`.
+- Remote `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo && go test
+  ./...'` passed. The exact static-library command was
+  `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo &&
+  CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-target CARGO_BUILD_JOBS=1
+  scripts/build-rust-cache.sh'`; its result was copied to
+  `rust/target/release/libmosdns_runtime.a` for cgo. The exact normal and race
+  commands were, respectively,
+  `ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3.qP7kFM/repo && CGO_ENABLED=1
+  go test -tags mosdns_rust ./plugin/executable/cache ./pkg/cache
+  ./pkg/query_context ./pkg/server_handler -count=1'` and the same command
+  with `go test -race`; both passed.
 - The W2 loopback tests passed both frozen workload rows, cold upstream-count
   assertions, warm zero-delta assertions, expiry/reforward, ID and buffer
   isolation, EDNS/non-IN bypass, invalid/TC/OPT/mismatched no-publication,
@@ -268,8 +281,15 @@ Slice 3 remote and final evidence:
   `tests/phase5a-baseline` remained
   `34678ca9acd6072ad2a01d429fd513d70e7dd48c899fbfc7cb7e4df160cc6b2d` in
   both local and remote exact-tree comparisons.
-- The owned remote checkout and target directory were removed after
-  validation. No benchmark, VM, deployment, production/default cutover, W3,
-  or memory-safety sanitizer/Miri campaign was run. The final reviewer result
-  is recorded separately as `FINAL: PASS`; only normal Trellis finish/archive
-  remains, and it was intentionally not run here.
+- The ABI/cache boundary received a focused memory-safety check after review:
+  `MIRIFLAGS='-Zmiri-tree-borrows -Zmiri-ignore-leaks' rustup run nightly
+  cargo miri test --manifest-path rust/cache-core/Cargo.toml --all-targets`
+  passed 11/11, and
+  `MIRIFLAGS='-Zmiri-tree-borrows -Zmiri-ignore-leaks' rustup run nightly
+  cargo miri test --manifest-path rust/runtime/Cargo.toml --test abi_contract`
+  passed 20/20 under `rustc 1.99.0-nightly`. Miri emitted only
+  the known dependency warnings for crossbeam-epoch/tagptr integer-pointer
+  casts; no Miri error occurred. The owned remote checkout and target
+  directory were removed after validation. No benchmark, VM, deployment,
+  production/default cutover, W3, sanitizer campaign, or final reviewer PASS
+  was recorded yet; the Slice 3 review is pending.
