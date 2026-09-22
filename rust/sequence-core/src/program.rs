@@ -16,7 +16,7 @@ impl SequenceId {
     }
 }
 
-/// A stable identifier for a validated fixture executable.
+/// A stable identifier for a validated executable catalog entry.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ExecutableId(pub usize);
 
