@@ -63,21 +63,21 @@ native-host foundation, not a production cutover.
 
 ## Acceptance criteria
 
-- [ ] The baseline runner/report relocation is planned and implemented as a
+- [x] The baseline runner/report relocation is planned and implemented as a
   separate first slice without mutating historical manifest or raw evidence.
-- [ ] The sequence engine exposes one canonical resumable execution path whose
+- [x] The sequence engine exposes one canonical resumable execution path whose
   synchronous API is an adapter, and its semantics remain parity-tested.
-- [ ] Supported YAML compiles strictly before any bind; every listed
+- [x] Supported YAML compiles strictly before any bind; every listed
   unsupported or malformed shape fails closed with a useful error.
-- [ ] W1 UDP passes positive response, NXDOMAIN, concurrent association,
+- [x] W1 UDP passes positive response, NXDOMAIN, concurrent association,
   timeout-to-SERVFAIL, cancellation, shutdown, rebind, and task/socket cleanup
   checks.
-- [ ] W1 TCP passes positive response, NXDOMAIN, partial framing, sequential
+- [x] W1 TCP passes positive response, NXDOMAIN, partial framing, sequential
   per-connection behavior, concurrent connections, idle timeout, timeout and
   disconnect handling, shutdown, rebind, and cleanup checks.
-- [ ] Focused Rust tests, formatting/lint checks, task validation, and the
+- [x] Focused Rust tests, formatting/lint checks, task validation, and the
   authorized Linux W1 evidence are recorded in the task-local research tree.
-- [ ] No production deployment or broader migration work is performed.
+- [x] No production deployment or broader migration work is performed.
 
 ## Stop boundary
 

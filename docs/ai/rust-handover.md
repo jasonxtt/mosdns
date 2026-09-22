@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-09-20`
+Last verified: `2026-09-22`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
@@ -35,15 +35,21 @@ Concise cross-session handover for the Rust migration on branch `rust`.
   `rust` branch is a future pure Rust-native replacement, not an intermediate
   production runtime.
 
-## Status as of 2026-09-20
+## Status as of 2026-09-22
 
-At this documentation check, `task.py current` has no selected task;
-`09-20-rust-phase4-quic-reuse-multiplexing/task.json` is `in_progress`, and
-Slice 0 model implementation is present. This is not evidence that the whole
-task or an outstanding review gate has passed. Resume from the task's actual
-artifacts and evidence; do not treat the earlier “planning only” summary as
-current. Existing Go live behavior is unchanged and no Rust path is enabled
-by default.
+`rust-phase5a-native-forwarding` completed all five approved slices on branch
+`rust`; `HEAD` and `origin/rust` are `7af4dd3e3cae4405af0a7cf4451619e811b71674`.
+The authoritative reviewer conversation `000` reviewed the exact final range
+`bdfd01614b689fcc7eaabe868e8aeb5195008147` → `7af4dd3e3cae4405af0a7cf4451619e811b71674`
+and returned `FINAL: PASS`, authorizing only normal Trellis finish/archive and
+stop. The task-local record contains the final workspace gates and the
+authorized Linux W1 correctness-only evidence; no performance verdict,
+deployment, or production/default wiring was performed. The expected archive
+path is `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-forwarding/`.
+
+The Rust native host remains an experimental W1 UDP/TCP forwarding foundation:
+existing Go behavior is unchanged, no default Rust cutover is enabled, and no
+follow-up task is authorized by this closeout.
 
 Completed milestones (all archived; each archive holds its own evidence):
 
@@ -82,9 +88,9 @@ Two evidence caveats carried from that review:
   normative; the reviewed code and `implement.md` are authoritative.
 
 Scope of what exists: the DoT/DoH and QUIC/HTTP3 foundations are **bounded
-one-shot, fresh-connection** transport work. The current task adds QUIC-specific
-connection reuse/multiplexing; it is not host wiring or completion of the Phase 4
-data plane.
+one-shot, fresh-connection** transport work, while the Phase 4 connection reuse
+and QUIC foundation tasks are separately archived. None of these foundations,
+nor the W1 native host, is a production/default runtime.
 
 ## Product priorities and next frontier
 
@@ -95,12 +101,11 @@ stability are the primary improvements. Memory is secondary with no required
 reduction percentage; bounded, reclaimable extra memory is acceptable when
 measurements justify the performance benefit.
 
-The architecture plan now brings **Phase 5A minimal native host** forward:
-after the current QUIC reuse task closes within its existing scope, prioritize
-YAML subset -> UDP/TCP listener -> async sequence -> matcher/cache/real upstream
--> response and basic audit/metrics. Do not wait for every remaining Phase 4
-protocol or tuning task before validating this composition. Reject unsupported
-configuration explicitly; this early host is isolated and experimental.
+The bounded **Phase 5A minimal native host** W1 task is now closed after the
+YAML subset -> UDP/TCP listener -> async sequence -> existing upstream ->
+response path passed its final gate. It intentionally did not migrate cache,
+rule routing, API/WebUI, QUIC, or production wiring. Any broader host work
+requires a separately scoped task and review.
 
 Remaining Phase 4 foundations compose with **5B full query features**; **5C full
 control plane** covers APIs, existing UI, persistent state and updates; **5D**
@@ -115,9 +120,9 @@ final concurrency performance.
 - Reproducible performance/stability workloads and threshold-freeze rules:
   `docs/rust/performance-validation.md`.
 
-This roadmap update does not change the existing QUIC task, close its gates,
-create/start another task, or authorize runtime changes or deployment. Later
-implementation needs its own scoped task and review.
+This handover update does not authorize a new task, runtime expansion,
+benchmark campaign, or deployment. Later implementation needs its own scoped
+task and review.
 
 ## Non-negotiable constraints
 
