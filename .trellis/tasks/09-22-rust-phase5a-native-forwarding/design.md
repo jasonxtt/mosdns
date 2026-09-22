@@ -352,9 +352,9 @@ config parser, production wiring, and unrelated crate cleanup.
 
 ### Slice 2 — host pre-I/O assembly
 
-Allowed: `rust/native-host/**`, workspace Cargo manifest/lock, and only a
-root-reviewed tiny `rust/dns-core/**` response helper if required; task-local
-docs/research.
+Allowed: `rust/native-host/**`, `rust/Cargo.toml`, `rust/Cargo.lock`, a
+root-reviewed tiny `rust/dns-core/**` response helper if required, and the
+task-local `.trellis/tasks/09-22-rust-phase5a-native-forwarding/**` docs/research.
 
 Forbidden: real listener bind, VM/SSH execution, benchmark runs, cache/routing,
 Go/cgo/backend selectors, production integration, and any change to
@@ -362,18 +362,22 @@ Go/cgo/backend selectors, production integration, and any change to
 
 ### Slice 3 — W1 UDP
 
-Allowed: the new host/listener and narrowly necessary existing crate fixes,
-test fixtures, and task-local W1 UDP evidence. Run only the approved focused
-checks and the authorized Linux correctness command after review.
+Allowed: `rust/native-host/**`, `rust/dns-core/**` only for narrowly necessary
+shared fixes, and the task-local
+`.trellis/tasks/09-22-rust-phase5a-native-forwarding/**` W1 UDP evidence. Run
+only the approved focused checks and the authorized Linux correctness command
+after review; integration tests live under `rust/native-host/**`.
 
 Forbidden: TCP implementation, cache/routing/QUIC, performance campaign,
 deployment, or creating a new task.
 
 ### Slice 4 — W1 TCP and final stop
 
-Allowed: native-host TCP path, narrowly necessary shared fixes, focused tests,
-and task-local W1 UDP/TCP evidence. Run the approved final gates and Linux W1
-correctness evidence.
+Allowed: `rust/native-host/**`, `rust/dns-core/**` only for narrowly necessary
+shared fixes, and the task-local
+`.trellis/tasks/09-22-rust-phase5a-native-forwarding/**` W1 UDP/TCP evidence.
+Run the approved final gates and Linux W1 correctness evidence; focused tests
+live under `rust/native-host/**`.
 
 Forbidden: all non-W1 feature families, production/default cutover, benchmark
 rerun as a performance verdict, deployment, finish/archive, or a next task
