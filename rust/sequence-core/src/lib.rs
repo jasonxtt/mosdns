@@ -6,14 +6,14 @@ mod state;
 
 pub use engine::{
     CancellationState, CancellationToken, ExecutionCompletion, ExecutionControl, ExecutionError,
-    execute,
+    ExecutionMachine, ExternalDispatch, MachineStep, execute,
 };
 pub use program::{
     DispatchMetadata, ExecutableId, ExecutableSpec, ExecutableTarget, ExecutableTargetSpec,
-    Executor, ExecutorError, ExecutorOutcome, FixtureRef, FixtureSpec, MatchOutcome, Matcher,
-    MatcherError, MatcherSpec, MatcherSpecInput, ProgramError, ProgramSpec, RuleSpec, SequenceId,
-    SequenceRef, SequenceSpec, ValidatedExecutable, ValidatedFixture, ValidatedProgram,
-    ValidatedRule, ValidatedSequence,
+    Executor, ExecutorError, ExecutorOutcome, ExternalRef, ExternalSpec, FixtureRef, FixtureSpec,
+    MatchOutcome, Matcher, MatcherError, MatcherSpec, MatcherSpecInput, ProgramError, ProgramSpec,
+    RuleSpec, SequenceId, SequenceRef, SequenceSpec, ValidatedExecutable, ValidatedExternal,
+    ValidatedFixture, ValidatedProgram, ValidatedRule, ValidatedSequence,
 };
 pub use state::{
     DnsResponseInspector, ExecutionState, OwnedResponseWire, QueryState, ResponseError,

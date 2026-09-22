@@ -117,10 +117,281 @@ pub enum ExecutionCompletion {
 pub enum ExecutionError {
     InvalidEntry(SequenceId),
     InvalidFixture(ExecutableId),
+    ExternalDispatchUnsupported(ExecutableId),
     Matcher(MatcherError),
     Executor(ExecutorError),
     Cancelled,
     BudgetExceeded,
+    WaitingForExternal(ExecutableId),
+    InvalidResume {
+        expected: ExecutableId,
+        received: ExecutableId,
+    },
+    ResumeNotPending(ExecutableId),
+    Finished,
+}
+
+/// A typed request for an executable that must be fulfilled by the host.
+///
+/// The request intentionally contains only stable catalog identity. Query and
+/// response bytes remain in the machine's owned [`ExecutionState`] and in the
+/// host's owned request buffer; no borrowed executor data crosses an await.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExternalDispatch {
+    executable: ExecutableId,
+}
+
+impl ExternalDispatch {
+    #[must_use]
+    pub const fn executable(self) -> ExecutableId {
+        self.executable
+    }
+}
+
+/// The externally observable progress of one canonical sequence machine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MachineStep {
+    Dispatch(ExternalDispatch),
+    Complete(ExecutionCompletion),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MachineStatus {
+    Running,
+    Waiting(ExecutableId),
+    Complete(ExecutionCompletion),
+    Failed,
+}
+
+enum StateSlot<'a> {
+    Owned(Box<ExecutionState>),
+    Borrowed(&'a mut ExecutionState),
+}
+
+impl StateSlot<'_> {
+    fn as_ref(&self) -> &ExecutionState {
+        match self {
+            Self::Owned(state) => state,
+            Self::Borrowed(state) => state,
+        }
+    }
+
+    fn as_mut(&mut self) -> &mut ExecutionState {
+        match self {
+            Self::Owned(state) => state,
+            Self::Borrowed(state) => state,
+        }
+    }
+}
+
+enum ControlSlot<'a> {
+    Owned(ExecutionControl),
+    Borrowed(&'a mut ExecutionControl),
+}
+
+impl ControlSlot<'_> {
+    fn as_ref(&self) -> &ExecutionControl {
+        match self {
+            Self::Owned(control) => control,
+            Self::Borrowed(control) => control,
+        }
+    }
+
+    fn as_mut(&mut self) -> &mut ExecutionControl {
+        match self {
+            Self::Owned(control) => control,
+            Self::Borrowed(control) => control,
+        }
+    }
+}
+
+/// The single resumable sequence interpreter used by both native hosts and
+/// the synchronous compatibility adapter.
+pub struct ExecutionMachine<'a> {
+    program: &'a ValidatedProgram,
+    scopes: Vec<Scope>,
+    state: StateSlot<'a>,
+    control: ControlSlot<'a>,
+    status: MachineStatus,
+}
+
+impl<'a> ExecutionMachine<'a> {
+    /// Creates an async-capable machine that owns its execution state and
+    /// control. The caller may hold it across an await between `step` and
+    /// `resume` without retaining a borrow into a fixture or packet buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExecutionError::InvalidEntry`] when `entry` is not present in
+    /// the validated program.
+    pub fn new(
+        program: &'a ValidatedProgram,
+        entry: SequenceId,
+        state: ExecutionState,
+        control: ExecutionControl,
+    ) -> Result<Self, ExecutionError> {
+        if program.sequence(entry).is_none() {
+            return Err(ExecutionError::InvalidEntry(entry));
+        }
+        Ok(Self {
+            program,
+            scopes: vec![Scope::sequence(ScopeKind::Root, entry)],
+            state: StateSlot::Owned(Box::new(state)),
+            control: ControlSlot::Owned(control),
+            status: MachineStatus::Running,
+        })
+    }
+
+    /// Creates the same machine over caller-owned state for the legacy sync
+    /// adapter. Control flow is shared with [`ExecutionMachine::new`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExecutionError::InvalidEntry`] when `entry` is not present in
+    /// the validated program.
+    pub fn borrowed(
+        program: &'a ValidatedProgram,
+        entry: SequenceId,
+        state: &'a mut ExecutionState,
+        control: &'a mut ExecutionControl,
+    ) -> Result<Self, ExecutionError> {
+        if program.sequence(entry).is_none() {
+            return Err(ExecutionError::InvalidEntry(entry));
+        }
+        Ok(Self {
+            program,
+            scopes: vec![Scope::sequence(ScopeKind::Root, entry)],
+            state: StateSlot::Borrowed(state),
+            control: ControlSlot::Borrowed(control),
+            status: MachineStatus::Running,
+        })
+    }
+
+    #[must_use]
+    pub fn state(&self) -> &ExecutionState {
+        self.state.as_ref()
+    }
+
+    pub fn state_mut(&mut self) -> &mut ExecutionState {
+        self.state.as_mut()
+    }
+
+    #[must_use]
+    pub fn control(&self) -> &ExecutionControl {
+        self.control.as_ref()
+    }
+
+    pub fn control_mut(&mut self) -> &mut ExecutionControl {
+        self.control.as_mut()
+    }
+
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
+        matches!(
+            self.status,
+            MachineStatus::Complete(_) | MachineStatus::Failed
+        )
+    }
+
+    /// Runs synchronous sequence work until an external operation or terminal
+    /// completion is reached.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed execution, cancellation, budget, or machine-state
+    /// error. A machine is terminal after an execution error.
+    pub fn step(&mut self) -> Result<MachineStep, ExecutionError> {
+        match self.status {
+            MachineStatus::Running => {}
+            MachineStatus::Waiting(executable) => {
+                return Err(ExecutionError::WaitingForExternal(executable));
+            }
+            MachineStatus::Complete(_) | MachineStatus::Failed => {
+                return Err(ExecutionError::Finished);
+            }
+        }
+        let result = self.drive(None);
+        if result.is_err() {
+            self.status = MachineStatus::Failed;
+        }
+        result
+    }
+
+    /// Supplies the result of the exact pending external operation and drives
+    /// the same frames to the next external operation or final completion.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed execution error when the response identity is wrong,
+    /// no dispatch is pending, the machine is terminal, or the resumed
+    /// outcome cannot be applied.
+    pub fn resume(
+        &mut self,
+        executable: ExecutableId,
+        outcome: Result<ExecutorOutcome, ExecutorError>,
+    ) -> Result<MachineStep, ExecutionError> {
+        let expected = match self.status {
+            MachineStatus::Waiting(expected) => expected,
+            MachineStatus::Running => {
+                return Err(ExecutionError::ResumeNotPending(executable));
+            }
+            MachineStatus::Complete(_) | MachineStatus::Failed => {
+                return Err(ExecutionError::Finished);
+            }
+        };
+        if expected != executable {
+            return Err(ExecutionError::InvalidResume {
+                expected,
+                received: executable,
+            });
+        }
+        self.status = MachineStatus::Running;
+        let ready = match outcome {
+            Ok(outcome) => {
+                let scopes = &mut self.scopes;
+                let state = self.state.as_mut();
+                executor_outcome_to_step(outcome, scopes, state)
+            }
+            Err(error) => Err(ExecutionError::Executor(error)),
+        };
+        let ready = match ready {
+            Ok(ready) => ready,
+            Err(error) => {
+                self.status = MachineStatus::Failed;
+                return Err(error);
+            }
+        };
+        let result = self.drive(Some(ready));
+        if result.is_err() {
+            self.status = MachineStatus::Failed;
+        }
+        result
+    }
+
+    fn drive(&mut self, mut ready: Option<Step>) -> Result<MachineStep, ExecutionError> {
+        loop {
+            let step = if let Some(step) = ready.take() {
+                step
+            } else {
+                let state = self.state.as_mut();
+                let control = self.control.as_mut();
+                next_step(self.program, &mut self.scopes, state, control)?
+            };
+            match step {
+                Step::Continue => {}
+                Step::Dispatch(executable) => {
+                    self.status = MachineStatus::Waiting(executable);
+                    return Ok(MachineStep::Dispatch(ExternalDispatch { executable }));
+                }
+                Step::Complete(signal) => {
+                    if let Some(completion) = finish_scope(&mut self.scopes, signal) {
+                        self.status = MachineStatus::Complete(completion);
+                        return Ok(MachineStep::Complete(completion));
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Executes one validated sequence using caller-owned state and control.
@@ -139,18 +410,19 @@ pub fn execute(
     state: &mut ExecutionState,
     control: &mut ExecutionControl,
 ) -> Result<ExecutionCompletion, ExecutionError> {
-    if program.sequence(entry).is_none() {
-        return Err(ExecutionError::InvalidEntry(entry));
-    }
-
-    let mut scopes = vec![Scope::sequence(ScopeKind::Root, entry)];
+    let mut machine = ExecutionMachine::borrowed(program, entry, state, control)?;
     loop {
-        match next_step(program, &mut scopes, state, control)? {
-            Step::Continue => {}
-            Step::Complete(signal) => {
-                if let Some(completion) = finish_scope(&mut scopes, signal) {
-                    return Ok(completion);
-                }
+        match machine.step()? {
+            MachineStep::Complete(completion) => return Ok(completion),
+            MachineStep::Dispatch(dispatch) => {
+                let fixture = program.fixture(dispatch.executable()).ok_or(
+                    ExecutionError::ExternalDispatchUnsupported(dispatch.executable()),
+                )?;
+                let outcome = fixture
+                    .executable
+                    .execute(machine.state_mut())
+                    .map_err(ExecutionError::Executor)?;
+                machine.resume(dispatch.executable(), Ok(outcome))?;
             }
         }
     }
@@ -206,6 +478,7 @@ enum ScopeSignal {
 enum Step {
     Continue,
     Complete(ScopeSignal),
+    Dispatch(ExecutableId),
 }
 
 fn next_step(
@@ -356,11 +629,22 @@ fn dispatch_executable(
         ValidatedExecutable::Fixture { target } => {
             dispatch_fixture(program, *target, scopes, state)
         }
+        ValidatedExecutable::External { target } => dispatch_external(program, *target),
         ValidatedExecutable::Inline { target } => {
             scopes.push(Scope::sequence(ScopeKind::Inline, *target));
             Ok(Step::Continue)
         }
     }
+}
+
+fn dispatch_external(
+    program: &ValidatedProgram,
+    executable: ExecutableId,
+) -> Result<Step, ExecutionError> {
+    if program.external(executable).is_none() {
+        return Err(ExecutionError::InvalidFixture(executable));
+    }
+    Ok(Step::Dispatch(executable))
 }
 
 fn dispatch_fixture(

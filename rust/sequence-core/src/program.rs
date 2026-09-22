@@ -51,6 +51,22 @@ impl FixtureRef {
     }
 }
 
+/// A symbolic reference to an externally fulfilled executable.
+///
+/// External executables are resolved by the sequence program just like local
+/// fixtures, but their operation is fulfilled by the host after the machine
+/// yields a dispatch request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExternalRef {
+    pub name: String,
+}
+
+impl ExternalRef {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
 /// A typed matcher result. The dispatcher applies the optional mutation after
 /// the matcher returns; matchers never receive mutable state.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -180,6 +196,7 @@ pub enum ExecutableSpec {
     Exit,
     Try { target: ExecutableTargetSpec },
     Fixture { target: FixtureRef },
+    External { target: ExternalRef },
     Unknown { kind: String },
 }
 
@@ -255,10 +272,22 @@ impl FixtureSpec {
     }
 }
 
+/// One named executable fulfilled outside the synchronous sequence crate.
+pub struct ExternalSpec {
+    pub name: String,
+}
+
+impl ExternalSpec {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
 /// The unvalidated program input model.
 pub struct ProgramSpec {
     pub sequences: Vec<SequenceSpec>,
     pub fixtures: Vec<FixtureSpec>,
+    pub externals: Vec<ExternalSpec>,
 }
 
 impl ProgramSpec {
@@ -267,7 +296,14 @@ impl ProgramSpec {
         Self {
             sequences,
             fixtures,
+            externals: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_externals(mut self, externals: Vec<ExternalSpec>) -> Self {
+        self.externals = externals;
+        self
     }
 
     /// Validates names, targets, matcher kinds, executable kinds and RCODEs,
@@ -278,9 +314,14 @@ impl ProgramSpec {
     /// Returns [`ProgramError`] when any definition is ambiguous, unknown or
     /// unresolved. No execution state is involved in this operation.
     pub fn validate(self) -> Result<ValidatedProgram, ProgramError> {
+        let Self {
+            sequences,
+            fixtures: fixture_specs,
+            externals: external_specs,
+        } = self;
         let mut sequence_ids = BTreeMap::new();
-        let mut sequence_specs = Vec::with_capacity(self.sequences.len());
-        for (index, sequence) in self.sequences.into_iter().enumerate() {
+        let mut sequence_specs = Vec::with_capacity(sequences.len());
+        for (index, sequence) in sequences.into_iter().enumerate() {
             if sequence.name.is_empty() {
                 return Err(ProgramError::EmptyName { kind: "sequence" });
             }
@@ -295,7 +336,7 @@ impl ProgramSpec {
 
         let mut fixture_ids = BTreeMap::new();
         let mut fixtures = BTreeMap::new();
-        for (index, fixture) in self.fixtures.into_iter().enumerate() {
+        for (index, fixture) in fixture_specs.into_iter().enumerate() {
             if fixture.name.is_empty() {
                 return Err(ProgramError::EmptyName { kind: "fixture" });
             }
@@ -313,6 +354,29 @@ impl ProgramSpec {
             );
         }
 
+        let mut external_ids = BTreeMap::new();
+        let mut externals = BTreeMap::new();
+        for (index, external) in external_specs.into_iter().enumerate() {
+            if external.name.is_empty() {
+                return Err(ProgramError::EmptyName { kind: "external" });
+            }
+            if fixture_ids.contains_key(&external.name)
+                || external_ids
+                    .insert(external.name.clone(), ExecutableId(fixtures.len() + index))
+                    .is_some()
+            {
+                return Err(ProgramError::DuplicateExternalName(external.name));
+            }
+            let id = ExecutableId(fixtures.len() + index);
+            externals.insert(
+                id,
+                ValidatedExternal {
+                    id,
+                    name: external.name,
+                },
+            );
+        }
+
         let user_sequence_count = sequence_specs.len();
         let mut sequence_slots: Vec<Option<ValidatedSequence>> =
             (0..user_sequence_count).map(|_| None).collect();
@@ -326,6 +390,7 @@ impl ProgramSpec {
                 sequence.rules,
                 &sequence_ids,
                 &fixture_ids,
+                &external_ids,
                 &mut sequence_slots,
                 &mut inline_counter,
             )?;
@@ -347,6 +412,7 @@ impl ProgramSpec {
         Ok(ValidatedProgram {
             sequences,
             fixtures,
+            externals,
             sequence_ids,
         })
     }
@@ -373,6 +439,12 @@ pub struct ValidatedFixture {
     pub executable: Box<dyn Executor>,
 }
 
+/// A validated external executable catalog entry.
+pub struct ValidatedExternal {
+    pub id: ExecutableId,
+    pub name: String,
+}
+
 /// Runtime executable variants with no unresolved names.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ValidatedExecutable {
@@ -384,6 +456,7 @@ pub enum ValidatedExecutable {
     Exit,
     Try { target: ExecutableTarget },
     Fixture { target: ExecutableId },
+    External { target: ExecutableId },
     Inline { target: SequenceId },
 }
 
@@ -391,6 +464,7 @@ pub enum ValidatedExecutable {
 pub struct ValidatedProgram {
     pub sequences: Vec<ValidatedSequence>,
     pub fixtures: BTreeMap<ExecutableId, ValidatedFixture>,
+    pub externals: BTreeMap<ExecutableId, ValidatedExternal>,
     sequence_ids: BTreeMap<String, SequenceId>,
 }
 
@@ -409,6 +483,11 @@ impl ValidatedProgram {
     pub fn fixture(&self, id: ExecutableId) -> Option<&ValidatedFixture> {
         self.fixtures.get(&id)
     }
+
+    #[must_use]
+    pub fn external(&self, id: ExecutableId) -> Option<&ValidatedExternal> {
+        self.externals.get(&id)
+    }
 }
 
 /// Deterministic program-construction failures.
@@ -417,8 +496,10 @@ pub enum ProgramError {
     EmptyName { kind: &'static str },
     DuplicateSequenceName(String),
     DuplicateFixtureName(String),
+    DuplicateExternalName(String),
     MissingSequence(String),
     MissingFixture(String),
+    MissingExternal(String),
     MissingMatcher,
     UnknownMatcher(String),
     UnknownExecutable(String),
@@ -430,6 +511,7 @@ fn normalize_rules(
     rules: Vec<RuleSpec>,
     sequence_ids: &BTreeMap<String, SequenceId>,
     fixture_ids: &BTreeMap<String, ExecutableId>,
+    external_ids: &BTreeMap<String, ExecutableId>,
     sequence_slots: &mut Vec<Option<ValidatedSequence>>,
     inline_counter: &mut usize,
 ) -> Result<Vec<ValidatedRule>, ProgramError> {
@@ -445,6 +527,7 @@ fn normalize_rules(
                 rule.exec,
                 sequence_ids,
                 fixture_ids,
+                external_ids,
                 sequence_slots,
                 inline_counter,
             )?;
@@ -480,6 +563,7 @@ fn normalize_executable_list(
     exec: Option<Vec<ExecutableSpec>>,
     sequence_ids: &BTreeMap<String, SequenceId>,
     fixture_ids: &BTreeMap<String, ExecutableId>,
+    external_ids: &BTreeMap<String, ExecutableId>,
     sequence_slots: &mut Vec<Option<ValidatedSequence>>,
     inline_counter: &mut usize,
 ) -> Result<Option<ValidatedExecutable>, ProgramError> {
@@ -494,7 +578,7 @@ fn normalize_executable_list(
             .into_iter()
             .next()
             .ok_or(ProgramError::InternalInvariant)?;
-        return resolve_executable(executable, sequence_ids, fixture_ids);
+        return resolve_executable(executable, sequence_ids, fixture_ids, external_ids);
     }
 
     let target = SequenceId(sequence_slots.len());
@@ -507,6 +591,7 @@ fn normalize_executable_list(
         inline_rules,
         sequence_ids,
         fixture_ids,
+        external_ids,
         sequence_slots,
         inline_counter,
     )?;
@@ -524,6 +609,7 @@ fn resolve_executable(
     executable: ExecutableSpec,
     sequence_ids: &BTreeMap<String, SequenceId>,
     fixture_ids: &BTreeMap<String, ExecutableId>,
+    external_ids: &BTreeMap<String, ExecutableId>,
 ) -> Result<Option<ValidatedExecutable>, ProgramError> {
     let resolved = match executable {
         ExecutableSpec::Accept => ValidatedExecutable::Accept,
@@ -544,6 +630,9 @@ fn resolve_executable(
         },
         ExecutableSpec::Fixture { target } => ValidatedExecutable::Fixture {
             target: resolve_fixture(target, fixture_ids)?,
+        },
+        ExecutableSpec::External { target } => ValidatedExecutable::External {
+            target: resolve_external(target, external_ids)?,
         },
         ExecutableSpec::Unknown { kind } => return Err(ProgramError::UnknownExecutable(kind)),
     };
@@ -568,6 +657,16 @@ fn resolve_fixture(
         .get(&target.name)
         .copied()
         .ok_or(ProgramError::MissingFixture(target.name))
+}
+
+fn resolve_external(
+    target: ExternalRef,
+    external_ids: &BTreeMap<String, ExecutableId>,
+) -> Result<ExecutableId, ProgramError> {
+    external_ids
+        .get(&target.name)
+        .copied()
+        .ok_or(ProgramError::MissingExternal(target.name))
 }
 
 fn resolve_target(
