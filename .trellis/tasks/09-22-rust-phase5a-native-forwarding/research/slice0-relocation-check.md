@@ -5,6 +5,8 @@ Task: `rust-phase5a-native-forwarding`
 Planning/implementation source HEAD before Slice 0 edits:
 `a5aef2305ef44614753c2de26d4003526f78ade4`
 
+Slice 0 implementation commit: `a884706`
+
 ## Relocation contract
 
 The archived baseline remains read-only:

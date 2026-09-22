@@ -76,6 +76,31 @@ Request `SLICE 0: PASS` with confirmation that only the runner default/report
 physical links changed, the historical manifest SHA is unchanged, and no
 benchmark or product path changed. A PASS authorizes Slice 1 only.
 
+### Slice 0 execution record
+
+Commit: `a884706` (`chore(phase5a): relocate baseline manifest entrypoint`).
+
+The runner now resolves the archived manifest by default or an explicit
+`MANIFEST_PATH`; the report says `FINAL: PASS — archived baseline` and points
+current physical evidence references at the archive. The archived manifest
+SHA, frozen environment file, 36 frozen raw-evidence directories, baseline
+configs/workloads, historical runner hash, and raw provenance were not edited.
+
+Checks:
+
+```text
+bash -n scripts/run-phase5a-baseline.sh                 PASS
+archived manifest SHA-256 and path assertions           PASS
+environment-frozen.json present; frozen-* count = 36    PASS
+official runner / measurement / VM / SSH                NOT RUN
+task.py validate rust-phase5a-native-forwarding          PASS
+git diff --check                                         PASS
+```
+
+The exact changed paths are the Slice 0 allowlist plus this task's relocation
+record. The task remains `in_progress` and is stopped here pending root
+`SLICE 0: PASS`.
+
 ## 2. Slice 1 — canonical sequence suspension/resume
 
 ### Allowlist
