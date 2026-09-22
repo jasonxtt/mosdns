@@ -9,6 +9,13 @@ authorized Slice 3 only. The UDP implementation was committed as:
 0efb9db feat(native-host): add phase5a UDP forwarding path
 ```
 
+The first root review of that commit returned `SLICE 3: FAIL` with P0=0,
+P1=2, P2=0. The bounded remediation was committed as:
+
+```text
+db9c270 fix(native-host): close UDP tasks on cancellation
+```
+
 The product diff is limited to:
 
 ```text
@@ -49,6 +56,18 @@ close, listener release, and clean rebind. A private unit test additionally
 drives the compiled sequence to completion without setting a response and
 verifies the final mapping is valid REFUSED.
 
+The remediation closes two lifecycle gaps identified by root review:
+
+1. `UdpServer::serve` now reaps completed request results while admission is
+   active. A task failure records the first error and cancels admission, but
+   teardown still drains every remaining task and closes the existing upstream
+   before returning the error.
+2. The final UDP write goes through a cancellation-first `tokio::select!`
+   commit helper. A deterministic `Notify` gate cancels after response
+   preparation but before send selection and proves no datagram is written.
+   Unit coverage also proves 128 completed tasks are reaped and that a failed
+   task cannot skip a remaining task or upstream close.
+
 ## Required checks
 
 ```text
@@ -59,7 +78,7 @@ cargo test --manifest-path rust/native-host/Cargo.toml --test w1_udp --locked
   PASS: 4 tests
 
 cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked
-  PASS: 9 unit/integration tests
+  PASS: 12 unit tests, 2 integration targets (4 integration tests)
 
 cargo clippy --manifest-path rust/native-host/Cargo.toml --all-targets --locked -- -D warnings
   PASS
