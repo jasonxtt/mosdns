@@ -1,4 +1,5 @@
 use std::fmt;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -69,11 +70,18 @@ impl UdpServer {
         let mut tasks = JoinSet::new();
         let mut packet = vec![0_u8; MAX_UDP_PACKET];
         let mut receive_error = None;
+        let mut task_error = None;
 
         loop {
+            let has_tasks = !tasks.is_empty();
             tokio::select! {
                 biased;
                 () = shutdown.cancelled() => break,
+                joined = reap_one_task(&mut tasks, &mut task_error), if has_tasks => {
+                    if joined && task_error.is_some() {
+                        shutdown.cancel();
+                    }
+                }
                 received = self.socket.recv_from(&mut packet) => {
                     match received {
                         Ok((length, peer)) => {
@@ -107,16 +115,7 @@ impl UdpServer {
         }
 
         shutdown.cancel();
-        while let Some(result) = tasks.join_next().await {
-            if let Err(error) = result {
-                return Err(UdpServerError::Task(error.to_string()));
-            }
-        }
-        let _ = self.forward.upstream().close().await;
-        if let Some(error) = receive_error {
-            return Err(UdpServerError::Receive(error));
-        }
-        Ok(())
+        finish_server(&self.forward, &mut tasks, &mut task_error, receive_error).await
     }
 }
 
@@ -151,7 +150,78 @@ async fn process_request(
     let Ok(framed) = frame_response(&response, FrameMode::Udp) else {
         return;
     };
-    let _ = socket.send_to(&framed, peer).await;
+    let _ = send_response(socket, framed, peer, request_shutdown).await;
+}
+
+async fn send_response(
+    socket: Arc<UdpSocket>,
+    response: Vec<u8>,
+    peer: SocketAddr,
+    request_shutdown: TransportCancellation,
+) -> bool {
+    send_response_after_gate(
+        socket,
+        response,
+        peer,
+        request_shutdown,
+        std::future::ready(()),
+    )
+    .await
+}
+
+async fn send_response_after_gate<F>(
+    socket: Arc<UdpSocket>,
+    response: Vec<u8>,
+    peer: SocketAddr,
+    request_shutdown: TransportCancellation,
+    before_send: F,
+) -> bool
+where
+    F: Future<Output = ()>,
+{
+    before_send.await;
+    tokio::select! {
+        biased;
+        () = request_shutdown.cancelled() => false,
+        result = socket.send_to(&response, peer) => result.is_ok(),
+    }
+}
+
+fn record_task_result(result: Result<(), tokio::task::JoinError>, task_error: &mut Option<String>) {
+    if let Err(error) = result {
+        if task_error.is_none() {
+            *task_error = Some(error.to_string());
+        }
+    }
+}
+
+async fn reap_one_task(tasks: &mut JoinSet<()>, task_error: &mut Option<String>) -> bool {
+    let Some(result) = tasks.join_next().await else {
+        return false;
+    };
+    record_task_result(result, task_error);
+    true
+}
+
+async fn drain_tasks(tasks: &mut JoinSet<()>, task_error: &mut Option<String>) {
+    while reap_one_task(tasks, task_error).await {}
+}
+
+async fn finish_server(
+    forward: &ForwardAdapter,
+    tasks: &mut JoinSet<()>,
+    task_error: &mut Option<String>,
+    receive_error: Option<std::io::Error>,
+) -> Result<(), UdpServerError> {
+    drain_tasks(tasks, task_error).await;
+    let _ = forward.upstream().close().await;
+    if let Some(error) = task_error {
+        return Err(UdpServerError::Task(error.clone()));
+    }
+    if let Some(error) = receive_error {
+        return Err(UdpServerError::Receive(error));
+    }
+    Ok(())
 }
 
 async fn execute_request(
@@ -267,10 +337,23 @@ impl std::error::Error for UdpServerError {}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
     use mosdns_dns_core::{parse_query, validate_response};
     use mosdns_sequence_core::{ExecutionControl, ExecutionState, ExecutorOutcome, MachineStep};
+    use mosdns_upstream_core::{LifecycleState, TransportCancellation};
+    use tokio::net::UdpSocket;
+    use tokio::sync::Notify;
+    use tokio::task::JoinSet;
 
-    use super::{REFUSED, response_from_state};
+    use super::{
+        REFUSED, drain_tasks, finish_server, reap_one_task, response_from_state,
+        send_response_after_gate,
+    };
+    use crate::assembly::{HostAssembly, HostRuntime};
     use crate::config::compile_yaml;
 
     const UDP_CONFIG: &str =
@@ -300,5 +383,92 @@ mod tests {
         let response = response_from_state(&machine, &header, &question);
         validate_response(&response).expect("REFUSED response must be valid");
         assert_eq!(response[3] & 0x0f, REFUSED);
+    }
+
+    #[test]
+    fn completed_tasks_are_reaped_and_failures_do_not_skip_remaining_tasks() {
+        let runtime = HostRuntime::new().expect("test runtime");
+        let observed = Arc::new(AtomicBool::new(false));
+        runtime.block_on(async {
+            let mut tasks = JoinSet::new();
+            for _ in 0..128 {
+                tasks.spawn_local(async {});
+            }
+            let mut task_error = None;
+            let mut reaped = 0;
+            while reap_one_task(&mut tasks, &mut task_error).await {
+                reaped += 1;
+            }
+            assert_eq!(reaped, 128);
+            assert!(tasks.is_empty());
+            assert!(task_error.is_none());
+
+            let panic_task = tasks.spawn_local(async {
+                panic!("intentional task failure");
+            });
+            let observed_by_task = Arc::clone(&observed);
+            tasks.spawn_local(async move {
+                observed_by_task.store(true, Ordering::SeqCst);
+            });
+            let mut task_error = None;
+            drain_tasks(&mut tasks, &mut task_error).await;
+            assert!(panic_task.is_finished());
+            assert!(observed.load(Ordering::SeqCst));
+            assert!(task_error.is_some());
+            assert!(tasks.is_empty());
+        });
+    }
+
+    #[test]
+    fn task_failure_still_closes_upstream_after_full_drain() {
+        let runtime = HostRuntime::new().expect("test runtime");
+        let host = HostAssembly::from_yaml(UDP_CONFIG).expect("frozen UDP config");
+        runtime.block_on(async {
+            let mut tasks = JoinSet::new();
+            tasks.spawn_local(async {
+                panic!("intentional task failure");
+            });
+            let mut task_error = None;
+            let result = finish_server(host.forward(), &mut tasks, &mut task_error, None).await;
+            assert!(matches!(result, Err(super::UdpServerError::Task(_))));
+            assert!(tasks.is_empty());
+            assert_eq!(
+                host.forward().upstream().lifecycle_state(),
+                LifecycleState::Closed
+            );
+        });
+    }
+
+    #[test]
+    fn cancellation_wins_at_the_pre_send_commit_gate() {
+        let runtime = HostRuntime::new().expect("test runtime");
+        runtime.block_on(async {
+            let sender = Arc::new(UdpSocket::bind("127.0.0.1:0").await.expect("sender socket"));
+            let receiver = UdpSocket::bind("127.0.0.1:0")
+                .await
+                .expect("receiver socket");
+            let peer = receiver.local_addr().expect("receiver address");
+            let cancellation = TransportCancellation::new();
+            let gate = Arc::new(Notify::new());
+            let send = tokio::task::spawn_local(send_response_after_gate(
+                sender,
+                vec![0xaa, 0xbb],
+                peer,
+                cancellation.clone(),
+                Arc::clone(&gate).notified_owned(),
+            ));
+
+            cancellation.cancel();
+            gate.notify_one();
+            assert!(!send.await.expect("send task"));
+            assert!(
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(20),
+                    receiver.recv_from(&mut [0_u8; 8]),
+                )
+                .await
+                .is_err()
+            );
+        });
     }
 }
