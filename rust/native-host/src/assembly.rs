@@ -8,6 +8,7 @@ use mosdns_upstream_core::{
 };
 
 use crate::config::{CompiledConfig, ConfigError, compile_yaml};
+use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
 
 /// Host-side options reserved for tests and the later request runner.
@@ -162,7 +163,39 @@ impl HostAssembly {
         let server = self.block_on(UdpServer::bind_configured(self))?;
         self.block_on(server.serve(TransportCancellation::new()))
     }
+
+    /// Binds and serves the configured TCP listener.
+    pub fn run_tcp(&self) -> Result<(), TcpServerError> {
+        let server = self.block_on(TcpServer::bind_configured(self))?;
+        self.block_on(server.serve(TransportCancellation::new()))
+    }
+
+    /// Runs the listener selected by the strictly compiled configuration.
+    pub fn run(&self) -> Result<(), HostRunError> {
+        match self.config.listener.kind {
+            crate::config::ListenerKind::Udp => self.run_udp().map_err(HostRunError::Udp),
+            crate::config::ListenerKind::Tcp => self.run_tcp().map_err(HostRunError::Tcp),
+        }
+    }
 }
+
+/// Listener failures returned by the native host's small runtime entrypoint.
+#[derive(Debug)]
+pub enum HostRunError {
+    Udp(UdpServerError),
+    Tcp(TcpServerError),
+}
+
+impl std::fmt::Display for HostRunError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Udp(error) => error.fmt(formatter),
+            Self::Tcp(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for HostRunError {}
 
 /// The only forward adapter owned by the native host. It delegates request
 /// validation and exchange execution to `upstream-core`; callers supply the

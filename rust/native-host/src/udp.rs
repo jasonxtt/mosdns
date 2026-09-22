@@ -195,7 +195,10 @@ fn record_task_result(result: Result<(), tokio::task::JoinError>, task_error: &m
     }
 }
 
-async fn reap_one_task(tasks: &mut JoinSet<()>, task_error: &mut Option<String>) -> bool {
+pub(crate) async fn reap_one_task(
+    tasks: &mut JoinSet<()>,
+    task_error: &mut Option<String>,
+) -> bool {
     let Some(result) = tasks.join_next().await else {
         return false;
     };
@@ -203,7 +206,7 @@ async fn reap_one_task(tasks: &mut JoinSet<()>, task_error: &mut Option<String>)
     true
 }
 
-async fn drain_tasks(tasks: &mut JoinSet<()>, task_error: &mut Option<String>) {
+pub(crate) async fn drain_tasks(tasks: &mut JoinSet<()>, task_error: &mut Option<String>) {
     while reap_one_task(tasks, task_error).await {}
 }
 
@@ -224,7 +227,7 @@ async fn finish_server(
     Ok(())
 }
 
-async fn execute_request(
+pub(crate) async fn execute_request(
     config: &CompiledConfig,
     forward: &ForwardAdapter,
     options: &HostOptions,

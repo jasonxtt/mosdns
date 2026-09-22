@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — Slice 3 remediation complete; awaiting root re-review**.
+Status: **in progress — Slice 4 TCP implementation complete; awaiting final root review**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -390,8 +390,8 @@ receive loop, drains all remaining task results, closes upstream before
 returning either task or receive errors, and uses a cancellation-first
 commit-aware send helper. Deterministic tests cover 128 completed-task
 reaps, failure plus remaining-task drain and upstream close, and cancellation
-at a pre-send gate. The task is stopped here pending the explicit root
-`SLICE 3: PASS`; Slice 4 is not authorized by this record.
+at a pre-send gate. Root re-review in conversation `000` returned
+`SLICE 3: PASS` with no new findings and authorized Slice 4.
 
 ## 5. Slice 4 — W1 TCP and final stop
 
@@ -423,6 +423,40 @@ cutover, a new benchmark, or a new task.
 5. RED: run all final focused/workspace gates and an exact path audit.
 6. GREEN: remediate only findings within the frozen allowlist; do not widen
    scope after the final gate.
+
+## Slice 4 execution record
+
+The W1 TCP implementation is contained in the existing native-host package;
+no dependency or lockfile change was needed. `TcpServer` owns one Tokio
+listener and a local join registry. Each accepted connection receives a child
+cancellation scope, reads exact two-byte big-endian DNS frames with a fresh
+`idle_timeout: 2` budget per frame, and closes only the affected connection on
+EOF, partial framing, zero-length framing, malformed DNS, or client
+disconnect. Valid frames run the same `execute_request` sequence path as UDP,
+one request at a time per connection, while separate connections remain
+concurrent. Responses use `dns-core::frame_response(..., FrameMode::Stream)`
+and are written through a cancellation-first gate.
+
+The supervisor stops admission, cancels and drains every connection task, then
+closes the existing upstream owner before returning. The integration target
+`rust/native-host/tests/w1_tcp.rs` uses an independent loopback TCP upstream
+and covers positive A, NXDOMAIN, fragmented request framing, sequential
+requests on one connection, concurrent connections, idle timeout, stalled
+upstream to SERVFAIL, partial-frame EOF isolation, client disconnect, and
+shutdown/rebind.
+
+Focused checks completed locally:
+
+```text
+cargo fmt --manifest-path rust/Cargo.toml --all -- --check                 PASS
+cargo test --manifest-path rust/native-host/Cargo.toml --test w1_tcp --locked PASS (5 tests)
+cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PASS (12 unit + 3 integration targets, 9 integration tests)
+cargo clippy --manifest-path rust/native-host/Cargo.toml --all-targets --locked -- -D warnings PASS
+```
+
+No browser, VM, benchmark, deployment, or historical baseline mutation was
+performed. Final workspace-wide checks and the separately authorized Linux
+W1 correctness evidence remain part of the final gate below.
 
 ### Required checks
 
