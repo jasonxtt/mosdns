@@ -45,7 +45,7 @@
 | P23 | `aliapi` | [plugin/executable/aliapi](../../plugin/executable/aliapi/) | 无逐插件 native 验收证据 | 5B 查询 + 5C API/状态/观测 |
 | P24 | `arbitrary` | [plugin/executable/arbitrary](../../plugin/executable/arbitrary/) | 无逐插件 native 验收证据 | 5B |
 | P25 | `black_hole` | [plugin/executable/black_hole](../../plugin/executable/black_hole/) | 无逐插件 native 验收证据 | 5B |
-| P26 | `cache` | [plugin/executable/cache](../../plugin/executable/cache/) | cache-core/Phase 1，dump/ABI 局部契约 | 5A 子集 -> 5B；5C API/持久化 |
+| P26 | `cache` | [plugin/executable/cache](../../plugin/executable/cache/) | cache-core/Phase 1；5A bounded W2 native-host/cache adapter；dump/ABI 局部契约 | 5A 子集 -> 5B；5C API/持久化 |
 | P27 | `cname_remover` | [plugin/executable/cname_remover](../../plugin/executable/cname_remover/) | 无逐插件 native 验收证据 | 5B |
 | P28 | `debug_print` | [plugin/executable/debug_print](../../plugin/executable/debug_print/) | 无逐插件 native 验收证据 | 5B |
 | P29 | `domain_output` | [plugin/executable/domain_output](../../plugin/executable/domain_output/) | 无逐插件 native 验收证据 | 5B |
@@ -141,6 +141,17 @@ switch1–17 逐项保留配置和持久化语义；位号必须遵守 [config-n
 | C17 | 本地/远端引用资源和配置包：[config-notes](../ai/config-notes.md)、外部配置包仓库 | 5A 选取子集 -> 5B/5C | 记录实际包版本和文件边界，完整代表性配置可加载并运行；不能只使用手写最小 fixture 宣称全兼容 |
 
 C16 是未来对应任务需完成的兼容分类，不是本轮删减批准；若分类涉及用户可见行为改变，必须在该变更实现前取得用户决策。现有 fork 排除的 nft/eBPF 不进入本表，平台新增适配由总规划单独排期。
+
+### 6.1 5A bounded W2 evidence
+
+`rust-phase5a-native-cache` 的 Slice 3 在 reviewed source
+`b558d153cad9ad8e3ffaf18a6e2dde82329e32e0` 上完成了 Linux amd64 的
+strict-W2 correctness gate：单一 host-owned cache、plain UDP hit/miss/
+expiry、W1 UDP/TCP forwarding preservation，以及 Go cgo regression。证据
+与精确命令见 [task execution state](../../.trellis/tasks/09-22-rust-phase5a-native-cache/research/execution-state.md)。
+这只关闭表中 P26/C01/C02 的受限 5A 子集；完整 lazy/EDNS 产品语义、cache
+dump/持久化、API/WebUI/metrics、完整插件与跨模块组合仍保持“待验收”，归
+入后续 5B/5C/5D/Phase 6 门槛，不能由本次测试升级状态。
 
 ## 6. 跨功能组合与关闭规则
 
