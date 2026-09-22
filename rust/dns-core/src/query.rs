@@ -78,7 +78,7 @@ pub fn parse_question(packet: &[u8], offset: usize) -> Result<QuestionInfo, Quer
     if end > packet.len() {
         return Err(QueryParseError::TooShort);
     }
-    let qname_wire = packet[offset..next].to_vec();
+    let qname_wire = expanded_question_name(packet, offset)?;
     let qtype = u16::from_be_bytes([packet[next], packet[next + 1]]);
     let qclass = u16::from_be_bytes([packet[next + 2], packet[next + 3]]);
     Ok(QuestionInfo {
@@ -249,6 +249,53 @@ fn skip_name(packet: &[u8], offset: usize) -> Option<usize> {
 /// walker preserves that distinction.
 fn question_name_end(packet: &[u8], offset: usize) -> Result<usize, QueryParseError> {
     skip_name(packet, offset).ok_or(QueryParseError::BadName)
+}
+
+/// Returns a self-contained, uncompressed question name. `QuestionInfo` is
+/// later allowed to outlive the original query packet, so retaining a pointer
+/// whose target belonged to that packet would make response synthesis unsafe.
+fn expanded_question_name(packet: &[u8], offset: usize) -> Result<Vec<u8>, QueryParseError> {
+    const MAX_DOMAIN_NAME_WIRE_OCTETS: usize = 255;
+    const MAX_POINTERS: usize = 255_usize.div_ceil(2) - 2;
+
+    let mut expanded = Vec::new();
+    let mut pos = offset;
+    let mut pointers = 0usize;
+    loop {
+        let label = *packet.get(pos).ok_or(QueryParseError::TooShort)?;
+        match label & 0xc0 {
+            0 => {
+                if label == 0 {
+                    expanded.push(0);
+                    return Ok(expanded);
+                }
+                let label_len = usize::from(label);
+                let end = pos
+                    .checked_add(1 + label_len)
+                    .ok_or(QueryParseError::TooShort)?;
+                if end > packet.len()
+                    || expanded.len() + 1 + label_len > MAX_DOMAIN_NAME_WIRE_OCTETS
+                {
+                    return Err(QueryParseError::BadName);
+                }
+                expanded.push(label);
+                expanded.extend_from_slice(&packet[pos + 1..end]);
+                pos = end;
+            }
+            0xc0 => {
+                if pointers == MAX_POINTERS {
+                    return Err(QueryParseError::BadName);
+                }
+                let target = pointer_target(packet, pos).ok_or(QueryParseError::BadName)?;
+                if target == pos {
+                    return Err(QueryParseError::BadName);
+                }
+                pointers += 1;
+                pos = target;
+            }
+            _ => return Err(QueryParseError::BadName),
+        }
+    }
 }
 
 #[cfg(test)]
