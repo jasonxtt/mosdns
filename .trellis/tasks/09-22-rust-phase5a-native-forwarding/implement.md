@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — Slice 1 implementation**.
+Status: **in progress — Slice 2 implementation complete; awaiting root review**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -187,9 +187,33 @@ P2=1. The bounded remediation added the required owned-machine versus sync
 adapter outcome/state parity matrix (Continue/Return/Accept/Reject/Exit and
 ordinary error), nested-try parity, post-dispatch fuel/cancellation checks,
 and direct missing-entry coverage. It also corrected the `ExecutableId`
-catalog-entry documentation. The same Slice 1 checks were rerun; no Slice 2
-work has started. The implementation remains stopped pending the remediation
-root review.
+catalog-entry documentation. The same Slice 1 checks were rerun and the
+remediation root review returned `SLICE 1: PASS` with P0/P1/P2 all zero.
+That review authorized Slice 2 only.
+
+## Slice 2 execution record
+
+Implementation commit: `146b46e` (`feat(native-host): add strict phase5a config assembly`).
+
+The new `mosdns-native-host` package provides the exact `mosdns start -c` /
+`--config` CLI shape, duplicate-detecting strict YAML compilation, ordered-
+independent W1 graph validation, current-thread host runtime, and one
+`ForwardAdapter` delegating to the existing upstream request/context/exchange
+APIs. `HostAssembly` is deliberately pre-I/O: it constructs no listener and
+does not call an upstream exchange. The accepted frozen UDP/TCP YAML files
+compile unchanged; invalid fields, types, schemes, hostnames, ports, roles,
+tags, references, sequence forms, audit settings, and timeout forms fail
+before assembly.
+
+The narrowly scoped `dns-core::synthesize_response` helper and tests cover
+associated SERVFAIL/REFUSED ID, question, QR/RA, RCODE, and zero section
+counts. No second parser or general DNS builder was introduced.
+
+Slice 2 checks and dependency evidence are recorded in
+`research/slice2-config-check.md`. All required focused checks passed; no
+listener bind, network/VM/SSH run, benchmark, production integration, or
+historical baseline mutation was performed. The task is stopped here pending
+the explicit root `SLICE 2: PASS`; Slice 3 is not authorized by this record.
 
 ## 3. Slice 2 — native host config/CLI/assembly before I/O
 
