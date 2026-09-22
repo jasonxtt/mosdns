@@ -92,8 +92,9 @@ impl HostRuntime {
     }
 }
 
-/// Pre-I/O native host graph. It owns the single runtime and one async
-/// upstream owner, but deliberately does not bind the configured listener.
+/// Pre-I/O native host graph. It owns the single runtime and immutable
+/// executable-to-upstream catalog, but deliberately does not bind the
+/// configured listener.
 pub struct HostAssembly {
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
@@ -191,8 +192,8 @@ impl HostAssembly {
         Rc::clone(&self.cache)
     }
 
-    /// Binds and serves the configured UDP listener. TCP remains a later
-    /// slice, so a TCP configuration is rejected without binding anything.
+    /// Binds and serves the configured UDP listener without opening any
+    /// listener socket during assembly.
     pub fn run_udp(&self) -> Result<(), UdpServerError> {
         let server = self.block_on(UdpServer::bind_configured(self))?;
         self.block_on(server.serve(TransportCancellation::new()))
@@ -231,7 +232,7 @@ impl std::fmt::Display for HostRunError {
 
 impl std::error::Error for HostRunError {}
 
-/// The only forward adapter owned by the native host. It delegates request
+/// One forward adapter owned by the native host catalog. It delegates request
 /// validation and exchange execution to `upstream-core`; callers supply the
 /// runtime, deadline, and cancellation scope.
 pub struct ForwardAdapter {
@@ -240,8 +241,8 @@ pub struct ForwardAdapter {
 }
 
 /// Immutable executable-ID to upstream-owner catalog. W1/W2 populate one
-/// entry; later routing compilation can add distinct validated owners without
-/// introducing a fallback-to-first-upstream path.
+/// entry; W3 populates one entry per validated route without introducing a
+/// fallback-to-first-upstream path.
 pub struct ForwardCatalog {
     owners: BTreeMap<mosdns_sequence_core::ExecutableId, Rc<ForwardAdapter>>,
 }
@@ -327,7 +328,8 @@ impl ForwardAdapter {
     }
 
     /// Performs one caller-owned exchange on the caller's Tokio runtime.
-    /// This method is not invoked by Slice 2, so assembly remains pre-I/O.
+    /// Assembly remains pre-I/O; the request driver invokes this through the
+    /// executable catalog after a listener admits a request.
     pub async fn exchange(
         &self,
         query: &[u8],
@@ -414,11 +416,13 @@ mod tests {
         let configs = vec![
             ForwardConfig {
                 tag: "a".to_owned(),
+                upstream_tag: None,
                 endpoint: endpoint_a,
                 executable: ExecutableId(1),
             },
             ForwardConfig {
                 tag: "b".to_owned(),
+                upstream_tag: None,
                 endpoint: endpoint_b,
                 executable: ExecutableId(2),
             },

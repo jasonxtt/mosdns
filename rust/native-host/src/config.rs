@@ -1,12 +1,13 @@
+use std::collections::BTreeSet;
 use std::fmt;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::time::Duration;
 
 use mosdns_sequence_core::{
-    ExecutableId, ExecutableSpec, ExecutionControl, ExecutionError, ExecutionMachine,
-    ExecutionState, ExternalRef, ExternalSpec, ProgramSpec, RuleSpec, SequenceId, SequenceSpec,
-    ValidatedProgram,
+    DispatchMetadata, ExecutableId, ExecutableSpec, ExecutionControl, ExecutionError,
+    ExecutionMachine, ExecutionState, ExternalRef, ExternalSpec, MatcherSpecInput, ProgramSpec,
+    RuleSpec, SequenceId, SequenceSpec, ValidatedProgram,
 };
 use mosdns_upstream_core::{Endpoint, Transport};
 use serde::de::{self, Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
@@ -28,12 +29,15 @@ pub enum ListenerKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ForwardConfig {
     pub tag: String,
+    /// The upstream entry's explicit identity, present for the W3 graph.
+    pub upstream_tag: Option<String>,
     pub endpoint: Endpoint,
     pub executable: ExecutableId,
 }
 
 /// A compiled sequence containing the bounded external dispatches accepted by
-/// the native host (forward for W1, cache then forward for W2).
+/// the native host (forward for W1, cache then forward for W2, or the strict
+/// four-rule routing graph for W3).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SequenceConfig {
     pub tag: String,
@@ -134,10 +138,10 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
     root.reject_unknown(&["log", "plugins"], "$")?;
     let log = compile_log(root.required("log", "$")?)?;
     let plugins = expect_sequence(root.required("plugins", "$")?, "$.plugins")?;
-    if plugins.len() != 3 && plugins.len() != 4 {
+    if plugins.len() != 3 && plugins.len() != 4 && plugins.len() != 6 {
         return Err(ConfigError::new(
             "$.plugins",
-            "exactly one W1 forward, sequence, and listener or one W2 cache, forward, sequence, and UDP listener are required",
+            "exactly one W1 forward, sequence, and listener; one W2 cache, forward, sequence, and UDP listener; or one W3 domain_set, three forwards, sequence, and UDP listener are required",
         ));
     }
 
@@ -147,7 +151,9 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
     }
 
     let mut forward = None;
+    let mut forward_plugins = Vec::new();
     let mut cache = None;
+    let mut domain_set = None;
     let mut sequence = None;
     let mut listener = None;
     let mut tags: Vec<String> = Vec::with_capacity(decoded.len());
@@ -160,8 +166,14 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
         }
         tags.push(plugin.tag.clone());
         match plugin.kind.as_str() {
-            "forward" => assign_unique(&mut forward, plugin, "forward")?,
+            "forward" => {
+                if forward.is_none() {
+                    forward = Some(plugin.clone());
+                }
+                forward_plugins.push(plugin);
+            }
             "cache" => assign_unique(&mut cache, plugin, "cache")?,
+            "domain_set" => assign_unique(&mut domain_set, plugin, "domain_set")?,
             "sequence" => assign_unique(&mut sequence, plugin, "sequence")?,
             "udp_server" | "tcp_server" => {
                 if listener.is_some() {
@@ -181,11 +193,16 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
         }
     }
 
-    let forward = forward.ok_or_else(|| ConfigError::new("$.plugins", "missing forward plugin"))?;
     let sequence =
         sequence.ok_or_else(|| ConfigError::new("$.plugins", "missing sequence plugin"))?;
     let listener =
         listener.ok_or_else(|| ConfigError::new("$.plugins", "missing listener plugin"))?;
+
+    if plugins.len() == 6 || domain_set.is_some() || forward_plugins.len() > 1 {
+        return compile_w3(log, forward_plugins, domain_set, cache, sequence, listener);
+    }
+
+    let forward = forward.ok_or_else(|| ConfigError::new("$.plugins", "missing forward plugin"))?;
 
     let (forward_tag, endpoint) = compile_forward(&forward)?;
     if let Some(cache) = cache.as_ref() {
@@ -273,6 +290,7 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
 
     let forward_config = ForwardConfig {
         tag: forward_tag,
+        upstream_tag: None,
         endpoint,
         executable: forward_executable,
     };
@@ -348,6 +366,458 @@ fn compile_forward(plugin: &RawPlugin) -> Result<(String, Endpoint), ConfigError
     )?;
     let endpoint = parse_endpoint(&address, "$.plugins.forward.args.upstreams[0].addr")?;
     Ok((plugin.tag.clone(), endpoint))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum W3MatcherSpec {
+    Qname { domain_set: String },
+    ResponseIp(Ipv4Addr),
+    True,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum W3ExecSpec {
+    External(String),
+    ExternalExit(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct W3RuleSpec {
+    matcher: Option<W3MatcherSpec>,
+    executable: W3ExecSpec,
+}
+
+fn compile_w3(
+    log: LogLevel,
+    forwards: Vec<RawPlugin>,
+    domain_set: Option<RawPlugin>,
+    cache: Option<RawPlugin>,
+    sequence: RawPlugin,
+    listener: RawPlugin,
+) -> Result<CompiledConfig, ConfigError> {
+    if forwards.len() != 3 {
+        return Err(ConfigError::new(
+            "$.plugins",
+            "W3 requires exactly three forward plugins",
+        ));
+    }
+    if cache.is_some() {
+        return Err(ConfigError::new(
+            "$.plugins",
+            "W3 routing cannot be combined with cache",
+        ));
+    }
+    let domain_set = domain_set.ok_or_else(|| {
+        ConfigError::new("$.plugins", "W3 requires exactly one domain_set plugin")
+    })?;
+    let (domain_tag, domain) = compile_domain_set(&domain_set)?;
+
+    let listener = compile_listener(&listener, &sequence.tag)?;
+    if listener.kind != ListenerKind::Udp {
+        return Err(ConfigError::new(
+            "$.plugins.listener.type",
+            "W3 routing supports only a UDP listener",
+        ));
+    }
+    if listener.entry != sequence.tag {
+        return Err(ConfigError::new(
+            "$.plugins.listener.args.entry",
+            format!("unknown sequence reference `{}`", listener.entry),
+        ));
+    }
+
+    let mut forward_specs = Vec::with_capacity(forwards.len());
+    let mut upstream_tags = BTreeSet::new();
+    for (index, forward) in forwards.iter().enumerate() {
+        let (plugin_tag, upstream_tag, endpoint) = compile_w3_forward(forward, index)?;
+        if !upstream_tags.insert(upstream_tag.clone()) {
+            return Err(ConfigError::new(
+                "$.plugins",
+                format!("duplicate W3 upstream tag `{upstream_tag}`"),
+            ));
+        }
+        forward_specs.push((plugin_tag, upstream_tag, endpoint));
+    }
+
+    let rules = parse_w3_sequence(&sequence, &domain_tag)?;
+    let (a_tag, b_tag, c_tag, response_ip) = validate_w3_topology(&rules, &forward_specs)?;
+    let a_matcher = crate::matchers::FullQnameMatcher::new(&domain).map_err(|error| {
+        ConfigError::new(
+            "$.plugins[domain_set].args.exps[0]",
+            format!("invalid full-domain matcher: {error:?}"),
+        )
+    })?;
+    let response_matcher = crate::matchers::ResponseIpMatcher::ipv4(response_ip);
+    let external = |tag: &str| ExecutableSpec::External {
+        target: ExternalRef::new(tag),
+    };
+    let sequence_rules = vec![
+        RuleSpec::new(
+            vec![MatcherSpecInput::new(
+                Box::new(a_matcher),
+                false,
+                DispatchMetadata::None,
+            )],
+            Some(vec![external(&a_tag), ExecutableSpec::Exit]),
+        ),
+        RuleSpec::unconditional(Some(vec![external(&b_tag)])),
+        RuleSpec::new(
+            vec![MatcherSpecInput::new(
+                Box::new(response_matcher),
+                false,
+                DispatchMetadata::None,
+            )],
+            Some(vec![external(&a_tag), ExecutableSpec::Exit]),
+        ),
+        RuleSpec::new(
+            vec![MatcherSpecInput::new(
+                Box::new(crate::matchers::TrueMatcher),
+                false,
+                DispatchMetadata::None,
+            )],
+            Some(vec![external(&c_tag), ExecutableSpec::Exit]),
+        ),
+    ];
+    let program = ProgramSpec::new(
+        vec![SequenceSpec::new(sequence.tag.clone(), sequence_rules)],
+        Vec::new(),
+    )
+    .with_externals(
+        forward_specs
+            .iter()
+            .map(|(tag, _, _)| ExternalSpec::new(tag.clone()))
+            .collect(),
+    )
+    .validate()
+    .map_err(|error| {
+        ConfigError::new(
+            "$.plugins.sequence",
+            format!("sequence compile failed: {error:?}"),
+        )
+    })?;
+
+    let mut compiled_forwards = Vec::with_capacity(forward_specs.len());
+    for (tag, upstream_tag, endpoint) in forward_specs {
+        let executable = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == tag).then_some(*id))
+            .ok_or_else(|| {
+                ConfigError::new(
+                    "$.plugins.sequence",
+                    format!("compiled forward `{tag}` is missing"),
+                )
+            })?;
+        compiled_forwards.push(ForwardConfig {
+            tag,
+            upstream_tag: Some(upstream_tag),
+            endpoint,
+            executable,
+        });
+    }
+    let forward = compiled_forwards
+        .iter()
+        .find(|forward| forward.tag == a_tag)
+        .cloned()
+        .ok_or_else(|| ConfigError::new("$.plugins.sequence", "route A forward is missing"))?;
+    let sequence_id = program
+        .sequence_id(&sequence.tag)
+        .ok_or_else(|| ConfigError::new("$.plugins.sequence", "compiled sequence is missing"))?;
+
+    Ok(CompiledConfig {
+        log_level: log,
+        forward: forward.clone(),
+        forwards: compiled_forwards,
+        cache: None,
+        sequence: SequenceConfig {
+            tag: sequence.tag,
+            sequence: sequence_id,
+            forward_executable: forward.executable,
+        },
+        listener,
+        program,
+    })
+}
+
+fn compile_domain_set(plugin: &RawPlugin) -> Result<(String, String), ConfigError> {
+    let path = "$.plugins.domain_set.args";
+    let args = expect_map(&plugin.args, path, "domain_set args must be a mapping")?;
+    args.reject_unknown(&["exps"], path)?;
+    let expressions = expect_sequence(
+        args.required("exps", path)?,
+        "$.plugins.domain_set.args.exps",
+    )?;
+    if expressions.len() != 1 {
+        return Err(ConfigError::new(
+            "$.plugins.domain_set.args.exps",
+            "exactly one full-domain expression is supported",
+        ));
+    }
+    let expression = expect_string(&expressions[0], "$.plugins.domain_set.args.exps[0]")?;
+    let domain = expression.strip_prefix("full:").ok_or_else(|| {
+        ConfigError::new(
+            "$.plugins.domain_set.args.exps[0]",
+            "only full:<ASCII-domain> expressions are supported",
+        )
+    })?;
+    if domain.is_empty() {
+        return Err(ConfigError::new(
+            "$.plugins.domain_set.args.exps[0]",
+            "full-domain expression must not be empty",
+        ));
+    }
+    Ok((plugin.tag.clone(), domain.to_owned()))
+}
+
+fn compile_w3_forward(
+    plugin: &RawPlugin,
+    index: usize,
+) -> Result<(String, String, Endpoint), ConfigError> {
+    let path = format!("$.plugins.forward[{index}].args");
+    let args = expect_map(&plugin.args, &path, "forward args must be a mapping")?;
+    args.reject_unknown(&["upstreams"], &path)?;
+    let upstream_path = format!("{path}.upstreams");
+    let upstreams = expect_sequence(args.required("upstreams", &path)?, &upstream_path)?;
+    if upstreams.len() != 1 {
+        return Err(ConfigError::new(
+            upstream_path,
+            "exactly one upstream is supported",
+        ));
+    }
+    let item_path = format!("{path}.upstreams[0]");
+    let upstream = expect_map(&upstreams[0], &item_path, "upstream must be a mapping")?;
+    upstream.reject_unknown(&["tag", "addr"], &item_path)?;
+    let upstream_tag = expect_string(
+        upstream.required("tag", &item_path)?,
+        &format!("{item_path}.tag"),
+    )?;
+    if upstream_tag.is_empty() {
+        return Err(ConfigError::new(
+            format!("{item_path}.tag"),
+            "upstream tag must not be empty",
+        ));
+    }
+    let address = expect_string(
+        upstream.required("addr", &item_path)?,
+        &format!("{item_path}.addr"),
+    )?;
+    let endpoint = parse_endpoint(&address, &format!("{item_path}.addr"))?;
+    if endpoint.transport() != Transport::Udp {
+        return Err(ConfigError::new(
+            format!("{item_path}.addr"),
+            "W3 forwards require UDP upstreams",
+        ));
+    }
+    Ok((plugin.tag.clone(), upstream_tag, endpoint))
+}
+
+fn parse_w3_sequence(plugin: &RawPlugin, domain_tag: &str) -> Result<Vec<W3RuleSpec>, ConfigError> {
+    let path = "$.plugins.sequence.args";
+    let args = expect_sequence(&plugin.args, path)?;
+    if args.len() != 4 {
+        return Err(ConfigError::new(
+            path,
+            "W3 sequence must contain exactly four rules",
+        ));
+    }
+    args.iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let item_path = format!("{path}[{index}]");
+            let item = expect_map(value, &item_path, "sequence rule must be a mapping")?;
+            item.reject_unknown(&["matches", "exec"], &item_path)?;
+            let matcher = item
+                .get("matches")
+                .map(|value| {
+                    let matcher_path = format!("{item_path}.matches");
+                    let matchers = expect_sequence(value, &matcher_path)?;
+                    if matchers.len() != 1 {
+                        return Err(ConfigError::new(
+                            matcher_path,
+                            "each conditional W3 rule must contain exactly one matcher",
+                        ));
+                    }
+                    let expression =
+                        expect_string(&matchers[0], &format!("{item_path}.matches[0]"))?;
+                    parse_w3_matcher(&expression, domain_tag, &format!("{item_path}.matches[0]"))
+                })
+                .transpose()?;
+            let executable = parse_w3_exec(
+                item.required("exec", &item_path)?,
+                &format!("{item_path}.exec"),
+            )?;
+            Ok(W3RuleSpec {
+                matcher,
+                executable,
+            })
+        })
+        .collect()
+}
+
+fn parse_w3_matcher(
+    expression: &str,
+    domain_tag: &str,
+    path: &str,
+) -> Result<W3MatcherSpec, ConfigError> {
+    if let Some(target) = expression.strip_prefix("qname $") {
+        if target == domain_tag {
+            return Ok(W3MatcherSpec::Qname {
+                domain_set: target.to_owned(),
+            });
+        }
+        return Err(ConfigError::new(
+            path,
+            format!("qname matcher must reference domain_set `${domain_tag}`"),
+        ));
+    }
+    if let Some(address) = expression.strip_prefix("resp_ip ") {
+        let address = address
+            .parse::<Ipv4Addr>()
+            .map_err(|_| ConfigError::new(path, "resp_ip matcher requires one IPv4 literal"))?;
+        return Ok(W3MatcherSpec::ResponseIp(address));
+    }
+    if expression == "_true" {
+        return Ok(W3MatcherSpec::True);
+    }
+    Err(ConfigError::new(
+        path,
+        "supported matchers are qname $<domain_set>, resp_ip <IPv4>, and _true",
+    ))
+}
+
+fn parse_w3_exec(value: &RawValue, path: &str) -> Result<W3ExecSpec, ConfigError> {
+    match value {
+        RawValue::String(value) => Ok(W3ExecSpec::External(parse_w3_ref(value, path)?)),
+        RawValue::Sequence(values) => {
+            if values.len() != 2 {
+                return Err(ConfigError::new(
+                    path,
+                    "a W3 exec list must be [\"$forward\", \"exit\"]",
+                ));
+            }
+            let target = expect_string(&values[0], &format!("{path}[0]"))?;
+            let terminal = expect_string(&values[1], &format!("{path}[1]"))?;
+            if terminal != "exit" {
+                return Err(ConfigError::new(
+                    format!("{path}[1]"),
+                    "W3 exec lists must terminate with exit",
+                ));
+            }
+            Ok(W3ExecSpec::ExternalExit(parse_w3_ref(
+                &target,
+                &format!("{path}[0]"),
+            )?))
+        }
+        _ => Err(ConfigError::new(
+            path,
+            "exec must be a $forward reference or [$forward, exit]",
+        )),
+    }
+}
+
+fn parse_w3_ref(value: &str, path: &str) -> Result<String, ConfigError> {
+    let Some(target) = value.strip_prefix('$') else {
+        return Err(ConfigError::new(
+            path,
+            "W3 exec references must start with `$`",
+        ));
+    };
+    if target.is_empty() || target.chars().any(char::is_whitespace) {
+        return Err(ConfigError::new(
+            path,
+            "W3 exec reference must name one forward",
+        ));
+    }
+    Ok(target.to_owned())
+}
+
+fn validate_w3_topology(
+    rules: &[W3RuleSpec],
+    forwards: &[(String, String, Endpoint)],
+) -> Result<(String, String, String, Ipv4Addr), ConfigError> {
+    let Some(first) = rules.first() else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args",
+            "W3 sequence is empty",
+        ));
+    };
+    let (Some(W3MatcherSpec::Qname { .. }), W3ExecSpec::ExternalExit(a_tag)) =
+        (&first.matcher, &first.executable)
+    else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args[0]",
+            "first W3 rule must be qname with [forward, exit]",
+        ));
+    };
+    let Some(second) = rules.get(1) else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args",
+            "W3 sequence is missing its intermediate forward",
+        ));
+    };
+    let (None, W3ExecSpec::External(b_tag)) = (&second.matcher, &second.executable) else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args[1]",
+            "second W3 rule must be an unconditional forward",
+        ));
+    };
+    let Some(third) = rules.get(2) else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args",
+            "W3 sequence is missing its response-IP branch",
+        ));
+    };
+    let (Some(W3MatcherSpec::ResponseIp(response_ip)), W3ExecSpec::ExternalExit(hit_tag)) =
+        (&third.matcher, &third.executable)
+    else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args[2]",
+            "third W3 rule must be resp_ip with [same forward, exit]",
+        ));
+    };
+    if a_tag != hit_tag {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args[2].exec",
+            "response-IP hit must select the same forward as the qname hit",
+        ));
+    }
+    let Some(fourth) = rules.get(3) else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args",
+            "W3 sequence is missing its final branch",
+        ));
+    };
+    let (Some(W3MatcherSpec::True), W3ExecSpec::ExternalExit(c_tag)) =
+        (&fourth.matcher, &fourth.executable)
+    else {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args[3]",
+            "fourth W3 rule must be _true with [forward, exit]",
+        ));
+    };
+    if a_tag == b_tag || a_tag == c_tag || b_tag == c_tag {
+        return Err(ConfigError::new(
+            "$.plugins.sequence.args",
+            "W3 route A, B, and C must be distinct forwards",
+        ));
+    }
+    let known = forwards
+        .iter()
+        .map(|(tag, _, _)| tag.as_str())
+        .collect::<BTreeSet<_>>();
+    for (path, tag) in [
+        ("$.plugins.sequence.args[0].exec", a_tag),
+        ("$.plugins.sequence.args[1].exec", b_tag),
+        ("$.plugins.sequence.args[3].exec", c_tag),
+    ] {
+        if !known.contains(tag.as_str()) {
+            return Err(ConfigError::new(
+                path,
+                format!("unknown forward reference `${tag}`"),
+            ));
+        }
+    }
+    Ok((a_tag.clone(), b_tag.clone(), c_tag.clone(), *response_ip))
 }
 
 fn compile_cache(plugin: &RawPlugin) -> Result<(), ConfigError> {
