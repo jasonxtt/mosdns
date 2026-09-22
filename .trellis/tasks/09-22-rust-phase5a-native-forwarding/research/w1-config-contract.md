@@ -59,12 +59,12 @@ plugin list is collected.
 | TCP listener | UDP fields plus positive integer `idle_timeout` | zero/negative/noninteger timeout, audit true, TLS/cert/key, unknown fields |
 | forward transport | UDP or TCP only | DoT/DoH/DoQ/DoH3/QUIC, bootstrap, hostname resolution, retry/fallback options |
 
-The unsupported names called out by the forward contract include
+The unsupported names called out by the forward upstream contract include
 `concurrent`, `socks5`, `so_mark`, `bind_to_device`, `bootstrap`,
 `bootstrap_version`, `dial_addr`, `idle_timeout`, and
-`upstream_query_timeout`; the host must not silently ignore them. Listener
-`max_conns`, `enable_pipeline`, `enable_http3`, `insecure_skip_verify`, and
-TLS certificate/key fields are likewise rejected where presented.
+`upstream_query_timeout`, `max_conns`, `enable_pipeline`, `enable_http3`, and
+`insecure_skip_verify`; the host must not silently ignore them. Listener
+`cert`/`key` and other TLS fields are likewise rejected where presented.
 
 ## Compile and bind order
 

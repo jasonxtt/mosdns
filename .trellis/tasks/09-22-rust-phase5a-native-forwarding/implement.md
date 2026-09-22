@@ -53,9 +53,14 @@ manifests, deployment, SSH/VM execution, and benchmark execution.
 
 ```bash
 bash -n scripts/run-phase5a-baseline.sh
-MANIFEST_PATH=<archived-manifest> MANIFEST_SHA256=<historical-sha> \
-  <runner-official-preflight-only>
-sha256sum <archived-manifest>
+ARCHIVE_MANIFEST='.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline/research/run-manifest.json'
+ARCHIVE_SHA256='a5cd4d791ca9a88f4a1217e86f5b46b89d71625d344263c222f8eab0a797d8d7'
+test -f "$ARCHIVE_MANIFEST"
+test "$(sha256sum "$ARCHIVE_MANIFEST" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
+test ! -e '.trellis/tasks/09-21-rust-phase5a-baseline/research/run-manifest.json'
+rg -Fq 'MANIFEST_PATH' scripts/run-phase5a-baseline.sh
+rg -Fq "$ARCHIVE_MANIFEST" scripts/run-phase5a-baseline.sh
+! rg -Fq 'pending final task review' docs/rust/phase5a-go-baseline.md
 git diff --check -- scripts/run-phase5a-baseline.sh docs/rust/phase5a-go-baseline.md \
   .trellis/tasks/09-22-rust-phase5a-native-forwarding
 python3 ./.trellis/scripts/task.py validate rust-phase5a-native-forwarding
@@ -110,8 +115,9 @@ git diff --check -- rust/sequence-core .trellis/tasks/09-22-rust-phase5a-native-
 python3 ./.trellis/scripts/task.py validate rust-phase5a-native-forwarding
 ```
 
-Also inspect `cargo tree -p mosdns-sequence-core --edges normal` to prove no
-Tokio/upstream/native-host edge. No host or network command is allowed.
+Also run `cargo tree --manifest-path rust/Cargo.toml -p mosdns-sequence-core \
+--edges normal --locked` to prove no Tokio/upstream/native-host edge. No host
+or network command is allowed.
 
 ### Exit gate
 
@@ -160,7 +166,7 @@ integration, and no changes to the frozen Go corpus.
 ### Required checks
 
 ```bash
-cargo tree --workspace --edges normal
+cargo tree --manifest-path rust/Cargo.toml --workspace --edges normal --locked
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --all-targets --locked
 cargo test --manifest-path rust/Cargo.toml -p mosdns-dns-core --all-targets --locked
@@ -194,7 +200,8 @@ deployment, or a performance campaign.
 
 ### RED → GREEN
 
-1. RED: add a loopback UDP fixture/test for positive A, NXDOMAIN, distinct
+1. RED: add `rust/native-host/tests/w1_udp.rs` as the focused loopback UDP
+   integration target, covering positive A, NXDOMAIN, distinct
    concurrent transaction IDs/qnames, stalled-upstream timeout, and malformed
    datagram behavior.
 2. GREEN: own a real Tokio `UdpSocket`, spawn independent request scopes,
@@ -212,7 +219,7 @@ deployment, or a performance campaign.
 ```bash
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host \
-  --test <focused-udp-target> --locked
+  --test w1_udp --locked
 cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --all-targets --locked
 cargo clippy --manifest-path rust/Cargo.toml -p mosdns-native-host \
   --all-targets --locked -- -D warnings
@@ -247,7 +254,8 @@ cutover, a new benchmark, or a new task.
 
 ### RED → GREEN
 
-1. RED: add loopback TCP tests for partial two-byte framing, positive A,
+1. RED: add `rust/native-host/tests/w1_tcp.rs` as the focused loopback TCP
+   integration target, covering partial two-byte framing, positive A,
    NXDOMAIN, sequential requests per connection, concurrent connections,
    effective `idle_timeout: 2`, stalled-upstream timeout, EOF/partial frame,
    and client disconnect.
