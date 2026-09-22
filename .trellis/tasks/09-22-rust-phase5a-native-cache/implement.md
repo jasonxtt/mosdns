@@ -81,10 +81,14 @@ or live cache listener required yet. No new external dependency/version/feature.
 - [ ] RED: hit skips forward; miss forwards and stores after completion only;
   upstream SERVFAIL versus local SERVFAIL; error, no response, malformed, TC,
   OPT, cancellation/deadline at publication, wrong/terminal machine paths.
+  Add mismatched name/type/class, missing question and non-QUERY response
+  cases: all must prevent storage while preserving W1 forwarding results.
 - [ ] GREEN: shared execution driver preserves W1 mapping, uses valid upstream
   provenance, drops uncommitted tokens, and adds no listener cache shortcut.
 - [ ] Tests cover negative, empty, zero-TTL and positive sub-5-second retention;
   authority/additional RR minimum TTL; compressed question key equivalence.
+  Test ARCOUNT=1/EDNS bypass before lookup and store, including a pre-existing
+  plain-query cache hit and an initially empty cache; W1 parsing is unchanged.
 - [ ] Run native-host, dns-core, cache-core and sequence-core tests with
   `--all-targets --locked`, clippy for changed crates, common checks and
   `cargo tree --manifest-path rust/Cargo.toml -p mosdns-native-host --edges normal --locked`.
@@ -107,7 +111,8 @@ expansion. Frozen baseline directories and sequence-core remain read-only.
   counter barrier and zero repeated-query upstream delta.
 - [ ] Test cold concurrency using barriers (no singleflight promise), warm
   concurrency/IDs/buffer isolation, expiry/reforward, non-IN bypass, negative
-  and invalid response handling, cancellation/no-publication, shutdown/rebind.
+  and invalid/mismatched response handling, EDNS-query bypass with unchanged
+  W1 forwarding, cancellation/no-publication, shutdown/rebind.
   Use deterministic clock injection for TTL assertions.
 - [ ] Run all native-host targets, cache-core/dns-core affected targets, changed
   crate clippy and common checks. Existing W1 UDP/TCP integration stays green.

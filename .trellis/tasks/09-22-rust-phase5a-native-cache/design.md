@@ -77,7 +77,23 @@ non-IN queries bypass without sharing entries. ID is excluded; compression
 layout must not create separate keys for the same decoded name. Native in-memory
 key bytes need not reproduce Go's textual packing: they are not persisted or
 exchanged with the hybrid cache. No global domain-name normalization is added.
-DO/ECS are deferred because the accepted query parser rejects additional records.
+The existing parser allows ARCOUNT=1. The W2 adapter explicitly requires
+ARCOUNT=0 before lookup or creating a store token: accepted queries with an
+additional record, including EDNS, retain W1 forwarding but bypass both cache
+operations. Do not change parse_query or reject inputs previously forwarded by
+W1. Test an EDNS query against an already warm plain-query cache entry and
+again after an empty-cache EDNS exchange to prove neither hit nor publication.
+DO/ECS cache semantics remain deferred; this bypass does not implement them.
+
+Before storage, require QR=response, QUERY opcode, exactly one response
+question, and a successfully decoded question matching this request
+(case-preserving decoded name, qtype and qclass). Reuse existing question
+parsing rather than assuming upstream ID/source/wire checks also verify the
+question. A mismatch or undecodable/missing question disables publication;
+retain the existing W1 forwarding result rather than expanding this task into
+transport validation changes. Test each mismatch independently and prove a
+subsequent request still reaches upstream; compressed equivalent questions
+remain eligible. Include this gate in the single synchronous publication path.
 
 Use `dns-core` validation/TTL observation for the response. Non-OPT additional
 and authority RRs contribute to minimum TTL; OPT TTL bits never do. An OPT in
