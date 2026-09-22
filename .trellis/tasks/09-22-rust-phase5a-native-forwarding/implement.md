@@ -154,7 +154,8 @@ authorizes Slice 2 only.
 
 ### Slice 1 execution record
 
-Implementation commit: `cd9e14b` (`feat(sequence): add resumable execution machine`).
+Implementation commits: `cd9e14b` (`feat(sequence): add resumable execution machine`)
+and `f17ae97` (`test(sequence): close resumable parity coverage`).
 
 The canonical sequence machine is implemented in `rust/sequence-core`.
 `ExecutionMachine` owns state/control for resumable native-host use and also
@@ -174,15 +175,21 @@ Checks:
 
 ```text
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check       PASS
-cargo test -p mosdns-sequence-core --all-targets --locked       PASS (61 tests)
+cargo test -p mosdns-sequence-core --all-targets --locked       PASS (65 tests)
 cargo clippy -p mosdns-sequence-core --all-targets --locked ... PASS
 cargo tree -p mosdns-sequence-core --edges normal --locked      PASS (dns-core only)
 git diff --check -- allowlisted paths                         PASS
 host/network/VM/SSH/benchmark commands                        NOT RUN
 ```
 
-The implementation is stopped pending root `SLICE 1: PASS`; no Slice 2 work
-has started.
+The first Slice 1 root review returned `SLICE 1: FAIL` with P0=0, P1=1,
+P2=1. The bounded remediation added the required owned-machine versus sync
+adapter outcome/state parity matrix (Continue/Return/Accept/Reject/Exit and
+ordinary error), nested-try parity, post-dispatch fuel/cancellation checks,
+and direct missing-entry coverage. It also corrected the `ExecutableId`
+catalog-entry documentation. The same Slice 1 checks were rerun; no Slice 2
+work has started. The implementation remains stopped pending the remediation
+root review.
 
 ## 3. Slice 2 — native host config/CLI/assembly before I/O
 
