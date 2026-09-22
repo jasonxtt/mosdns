@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use mosdns_dns_core::{FrameMode, frame_response, parse_query};
 use mosdns_upstream_core::TransportCancellation;
@@ -148,11 +149,13 @@ async fn process_connection(
             // A malformed or partial DNS message closes only this connection.
             return;
         };
+        let mut request_options = options.clone();
+        request_options.admission_deadline = Some(Instant::now() + options.request_deadline);
         let response = execute_request(
             ExecutionRequest {
                 config: &config,
                 cache: &cache,
-                options: &options,
+                options: &request_options,
                 raw: &frame,
                 header,
                 question,

@@ -3,6 +3,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use mosdns_dns_core::{FrameMode, frame_response};
 use mosdns_upstream_core::TransportCancellation;
@@ -86,7 +87,8 @@ impl UdpServer {
                             let config = Rc::clone(&self.config);
                             let forwards = Rc::clone(&self.forwards);
                             let cache = Rc::clone(&self.cache);
-                            let options = self.options.clone();
+                            let mut options = self.options.clone();
+                            options.admission_deadline = Some(Instant::now() + options.request_deadline);
                             let request_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
                                 process_request(RequestTask {
