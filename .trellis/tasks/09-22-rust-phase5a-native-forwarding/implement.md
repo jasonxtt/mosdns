@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — Slice 4 TCP implementation complete; awaiting final root review**.
+Status: **in progress — final evidence remediation complete; awaiting final root re-review**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -454,9 +454,25 @@ cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PA
 cargo clippy --manifest-path rust/native-host/Cargo.toml --all-targets --locked -- -D warnings PASS
 ```
 
+Final workspace checks and the authorized Linux correctness-only run are now
+recorded in `research/linux-w1-correctness.md`. The root reviewer first
+returned `FINAL: FAIL` with P0=0, P1=2, P2=0: the workspace gate results and
+the Linux W1 results were not committed task evidence. No source defect was
+reported. The bounded remediation is task-document-only and remains inside
+the frozen allowlist.
+
+The completed evidence remediation records:
+
+```text
+cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked PASS
+cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings PASS
+python3 ./.trellis/scripts/task.py validate rust-phase5a-native-forwarding PASS
+git diff --check PASS
+ssh mosdns-rust Linux W1 correctness-only gate PASS
+```
+
 No browser, VM, benchmark, deployment, or historical baseline mutation was
-performed. Final workspace-wide checks and the separately authorized Linux
-W1 correctness evidence remain part of the final gate below.
+performed. The task is stopped here pending final root re-review.
 
 ### Required checks
 
