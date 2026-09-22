@@ -182,7 +182,29 @@ ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 
 ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 go test -race -tags mosdns_rust ./plugin/executable/cache ./pkg/cache ./pkg/query_context ./pkg/server_handler ./pkg/matcher/... ./plugin/matcher/... -count=1'  # EXIT 0
 ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -race -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/data_provider/sd_set ./plugin/data_provider/si_set ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1'  # EXIT 1: same typed-nil panic at matcher_adapter slice2_integration_linux_test.go:14 -> adapter_linux.go:187
 ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -race -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/data_provider/sd_set ./plugin/data_provider/si_set ./plugin/data_provider/domain_mapper ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1'  # EXIT 0
-ssh mosdns-rust 'python3 -' <<'PY'  # EXIT 0; shutil.rmtree only /tmp/mosdns-phase5a-slice3-w3-33e826c and /root/mosdns-phase5a-slice3-w3-target-33e826c
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && python3 -' <<'PY'  # EXIT 0; source tree digest after checks, before cleanup, excluding generated rust/target
+from pathlib import Path
+import hashlib
+root = Path('.')
+rows = []
+total = 0
+for path in sorted(item for item in root.rglob('*') if item.is_file() and Path('rust/target') not in item.parents):
+    data = path.read_bytes()
+    total += len(data)
+    rows.append(path.as_posix().encode() + b'\0' + str(len(data)).encode() + b'\0' + hashlib.sha256(data).hexdigest().encode() + b'\n')
+print(len(rows), total, hashlib.sha256(b''.join(rows)).hexdigest())
+PY
+ssh mosdns-rust 'python3 -' <<'PY'  # EXIT 0
+from pathlib import Path
+import shutil
+for name in ("/tmp/mosdns-phase5a-slice3-w3-33e826c", "/root/mosdns-phase5a-slice3-w3-target-33e826c"):
+    path = Path(name)
+    if path.exists():
+        shutil.rmtree(path)
+    if path.exists():
+        raise SystemExit(f"cleanup failed: {path}")
+print("task-owned remote artifacts removed")
+PY
 python3 .trellis/scripts/task.py validate .trellis/tasks/09-22-rust-phase5a-native-routing  # EXIT 0
 git diff --check  # EXIT 0
 git add .trellis/tasks/09-22-rust-phase5a-native-routing/implement.md docs/ai/rust-handover.md docs/rust/feature-coverage.md && git diff --cached --check && git commit -m 'docs: record native W3 Linux evidence' && git push origin rust  # EXIT 0; evidence commit 8150b7e06331612343683f42ea415e5b776387a6
