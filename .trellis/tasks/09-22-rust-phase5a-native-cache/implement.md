@@ -102,27 +102,49 @@ Allowlist: `rust/native-host/**`, `rust/Cargo.lock` path-edge changes only,
 this task directory. No sequence-core production change; no accepted W2 config
 or live cache listener required yet. No new external dependency/version/feature.
 
-- [ ] RED: deterministic clock/key/retention tests, exact expiry, no cumulative
+- [x] RED: deterministic clock/key/retention tests, exact expiry, no cumulative
   TTL mutation, case/qtype/AD/CD separation and non-IN bypass.
-- [ ] GREEN: host-owned native cache adapter and request-owned pending-store
+- [x] GREEN: host-owned native cache adapter and request-owned pending-store
   token integrated with the existing canonical sequence machine as designed.
   Test with an in-memory compiled W2 program/controlled exchange seam.
-- [ ] RED: hit skips forward; miss forwards and stores after completion only;
+- [x] RED: hit skips forward; miss forwards and stores after completion only;
   upstream SERVFAIL versus local SERVFAIL; error, no response, malformed, TC,
   OPT, cancellation/deadline at publication, wrong/terminal machine paths.
   Add mismatched name/type/class, missing question and non-QUERY response
   cases: all must prevent storage while preserving W1 forwarding results.
-- [ ] GREEN: shared execution driver preserves W1 mapping, uses valid upstream
+- [x] GREEN: shared execution driver preserves W1 mapping, uses valid upstream
   provenance, drops uncommitted tokens, and adds no listener cache shortcut.
-- [ ] Tests cover negative, empty, zero-TTL and positive sub-5-second retention;
+- [x] Tests cover negative, empty, zero-TTL and positive sub-5-second retention;
   authority/additional RR minimum TTL; compressed question key equivalence.
   Test ARCOUNT=1/EDNS bypass before lookup and store, including a pre-existing
   plain-query cache hit and an initially empty cache; W1 parsing is unchanged.
-- [ ] Run native-host, dns-core, cache-core and sequence-core tests with
+- [x] Run native-host, dns-core, cache-core and sequence-core tests with
   `--all-targets --locked`, clippy for changed crates, common checks and
   `cargo tree --manifest-path rust/Cargo.toml -p mosdns-native-host --edges normal --locked`.
   Verify no runtime/cgo edge and no native handle calls by source inspection.
 - [ ] Commit/push and obtain `SLICE 1: PASS` before Slice 2.
+
+Slice 1 local evidence before review:
+
+- RED: the adapter contract test failed before implementation with unresolved
+  `CacheTestClock` and `NativeCacheAdapter` imports.
+- GREEN: native-host all-targets locked passed 15 unit tests, 8 adapter tests,
+  2 strict-config tests, 5 W1 TCP tests and 4 W1 UDP tests.
+- The controlled execution seam proved a W2-shaped in-memory program skips the
+  exact forward dispatch on a hit, publishes only after a successful miss,
+  caches valid upstream SERVFAIL for five seconds, and does not cache local
+  synthesized SERVFAIL.
+- Adapter tests cover deterministic expiry, immutable TTL aging and buffer
+  copies, qname/qtype/class/AD/CD key dimensions, non-IN and EDNS bypass,
+  compressed query-name equivalence, NXDOMAIN/SERVFAIL/empty/zero-TTL
+  retention, and TC/OPT/malformed/mismatched-name/type/class/missing-question/
+  non-QUERY admission gates.
+- Locked checks passed for native-host, cache-core, dns-core and
+  sequence-core; native-host clippy with `--all-targets -- -D warnings`,
+  workspace format check and `git diff --check` passed. The only lockfile
+  change is the reviewed `mosdns-native-host -> mosdns-cache-core` path edge.
+- Source inspection found no runtime/cgo/ABI-handle/cache-ABI references under
+  `rust/native-host`; both listener modules call the shared execution driver.
 
 ## Slice 2 — strict W2 config and UDP correctness
 

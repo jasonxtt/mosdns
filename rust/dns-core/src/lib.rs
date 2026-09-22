@@ -55,6 +55,6 @@ pub use resolver::{
     build_resolver_query, parse_resolver_response,
 };
 pub use response::{
-    ResponseError, TtlInfo, age_response_ttls, observe_response_ttl, replace_response_ttls,
-    validate_response,
+    ResponseError, ResponseMetadata, ResponseQuestion, TtlInfo, age_response_ttls,
+    observe_response_metadata, observe_response_ttl, replace_response_ttls, validate_response,
 };

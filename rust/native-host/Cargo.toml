@@ -10,6 +10,7 @@ name = "mosdns"
 path = "src/main.rs"
 
 [dependencies]
+mosdns-cache-core = { path = "../cache-core" }
 mosdns-dns-core = { path = "../dns-core" }
 mosdns-sequence-core = { path = "../sequence-core" }
 mosdns-upstream-core = { path = "../upstream-core" }

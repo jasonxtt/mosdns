@@ -30,6 +30,24 @@ pub struct TtlInfo {
     pub record_count: u32,
 }
 
+/// The response question, expanded from any compression pointers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseQuestion {
+    pub qname_wire: Vec<u8>,
+    pub qtype: u16,
+    pub qclass: u16,
+}
+
+/// Metadata needed by a native cache admission decision.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseMetadata {
+    pub rcode: u16,
+    pub opcode: u8,
+    pub question: Option<ResponseQuestion>,
+    pub has_opt: bool,
+    pub truncated: bool,
+}
+
 const DNS_HEADER_LEN: usize = 12;
 const RR_FIXED_LEN: usize = 10;
 const TYPE_OPT: u16 = 41;
@@ -47,6 +65,52 @@ pub fn validate_response(packet: &[u8]) -> Result<TtlInfo, ResponseError> {
     observe_response_ttl(packet)
 }
 
+/// Observes the response header, question and declared record types in one
+/// bounded wire walk. The helper intentionally does not impose the native
+/// cache's policy; callers decide whether the metadata is eligible.
+pub fn observe_response_metadata(packet: &[u8]) -> Result<ResponseMetadata, ResponseError> {
+    if packet.len() < DNS_HEADER_LEN {
+        return Err(ResponseError::TooShort);
+    }
+    if packet[2] & 0x80 == 0 {
+        return Err(ResponseError::NotResponse);
+    }
+
+    let qdcount = usize::from(u16::from_be_bytes([packet[4], packet[5]]));
+    let question = if qdcount == 1 {
+        let (end, qname_wire) = read_name(packet, DNS_HEADER_LEN)?;
+        let fields_end = end.checked_add(4).ok_or(ResponseError::TooShort)?;
+        let fields = packet
+            .get(end..fields_end)
+            .ok_or(ResponseError::TruncatedQuestion)?;
+        Some(ResponseQuestion {
+            qname_wire,
+            qtype: u16::from_be_bytes([fields[0], fields[1]]),
+            qclass: u16::from_be_bytes([fields[2], fields[3]]),
+        })
+    } else {
+        None
+    };
+
+    let mut has_opt = false;
+    let mut extended_rcode = 0_u16;
+    walk_records(packet, |record| {
+        if record.rrtype == TYPE_OPT {
+            has_opt = true;
+            extended_rcode = u16::from((record.ttl >> 24) as u8);
+        }
+        Ok(())
+    })?;
+
+    Ok(ResponseMetadata {
+        rcode: (u16::from(packet[3] & 0x0f)) | (extended_rcode << 4),
+        opcode: (packet[2] >> 3) & 0x0f,
+        question,
+        has_opt,
+        truncated: packet[2] & 0x02 != 0,
+    })
+}
+
 /// Reports the minimal non-OPT TTL and count, mirroring the Go oracle.
 ///
 /// # Errors
@@ -58,8 +122,11 @@ pub fn observe_response_ttl(packet: &[u8]) -> Result<TtlInfo, ResponseError> {
     // contains no unwrap/expect and cannot panic on malformed input.
     let mut count: u32 = 0;
     let mut min = u32::MAX;
-    walk_ttl_offsets(packet, |offset| {
-        let ttl = read_u32(packet, offset);
+    walk_records(packet, |record| {
+        let ttl = record.ttl;
+        if record.rrtype == TYPE_OPT {
+            return Ok(());
+        }
         if ttl < min {
             min = ttl;
         }
@@ -101,8 +168,12 @@ pub fn replace_response_ttls(packet: &[u8], ttl: u32) -> Result<Vec<u8>, Respons
 
 fn patch_ttls(packet: &[u8], transform: impl Fn(u32) -> u32) -> Result<Vec<u8>, ResponseError> {
     let mut patched = packet.to_vec();
-    walk_ttl_offsets(packet, |offset| {
-        let ttl = read_u32(packet, offset);
+    walk_records(packet, |record| {
+        if record.rrtype == TYPE_OPT {
+            return Ok(());
+        }
+        let offset = record.ttl_offset;
+        let ttl = record.ttl;
         patched[offset..offset + 4].copy_from_slice(&transform(ttl).to_be_bytes());
         Ok(())
     })?;
@@ -110,9 +181,15 @@ fn patch_ttls(packet: &[u8], transform: impl Fn(u32) -> u32) -> Result<Vec<u8>, 
 }
 
 /// Visits the TTL offset of every non-OPT record; returns the count visited.
-fn walk_ttl_offsets(
+struct RecordMetadata {
+    rrtype: u16,
+    ttl: u32,
+    ttl_offset: usize,
+}
+
+fn walk_records(
     packet: &[u8],
-    mut visitor: impl FnMut(usize) -> Result<(), ResponseError>,
+    mut visitor: impl FnMut(RecordMetadata) -> Result<(), ResponseError>,
 ) -> Result<usize, ResponseError> {
     if packet.len() < DNS_HEADER_LEN {
         return Err(ResponseError::TooShort);
@@ -149,8 +226,13 @@ fn walk_ttl_offsets(
             return Err(ResponseError::TruncatedRecord);
         }
         let rrtype = u16::from_be_bytes([packet[position], packet[position + 1]]);
+        let ttl = read_u32(packet, position + 4);
+        visitor(RecordMetadata {
+            rrtype,
+            ttl,
+            ttl_offset: position + 4,
+        })?;
         if rrtype != TYPE_OPT {
-            visitor(position + 4)?;
             visits += 1;
         }
         let data_len = usize::from(u16::from_be_bytes([
@@ -165,6 +247,56 @@ fn walk_ttl_offsets(
         }
     }
     Ok(visits)
+}
+
+/// Reads and expands one DNS name while preserving ASCII case.
+fn read_name(packet: &[u8], offset: usize) -> Result<(usize, Vec<u8>), ResponseError> {
+    const MAX_NAME_OCTETS: usize = 255;
+    const MAX_POINTERS: usize = 255_usize.div_ceil(2) - 2;
+
+    let mut name = Vec::with_capacity(32);
+    let mut position = offset;
+    let mut written_end = None;
+    let mut pointers = 0;
+    loop {
+        let label = *packet.get(position).ok_or(ResponseError::BadName)?;
+        match label & 0xc0 {
+            0 => {
+                if label == 0 {
+                    name.push(0);
+                    let end = written_end
+                        .unwrap_or(position.checked_add(1).ok_or(ResponseError::BadName)?);
+                    return Ok((end, name));
+                }
+                let length = usize::from(label);
+                let start = position.checked_add(1).ok_or(ResponseError::BadName)?;
+                let end = start.checked_add(length).ok_or(ResponseError::BadName)?;
+                let bytes = packet.get(start..end).ok_or(ResponseError::BadName)?;
+                if name.len() + length + 1 > MAX_NAME_OCTETS {
+                    return Err(ResponseError::BadName);
+                }
+                name.push(label);
+                name.extend_from_slice(bytes);
+                position = end;
+            }
+            0xc0 => {
+                if pointers == MAX_POINTERS {
+                    return Err(ResponseError::BadName);
+                }
+                let second = *packet.get(position + 1).ok_or(ResponseError::BadName)?;
+                let target = usize::from(label & 0x3f) << 8 | usize::from(second);
+                if target >= packet.len() || target == position {
+                    return Err(ResponseError::BadName);
+                }
+                if written_end.is_none() {
+                    written_end = Some(position.checked_add(2).ok_or(ResponseError::BadName)?);
+                }
+                pointers += 1;
+                position = target;
+            }
+            _ => return Err(ResponseError::BadName),
+        }
+    }
 }
 
 /// Skip one wire name, mirroring the cache walk (see `query::skip_name`'s

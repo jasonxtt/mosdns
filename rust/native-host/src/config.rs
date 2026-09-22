@@ -40,6 +40,15 @@ pub struct SequenceConfig {
     pub forward_executable: ExecutableId,
 }
 
+/// The bounded native cache dispatch identity used by the reviewed W2 graph.
+/// W1 configurations leave this field absent until Slice 2's strict compiler
+/// accepts the cache plugin shape.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CachePluginConfig {
+    pub tag: String,
+    pub executable: ExecutableId,
+}
+
 /// A compiled UDP or TCP listener declaration. No socket is owned here.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListenerConfig {
@@ -55,6 +64,7 @@ pub struct ListenerConfig {
 pub struct CompiledConfig {
     pub log_level: LogLevel,
     pub forward: ForwardConfig,
+    pub cache: Option<CachePluginConfig>,
     pub sequence: SequenceConfig,
     pub listener: ListenerConfig,
     pub program: ValidatedProgram,
@@ -220,6 +230,7 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
             endpoint,
             executable: forward_executable,
         },
+        cache: None,
         sequence: SequenceConfig {
             tag: sequence_tag,
             sequence: sequence_id,
