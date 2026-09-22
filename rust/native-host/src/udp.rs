@@ -3,25 +3,19 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
-use mosdns_dns_core::{
-    FrameMode, QueryHeader, QuestionInfo, frame_response, inspect_response_header,
-    patch_response_id_ra, synthesize_response, validate_response,
-};
-use mosdns_sequence_core::{
-    ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep, ResponseState,
-};
+use mosdns_dns_core::{FrameMode, frame_response};
 use mosdns_upstream_core::TransportCancellation;
 use tokio::net::UdpSocket;
 use tokio::task::JoinSet;
 
 use crate::assembly::{ForwardAdapter, HostAssembly, HostOptions};
+use crate::cache::NativeCacheAdapter;
 use crate::config::{CompiledConfig, ListenerKind};
+use crate::execution::{ExecutionRequest, execute_request};
 
 const MAX_UDP_PACKET: usize = 65535;
-const DEFAULT_FUEL: u64 = 64;
-const SERVFAIL: u8 = 2;
+#[cfg(test)]
 const REFUSED: u8 = 5;
 
 /// A local UDP listener owned by the native host. Its request tasks run on the
@@ -30,6 +24,7 @@ const REFUSED: u8 = 5;
 pub struct UdpServer {
     config: Rc<CompiledConfig>,
     forward: Rc<ForwardAdapter>,
+    cache: Rc<NativeCacheAdapter>,
     options: HostOptions,
     socket: Arc<UdpSocket>,
 }
@@ -50,6 +45,7 @@ impl UdpServer {
         Ok(Self {
             config: assembly.config_handle(),
             forward: assembly.forward_handle(),
+            cache: assembly.cache_handle(),
             options: assembly.options().clone(),
             socket: Arc::new(socket),
         })
@@ -89,18 +85,20 @@ impl UdpServer {
                             let socket = Arc::clone(&self.socket);
                             let config = Rc::clone(&self.config);
                             let forward = Rc::clone(&self.forward);
+                            let cache = Rc::clone(&self.cache);
                             let options = self.options.clone();
                             let request_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
-                                process_request(
+                                process_request(RequestTask {
                                     socket,
                                     config,
                                     forward,
+                                    cache,
                                     options,
                                     raw,
                                     peer,
                                     request_shutdown,
-                                )
+                                })
                                 .await;
                             });
                         }
@@ -119,15 +117,28 @@ impl UdpServer {
     }
 }
 
-async fn process_request(
+struct RequestTask {
     socket: Arc<UdpSocket>,
     config: Rc<CompiledConfig>,
     forward: Rc<ForwardAdapter>,
+    cache: Rc<NativeCacheAdapter>,
     options: HostOptions,
     raw: Vec<u8>,
     peer: SocketAddr,
     request_shutdown: TransportCancellation,
-) {
+}
+
+async fn process_request(task: RequestTask) {
+    let RequestTask {
+        socket,
+        config,
+        forward,
+        cache,
+        options,
+        raw,
+        peer,
+        request_shutdown,
+    } = task;
     let Ok((header, question)) = mosdns_dns_core::parse_query(&raw) else {
         // Malformed UDP input is isolated to this datagram and produces no
         // response, matching the frozen server behavior.
@@ -135,12 +146,15 @@ async fn process_request(
     };
 
     let response = execute_request(
-        &config,
+        ExecutionRequest {
+            config: &config,
+            cache: &cache,
+            options: &options,
+            raw: &raw,
+            header,
+            question,
+        },
         &forward,
-        &options,
-        &raw,
-        header,
-        question,
         request_shutdown.clone(),
     )
     .await;
@@ -227,93 +241,6 @@ async fn finish_server(
     Ok(())
 }
 
-pub(crate) async fn execute_request(
-    config: &CompiledConfig,
-    forward: &ForwardAdapter,
-    options: &HostOptions,
-    raw: &[u8],
-    header: QueryHeader,
-    question: QuestionInfo,
-    request_shutdown: TransportCancellation,
-) -> Vec<u8> {
-    let state = ExecutionState::new(header, question.clone());
-    let mut machine = match config.new_machine(state, ExecutionControl::with_fuel(DEFAULT_FUEL)) {
-        Ok(machine) => machine,
-        Err(_) => return protocol_error(&header, &question, SERVFAIL),
-    };
-
-    let mut step = match machine.step() {
-        Ok(step) => step,
-        Err(_) => return protocol_error(&header, &question, SERVFAIL),
-    };
-    loop {
-        match step {
-            MachineStep::Complete(_) => return response_from_state(&machine, &header, &question),
-            MachineStep::Dispatch(dispatch) => {
-                if dispatch.executable() != config.forward.executable {
-                    return protocol_error(&header, &question, SERVFAIL);
-                }
-                if request_shutdown.is_cancelled() {
-                    return Vec::new();
-                }
-                let deadline = Instant::now() + options.request_deadline;
-                let exchange = forward
-                    .exchange(raw, deadline, request_shutdown.clone())
-                    .await;
-                if request_shutdown.is_cancelled() {
-                    return Vec::new();
-                }
-                match exchange {
-                    Ok(response) => {
-                        let accepted = patch_response_id_ra(response.wire(), header.id)
-                            .ok()
-                            .filter(|wire| {
-                                inspect_response_header(wire).is_ok()
-                                    && validate_response(wire).is_ok()
-                            });
-                        match accepted {
-                            Some(wire) => machine.state_mut().set_raw_response(wire),
-                            None => set_servfail(&mut machine),
-                        }
-                    }
-                    Err(_) => set_servfail(&mut machine),
-                }
-                step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Continue)) {
-                    Ok(step) => step,
-                    Err(_) => return response_from_state(&machine, &header, &question),
-                };
-            }
-        }
-    }
-}
-
-fn set_servfail(machine: &mut ExecutionMachine<'_>) {
-    let _ = machine
-        .state_mut()
-        .set_synthesized_response(u16::from(SERVFAIL));
-}
-
-fn response_from_state(
-    machine: &ExecutionMachine<'_>,
-    header: &QueryHeader,
-    question: &QuestionInfo,
-) -> Vec<u8> {
-    match &machine.state().response {
-        ResponseState::Raw(wire) => wire.0.clone(),
-        ResponseState::Synthesized(response) => {
-            let rcode = u8::try_from(response.rcode()).unwrap_or(SERVFAIL);
-            protocol_error(header, question, rcode)
-        }
-        ResponseState::None => protocol_error(header, question, REFUSED),
-    }
-}
-
-fn protocol_error(header: &QueryHeader, question: &QuestionInfo, rcode: u8) -> Vec<u8> {
-    synthesize_response(header, question, rcode).unwrap_or_else(|_| {
-        synthesize_response(header, question, SERVFAIL).unwrap_or_else(|_| Vec::new())
-    })
-}
-
 /// Failures that can occur while owning the UDP listener.
 #[derive(Debug)]
 pub enum UdpServerError {
@@ -352,12 +279,10 @@ mod tests {
     use tokio::sync::Notify;
     use tokio::task::JoinSet;
 
-    use super::{
-        REFUSED, drain_tasks, finish_server, reap_one_task, response_from_state,
-        send_response_after_gate,
-    };
+    use super::{REFUSED, drain_tasks, finish_server, reap_one_task, send_response_after_gate};
     use crate::assembly::{HostAssembly, HostRuntime};
     use crate::config::compile_yaml;
+    use crate::execution::response_from_state;
 
     const UDP_CONFIG: &str =
         include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");

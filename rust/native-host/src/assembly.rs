@@ -2,6 +2,7 @@ use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::cache::{CacheAdapterError, CacheClock, NativeCacheAdapter};
 use mosdns_upstream_core::{
     Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, TransportCancellation, Upstream,
     UpstreamError,
@@ -17,6 +18,7 @@ use crate::udp::{UdpServer, UdpServerError};
 pub struct HostOptions {
     pub request_deadline: Duration,
     pub cancellation: Option<TransportCancellation>,
+    pub cache_clock: Rc<dyn CacheClock>,
 }
 
 impl Default for HostOptions {
@@ -24,6 +26,7 @@ impl Default for HostOptions {
         Self {
             request_deadline: Duration::from_secs(5),
             cancellation: None,
+            cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
         }
     }
 }
@@ -32,10 +35,11 @@ impl HostOptions {
     /// Sets a short deadline for a focused request test without adding a YAML
     /// timeout field to the accepted product configuration.
     #[must_use]
-    pub const fn with_deadline(request_deadline: Duration) -> Self {
+    pub fn with_deadline(request_deadline: Duration) -> Self {
         Self {
             request_deadline,
             cancellation: None,
+            cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
         }
     }
 
@@ -43,6 +47,12 @@ impl HostOptions {
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: TransportCancellation) -> Self {
         self.cancellation = Some(cancellation);
+        self
+    }
+
+    #[must_use]
+    pub fn with_cache_clock(mut self, cache_clock: Rc<dyn CacheClock>) -> Self {
+        self.cache_clock = cache_clock;
         self
     }
 }
@@ -82,6 +92,7 @@ impl HostRuntime {
 pub struct HostAssembly {
     config: Rc<CompiledConfig>,
     forward: Rc<ForwardAdapter>,
+    cache: Rc<NativeCacheAdapter>,
     runtime: HostRuntime,
     options: HostOptions,
 }
@@ -106,9 +117,14 @@ impl HostAssembly {
     ) -> Result<Self, AssemblyError> {
         let endpoint = config.forward.endpoint;
         let config = Rc::new(config);
+        let cache = Rc::new(
+            NativeCacheAdapter::with_clock(options.cache_clock.clone())
+                .map_err(AssemblyError::Cache)?,
+        );
         Ok(Self {
             config,
             forward: Rc::new(ForwardAdapter::new(endpoint)),
+            cache,
             runtime: HostRuntime::new()?,
             options,
         })
@@ -122,6 +138,11 @@ impl HostAssembly {
     #[must_use]
     pub fn forward(&self) -> &ForwardAdapter {
         &self.forward
+    }
+
+    #[must_use]
+    pub fn cache(&self) -> &NativeCacheAdapter {
+        &self.cache
     }
 
     #[must_use]
@@ -155,6 +176,10 @@ impl HostAssembly {
 
     pub(crate) fn forward_handle(&self) -> Rc<ForwardAdapter> {
         Rc::clone(&self.forward)
+    }
+
+    pub(crate) fn cache_handle(&self) -> Rc<NativeCacheAdapter> {
+        Rc::clone(&self.cache)
     }
 
     /// Binds and serves the configured UDP listener. TCP remains a later
@@ -239,6 +264,7 @@ impl ForwardAdapter {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AssemblyError {
     Config(ConfigError),
+    Cache(CacheAdapterError),
     Runtime(String),
 }
 
@@ -246,6 +272,7 @@ impl std::fmt::Display for AssemblyError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Config(error) => error.fmt(formatter),
+            Self::Cache(error) => write!(formatter, "cache setup failed: {error}"),
             Self::Runtime(message) => write!(formatter, "runtime setup failed: {message}"),
         }
     }

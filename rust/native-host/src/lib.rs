@@ -2,18 +2,21 @@
 #![allow(clippy::pedantic)]
 
 mod assembly;
+mod cache;
 mod cli;
 mod config;
+mod execution;
 mod tcp;
 mod udp;
 
 pub use assembly::{
     AssemblyError, ForwardAdapter, HostAssembly, HostOptions, HostRunError, HostRuntime,
 };
+pub use cache::{CacheAdapterError, CacheClock, CacheTestClock, NativeCacheAdapter, PendingStore};
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
-    CompiledConfig, ConfigError, ForwardConfig, ListenerConfig, ListenerKind, LogLevel,
-    SequenceConfig, compile_yaml, load_yaml,
+    CachePluginConfig, CompiledConfig, ConfigError, ForwardConfig, ListenerConfig, ListenerKind,
+    LogLevel, SequenceConfig, compile_yaml, load_yaml,
 };
 pub use tcp::{TcpServer, TcpServerError};
 pub use udp::{UdpServer, UdpServerError};

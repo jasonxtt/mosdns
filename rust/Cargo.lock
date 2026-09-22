@@ -645,6 +645,7 @@ dependencies = [
 name = "mosdns-native-host"
 version = "0.1.0"
 dependencies = [
+ "mosdns-cache-core",
  "mosdns-dns-core",
  "mosdns-sequence-core",
  "mosdns-upstream-core",
