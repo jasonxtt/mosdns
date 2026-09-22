@@ -1,0 +1,45 @@
+{
+  "id": "rust-phase5a-native-cache",
+  "name": "rust-phase5a-native-cache",
+  "title": "Rust Phase 5A native cache",
+  "description": "Integrate bounded W2 cache into the existing Rust-native host with safe cache-core API, canonical sequence execution, strict config and Linux correctness evidence.",
+  "status": "planning",
+  "dev_type": "backend",
+  "scope": "rust-phase5a",
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-22",
+  "completedAt": null,
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "rust/cache-core",
+    "rust/native-host",
+    "rust/dns-core",
+    "docs/ai/rust-handover.md",
+    "docs/rust/feature-coverage.md"
+  ],
+  "notes": "",
+  "meta": {
+    "handoff": {
+      "executor_thread": "01a0c7fa-e0ea-7f52-adb0-f3789e7a7bdb",
+      "reviewer_thread": "01a0c7fe-fd97-7ce1-aed2-d389bbefa3e3",
+      "units": [
+        "Slice 0",
+        "Slice 1",
+        "Slice 2",
+        "Slice 3"
+      ],
+      "source_anchor": "e4dcc71398c2412a4d42a5be6bad3ddcca1f0bc0",
+      "stop_after": "Final review PASS; no finish/archive"
+    }
+  }
+}
