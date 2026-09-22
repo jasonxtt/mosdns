@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native cache
 
-Status: Slice 2 implementation complete; awaiting scoped reviewer PASS.
+Status: Slice 2 directed remediation complete; awaiting scoped re-review PASS.
 Planning review: `PLANNING: PASS` at
 `d49da845b694ec39ce9ecb09fd51447350f06b97`; see
 `research/planning-review.md`. Executor still owns authorize/start/activate.
@@ -181,9 +181,11 @@ Slice 2 local evidence before review:
   unknown fields, wrong types/values, missing roles, counts, TCP, audit and
   wrong/repeated/missing references before assembly.
 - UDP correctness: `cargo test -p mosdns-native-host --all-targets --locked`
-  passed 15 unit, 8 Slice 1 adapter, 5 config, 5 W1 TCP, 4 W1 UDP and 5 W2
-  tests. W2 loopback tests cover independent cold misses, concurrent warm hits,
-  ID/buffer isolation, expiry/reforward, EDNS and non-IN bypass, upstream
+  passed 15 unit, 8 Slice 1 adapter, 5 config, 5 W1 TCP, 4 W1 UDP and 6 W2
+  tests. W2 loopback tests cover the two immutable `workloads/cache.jsonl`
+  hot cases in separate cold and warm lifecycles, independent cold misses,
+  concurrent warm hits, ID/buffer isolation, expiry/reforward, EDNS and
+  non-IN bypass, upstream
   SERVFAIL caching, TC/OPT/malformed/mismatched responses, cancellation,
   shutdown and listener rebind.
 - Affected crate checks passed: cache-core 11 tests; dns-core 55 unit plus 47
@@ -193,6 +195,12 @@ Slice 2 local evidence before review:
   the reviewed cache-core edge, with no runtime/cgo/ABI-handle source use.
 - No Linux remote regression, baseline runner, benchmark, VM, deployment or
   production cutover was run in this slice.
+
+Reviewer remediation round 0 (`5075d12adeab809bb34928a53af5503218375f35`)
+returned a scoped FAIL with P1-1 and P2-1. The directed remediation adds
+immutable corpus checks for both frozen W2 rows, independent cold and warm
+lifecycles with a warm counter barrier, and an upstream-receipt signal before
+the shutdown cancellation assertion. No implementation scope was expanded.
 
 ## Slice 3 — Linux regression evidence and final review
 

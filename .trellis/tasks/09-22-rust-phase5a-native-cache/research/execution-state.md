@@ -95,3 +95,24 @@ loopback UDP correctness coverage in `rust/native-host/tests/w2_cache.rs`.
   SERVFAIL, invalid/TC/OPT/mismatched response no-publication, cancellation,
   shutdown and rebind. No Linux remote run, benchmark, VM, deployment or
   production cutover was performed.
+
+### Slice 2 reviewer remediation
+
+The first Slice 2 review at pushed head
+`5075d12adeab809bb34928a53af5503218375f35` returned `SLICE 2: FAIL` with two
+scoped findings:
+
+- P1-1 required direct checks against both immutable rows in
+  `tests/phase5a-baseline/workloads/cache.jsonl`, with separate cold and warm
+  lifecycles and a post-prefill counter barrier. `w2_cache.rs` now reads and
+  asserts the exact `cache-a`/`cache-b` qname and answer fields, then runs each
+  row through its own cold lifecycle and a fresh warm lifecycle.
+- P2-1 required proof that cancellation occurs after the request reaches the
+  upstream. The shutdown test now uses a controlled blackhole upstream and
+  waits for its receipt counter before cancelling, then asserts no response,
+  no cache publication and successful listener rebind.
+
+The remediation is limited to `rust/native-host/tests/w2_cache.rs` plus this
+task evidence. Post-remediation native-host tests/clippy, format, and diff
+checks pass; no remote Linux, benchmark, VM, deployment or production work
+was run.
