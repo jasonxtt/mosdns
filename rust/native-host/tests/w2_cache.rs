@@ -12,6 +12,7 @@ use mosdns_native_host::{CacheTestClock, HostAssembly, HostOptions, UdpServer, c
 use mosdns_upstream_core::TransportCancellation;
 
 const CACHE_CONFIG: &str = include_str!("../../../tests/phase5a-baseline/configs/cache.yaml");
+const HOT_CASES: &str = include_str!("../../../tests/phase5a-baseline/workloads/cache.jsonl");
 
 struct MockUpstream {
     address: SocketAddr,
@@ -129,13 +130,20 @@ fn response_for(query: &[u8]) -> Vec<u8> {
     }
     if answer_count != 0 {
         let ttl = u32::from(query_has_label(query, "expire"));
+        let address_tail = if query_has_label(query, "cache-a") {
+            20
+        } else if query_has_label(query, "cache-b") {
+            21
+        } else {
+            1
+        };
         response.extend_from_slice(&[
             0xc0, 0x0c, // owner pointer to the response question
         ]);
         response.extend_from_slice(&question.qtype.to_be_bytes());
         response.extend_from_slice(&question.qclass.to_be_bytes());
         response.extend_from_slice(&if ttl == 0 { 60 } else { ttl }.to_be_bytes());
-        response.extend_from_slice(&[0, 4, 192, 0, 2, 1]);
+        response.extend_from_slice(&[0, 4, 198, 51, 100, address_tail]);
     }
     if opt {
         response.extend_from_slice(&[0, 0, 41, 0x04, 0xd0, 0, 0, 0, 0, 0, 0]);
@@ -193,6 +201,111 @@ fn response_id(response: &[u8]) -> u16 {
     inspect_response_header(response)
         .expect("response header")
         .id
+}
+
+fn assert_frozen_answer(response: &[u8], id: u16, address_tail: u8) {
+    assert_eq!(response_id(response), id);
+    validate_response(response).expect("frozen hot-case response");
+    assert!(
+        response
+            .windows(4)
+            .any(|window| window == [198, 51, 100, address_tail]),
+        "response must carry the frozen expected answer"
+    );
+}
+
+fn run_frozen_hot_case(name: &str, address_tail: u8, case_id: &str) {
+    let case_marker = format!("\"case_id\":\"{case_id}\"");
+    let qname_marker = format!("\"qname\":\"{name}.\"");
+    let answer_marker = format!("\"expected_answer\":\"198.51.100.{address_tail}\"");
+    assert!(
+        HOT_CASES.lines().any(|line| {
+            line.contains(&case_marker)
+                && line.contains(&qname_marker)
+                && line.contains(&answer_marker)
+        }),
+        "frozen workload row must be checked as-is"
+    );
+
+    let mock = MockUpstream::start(false);
+    let assembly = assembly_for(mock.address, HostOptions::default());
+    let server = assembly
+        .block_on(UdpServer::bind(&assembly, "127.0.0.1:0".parse().unwrap()))
+        .expect("cold UDP listener bind");
+    let listener = server.local_addr().expect("cold listener address");
+    let shutdown = TransportCancellation::new();
+    let cold = assembly.block_on(async {
+        let task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+        let request = query(0x6001, name, 1, 1, false);
+        let response = tokio::task::spawn_blocking(move || {
+            client_request(listener, &request, Duration::from_secs(2))
+        })
+        .await
+        .expect("cold hot-case client");
+        shutdown.cancel();
+        let server_result = task.await.expect("cold server task");
+        (response, server_result)
+    });
+    let (response, server_result) = cold;
+    server_result.expect("cold server shutdown");
+    assert_frozen_answer(&response, 0x6001, address_tail);
+    assert_eq!(
+        mock.requests(),
+        1,
+        "each frozen cold case reaches upstream once"
+    );
+    mock.stop();
+
+    let mock = MockUpstream::start(false);
+    let assembly = assembly_for(mock.address, HostOptions::default());
+    let server = assembly
+        .block_on(UdpServer::bind(&assembly, "127.0.0.1:0".parse().unwrap()))
+        .expect("warm UDP listener bind");
+    let listener = server.local_addr().expect("warm listener address");
+    let shutdown = TransportCancellation::new();
+    let warm = assembly.block_on(async {
+        let task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+        let request = query(0x6100, name, 1, 1, false);
+        let prefill = tokio::task::spawn_blocking(move || {
+            client_request(listener, &request, Duration::from_secs(2))
+        })
+        .await
+        .expect("warm prefill client");
+        let baseline = mock.requests();
+        assert_eq!(baseline, 1, "warm lifecycle must prefill exactly once");
+        let gate = Arc::new(Barrier::new(2));
+        let mut clients = Vec::new();
+        for id in [0x6101_u16, 0x6102] {
+            let request = query(id, name, 1, 1, false);
+            let gate = Arc::clone(&gate);
+            clients.push(tokio::task::spawn_blocking(move || {
+                gate.wait();
+                client_request(listener, &request, Duration::from_secs(2))
+            }));
+        }
+        let first = clients.remove(0).await.expect("warm hot-case client one");
+        let second = clients.remove(0).await.expect("warm hot-case client two");
+        shutdown.cancel();
+        let server_result = task.await.expect("warm server task");
+        (prefill, first, second, baseline, server_result)
+    });
+    let (prefill, first, second, baseline, server_result) = warm;
+    server_result.expect("warm server shutdown");
+    assert_frozen_answer(&prefill, 0x6100, address_tail);
+    assert_frozen_answer(&first, 0x6101, address_tail);
+    assert_frozen_answer(&second, 0x6102, address_tail);
+    assert_eq!(
+        mock.requests(),
+        baseline,
+        "warm hot-case requests add zero upstream delta"
+    );
+    mock.stop();
+}
+
+#[test]
+fn frozen_w2_hot_cases_have_independent_cold_and_warm_lifecycles() {
+    run_frozen_hot_case("cache-a.test", 20, "cache-a");
+    run_frozen_hot_case("cache-b.test", 21, "cache-b");
 }
 
 #[test]
@@ -431,9 +544,9 @@ fn expiry_and_invalid_or_opt_responses_never_publish() {
 
 #[test]
 fn shutdown_cancels_w2_request_without_publication_and_allows_rebind() {
-    let blackhole = StdUdpSocket::bind("127.0.0.1:0").expect("blackhole bind");
+    let blackhole = MockUpstream::start(false);
     let assembly = assembly_for(
-        blackhole.local_addr().expect("blackhole address"),
+        blackhole.address,
         HostOptions::with_deadline(Duration::from_secs(2)),
     );
     let server = assembly
@@ -453,7 +566,13 @@ fn shutdown_cancels_w2_request_without_publication_and_allows_rebind() {
             let mut response = [0_u8; 512];
             socket.recv_from(&mut response).is_ok()
         });
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while blackhole.requests() == 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("blackhole must observe the query before shutdown");
         shutdown.cancel();
         let received = client.await.expect("cancelled client");
         let server_result = task.await.expect("server task");
@@ -469,4 +588,10 @@ fn shutdown_cancels_w2_request_without_publication_and_allows_rebind() {
         .block_on(UdpServer::bind(&assembly, listener))
         .expect("W2 listener must rebind after shutdown");
     drop(rebound);
+    assert_eq!(
+        blackhole.requests(),
+        1,
+        "cancellation test must reach upstream once"
+    );
+    blackhole.stop();
 }
