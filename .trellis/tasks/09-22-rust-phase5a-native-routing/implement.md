@@ -1,6 +1,7 @@
 # Implementation plan — native W3 routing
 
-Status: planning only. Numeric units below are a proposed execution plan;
+Status: reviewed planning (PLANNING: PASS at `7d684c5dee67afeb1eea298813c25b632a6f8438`).
+See `research/planning-review.md`. Numeric units below are a proposed execution plan;
 there is no user-authorized W3 run. Do not start or send implementation work.
 
 ## Pre-start gates
