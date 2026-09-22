@@ -1,6 +1,7 @@
 # Rust Phase 5A native cache
 
-Status: planning; implementation waits for explicit planning PASS.
+Status: planning; reviewer returned PLANNING: PASS at
+`d49da845b694ec39ce9ecb09fd51447350f06b97`; executor activation is next.
 Source anchor: `e4dcc71398c2412a4d42a5be6bad3ddcca1f0bc0` on `rust`.
 
 ## Goal and value
