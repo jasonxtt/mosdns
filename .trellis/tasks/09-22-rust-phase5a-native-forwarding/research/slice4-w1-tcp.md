@@ -64,8 +64,7 @@ cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PA
 cargo clippy --manifest-path rust/native-host/Cargo.toml --all-targets --locked -- -D warnings PASS
 ```
 
-The native-host manifest and `Cargo.lock` were unchanged. No remote Linux
-evidence, VM, browser, benchmark, deployment, or official Go baseline runner
-was used for the focused local checks; any separately authorized Linux
-correctness evidence must be recorded independently and is not performance
-comparison evidence.
+The native-host manifest and `Cargo.lock` were unchanged. The separately
+authorized Linux correctness-only run is recorded independently in
+`linux-w1-correctness.md`; it is not performance comparison evidence. No VM,
+browser, benchmark, deployment, or official Go baseline runner was used.
