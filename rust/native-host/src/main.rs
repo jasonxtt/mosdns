@@ -1,7 +1,7 @@
 fn main() {
     match mosdns_native_host::prepare_from_args(std::env::args_os()) {
         Ok(assembly) => {
-            if let Err(error) = assembly.run_udp() {
+            if let Err(error) = assembly.run() {
                 eprintln!("mosdns: {error}");
                 std::process::exit(2);
             }

@@ -4,14 +4,18 @@
 mod assembly;
 mod cli;
 mod config;
+mod tcp;
 mod udp;
 
-pub use assembly::{AssemblyError, ForwardAdapter, HostAssembly, HostOptions, HostRuntime};
+pub use assembly::{
+    AssemblyError, ForwardAdapter, HostAssembly, HostOptions, HostRunError, HostRuntime,
+};
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
     CompiledConfig, ConfigError, ForwardConfig, ListenerConfig, ListenerKind, LogLevel,
     SequenceConfig, compile_yaml, load_yaml,
 };
+pub use tcp::{TcpServer, TcpServerError};
 pub use udp::{UdpServer, UdpServerError};
 
 /// Parses and prepares a native host without opening a listener or an
