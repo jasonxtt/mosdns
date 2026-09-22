@@ -1,0 +1,30 @@
+{
+  "id": "rust-phase5a-native-routing",
+  "name": "rust-phase5a-native-routing",
+  "title": "Rust Phase 5A native routing",
+  "description": "Plan bounded native W3 domain/response-IP routing with canonical sequence, three UDP upstreams and W1/W2 regression.",
+  "status": "planning",
+  "dev_type": "backend",
+  "scope": "rust-phase5a",
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-22",
+  "completedAt": null,
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "planning_only": true,
+    "source_anchor": "0fb56189f04820c79d1cbb52fef6571aefdfe536",
+    "proposed_reviewer": "codex://threads/01a0c7fe-fd97-7ce1-aed2-d389bbefa3e3"
+  }
+}
