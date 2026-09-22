@@ -742,7 +742,6 @@ plugins:
             ("hostname", "addr: udp://dns.example:53\n"),
             ("zero upstream port", "addr: udp://127.0.0.1:0\n"),
             ("zero listener port", "listen: 127.0.0.1:0\n"),
-            ("audit", "enable_audit: true\n"),
             ("missing ref", "exec: $missing\n"),
             ("sequence matcher", "match: foo\n"),
             ("tcp timeout", "idle_timeout: 0\n"),
@@ -764,7 +763,7 @@ plugins:
                 "hostname" | "zero upstream port" => format!(
                     "log: {{ level: error }}\nplugins: [{{ tag: f, type: forward, args: {{ upstreams: [{{ {marker} }}] }} }}, {{ tag: s, type: sequence, args: [{{ exec: $f }}] }}, {{ tag: l, type: udp_server, args: {{ entry: s, listen: 127.0.0.1:53, enable_audit: false }} }}]\n"
                 ),
-                "zero listener port" | "audit" => format!(
+                "zero listener port" => format!(
                     "log: {{ level: error }}\nplugins: [{{ tag: f, type: forward, args: {{ upstreams: [{{ addr: udp://127.0.0.1:53 }}] }} }}, {{ tag: s, type: sequence, args: [{{ exec: $f }}] }}, {{ tag: l, type: udp_server, args: {{ entry: s, {marker}, enable_audit: false }} }}]\n"
                 ),
                 "missing ref" | "sequence matcher" => format!(
@@ -775,6 +774,43 @@ plugins:
                 ),
                 _ => unreachable!(),
             };
+            assert!(compile_yaml(&yaml).is_err(), "case {name} must reject");
+        }
+    }
+
+    #[test]
+    fn independently_proves_the_remaining_fail_closed_categories() {
+        let cases = [
+            (
+                "unsupported scheme",
+                UDP.replace("udp://127.0.0.1:15453", "quic://127.0.0.1:15453"),
+            ),
+            (
+                "wrong YAML type",
+                UDP.replace("enable_audit: false", "enable_audit: \"false\""),
+            ),
+            (
+                "listener missing sequence reference",
+                UDP.replace("entry: phase5a_entry", "entry: missing_entry"),
+            ),
+            (
+                "invalid sequence control form",
+                UDP.replace("- exec: $phase5a_forward", "- goto: another_sequence"),
+            ),
+            (
+                "audit true",
+                UDP.replace("enable_audit: false", "enable_audit: true"),
+            ),
+            (
+                "negative TCP timeout",
+                TCP.replace("idle_timeout: 2", "idle_timeout: -1"),
+            ),
+            (
+                "noninteger TCP timeout",
+                TCP.replace("idle_timeout: 2", "idle_timeout: \"2\""),
+            ),
+        ];
+        for (name, yaml) in cases {
             assert!(compile_yaml(&yaml).is_err(), "case {name} must reject");
         }
     }

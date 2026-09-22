@@ -57,7 +57,8 @@ pub enum ResponseBuildError {
 }
 
 /// Builds a QR/RA response carrying the original ID and question with no
-/// answer, authority, or additional records.
+/// answer, authority, or additional records. The question name is the
+/// self-contained, uncompressed form produced by [`crate::parse_query`].
 ///
 /// This is deliberately limited to the two native-host protocol-error forms
 /// (SERVFAIL and REFUSED in the current caller). It is not a general DNS
@@ -252,6 +253,30 @@ mod tests {
         assert_eq!(
             synthesize_response(&query, &question, 16),
             Err(ResponseBuildError::InvalidRcode(16))
+        );
+    }
+
+    #[test]
+    fn synthesizes_a_self_contained_question_from_compressed_query_input() {
+        // The query name points into the query header at offset 2. That is
+        // accepted by the query parser, but the target bytes would not be a
+        // valid target at offset 2 after the question is copied into a new
+        // response with different flags.
+        let mut query = vec![
+            0x00, 0x12, 0x01, 0x00, // ID and RD flags; offset 2 is a one-byte label.
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        query.extend_from_slice(&[0xc0, 0x02, 0x00, 0x01, 0x00, 0x01]);
+        let (header, question) = crate::parse_query(&query).expect("compressed query parses");
+        assert_eq!(question.qname_wire, vec![1, 0, 0]);
+
+        let response = synthesize_response(&header, &question, 2).expect("SERVFAIL response");
+        assert_eq!(
+            crate::validate_response(&response),
+            Ok(crate::TtlInfo {
+                minimal_ttl: 0,
+                record_count: 0,
+            })
         );
     }
 
