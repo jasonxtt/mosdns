@@ -202,7 +202,7 @@ impl PendingStore {
 
         let ttl = mosdns_dns_core::observe_response_ttl(response)
             .map_err(|_| CacheAdapterError::InvalidQuery)?;
-        let retention = retention_seconds(metadata.rcode, ttl.minimal_ttl, ttl.record_count);
+        let retention = retention_seconds(&metadata, ttl.minimal_ttl, ttl.record_count);
         let stored_at = self.adapter.clock.now_seconds()?;
         let expires = stored_at
             .checked_add(i64::from(retention))
@@ -285,12 +285,16 @@ fn eligible_response(metadata: &ResponseMetadata, question: &ResponseQuestion) -
         && metadata.question.as_ref() == Some(question)
 }
 
-fn retention_seconds(rcode: u16, minimal_ttl: u32, record_count: u32) -> u32 {
-    match rcode {
+fn retention_seconds(metadata: &ResponseMetadata, minimal_ttl: u32, record_count: u32) -> u32 {
+    match metadata.rcode {
         RCODE_NXDOMAIN => RETENTION_NXDOMAIN_SECS,
         RCODE_SERVFAIL => RETENTION_FALLBACK_SECS,
         RCODE_NOERROR if record_count > 0 && minimal_ttl > 0 => {
-            minimal_ttl.min(RETENTION_MAX_NOERROR_SECS)
+            if metadata.answer_count == 0 {
+                minimal_ttl.min(RETENTION_MAX_NOERROR_SECS)
+            } else {
+                minimal_ttl
+            }
         }
         _ => RETENTION_FALLBACK_SECS,
     }
