@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use mosdns_dns_core::{
     FrameMode, QueryHeader, QuestionInfo, frame_response, inspect_response_header,
-    observe_response_metadata, patch_response_id_ra, synthesize_response, validate_response,
+    observe_answer_addresses, observe_response_metadata, patch_response_id_ra, synthesize_response,
+    validate_response,
 };
 use mosdns_sequence_core::{
     ExecutableId, ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep,
@@ -177,7 +178,16 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                 }
                 match exchange {
                     Ok(response) => {
-                        let accepted = qualify_response(response.wire(), header.id, &question);
+                        let accepted = if multi_forward {
+                            qualify_response(response.wire(), header.id, &question)
+                        } else {
+                            patch_response_id_ra(response.wire(), header.id)
+                                .ok()
+                                .filter(|wire| {
+                                    inspect_response_header(wire).is_ok()
+                                        && validate_response(wire).is_ok()
+                                })
+                        };
                         match accepted {
                             Some(wire) => {
                                 upstream_response = true;
@@ -229,6 +239,7 @@ fn qualify_response(
     {
         return None;
     }
+    observe_answer_addresses(&wire).ok()?;
     validate_response(&wire).ok()?;
     Some(wire)
 }
@@ -276,7 +287,9 @@ mod tests {
         DispatchMetadata, ExecutableId, ExecutableSpec, ExternalRef, ExternalSpec,
         MatcherSpecInput, ProgramSpec, RuleSpec, SequenceSpec,
     };
-    use mosdns_upstream_core::{Endpoint, ExchangeResponse, Transport, UpstreamError};
+    use mosdns_upstream_core::{
+        Endpoint, ExchangeResponse, Transport, TransportCancellation, UpstreamError,
+    };
 
     use super::{ExchangeExecutor, execute_request_with_executor};
     use crate::assembly::{ForwardAdapter, HostOptions};
@@ -301,6 +314,18 @@ mod tests {
         calls: Rc<RefCell<Vec<ExecutableId>>>,
     }
 
+    struct SecondLegFailExchange {
+        calls: Rc<RefCell<Vec<ExecutableId>>>,
+        first_response: Vec<u8>,
+        fail_id: ExecutableId,
+    }
+
+    struct CancelFirstExchange {
+        calls: Rc<RefCell<Vec<ExecutableId>>>,
+        exchange_count: Rc<Cell<u32>>,
+        response: Vec<u8>,
+    }
+
     impl ExchangeExecutor for FailingExchange {
         fn exchange<'a>(
             &'a self,
@@ -316,6 +341,72 @@ mod tests {
         > {
             self.calls.borrow_mut().push(executable);
             Box::pin(async { Err(super::ExchangeError::Upstream(UpstreamError::Connect)) })
+        }
+    }
+
+    impl ExchangeExecutor for SecondLegFailExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            _query: &'a [u8],
+            _deadline: std::time::Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            self.calls.borrow_mut().push(executable);
+            if executable == self.fail_id {
+                return Box::pin(async {
+                    Err(super::ExchangeError::Upstream(UpstreamError::Connect))
+                });
+            }
+            let response = self.first_response.clone();
+            Box::pin(async move {
+                let id = u16::from_be_bytes([response[0], response[1]]);
+                Ok(ExchangeResponse::new(
+                    response,
+                    id,
+                    id,
+                    Transport::Udp,
+                    false,
+                ))
+            })
+        }
+    }
+
+    impl ExchangeExecutor for CancelFirstExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            _query: &'a [u8],
+            _deadline: std::time::Instant,
+            cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            self.calls.borrow_mut().push(executable);
+            let cancel = self.exchange_count.get() == 0;
+            self.exchange_count.set(self.exchange_count.get() + 1);
+            let response = self.response.clone();
+            Box::pin(async move {
+                if cancel {
+                    cancellation.cancel();
+                }
+                let id = u16::from_be_bytes([response[0], response[1]]);
+                Ok(ExchangeResponse::new(
+                    response,
+                    id,
+                    id,
+                    Transport::Udp,
+                    false,
+                ))
+            })
         }
     }
 
@@ -434,6 +525,13 @@ mod tests {
         response
     }
 
+    fn malformed_address_response(query: &[u8]) -> Vec<u8> {
+        let mut response = response(query);
+        let rdlength_offset = response.len() - 6;
+        response[rdlength_offset..rdlength_offset + 2].copy_from_slice(&3_u16.to_be_bytes());
+        response
+    }
+
     fn config() -> CompiledConfig {
         let forward = "forward".to_owned();
         let cache = "cache".to_owned();
@@ -517,6 +615,9 @@ mod tests {
                             ExecutableSpec::Exit,
                         ]),
                     ),
+                    RuleSpec::unconditional(Some(vec![ExecutableSpec::External {
+                        target: ExternalRef::new(b.clone()),
+                    }])),
                 ],
             )],
             Vec::new(),
@@ -674,6 +775,115 @@ mod tests {
         let calls = calls.borrow();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, b);
+    }
+
+    #[test]
+    fn malformed_address_rdata_is_terminal_for_multi_forward_w3() {
+        let (config, _a, b) = two_leg_config();
+        let request = query(15);
+        let (header, question) = parse_query(&request).expect("query");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = RecordingExchange {
+            calls: Rc::clone(&calls),
+            response: malformed_address_response(&request),
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let response = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &HostOptions::default(),
+                raw: &request,
+                header,
+                question,
+            },
+            &executor,
+            TransportCancellation::new(),
+        ));
+        validate_response(&response).expect("SERVFAIL response");
+        assert_eq!(response[3] & 0x0f, super::SERVFAIL);
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, b);
+    }
+
+    #[test]
+    fn failed_second_multi_forward_leg_does_not_republish_first_answer() {
+        let (config, a, b) = two_leg_config();
+        let request = query(16);
+        let (header, question) = parse_query(&request).expect("query");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = SecondLegFailExchange {
+            calls: Rc::clone(&calls),
+            first_response: response(&request),
+            fail_id: a,
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let response = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &HostOptions::default(),
+                raw: &request,
+                header,
+                question,
+            },
+            &executor,
+            TransportCancellation::new(),
+        ));
+        validate_response(&response).expect("SERVFAIL response");
+        assert_eq!(response[3] & 0x0f, super::SERVFAIL);
+        assert_eq!(calls.borrow().as_slice(), &[b, a]);
+    }
+
+    #[test]
+    fn cancellation_after_first_leg_isolated_from_the_next_request() {
+        let (config, _a, b) = two_leg_config();
+        let first_request = query(17);
+        let second_request = query(18);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = CancelFirstExchange {
+            calls: Rc::clone(&calls),
+            exchange_count: Rc::new(Cell::new(0)),
+            response: response(&first_request),
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+
+        let first_cancellation = TransportCancellation::new();
+        let (header, question) = parse_query(&first_request).expect("query");
+        let first_response = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &HostOptions::default(),
+                raw: &first_request,
+                header,
+                question,
+            },
+            &executor,
+            first_cancellation,
+        ));
+        assert!(
+            first_response.is_empty(),
+            "cancelled request must not publish"
+        );
+
+        let second_cancellation = TransportCancellation::new();
+        let (header, question) = parse_query(&second_request).expect("query");
+        let second_response = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &HostOptions::default(),
+                raw: &second_request,
+                header,
+                question,
+            },
+            &executor,
+            second_cancellation,
+        ));
+        validate_response(&second_response).expect("uncancelled request response");
+        assert_eq!(calls.borrow().as_slice(), &[b, b, _a]);
     }
 
     #[test]
