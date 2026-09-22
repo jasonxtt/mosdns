@@ -88,6 +88,13 @@ Slice 0 local evidence before review:
   evidence is in `research/execution-state.md`. No runtime/ABI source was
   changed.
 
+Reviewer remediation round 0 (`0d4a4355cc0447e6bef6b82e89b0245233c8f1c0`)
+returned a scoped FAIL with P1-1, P2-1 and P2-2. The remediation keeps the
+legacy ABI validation-before-handle-lookup precedence and adds the closed-handle
+regression test, writes five distinct entries into the capacity-four native
+cache test, and checks both sides of the message-expiry and cache-expiry
+boundaries. The next review is a Slice 0 re-review only.
+
 ## Slice 1 — native cache adapter and request completion
 
 Allowlist: `rust/native-host/**`, `rust/Cargo.lock` path-edge changes only,

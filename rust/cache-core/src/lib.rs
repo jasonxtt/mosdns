@@ -322,6 +322,25 @@ pub struct NativeLookup {
     pub domain_set: Vec<u8>,
 }
 
+fn validate_store(
+    key: &[u8],
+    response: &[u8],
+    stored_at_unix: i64,
+    message_expires_at_unix: i64,
+    cache_expires_at_unix: i64,
+) -> Result<(), CacheError> {
+    if key.is_empty() {
+        return Err(CacheError::InvalidKey);
+    }
+    if response.is_empty() || wire::validate_response(response).is_err() {
+        return Err(CacheError::InvalidResponse);
+    }
+    if message_expires_at_unix < stored_at_unix || cache_expires_at_unix < stored_at_unix {
+        return Err(CacheError::InvalidExpiry);
+    }
+    Ok(())
+}
+
 fn lookup_data(
     cache: &NativeCache,
     key: &[u8],
@@ -382,15 +401,13 @@ impl NativeCache {
         message_expires_at_unix: i64,
         cache_expires_at_unix: i64,
     ) -> Result<(), CacheError> {
-        if key.is_empty() {
-            return Err(CacheError::InvalidKey);
-        }
-        if response.is_empty() || wire::validate_response(response).is_err() {
-            return Err(CacheError::InvalidResponse);
-        }
-        if message_expires_at_unix < stored_at_unix || cache_expires_at_unix < stored_at_unix {
-            return Err(CacheError::InvalidExpiry);
-        }
+        validate_store(
+            key,
+            response,
+            stored_at_unix,
+            message_expires_at_unix,
+            cache_expires_at_unix,
+        )?;
         self.state.entries.insert(
             Bytes::copy_from_slice(key),
             Arc::new(CacheEntry {
@@ -578,6 +595,15 @@ pub unsafe fn cache_store(
         let Ok(domain_set) = (unsafe { domain_set.as_slice() }) else {
             return Status::InvalidArgument;
         };
+        if let Err(error) = validate_store(
+            key,
+            response,
+            stored_at_unix,
+            message_expires_at_unix,
+            cache_expires_at_unix,
+        ) {
+            return cache_error_status(error);
+        }
         let Some(state) = handles().get(&handle) else {
             return Status::Closed;
         };
@@ -808,7 +834,7 @@ mod tests {
         assert_eq!(answer_ttl(&second_hit.response), 49);
 
         cache
-            .store(b"key", &replacement, &[], 120, 150, 155)
+            .store(b"key", &replacement, &[], 120, 150, 200)
             .expect("overwrite");
         let overwritten = cache
             .lookup(b"key", 121)
@@ -816,7 +842,34 @@ mod tests {
             .expect("hit");
         assert_eq!(overwritten.response[41..45], [192, 0, 2, 2]);
         assert_eq!(answer_ttl(&overwritten.response), 29);
-        assert!(cache.lookup(b"key", 155).expect("expiry lookup").is_none());
+        assert!(
+            cache
+                .lookup(b"key", 149)
+                .expect("message expiry boundary predecessor")
+                .is_some()
+        );
+        assert!(
+            cache
+                .lookup(b"key", 150)
+                .expect("message expiry boundary")
+                .is_none()
+        );
+
+        cache
+            .store(b"cache-expiry", &replacement, &[], 200, 260, 205)
+            .expect("cache expiry store");
+        assert!(
+            cache
+                .lookup(b"cache-expiry", 204)
+                .expect("cache expiry boundary predecessor")
+                .is_some()
+        );
+        assert!(
+            cache
+                .lookup(b"cache-expiry", 205)
+                .expect("cache expiry boundary")
+                .is_none()
+        );
     }
 
     #[test]
@@ -888,6 +941,7 @@ mod tests {
             (b"key-1", [192, 0, 2, 5]),
             (b"key-2", [192, 0, 2, 6]),
             (b"key-3", [192, 0, 2, 7]),
+            (b"key-4", [192, 0, 2, 8]),
         ] {
             cache
                 .store(key, &response(60, address), &[], 100, 160, 200)

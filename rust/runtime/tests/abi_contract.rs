@@ -580,6 +580,36 @@ fn malformed_dns_wire_is_rejected_at_store_boundary() {
 }
 
 #[test]
+fn closed_cache_store_preserves_invalid_argument_precedence() {
+    let config = CacheConfig {
+        capacity: 1,
+        lazy_cache_ttl_secs: 0,
+        flags: 0,
+    };
+    let mut handle = 0;
+    assert_eq!(
+        unsafe { cache_create(&raw const config, &raw mut handle) },
+        Status::Ok
+    );
+    assert_eq!(cache_close(handle), Status::Ok);
+
+    assert_eq!(
+        unsafe {
+            cache_store(
+                handle,
+                BorrowedSlice::from_slice(b""),
+                BorrowedSlice::from_slice(&response_wire(60)),
+                BorrowedSlice::from_slice(b""),
+                100,
+                160,
+                200,
+            )
+        },
+        Status::InvalidArgument
+    );
+}
+
+#[test]
 fn lookup_into_reports_sizes_then_writes_caller_owned_buffers() {
     let config = CacheConfig {
         capacity: 1,
