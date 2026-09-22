@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use mosdns_dns_core::{
     FrameMode, QueryHeader, QuestionInfo, frame_response, inspect_response_header,
-    patch_response_id_ra, synthesize_response, validate_response,
+    observe_response_metadata, patch_response_id_ra, synthesize_response, validate_response,
 };
 use mosdns_sequence_core::{
     ExecutableId, ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep,
@@ -93,7 +93,9 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
     } = request;
     let state = ExecutionState::new(header, question.clone());
     // Every external leg shares this one request-owned absolute budget.
-    let request_deadline = Instant::now() + options.request_deadline;
+    let request_deadline = options
+        .admission_deadline
+        .unwrap_or_else(|| Instant::now() + options.request_deadline);
     let mut machine = match config.new_machine(state, ExecutionControl::with_fuel(DEFAULT_FUEL)) {
         Ok(machine) => machine,
         Err(_) => return protocol_error(&header, &question, SERVFAIL),
@@ -175,12 +177,7 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                 }
                 match exchange {
                     Ok(response) => {
-                        let accepted = patch_response_id_ra(response.wire(), header.id)
-                            .ok()
-                            .filter(|wire| {
-                                inspect_response_header(wire).is_ok()
-                                    && validate_response(wire).is_ok()
-                            });
+                        let accepted = qualify_response(response.wire(), header.id, &question);
                         match accepted {
                             Some(wire) => {
                                 upstream_response = true;
@@ -210,6 +207,30 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
             }
         }
     }
+}
+
+fn qualify_response(
+    response: &[u8],
+    request_id: u16,
+    request_question: &QuestionInfo,
+) -> Option<Vec<u8>> {
+    let wire = patch_response_id_ra(response, request_id).ok()?;
+    let header = inspect_response_header(&wire).ok()?;
+    let metadata = observe_response_metadata(&wire).ok()?;
+    if !header.qr || metadata.opcode != 0 {
+        return None;
+    }
+    let question = metadata.question.as_ref()?;
+    if !question
+        .qname_wire
+        .eq_ignore_ascii_case(&request_question.qname_wire)
+        || question.qtype != request_question.qtype
+        || question.qclass != request_question.qclass
+    {
+        return None;
+    }
+    validate_response(&wire).ok()?;
+    Some(wire)
 }
 
 fn set_servfail(machine: &mut ExecutionMachine<'_>) {
@@ -252,8 +273,8 @@ mod tests {
 
     use mosdns_dns_core::{parse_query, validate_response};
     use mosdns_sequence_core::{
-        ExecutableId, ExecutableSpec, ExternalRef, ExternalSpec, ProgramSpec, RuleSpec,
-        SequenceSpec,
+        DispatchMetadata, ExecutableId, ExecutableSpec, ExternalRef, ExternalSpec,
+        MatcherSpecInput, ProgramSpec, RuleSpec, SequenceSpec,
     };
     use mosdns_upstream_core::{Endpoint, ExchangeResponse, Transport, UpstreamError};
 
@@ -483,12 +504,19 @@ mod tests {
                     RuleSpec::unconditional(Some(vec![ExecutableSpec::External {
                         target: ExternalRef::new(b.clone()),
                     }])),
-                    RuleSpec::unconditional(Some(vec![
-                        ExecutableSpec::External {
-                            target: ExternalRef::new(a.clone()),
-                        },
-                        ExecutableSpec::Exit,
-                    ])),
+                    RuleSpec::new(
+                        vec![MatcherSpecInput::new(
+                            Box::new(crate::matchers::TrueMatcher),
+                            false,
+                            DispatchMetadata::None,
+                        )],
+                        Some(vec![
+                            ExecutableSpec::External {
+                                target: ExternalRef::new(a.clone()),
+                            },
+                            ExecutableSpec::Exit,
+                        ]),
+                    ),
                 ],
             )],
             Vec::new(),
@@ -609,8 +637,43 @@ mod tests {
         ));
         validate_response(&response).expect("SERVFAIL response");
         assert_eq!(response[3] & 0x0f, super::SERVFAIL);
-        assert_eq!(&*calls.borrow(), &[b]);
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], b);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn mismatched_question_is_terminal_and_never_reaches_the_next_external() {
+        let (config, _a, b) = two_leg_config();
+        let request = query(14);
+        let mut wrong_query = query(15);
+        wrong_query[13] = b'x';
+        let (header, question) = parse_query(&request).expect("query");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = RecordingExchange {
+            calls: Rc::clone(&calls),
+            response: response(&wrong_query),
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let options = HostOptions::default();
+        let response = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &options,
+                raw: &request,
+                header,
+                question,
+            },
+            &executor,
+            mosdns_upstream_core::TransportCancellation::new(),
+        ));
+        validate_response(&response).expect("SERVFAIL response");
+        assert_eq!(response[3] & 0x0f, super::SERVFAIL);
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, b);
     }
 
     #[test]

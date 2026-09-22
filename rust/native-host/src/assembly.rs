@@ -21,6 +21,7 @@ pub struct HostOptions {
     pub request_deadline: Duration,
     pub cancellation: Option<TransportCancellation>,
     pub cache_clock: Rc<dyn CacheClock>,
+    pub(crate) admission_deadline: Option<std::time::Instant>,
 }
 
 impl Default for HostOptions {
@@ -29,6 +30,7 @@ impl Default for HostOptions {
             request_deadline: Duration::from_secs(5),
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
+            admission_deadline: None,
         }
     }
 }
@@ -42,6 +44,7 @@ impl HostOptions {
             request_deadline,
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
+            admission_deadline: None,
         }
     }
 
