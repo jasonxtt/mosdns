@@ -3,7 +3,7 @@
   "name": "trellis-automation-simplification",
   "title": "Simplify Trellis execution and review automation",
   "description": "Remove the Codex executor/reviewer routing state machine (surface detection, host_routes, provider dispatch modes, provider-specific workflow-state) from Trellis core; establish a simple automatic execution + independent review loop with current-conversation default executor, generic reviewer target, snapshotted unit authorization, auto-advance, bounded auto-remediation, and no auto-archive.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "Trellis infrastructure only: .trellis scripts/hooks/config/workflow/spec/tests and .codex hooks. No MosDNS runtime code, Cargo manifests, WebUI, DNS behavior, Phase 5A benchmark semantics, production wiring, or deployment.",
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "tom",
   "assignee": "tom",
   "createdAt": "2026-09-21",
-  "completedAt": null,
+  "completedAt": "2026-09-22",
   "branch": "rust",
   "base_branch": "rust",
   "worktree_path": null,
@@ -21,6 +21,8 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Planning-only phase. Baseline HEAD at planning time: 1489ebf41975bf0ab836b2592060aa9d16905b36. Awaiting external root reviewer PASS before task.py start.",
-  "meta": {}
+  "notes": "Authorized implementation scope complete. Planning, Slice G, and Slices 0-4 passed independent reviewer gates. Slice 4 final reviewed SHA: 8907cce2eadd6febcc00a46a50b0c15adfbf35aa; external ChatGPT root reviewer; FINAL: PASS. Final Slice PASS did not auto-finish or archive. User explicitly authorized this finish/archive closeout on 2026-09-22. No MosDNS runtime, production, or deployment scope.",
+  "meta": {
+    "completion_report": "Authorized implementation scope complete; planning and Slices G, 0, 1, 2, 3, 4 passed independent reviewer gates; Slice 4 final reviewed SHA 8907cce2eadd6febcc00a46a50b0c15adfbf35aa; external ChatGPT root reviewer result FINAL: PASS; final Slice PASS did not auto-finish or archive; finish/archive is explicitly authorized in this closeout; no MosDNS runtime, production, or deployment scope."
+  }
 }
