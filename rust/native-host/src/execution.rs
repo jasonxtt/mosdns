@@ -571,11 +571,13 @@ mod tests {
             log_level: LogLevel::Error,
             forward: ForwardConfig {
                 tag: forward,
+                upstream_tag: None,
                 endpoint,
                 executable: forward_id,
             },
             forwards: vec![ForwardConfig {
                 tag: "forward".to_owned(),
+                upstream_tag: None,
                 endpoint,
                 executable: forward_id,
             }],
@@ -653,17 +655,20 @@ mod tests {
                 log_level: LogLevel::Error,
                 forward: ForwardConfig {
                     tag: a,
+                    upstream_tag: None,
                     endpoint,
                     executable: a_id,
                 },
                 forwards: vec![
                     ForwardConfig {
                         tag: "a".to_owned(),
+                        upstream_tag: None,
                         endpoint,
                         executable: a_id,
                     },
                     ForwardConfig {
                         tag: "b".to_owned(),
+                        upstream_tag: None,
                         endpoint,
                         executable: b_id,
                     },
