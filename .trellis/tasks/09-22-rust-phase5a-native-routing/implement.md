@@ -83,7 +83,10 @@ Out-of-scope source defects return to the owning slice with reviewer review.
   on B and final A/C, no later send/leg, every-owner close and rebind.
 - [ ] Run all native-host targets and affected package checks/clippy, common
   checks. No Linux remote run before this slice's explicit PASS.
-- [ ] `SLICE 2: PASS` required before Slice 3.
+- [x] `SLICE 2: PASS` returned by the designated reviewer for the exact
+  remediation head `33e826ccd89a5db039bfc4d92aaf0593907dd95b` after the
+  corpus-driven route oracle, A/C cancellation barrier, question assertions,
+  and negative configuration matrix were re-reviewed.
 
 ## Slice 3 — Linux correctness evidence and final gate
 
@@ -157,3 +160,50 @@ No product fixes in evidence-only slice; failures return to their owning slice.
   The task-owned remote checkout and target were removed after validation. No
   benchmark runner, VM, deployment, production/default cutover or UI build
   was run; the final reviewer result remains pending.
+
+#### Reproducible command ledger
+
+The following commands were run exactly against the task-owned remote artifact;
+each command exited 0 unless marked `EXIT 1`.
+
+```text
+git archive --format=tar 33e826ccd89a5db039bfc4d92aaf0593907dd95b | ssh mosdns-rust 'set -eu; test ! -e /tmp/mosdns-phase5a-slice3-w3-33e826c; mkdir -p /tmp/mosdns-phase5a-slice3-w3-33e826c/repo; tar -xf - -C /tmp/mosdns-phase5a-slice3-w3-33e826c/repo; test -f /tmp/mosdns-phase5a-slice3-w3-33e826c/repo/Cargo.toml; printf "%s\n" source-staged'  # remote EXIT 1 (wrong root manifest assertion; local pipeline status was not propagated; subsequent cargo commands used rust/Cargo.toml successfully)
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && printf "SOURCE=33e826ccd89a5db039bfc4d92aaf0593907dd95b\\n" && uname -a && printf "ARCH=" && uname -m && rustc --version && cargo --version && go version && python3 --version && printf "RUSTFMT=" && rustfmt --version && printf "CLIPPY=" && cargo clippy --version && printf "TMP=" && df -h /tmp | tail -n 1 && printf "ROOT=" && df -h / | tail -n 1'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && cargo fmt --manifest-path rust/Cargo.toml --all -- --check'  # EXIT 0
+ssh mosdns-rust 'set -eu; test ! -e /root/mosdns-phase5a-slice3-w3-target-33e826c; mkdir /root/mosdns-phase5a-slice3-w3-target-33e826c; cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo; CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-w3-target-33e826c CARGO_BUILD_JOBS=1 cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-w3-target-33e826c CARGO_BUILD_JOBS=1 cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-w3-target-33e826c CARGO_BUILD_JOBS=1 cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && go test ./...'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && go vet ./...'  # EXIT 0
+ssh mosdns-rust 'set -eu; cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo; CARGO_TARGET_DIR=/root/mosdns-phase5a-slice3-w3-target-33e826c CARGO_BUILD_JOBS=1 scripts/build-rust-cache.sh; mkdir -p rust/target/release; cp /root/mosdns-phase5a-slice3-w3-target-33e826c/release/libmosdns_runtime.a rust/target/release/libmosdns_runtime.a; test -s rust/target/release/libmosdns_runtime.a; sha256sum rust/target/release/libmosdns_runtime.a'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 go test -tags mosdns_rust ./plugin/executable/cache ./pkg/cache ./pkg/query_context ./pkg/server_handler ./pkg/matcher/... ./plugin/matcher/... -count=1'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/data_provider/sd_set ./plugin/data_provider/si_set ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter ./plugin/matcher/... -count=1'  # EXIT 1: typed-nil panic at matcher_adapter slice2_integration_linux_test.go:14 -> adapter_linux.go:187
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/data_provider/sd_set ./plugin/data_provider/si_set ./plugin/data_provider/domain_mapper ./plugin/matcher/... -count=1'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 go test -race -tags mosdns_rust ./plugin/executable/cache ./pkg/cache ./pkg/query_context ./pkg/server_handler ./pkg/matcher/... ./plugin/matcher/... -count=1'  # EXIT 0
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -race -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/data_provider/sd_set ./plugin/data_provider/si_set ./plugin/data_provider/domain_mapper ./plugin/data_provider/matcher_adapter ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1'  # EXIT 1: same typed-nil panic at matcher_adapter slice2_integration_linux_test.go:14 -> adapter_linux.go:187
+ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && CGO_ENABLED=1 MOSDNS_MATCHER_BACKEND=rust go test -race -tags mosdns_rust ./plugin/data_provider/domain_set ./plugin/data_provider/ip_set ./plugin/data_provider/sd_set ./plugin/data_provider/si_set ./plugin/data_provider/domain_mapper ./plugin/matcher/base_domain ./plugin/matcher/base_ip -count=1'  # EXIT 0
+ssh mosdns-rust 'python3 -' <<'PY'  # EXIT 0; shutil.rmtree only /tmp/mosdns-phase5a-slice3-w3-33e826c and /root/mosdns-phase5a-slice3-w3-target-33e826c
+python3 .trellis/scripts/task.py validate .trellis/tasks/09-22-rust-phase5a-native-routing  # EXIT 0
+git diff --check  # EXIT 0
+git add .trellis/tasks/09-22-rust-phase5a-native-routing/implement.md docs/ai/rust-handover.md docs/rust/feature-coverage.md && git diff --cached --check && git commit -m 'docs: record native W3 Linux evidence' && git push origin rust  # EXIT 0; evidence commit 8150b7e06331612343683f42ea415e5b776387a6
+```
+
+The frozen-input digest command was run before and after the checks as
+`ssh mosdns-rust 'cd /tmp/mosdns-phase5a-slice3-w3-33e826c/repo && python3 -'`
+with this exact script, covering exactly the two scopes below:
+
+```python
+from pathlib import Path
+import hashlib
+for scope in ('.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline', 'tests/phase5a-baseline'):
+    root = Path(scope)
+    rows = []
+    total = 0
+    for path in sorted(item for item in root.rglob('*') if item.is_file()):
+        data = path.read_bytes()
+        total += len(data)
+        rows.append(path.as_posix().encode() + b'\0' + str(len(data)).encode() + b'\0' + hashlib.sha256(data).hexdigest().encode() + b'\n')
+    print(scope, len(rows), total, hashlib.sha256(b''.join(rows)).hexdigest())
+```
+
+Both runs produced the digests recorded above.
