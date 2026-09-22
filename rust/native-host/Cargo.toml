@@ -1,0 +1,21 @@
+[package]
+name = "mosdns-native-host"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mosdns"
+path = "src/main.rs"
+
+[dependencies]
+mosdns-dns-core = { path = "../dns-core" }
+mosdns-sequence-core = { path = "../sequence-core" }
+mosdns-upstream-core = { path = "../upstream-core" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt"] }
+yaml_serde = "=0.10.7"
+
+[lints]
+workspace = true

@@ -42,8 +42,8 @@ pub mod response;
 // slice.
 pub use edns::{EcsInfo, EdnsInfo, EdnsParseError, OPT_RDLEN, extract_edns, extract_edns_at};
 pub use header::{
-    FrameMode, FramingError, HeaderError, ResponseHeader, frame_response, inspect_response_header,
-    patch_response_id_ra,
+    FrameMode, FramingError, HeaderError, ResponseBuildError, ResponseHeader, frame_response,
+    inspect_response_header, patch_response_id_ra, synthesize_response,
 };
 pub use query::{
     QueryError, QueryHeader, QueryParseError, QueryUnsupportedError, QuestionInfo, parse_query,
