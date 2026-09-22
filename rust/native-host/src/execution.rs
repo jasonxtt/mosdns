@@ -280,6 +280,7 @@ pub(crate) fn frame_native_response(response: &[u8], mode: FrameMode) -> Option<
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use mosdns_dns_core::{parse_query, validate_response};
@@ -320,9 +321,11 @@ mod tests {
         fail_id: ExecutableId,
     }
 
-    struct CancelFirstExchange {
-        calls: Rc<RefCell<Vec<ExecutableId>>>,
-        exchange_count: Rc<Cell<u32>>,
+    struct InterleavedExchange {
+        calls: Rc<RefCell<Vec<(u16, ExecutableId)>>>,
+        cancelled_request: u16,
+        barrier_executable: ExecutableId,
+        barrier: Arc<tokio::sync::Barrier>,
         response: Vec<u8>,
     }
 
@@ -377,11 +380,11 @@ mod tests {
         }
     }
 
-    impl ExchangeExecutor for CancelFirstExchange {
+    impl ExchangeExecutor for InterleavedExchange {
         fn exchange<'a>(
             &'a self,
             executable: ExecutableId,
-            _query: &'a [u8],
+            query: &'a [u8],
             _deadline: std::time::Instant,
             cancellation: TransportCancellation,
         ) -> std::pin::Pin<
@@ -390,12 +393,17 @@ mod tests {
                     + 'a,
             >,
         > {
-            self.calls.borrow_mut().push(executable);
-            let cancel = self.exchange_count.get() == 0;
-            self.exchange_count.set(self.exchange_count.get() + 1);
+            let request_id = u16::from_be_bytes([query[0], query[1]]);
+            self.calls.borrow_mut().push((request_id, executable));
+            let barrier = Arc::clone(&self.barrier);
+            let wait_for_b = executable == self.barrier_executable;
+            let cancel = request_id == self.cancelled_request;
             let response = self.response.clone();
             Box::pin(async move {
-                if cancel {
+                if wait_for_b {
+                    barrier.wait().await;
+                }
+                if cancel && wait_for_b {
                     cancellation.cancel();
                 }
                 let id = u16::from_be_bytes([response[0], response[1]]);
@@ -837,53 +845,72 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_after_first_leg_isolated_from_the_next_request() {
-        let (config, _a, b) = two_leg_config();
-        let first_request = query(17);
-        let second_request = query(18);
+    fn interleaved_request_cancellation_does_not_cross_request_state() {
+        let (config, a, b) = two_leg_config();
+        let cancelled_request = query(17);
+        let live_request = query(18);
+        let cancelled_id = u16::from_be_bytes([cancelled_request[0], cancelled_request[1]]);
+        let live_id = u16::from_be_bytes([live_request[0], live_request[1]]);
         let calls = Rc::new(RefCell::new(Vec::new()));
-        let executor = CancelFirstExchange {
+        let executor = InterleavedExchange {
             calls: Rc::clone(&calls),
-            exchange_count: Rc::new(Cell::new(0)),
-            response: response(&first_request),
+            cancelled_request: cancelled_id,
+            barrier_executable: b,
+            barrier: Arc::new(tokio::sync::Barrier::new(2)),
+            response: response(&cancelled_request),
         };
         let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
 
-        let first_cancellation = TransportCancellation::new();
-        let (header, question) = parse_query(&first_request).expect("query");
-        let first_response = futures_like_block_on(execute_request_with_executor(
-            super::ExecutionRequest {
-                config: &config,
-                cache: &cache,
-                options: &HostOptions::default(),
-                raw: &first_request,
-                header,
-                question,
-            },
-            &executor,
-            first_cancellation,
-        ));
+        let cancelled_options = HostOptions::default();
+        let live_options = HostOptions::default();
+        let (cancelled_header, cancelled_question) =
+            parse_query(&cancelled_request).expect("cancelled query");
+        let (live_header, live_question) = parse_query(&live_request).expect("live query");
+        let cancelled_cancellation = TransportCancellation::new();
+        let live_cancellation = TransportCancellation::new();
+        let (cancelled_response, live_response) = futures_like_block_on(async {
+            tokio::join!(
+                execute_request_with_executor(
+                    super::ExecutionRequest {
+                        config: &config,
+                        cache: &cache,
+                        options: &cancelled_options,
+                        raw: &cancelled_request,
+                        header: cancelled_header,
+                        question: cancelled_question,
+                    },
+                    &executor,
+                    cancelled_cancellation,
+                ),
+                execute_request_with_executor(
+                    super::ExecutionRequest {
+                        config: &config,
+                        cache: &cache,
+                        options: &live_options,
+                        raw: &live_request,
+                        header: live_header,
+                        question: live_question,
+                    },
+                    &executor,
+                    live_cancellation,
+                ),
+            )
+        });
         assert!(
-            first_response.is_empty(),
+            cancelled_response.is_empty(),
             "cancelled request must not publish"
         );
-
-        let second_cancellation = TransportCancellation::new();
-        let (header, question) = parse_query(&second_request).expect("query");
-        let second_response = futures_like_block_on(execute_request_with_executor(
-            super::ExecutionRequest {
-                config: &config,
-                cache: &cache,
-                options: &HostOptions::default(),
-                raw: &second_request,
-                header,
-                question,
-            },
-            &executor,
-            second_cancellation,
-        ));
-        validate_response(&second_response).expect("uncancelled request response");
-        assert_eq!(calls.borrow().as_slice(), &[b, b, _a]);
+        validate_response(&live_response).expect("uncancelled request response");
+        assert_eq!(
+            u16::from_be_bytes([live_response[0], live_response[1]]),
+            live_id
+        );
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 3, "two B legs must rendezvous before live A");
+        assert!(calls[..2].iter().all(|(request_id, executable)| {
+            *executable == b && (*request_id == cancelled_id || *request_id == live_id)
+        }));
+        assert_eq!(calls[2], (live_id, a));
     }
 
     #[test]
