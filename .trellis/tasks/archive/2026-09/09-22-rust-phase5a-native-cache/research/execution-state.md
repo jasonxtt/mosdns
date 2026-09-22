@@ -20,7 +20,7 @@ Pre-existing dirty paths, preserved verbatim and excluded from task commits:
 
 The following deterministic tree digest was computed over every regular file
 under each scope. For each scope, paths were sorted and the digest input was
-`relative-path`, file byte length, and the file's SHA-256, separated by NUL
+`repository-relative-path`, file byte length, and the file's SHA-256, separated by NUL
 bytes and terminated by LF. No baseline runner or benchmark was executed.
 
 | Scope | Files | Bytes | Tree SHA-256 |
@@ -182,3 +182,12 @@ Miri error. No benchmark, VM, deployment, production/default cutover, W3,
 sanitizer campaign, or final reviewer PASS has been recorded yet. The selected
 reviewer request is pending; normal Trellis finish/archive remains outside
 this run.
+
+## Received final result and closure
+
+The prior paragraph records the state before the final response. The selected
+reviewer subsequently returned `SLICE 3: PASS` / `FINAL: PASS` for
+`c6b7f80226a13fa9ab81945fe782fe2c7c6bb5d0`, with all A1–A8 accepted.
+The executor run is `authorized_scope_complete`, all four units passed and all
+findings closed. The user then authorized archive after independent checks.
+See `closure-review.md`; no additional product or benchmark work was performed.

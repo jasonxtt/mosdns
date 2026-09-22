@@ -1,7 +1,8 @@
 # Rust Phase 5A native cache
 
-Status: planning; reviewer returned PLANNING: PASS at
-`d49da845b694ec39ce9ecb09fd51447350f06b97`; executor activation is next.
+Status: completed and archived after FINAL: PASS at
+`c6b7f80226a13fa9ab81945fe782fe2c7c6bb5d0` and user-authorized closure.
+See `research/closure-review.md` for the independent archive checks.
 Source anchor: `e4dcc71398c2412a4d42a5be6bad3ddcca1f0bc0` on `rust`.
 
 ## Goal and value
@@ -74,28 +75,28 @@ Final PASS stops before finish/archive, a new task or deployment.
 
 ## Acceptance criteria
 
-- [ ] A1: Frozen W1 UDP, W1 TCP and W2 YAML compile unchanged; negative config
+- [x] A1: Frozen W1 UDP, W1 TCP and W2 YAML compile unchanged; negative config
   matrix rejects duplicate/unknown/missing fields, unsupported values, cache
   options, plugin counts, refs and order before I/O.
-- [ ] A2: Native API isolation and bridge regression tests pass; native-host's
+- [x] A2: Native API isolation and bridge regression tests pass; native-host's
   call graph uses no handle/ABI API. No new external dependencies or features.
-- [ ] A3: Each frozen W2 hot case, in a fresh cold lifecycle, adds exactly one
+- [x] A3: Each frozen W2 hot case, in a fresh cold lifecycle, adds exactly one
   controlled-upstream query. A separate warm lifecycle performs exact prefill,
   captures a counter barrier, then repeated warm queries add zero.
-- [ ] A4: Deterministic clock tests cover TTL aging, repeated-hit immutability,
+- [x] A4: Deterministic clock tests cover TTL aging, repeated-hit immutability,
   exact expiry, negative/empty/zero-TTL retention, and post-expiry forwarding;
   ID, qtype, AD/CD, qname case, cache-instance isolation and non-IN bypass pass.
-- [ ] A5: Controlled cold concurrency asserts all forced pre-publication misses
+- [x] A5: Controlled cold concurrency asserts all forced pre-publication misses
   complete correctly without imposing singleflight; concurrent warm hits have
   zero upstream delta and no cross-request mutations.
-- [ ] A6: Upstream timeout/error, malformed response, TC, OPT, no response,
+- [x] A6: Upstream timeout/error, malformed response, TC, OPT, no response,
   mismatched/missing response questions, EDNS-query cache bypass,
   cancellation before publication and shutdown prevent cache publication as
   specified. A valid upstream SERVFAIL follows its separate 5 s retention.
-- [ ] A7: W1 UDP/TCP and W2 integration tests pass on Linux amd64 with exact
+- [x] A7: W1 UDP/TCP and W2 integration tests pass on Linux amd64 with exact
   source identity, command/output and cleanup evidence. Rust checks and Go
   bridge regression checks pass. Historical corpus/evidence hashes unchanged.
-- [ ] A8: Reviewer explicitly returns final PASS; handover/coverage describe W2
+- [x] A8: Reviewer explicitly returns final PASS; handover/coverage describe W2
   as a bounded correctness milestone, not full cache migration, a performance
   improvement, Phase 5A completion or production readiness.
 
