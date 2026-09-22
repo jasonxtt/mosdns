@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — Slice 3 implementation complete; awaiting root review**.
+Status: **in progress — Slice 3 remediation complete; awaiting root re-review**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -362,12 +362,12 @@ a late write, shutdown/rebind, and the no-response REFUSED mapping. The test
 upstream is an independent local loopback mock; no baseline runner, remote
 host, VM, benchmark, deployment, or frozen evidence was used.
 
-Required checks:
+Required checks before the first review:
 
 ```text
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check                    PASS
 cargo test --manifest-path rust/native-host/Cargo.toml --test w1_udp --locked PASS (4 tests)
-cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PASS (9 unit/integration tests)
+cargo test --manifest-path rust/native-host/Cargo.toml --all-targets --locked PASS (12 unit + 2 integration targets)
 cargo clippy --manifest-path rust/native-host/Cargo.toml --all-targets --locked -- -D warnings PASS
 cargo test --manifest-path rust/dns-core/Cargo.toml --all-targets --locked  PASS (existing full suite)
 python3 ./.trellis/scripts/task.py validate rust-phase5a-native-forwarding   PASS
@@ -375,8 +375,23 @@ git diff --check -- allowlisted Slice 3 paths                              PASS
 ```
 
 The direct native-host Tokio manifest remains unchanged from Slice 2; no new
-dependency or lockfile change was needed. The task is stopped here pending
-the explicit root `SLICE 3: PASS`; Slice 4 is not authorized by this record.
+dependency or lockfile change was needed. The first root review returned
+`SLICE 3: FAIL` with P0=0, P1=2, P2=0:
+
+- `UdpServer::serve` retained completed request results in its `JoinSet` until
+  shutdown, and returned early on a join failure before draining remaining
+  tasks or closing upstream.
+- the final UDP `send_to` had a cancellation check/send TOCTOU window and had
+  no deterministic pre-send cancellation regression.
+
+The bounded remediation is commit `db9c270` (`fix(native-host): close
+UDP tasks on cancellation`). It reaps completed tasks during the active
+receive loop, drains all remaining task results, closes upstream before
+returning either task or receive errors, and uses a cancellation-first
+commit-aware send helper. Deterministic tests cover 128 completed-task
+reaps, failure plus remaining-task drain and upstream close, and cancellation
+at a pre-send gate. The task is stopped here pending the explicit root
+`SLICE 3: PASS`; Slice 4 is not authorized by this record.
 
 ## 5. Slice 4 — W1 TCP and final stop
 
