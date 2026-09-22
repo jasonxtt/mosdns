@@ -32,7 +32,8 @@ pub struct ForwardConfig {
     pub executable: ExecutableId,
 }
 
-/// A compiled sequence containing exactly one external forward dispatch.
+/// A compiled sequence containing the bounded external dispatches accepted by
+/// the native host (forward for W1, cache then forward for W2).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SequenceConfig {
     pub tag: String,
@@ -130,10 +131,10 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
     root.reject_unknown(&["log", "plugins"], "$")?;
     let log = compile_log(root.required("log", "$")?)?;
     let plugins = expect_sequence(root.required("plugins", "$")?, "$.plugins")?;
-    if plugins.len() != 3 {
+    if plugins.len() != 3 && plugins.len() != 4 {
         return Err(ConfigError::new(
             "$.plugins",
-            "exactly one forward, one sequence, and one listener are required",
+            "exactly one W1 forward, sequence, and listener or one W2 cache, forward, sequence, and UDP listener are required",
         ));
     }
 
@@ -143,6 +144,7 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
     }
 
     let mut forward = None;
+    let mut cache = None;
     let mut sequence = None;
     let mut listener = None;
     let mut tags: Vec<String> = Vec::with_capacity(decoded.len());
@@ -156,6 +158,7 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
         tags.push(plugin.tag.clone());
         match plugin.kind.as_str() {
             "forward" => assign_unique(&mut forward, plugin, "forward")?,
+            "cache" => assign_unique(&mut cache, plugin, "cache")?,
             "sequence" => assign_unique(&mut sequence, plugin, "sequence")?,
             "udp_server" | "tcp_server" => {
                 if listener.is_some() {
@@ -182,11 +185,32 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
         listener.ok_or_else(|| ConfigError::new("$.plugins", "missing listener plugin"))?;
 
     let (forward_tag, endpoint) = compile_forward(&forward)?;
-    let (sequence_tag, forward_ref) = compile_sequence(&sequence)?;
-    if forward_ref != forward_tag {
+    if let Some(cache) = cache.as_ref() {
+        compile_cache(cache)?;
+    }
+    let cache_tag = cache.as_ref().map(|plugin| plugin.tag.clone());
+    let (sequence_tag, sequence_refs) = compile_sequence(&sequence)?;
+    let expected_refs = if let Some(cache_tag) = &cache_tag {
+        if !matches!(endpoint.transport(), Transport::Udp) {
+            return Err(ConfigError::new(
+                "$.plugins.forward.args.upstreams[0].addr",
+                "W2 cache configuration requires a UDP upstream",
+            ));
+        }
+        if listener.kind == "tcp_server" {
+            return Err(ConfigError::new(
+                "$.plugins.listener.type",
+                "cache-enabled TCP listeners are outside the supported W2 subset",
+            ));
+        }
+        vec![cache_tag.clone(), forward_tag.clone()]
+    } else {
+        vec![forward_tag.clone()]
+    };
+    if sequence_refs != expected_refs {
         return Err(ConfigError::new(
-            "$.plugins[sequence].args[0].exec",
-            format!("unknown forward reference `{forward_ref}`"),
+            "$.plugins[sequence].args",
+            format!("sequence must contain exactly {:?} in order", expected_refs),
         ));
     }
     let listener = compile_listener(&listener, &sequence_tag)?;
@@ -197,18 +221,27 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
         ));
     }
 
+    let executables = sequence_refs
+        .iter()
+        .cloned()
+        .map(|target| ExecutableSpec::External {
+            target: ExternalRef::new(target),
+        })
+        .collect();
     let program = ProgramSpec::new(
         vec![SequenceSpec::new(
             sequence_tag.clone(),
-            vec![RuleSpec::unconditional(Some(vec![
-                ExecutableSpec::External {
-                    target: ExternalRef::new(forward_tag.clone()),
-                },
-            ]))],
+            vec![RuleSpec::unconditional(Some(executables))],
         )],
         Vec::new(),
     )
-    .with_externals(vec![ExternalSpec::new(forward_tag.clone())])
+    .with_externals(
+        expected_refs
+            .iter()
+            .cloned()
+            .map(ExternalSpec::new)
+            .collect(),
+    )
     .validate()
     .map_err(|error| {
         ConfigError::new("$.plugins", format!("sequence compile failed: {error:?}"))
@@ -222,6 +255,18 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
     let sequence_id = program
         .sequence_id(&sequence_tag)
         .ok_or_else(|| ConfigError::new("$.plugins.sequence", "compiled sequence is missing"))?;
+    let cache = cache_tag
+        .map(|tag| {
+            let executable = program
+                .externals
+                .iter()
+                .find_map(|(id, external)| (external.name == tag).then_some(*id))
+                .ok_or_else(|| {
+                    ConfigError::new("$.plugins.cache", "compiled cache external is missing")
+                })?;
+            Ok(CachePluginConfig { tag, executable })
+        })
+        .transpose()?;
 
     Ok(CompiledConfig {
         log_level: log,
@@ -230,7 +275,7 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
             endpoint,
             executable: forward_executable,
         },
-        cache: None,
+        cache,
         sequence: SequenceConfig {
             tag: sequence_tag,
             sequence: sequence_id,
@@ -300,35 +345,58 @@ fn compile_forward(plugin: &RawPlugin) -> Result<(String, Endpoint), ConfigError
     Ok((plugin.tag.clone(), endpoint))
 }
 
-fn compile_sequence(plugin: &RawPlugin) -> Result<(String, String), ConfigError> {
+fn compile_cache(plugin: &RawPlugin) -> Result<(), ConfigError> {
+    let path = "$.plugins.cache.args";
+    let args = expect_map(&plugin.args, path, "cache args must be a mapping")?;
+    args.reject_unknown(&["size", "lazy_cache_ttl"], path)?;
+    let size = expect_nonnegative_integer(args.required("size", path)?, &format!("{path}.size"))?;
+    if size != 64 {
+        return Err(ConfigError::new(
+            format!("{path}.size"),
+            "only cache size 64 is supported",
+        ));
+    }
+    let lazy_cache_ttl = expect_nonnegative_integer(
+        args.required("lazy_cache_ttl", path)?,
+        &format!("{path}.lazy_cache_ttl"),
+    )?;
+    if lazy_cache_ttl != 0 {
+        return Err(ConfigError::new(
+            format!("{path}.lazy_cache_ttl"),
+            "lazy_cache_ttl must be exactly 0",
+        ));
+    }
+    Ok(())
+}
+
+fn compile_sequence(plugin: &RawPlugin) -> Result<(String, Vec<String>), ConfigError> {
     let path = "$.plugins.sequence.args";
     let args = expect_sequence(&plugin.args, path)?;
-    if args.len() != 1 {
+    if args.is_empty() || args.len() > 2 {
         return Err(ConfigError::new(
             path,
-            "exactly one unconditional executable is supported",
+            "one W1 or two W2 unconditional executables are supported",
         ));
     }
-    let item_path = "$.plugins.sequence.args[0]";
-    let item = expect_map(&args[0], item_path, "sequence item must be a mapping")?;
-    item.reject_unknown(&["exec"], item_path)?;
-    let exec = expect_string(
-        item.required("exec", item_path)?,
-        "$.plugins.sequence.args[0].exec",
-    )?;
-    let Some(target) = exec.strip_prefix('$') else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args[0].exec",
-            "only a named $forward reference is supported",
-        ));
-    };
-    if target.is_empty() {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args[0].exec",
-            "forward reference must not be empty",
-        ));
+    let mut refs = Vec::with_capacity(args.len());
+    for (index, value) in args.iter().enumerate() {
+        let item_path = format!("$.plugins.sequence.args[{index}]");
+        let item = expect_map(value, &item_path, "sequence item must be a mapping")?;
+        item.reject_unknown(&["exec"], &item_path)?;
+        let exec_path = format!("{item_path}.exec");
+        let exec = expect_string(item.required("exec", &item_path)?, &exec_path)?;
+        let Some(target) = exec.strip_prefix('$') else {
+            return Err(ConfigError::new(
+                exec_path,
+                "only named $ references are supported",
+            ));
+        };
+        if target.is_empty() {
+            return Err(ConfigError::new(exec_path, "reference must not be empty"));
+        }
+        refs.push(target.to_owned());
     }
-    Ok((plugin.tag.clone(), target.to_owned()))
+    Ok((plugin.tag.clone(), refs))
 }
 
 fn compile_listener(
@@ -480,6 +548,14 @@ fn expect_positive_integer(value: &RawValue, path: &str) -> Result<u64, ConfigEr
         RawValue::Number(RawNumber::Unsigned(value)) if *value > 0 => Ok(*value),
         RawValue::Number(RawNumber::Signed(value)) if *value > 0 => Ok(*value as u64),
         _ => Err(ConfigError::new(path, "expected a positive integer")),
+    }
+}
+
+fn expect_nonnegative_integer(value: &RawValue, path: &str) -> Result<u64, ConfigError> {
+    match value {
+        RawValue::Number(RawNumber::Unsigned(value)) => Ok(*value),
+        RawValue::Number(RawNumber::Signed(value)) if *value >= 0 => Ok(*value as u64),
+        _ => Err(ConfigError::new(path, "expected a nonnegative integer")),
     }
 }
 

@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native cache
 
-Status: reviewed planning. Four implementation units; none started.
+Status: Slice 2 implementation complete; awaiting scoped reviewer PASS.
 Planning review: `PLANNING: PASS` at
 `d49da845b694ec39ce9ecb09fd51447350f06b97`; see
 `research/planning-review.md`. Executor still owns authorize/start/activate.
@@ -153,22 +153,46 @@ Allowlist: `rust/native-host/**` and this task directory. Shared helper defects
 outside this scope go back through a scoped reviewer decision, not quiet scope
 expansion. Frozen baseline directories and sequence-core remain read-only.
 
-- [ ] RED: unchanged W1 UDP/TCP and W2 config fixtures; all PRD/design config
+- [x] RED: unchanged W1 UDP/TCP and W2 config fixtures; all PRD/design config
   rejection categories including wrong order/refs/counts/options/types/values.
-- [ ] GREEN: strict compiler accepts exactly the reviewed W2 graph and wires
+- [x] GREEN: strict compiler accepts exactly the reviewed W2 graph and wires
   one cache per host; errors precede all listener/upstream I/O.
-- [ ] RED/GREEN: add `rust/native-host/tests/w2_cache.rs` using independent
+- [x] RED/GREEN: add `rust/native-host/tests/w2_cache.rs` using independent
   loopback upstream counters and frozen hot-case expectations. Cold lifecycle
   gives one upstream query per case; separate warm lifecycle verifies prefill,
   counter barrier and zero repeated-query upstream delta.
-- [ ] Test cold concurrency using barriers (no singleflight promise), warm
+- [x] Test cold concurrency using barriers (no singleflight promise), warm
   concurrency/IDs/buffer isolation, expiry/reforward, non-IN bypass, negative
   and invalid/mismatched response handling, EDNS-query bypass with unchanged
   W1 forwarding, cancellation/no-publication, shutdown/rebind.
   Use deterministic clock injection for TTL assertions.
-- [ ] Run all native-host targets, cache-core/dns-core affected targets, changed
+- [x] Run all native-host targets, cache-core/dns-core affected targets, changed
   crate clippy and common checks. Existing W1 UDP/TCP integration stays green.
 - [ ] Commit/push and obtain `SLICE 2: PASS` before remote/final Slice 3.
+
+Slice 2 local evidence before review:
+
+- RED: `cargo test -p mosdns-native-host --test slice2_config --locked` first
+  failed only because the unchanged compiler rejected the four-plugin W2 YAML
+  with the expected W1-only plugin-count diagnostic.
+- GREEN: frozen W2 YAML now compiles only with integer `size: 64`,
+  `lazy_cache_ttl: 0`, one UDP listener/upstream, and the exact `$cache` then
+  `$forward` program. The config test covers declaration order, duplicate and
+  unknown fields, wrong types/values, missing roles, counts, TCP, audit and
+  wrong/repeated/missing references before assembly.
+- UDP correctness: `cargo test -p mosdns-native-host --all-targets --locked`
+  passed 15 unit, 8 Slice 1 adapter, 5 config, 5 W1 TCP, 4 W1 UDP and 5 W2
+  tests. W2 loopback tests cover independent cold misses, concurrent warm hits,
+  ID/buffer isolation, expiry/reforward, EDNS and non-IN bypass, upstream
+  SERVFAIL caching, TC/OPT/malformed/mismatched responses, cancellation,
+  shutdown and listener rebind.
+- Affected crate checks passed: cache-core 11 tests; dns-core 55 unit plus 47
+  integration tests; sequence-core 65 tests; native-host clippy with
+  `--all-targets --locked -- -D warnings`; workspace format check and
+  `git diff --check`. The native-host dependency tree remains path-only for
+  the reviewed cache-core edge, with no runtime/cgo/ABI-handle source use.
+- No Linux remote regression, baseline runner, benchmark, VM, deployment or
+  production cutover was run in this slice.
 
 ## Slice 3 — Linux regression evidence and final review
 

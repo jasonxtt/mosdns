@@ -68,3 +68,30 @@ RED/GREEN and review-scope evidence:
 - The implementation uses one HostAssembly-owned adapter and a shared
   canonical `ExecutionMachine` driver; UDP and TCP only admit, frame, send,
   and supervise requests.
+
+## Slice 2 implementation evidence
+
+Slice 2 remains bounded to `rust/native-host/**` and this task directory. The
+frozen baseline and historical archive were not edited. The implementation
+adds strict W2 compilation in `rust/native-host/src/config.rs`, config RED/
+GREEN coverage in `rust/native-host/tests/slice2_config.rs`, and controlled
+loopback UDP correctness coverage in `rust/native-host/tests/w2_cache.rs`.
+
+- RED first failed at the unchanged W1-only plugin-count gate for the exact
+  `tests/phase5a-baseline/configs/cache.yaml` input.
+- GREEN accepts only the reviewed four-plugin graph: integer cache values
+  `size: 64` and `lazy_cache_ttl: 0`, UDP upstream/listener, audit false, and
+  the exact flat `$cache -> $forward` sequence. W1 UDP/TCP compilation remains
+  accepted and W2 rejects wrong counts, roles, fields, values, types, refs,
+  order, repeats, audit, TCP and non-UDP upstream before assembly.
+- Native-host all-targets locked tests passed 15 unit, 8 Slice 1 adapter, 5
+  config, 5 W1 TCP, 4 W1 UDP and 5 W2 tests. Cache-core (11), dns-core (55
+  unit plus 47 integration) and sequence-core (65) affected tests passed.
+  Native-host all-targets clippy with `-D warnings`, workspace format,
+  `git diff --check`, and task-local checks passed.
+- The W2 UDP tests record the controlled-upstream counter assertions for cold
+  non-singleflight and warm zero-delta behavior, deterministic expiry and
+  ref forwarding, ID/buffer isolation, EDNS/non-IN bypass, valid upstream
+  SERVFAIL, invalid/TC/OPT/mismatched response no-publication, cancellation,
+  shutdown and rebind. No Linux remote run, benchmark, VM, deployment or
+  production cutover was performed.
