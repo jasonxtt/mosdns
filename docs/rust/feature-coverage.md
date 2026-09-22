@@ -148,7 +148,8 @@ C16 是未来对应任务需完成的兼容分类，不是本轮删减批准；�
 `b558d153cad9ad8e3ffaf18a6e2dde82329e32e0` 上完成了 Linux amd64 的
 strict-W2 correctness gate：单一 host-owned cache、plain UDP hit/miss/
 expiry、W1 UDP/TCP forwarding preservation，以及 Go cgo regression。证据
-与精确命令见 [task execution state](../../.trellis/tasks/09-22-rust-phase5a-native-cache/research/execution-state.md)。
+与精确命令见 [task execution state](../../.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-cache/research/execution-state.md)。
+最终 reviewer 已对 `c6b7f80226a13fa9ab81945fe782fe2c7c6bb5d0` 返回 PASS，任务已获用户授权归档。
 这只关闭表中 P26/C01/C02 的受限 5A 子集；完整 lazy/EDNS 产品语义、cache
 dump/持久化、API/WebUI/metrics、完整插件与跨模块组合仍保持“待验收”，归
 入后续 5B/5C/5D/Phase 6 门槛，不能由本次测试升级状态。

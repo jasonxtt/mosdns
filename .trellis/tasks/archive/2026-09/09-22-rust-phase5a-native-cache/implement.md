@@ -1,9 +1,11 @@
 # Implementation plan — Rust Phase 5A native cache
 
-Status: Slice 2 directed remediation complete; awaiting scoped re-review PASS.
+Status: all four slices passed; completed and archived after user authorization.
+Final reviewer SHA: `c6b7f80226a13fa9ab81945fe782fe2c7c6bb5d0`.
+See `research/closure-review.md` for the closure audit.
 Planning review: `PLANNING: PASS` at
 `d49da845b694ec39ce9ecb09fd51447350f06b97`; see
-`research/planning-review.md`. Executor still owns authorize/start/activate.
+`research/planning-review.md`. The executor completed authorize/start/activate and all four reviewed units.
 
 ## Pre-start and review contract
 
@@ -236,7 +238,7 @@ history or full-cache coverage status.
 - [x] Inspect exact docs/evidence diff, validate task/common checks, and
   commit/push the evidence. The selected reviewer request for A1–A8 remains
   pending after each remediation commit.
-- [ ] Obtain the selected reviewer's `FINAL: PASS`, then report the tested SHA,
+- [x] Obtain the selected reviewer's `FINAL: PASS`, then report the tested SHA,
   final evidence SHA, reviewer result and remaining finish/archive lifecycle
   step, and stop. Do not finish/archive, create next task, run W3, performance
   tests or production work automatically.
@@ -293,3 +295,11 @@ Slice 3 remote and final evidence:
   directory were removed after validation. No benchmark, VM, deployment,
   production/default cutover, W3, sanitizer campaign, or final reviewer PASS
   was recorded yet; the Slice 3 review is pending.
+
+## Final review and authorized closure
+
+The designated reviewer returned `SLICE 3: PASS` / `FINAL: PASS` for
+`c6b7f80226a13fa9ab81945fe782fe2c7c6bb5d0`, closing all findings.
+Earlier pending-review statements above describe the pre-submission state.
+The user then explicitly authorized archive after independent verification.
+`task.py archive --no-commit` recorded completion; see closure-review evidence.
