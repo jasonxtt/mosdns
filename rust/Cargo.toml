@@ -5,6 +5,7 @@ members = [
     "dns-core",
     "sequence-core",
     "upstream-core",
+    "native-host",
     "runtime",
 ]
 resolver = "3"

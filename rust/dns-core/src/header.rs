@@ -47,6 +47,43 @@ pub enum FrameMode {
     Http,
 }
 
+/// A small protocol-error response constructor for an already parsed
+/// one-question query. It intentionally does not parse or normalize DNS
+/// names; callers must supply the [`QueryHeader`] and [`QuestionInfo`] from
+/// [`crate::parse_query`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResponseBuildError {
+    InvalidRcode(u8),
+}
+
+/// Builds a QR/RA response carrying the original ID and question with no
+/// answer, authority, or additional records.
+///
+/// This is deliberately limited to the two native-host protocol-error forms
+/// (SERVFAIL and REFUSED in the current caller). It is not a general DNS
+/// message builder and does not inspect a second copy of the query wire.
+pub fn synthesize_response(
+    query: &crate::QueryHeader,
+    question: &crate::QuestionInfo,
+    rcode: u8,
+) -> Result<Vec<u8>, ResponseBuildError> {
+    if rcode > 0x0f {
+        return Err(ResponseBuildError::InvalidRcode(rcode));
+    }
+    let flags = 0x8000 | 0x0080 | u16::from(rcode);
+    let mut response = Vec::with_capacity(12 + question.qname_wire.len() + 4);
+    response.extend_from_slice(&query.id.to_be_bytes());
+    response.extend_from_slice(&flags.to_be_bytes());
+    response.extend_from_slice(&1_u16.to_be_bytes());
+    response.extend_from_slice(&0_u16.to_be_bytes());
+    response.extend_from_slice(&0_u16.to_be_bytes());
+    response.extend_from_slice(&0_u16.to_be_bytes());
+    response.extend_from_slice(&question.qname_wire);
+    response.extend_from_slice(&question.qtype.to_be_bytes());
+    response.extend_from_slice(&question.qclass.to_be_bytes());
+    Ok(response)
+}
+
 impl FrameMode {
     /// Builds a [`FrameMode`] from its numeric discriminator, returning
     /// `None` for any value with no defined transport.
@@ -140,7 +177,11 @@ pub fn frame_response(packet: &[u8], mode: FrameMode) -> Result<Vec<u8>, Framing
 
 #[cfg(test)]
 mod tests {
-    use super::{FrameMode, FramingError, HeaderError, frame_response, patch_response_id_ra};
+    use super::{
+        FrameMode, FramingError, HeaderError, ResponseBuildError, frame_response,
+        patch_response_id_ra, synthesize_response,
+    };
+    use crate::{QueryHeader, QuestionInfo};
 
     const MAX: usize = 65535;
 
@@ -174,6 +215,44 @@ mod tests {
         b.extend_from_slice(&[0x00, 0x04]);
         b.extend_from_slice(ip);
         b
+    }
+
+    #[test]
+    fn synthesizes_associated_servfail_and_refused_responses() {
+        let query = QueryHeader {
+            id: 0xcafe,
+            qr: false,
+            opcode: 0,
+            qdcount: 1,
+            ancount: 0,
+            nscount: 0,
+            arcount: 0,
+        };
+        let question = QuestionInfo {
+            qname_wire: vec![7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0],
+            qtype: 1,
+            qclass: 1,
+        };
+        for rcode in [2, 5] {
+            let response = synthesize_response(&query, &question, rcode).unwrap();
+            assert_eq!(&response[0..2], &0xcafe_u16.to_be_bytes());
+            assert_eq!(response[2] & 0x80, 0x80);
+            assert_eq!(response[3] & 0x80, 0x80);
+            assert_eq!(
+                u16::from_be_bytes([response[2], response[3]]) & 0x000f,
+                u16::from(rcode)
+            );
+            assert_eq!(&response[4..12], &[0, 1, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(
+                &response[12..12 + question.qname_wire.len()],
+                &question.qname_wire[..]
+            );
+            assert_eq!(&response[12 + question.qname_wire.len()..], &[0, 1, 0, 1]);
+        }
+        assert_eq!(
+            synthesize_response(&query, &question, 16),
+            Err(ResponseBuildError::InvalidRcode(16))
+        );
     }
 
     #[test]
