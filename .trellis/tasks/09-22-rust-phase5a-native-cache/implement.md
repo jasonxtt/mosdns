@@ -137,8 +137,9 @@ Slice 1 local evidence before review:
 - Adapter tests cover deterministic expiry, immutable TTL aging and buffer
   copies, qname/qtype/class/AD/CD key dimensions, non-IN and EDNS bypass,
   compressed query-name equivalence, NXDOMAIN/SERVFAIL/empty/zero-TTL
-  retention, and TC/OPT/malformed/mismatched-name/type/class/missing-question/
-  non-QUERY admission gates.
+  retention (including long positive TTL versus the empty-answer cap), and
+  TC/OPT/malformed/mismatched-name/type/class/missing-question/non-QUERY
+  admission gates.
 - Locked checks passed for native-host, cache-core, dns-core and
   sequence-core; native-host clippy with `--all-targets -- -D warnings`,
   workspace format check and `git diff --check` passed. The only lockfile

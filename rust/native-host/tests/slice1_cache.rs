@@ -96,6 +96,16 @@ fn response_with_authority_and_additional_ttls(query: &[u8]) -> Vec<u8> {
     wire
 }
 
+fn empty_answer_with_authority_ttl(query: &[u8], ttl: u32) -> Vec<u8> {
+    let mut wire = empty_noerror(query);
+    wire[8] = 0;
+    wire[9] = 1;
+    wire.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1]);
+    wire.extend_from_slice(&ttl.to_be_bytes());
+    wire.extend_from_slice(&[0, 4, 192, 0, 2, 2]);
+    wire
+}
+
 fn response_with_compressed_question(query: &[u8]) -> Vec<u8> {
     let (_, question) = mosdns_dns_core::parse_query(query).expect("query");
     let target = 34_u8;
@@ -212,7 +222,7 @@ fn compressed_query_name_reuses_the_decoded_key() {
 fn retention_is_separate_from_answer_ttl_and_expires_at_exact_boundaries() {
     let cases = [
         ("positive-short", 4_u32, 0_u8, 4_u64),
-        ("positive-capped", 600_u32, 0_u8, 300_u64),
+        ("positive-long", 600_u32, 0_u8, 600_u64),
         ("nxdomain", 0_u32, 3_u8, 30_u64),
         ("upstream-servfail", 0_u32, 2_u8, 5_u64),
         ("zero-ttl", 0_u32, 0_u8, 5_u64),
@@ -235,25 +245,57 @@ fn retention_is_separate_from_answer_ttl_and_expires_at_exact_boundaries() {
 
     let clock = CacheTestClock::new(100);
     let adapter = NativeCacheAdapter::for_test(clock.clone()).expect("empty");
-    let query = query(0x4001, 0x0100, &name(&["empty", "example"]), 1, 1, 0);
+    let empty_query = query(0x4001, 0x0100, &name(&["empty", "example"]), 1, 1, 0);
     let token = adapter
-        .begin_store(&query)
+        .begin_store(&empty_query)
         .expect("begin")
         .expect("eligible");
     assert!(
         token
-            .publish(&empty_noerror(&query))
+            .publish(&empty_noerror(&empty_query))
             .expect("empty publish")
     );
     clock.set(104);
     assert!(
         adapter
-            .lookup(&query)
+            .lookup(&empty_query)
             .expect("empty before expiry")
             .is_some()
     );
     clock.set(105);
-    assert!(adapter.lookup(&query).expect("empty expiry").is_none());
+    assert!(
+        adapter
+            .lookup(&empty_query)
+            .expect("empty expiry")
+            .is_none()
+    );
+
+    let clock = CacheTestClock::new(100);
+    let adapter = NativeCacheAdapter::for_test(clock.clone()).expect("empty cap");
+    let capped_empty_query = query(0x4002, 0x0100, &name(&["empty-cap", "example"]), 1, 1, 0);
+    let token = adapter
+        .begin_store(&capped_empty_query)
+        .expect("empty cap begin")
+        .expect("eligible");
+    assert!(
+        token
+            .publish(&empty_answer_with_authority_ttl(&capped_empty_query, 600))
+            .expect("empty cap publish")
+    );
+    clock.set(399);
+    assert!(
+        adapter
+            .lookup(&capped_empty_query)
+            .expect("empty cap before")
+            .is_some()
+    );
+    clock.set(400);
+    assert!(
+        adapter
+            .lookup(&capped_empty_query)
+            .expect("empty cap expiry")
+            .is_none()
+    );
 }
 
 #[test]

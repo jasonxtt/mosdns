@@ -43,6 +43,7 @@ pub struct ResponseQuestion {
 pub struct ResponseMetadata {
     pub rcode: u16,
     pub opcode: u8,
+    pub answer_count: u16,
     pub question: Option<ResponseQuestion>,
     pub has_opt: bool,
     pub truncated: bool,
@@ -105,6 +106,7 @@ pub fn observe_response_metadata(packet: &[u8]) -> Result<ResponseMetadata, Resp
     Ok(ResponseMetadata {
         rcode: (u16::from(packet[3] & 0x0f)) | (extended_rcode << 4),
         opcode: (packet[2] >> 3) & 0x0f,
+        answer_count: u16::from_be_bytes([packet[6], packet[7]]),
         question,
         has_opt,
         truncated: packet[2] & 0x02 != 0,
