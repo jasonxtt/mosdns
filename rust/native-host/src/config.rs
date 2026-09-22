@@ -65,6 +65,9 @@ pub struct ListenerConfig {
 pub struct CompiledConfig {
     pub log_level: LogLevel,
     pub forward: ForwardConfig,
+    /// Every validated upstream owner keyed by the executable that can
+    /// dispatch it. W1/W2 contain only the primary forward.
+    pub forwards: Vec<ForwardConfig>,
     pub cache: Option<CachePluginConfig>,
     pub sequence: SequenceConfig,
     pub listener: ListenerConfig,
@@ -268,13 +271,15 @@ fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
         })
         .transpose()?;
 
+    let forward_config = ForwardConfig {
+        tag: forward_tag,
+        endpoint,
+        executable: forward_executable,
+    };
     Ok(CompiledConfig {
         log_level: log,
-        forward: ForwardConfig {
-            tag: forward_tag,
-            endpoint,
-            executable: forward_executable,
-        },
+        forwards: vec![forward_config.clone()],
+        forward: forward_config,
         cache,
         sequence: SequenceConfig {
             tag: sequence_tag,

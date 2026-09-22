@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
@@ -9,6 +10,7 @@ use mosdns_upstream_core::{
 };
 
 use crate::config::{CompiledConfig, ConfigError, compile_yaml};
+use crate::execution::{ExchangeError, ExchangeExecutor};
 use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
 
@@ -91,7 +93,7 @@ impl HostRuntime {
 /// upstream owner, but deliberately does not bind the configured listener.
 pub struct HostAssembly {
     config: Rc<CompiledConfig>,
-    forward: Rc<ForwardAdapter>,
+    forwards: Rc<ForwardCatalog>,
     cache: Rc<NativeCacheAdapter>,
     runtime: HostRuntime,
     options: HostOptions,
@@ -115,15 +117,17 @@ impl HostAssembly {
         config: CompiledConfig,
         options: HostOptions,
     ) -> Result<Self, AssemblyError> {
-        let endpoint = config.forward.endpoint;
         let config = Rc::new(config);
+        let forwards = Rc::new(
+            ForwardCatalog::from_configs(&config.forwards).map_err(AssemblyError::Catalog)?,
+        );
         let cache = Rc::new(
             NativeCacheAdapter::with_clock(options.cache_clock.clone())
                 .map_err(AssemblyError::Cache)?,
         );
         Ok(Self {
             config,
-            forward: Rc::new(ForwardAdapter::new(endpoint)),
+            forwards,
             cache,
             runtime: HostRuntime::new()?,
             options,
@@ -137,7 +141,9 @@ impl HostAssembly {
 
     #[must_use]
     pub fn forward(&self) -> &ForwardAdapter {
-        &self.forward
+        self.forwards
+            .forward(self.config.forward.executable)
+            .expect("compiled primary forward must exist in the owner catalog")
     }
 
     #[must_use]
@@ -167,15 +173,15 @@ impl HostAssembly {
     /// internals or creating a second transport adapter.
     #[must_use]
     pub fn endpoint(&self) -> Endpoint {
-        self.forward.endpoint()
+        self.forward().endpoint()
     }
 
     pub(crate) fn config_handle(&self) -> Rc<CompiledConfig> {
         Rc::clone(&self.config)
     }
 
-    pub(crate) fn forward_handle(&self) -> Rc<ForwardAdapter> {
-        Rc::clone(&self.forward)
+    pub(crate) fn forwards_handle(&self) -> Rc<ForwardCatalog> {
+        Rc::clone(&self.forwards)
     }
 
     pub(crate) fn cache_handle(&self) -> Rc<NativeCacheAdapter> {
@@ -226,14 +232,85 @@ impl std::error::Error for HostRunError {}
 /// validation and exchange execution to `upstream-core`; callers supply the
 /// runtime, deadline, and cancellation scope.
 pub struct ForwardAdapter {
+    executable: mosdns_sequence_core::ExecutableId,
     upstream: Upstream,
 }
 
+/// Immutable executable-ID to upstream-owner catalog. W1/W2 populate one
+/// entry; later routing compilation can add distinct validated owners without
+/// introducing a fallback-to-first-upstream path.
+pub struct ForwardCatalog {
+    owners: BTreeMap<mosdns_sequence_core::ExecutableId, Rc<ForwardAdapter>>,
+}
+
+impl ForwardCatalog {
+    fn from_configs(configs: &[crate::config::ForwardConfig]) -> Result<Self, String> {
+        let mut owners = BTreeMap::new();
+        for config in configs {
+            if owners
+                .insert(
+                    config.executable,
+                    Rc::new(ForwardAdapter::new(config.executable, config.endpoint)),
+                )
+                .is_some()
+            {
+                return Err(format!(
+                    "duplicate forward executable {:?}",
+                    config.executable
+                ));
+            }
+        }
+        Ok(Self { owners })
+    }
+
+    #[must_use]
+    pub fn forward(
+        &self,
+        executable: mosdns_sequence_core::ExecutableId,
+    ) -> Option<&ForwardAdapter> {
+        self.owners.get(&executable).map(Rc::as_ref)
+    }
+
+    pub async fn close_all(&self) {
+        for owner in self.owners.values() {
+            let _ = owner.upstream().close().await;
+        }
+    }
+}
+
+impl ExchangeExecutor for ForwardCatalog {
+    fn exchange<'a>(
+        &'a self,
+        executable: mosdns_sequence_core::ExecutableId,
+        query: &'a [u8],
+        deadline: std::time::Instant,
+        cancellation: TransportCancellation,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<ExchangeResponse, ExchangeError>> + 'a>,
+    > {
+        let Some(owner) = self.owners.get(&executable) else {
+            return Box::pin(async move { Err(ExchangeError::UnknownExecutable(executable)) });
+        };
+        Box::pin(async move {
+            owner
+                .exchange(query, deadline, cancellation)
+                .await
+                .map_err(ExchangeError::Upstream)
+        })
+    }
+}
+
 impl ForwardAdapter {
-    fn new(endpoint: Endpoint) -> Self {
+    pub(crate) fn new(executable: mosdns_sequence_core::ExecutableId, endpoint: Endpoint) -> Self {
         Self {
+            executable,
             upstream: Upstream::new(endpoint),
         }
+    }
+
+    #[must_use]
+    pub const fn executable(&self) -> mosdns_sequence_core::ExecutableId {
+        self.executable
     }
 
     #[must_use]
@@ -265,6 +342,7 @@ impl ForwardAdapter {
 pub enum AssemblyError {
     Config(ConfigError),
     Cache(CacheAdapterError),
+    Catalog(String),
     Runtime(String),
 }
 
@@ -273,6 +351,7 @@ impl std::fmt::Display for AssemblyError {
         match self {
             Self::Config(error) => error.fmt(formatter),
             Self::Cache(error) => write!(formatter, "cache setup failed: {error}"),
+            Self::Catalog(message) => write!(formatter, "forward catalog setup failed: {message}"),
             Self::Runtime(message) => write!(formatter, "runtime setup failed: {message}"),
         }
     }
@@ -284,10 +363,13 @@ impl std::error::Error for AssemblyError {}
 mod tests {
     use std::time::{Duration, Instant};
 
-    use mosdns_upstream_core::{LifecycleState, TransportCancellation, UpstreamError};
+    use mosdns_sequence_core::ExecutableId;
+    use mosdns_upstream_core::{
+        Endpoint, LifecycleState, Transport, TransportCancellation, UpstreamError,
+    };
 
-    use super::{AssemblyError, HostAssembly, HostOptions};
-    use crate::config::ConfigError;
+    use super::{AssemblyError, ForwardCatalog, HostAssembly, HostOptions, HostRuntime};
+    use crate::config::{ConfigError, ForwardConfig};
 
     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
 
@@ -318,5 +400,55 @@ mod tests {
             HostAssembly::from_yaml(&invalid),
             Err(AssemblyError::Config(ConfigError { .. }))
         ));
+    }
+
+    #[test]
+    fn catalog_closes_all_distinct_forward_owners_and_rejects_duplicates() {
+        let endpoint_a = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
+            .expect("endpoint");
+        let endpoint_b = Endpoint::new("127.0.0.1:2".parse().expect("endpoint"), Transport::Udp)
+            .expect("endpoint");
+        let configs = vec![
+            ForwardConfig {
+                tag: "a".to_owned(),
+                endpoint: endpoint_a,
+                executable: ExecutableId(1),
+            },
+            ForwardConfig {
+                tag: "b".to_owned(),
+                endpoint: endpoint_b,
+                executable: ExecutableId(2),
+            },
+        ];
+        let catalog = ForwardCatalog::from_configs(&configs).expect("distinct catalog");
+        assert_eq!(
+            catalog.forward(ExecutableId(1)).expect("a").endpoint(),
+            endpoint_a
+        );
+        assert_eq!(
+            catalog.forward(ExecutableId(2)).expect("b").endpoint(),
+            endpoint_b
+        );
+        let duplicate = vec![configs[0].clone(), configs[0].clone()];
+        assert!(ForwardCatalog::from_configs(&duplicate).is_err());
+
+        let runtime = HostRuntime::new().expect("runtime");
+        runtime.block_on(catalog.close_all());
+        assert_eq!(
+            catalog
+                .forward(ExecutableId(1))
+                .expect("a")
+                .upstream()
+                .lifecycle_state(),
+            LifecycleState::Closed
+        );
+        assert_eq!(
+            catalog
+                .forward(ExecutableId(2))
+                .expect("b")
+                .upstream()
+                .lifecycle_state(),
+            LifecycleState::Closed
+        );
     }
 }

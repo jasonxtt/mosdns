@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinSet;
 
-use crate::assembly::{ForwardAdapter, HostAssembly, HostOptions};
+use crate::assembly::{ForwardCatalog, HostAssembly, HostOptions};
 use crate::cache::NativeCacheAdapter;
 use crate::config::{CompiledConfig, ListenerKind};
 use crate::execution::{ExecutionRequest, execute_request};
@@ -22,7 +22,7 @@ const MAX_TCP_FRAME: usize = u16::MAX as usize;
 /// A local TCP listener for the supported W1 DNS-over-TCP path.
 pub struct TcpServer {
     config: Rc<CompiledConfig>,
-    forward: Rc<ForwardAdapter>,
+    forwards: Rc<ForwardCatalog>,
     cache: Rc<NativeCacheAdapter>,
     options: HostOptions,
     listener: Arc<TcpListener>,
@@ -47,7 +47,7 @@ impl TcpServer {
             .map_err(TcpServerError::Bind)?;
         Ok(Self {
             config: assembly.config_handle(),
-            forward: assembly.forward_handle(),
+            forwards: assembly.forwards_handle(),
             cache: assembly.cache_handle(),
             options: assembly.options().clone(),
             listener: Arc::new(listener),
@@ -88,7 +88,7 @@ impl TcpServer {
                     match accepted {
                         Ok((stream, _peer)) => {
                             let config = Rc::clone(&self.config);
-                            let forward = Rc::clone(&self.forward);
+                            let forwards = Rc::clone(&self.forwards);
                             let cache = Rc::clone(&self.cache);
                             let options = self.options.clone();
                             let idle_timeout = self.idle_timeout;
@@ -97,7 +97,7 @@ impl TcpServer {
                                 process_connection(
                                     stream,
                                     config,
-                                    forward,
+                                    forwards,
                                     cache,
                                     options,
                                     idle_timeout,
@@ -118,7 +118,7 @@ impl TcpServer {
 
         shutdown.cancel();
         drain_tasks(&mut tasks, &mut task_error).await;
-        let _ = self.forward.upstream().close().await;
+        self.forwards.close_all().await;
         if let Some(error) = task_error {
             return Err(TcpServerError::Task(error));
         }
@@ -132,7 +132,7 @@ impl TcpServer {
 async fn process_connection(
     mut stream: TcpStream,
     config: Rc<CompiledConfig>,
-    forward: Rc<ForwardAdapter>,
+    forwards: Rc<ForwardCatalog>,
     cache: Rc<NativeCacheAdapter>,
     options: HostOptions,
     idle_timeout: Duration,
@@ -157,7 +157,7 @@ async fn process_connection(
                 header,
                 question,
             },
-            &forward,
+            &forwards,
             connection_shutdown.clone(),
         )
         .await;

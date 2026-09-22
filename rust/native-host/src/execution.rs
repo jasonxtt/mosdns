@@ -7,11 +7,12 @@ use mosdns_dns_core::{
     patch_response_id_ra, synthesize_response, validate_response,
 };
 use mosdns_sequence_core::{
-    ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep, ResponseState,
+    ExecutableId, ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep,
+    ResponseState,
 };
 use mosdns_upstream_core::{ExchangeResponse, TransportCancellation, UpstreamError};
 
-use crate::assembly::{ForwardAdapter, HostOptions};
+use crate::assembly::{ForwardAdapter, ForwardCatalog, HostOptions};
 use crate::cache::{NativeCacheAdapter, PendingStore};
 use crate::config::CompiledConfig;
 
@@ -25,10 +26,19 @@ const REFUSED: u8 = 5;
 pub(crate) trait ExchangeExecutor {
     fn exchange<'a>(
         &'a self,
+        executable: ExecutableId,
         query: &'a [u8],
         deadline: Instant,
         cancellation: TransportCancellation,
-    ) -> Pin<Box<dyn Future<Output = Result<ExchangeResponse, UpstreamError>> + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<ExchangeResponse, ExchangeError>> + 'a>>;
+}
+
+/// A host dispatch failure that preserves the distinction between a missing
+/// validated executable identity and an upstream transport failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ExchangeError {
+    UnknownExecutable(ExecutableId),
+    Upstream(UpstreamError),
 }
 
 pub(crate) struct ExecutionRequest<'a> {
@@ -43,26 +53,29 @@ pub(crate) struct ExecutionRequest<'a> {
 impl ExchangeExecutor for ForwardAdapter {
     fn exchange<'a>(
         &'a self,
+        executable: ExecutableId,
         query: &'a [u8],
         deadline: Instant,
         cancellation: TransportCancellation,
-    ) -> Pin<Box<dyn Future<Output = Result<ExchangeResponse, UpstreamError>> + 'a>> {
-        Box::pin(ForwardAdapter::exchange(
-            self,
-            query,
-            deadline,
-            cancellation,
-        ))
+    ) -> Pin<Box<dyn Future<Output = Result<ExchangeResponse, ExchangeError>> + 'a>> {
+        if executable != self.executable() {
+            return Box::pin(async move { Err(ExchangeError::UnknownExecutable(executable)) });
+        }
+        Box::pin(async move {
+            ForwardAdapter::exchange(self, query, deadline, cancellation)
+                .await
+                .map_err(ExchangeError::Upstream)
+        })
     }
 }
 
 /// Shared W1/W2 request driver used by both UDP and TCP listeners.
 pub(crate) async fn execute_request(
     request: ExecutionRequest<'_>,
-    forward: &ForwardAdapter,
+    forwards: &ForwardCatalog,
     request_shutdown: TransportCancellation,
 ) -> Vec<u8> {
-    execute_request_with_executor(request, forward, request_shutdown).await
+    execute_request_with_executor(request, forwards, request_shutdown).await
 }
 
 pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
@@ -79,6 +92,8 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
         question,
     } = request;
     let state = ExecutionState::new(header, question.clone());
+    // Every external leg shares this one request-owned absolute budget.
+    let request_deadline = Instant::now() + options.request_deadline;
     let mut machine = match config.new_machine(state, ExecutionControl::with_fuel(DEFAULT_FUEL)) {
         Ok(machine) => machine,
         Err(_) => return protocol_error(&header, &question, SERVFAIL),
@@ -87,6 +102,7 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
     let mut pending_store: Option<PendingStore> = None;
     let mut upstream_response = false;
     let mut publication_deadline = None;
+    let multi_forward = config.program.externals.len() > usize::from(config.cache.is_some()) + 1;
     let mut step = match machine.step() {
         Ok(step) => step,
         Err(_) => return protocol_error(&header, &question, SERVFAIL),
@@ -138,16 +154,21 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                     continue;
                 }
 
-                if dispatch.executable() != config.forward.executable {
-                    return protocol_error(&header, &question, SERVFAIL);
-                }
                 if request_shutdown.is_cancelled() {
                     return Vec::new();
                 }
-                let deadline = Instant::now() + options.request_deadline;
-                publication_deadline = Some(deadline);
+                if multi_forward && Instant::now() >= request_deadline {
+                    set_servfail(&mut machine);
+                    return response_from_state(&machine, &header, &question);
+                }
+                publication_deadline = Some(request_deadline);
                 let exchange = executor
-                    .exchange(raw, deadline, request_shutdown.clone())
+                    .exchange(
+                        dispatch.executable(),
+                        raw,
+                        request_deadline,
+                        request_shutdown.clone(),
+                    )
                     .await;
                 if request_shutdown.is_cancelled() {
                     return Vec::new();
@@ -168,12 +189,18 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                             None => {
                                 upstream_response = false;
                                 set_servfail(&mut machine);
+                                if multi_forward {
+                                    return response_from_state(&machine, &header, &question);
+                                }
                             }
                         }
                     }
                     Err(_) => {
                         upstream_response = false;
                         set_servfail(&mut machine);
+                        if multi_forward {
+                            return response_from_state(&machine, &header, &question);
+                        }
                     }
                 }
                 step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Continue)) {
@@ -219,7 +246,7 @@ pub(crate) fn frame_native_response(response: &[u8], mode: FrameMode) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
 
@@ -228,10 +255,10 @@ mod tests {
         ExecutableId, ExecutableSpec, ExternalRef, ExternalSpec, ProgramSpec, RuleSpec,
         SequenceSpec,
     };
-    use mosdns_upstream_core::{Endpoint, ExchangeResponse, Transport};
+    use mosdns_upstream_core::{Endpoint, ExchangeResponse, Transport, UpstreamError};
 
     use super::{ExchangeExecutor, execute_request_with_executor};
-    use crate::assembly::HostOptions;
+    use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
     use crate::config::{
         CachePluginConfig, CompiledConfig, ForwardConfig, ListenerConfig, ListenerKind, LogLevel,
@@ -244,22 +271,81 @@ mod tests {
         fail: bool,
     }
 
-    impl ExchangeExecutor for MockExchange {
+    struct RecordingExchange {
+        calls: Rc<RefCell<Vec<(ExecutableId, std::time::Instant)>>>,
+        response: Vec<u8>,
+    }
+
+    struct FailingExchange {
+        calls: Rc<RefCell<Vec<ExecutableId>>>,
+    }
+
+    impl ExchangeExecutor for FailingExchange {
         fn exchange<'a>(
             &'a self,
+            executable: ExecutableId,
             _query: &'a [u8],
             _deadline: std::time::Instant,
             _cancellation: mosdns_upstream_core::TransportCancellation,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<
-                        Output = Result<ExchangeResponse, mosdns_upstream_core::UpstreamError>,
-                    > + 'a,
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            self.calls.borrow_mut().push(executable);
+            Box::pin(async { Err(super::ExchangeError::Upstream(UpstreamError::Connect)) })
+        }
+    }
+
+    impl ExchangeExecutor for RecordingExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            _query: &'a [u8],
+            deadline: std::time::Instant,
+            _cancellation: mosdns_upstream_core::TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            self.calls.borrow_mut().push((executable, deadline));
+            let response = self.response.clone();
+            Box::pin(async move {
+                let id = u16::from_be_bytes([response[0], response[1]]);
+                Ok(ExchangeResponse::new(
+                    response,
+                    id,
+                    id,
+                    Transport::Udp,
+                    false,
+                ))
+            })
+        }
+    }
+
+    impl ExchangeExecutor for MockExchange {
+        fn exchange<'a>(
+            &'a self,
+            _executable: ExecutableId,
+            _query: &'a [u8],
+            _deadline: std::time::Instant,
+            _cancellation: mosdns_upstream_core::TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
             >,
         > {
             self.calls.set(self.calls.get() + 1);
             if self.fail {
-                return Box::pin(async { Err(mosdns_upstream_core::UpstreamError::Connect) });
+                return Box::pin(async {
+                    Err(super::ExchangeError::Upstream(
+                        mosdns_upstream_core::UpstreamError::Connect,
+                    ))
+                });
             }
             let response = self.response.clone();
             Box::pin(async move {
@@ -361,6 +447,11 @@ mod tests {
                 endpoint,
                 executable: forward_id,
             },
+            forwards: vec![ForwardConfig {
+                tag: "forward".to_owned(),
+                endpoint,
+                executable: forward_id,
+            }],
             cache: Some(CachePluginConfig {
                 tag: cache,
                 executable: cache_id,
@@ -380,6 +471,146 @@ mod tests {
             },
             program,
         }
+    }
+
+    fn two_leg_config() -> (CompiledConfig, ExecutableId, ExecutableId) {
+        let a = "a".to_owned();
+        let b = "b".to_owned();
+        let program = ProgramSpec::new(
+            vec![SequenceSpec::new(
+                "root",
+                vec![
+                    RuleSpec::unconditional(Some(vec![ExecutableSpec::External {
+                        target: ExternalRef::new(b.clone()),
+                    }])),
+                    RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: ExternalRef::new(a.clone()),
+                        },
+                        ExecutableSpec::Exit,
+                    ])),
+                ],
+            )],
+            Vec::new(),
+        )
+        .with_externals(vec![
+            ExternalSpec::new(a.clone()),
+            ExternalSpec::new(b.clone()),
+        ])
+        .validate()
+        .expect("two leg program");
+        let a_id = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == a).then_some(*id))
+            .expect("a external");
+        let b_id = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == b).then_some(*id))
+            .expect("b external");
+        let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
+            .expect("endpoint");
+        (
+            CompiledConfig {
+                log_level: LogLevel::Error,
+                forward: ForwardConfig {
+                    tag: a,
+                    endpoint,
+                    executable: a_id,
+                },
+                forwards: vec![
+                    ForwardConfig {
+                        tag: "a".to_owned(),
+                        endpoint,
+                        executable: a_id,
+                    },
+                    ForwardConfig {
+                        tag: "b".to_owned(),
+                        endpoint,
+                        executable: b_id,
+                    },
+                ],
+                cache: None,
+                sequence: SequenceConfig {
+                    tag: "root".to_owned(),
+                    sequence: program.sequence_id("root").expect("root"),
+                    forward_executable: a_id,
+                },
+                listener: ListenerConfig {
+                    tag: "listener".to_owned(),
+                    kind: ListenerKind::Udp,
+                    entry: "root".to_owned(),
+                    listen: "127.0.0.1:1".parse().expect("listen"),
+                    enable_audit: false,
+                    idle_timeout: None,
+                },
+                program,
+            },
+            a_id,
+            b_id,
+        )
+    }
+
+    #[test]
+    fn canonical_machine_resumes_two_external_legs_with_one_deadline() {
+        let (config, a, b) = two_leg_config();
+        let request = query(12);
+        let (header, question) = parse_query(&request).expect("query");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = RecordingExchange {
+            calls: Rc::clone(&calls),
+            response: response(&request),
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let options = HostOptions::with_deadline(Duration::from_secs(1));
+        let result = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &options,
+                raw: &request,
+                header,
+                question,
+            },
+            &executor,
+            mosdns_upstream_core::TransportCancellation::new(),
+        ));
+        validate_response(&result).expect("final response");
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, b);
+        assert_eq!(calls[1].0, a);
+        assert_eq!(calls[0].1, calls[1].1);
+    }
+
+    #[test]
+    fn failed_first_multi_forward_leg_stops_before_the_next_external() {
+        let (config, a, b) = two_leg_config();
+        let request = query(13);
+        let (header, question) = parse_query(&request).expect("query");
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = FailingExchange {
+            calls: Rc::clone(&calls),
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let options = HostOptions::default();
+        let response = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &options,
+                raw: &request,
+                header,
+                question,
+            },
+            &executor,
+            mosdns_upstream_core::TransportCancellation::new(),
+        ));
+        validate_response(&response).expect("SERVFAIL response");
+        assert_eq!(response[3] & 0x0f, super::SERVFAIL);
+        assert_eq!(&*calls.borrow(), &[b]);
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -439,6 +670,32 @@ mod tests {
         wire[7] = 0;
         wire.truncate(12 + question.qname_wire.len() + 4);
         wire
+    }
+
+    #[test]
+    fn unknown_executable_id_fails_closed_without_selecting_the_only_forward() {
+        let config = config();
+        let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
+            .expect("endpoint");
+        let wrong_owner = ForwardAdapter::new(ExecutableId(99), endpoint);
+        let request = query(11);
+        let (header, question) = parse_query(&request).expect("query");
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let options = HostOptions::default();
+        let response = futures_like_block_on(execute_request_with_executor(
+            super::ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &options,
+                raw: &request,
+                header,
+                question,
+            },
+            &wrong_owner,
+            mosdns_upstream_core::TransportCancellation::new(),
+        ));
+        validate_response(&response).expect("SERVFAIL response");
+        assert_eq!(response[3] & 0x0f, super::SERVFAIL);
     }
 
     #[test]

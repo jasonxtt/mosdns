@@ -9,7 +9,7 @@ use mosdns_upstream_core::TransportCancellation;
 use tokio::net::UdpSocket;
 use tokio::task::JoinSet;
 
-use crate::assembly::{ForwardAdapter, HostAssembly, HostOptions};
+use crate::assembly::{ForwardCatalog, HostAssembly, HostOptions};
 use crate::cache::NativeCacheAdapter;
 use crate::config::{CompiledConfig, ListenerKind};
 use crate::execution::{ExecutionRequest, execute_request};
@@ -23,7 +23,7 @@ const REFUSED: u8 = 5;
 /// widened to `Send + Sync` by this migration slice.
 pub struct UdpServer {
     config: Rc<CompiledConfig>,
-    forward: Rc<ForwardAdapter>,
+    forwards: Rc<ForwardCatalog>,
     cache: Rc<NativeCacheAdapter>,
     options: HostOptions,
     socket: Arc<UdpSocket>,
@@ -44,7 +44,7 @@ impl UdpServer {
             .map_err(UdpServerError::Bind)?;
         Ok(Self {
             config: assembly.config_handle(),
-            forward: assembly.forward_handle(),
+            forwards: assembly.forwards_handle(),
             cache: assembly.cache_handle(),
             options: assembly.options().clone(),
             socket: Arc::new(socket),
@@ -84,7 +84,7 @@ impl UdpServer {
                             let raw = packet[..length].to_vec();
                             let socket = Arc::clone(&self.socket);
                             let config = Rc::clone(&self.config);
-                            let forward = Rc::clone(&self.forward);
+                            let forwards = Rc::clone(&self.forwards);
                             let cache = Rc::clone(&self.cache);
                             let options = self.options.clone();
                             let request_shutdown = shutdown.child_token();
@@ -92,7 +92,7 @@ impl UdpServer {
                                 process_request(RequestTask {
                                     socket,
                                     config,
-                                    forward,
+                                    forwards,
                                     cache,
                                     options,
                                     raw,
@@ -113,14 +113,14 @@ impl UdpServer {
         }
 
         shutdown.cancel();
-        finish_server(&self.forward, &mut tasks, &mut task_error, receive_error).await
+        finish_server(&self.forwards, &mut tasks, &mut task_error, receive_error).await
     }
 }
 
 struct RequestTask {
     socket: Arc<UdpSocket>,
     config: Rc<CompiledConfig>,
-    forward: Rc<ForwardAdapter>,
+    forwards: Rc<ForwardCatalog>,
     cache: Rc<NativeCacheAdapter>,
     options: HostOptions,
     raw: Vec<u8>,
@@ -132,7 +132,7 @@ async fn process_request(task: RequestTask) {
     let RequestTask {
         socket,
         config,
-        forward,
+        forwards,
         cache,
         options,
         raw,
@@ -154,7 +154,7 @@ async fn process_request(task: RequestTask) {
             header,
             question,
         },
-        &forward,
+        &forwards,
         request_shutdown.clone(),
     )
     .await;
@@ -225,13 +225,13 @@ pub(crate) async fn drain_tasks(tasks: &mut JoinSet<()>, task_error: &mut Option
 }
 
 async fn finish_server(
-    forward: &ForwardAdapter,
+    forwards: &ForwardCatalog,
     tasks: &mut JoinSet<()>,
     task_error: &mut Option<String>,
     receive_error: Option<std::io::Error>,
 ) -> Result<(), UdpServerError> {
     drain_tasks(tasks, task_error).await;
-    let _ = forward.upstream().close().await;
+    forwards.close_all().await;
     if let Some(error) = task_error {
         return Err(UdpServerError::Task(error.clone()));
     }
@@ -357,7 +357,8 @@ mod tests {
                 panic!("intentional task failure");
             });
             let mut task_error = None;
-            let result = finish_server(host.forward(), &mut tasks, &mut task_error, None).await;
+            let result =
+                finish_server(&host.forwards_handle(), &mut tasks, &mut task_error, None).await;
             assert!(matches!(result, Err(super::UdpServerError::Task(_))));
             assert!(tasks.is_empty());
             assert_eq!(
