@@ -43,6 +43,28 @@ listener. Invalid YAML returns before `HostAssembly` construction. The
 assembly tests assert the upstream lifecycle remains `Open` and expose no
 listener socket.
 
+## Root-review remediation
+
+The first Slice 2 root review returned `SLICE 2: FAIL` with P0=0, P1=2, P2=0.
+The bounded remediation is:
+
+```text
+33318d7 test(phase5a): close slice2 rejection and DNS edge cases
+```
+
+The native-host rejection tests now independently exercise unsupported
+scheme, wrong YAML type, missing listener-to-sequence reference, invalid
+sequence control syntax, `enable_audit: true`, negative TCP timeout, and
+non-integer TCP timeout. The audit case no longer contains a duplicate key, so
+it proves semantic rejection rather than only YAML duplicate detection.
+
+The DNS query decoder now stores a self-contained uncompressed question name
+when accepted input used a compression pointer. The response helper can
+therefore copy the parsed `QuestionInfo` into a new packet without retaining a
+pointer into the old query. A compressed-question regression constructs
+SERVFAIL and validates the complete response through the existing `dns-core`
+response walker.
+
 `dns-core::synthesize_response` is the narrowly scoped protocol-error helper
 needed by later W1 request handling. It accepts an already parsed
 `QueryHeader`/`QuestionInfo`, preserves the request ID/question, sets QR and
@@ -76,8 +98,8 @@ Tokio feature closure; the tree contains no duplicate YAML parser.
 
 ```text
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check       PASS
-cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --all-targets --locked  PASS (9 tests)
-cargo test --manifest-path rust/Cargo.toml -p mosdns-dns-core --all-targets --locked     PASS (54 unit + existing integration tests)
+cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --all-targets --locked  PASS (10 tests)
+cargo test --manifest-path rust/Cargo.toml -p mosdns-dns-core --all-targets --locked     PASS (55 unit + existing integration tests)
 cargo clippy --manifest-path rust/Cargo.toml -p mosdns-native-host --all-targets --locked -- -D warnings  PASS
 python3 ./.trellis/scripts/task.py validate rust-phase5a-native-forwarding                         PASS
 git diff --check -- approved Slice 2 paths                                                      PASS

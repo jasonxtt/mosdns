@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — Slice 2 implementation complete; awaiting root review**.
+Status: **in progress — Slice 2 remediation complete; awaiting root review**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -214,6 +214,15 @@ Slice 2 checks and dependency evidence are recorded in
 listener bind, network/VM/SSH run, benchmark, production integration, or
 historical baseline mutation was performed. The task is stopped here pending
 the explicit root `SLICE 2: PASS`; Slice 3 is not authorized by this record.
+
+The first Slice 2 root review returned `SLICE 2: FAIL` with P0=0, P1=2,
+P2=0. The bounded remediation commit is `33318d7` (`test(phase5a): close
+slice2 rejection and DNS edge cases`). It adds independent tests for the
+missing fail-closed rejection categories and changes `dns-core` query parsing
+to retain a self-contained uncompressed question name, with a compressed-
+question SERVFAIL response regression validated by the existing response
+walker. The focused checks were rerun successfully; this task remains stopped
+pending the remediation root review, with no Slice 3 authorization yet.
 
 ## 3. Slice 2 — native host config/CLI/assembly before I/O
 
