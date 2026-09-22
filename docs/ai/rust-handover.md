@@ -103,12 +103,12 @@ measurements justify the performance benefit.
 
 The bounded **Phase 5A minimal native host** W1 task is closed after the YAML
 subset -> UDP/TCP listener -> async sequence -> existing upstream -> response
-path passed its final gate. The follow-on `rust-phase5a-native-cache` task also
-closed its bounded W2 cache slice at reviewed source
+path passed its final gate. The follow-on `rust-phase5a-native-cache` task has
+completed its bounded W2 Linux evidence at reviewed source
 `b558d153cad9ad8e3ffaf18a6e2dde82329e32e0`: strict four-plugin YAML, one
 host-owned cache, plain UDP W2 hit/miss/expiry and the existing W1 UDP/TCP
-path passed the Linux amd64 correctness and cgo regression gates. Its exact
-commands, hashes and limits are in
+path passed the Linux amd64 correctness and cgo regression gates; its final
+review is pending. Its exact commands, hashes and limits are in
 `.trellis/tasks/09-22-rust-phase5a-native-cache/`.
 
 This is still only a bounded W2 subset. Full cache behavior (lazy policy,
