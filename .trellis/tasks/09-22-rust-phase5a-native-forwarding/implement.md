@@ -1,6 +1,6 @@
 # Implementation plan — Rust Phase 5A native forwarding
 
-Status: **in progress — Slice 0 implementation**.
+Status: **in progress — Slice 1 implementation**.
 
 The root planning review returned `PLANNING: PASS` at
 `a5aef2305ef44614753c2de26d4003526f78ade4`; the user then explicitly
@@ -98,8 +98,8 @@ git diff --check                                         PASS
 ```
 
 The exact changed paths are the Slice 0 allowlist plus this task's relocation
-record. The task remains `in_progress` and is stopped here pending root
-`SLICE 0: PASS`.
+record. Root review returned `SLICE 0: PASS` with P0/P1/P2=0, authorizing
+Slice 1 only.
 
 ## 2. Slice 1 — canonical sequence suspension/resume
 
@@ -151,6 +151,38 @@ Request `SLICE 1: PASS` for the exact sequence-core diff. Review must confirm
 one machine/one control-flow engine, sync adapter parity, state retention,
 typed invalid-resume behavior, and no async/runtime dependency. A PASS
 authorizes Slice 2 only.
+
+### Slice 1 execution record
+
+Implementation commit: `cd9e14b` (`feat(sequence): add resumable execution machine`).
+
+The canonical sequence machine is implemented in `rust/sequence-core`.
+`ExecutionMachine` owns state/control for resumable native-host use and also
+supports a borrowed mode used by the existing synchronous `execute` adapter;
+both modes share the same scope/frame/continuation engine. External
+executables have stable catalog IDs and produce an identity-only dispatch.
+`resume` validates the pending ID, preserves state and frames, and maps
+accepted/rejected/exit/error outcomes through the existing scope rules.
+
+Focused coverage is in `rust/sequence-core/tests/slice5_resumable.rs` and
+covers state retention, multiple pending dispatches, wrong/duplicate and
+post-terminal resumes, fuel/cancellation boundaries, and sync adapter
+behavior. No Tokio, upstream, listener, network, config, or broad trait-bound
+change was introduced.
+
+Checks:
+
+```text
+cargo fmt --manifest-path rust/Cargo.toml --all -- --check       PASS
+cargo test -p mosdns-sequence-core --all-targets --locked       PASS (61 tests)
+cargo clippy -p mosdns-sequence-core --all-targets --locked ... PASS
+cargo tree -p mosdns-sequence-core --edges normal --locked      PASS (dns-core only)
+git diff --check -- allowlisted paths                         PASS
+host/network/VM/SSH/benchmark commands                        NOT RUN
+```
+
+The implementation is stopped pending root `SLICE 1: PASS`; no Slice 2 work
+has started.
 
 ## 3. Slice 2 — native host config/CLI/assembly before I/O
 
