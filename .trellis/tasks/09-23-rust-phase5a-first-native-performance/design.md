@@ -1,6 +1,6 @@
 # Design — paired Go-only / Rust-native W1–W3 measurement
 
-Status: in progress — Slice 0 reviewer PASS; manifest v1 was rejected at Slice 1 review because its digest was derived from the mutable file. Replacement manifest v2 pins its reviewed digest in the driver, its 24-tuple validation and mutation regression pass, and Slice 1 review is pending. No official measurements have been run.
+Status: in progress — Slice 0 reviewer PASS; manifest v1 was rejected because its digest was derived from the mutable file. Replacement manifest v2 pins its reviewed digest in the driver and received Slice 1 reviewer PASS at `8b09f56fcbf194e04d0f95c924c4f28392291d89`. The authorized official matrix is next; no official measurements have run.
 
 ## Evidence model
 

@@ -1,6 +1,6 @@
 # Slice 1 preflight and manifest v2
 
-Status: replacement manifest v2 is frozen locally and on `mosdns-rust`; the digest-mutation regression and all 24 tuple validations pass. Independent Slice 1 review is pending. No official sample has run.
+Status: replacement manifest v2 received independent Slice 1 **PASS** at exact commit `8b09f56fcbf194e04d0f95c924c4f28392291d89`; its digest-mutation regression and all 24 tuple validations pass. The authorized official matrix is next; no official sample has run.
 
 ## Superseded v1 review
 
@@ -27,4 +27,4 @@ Both commands validated the frozen 24 candidate/scenario/repetition tuples. The 
 
 The previous preflight's environment, build provenance, bilateral W1/W2/W3 smoke, fixed input hashes, and existing-service isolation findings remain applicable; see `slice1-preflight-v1.md`, `slice1-environment-v1.txt`, and `slice1-smoke-v1-status.tsv`. Production `mos` was not accessed.
 
-Official samples remain blocked until an independent reviewer returns PASS for the exact pushed v2 manifest and driver hashes.
+Before official launch, verify the deployed driver SHA-256 still equals the reviewed value `d7cd9cc786afcf343a0546a1ffe97883a064a39dd3686769128fc1077dcb8c18`, and verify the v2 manifest and sidecar still match the pinned digest above. Any mismatch stops the run. The reviewer PASS authorizes only the already approved Slice 1 matrix, not a performance verdict, production/deployment, or task closure.
