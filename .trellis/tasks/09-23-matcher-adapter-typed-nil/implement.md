@@ -25,8 +25,9 @@
   `go test ./...`.
 - [x] Review the exact diff and update the relevant error-handling guidance
   with the Go typed-nil interface rule.
-- [ ] Stage exact paths, commit, and push `rust`.
-- [ ] Rerun the Linux tagged normal/race suite against an archive of the exact
+- [x] Stage exact paths, commit, and push the scoped implementation to `rust`
+  as `214796fb8292a7a35ac7b03a4bd6f01657569620`.
+- [x] Rerun the Linux tagged normal/race suite against an archive of that exact
   pushed commit.
 - [ ] Send one complete review request with the exact commit and test evidence
   to the frozen reviewer conversation; wait for an explicit PASS or scoped
@@ -56,12 +57,17 @@ go test ./...
   Staged `rust/target/release/libmosdns_runtime.a` in that temporary checkout;
   SHA-256: `8847a4b6213a5920fb6d2b6fb863a90ee7cda437a5745024dfebce6218544187`.
 - The normal tagged suite and the same suite with `-race` both passed across
-  all listed data-provider and matcher packages.
+  all listed data-provider and matcher packages before commit.
 - The pre-fix red checks failed specifically because the returned interface
   held `*matcher_adapter.snapshot` for domain and IP, and
   `*matcher_adapter.valuedSnapshot` for valued domain. Each focused check passed
   after its corresponding constructor fix.
 - Local host: Darwin arm64, Go 1.26.4. `go test ./...`, `go vet ./...`,
   `gofmt -d` for the two Go files, and `git diff --check` all passed.
-- After commit/push, rerun the Linux tagged normal/race suite against an archive
-  of the exact pushed commit and record its SHA before review.
+- Exact pushed source recheck: archived commit
+  `214796fb8292a7a35ac7b03a4bd6f01657569620` with
+  `git archive --format=tar 214796fb8292a7a35ac7b03a4bd6f01657569620` into a
+  fresh Linux checkout, rebuilt `libmosdns_runtime.a` with
+  `CARGO_TARGET_DIR=/root/mosdns-matcher-typednil-target-final.3VCNGm` and
+  `CARGO_BUILD_JOBS=1`, and verified the same library SHA-256. The full tagged
+  normal and `-race` commands above both passed against that checkout.
