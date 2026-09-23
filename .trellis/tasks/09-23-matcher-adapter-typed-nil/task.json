@@ -15,7 +15,7 @@
   "branch": "rust",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "214796fb8292a7a35ac7b03a4bd6f01657569620",
   "pr_url": null,
   "subtasks": [],
   "children": [],
