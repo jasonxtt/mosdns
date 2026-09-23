@@ -1,0 +1,4 @@
+command=ssh mosdns-rust bash test-run-official-matrix-manifest-pin.sh official-manifest-v1.json run-official-matrix-v1.sh
+exit_status=1
+tampered manifest unexpectedly passed validation
+Interpretation: expected red regression; the v1 driver accepted the modified manifest and the test reported that bypass.
