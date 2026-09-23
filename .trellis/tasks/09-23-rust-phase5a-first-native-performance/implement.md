@@ -1,6 +1,6 @@
 # Implementation plan — first native whole-process comparison
 
-Status: **in progress — Slice 0 reviewer PASS; prepare and review the Slice 1 official manifest before measurements**. Planning review passed and execution was authorized in this task. No official samples have run and no official manifest is frozen.
+Status: **in progress — Slice 0 reviewer PASS; official manifest v1 is frozen and all 24 tuples validate, with Slice 1 review pending before measurements**. Planning review passed and execution was authorized in this task. No official samples have run.
 
 ## Before start
 
@@ -44,7 +44,9 @@ The reviewer returned three P1 findings against commit `4c2631d0ab9cb68939699e7c
 
 Allowed edits: this task's `research/**` manifest/results and small benchmark-tool remediation reviewed before fresh official runs. No product change or archived evidence rewrite.
 
-- [ ] Freeze a new task-owned manifest **before** official samples: exact Go/Rust source/binary/helper and corpus hashes, VM/environment, config parity, CPU placement, scenario/order/repetition/QPS/duration/deadline, TCP policy, per-key W2 prefill times, 30-second fixture TTL and safety margin, W3 event schema, continuous stage sequence, terminal health-check rate/duration/sample minimum/p95-p99 ceilings, categorical recovery assessment mode, logs/audit and criteria for invalid stage. Record SHA-256 and review it before official execution.
+- [x] Freeze a new task-owned manifest v1 **before** official samples: exact Go/Rust source/binary/helper and corpus hashes, VM/environment, config parity, CPU placement, scenario/order/repetition/QPS/duration/deadline, TCP policy, per-key W2 prefill timestamp capture, 30-second fixture TTL and safety margin, W3 event schema, continuous stage sequence, terminal health-check rate/duration/sample minimum/p95-p99 ceilings, categorical recovery assessment mode, logs/audit and criteria for invalid stage. Record SHA-256.
+- [x] Validate all 24 candidate/scenario/repetition tuples against the frozen manifest and confirm the dry-run schedule; no SUT or official samples were started.
+- [ ] Obtain independent Slice 1 reviewer PASS before official samples.
 - [ ] Run frozen open-loop matrix at least three times per valid point; alternate candidate order. Preserve the same SUT PID/fixture session across each staged sequence, while W2 cold and W2 warm retain their separately declared lifecycle. Keep all valid/invalid attempts with separate directories and reasons. Verify manifest/input hashes, correct-on-time counters, exact W3 event path per sent request, stage sequence barriers, terminal health-check criterion and indeterminate recovery assessment, resource samples and headroom after each run.
 - [ ] Inspect overloading/recovery behavior separately and ensure missing responses, timeouts and sender shortfall are not hidden. If a method/manifest change is required, issue a new manifest and rerun both candidates at all affected points.
 - [ ] Check cleanup on VM (task-owned processes/listeners only), retain hashes and exact commands; commit/push evidence index and obtain Slice 1 reviewer PASS.

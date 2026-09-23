@@ -1,0 +1,12 @@
+ssh_host_alias=mosdns-rust
+hostname=mosdns-rust
+kernel_release=7.0.9-x64v3-xanmod1
+online_cpus=0-1
+memory_total_bytes=4102578176
+root_filesystem=ext4
+root_free_bytes=12786278400
+open_file_limit=1024
+load_average_before_official_v1=0.27 0.37 0.22
+existing_mosdns_process=pid:425 state:S cpu_allowed:0-1 rss_kib:108088
+existing_service_mutated=no
+task_processes_remaining=0

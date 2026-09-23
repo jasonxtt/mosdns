@@ -1,0 +1,16 @@
+go_source_commit=5b1eca69e0668ad1ddb6db88c0f39202557d5b98
+go_source_archive_sha256=63c902178e159d2d5e99f5ab42365a909f9ef75c6f1ca09aa73639f8682d7bd1
+go_build_command=cd build-src/go-5b1eca69-official && env SKIP_UI_BUILD=1 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO_TAGS= BUILD_VERSION=phase5a-go-5b1eca6 OUTPUT=bin/official-v1/mosdns-go ./scripts/build-local.sh
+rust_source_commit=605c30577b79d397b5695618dbd2980e550ca6f3
+rust_source_archive_sha256=28c3a4e9eb9d0f78c4e0da2dce253a9a1fe4aa81a983897b1287533581086e3b
+rust_build_command=CARGO_TARGET_DIR=target-official-rust cargo build --manifest-path build-src/rust-605c305-official/rust/Cargo.toml --package mosdns-native-host --bin mosdns --release --locked
+helper_version=phase5a-baseline-helper/v8
+helper_build_command=cd src-rust-v9 && go build -trimpath -o bin/official-v1/phase5a-baseline-helper ./tests/phase5a-baseline/cmd/phase5a-baseline
+runner_sha256=18c1e29cdcf23694a458899c26850414fd456529a84349f3a2884b06caf2245e
+helper_source_sha256=2dec4788eaa3dad251061e380cbd8c32c9122285b852acf8b9a0b2eb81f64da1
+go_candidate_sha256=2cd2274b70e258e2ff6065ecf70f4d65d28b4049d7b41a2a01ed1225763cc069
+rust_candidate_sha256=370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa
+helper_binary_sha256=df4515d7045ddcfd30139b0407e8e9933277c1560137d71ee0f7360d7d537065
+go_candidate_toolchain=go1.26.4
+helper_toolchain=go1.26.4
+rust_toolchain=rustc 1.95.0 (59807616e 2026-04-14)

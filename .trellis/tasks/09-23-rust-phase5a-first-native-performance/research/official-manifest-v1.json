@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "official_frozen": true,
+  "recovery_assessment_mode": "indeterminate-no-overload-evidence",
+  "inputs": [
+    {
+      "path": "tests/phase5a-baseline/configs/cache.yaml",
+      "sha256": "7f521ae011c28b4e102ff75437ebb943ba11f4bdc09aa656c41290ccde4b61c7"
+    },
+    {
+      "path": "tests/phase5a-baseline/configs/forward-tcp.yaml",
+      "sha256": "1a2280f44ad07ec2111eeb09f6d1904e66b65d52a20f2df1bb14fff22458b8a1"
+    },
+    {
+      "path": "tests/phase5a-baseline/configs/forward-udp.yaml",
+      "sha256": "f6758fb2b2eb8056d6d1c2aef320a3357d005b92685136dec457d5543bd9d729"
+    },
+    {
+      "path": "tests/phase5a-baseline/configs/routing.yaml",
+      "sha256": "66f358dbe2315df2aab1ad81668cec980b2f11aa68f863acad522c8e0c9fc651"
+    },
+    {
+      "path": "tests/phase5a-baseline/workloads/cache.jsonl",
+      "sha256": "7680cd55ccf477972cd700c05e72c83c52ab1a55643b9a98bb610629035214ed"
+    },
+    {
+      "path": "tests/phase5a-baseline/workloads/forward.jsonl",
+      "sha256": "32ae1a43cae5f4e85b0a058d389d2071a8d7cf844aad98b31137f95b57715aa2"
+    },
+    {
+      "path": "tests/phase5a-baseline/workloads/routing.jsonl",
+      "sha256": "dbb582dc9d623af54e501639b7a52538b1e1d9e493fa0f0f6a4f4714ea0176c1"
+    }
+  ],
+  "runner": {
+    "path": "scripts/run-phase5a-baseline.sh",
+    "sha256": "18c1e29cdcf23694a458899c26850414fd456529a84349f3a2884b06caf2245e"
+  },
+  "helper": {
+    "source_path": "tests/phase5a-baseline/cmd/phase5a-baseline/main.go",
+    "source_sha256": "2dec4788eaa3dad251061e380cbd8c32c9122285b852acf8b9a0b2eb81f64da1",
+    "binary_path": "/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/phase5a-baseline-helper",
+    "binary_sha256": "df4515d7045ddcfd30139b0407e8e9933277c1560137d71ee0f7360d7d537065",
+    "version": "phase5a-baseline-helper/v8"
+  },
+  "candidates": {
+    "go": {
+      "source_commit": "5b1eca69e0668ad1ddb6db88c0f39202557d5b98",
+      "binary_path": "/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go",
+      "binary_sha256": "2cd2274b70e258e2ff6065ecf70f4d65d28b4049d7b41a2a01ed1225763cc069"
+    },
+    "rust": {
+      "source_commit": "605c30577b79d397b5695618dbd2980e550ca6f3",
+      "binary_path": "/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust",
+      "binary_sha256": "370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa"
+    }
+  },
+  "stage_sequence": [
+    "normal-reference",
+    "common-load",
+    "near-saturation",
+    "overload",
+    "recovery"
+  ],
+  "w3_event_schema": "fixture-event-v3-occurrence-time",
+  "pair_schedule": [
+    {
+      "repetition": 1,
+      "order": ["go", "rust"]
+    },
+    {
+      "repetition": 2,
+      "order": ["rust", "go"]
+    },
+    {
+      "repetition": 3,
+      "order": ["go", "rust"]
+    }
+  ],
+  "scenarios": {
+    "w1-udp": {
+      "stage_duration_ms": 3000,
+      "normal_reference_qps": 200,
+      "common_load_qps": 400,
+      "near_saturation_qps": 800,
+      "overload_qps": 1000,
+      "request_deadline_ms": 500,
+      "late_drain_ms": 100,
+      "tcp_policy": "fresh-connection-per-request",
+      "w2_cache_ttl_ms": 30000,
+      "w2_ttl_safety_margin_ms": 500,
+      "harness_cpu_set": "1",
+      "sut_cpu_set": "0",
+      "recovery_minimum_samples": 600,
+      "recovery_p95_ceiling_us": 274,
+      "recovery_p99_ceiling_us": 365
+    },
+    "w1-tcp": {
+      "stage_duration_ms": 3000,
+      "normal_reference_qps": 200,
+      "common_load_qps": 400,
+      "near_saturation_qps": 800,
+      "overload_qps": 1000,
+      "request_deadline_ms": 500,
+      "late_drain_ms": 100,
+      "tcp_policy": "fresh-connection-per-request",
+      "w2_cache_ttl_ms": 30000,
+      "w2_ttl_safety_margin_ms": 500,
+      "harness_cpu_set": "1",
+      "sut_cpu_set": "0",
+      "recovery_minimum_samples": 600,
+      "recovery_p95_ceiling_us": 360,
+      "recovery_p99_ceiling_us": 465
+    },
+    "w2": {
+      "stage_duration_ms": 3000,
+      "normal_reference_qps": 200,
+      "common_load_qps": 400,
+      "near_saturation_qps": 800,
+      "overload_qps": 1000,
+      "request_deadline_ms": 500,
+      "late_drain_ms": 100,
+      "tcp_policy": "fresh-connection-per-request",
+      "w2_cache_ttl_ms": 30000,
+      "w2_ttl_safety_margin_ms": 500,
+      "w2_warm_lifecycle": "same-process",
+      "harness_cpu_set": "1",
+      "sut_cpu_set": "0",
+      "recovery_minimum_samples": 600,
+      "recovery_p95_ceiling_us": 204,
+      "recovery_p99_ceiling_us": 315
+    },
+    "w3": {
+      "stage_duration_ms": 3000,
+      "normal_reference_qps": 200,
+      "common_load_qps": 400,
+      "near_saturation_qps": 800,
+      "overload_qps": 1000,
+      "request_deadline_ms": 500,
+      "late_drain_ms": 100,
+      "tcp_policy": "fresh-connection-per-request",
+      "w2_cache_ttl_ms": 30000,
+      "w2_ttl_safety_margin_ms": 500,
+      "harness_cpu_set": "1",
+      "sut_cpu_set": "0",
+      "recovery_minimum_samples": 600,
+      "recovery_p95_ceiling_us": 437,
+      "recovery_p99_ceiling_us": 580
+    }
+  },
+  "environment": {
+    "host_alias": "mosdns-rust",
+    "goos": "linux",
+    "goarch": "amd64",
+    "online_cpus": 2,
+    "kernel_release": "7.0.9-x64v3-xanmod1",
+    "go_toolchain": "go1.26.4",
+    "rust_toolchain": "rustc 1.95.0 (59807616e 2026-04-14)"
+  },
+  "matrix_driver": {
+    "path": "evidence-official-v1/run-official-matrix-v1.sh",
+    "sha256": "853a801eb57bb58dde33ed24b4546cd1a45adc4efe65d2126cb4878a2dfbeee2"
+  },
+  "build_provenance": {
+    "go_source_archive_sha256": "63c902178e159d2d5e99f5ab42365a909f9ef75c6f1ca09aa73639f8682d7bd1",
+    "go_build_command": "cd /root/mosdns-rust-phase5a-first-native-performance-605c305/build-src/go-5b1eca69-official && env SKIP_UI_BUILD=1 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO_TAGS= BUILD_VERSION=phase5a-go-5b1eca6 OUTPUT=/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go ./scripts/build-local.sh",
+    "rust_source_archive_sha256": "28c3a4e9eb9d0f78c4e0da2dce253a9a1fe4aa81a983897b1287533581086e3b",
+    "rust_build_command": "CARGO_TARGET_DIR=/root/mosdns-rust-phase5a-first-native-performance-605c305/target-official-rust cargo build --manifest-path /root/mosdns-rust-phase5a-first-native-performance-605c305/build-src/rust-605c305-official/rust/Cargo.toml --package mosdns-native-host --bin mosdns --release --locked",
+    "reviewed_tool_code_commit": "48ef11ea0d9ae72484e7b11fc6af7f370b8fa0e5",
+    "helper_build_command": "go build -trimpath -o /root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/phase5a-baseline-helper ./tests/phase5a-baseline/cmd/phase5a-baseline"
+  },
+  "execution_contract": {
+    "scenario_order": ["w1-udp", "w1-tcp", "w2", "w3"],
+    "matrix_driver_command": "taskset --cpu-list 1 bash /root/mosdns-rust-phase5a-first-native-performance-605c305/evidence-official-v1/run-official-matrix-v1.sh --execute",
+    "candidate_entrypoint": "<candidate-binary> start -c <unchanged scenario config>",
+    "harness_affinity": "runner, generator, and fixture processes inherit CPU 1; each SUT is launched and inspected on CPU 0",
+    "w2_prefill": {
+      "mode": "unmeasured one-pass warm-prefill, one request per unique workload key",
+      "qps": 200,
+      "duration_ms": 3000,
+      "lifecycle": "same-process through all five measured stages",
+      "ttl_ms": 30000,
+      "safety_margin_ms": 500,
+      "observed_key_times": "per-key prefill and measured request sent/finish times are captured in each run request ledger and checked against TTL minus margin"
+    },
+    "health_check_basis": "600 samples; per-scenario p95/p99 ceilings are the maxima across the six valid v7 normal-reference samples; the terminal same-rate stage is not service-recovery proof",
+    "host_load_capture": "matrix driver records UTC start/end and 1/5/15-minute load averages for every candidate attempt; retain attempts and assess noise without changing the frozen ladder"
+  }
+}

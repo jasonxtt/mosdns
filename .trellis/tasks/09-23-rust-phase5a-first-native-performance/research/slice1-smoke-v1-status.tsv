@@ -1,0 +1,9 @@
+candidate	scenario	runner_status	invalid_artifact	stage_files
+go	w1-udp	pass	none	1
+go	w1-tcp	pass	none	1
+go	w2	pass	none	3
+go	w3	pass	none	1
+rust	w1-udp	pass	none	1
+rust	w1-tcp	pass	none	1
+rust	w2	pass	none	3
+rust	w3	pass	none	1

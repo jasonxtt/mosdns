@@ -1,0 +1,51 @@
+manifest_sha256=2ff4e0804b26af77db41c1357e107b00ea9539127665784087b29add3e43698f
+matrix_driver_sha256=853a801eb57bb58dde33ed24b4546cd1a45adc4efe65d2126cb4878a2dfbeee2
+manifest_tuple_validated	w1-udp	1	1	go
+manifest_tuple_validated	w1-udp	1	2	rust
+manifest_tuple_validated	w1-udp	2	1	rust
+manifest_tuple_validated	w1-udp	2	2	go
+manifest_tuple_validated	w1-udp	3	1	go
+manifest_tuple_validated	w1-udp	3	2	rust
+manifest_tuple_validated	w1-tcp	1	1	go
+manifest_tuple_validated	w1-tcp	1	2	rust
+manifest_tuple_validated	w1-tcp	2	1	rust
+manifest_tuple_validated	w1-tcp	2	2	go
+manifest_tuple_validated	w1-tcp	3	1	go
+manifest_tuple_validated	w1-tcp	3	2	rust
+manifest_tuple_validated	w2	1	1	go
+manifest_tuple_validated	w2	1	2	rust
+manifest_tuple_validated	w2	2	1	rust
+manifest_tuple_validated	w2	2	2	go
+manifest_tuple_validated	w2	3	1	go
+manifest_tuple_validated	w2	3	2	rust
+manifest_tuple_validated	w3	1	1	go
+manifest_tuple_validated	w3	1	2	rust
+manifest_tuple_validated	w3	2	1	rust
+manifest_tuple_validated	w3	2	2	go
+manifest_tuple_validated	w3	3	1	go
+manifest_tuple_validated	w3	3	2	rust
+scenario	repetition	position	candidate	binary	result_dir
+w1-udp	1	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-udp/repetition-1/go
+w1-udp	1	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-udp/repetition-1/rust
+w1-udp	2	1	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-udp/repetition-2/rust
+w1-udp	2	2	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-udp/repetition-2/go
+w1-udp	3	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-udp/repetition-3/go
+w1-udp	3	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-udp/repetition-3/rust
+w1-tcp	1	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-tcp/repetition-1/go
+w1-tcp	1	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-tcp/repetition-1/rust
+w1-tcp	2	1	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-tcp/repetition-2/rust
+w1-tcp	2	2	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-tcp/repetition-2/go
+w1-tcp	3	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-tcp/repetition-3/go
+w1-tcp	3	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w1-tcp/repetition-3/rust
+w2	1	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w2/repetition-1/go
+w2	1	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w2/repetition-1/rust
+w2	2	1	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w2/repetition-2/rust
+w2	2	2	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w2/repetition-2/go
+w2	3	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w2/repetition-3/go
+w2	3	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w2/repetition-3/rust
+w3	1	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w3/repetition-1/go
+w3	1	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w3/repetition-1/rust
+w3	2	1	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w3/repetition-2/rust
+w3	2	2	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w3/repetition-2/go
+w3	3	1	go	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-go	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w3/repetition-3/go
+w3	3	2	rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust	/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v1/w3/repetition-3/rust
