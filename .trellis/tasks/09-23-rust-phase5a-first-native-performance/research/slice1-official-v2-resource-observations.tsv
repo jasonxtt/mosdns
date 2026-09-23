@@ -1,0 +1,439 @@
+scenario	repetition	position	candidate	stage	role	pid	sample_count	sample_interval_s	cpu_ticks	user_system_cpu_ms	cpu_percent_one_core	cpu_resolution_percent_one_core	cpu_us_per_correct_on_time	cpu_resolution_us_per_correct_on_time	rss_median_kib	rss_peak_kib	fd_median	fd_peak	stage_invalid_reason	pair_valid
+w1-udp	1	1	go	normal-reference	fixture-1	65444	4	3.002539	1	10.0	0.333	0.333			8622.0	8712	7.0	7		true
+w1-udp	1	1	go	normal-reference	load-generator	65487	4	3.002459	5	50.0	1.665	0.333			15806.0	15888	9.0	10		true
+w1-udp	1	1	go	normal-reference	sut	65468	4	3.002446	3	30.0	0.999	0.333	50.0	16.667	32630.0	34704	9.0	9		true
+w1-udp	1	1	go	common-load	fixture-1	65444	4	3.002933	3	30.0	0.999	0.333			8784.0	10904	7.0	7		true
+w1-udp	1	1	go	common-load	load-generator	65522	4	3.00284	9	90.0	2.997	0.333			13854.0	13872	9.5	10		true
+w1-udp	1	1	go	common-load	sut	65468	4	3.002692	7	70.0	2.331	0.333	58.333	8.333	35792.0	36852	9.0	9		true
+w1-udp	1	1	go	near-saturation	fixture-1	65444	4	3.002425	4	40.0	1.332	0.333			10912.0	10928	7.0	7		true
+w1-udp	1	1	go	near-saturation	load-generator	65558	4	3.002462	16	160.0	5.329	0.333			13872.0	13896	10.0	10		true
+w1-udp	1	1	go	near-saturation	sut	65468	4	3.002429	10	100.0	3.331	0.333	41.667	4.167	40016.0	43164	9.0	9		true
+w1-udp	1	1	go	overload	fixture-1	65444	4	3.002083	4	40.0	1.332	0.333			10940.0	13008	7.0	7		false
+w1-udp	1	1	go	overload	load-generator	65595	4	3.002042	15	150.0	4.997	0.333			14396.0	14652	10.0	11		false
+w1-udp	1	1	go	overload	sut	65468	4	3.002131	10	100.0	3.331	0.333	33.333	3.333	48390.0	51564	9.0	9		false
+w1-udp	1	1	go	recovery	fixture-1	65444	4	3.002669	1	10.0	0.333	0.333			13012.0	13016	7.0	7	same-process recovery criteria failed	false
+w1-udp	1	1	go	recovery	load-generator	65630	4	3.002605	6	60.0	1.998	0.333			13814.0	16580	9.0	10	same-process recovery criteria failed	false
+w1-udp	1	1	go	recovery	sut	65468	4	3.002499	4	40.0	1.332	0.333	66.667	16.667	53624.0	53640	9.0	9	same-process recovery criteria failed	false
+w1-udp	1	2	rust	normal-reference	fixture-1	65768	4	3.002271	2	20.0	0.666	0.333			8654.0	8744	7.0	7		true
+w1-udp	1	2	rust	normal-reference	load-generator	65806	4	3.002362	5	50.0	1.665	0.333			13644.0	13720	9.0	10		true
+w1-udp	1	2	rust	normal-reference	sut	65793	4	3.002417	2	20.0	0.666	0.333	33.333	16.667	3184.0	3184	7.0	8		true
+w1-udp	1	2	rust	common-load	fixture-1	65768	4	3.003033	1	10.0	0.333	0.333			9780.0	10808	7.0	7		true
+w1-udp	1	2	rust	common-load	load-generator	65842	4	3.002817	7	70.0	2.331	0.333			13814.0	13836	9.5	10		true
+w1-udp	1	2	rust	common-load	sut	65793	4	3.00275	4	40.0	1.332	0.333	33.333	8.333	3184.0	3184	7.5	8		true
+w1-udp	1	2	rust	near-saturation	fixture-1	65768	4	3.002257	4	40.0	1.332	0.333			10816.0	10832	7.0	7		true
+w1-udp	1	2	rust	near-saturation	load-generator	65877	4	3.00225	14	140.0	4.663	0.333			13822.0	13856	10.0	11		true
+w1-udp	1	2	rust	near-saturation	sut	65793	4	3.002351	7	70.0	2.332	0.333	29.167	4.167	3216.0	3248	7.5	8		true
+w1-udp	1	2	rust	overload	fixture-1	65768	4	3.002859	4	40.0	1.332	0.333			10840.0	10852	7.0	7	sender shortfall or scheduled query not sent	false
+w1-udp	1	2	rust	overload	load-generator	65915	4	3.002845	22	220.0	7.326	0.333			14456.0	14660	10.5	11	sender shortfall or scheduled query not sent	false
+w1-udp	1	2	rust	overload	sut	65793	4	3.002849	10	100.0	3.33	0.333	33.344	3.334	3252.0	3252	7.0	7	sender shortfall or scheduled query not sent	false
+w1-udp	1	2	rust	recovery	fixture-1	65768	4	3.00199	2	20.0	0.666	0.333			10854.0	12904	7.0	7	same-process recovery criteria failed	false
+w1-udp	1	2	rust	recovery	load-generator	65951	4	3.001931	5	50.0	1.666	0.333			14240.0	17084	9.0	10	same-process recovery criteria failed	false
+w1-udp	1	2	rust	recovery	sut	65793	4	3.001871	3	30.0	0.999	0.333	50.0	16.667	3252.0	3252	7.0	7	same-process recovery criteria failed	false
+w1-udp	2	1	rust	normal-reference	fixture-1	66082	4	3.002664	1	10.0	0.333	0.333			8714.0	8772	7.0	7		true
+w1-udp	2	1	rust	normal-reference	load-generator	66118	4	3.002527	4	40.0	1.332	0.333			13638.0	13716	9.0	9		true
+w1-udp	2	1	rust	normal-reference	sut	66106	4	3.002321	1	10.0	0.333	0.333	16.667	16.667	3180.0	3180	7.0	7		true
+w1-udp	2	1	rust	common-load	fixture-1	66082	4	3.001812	3	30.0	0.999	0.333			9806.0	10832	7.0	7		true
+w1-udp	2	1	rust	common-load	load-generator	66153	4	3.001931	10	100.0	3.331	0.333			13792.0	13800	9.5	10		true
+w1-udp	2	1	rust	common-load	sut	66106	4	3.002063	6	60.0	1.999	0.333	50.0	8.333	3180.0	3180	7.5	8		true
+w1-udp	2	1	rust	near-saturation	fixture-1	66082	4	3.002191	4	40.0	1.332	0.333			10840.0	10856	7.0	7		true
+w1-udp	2	1	rust	near-saturation	load-generator	66189	4	3.002262	13	130.0	4.33	0.333			13868.0	13884	10.0	10		true
+w1-udp	2	1	rust	near-saturation	sut	66106	4	3.002372	7	70.0	2.331	0.333	29.167	4.167	3246.0	3248	7.5	8		true
+w1-udp	2	1	rust	overload	fixture-1	66082	4	3.001921	3	30.0	0.999	0.333			10864.0	10876	7.0	7		true
+w1-udp	2	1	rust	overload	load-generator	66225	4	3.001893	16	160.0	5.33	0.333			12696.0	13416	10.0	11		true
+w1-udp	2	1	rust	overload	sut	66106	4	3.002065	9	90.0	2.998	0.333	30.0	3.333	3248.0	3248	7.0	8		true
+w1-udp	2	1	rust	recovery	fixture-1	66082	4	3.001927	1	10.0	0.333	0.333			10878.0	12944	7.0	7		false
+w1-udp	2	1	rust	recovery	load-generator	66261	4	3.001849	6	60.0	1.999	0.333			15606.0	16756	9.0	10		false
+w1-udp	2	1	rust	recovery	sut	66106	4	3.00185	3	30.0	0.999	0.333	50.0	16.667	3248.0	3248	7.0	8		false
+w1-udp	2	2	go	normal-reference	fixture-1	66394	4	3.001789	2	20.0	0.666	0.333			10834.0	10892	7.0	7		true
+w1-udp	2	2	go	normal-reference	load-generator	66434	4	3.001778	4	40.0	1.333	0.333			13736.0	13816	9.0	9		true
+w1-udp	2	2	go	normal-reference	sut	66417	4	3.001808	3	30.0	0.999	0.333	50.0	16.667	35818.0	36872	9.0	9		true
+w1-udp	2	2	go	common-load	fixture-1	66394	4	3.002294	1	10.0	0.333	0.333			10900.0	10908	7.0	7		true
+w1-udp	2	2	go	common-load	load-generator	66470	4	3.002177	7	70.0	2.332	0.333			13796.0	13868	9.0	10		true
+w1-udp	2	2	go	common-load	sut	66417	4	3.002147	6	60.0	1.999	0.333	50.0	8.333	37942.0	39004	9.0	9		true
+w1-udp	2	2	go	near-saturation	fixture-1	66394	4	3.002356	4	40.0	1.332	0.333			12964.0	12980	7.0	7		true
+w1-udp	2	2	go	near-saturation	load-generator	66508	4	3.002208	19	190.0	6.329	0.333			13862.0	13900	10.0	11		true
+w1-udp	2	2	go	near-saturation	sut	66417	4	3.002248	12	120.0	3.997	0.333	50.0	4.167	42156.0	47360	9.0	9		true
+w1-udp	2	2	go	overload	fixture-1	66394	4	3.001851	4	40.0	1.333	0.333			12992.0	13008	7.0	7		true
+w1-udp	2	2	go	overload	load-generator	66542	4	3.001957	18	180.0	5.996	0.333			14028.0	14052	10.0	11		true
+w1-udp	2	2	go	overload	sut	66417	4	3.00211	11	110.0	3.664	0.333	36.667	3.333	50532.0	53712	9.0	9		true
+w1-udp	2	2	go	recovery	fixture-1	66394	4	3.001911	2	20.0	0.666	0.333			14042.0	15076	7.0	7	same-process recovery criteria failed	false
+w1-udp	2	2	go	recovery	load-generator	66577	4	3.001873	4	40.0	1.333	0.333			14028.0	16644	9.0	10	same-process recovery criteria failed	false
+w1-udp	2	2	go	recovery	sut	66417	4	3.001812	2	20.0	0.666	0.333	33.333	16.667	55780.0	55796	9.0	9	same-process recovery criteria failed	false
+w1-udp	3	1	go	normal-reference	fixture-1	66717	4	3.003214	1	10.0	0.333	0.333			10710.0	10800	7.0	7		true
+w1-udp	3	1	go	normal-reference	load-generator	66758	4	3.003168	6	60.0	1.998	0.333			13730.0	13816	9.0	10		true
+w1-udp	3	1	go	normal-reference	sut	66741	4	3.003099	4	40.0	1.332	0.333	66.667	16.667	32684.0	32712	9.0	9		true
+w1-udp	3	1	go	common-load	fixture-1	66717	4	3.002909	3	30.0	0.999	0.333			10808.0	10816	7.0	7		true
+w1-udp	3	1	go	common-load	load-generator	66794	4	3.002896	8	80.0	2.664	0.333			13804.0	13844	9.0	10		true
+w1-udp	3	1	go	common-load	sut	66741	4	3.00297	5	50.0	1.665	0.333	41.667	8.333	34812.0	36908	9.0	9		true
+w1-udp	3	1	go	near-saturation	fixture-1	66717	4	3.001729	4	40.0	1.333	0.333			11848.0	12888	7.0	7	sender shortfall or scheduled query not sent	false
+w1-udp	3	1	go	near-saturation	load-generator	66832	4	3.001735	15	150.0	4.997	0.333			15770.0	15836	9.5	10	sender shortfall or scheduled query not sent	false
+w1-udp	3	1	go	near-saturation	sut	66741	4	3.001889	10	100.0	3.331	0.333	41.684	4.168	40062.0	43204	9.0	9	sender shortfall or scheduled query not sent	false
+w1-udp	3	1	go	overload	fixture-1	66717	4	3.001797	4	40.0	1.333	0.333			12900.0	12916	7.0	7		true
+w1-udp	3	1	go	overload	load-generator	66867	4	3.001853	18	180.0	5.996	0.333			14276.0	14548	9.5	12		true
+w1-udp	3	1	go	overload	sut	66741	4	3.001851	11	110.0	3.664	0.333	36.667	3.333	47414.0	51612	9.0	9		true
+w1-udp	3	1	go	recovery	fixture-1	66717	4	3.002558	1	10.0	0.333	0.333			12920.0	14976	7.0	7	same-process recovery criteria failed	false
+w1-udp	3	1	go	recovery	load-generator	66902	4	3.002474	7	70.0	2.331	0.333			13782.0	16504	9.0	10	same-process recovery criteria failed	false
+w1-udp	3	1	go	recovery	sut	66741	4	3.002531	4	40.0	1.332	0.333	66.667	16.667	51624.0	53692	9.0	9	same-process recovery criteria failed	false
+w1-udp	3	2	rust	normal-reference	fixture-1	67044	4	3.002339	1	10.0	0.333	0.333			10770.0	10828	7.0	7		true
+w1-udp	3	2	rust	normal-reference	load-generator	67079	4	3.002272	5	50.0	1.665	0.333			15684.0	15764	9.0	9		true
+w1-udp	3	2	rust	normal-reference	sut	67067	4	3.002249	1	10.0	0.333	0.333	16.667	16.667	3224.0	3224	7.0	7		true
+w1-udp	3	2	rust	common-load	fixture-1	67044	4	3.002938	2	20.0	0.666	0.333			10838.0	10840	7.0	7		true
+w1-udp	3	2	rust	common-load	load-generator	67115	4	3.002855	9	90.0	2.997	0.333			13832.0	13880	9.5	10		true
+w1-udp	3	2	rust	common-load	sut	67067	4	3.002826	5	50.0	1.665	0.333	41.667	8.333	3224.0	3224	7.5	8		true
+w1-udp	3	2	rust	near-saturation	fixture-1	67044	4	3.002362	4	40.0	1.332	0.333			10848.0	12912	7.0	7		false
+w1-udp	3	2	rust	near-saturation	load-generator	67153	4	3.00248	18	180.0	5.995	0.333			13850.0	13920	10.0	10		false
+w1-udp	3	2	rust	near-saturation	sut	67067	4	3.002611	10	100.0	3.33	0.333	41.667	4.167	3290.0	3292	7.5	8		false
+w1-udp	3	2	rust	overload	fixture-1	67044	4	3.00287	4	40.0	1.332	0.333			12920.0	12932	7.0	7		true
+w1-udp	3	2	rust	overload	load-generator	67189	4	3.002901	19	190.0	6.327	0.333			14724.0	14748	10.0	10		true
+w1-udp	3	2	rust	overload	sut	67067	4	3.002934	10	100.0	3.33	0.333	33.333	3.333	3292.0	3292	7.0	7		true
+w1-udp	3	2	rust	recovery	fixture-1	67044	4	3.002083	3	30.0	0.999	0.333			12934.0	12936	7.0	7		false
+w1-udp	3	2	rust	recovery	load-generator	67226	4	3.002004	6	60.0	1.999	0.333			14114.0	16708	9.0	10		false
+w1-udp	3	2	rust	recovery	sut	67067	4	3.001924	3	30.0	0.999	0.333	50.0	16.667	3292.0	3292	7.0	8		false
+w1-tcp	1	1	go	normal-reference	fixture-1	67359	4	3.002592	4	40.0	1.332	0.333			10688.0	10728	7.0	7		true
+w1-tcp	1	1	go	normal-reference	load-generator	67407	4	3.002625	8	80.0	2.664	0.333			10932.0	13036	9.0	10		true
+w1-tcp	1	1	go	normal-reference	sut	67384	4	3.002557	12	120.0	3.997	0.333	200.0	16.667	32640.0	34736	8.0	9		true
+w1-tcp	1	1	go	common-load	fixture-1	67359	4	3.002946	5	50.0	1.665	0.333			10762.0	12820	7.0	7		true
+w1-tcp	1	1	go	common-load	load-generator	67442	4	3.00297	12	120.0	3.996	0.333			12180.0	13492	9.5	10		true
+w1-tcp	1	1	go	common-load	sut	67384	4	3.002965	16	160.0	5.328	0.333	133.333	8.333	37900.0	41072	9.0	9		true
+w1-tcp	1	1	go	near-saturation	fixture-1	67359	4	3.003069	11	110.0	3.663	0.333			12850.0	15312	7.0	7		true
+w1-tcp	1	1	go	near-saturation	load-generator	67478	4	3.003067	21	210.0	6.993	0.333			13592.0	13852	9.5	10		true
+w1-tcp	1	1	go	near-saturation	sut	67384	4	3.003058	32	320.0	10.656	0.333	133.333	4.167	49444.0	54552	9.0	9		true
+w1-tcp	1	1	go	overload	fixture-1	67359	4	3.003172	13	130.0	4.329	0.333			15352.0	15360	7.0	7		true
+w1-tcp	1	1	go	overload	load-generator	67513	4	3.003073	25	250.0	8.325	0.333			14124.0	14192	9.5	11		true
+w1-tcp	1	1	go	overload	sut	67384	4	3.003011	37	370.0	12.321	0.333	123.333	3.333	54572.0	54592	8.0	9		true
+w1-tcp	1	1	go	recovery	fixture-1	67359	4	3.002766	5	50.0	1.665	0.333			15360.0	15360	7.0	7	same-process recovery criteria failed	false
+w1-tcp	1	1	go	recovery	load-generator	67549	4	3.002671	10	100.0	3.33	0.333			14470.0	14640	9.0	10	same-process recovery criteria failed	false
+w1-tcp	1	1	go	recovery	sut	67384	4	3.00269	13	130.0	4.329	0.333	216.667	16.667	54596.0	54596	8.0	9	same-process recovery criteria failed	false
+w1-tcp	1	2	rust	normal-reference	fixture-1	67691	4	3.002282	2	20.0	0.666	0.333			8802.0	8828	7.0	7		true
+w1-tcp	1	2	rust	normal-reference	load-generator	67725	4	3.002452	6	60.0	1.998	0.333			9886.0	10968	9.0	9		true
+w1-tcp	1	2	rust	normal-reference	sut	67714	4	3.002418	5	50.0	1.665	0.333	83.333	16.667	3144.0	3144	7.0	8		true
+w1-tcp	1	2	rust	common-load	fixture-1	67691	4	3.002161	5	50.0	1.665	0.333			10906.0	10916	7.0	7		true
+w1-tcp	1	2	rust	common-load	load-generator	67762	4	3.002402	13	130.0	4.33	0.333			13162.0	13448	9.0	10		true
+w1-tcp	1	2	rust	common-load	sut	67714	4	3.002532	10	100.0	3.331	0.333	83.333	8.333	3144.0	3144	7.0	8		true
+w1-tcp	1	2	rust	near-saturation	fixture-1	67691	4	3.00266	10	100.0	3.33	0.333			11966.0	13016	7.0	7		true
+w1-tcp	1	2	rust	near-saturation	load-generator	67796	4	3.002508	23	230.0	7.66	0.333			13476.0	13736	9.5	10		true
+w1-tcp	1	2	rust	near-saturation	sut	67714	4	3.002409	19	190.0	6.328	0.333	79.167	4.167	3148.0	3148	7.5	8		true
+w1-tcp	1	2	rust	overload	fixture-1	67691	4	3.002721	14	140.0	4.662	0.333			13430.0	13440	7.0	7		true
+w1-tcp	1	2	rust	overload	load-generator	67832	4	3.002707	29	290.0	9.658	0.333			14190.0	14264	11.0	11		true
+w1-tcp	1	2	rust	overload	sut	67714	4	3.002803	25	250.0	8.326	0.333	83.333	3.333	3152.0	3152	8.0	8		true
+w1-tcp	1	2	rust	recovery	fixture-1	67691	4	3.002284	3	30.0	0.999	0.333			13444.0	13444	7.0	7	same-process recovery criteria failed	false
+w1-tcp	1	2	rust	recovery	load-generator	67865	4	3.002282	8	80.0	2.665	0.333			13956.0	15544	9.0	10	same-process recovery criteria failed	false
+w1-tcp	1	2	rust	recovery	sut	67714	4	3.002432	5	50.0	1.665	0.333	83.333	16.667	3152.0	3152	7.0	8	same-process recovery criteria failed	false
+w1-tcp	2	1	rust	normal-reference	fixture-1	67995	4	3.002139	3	30.0	0.999	0.333			10736.0	10764	7.0	7		true
+w1-tcp	2	1	rust	normal-reference	load-generator	68030	4	3.002214	8	80.0	2.665	0.333			11928.0	13008	9.0	9		true
+w1-tcp	2	1	rust	normal-reference	sut	68019	4	3.002226	5	50.0	1.665	0.333	83.333	16.667	3184.0	3184	7.0	8		true
+w1-tcp	2	1	rust	common-load	fixture-1	67995	4	3.002253	7	70.0	2.332	0.333			10794.0	12852	7.0	7		true
+w1-tcp	2	1	rust	common-load	load-generator	68066	4	3.002294	15	150.0	4.996	0.333			12240.0	13560	9.0	10		true
+w1-tcp	2	1	rust	common-load	sut	68019	4	3.002125	12	120.0	3.997	0.333	100.0	8.333	3184.0	3184	7.0	8		true
+w1-tcp	2	1	rust	near-saturation	fixture-1	67995	4	3.002012	11	110.0	3.664	0.333			12876.0	12900	7.0	7		true
+w1-tcp	2	1	rust	near-saturation	load-generator	68099	4	3.002146	26	260.0	8.66	0.333			15606.0	15880	10.0	10		true
+w1-tcp	2	1	rust	near-saturation	sut	68019	4	3.002532	20	200.0	6.661	0.333	83.333	4.167	3190.0	3192	7.0	8		true
+w1-tcp	2	1	rust	overload	fixture-1	67995	4	3.002716	10	100.0	3.33	0.333			15378.0	15388	7.0	7		true
+w1-tcp	2	1	rust	overload	load-generator	68134	4	3.002722	24	240.0	7.993	0.333			14158.0	14280	11.0	11		true
+w1-tcp	2	1	rust	overload	sut	68019	4	3.002717	20	200.0	6.661	0.333	66.667	3.333	3192.0	3192	7.5	8		true
+w1-tcp	2	1	rust	recovery	fixture-1	67995	4	3.00276	4	40.0	1.332	0.333			15400.0	15400	7.0	7	same-process recovery criteria failed	false
+w1-tcp	2	1	rust	recovery	load-generator	68167	4	3.002625	8	80.0	2.664	0.333			14922.0	15288	9.0	10	same-process recovery criteria failed	false
+w1-tcp	2	1	rust	recovery	sut	68019	4	3.00257	6	60.0	1.998	0.333	100.0	16.667	3192.0	3192	7.0	8	same-process recovery criteria failed	false
+w1-tcp	2	2	go	normal-reference	fixture-1	68296	4	3.002711	4	40.0	1.332	0.333			10772.0	10812	7.0	7		true
+w1-tcp	2	2	go	normal-reference	load-generator	68343	4	3.002582	9	90.0	2.997	0.333			12004.0	13084	9.0	9		true
+w1-tcp	2	2	go	normal-reference	sut	68320	4	3.002582	12	120.0	3.997	0.333	200.0	16.667	33884.0	34968	8.0	9		true
+w1-tcp	2	2	go	common-load	fixture-1	68296	4	3.002112	8	80.0	2.665	0.333			10842.0	12900	7.0	7		true
+w1-tcp	2	2	go	common-load	load-generator	68381	4	3.002023	19	190.0	6.329	0.333			12232.0	13552	10.0	10		true
+w1-tcp	2	2	go	common-load	sut	68320	4	3.0021	25	250.0	8.328	0.333	208.333	8.333	40176.0	43336	9.0	9		true
+w1-tcp	2	2	go	near-saturation	fixture-1	68296	4	3.002749	14	140.0	4.662	0.333			12928.0	15388	7.0	7		true
+w1-tcp	2	2	go	near-saturation	load-generator	68417	4	3.002571	29	290.0	9.658	0.333			14672.0	15904	10.0	11		true
+w1-tcp	2	2	go	near-saturation	sut	68320	4	3.002553	41	410.0	13.655	0.333	170.833	4.167	49670.0	56692	9.0	9		true
+w1-tcp	2	2	go	overload	fixture-1	68296	4	3.002927	14	140.0	4.662	0.333			15430.0	15440	7.0	7		true
+w1-tcp	2	2	go	overload	load-generator	68453	4	3.002922	28	280.0	9.324	0.333			14138.0	14200	9.5	11		true
+w1-tcp	2	2	go	overload	sut	68320	4	3.00306	41	410.0	13.653	0.333	136.667	3.333	56720.0	56744	8.0	8		true
+w1-tcp	2	2	go	recovery	fixture-1	68296	4	3.003267	4	40.0	1.332	0.333			15440.0	15440	7.0	7	same-process recovery criteria failed	false
+w1-tcp	2	2	go	recovery	load-generator	68490	4	3.003218	10	100.0	3.33	0.333			16664.0	16728	9.0	10	same-process recovery criteria failed	false
+w1-tcp	2	2	go	recovery	sut	68320	4	3.003291	13	130.0	4.329	0.333	216.667	16.667	56748.0	56752	8.0	9	same-process recovery criteria failed	false
+w1-tcp	3	1	go	normal-reference	fixture-1	68624	4	3.00315	4	40.0	1.332	0.333			8724.0	10816	7.0	7		true
+w1-tcp	3	1	go	normal-reference	load-generator	68672	4	3.003133	7	70.0	2.331	0.333			10840.0	10892	9.0	10		true
+w1-tcp	3	1	go	normal-reference	sut	68648	4	3.002985	10	100.0	3.33	0.333	166.667	16.667	33752.0	34828	8.0	9		true
+w1-tcp	3	1	go	common-load	fixture-1	68624	4	3.002114	5	50.0	1.665	0.333			10850.0	10856	7.0	7		true
+w1-tcp	3	1	go	common-load	load-generator	68710	4	3.002198	12	120.0	3.997	0.333			13108.0	13404	9.5	10		true
+w1-tcp	3	1	go	common-load	sut	68648	4	3.002145	17	170.0	5.663	0.333	141.667	8.333	37996.0	43224	8.5	9		true
+w1-tcp	3	1	go	near-saturation	fixture-1	68624	4	3.002641	11	110.0	3.663	0.333			11910.0	13348	7.0	7		true
+w1-tcp	3	1	go	near-saturation	load-generator	68745	4	3.002585	23	230.0	7.66	0.333			13708.0	13972	10.0	10		true
+w1-tcp	3	1	go	near-saturation	sut	68648	4	3.00269	33	330.0	10.99	0.333	137.5	4.167	49562.0	54600	8.5	9		true
+w1-tcp	3	1	go	overload	fixture-1	68624	4	3.003015	15	150.0	4.995	0.333			13388.0	13396	7.0	7		true
+w1-tcp	3	1	go	overload	load-generator	68780	4	3.003083	29	290.0	9.657	0.333			14306.0	14432	10.0	11		true
+w1-tcp	3	1	go	overload	sut	68648	4	3.00313	43	430.0	14.318	0.333	143.333	3.333	54632.0	54664	8.0	9		true
+w1-tcp	3	1	go	recovery	fixture-1	68624	4	3.002576	3	30.0	0.999	0.333			13396.0	13396	7.0	7	same-process recovery criteria failed	false
+w1-tcp	3	1	go	recovery	load-generator	68817	4	3.002478	7	70.0	2.331	0.333			14544.0	15180	9.0	10	same-process recovery criteria failed	false
+w1-tcp	3	1	go	recovery	sut	68648	4	3.002381	10	100.0	3.331	0.333	166.667	16.667	54664.0	54664	8.0	9	same-process recovery criteria failed	false
+w1-tcp	3	2	rust	normal-reference	fixture-1	68953	4	3.00208	3	30.0	0.999	0.333			9706.0	10764	7.0	7		true
+w1-tcp	3	2	rust	normal-reference	load-generator	68988	4	3.001961	7	70.0	2.332	0.333			10972.0	13076	9.0	9		true
+w1-tcp	3	2	rust	normal-reference	sut	68977	4	3.001764	4	40.0	1.333	0.333	66.667	16.667	3104.0	3104	7.0	8		true
+w1-tcp	3	2	rust	common-load	fixture-1	68953	4	3.002903	7	70.0	2.331	0.333			10802.0	10812	7.0	7		true
+w1-tcp	3	2	rust	common-load	load-generator	69024	4	3.002736	15	150.0	4.995	0.333			14248.0	15568	9.0	10		true
+w1-tcp	3	2	rust	common-load	sut	68977	4	3.00258	13	130.0	4.33	0.333	108.333	8.333	3104.0	3104	7.0	8		true
+w1-tcp	3	2	rust	near-saturation	fixture-1	68953	4	3.002085	11	110.0	3.664	0.333			11858.0	12904	7.0	7		true
+w1-tcp	3	2	rust	near-saturation	load-generator	69061	4	3.002107	25	250.0	8.327	0.333			13500.0	13760	10.5	11		true
+w1-tcp	3	2	rust	near-saturation	sut	68977	4	3.00215	20	200.0	6.662	0.333	83.333	4.167	3108.0	3108	8.0	8		true
+w1-tcp	3	2	rust	overload	fixture-1	68953	4	3.002431	12	120.0	3.997	0.333			13320.0	13332	7.0	7		true
+w1-tcp	3	2	rust	overload	load-generator	69095	4	3.002529	27	270.0	8.992	0.333			14478.0	15008	10.0	11		true
+w1-tcp	3	2	rust	overload	sut	68977	4	3.00251	22	220.0	7.327	0.333	73.333	3.333	3112.0	3112	7.0	8		true
+w1-tcp	3	2	rust	recovery	fixture-1	68953	4	3.002388	4	40.0	1.332	0.333			13340.0	13340	7.0	7		false
+w1-tcp	3	2	rust	recovery	load-generator	69134	4	3.002238	8	80.0	2.665	0.333			17332.0	17364	9.0	10		false
+w1-tcp	3	2	rust	recovery	sut	68977	4	3.002232	6	60.0	1.999	0.333	100.0	16.667	3112.0	3112	7.0	8		false
+w2	1	1	go	official-w2-cold	fixture-1	69266	4	3.003042	1	10.0	0.333	0.333			10708.0	10724	7.0	7		true
+w2	1	1	go	official-w2-cold	load-generator	69308	4	3.003123	8	80.0	2.664	0.333			13694.0	13780	9.0	9		true
+w2	1	1	go	official-w2-cold	sut	69291	4	3.003117	3	30.0	0.999	0.333	50.0	16.667	38924.0	38932	9.0	9		true
+w2	1	1	go	normal-reference	fixture-1	69356	4	3.00321	0	0.0	0.0	0.333			10744.0	10760	7.0	7		true
+w2	1	1	go	normal-reference	load-generator	69421	4	3.003195	7	70.0	2.331	0.333			13734.0	13816	9.0	9		true
+w2	1	1	go	normal-reference	sut	69380	4	3.003238	3	30.0	0.999	0.333	50.0	16.667	38928.0	38940	9.0	9		true
+w2	1	1	go	common-load	fixture-1	69356	4	3.002634	1	10.0	0.333	0.333			10764.0	10764	7.0	7		true
+w2	1	1	go	common-load	load-generator	69456	4	3.002744	15	150.0	4.995	0.333			15728.0	15748	9.0	10		true
+w2	1	1	go	common-load	sut	69380	4	3.002562	6	60.0	1.998	0.333	50.0	8.333	41002.0	41016	9.0	9		true
+w2	1	1	go	near-saturation	fixture-1	69356	4	3.002792	1	10.0	0.333	0.333			10772.0	10776	7.0	7		true
+w2	1	1	go	near-saturation	load-generator	69493	4	3.002735	19	190.0	6.328	0.333			13748.0	13764	10.0	11		true
+w2	1	1	go	near-saturation	sut	69380	4	3.002897	8	80.0	2.664	0.333	33.333	4.167	42076.0	43140	9.0	9		true
+w2	1	1	go	overload	fixture-1	69356	4	3.002722	0	0.0	0.0	0.333			10784.0	10784	7.0	7		false
+w2	1	1	go	overload	load-generator	69529	4	3.002745	22	220.0	7.327	0.333			12448.0	12748	10.0	11		false
+w2	1	1	go	overload	sut	69380	4	3.002854	8	80.0	2.664	0.333	26.667	3.333	46260.0	47320	9.0	9		false
+w2	1	1	go	recovery	fixture-1	69356	4	3.002142	1	10.0	0.333	0.333			10788.0	10788	7.0	7	same-process recovery criteria failed	false
+w2	1	1	go	recovery	load-generator	69565	4	3.002165	6	60.0	1.999	0.333			15702.0	16728	9.0	10	same-process recovery criteria failed	false
+w2	1	1	go	recovery	sut	69380	4	3.00221	2	20.0	0.666	0.333	33.333	16.667	47332.0	49400	9.0	9	same-process recovery criteria failed	false
+w2	1	2	rust	official-w2-cold	fixture-1	69711	4	3.002547	1	10.0	0.333	0.333			8580.0	8596	7.0	7		true
+w2	1	2	rust	official-w2-cold	load-generator	69748	4	3.002653	4	40.0	1.332	0.333			13600.0	13680	9.0	9		true
+w2	1	2	rust	official-w2-cold	sut	69736	4	3.002592	0	0.0	0.0	0.333		16.667	3196.0	3196	7.0	7		true
+w2	1	2	rust	normal-reference	fixture-1	69794	4	3.002943	1	10.0	0.333	0.333			8648.0	8664	7.0	7		true
+w2	1	2	rust	normal-reference	load-generator	69856	4	3.002797	6	60.0	1.998	0.333			13634.0	13716	9.0	9		true
+w2	1	2	rust	normal-reference	sut	69815	4	3.002761	0	0.0	0.0	0.333		16.667	3252.0	3252	7.0	7		true
+w2	1	2	rust	common-load	fixture-1	69794	4	3.002261	1	10.0	0.333	0.333			8668.0	8668	7.0	7		true
+w2	1	2	rust	common-load	load-generator	69890	4	3.002313	13	130.0	4.33	0.333			13758.0	13772	10.0	10		true
+w2	1	2	rust	common-load	sut	69815	4	3.00245	5	50.0	1.665	0.333	41.667	8.333	3252.0	3252	7.0	7		true
+w2	1	2	rust	near-saturation	fixture-1	69794	4	3.002289	0	0.0	0.0	0.333			8676.0	8680	7.0	7		true
+w2	1	2	rust	near-saturation	load-generator	69925	4	3.002122	16	160.0	5.33	0.333			15818.0	15832	10.0	10		true
+w2	1	2	rust	near-saturation	sut	69815	4	3.001935	3	30.0	0.999	0.333	12.5	4.167	3252.0	3252	7.0	7		true
+w2	1	2	rust	overload	fixture-1	69794	4	3.002858	1	10.0	0.333	0.333			8688.0	8688	7.0	7	sender shortfall or scheduled query not sent	false
+w2	1	2	rust	overload	load-generator	69961	4	3.002927	19	190.0	6.327	0.333			14442.0	14616	10.0	11	sender shortfall or scheduled query not sent	false
+w2	1	2	rust	overload	sut	69815	4	3.002945	6	60.0	1.998	0.333	20.007	3.334	3256.0	3256	7.0	7	sender shortfall or scheduled query not sent	false
+w2	1	2	rust	recovery	fixture-1	69794	4	3.002175	1	10.0	0.333	0.333			8692.0	8692	7.0	7	same-process recovery criteria failed	false
+w2	1	2	rust	recovery	load-generator	69996	4	3.002112	8	80.0	2.665	0.333			15294.0	17508	9.0	10	same-process recovery criteria failed	false
+w2	1	2	rust	recovery	sut	69815	4	3.002166	2	20.0	0.666	0.333	33.333	16.667	3256.0	3256	7.0	7	same-process recovery criteria failed	false
+w2	2	1	rust	official-w2-cold	fixture-1	70132	4	3.003199	0	0.0	0.0	0.333			10656.0	10672	7.0	7		true
+w2	2	1	rust	official-w2-cold	load-generator	70169	4	3.003045	6	60.0	1.998	0.333			15718.0	15800	9.0	9		true
+w2	2	1	rust	official-w2-cold	sut	70157	4	3.003016	1	10.0	0.333	0.333	16.667	16.667	3176.0	3176	7.0	7		true
+w2	2	1	rust	normal-reference	fixture-1	70214	4	3.003227	1	10.0	0.333	0.333			10720.0	10736	7.0	7		true
+w2	2	1	rust	normal-reference	load-generator	70278	4	3.00308	7	70.0	2.331	0.333			13736.0	13824	9.0	10		true
+w2	2	1	rust	normal-reference	sut	70237	4	3.003161	1	10.0	0.333	0.333	16.667	16.667	3196.0	3196	7.0	7		true
+w2	2	1	rust	common-load	fixture-1	70214	4	3.002228	0	0.0	0.0	0.333			10740.0	10740	7.0	7		true
+w2	2	1	rust	common-load	load-generator	70313	4	3.002246	11	110.0	3.664	0.333			13704.0	13720	9.5	10		true
+w2	2	1	rust	common-load	sut	70237	4	3.0023	3	30.0	0.999	0.333	25.0	8.333	3196.0	3196	7.0	7		true
+w2	2	1	rust	near-saturation	fixture-1	70214	4	3.002599	1	10.0	0.333	0.333			10748.0	10752	7.0	7	sender shortfall or scheduled query not sent	false
+w2	2	1	rust	near-saturation	load-generator	70347	4	3.002634	17	170.0	5.662	0.333			15844.0	15860	10.0	11	sender shortfall or scheduled query not sent	false
+w2	2	1	rust	near-saturation	sut	70237	4	3.00279	5	50.0	1.665	0.333	20.842	4.168	3196.0	3196	7.0	7	sender shortfall or scheduled query not sent	false
+w2	2	1	rust	overload	fixture-1	70214	4	3.002757	0	0.0	0.0	0.333			10760.0	10760	7.0	7		true
+w2	2	1	rust	overload	load-generator	70384	4	3.002562	20	200.0	6.661	0.333			14550.0	14572	9.5	10		true
+w2	2	1	rust	overload	sut	70237	4	3.002666	5	50.0	1.665	0.333	16.667	3.333	3200.0	3200	7.0	7		true
+w2	2	1	rust	recovery	fixture-1	70214	4	3.003129	2	20.0	0.666	0.333			10764.0	10764	7.0	7	same-process recovery criteria failed	false
+w2	2	1	rust	recovery	load-generator	70419	4	3.003081	8	80.0	2.664	0.333			15952.0	16452	9.0	10	same-process recovery criteria failed	false
+w2	2	1	rust	recovery	sut	70237	4	3.002965	3	30.0	0.999	0.333	50.0	16.667	3200.0	3200	7.0	7	same-process recovery criteria failed	false
+w2	2	2	go	official-w2-cold	fixture-1	70556	4	3.002623	1	10.0	0.333	0.333			8656.0	8668	7.0	7		true
+w2	2	2	go	official-w2-cold	load-generator	70599	4	3.002698	6	60.0	1.998	0.333			15804.0	15892	9.0	9		true
+w2	2	2	go	official-w2-cold	sut	70582	4	3.002678	2	20.0	0.666	0.333	33.333	16.667	38932.0	40992	9.0	9		true
+w2	2	2	go	normal-reference	fixture-1	70645	4	3.001948	1	10.0	0.333	0.333			10660.0	10672	7.0	7		true
+w2	2	2	go	normal-reference	load-generator	70710	4	3.001991	6	60.0	1.999	0.333			13644.0	13748	9.0	9		true
+w2	2	2	go	normal-reference	sut	70667	4	3.001945	3	30.0	0.999	0.333	50.0	16.667	36760.0	36776	9.0	9		true
+w2	2	2	go	common-load	fixture-1	70645	4	3.002258	0	0.0	0.0	0.333			10676.0	10676	7.0	7		true
+w2	2	2	go	common-load	load-generator	70747	4	3.002274	6	60.0	1.998	0.333			13680.0	13696	9.0	10		true
+w2	2	2	go	common-load	sut	70667	4	3.002304	2	20.0	0.666	0.333	16.667	8.333	36794.0	38868	9.0	9		true
+w2	2	2	go	near-saturation	fixture-1	70645	4	3.002265	1	10.0	0.333	0.333			10684.0	10688	7.0	7		false
+w2	2	2	go	near-saturation	load-generator	70780	4	3.002227	23	230.0	7.661	0.333			13760.0	13776	10.0	10		false
+w2	2	2	go	near-saturation	sut	70667	4	3.002319	7	70.0	2.332	0.333	29.167	4.167	39920.0	40980	9.0	9		false
+w2	2	2	go	overload	fixture-1	70645	4	3.002196	1	10.0	0.333	0.333			10696.0	10696	7.0	7		true
+w2	2	2	go	overload	load-generator	70815	4	3.002175	16	160.0	5.329	0.333			14596.0	14872	9.5	11		true
+w2	2	2	go	overload	sut	70667	4	3.002233	7	70.0	2.332	0.333	23.333	3.333	43070.0	45168	9.0	9		true
+w2	2	2	go	recovery	fixture-1	70645	4	3.00264	0	0.0	0.0	0.333			10698.0	10700	7.0	7		false
+w2	2	2	go	recovery	load-generator	70852	4	3.002636	5	50.0	1.665	0.333			15620.0	16400	9.0	10		false
+w2	2	2	go	recovery	sut	70667	4	3.002779	2	20.0	0.666	0.333	33.333	16.667	45190.0	45776	9.0	9		false
+w2	3	1	go	official-w2-cold	fixture-1	70996	4	3.002568	0	0.0	0.0	0.333			8656.0	8672	7.0	7		true
+w2	3	1	go	official-w2-cold	load-generator	71038	4	3.002455	5	50.0	1.665	0.333			13702.0	13776	9.0	10		true
+w2	3	1	go	official-w2-cold	sut	71021	4	3.002643	2	20.0	0.666	0.333	33.333	16.667	35508.0	37564	9.0	9		true
+w2	3	1	go	normal-reference	fixture-1	71085	4	3.002525	1	10.0	0.333	0.333			8556.0	8572	7.0	7		true
+w2	3	1	go	normal-reference	load-generator	71151	4	3.002656	4	40.0	1.332	0.333			15798.0	15876	9.0	9		true
+w2	3	1	go	normal-reference	sut	71107	4	3.002743	2	20.0	0.666	0.333	33.333	16.667	39504.0	39512	9.0	9		true
+w2	3	1	go	common-load	fixture-1	71085	4	3.002361	0	0.0	0.0	0.333			8576.0	8576	7.0	7		true
+w2	3	1	go	common-load	load-generator	71189	4	3.002391	8	80.0	2.665	0.333			13800.0	13816	9.0	10		true
+w2	3	1	go	common-load	sut	71107	4	3.002475	3	30.0	0.999	0.333	25.0	8.333	41596.0	41616	9.0	9		true
+w2	3	1	go	near-saturation	fixture-1	71085	4	3.002281	1	10.0	0.333	0.333			8584.0	8588	7.0	7		true
+w2	3	1	go	near-saturation	load-generator	71224	4	3.002468	13	130.0	4.33	0.333			15868.0	15932	10.0	10		true
+w2	3	1	go	near-saturation	sut	71107	4	3.002639	4	40.0	1.332	0.333	16.667	4.167	43696.0	45792	9.0	9		true
+w2	3	1	go	overload	fixture-1	71085	4	3.002007	0	0.0	0.0	0.333			8596.0	8596	7.0	7		true
+w2	3	1	go	overload	load-generator	71260	4	3.001922	18	180.0	5.996	0.333			14450.0	14616	10.5	11		true
+w2	3	1	go	overload	sut	71107	4	3.002007	7	70.0	2.332	0.333	23.333	3.333	46854.0	47920	9.0	9		true
+w2	3	1	go	recovery	fixture-1	71085	4	3.002223	1	10.0	0.333	0.333			8600.0	8600	7.0	7		true
+w2	3	1	go	recovery	load-generator	71298	4	3.002202	6	60.0	1.999	0.333			13070.0	15660	9.0	10		true
+w2	3	1	go	recovery	sut	71107	4	3.002226	2	20.0	0.666	0.333	33.333	16.667	48952.0	49984	9.0	9		true
+w2	3	2	rust	official-w2-cold	fixture-1	71443	4	3.003096	1	10.0	0.333	0.333			8708.0	8724	7.0	7		true
+w2	3	2	rust	official-w2-cold	load-generator	71479	4	3.002776	4	40.0	1.332	0.333			13652.0	13732	9.0	9		true
+w2	3	2	rust	official-w2-cold	sut	71468	4	3.002638	0	0.0	0.0	0.333		16.667	3196.0	3196	7.0	7		true
+w2	3	2	rust	normal-reference	fixture-1	71527	4	3.002402	0	0.0	0.0	0.333			10744.0	10760	7.0	7		true
+w2	3	2	rust	normal-reference	load-generator	71588	4	3.002369	4	40.0	1.332	0.333			13622.0	13716	9.0	9		true
+w2	3	2	rust	normal-reference	sut	71549	4	3.002197	0	0.0	0.0	0.333		16.667	3260.0	3260	7.0	7		true
+w2	3	2	rust	common-load	fixture-1	71527	4	3.002148	1	10.0	0.333	0.333			10764.0	10764	7.0	7		true
+w2	3	2	rust	common-load	load-generator	71624	4	3.002198	6	60.0	1.999	0.333			15796.0	15824	9.5	10		true
+w2	3	2	rust	common-load	sut	71549	4	3.002218	2	20.0	0.666	0.333	16.667	8.333	3262.0	3264	7.0	7		true
+w2	3	2	rust	near-saturation	fixture-1	71527	4	3.002894	0	0.0	0.0	0.333			10772.0	10776	7.0	7		true
+w2	3	2	rust	near-saturation	load-generator	71661	4	3.002509	15	150.0	4.996	0.333			13812.0	13828	10.0	10		true
+w2	3	2	rust	near-saturation	sut	71549	4	3.002322	4	40.0	1.332	0.333	16.667	4.167	3264.0	3264	7.0	7		true
+w2	3	2	rust	overload	fixture-1	71527	4	3.001906	1	10.0	0.333	0.333			10784.0	10784	7.0	7		true
+w2	3	2	rust	overload	load-generator	71696	4	3.001991	15	150.0	4.997	0.333			14830.0	14892	10.5	11		true
+w2	3	2	rust	overload	sut	71549	4	3.002097	4	40.0	1.332	0.333	13.333	3.333	3264.0	3264	7.0	7		true
+w2	3	2	rust	recovery	fixture-1	71527	4	3.002563	1	10.0	0.333	0.333			10788.0	10788	7.0	7		true
+w2	3	2	rust	recovery	load-generator	71732	4	3.002551	5	50.0	1.665	0.333			15260.0	16804	9.0	10		true
+w2	3	2	rust	recovery	sut	71549	4	3.0025	2	20.0	0.666	0.333	33.333	16.667	3264.0	3264	7.0	7		true
+w3	1	1	go	normal-reference	fixture-1	71871	4	3.003855	3	30.0	0.999	0.333			10792.0	12884	7.0	7		true
+w3	1	1	go	normal-reference	fixture-2	71872	4	3.00388	2	20.0	0.666	0.333			11770.0	12832	7.0	7		true
+w3	1	1	go	normal-reference	fixture-3	71873	4	3.004079	0	0.0	0.0	0.333			10774.0	10812	7.0	7		true
+w3	1	1	go	normal-reference	load-generator	71935	4	3.003809	6	60.0	1.997	0.333			13748.0	13836	9.0	10		true
+w3	1	1	go	normal-reference	sut	71917	4	3.003663	5	50.0	1.665	0.333	83.333	16.667	34376.0	35436	11.0	11		true
+w3	1	1	go	common-load	fixture-1	71871	4	3.003966	4	40.0	1.332	0.333			13362.0	13628	7.0	7		true
+w3	1	1	go	common-load	fixture-2	71872	4	3.003882	4	40.0	1.332	0.333			15370.0	15640	7.0	7		true
+w3	1	1	go	common-load	fixture-3	71873	4	3.003863	3	30.0	0.999	0.333			12898.0	13336	7.0	7		true
+w3	1	1	go	common-load	load-generator	71977	4	3.004074	10	100.0	3.329	0.333			15872.0	15892	9.0	10		true
+w3	1	1	go	common-load	sut	71917	4	3.004033	8	80.0	2.663	0.333	66.667	8.333	37554.0	39660	11.0	11		true
+w3	1	1	go	near-saturation	fixture-1	71871	4	3.00362	6	60.0	1.998	0.333			13772.0	13844	7.0	7		true
+w3	1	1	go	near-saturation	fixture-2	71872	4	3.003607	8	80.0	2.663	0.333			15772.0	15844	7.0	7		true
+w3	1	1	go	near-saturation	fixture-3	71873	4	3.00356	2	20.0	0.666	0.333			13514.0	13680	7.0	7		true
+w3	1	1	go	near-saturation	load-generator	72020	4	3.003605	16	160.0	5.327	0.333			13852.0	13876	10.0	10		true
+w3	1	1	go	near-saturation	sut	71917	4	3.003598	14	140.0	4.661	0.333	58.333	4.167	44892.0	48072	11.0	11		true
+w3	1	1	go	overload	fixture-1	71871	4	3.003427	7	70.0	2.331	0.333			13844.0	13844	7.0	7		false
+w3	1	1	go	overload	fixture-2	71872	4	3.003413	7	70.0	2.331	0.333			15844.0	15844	7.0	7		false
+w3	1	1	go	overload	fixture-3	71873	4	3.003305	2	20.0	0.666	0.333			13752.0	13800	7.0	7		false
+w3	1	1	go	overload	load-generator	72062	4	3.003463	17	170.0	5.66	0.333			14642.0	14988	9.5	10		false
+w3	1	1	go	overload	sut	71917	4	3.003357	14	140.0	4.661	0.333	46.667	3.333	53736.0	55164	11.0	11		false
+w3	1	1	go	recovery	fixture-1	71871	4	3.003653	2	20.0	0.666	0.333			13844.0	13844	7.0	7		false
+w3	1	1	go	recovery	fixture-2	71872	4	3.003778	3	30.0	0.999	0.333			15844.0	15844	7.0	7		false
+w3	1	1	go	recovery	fixture-3	71873	4	3.003909	2	20.0	0.666	0.333			13800.0	13800	7.0	7		false
+w3	1	1	go	recovery	load-generator	72105	4	3.003607	5	50.0	1.665	0.333			13988.0	16428	9.0	10		false
+w3	1	1	go	recovery	sut	71917	4	3.003487	5	50.0	1.665	0.333	83.333	16.667	55166.0	55172	11.0	11		false
+w3	1	2	rust	normal-reference	fixture-1	72258	4	3.003905	1	10.0	0.333	0.333			10786.0	12876	7.0	7		true
+w3	1	2	rust	normal-reference	fixture-2	72259	4	3.004031	2	20.0	0.666	0.333			10820.0	12908	7.0	7		true
+w3	1	2	rust	normal-reference	fixture-3	72260	4	3.004197	0	0.0	0.0	0.333			9766.0	10832	7.0	7		true
+w3	1	2	rust	normal-reference	load-generator	72318	4	3.003761	4	40.0	1.332	0.333			13758.0	13836	9.0	9		true
+w3	1	2	rust	normal-reference	sut	72307	4	3.003652	3	30.0	0.999	0.333	50.0	16.667	3236.0	3236	7.0	7		true
+w3	1	2	rust	common-load	fixture-1	72258	4	3.003507	6	60.0	1.998	0.333			13352.0	13616	7.0	7		true
+w3	1	2	rust	common-load	fixture-2	72259	4	3.003598	6	60.0	1.998	0.333			13372.0	13644	7.0	7		true
+w3	1	2	rust	common-load	fixture-3	72260	4	3.003537	3	30.0	0.999	0.333			11882.0	13336	7.0	7		true
+w3	1	2	rust	common-load	load-generator	72361	4	3.00338	14	140.0	4.661	0.333			15902.0	15940	9.0	9		true
+w3	1	2	rust	common-load	sut	72307	4	3.003285	9	90.0	2.997	0.333	75.0	8.333	3236.0	3236	7.0	7		true
+w3	1	2	rust	near-saturation	fixture-1	72258	4	3.004151	10	100.0	3.329	0.333			13764.0	13836	7.0	7		true
+w3	1	2	rust	near-saturation	fixture-2	72259	4	3.003958	10	100.0	3.329	0.333			13764.0	13836	7.0	7		true
+w3	1	2	rust	near-saturation	fixture-3	72260	4	3.003831	5	50.0	1.665	0.333			13534.0	13704	7.0	7		true
+w3	1	2	rust	near-saturation	load-generator	72405	4	3.004037	23	230.0	7.656	0.333			15912.0	15940	9.5	10		true
+w3	1	2	rust	near-saturation	sut	72307	4	3.003894	17	170.0	5.659	0.333	70.833	4.167	3304.0	3304	7.0	8		true
+w3	1	2	rust	overload	fixture-1	72258	4	3.003638	7	70.0	2.331	0.333			13836.0	13836	7.0	7	sender shortfall or scheduled query not sent	false
+w3	1	2	rust	overload	fixture-2	72259	4	3.003486	9	90.0	2.997	0.333			13836.0	13836	7.0	7	sender shortfall or scheduled query not sent	false
+w3	1	2	rust	overload	fixture-3	72260	4	3.003479	3	30.0	0.999	0.333			13788.0	13836	7.0	7	sender shortfall or scheduled query not sent	false
+w3	1	2	rust	overload	load-generator	72447	4	3.003685	19	190.0	6.326	0.333			14250.0	14540	10.0	10	sender shortfall or scheduled query not sent	false
+w3	1	2	rust	overload	sut	72307	4	3.003736	12	120.0	3.995	0.333	40.013	3.334	3304.0	3304	7.0	8	sender shortfall or scheduled query not sent	false
+w3	1	2	rust	recovery	fixture-1	72258	4	3.003294	2	20.0	0.666	0.333			13842.0	13844	7.0	7	same-process recovery criteria failed	false
+w3	1	2	rust	recovery	fixture-2	72259	4	3.00336	1	10.0	0.333	0.333			13842.0	13844	7.0	7	same-process recovery criteria failed	false
+w3	1	2	rust	recovery	fixture-3	72260	4	3.003407	0	0.0	0.0	0.333			13840.0	13840	7.0	7	same-process recovery criteria failed	false
+w3	1	2	rust	recovery	load-generator	72491	4	3.003233	5	50.0	1.665	0.333			15358.0	16196	9.0	10	same-process recovery criteria failed	false
+w3	1	2	rust	recovery	sut	72307	4	3.003194	3	30.0	0.999	0.333	50.0	16.667	3304.0	3304	7.0	8	same-process recovery criteria failed	false
+w3	2	1	rust	normal-reference	fixture-1	72638	4	3.003622	2	20.0	0.666	0.333			10734.0	12824	7.0	7		true
+w3	2	1	rust	normal-reference	fixture-2	72639	4	3.003427	3	30.0	0.999	0.333			10822.0	12900	7.0	7		true
+w3	2	1	rust	normal-reference	fixture-3	72640	4	3.003415	0	0.0	0.0	0.333			10716.0	12808	7.0	7		true
+w3	2	1	rust	normal-reference	load-generator	72694	4	3.003622	5	50.0	1.665	0.333			13740.0	13816	9.0	9		true
+w3	2	1	rust	normal-reference	sut	72683	4	3.003705	3	30.0	0.999	0.333	50.0	16.667	3116.0	3116	7.0	7		true
+w3	2	1	rust	common-load	fixture-1	72638	4	3.003095	3	30.0	0.999	0.333			13276.0	13560	7.0	7		true
+w3	2	1	rust	common-load	fixture-2	72639	4	3.003123	4	40.0	1.332	0.333			13378.0	13660	7.0	7		true
+w3	2	1	rust	common-load	fixture-3	72640	4	3.003021	2	20.0	0.666	0.333			12834.0	15312	7.0	7		true
+w3	2	1	rust	common-load	load-generator	72739	4	3.003063	9	90.0	2.997	0.333			13748.0	13824	9.0	10		true
+w3	2	1	rust	common-load	sut	72683	4	3.003034	6	60.0	1.998	0.333	50.0	8.333	3116.0	3116	7.0	7		true
+w3	2	1	rust	near-saturation	fixture-1	72638	4	3.002696	7	70.0	2.331	0.333			13690.0	13772	7.0	7		true
+w3	2	1	rust	near-saturation	fixture-2	72639	4	3.00266	7	70.0	2.331	0.333			13672.0	13736	7.0	7		true
+w3	2	1	rust	near-saturation	fixture-3	72640	4	3.00258	4	40.0	1.332	0.333			15492.0	15656	7.0	7		true
+w3	2	1	rust	near-saturation	load-generator	72780	4	3.002693	17	170.0	5.662	0.333			15780.0	15808	10.0	10		true
+w3	2	1	rust	near-saturation	sut	72683	4	3.002642	11	110.0	3.663	0.333	45.833	4.167	3184.0	3184	7.0	7		true
+w3	2	1	rust	overload	fixture-1	72638	4	3.003112	8	80.0	2.664	0.333			13772.0	13772	7.0	7		true
+w3	2	1	rust	overload	fixture-2	72639	4	3.003137	9	90.0	2.997	0.333			13800.0	13864	7.0	7		true
+w3	2	1	rust	overload	fixture-3	72640	4	3.003226	4	40.0	1.332	0.333			15732.0	15780	7.0	7		true
+w3	2	1	rust	overload	load-generator	72821	4	3.003122	21	210.0	6.993	0.333			14236.0	14500	9.0	11		true
+w3	2	1	rust	overload	sut	72683	4	3.003241	14	140.0	4.662	0.333	46.667	3.333	3184.0	3184	7.0	8		true
+w3	2	1	rust	recovery	fixture-1	72638	4	3.00357	1	10.0	0.333	0.333			13774.0	13776	7.0	7		true
+w3	2	1	rust	recovery	fixture-2	72639	4	3.003617	3	30.0	0.999	0.333			13864.0	13864	7.0	7		true
+w3	2	1	rust	recovery	fixture-3	72640	4	3.003778	0	0.0	0.0	0.333			15780.0	15780	7.0	7		true
+w3	2	1	rust	recovery	load-generator	72865	4	3.003531	5	50.0	1.665	0.333			13422.0	15788	9.0	10		true
+w3	2	1	rust	recovery	sut	72683	4	3.003464	4	40.0	1.332	0.333	66.667	16.667	3184.0	3184	7.0	8		true
+w3	2	2	go	normal-reference	fixture-1	73013	4	3.003522	1	10.0	0.333	0.333			11728.0	12796	7.0	7		true
+w3	2	2	go	normal-reference	fixture-2	73014	4	3.003553	2	20.0	0.666	0.333			10680.0	10716	7.0	7		true
+w3	2	2	go	normal-reference	fixture-3	73015	4	3.00355	0	0.0	0.0	0.333			10792.0	10832	7.0	7		true
+w3	2	2	go	normal-reference	load-generator	73080	4	3.003513	4	40.0	1.332	0.333			15716.0	15800	9.0	9		true
+w3	2	2	go	normal-reference	sut	73060	4	3.003564	5	50.0	1.665	0.333	83.333	16.667	33352.0	35444	11.0	11		true
+w3	2	2	go	common-load	fixture-1	73013	4	3.003735	5	50.0	1.665	0.333			15322.0	15588	7.0	7		true
+w3	2	2	go	common-load	fixture-2	73014	4	3.003897	5	50.0	1.665	0.333			13246.0	13512	7.0	7		true
+w3	2	2	go	common-load	fixture-3	73015	4	3.003828	2	20.0	0.666	0.333			12916.0	13356	7.0	7		true
+w3	2	2	go	common-load	load-generator	73121	4	3.003662	10	100.0	3.329	0.333			13874.0	13916	9.5	10		true
+w3	2	2	go	common-load	sut	73060	4	3.003498	9	90.0	2.997	0.333	75.0	8.333	36518.0	39656	11.0	11		true
+w3	2	2	go	near-saturation	fixture-1	73013	4	3.003305	7	70.0	2.331	0.333			15724.0	15796	7.0	7		true
+w3	2	2	go	near-saturation	fixture-2	73014	4	3.003229	8	80.0	2.664	0.333			13650.0	13728	7.0	7		true
+w3	2	2	go	near-saturation	fixture-3	73015	4	3.003221	4	40.0	1.332	0.333			13534.0	13696	7.0	7		true
+w3	2	2	go	near-saturation	load-generator	73163	4	3.003474	17	170.0	5.66	0.333			15824.0	15868	9.5	10		true
+w3	2	2	go	near-saturation	sut	73060	4	3.003531	14	140.0	4.661	0.333	58.333	4.167	43856.0	48148	11.0	11		true
+w3	2	2	go	overload	fixture-1	73013	4	3.003987	6	60.0	1.997	0.333			15804.0	15804	7.0	7		true
+w3	2	2	go	overload	fixture-2	73014	4	3.003992	7	70.0	2.33	0.333			13728.0	13728	7.0	7		true
+w3	2	2	go	overload	fixture-3	73015	4	3.004053	3	30.0	0.999	0.333			13768.0	13816	7.0	7		true
+w3	2	2	go	overload	load-generator	73208	4	3.003852	18	180.0	5.992	0.333			14186.0	14252	10.5	11		true
+w3	2	2	go	overload	sut	73060	4	3.003949	14	140.0	4.661	0.333	46.667	3.333	53746.0	55168	11.0	11		true
+w3	2	2	go	recovery	fixture-1	73013	4	3.003673	2	20.0	0.666	0.333			15804.0	15804	7.0	7		true
+w3	2	2	go	recovery	fixture-2	73014	4	3.003806	3	30.0	0.999	0.333			13728.0	13728	7.0	7		true
+w3	2	2	go	recovery	fixture-3	73015	4	3.003944	1	10.0	0.333	0.333			13816.0	13816	7.0	7		true
+w3	2	2	go	recovery	load-generator	73248	4	3.003521	5	50.0	1.665	0.333			15432.0	16108	9.0	10		true
+w3	2	2	go	recovery	sut	73060	4	3.003427	4	40.0	1.332	0.333	66.667	16.667	55176.0	55184	11.0	11		true
+w3	3	1	go	normal-reference	fixture-1	73399	4	3.002573	2	20.0	0.666	0.333			10836.0	12928	7.0	7		true
+w3	3	1	go	normal-reference	fixture-2	73400	4	3.002589	2	20.0	0.666	0.333			9796.0	10856	7.0	7		true
+w3	3	1	go	normal-reference	fixture-3	73403	4	3.002591	0	0.0	0.0	0.333			10722.0	10760	7.0	7		true
+w3	3	1	go	normal-reference	load-generator	73464	4	3.002544	4	40.0	1.332	0.333			13720.0	13824	9.0	9		true
+w3	3	1	go	normal-reference	sut	73446	4	3.002698	5	50.0	1.665	0.333	83.333	16.667	33352.0	35500	11.0	11		true
+w3	3	1	go	common-load	fixture-1	73399	4	3.003576	3	30.0	0.999	0.333			13406.0	13672	7.0	7		true
+w3	3	1	go	common-load	fixture-2	73400	4	3.003535	4	40.0	1.332	0.333			13402.0	13664	7.0	7		true
+w3	3	1	go	common-load	fixture-3	73403	4	3.003352	2	20.0	0.666	0.333			11816.0	13288	7.0	7		true
+w3	3	1	go	common-load	load-generator	73505	4	3.003612	9	90.0	2.996	0.333			15782.0	15804	9.0	9		true
+w3	3	1	go	common-load	sut	73446	4	3.003639	7	70.0	2.331	0.333	58.333	8.333	36586.0	39708	11.0	11		true
+w3	3	1	go	near-saturation	fixture-1	73399	4	3.003129	7	70.0	2.331	0.333			13714.0	13832	7.0	7		true
+w3	3	1	go	near-saturation	fixture-2	73400	4	3.00306	8	80.0	2.664	0.333			13796.0	13868	7.0	7		true
+w3	3	1	go	near-saturation	fixture-3	73403	4	3.003075	4	40.0	1.332	0.333			13454.0	13604	7.0	7		true
+w3	3	1	go	near-saturation	load-generator	73547	4	3.003142	19	190.0	6.327	0.333			15826.0	15848	10.0	11		true
+w3	3	1	go	near-saturation	sut	73446	4	3.003162	17	170.0	5.661	0.333	70.833	4.167	43918.0	48140	11.0	11		true
+w3	3	1	go	overload	fixture-1	73399	4	3.003719	8	80.0	2.663	0.333			13824.0	13888	7.0	7	sender shortfall or scheduled query not sent	false
+w3	3	1	go	overload	fixture-2	73400	4	3.003598	10	100.0	3.329	0.333			13868.0	13868	7.0	7	sender shortfall or scheduled query not sent	false
+w3	3	1	go	overload	fixture-3	73403	4	3.003606	4	40.0	1.332	0.333			13676.0	13732	7.0	7	sender shortfall or scheduled query not sent	false
+w3	3	1	go	overload	load-generator	73592	4	3.003759	23	230.0	7.657	0.333			12662.0	12992	10.5	11	sender shortfall or scheduled query not sent	false
+w3	3	1	go	overload	sut	73446	4	3.003901	20	200.0	6.658	0.333	66.689	3.334	53808.0	55248	11.0	11	sender shortfall or scheduled query not sent	false
+w3	3	1	go	recovery	fixture-1	73399	4	3.003612	3	30.0	0.999	0.333			13824.0	13888	7.0	7	same-process recovery criteria failed	false
+w3	3	1	go	recovery	fixture-2	73400	4	3.003687	3	30.0	0.999	0.333			13868.0	13868	7.0	7	same-process recovery criteria failed	false
+w3	3	1	go	recovery	fixture-3	73403	4	3.003827	1	10.0	0.333	0.333			13736.0	13740	7.0	7	same-process recovery criteria failed	false
+w3	3	1	go	recovery	load-generator	73633	4	3.003506	5	50.0	1.665	0.333			13268.0	15816	9.0	10	same-process recovery criteria failed	false
+w3	3	1	go	recovery	sut	73446	4	3.003413	3	30.0	0.999	0.333	50.0	16.667	55248.0	55248	11.0	11	same-process recovery criteria failed	false
+w3	3	2	rust	normal-reference	fixture-1	73787	4	3.003653	2	20.0	0.666	0.333			10856.0	10892	7.0	7		true
+w3	3	2	rust	normal-reference	fixture-2	73788	4	3.003713	2	20.0	0.666	0.333			11842.0	12896	7.0	7		true
+w3	3	2	rust	normal-reference	fixture-3	73790	4	3.003785	1	10.0	0.333	0.333			10778.0	12864	7.0	7		true
+w3	3	2	rust	normal-reference	load-generator	73849	4	3.003582	5	50.0	1.665	0.333			15798.0	15884	9.0	9		true
+w3	3	2	rust	normal-reference	sut	73836	4	3.003572	3	30.0	0.999	0.333	50.0	16.667	3124.0	3124	7.0	8		true
+w3	3	2	rust	common-load	fixture-1	73787	4	3.002908	4	40.0	1.332	0.333			13404.0	13684	7.0	7		true
+w3	3	2	rust	common-load	fixture-2	73788	4	3.002917	4	40.0	1.332	0.333			15410.0	15700	7.0	7		true
+w3	3	2	rust	common-load	fixture-3	73790	4	3.002762	2	20.0	0.666	0.333			12890.0	15372	7.0	7		true
+w3	3	2	rust	common-load	load-generator	73891	4	3.002867	8	80.0	2.664	0.333			13800.0	13824	9.5	10		true
+w3	3	2	rust	common-load	sut	73836	4	3.002852	6	60.0	1.998	0.333	50.0	8.333	3124.0	3124	7.0	7		true
+w3	3	2	rust	near-saturation	fixture-1	73787	4	3.003583	6	60.0	1.998	0.333			13808.0	13880	7.0	7		true
+w3	3	2	rust	near-saturation	fixture-2	73788	4	3.003582	7	70.0	2.331	0.333			15830.0	15856	7.0	7		true
+w3	3	2	rust	near-saturation	fixture-3	73790	4	3.003329	2	20.0	0.666	0.333			15552.0	15716	7.0	7		true
+w3	3	2	rust	near-saturation	load-generator	73934	4	3.003668	16	160.0	5.327	0.333			15780.0	15804	9.5	10		true
+w3	3	2	rust	near-saturation	sut	73836	4	3.003845	11	110.0	3.662	0.333	45.833	4.167	3192.0	3192	7.0	7		true
+w3	3	2	rust	overload	fixture-1	73787	4	3.002781	7	70.0	2.331	0.333			13888.0	13888	7.0	7		false
+w3	3	2	rust	overload	fixture-2	73788	4	3.002679	7	70.0	2.331	0.333			15908.0	15908	7.0	7		false
+w3	3	2	rust	overload	fixture-3	73790	4	3.002696	3	30.0	0.999	0.333			15800.0	15848	7.0	7		false
+w3	3	2	rust	overload	load-generator	73975	4	3.002906	19	190.0	6.327	0.333			14374.0	14532	10.0	10		false
+w3	3	2	rust	overload	sut	73836	4	3.003084	11	110.0	3.663	0.333	36.667	3.333	3192.0	3192	7.0	7		false
+w3	3	2	rust	recovery	fixture-1	73787	4	3.003519	3	30.0	0.999	0.333			13890.0	13892	7.0	7	same-process recovery criteria failed	false
+w3	3	2	rust	recovery	fixture-2	73788	4	3.003466	3	30.0	0.999	0.333			15908.0	15908	7.0	7	same-process recovery criteria failed	false
+w3	3	2	rust	recovery	fixture-3	73790	4	3.003494	1	10.0	0.333	0.333			15848.0	15848	7.0	7	same-process recovery criteria failed	false
+w3	3	2	rust	recovery	load-generator	74016	4	3.003525	7	70.0	2.331	0.333			13136.0	14216	9.0	10	same-process recovery criteria failed	false
+w3	3	2	rust	recovery	sut	73836	4	3.003596	5	50.0	1.665	0.333	83.333	16.667	3192.0	3192	7.0	8	same-process recovery criteria failed	false

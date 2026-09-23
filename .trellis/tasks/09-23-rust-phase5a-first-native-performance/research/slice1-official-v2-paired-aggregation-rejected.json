@@ -1,0 +1,2298 @@
+{
+  "manifest_sha256": "3d8b76e8799bf709ef7e19df9edd6245936f05f9c4e09230dd49ecdaaf000f13",
+  "groups": [
+    {
+      "scenario": "w1-tcp",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status; sender shortfall or scheduled query not sent"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; sender shortfall or scheduled query not sent"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; sender shortfall or scheduled query not sent"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "official-w2-cold",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; sender shortfall or scheduled query not sent"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w3",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w3",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w3",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w3",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; sender shortfall or scheduled query not sent"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status; sender shortfall or scheduled query not sent"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        }
+      ]
+    },
+    {
+      "scenario": "w3",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "missing attempt exit status"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "missing attempt exit status; same-process recovery criteria failed"
+        }
+      ]
+    }
+  ]
+}

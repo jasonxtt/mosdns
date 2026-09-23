@@ -1,0 +1,36 @@
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-udp/repetition-3/go/invalid-stages.tsv
+near-saturation	sender shortfall or scheduled query not sent
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-udp/repetition-1/go/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-udp/repetition-1/rust/invalid-stages.tsv
+overload	sender shortfall or scheduled query not sent
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-udp/repetition-2/go/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-tcp/repetition-3/go/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-tcp/repetition-1/go/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-tcp/repetition-1/rust/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-tcp/repetition-2/go/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w1-tcp/repetition-2/rust/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w2/repetition-1/go/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w2/repetition-1/rust/invalid-stages.tsv
+overload	sender shortfall or scheduled query not sent
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w2/repetition-2/rust/invalid-stages.tsv
+near-saturation	sender shortfall or scheduled query not sent
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w3/repetition-3/go/invalid-stages.tsv
+overload	sender shortfall or scheduled query not sent
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w3/repetition-3/rust/invalid-stages.tsv
+recovery	same-process recovery criteria failed
+/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/w3/repetition-1/rust/invalid-stages.tsv
+overload	sender shortfall or scheduled query not sent
+recovery	same-process recovery criteria failed
