@@ -43,14 +43,22 @@ func BuildDomainSnapshot(rules []string) (DomainSnapshot, error) {
 	if !RustDomainRulesSupported(rules) {
 		return nil, fmt.Errorf("rust domain matcher requires ASCII rules")
 	}
-	return buildSnapshot(domainKind, strings.Join(rules, "\n"))
+	snapshot, err := buildSnapshot(domainKind, strings.Join(rules, "\n"))
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }
 
 func BuildIPSnapshot(prefixes []string) (IPSnapshot, error) {
 	if !rustRequested() {
 		return nil, nil
 	}
-	return buildSnapshot(ipKind, strings.Join(prefixes, "\n"))
+	snapshot, err := buildSnapshot(ipKind, strings.Join(prefixes, "\n"))
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }
 
 func BuildValuedDomainSnapshot(rules []ValuedRule) (ValuedSnapshot, error) {
@@ -60,7 +68,11 @@ func BuildValuedDomainSnapshot(rules []ValuedRule) (ValuedSnapshot, error) {
 	if !RustValuedRulesSupported(rules) {
 		return nil, fmt.Errorf("rust valued domain matcher requires ASCII rules")
 	}
-	return buildValuedSnapshot(rules)
+	snapshot, err := buildValuedSnapshot(rules)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }
 
 func rustRequested() bool {
