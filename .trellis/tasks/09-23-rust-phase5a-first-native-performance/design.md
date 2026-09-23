@@ -1,6 +1,6 @@
 # Design — paired Go-only / Rust-native W1–W3 measurement
 
-Status: in progress — Slice 0 tooling and pilot evidence complete; local validation passed, with exact-scope commit and re-review pending. No official measurements have been run and no official manifest is frozen.
+Status: in progress — Slice 0 reviewer PASS; prepare and review the Slice 1 official manifest before measurements. No official measurements have been run and no official manifest is frozen.
 
 ## Evidence model
 
