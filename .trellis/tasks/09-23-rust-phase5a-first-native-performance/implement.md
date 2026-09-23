@@ -1,6 +1,6 @@
 # Implementation plan — first native whole-process comparison
 
-Status: **in progress — Slice 0 tooling and pilot evidence complete; local validation passed, with exact-scope commit and re-review pending**. Planning review passed and execution was authorized in this task. No official samples have run and no official manifest is frozen.
+Status: **in progress — Slice 0 reviewer PASS; prepare and review the Slice 1 official manifest before measurements**. Planning review passed and execution was authorized in this task. No official samples have run and no official manifest is frozen.
 
 ## Before start
 
@@ -22,7 +22,9 @@ Allowed edits: `scripts/run-phase5a-baseline.sh` and `tests/phase5a-baseline/cmd
 - [x] Re-run unchanged bilateral W1/W2/W3 smoke with helper v7 and v8. All eight candidate/scenario combinations passed on each helper; verify W2 cold/prefill/warm deltas, W3 event-time request joins and exact route legs/order, wrong-answer rejection, process cleanup and port rebind.
 - [x] Complete the labeled 24-attempt v7 pilot; confirm six stable normal-reference samples per scenario, TTL eligibility, event-journal capacity, sender/upstream headroom, and CPU affinity. Choose candidate health-check ceilings using only the six normal-reference samples. Verify helper v8 preserves categorical indeterminate assessment and failure reason on an actual failed sequence, and runner v9 records separate base/project/candidate toolchains. Terminal points remain health checks only.
 - [x] Run final helper tests/vet, Linux amd64 build, shell syntax, task/JSON validation and `git diff --check` after all edits.
-- [ ] Inspect and stage only the exact task/tooling diff, commit/push it, and obtain Slice 0 reviewer PASS before freezing the official manifest.
+- [x] Inspect and stage only the exact task/tooling diff, commit/push it, and obtain Slice 0 reviewer PASS before freezing the official manifest.
+
+Independent Slice 0 re-review returned **PASS** for final commit `48ef11ea0d9ae72484e7b11fc6af7f370b8fa0e5`, range `605c30577b79d397b5695618dbd2980e550ca6f3..48ef11ea0d9ae72484e7b11fc6af7f370b8fa0e5`. The reviewer found no remaining Slice 0 blockers. This permits freezing and reviewing the new official manifest and proceeding within the already-authorized Slice 1; it does not approve official results, production or deployment, or task closure.
 
 ### Live smoke finding
 

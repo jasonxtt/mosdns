@@ -1,6 +1,6 @@
 # Rust Phase 5A — first native whole-process comparison
 
-Status: **in progress — Slice 0 tooling and pilot evidence complete; local validation passed, with exact-scope commit and re-review pending**. The user authorized execution after the planning review passed. No official measurements have started and the official manifest is not frozen; production deployment is outside scope.
+Status: **in progress — Slice 0 PASS; Slice 1 manifest freeze is next**. The user authorized execution after the planning review passed. No official measurements have started and the official manifest is not frozen; production deployment is outside scope.
 
 ## Goal
 

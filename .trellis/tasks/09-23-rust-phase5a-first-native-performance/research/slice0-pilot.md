@@ -1,6 +1,6 @@
 # Slice 0 pilot and smoke evidence
 
-Status: v6 evidence is historical. v7 bilateral smoke and the full 24-attempt pilot are complete; v8 bilateral smoke and the failed-health-check assessment check pass; v9's environment metadata probe confirms the Go toolchain fields. Local validation passed; exact-scope commit and Slice 0 re-review are pending. No official samples or frozen official manifest exist. Full result hashes are indexed in `slice0-v7-v9-evidence-index.sha256`; raw results remain on the test VM under `/root/mosdns-rust-phase5a-first-native-performance-605c305/`.
+Status: v6 evidence is historical. v7 bilateral smoke and the full 24-attempt pilot are complete; v8 bilateral smoke and the failed-health-check assessment check pass; v9's environment metadata probe confirms the Go toolchain fields. Slice 0 reviewer PASS is bound to `48ef11ea0d9ae72484e7b11fc6af7f370b8fa0e5`. No official samples or frozen official manifest exist. Full result hashes are indexed in `slice0-v7-v9-evidence-index.sha256`; raw results remain on the test VM under `/root/mosdns-rust-phase5a-first-native-performance-605c305/`.
 
 ## Candidate and tool identity
 
