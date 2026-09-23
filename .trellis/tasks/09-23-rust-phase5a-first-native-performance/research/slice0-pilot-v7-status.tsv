@@ -1,0 +1,24 @@
+w1-udp	1	go	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w1-udp	1	rust	PASS
+w1-udp	2	rust	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w1-udp	2	go	PASS
+w1-udp	3	go	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w1-udp	3	rust	INVALID(exit=1)	overload	sender shortfall or scheduled query not sent;recovery	same-process recovery criteria failed;
+w1-tcp	1	go	PASS
+w1-tcp	1	rust	PASS
+w1-tcp	2	rust	PASS
+w1-tcp	2	go	PASS
+w1-tcp	3	go	PASS
+w1-tcp	3	rust	PASS
+w2	1	go	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w2	1	rust	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w2	2	rust	PASS
+w2	2	go	PASS
+w2	3	go	PASS
+w2	3	rust	PASS
+w3	1	go	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w3	1	rust	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w3	2	rust	PASS
+w3	2	go	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w3	3	go	INVALID(exit=1)	recovery	same-process recovery criteria failed;
+w3	3	rust	INVALID(exit=1)	recovery	same-process recovery criteria failed;

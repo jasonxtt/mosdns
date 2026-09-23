@@ -183,8 +183,9 @@ func usage() {
 }
 
 const (
-	helperVersion      = "phase5a-baseline-helper/v6"
-	fixtureEventSchema = "fixture-event-v2"
+	helperVersion          = "phase5a-baseline-helper/v8"
+	fixtureEventSchema     = "fixture-event-v3-occurrence-time"
+	recoveryAssessmentMode = "indeterminate-no-overload-evidence"
 )
 
 var fixedCorpusInputPaths = []string{
@@ -225,6 +226,12 @@ type manifestCandidate struct {
 	BinarySHA256 string `json:"binary_sha256"`
 }
 
+type recoveryAssessment struct {
+	Status string `json:"status"`
+	Mode   string `json:"mode"`
+	Reason string `json:"reason"`
+}
+
 type manifestPair struct {
 	Repetition int      `json:"repetition"`
 	Order      []string `json:"order"`
@@ -234,6 +241,7 @@ type pairedStageObservation struct {
 	Scenario           string        `json:"scenario"`
 	Stage              string        `json:"stage"`
 	Candidate          string        `json:"candidate"`
+	RecoveryAssessment string        `json:"recovery_assessment,omitempty"`
 	ManifestSHA256     string        `json:"manifest_sha256"`
 	Repetition         int           `json:"repetition"`
 	PairPosition       int           `json:"pair_position"`
@@ -269,15 +277,16 @@ type pairedInvalidRecord struct {
 }
 
 type pairedStageAggregate struct {
-	Scenario         string                 `json:"scenario"`
-	Stage            string                 `json:"stage"`
-	TargetQPS        float64                `json:"target_qps"`
-	CompletePairs    int                    `json:"complete_pairs"`
-	ValidPairs       int                    `json:"valid_pairs"`
-	Go               pairedCandidateSummary `json:"go"`
-	Rust             pairedCandidateSummary `json:"rust"`
-	RustMinusGoP95US pairedMetricRange      `json:"rust_minus_go_p95_us"`
-	InvalidPairs     []pairedInvalidRecord  `json:"invalid_pairs,omitempty"`
+	Scenario           string                 `json:"scenario"`
+	Stage              string                 `json:"stage"`
+	TargetQPS          float64                `json:"target_qps"`
+	RecoveryAssessment string                 `json:"recovery_assessment,omitempty"`
+	CompletePairs      int                    `json:"complete_pairs"`
+	ValidPairs         int                    `json:"valid_pairs"`
+	Go                 pairedCandidateSummary `json:"go"`
+	Rust               pairedCandidateSummary `json:"rust"`
+	RustMinusGoP95US   pairedMetricRange      `json:"rust_minus_go_p95_us"`
+	InvalidPairs       []pairedInvalidRecord  `json:"invalid_pairs,omitempty"`
 }
 
 type pairedAggregationReport struct {
@@ -315,17 +324,18 @@ type manifestEnvironment struct {
 }
 
 type officialManifest struct {
-	SchemaVersion  int                          `json:"schema_version"`
-	OfficialFrozen bool                         `json:"official_frozen"`
-	Inputs         []manifestInput              `json:"inputs"`
-	Runner         manifestArtifact             `json:"runner"`
-	Helper         manifestHelper               `json:"helper"`
-	Candidates     map[string]manifestCandidate `json:"candidates"`
-	StageSequence  []string                     `json:"stage_sequence"`
-	W3EventSchema  string                       `json:"w3_event_schema"`
-	PairSchedule   []manifestPair               `json:"pair_schedule"`
-	Scenarios      map[string]manifestScenario  `json:"scenarios"`
-	Environment    manifestEnvironment          `json:"environment"`
+	SchemaVersion          int                          `json:"schema_version"`
+	OfficialFrozen         bool                         `json:"official_frozen"`
+	RecoveryAssessmentMode string                       `json:"recovery_assessment_mode"`
+	Inputs                 []manifestInput              `json:"inputs"`
+	Runner                 manifestArtifact             `json:"runner"`
+	Helper                 manifestHelper               `json:"helper"`
+	Candidates             map[string]manifestCandidate `json:"candidates"`
+	StageSequence          []string                     `json:"stage_sequence"`
+	W3EventSchema          string                       `json:"w3_event_schema"`
+	PairSchedule           []manifestPair               `json:"pair_schedule"`
+	Scenarios              map[string]manifestScenario  `json:"scenarios"`
+	Environment            manifestEnvironment          `json:"environment"`
 }
 
 type manifestValidationOptions struct {
@@ -676,6 +686,9 @@ func verifyOfficialManifest(opts manifestValidationOptions) error {
 	if manifest.SchemaVersion != 1 || !manifest.OfficialFrozen {
 		return errors.New("official mode requires schema_version=1 and official_frozen=true")
 	}
+	if manifest.RecoveryAssessmentMode != recoveryAssessmentMode {
+		return fmt.Errorf("official recovery assessment mode must be %q, got %q", recoveryAssessmentMode, manifest.RecoveryAssessmentMode)
+	}
 	if manifest.Environment.HostAlias != opts.HostAlias || manifest.Environment.GOOS != runtime.GOOS || manifest.Environment.GOARCH != runtime.GOARCH || manifest.Environment.OnlineCPUs != currentOnlineCPUCount() || manifest.Environment.KernelRelease != currentKernelRelease() || manifest.Environment.GoToolchain != runtime.Version() || manifest.Environment.RustToolchain != opts.RustToolchain {
 		return fmt.Errorf("official environment differs from manifest: host=%s go=%s/%s online_cpus=%d kernel=%s go_toolchain=%s rust_toolchain=%s", opts.HostAlias, runtime.GOOS, runtime.GOARCH, currentOnlineCPUCount(), currentKernelRelease(), runtime.Version(), opts.RustToolchain)
 	}
@@ -1001,6 +1014,8 @@ func aggregatePairedStages(observations []pairedStageObservation, schedule []man
 		var goP50, goP95, goP99, goQPS, goSamples []float64
 		var rustP50, rustP95, rustP99, rustQPS, rustSamples []float64
 		var p95Deltas []float64
+		recoveryAssessmentValue := ""
+		recoveryAssessmentsConsistent := true
 		for repetition := 1; repetition <= len(schedule); repetition++ {
 			pair, ok := byRepetition[repetition]
 			if !ok {
@@ -1014,6 +1029,32 @@ func aggregatePairedStages(observations []pairedStageObservation, schedule []man
 					missing = "rust"
 				}
 				return nil, fmt.Errorf("incomplete paired results for %s/%s at %.3f QPS repetition %d: missing %s", key.scenario, key.stage, key.qps, repetition, missing)
+			}
+			if key.stage == "recovery" {
+				prefix := "status=indeterminate; mode=" + recoveryAssessmentMode + "; reason="
+				goAssessmentValid := strings.HasPrefix(goObservation.RecoveryAssessment, prefix)
+				rustAssessmentValid := strings.HasPrefix(rustObservation.RecoveryAssessment, prefix)
+				if !goAssessmentValid {
+					goObservation.InvalidReason = appendInvalidReason(goObservation.InvalidReason, "missing or invalid service recovery assessment evidence")
+					recoveryAssessmentsConsistent = false
+				}
+				if !rustAssessmentValid {
+					rustObservation.InvalidReason = appendInvalidReason(rustObservation.InvalidReason, "missing or invalid service recovery assessment evidence")
+					recoveryAssessmentsConsistent = false
+				}
+				if goAssessmentValid && rustAssessmentValid && goObservation.RecoveryAssessment != rustObservation.RecoveryAssessment {
+					if goObservation.InvalidReason == "" && rustObservation.InvalidReason == "" {
+						goObservation.InvalidReason = appendInvalidReason(goObservation.InvalidReason, "paired recovery assessment differs")
+						rustObservation.InvalidReason = appendInvalidReason(rustObservation.InvalidReason, "paired recovery assessment differs")
+					}
+					recoveryAssessmentsConsistent = false
+				} else if goAssessmentValid && rustAssessmentValid {
+					if recoveryAssessmentValue == "" {
+						recoveryAssessmentValue = goObservation.RecoveryAssessment
+					} else if recoveryAssessmentValue != goObservation.RecoveryAssessment {
+						recoveryAssessmentsConsistent = false
+					}
+				}
 			}
 
 			goReason := pairedObservationInvalidReason(goObservation)
@@ -1040,6 +1081,13 @@ func aggregatePairedStages(observations []pairedStageObservation, schedule []man
 			rustQPS = append(rustQPS, effectiveQPS(rustObservation))
 			rustSamples = append(rustSamples, float64(rustObservation.LatencySampleCount))
 			p95Deltas = append(p95Deltas, float64(rustObservation.P95US-goObservation.P95US))
+		}
+		if key.stage == "recovery" {
+			if recoveryAssessmentsConsistent && recoveryAssessmentValue != "" {
+				summary.RecoveryAssessment = recoveryAssessmentValue
+			} else {
+				summary.RecoveryAssessment = "status=indeterminate; mode=" + recoveryAssessmentMode + "; reason=service recovery assessment evidence is incomplete or inconsistent"
+			}
 		}
 		summary.Go = summarizePairedCandidate(goP50, goP95, goP99, goQPS, goSamples)
 		summary.Rust = summarizePairedCandidate(rustP50, rustP95, rustP99, rustQPS, rustSamples)
@@ -1098,8 +1146,9 @@ func summarizePairedValues(values []float64) pairedMetricRange {
 }
 
 type pairedPlannedStage struct {
-	name string
-	qps  float64
+	name       string
+	qps        float64
+	resultPath string
 }
 
 func collectPairedStageObservations(resultsRoot string, manifest officialManifest, manifestSHA string) ([]pairedStageObservation, error) {
@@ -1108,6 +1157,9 @@ func collectPairedStageObservations(resultsRoot string, manifest officialManifes
 	}
 	if !manifest.OfficialFrozen {
 		return nil, errors.New("paired result collection requires an official-frozen manifest")
+	}
+	if manifest.RecoveryAssessmentMode != recoveryAssessmentMode {
+		return nil, fmt.Errorf("unsupported recovery assessment mode %q", manifest.RecoveryAssessmentMode)
 	}
 	if len(manifest.PairSchedule) < 3 || len(manifest.Scenarios) == 0 {
 		return nil, errors.New("frozen manifest lacks paired repetitions or scenarios")
@@ -1158,6 +1210,30 @@ func collectPairedStageObservations(resultsRoot string, manifest officialManifes
 				if err != nil {
 					return nil, fmt.Errorf("invalid stage reasons in %s: %w", runDir, err)
 				}
+				assessment, assessmentErr := readServiceRecoveryAssessment(filepath.Join(runDir, "service-recovery-assessment.txt"), manifest.RecoveryAssessmentMode)
+				if assessmentErr != nil {
+					stageReasons["recovery"] = appendInvalidReason(stageReasons["recovery"], "service recovery assessment: "+assessmentErr.Error())
+				}
+				if scenario == "w2" {
+					lifecyclePath := filepath.Join(runDir, "w2-warm", "recovery-status.txt")
+					if plan.W2WarmLifecycle == "independent-prefilled" {
+						lifecyclePath = filepath.Join(runDir, "w2-warm-independent", "recovery-status.txt")
+					}
+					lifecycleStatus, statusErr := readSmallTextFile(lifecyclePath)
+					lifecycleValid := statusErr == nil && ((plan.W2WarmLifecycle == "same-process" && lifecycleStatus == "TTL-eligible") || (plan.W2WarmLifecycle == "independent-prefilled" && strings.HasPrefix(lifecycleStatus, "indeterminate:")))
+					if !lifecycleValid {
+						reason := "missing or invalid W2 warm lifecycle status"
+						if statusErr != nil && !errors.Is(statusErr, os.ErrNotExist) {
+							return nil, statusErr
+						}
+						if statusErr == nil {
+							reason += ": " + lifecycleStatus
+						}
+						for _, stage := range continuousStageSequence {
+							stageReasons[stage] = appendInvalidReason(stageReasons[stage], reason)
+						}
+					}
+				}
 				runLevelInvalid := ""
 				if metadataErr != nil {
 					runLevelInvalid = "missing official run metadata"
@@ -1165,10 +1241,16 @@ func collectPairedStageObservations(resultsRoot string, manifest officialManifes
 				if _, err := os.Stat(runDir); errors.Is(err, os.ErrNotExist) {
 					runLevelInvalid = "missing candidate run directory"
 				}
-				for _, key := range []string{"scenario", "run_mode", "candidate", "repetition", "pair_position", "manifest_sha256"} {
+				for _, key := range []string{"scenario", "run_mode", "candidate", "repetition", "pair_position", "manifest_sha256", "recovery_assessment_mode"} {
 					if metadata[key] == "" {
 						runLevelInvalid = appendInvalidReason(runLevelInvalid, "missing run metadata field "+key)
 					}
+				}
+				if metadata["recovery_assessment_mode"] != manifest.RecoveryAssessmentMode {
+					runLevelInvalid = appendInvalidReason(runLevelInvalid, "run recovery assessment mode differs from frozen manifest")
+				}
+				if scenario == "w2" && metadata["w2_warm_lifecycle"] != plan.W2WarmLifecycle {
+					runLevelInvalid = appendInvalidReason(runLevelInvalid, "run W2 warm lifecycle differs from frozen manifest")
 				}
 				if metadata["manifest_sha256"] == "" {
 					runLevelInvalid = appendInvalidReason(runLevelInvalid, "missing manifest SHA evidence")
@@ -1205,7 +1287,13 @@ func collectPairedStageObservations(resultsRoot string, manifest officialManifes
 				}
 
 				stageRows := make(map[string]stageResult)
-				for _, relative := range stageResultFiles(scenario) {
+				loadedResultPaths := make(map[string]struct{})
+				for _, planned := range plannedStages {
+					relative := planned.resultPath
+					if _, loaded := loadedResultPaths[relative]; loaded {
+						continue
+					}
+					loadedResultPaths[relative] = struct{}{}
 					path := filepath.Join(runDir, relative)
 					rows, err := readStageResultRows(path)
 					if errors.Is(err, os.ErrNotExist) {
@@ -1234,6 +1322,16 @@ func collectPairedStageObservations(resultsRoot string, manifest officialManifes
 						Scenario: scenario, Stage: planned.name, Candidate: candidate,
 						ManifestSHA256: manifestSHA, Repetition: pair.Repetition, PairPosition: position + 1,
 						TargetQPS: planned.qps, DurationMS: plan.StageDurationMS, InvalidReason: reason,
+					}
+					if planned.name == "recovery" {
+						if assessmentErr == nil {
+							observation.RecoveryAssessment = formatRecoveryAssessment(assessment)
+						} else {
+							observation.RecoveryAssessment = formatRecoveryAssessment(recoveryAssessment{
+								Status: "indeterminate", Mode: manifest.RecoveryAssessmentMode,
+								Reason: "missing or invalid assessment evidence",
+							})
+						}
 					}
 					if !found {
 						observation.InvalidReason = appendInvalidReason(observation.InvalidReason, "missing stage result")
@@ -1277,7 +1375,7 @@ func phase5aPlannedStages(scenario string, plan manifestScenario) ([]pairedPlann
 	}
 	stages := make([]pairedPlannedStage, 0, len(continuousStageSequence)+1)
 	if scenario == "w2" {
-		stages = append(stages, pairedPlannedStage{name: "official-w2-cold", qps: plan.NormalReferenceQPS})
+		stages = append(stages, pairedPlannedStage{name: "official-w2-cold", qps: plan.NormalReferenceQPS, resultPath: filepath.Join("w2-cold", "stages.jsonl")})
 	}
 	qpsByStage := map[string]float64{
 		"normal-reference": plan.NormalReferenceQPS,
@@ -1291,7 +1389,15 @@ func phase5aPlannedStages(scenario string, plan manifestScenario) ([]pairedPlann
 		if qps <= 0 {
 			return nil, fmt.Errorf("manifest scenario %s has invalid QPS for %s", scenario, name)
 		}
-		stages = append(stages, pairedPlannedStage{name: name, qps: qps})
+		resultPath := "stages.jsonl"
+		if scenario == "w2" {
+			if plan.W2WarmLifecycle == "independent-prefilled" {
+				resultPath = filepath.Join("w2-warm-independent", name, "stages.jsonl")
+			} else {
+				resultPath = filepath.Join("w2-warm", "stages.jsonl")
+			}
+		}
+		stages = append(stages, pairedPlannedStage{name: name, qps: qps, resultPath: resultPath})
 	}
 	if scenario == "w2" && plan.NormalReferenceQPS <= 0 {
 		return nil, errors.New("manifest scenario w2 has invalid cold QPS")
@@ -1312,13 +1418,6 @@ func expectedWorkloadPath(scenario string) (string, string, error) {
 	default:
 		return "", "", fmt.Errorf("unsupported manifest scenario %q", scenario)
 	}
-}
-
-func stageResultFiles(scenario string) []string {
-	if scenario == "w2" {
-		return []string{"w2-cold/stages.jsonl", "w2-warm/stages.jsonl"}
-	}
-	return []string{"stages.jsonl"}
 }
 
 func readRunMetadata(path string) (map[string]string, error) {
@@ -1437,6 +1536,22 @@ func readSmallTextFile(path string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+func readServiceRecoveryAssessment(path, expectedMode string) (recoveryAssessment, error) {
+	fields, err := readRunMetadata(path)
+	if err != nil {
+		return recoveryAssessment{}, err
+	}
+	assessment := recoveryAssessment{Status: fields["status"], Mode: fields["mode"], Reason: fields["reason"]}
+	if assessment.Status != "indeterminate" || assessment.Mode != expectedMode || assessment.Reason == "" {
+		return recoveryAssessment{}, fmt.Errorf("unexpected status/mode/reason: status=%q mode=%q reason=%q", assessment.Status, assessment.Mode, assessment.Reason)
+	}
+	return assessment, nil
+}
+
+func formatRecoveryAssessment(assessment recoveryAssessment) string {
+	return fmt.Sprintf("status=%s; mode=%s; reason=%s", assessment.Status, assessment.Mode, assessment.Reason)
+}
+
 func verifyRunInputHashes(path string, manifest officialManifest, candidateName string) (string, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -1515,6 +1630,12 @@ func expandInvalidStageReasons(scenario string, planned []pairedPlannedStage, in
 			for _, stage := range continuousStageSequence {
 				targets = append(targets, stage)
 			}
+		case scenario == "w2" && strings.HasSuffix(name, "-prefill"):
+			stage := strings.TrimSuffix(name, "-prefill")
+			if !containsString(continuousStageSequence, stage) {
+				return nil, fmt.Errorf("unrecognized W2 prefill stage %q", name)
+			}
+			targets = append(targets, stage)
 		case scenario == "w2" && name == "w2-warm":
 			for _, stage := range continuousStageSequence {
 				targets = append(targets, stage)
@@ -2222,11 +2343,24 @@ func verifyContinuousCommand(args []string) error {
 		return err
 	}
 	criteria := recoveryCriteria{MinimumSamples: *minimumSamples, P95CeilingUS: *p95Ceiling, P99CeilingUS: *p99Ceiling}
+	assessment, err := assessServiceRecovery(stages, criteria)
+	fmt.Fprintf(os.Stdout, "status=%s\nmode=%s\nreason=%s\n", assessment.Status, assessment.Mode, assessment.Reason)
+	return err
+}
+
+func assessServiceRecovery(stages []stageResult, criteria recoveryCriteria) (recoveryAssessment, error) {
 	if err := verifyContinuousStages(stages, criteria); err != nil {
-		return err
+		return recoveryAssessment{
+			Status: "indeterminate",
+			Mode:   recoveryAssessmentMode,
+			Reason: "terminal health check failed; service recovery remains indeterminate: " + err.Error(),
+		}, err
 	}
-	fmt.Fprintf(os.Stdout, "continuous session verified: run_id=%s stages=%d recovery_min_samples=%d p95_ceiling_us=%d p99_ceiling_us=%d\n", *runID, len(stages), *minimumSamples, *p95Ceiling, *p99Ceiling)
-	return nil
+	return recoveryAssessment{
+		Status: "indeterminate",
+		Mode:   recoveryAssessmentMode,
+		Reason: "the frozen ladder has no objective overload-evidence criterion; the final same-rate stage is a post-sequence health check, not proof of recovery",
+	}, nil
 }
 
 func readStageResults(path, runID string) ([]stageResult, error) {
@@ -3180,12 +3314,13 @@ type requestRecord struct {
 }
 
 type fixtureEvent struct {
-	FixtureSeq uint64 `json:"fixture_seq"`
-	DNSID      uint16 `json:"dns_id"`
-	QName      string `json:"qname"`
-	QType      uint16 `json:"qtype"`
-	QClass     uint16 `json:"qclass"`
-	Upstream   string `json:"upstream"`
+	FixtureSeq uint64    `json:"fixture_seq"`
+	OccurredAt time.Time `json:"occurred_at"`
+	DNSID      uint16    `json:"dns_id"`
+	QName      string    `json:"qname"`
+	QType      uint16    `json:"qtype"`
+	QClass     uint16    `json:"qclass"`
+	Upstream   string    `json:"upstream"`
 }
 
 type fixtureEventJournal struct {
@@ -3233,6 +3368,7 @@ func (j *fixtureEventJournal) withLock(fn func() error) error {
 func (j *fixtureEventJournal) append(event fixtureEvent) (fixtureEvent, error) {
 	var err error
 	err = j.withLock(func() error {
+		event.OccurredAt = time.Now().UTC()
 		last, err := j.lastSequenceUnlocked()
 		if err != nil {
 			return err
@@ -3554,43 +3690,56 @@ func verifyRoutingEvents(cases []workloadCase, requests []requestRecord, events 
 		}
 	}
 
-	eventsByQuestion := make(map[string][]fixtureEvent)
-	for _, event := range windowEvents {
-		key := requestKey(event.QName, dns.TypeToString[event.QType], event.QClass)
-		eventsByQuestion[key] = append(eventsByQuestion[key], event)
+	requestsByQuestion := make(map[string][]requestRecord)
+	for _, request := range stageRequests {
+		key := requestKey(request.QName, request.QType, request.QClass)
+		requestsByQuestion[key] = append(requestsByQuestion[key], request)
 	}
-	consumed := make(map[string]int, len(eventsByQuestion))
+	eventsByRequest := make(map[uint64][]fixtureEvent, len(stageRequests))
+	for _, event := range windowEvents {
+		if event.OccurredAt.IsZero() {
+			return fmt.Errorf("fixture event %d has no occurrence timestamp", event.FixtureSeq)
+		}
+		key := requestKey(event.QName, dns.TypeToString[event.QType], event.QClass)
+		var owner requestRecord
+		matches := 0
+		for _, request := range requestsByQuestion[key] {
+			if !event.OccurredAt.Before(request.SentAt) && !event.OccurredAt.After(request.FinishedAt) {
+				owner = request
+				matches++
+			}
+		}
+		if matches == 0 {
+			return fmt.Errorf("fixture event %d has no matching client request interval for %s", event.FixtureSeq, key)
+		}
+		if matches > 1 {
+			return fmt.Errorf("fixture event %d ambiguously matches %d client request intervals for %s", event.FixtureSeq, matches, key)
+		}
+		eventsByRequest[owner.RequestSeq] = append(eventsByRequest[owner.RequestSeq], event)
+	}
 	for _, request := range stageRequests {
 		c := caseByID[request.CaseID]
 		path, err := expectedRoutePath(c.ExpectedRouteClass)
 		if err != nil {
 			return fmt.Errorf("case %s: %w", c.CaseID, err)
 		}
-		key := requestKey(request.QName, request.QType, request.QClass)
-		requestEvents := eventsByQuestion[key]
-		start := consumed[key]
-		end := start + len(path)
-		if end > len(requestEvents) {
-			return fmt.Errorf("missing route legs for request_seq=%d case=%s: expected=%v", request.RequestSeq, c.CaseID, path)
+		requestEvents := eventsByRequest[request.RequestSeq]
+		sort.Slice(requestEvents, func(i, j int) bool { return requestEvents[i].FixtureSeq < requestEvents[j].FixtureSeq })
+		if len(requestEvents) != len(path) {
+			return fmt.Errorf("route leg count mismatch for request_seq=%d case=%s: expected=%d actual=%d path=%v", request.RequestSeq, c.CaseID, len(path), len(requestEvents), path)
 		}
 		for i, upstream := range path {
-			if requestEvents[start+i].Upstream != upstream {
-				return fmt.Errorf("route path mismatch for request_seq=%d case=%s at leg %d: expected=%s actual=%s", request.RequestSeq, c.CaseID, i, upstream, requestEvents[start+i].Upstream)
+			if requestEvents[i].Upstream != upstream {
+				return fmt.Errorf("route path mismatch for request_seq=%d case=%s at leg %d: expected=%s actual=%s", request.RequestSeq, c.CaseID, i, upstream, requestEvents[i].Upstream)
 			}
-		}
-		consumed[key] = end
-	}
-	for key, questionEvents := range eventsByQuestion {
-		if consumed[key] != len(questionEvents) {
-			return fmt.Errorf("unmatched or duplicate route events for %s: consumed=%d actual=%d", key, consumed[key], len(questionEvents))
 		}
 	}
 	return nil
 }
 
 // verifyQuestionUse proves that one W3 question tuple is never in flight more
-// than once. MosDNS assigns its own transaction IDs on upstream legs, so the
-// ordered question occurrence is the stable client-to-fixture correlation.
+// than once. Fixture occurrence timestamps are the client-to-fixture join;
+// single-flight prevents adjacent same-question intervals from overlapping.
 func verifyQuestionUse(records []requestRecord) error {
 	ordered := append([]requestRecord(nil), records...)
 	sort.Slice(ordered, func(i, j int) bool {

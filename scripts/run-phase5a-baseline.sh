@@ -137,7 +137,7 @@ fi
 HELPER_BINARY="$(cd "$(dirname "${HELPER_BINARY}")" && pwd)/$(basename "${HELPER_BINARY}")"
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   helper_version="$("${HELPER_BINARY}" version)"
-  if [[ "${helper_version}" != "phase5a-baseline-helper/v6" ]]; then
+  if [[ "${helper_version}" != "phase5a-baseline-helper/v8" ]]; then
     echo "unsupported helper version: ${helper_version}" >&2
     exit 2
   fi
@@ -496,7 +496,8 @@ run_continuous_sequence() {
   run_one_stage overload "${OVERLOAD_QPS}" "${stage_dir}" "${ledger_path}" false warm
   run_one_stage recovery "${NORMAL_REFERENCE_QPS}" "${stage_dir}" "${ledger_path}" false warm
   if ! "${HELPER_BINARY}" verify-continuous --stage-result "${stage_dir}/stages.jsonl" --run-id "${SESSION_RUN_ID}" \
-    --minimum-samples "${RECOVERY_MINIMUM_SAMPLES}" --p95-ceiling-us "${RECOVERY_P95_CEILING_US}" --p99-ceiling-us "${RECOVERY_P99_CEILING_US}"; then
+    --minimum-samples "${RECOVERY_MINIMUM_SAMPLES}" --p95-ceiling-us "${RECOVERY_P95_CEILING_US}" --p99-ceiling-us "${RECOVERY_P99_CEILING_US}" \
+    > "${RESULT_DIR}/service-recovery-assessment.txt"; then
     record_invalid "recovery" "same-process recovery criteria failed"
   fi
 }
@@ -512,6 +513,7 @@ run_w2_independent_points() {
   )
   mkdir -p "${RESULT_DIR}/w2-warm-independent"
   printf '%s\n' "indeterminate: W2 warm stages use independent prefilled SUT sessions; no same-process recovery claim" > "${RESULT_DIR}/w2-warm-independent/recovery-status.txt"
+  printf '%s\n' "status=indeterminate" "mode=indeterminate-no-overload-evidence" "reason=independent-prefilled W2 sessions; no same-process recovery is measured" > "${RESULT_DIR}/service-recovery-assessment.txt"
   for stage_spec in "${stage_specs[@]}"; do
     stage="${stage_spec%%:*}"
     stage_qps="${stage_spec#*:}"
@@ -678,8 +680,14 @@ if [[ "${RUN_MODE}" != "smoke" ]]; then
     printf 'memory=%s\n' "$(free -b | awk '/^Mem:/ {print $2}')"
     printf 'disk_filesystem=%s\n' "$(df -PT "${RESULT_DIR}" | awk 'NR == 2 {print $2}')"
     printf 'open_file_limit=%s\n' "$(ulimit -n)"
-    printf 'go_toolchain=%s\n' "$(go version)"
-    printf 'go_runtime=%s\n' "$(go env GOVERSION)"
+    printf 'go_base_launcher=%s\n' "$(go version)"
+    printf 'go_project_selected_toolchain=%s\n' "$(cd "${ROOT_DIR}" && go version)"
+    printf 'go_helper_build_toolchain=%s\n' "$(go version -m "${HELPER_BINARY}" | awk -F': ' 'NR == 1 {print $2}')"
+    if [[ "${CANDIDATE}" == "go" ]]; then
+      printf 'go_candidate_build_toolchain=%s\n' "$(go version -m "${MOSDNS_BINARY}" | awk -F': ' 'NR == 1 {print $2}')"
+    else
+      printf 'go_candidate_build_toolchain=not-applicable\n'
+    fi
     printf 'rust_toolchain=%s\n' "${RUST_TOOLCHAIN_VERSION}"
     printf 'cpu_cgroup=%s\n' "$(tr '\n' ';' < /proc/self/cgroup)"
     printf 'harness_requested_cpus=%s\n' "${HARNESS_CPU_SET}"
@@ -691,6 +699,9 @@ if [[ "${SCENARIO}" == "w2" ]]; then
 fi
 if [[ "${RUN_MODE}" == "official" ]]; then
   printf '%s\n' "manifest_sha256=${MANIFEST_SHA256}" >> "${RESULT_DIR}/run-metadata.txt"
+fi
+if [[ "${RUN_MODE}" != "smoke" ]]; then
+  printf '%s\n' "recovery_assessment_mode=indeterminate-no-overload-evidence" >> "${RESULT_DIR}/run-metadata.txt"
 fi
 if [[ "${RUN_INVALID}" -ne 0 ]]; then
   exit 1

@@ -1,0 +1,8 @@
+go	w1-udp	PASS
+go	w1-tcp	PASS
+go	w2	PASS
+go	w3	PASS
+rust	w1-udp	PASS
+rust	w1-tcp	PASS
+rust	w2	PASS
+rust	w3	PASS
