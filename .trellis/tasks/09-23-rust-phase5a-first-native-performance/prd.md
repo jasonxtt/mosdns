@@ -1,6 +1,6 @@
 # Rust Phase 5A — first native whole-process comparison
 
-Status: **in progress — Slice 0 pilot complete; scoped changes awaiting reviewer PASS**. The user authorized execution after the planning review passed. No official measurements have started and the official manifest is not frozen; production deployment is outside scope.
+Status: **in progress — Slice 0 tooling and pilot evidence complete; local validation passed, with exact-scope commit and re-review pending**. The user authorized execution after the planning review passed. No official measurements have started and the official manifest is not frozen; production deployment is outside scope.
 
 ## Goal
 
@@ -32,26 +32,26 @@ Status: **in progress — Slice 0 pilot complete; scoped changes awaiting review
 
 ### R3. Freeze a new VM manifest before official runs
 
-短 pilot 仅检验发生器/fixture 余量并选择阶梯。正式样本前冻结新 manifest：源/binary/config/workload/helper 哈希，启动命令，场景和 Go/Rust 交错顺序、QPS 阶梯、stage 时长、期限、warmup/prefill、TCP 连接策略、缓存/日志/审计设置、CPU 亲和性、W3 事件证据格式与 stage 边界、连续恢复阶段顺序和恢复判据。SHA-256 必须由 official runner 校验。变更需新版本并双边重跑；不得覆写历史证据。
+短 pilot 仅检验发生器/fixture 余量并选择阶梯。正式样本前冻结新 manifest：源/binary/config/workload/helper 哈希，启动命令，场景和 Go/Rust 交错顺序、QPS 阶梯、stage 时长、期限、warmup/prefill、TCP 连接策略、缓存/日志/审计设置、CPU 亲和性、带事件时间的 W3 证据格式、stage 边界和 `recovery_assessment_mode=indeterminate-no-overload-evidence`。SHA-256 必须由 official runner 校验。变更需新版本并双边重跑；不得覆写历史证据。
 
 ### R4. Valid load on a 2-CPU VM
 
-固定速率发送与响应速度解耦；短 pilot 后冻结低/正常参考负载→常用负载→接近饱和→过载→恢复的阶梯，不能在规划时伪造 QPS/容量。每个有效点至少三次，Go/Rust 交错先后；保留全部无效/失败尝试。恢复声称必须在同一 SUT PID、同一 fixture session 内按“正常参考→过载→同一正常参考”连续运行，中途不得重启或重置；W2 cold 单独启动，W2 warm 在显式预热后运行自己的连续序列。归档 fixture 的 A 应答 TTL 为 30 秒，正式样本前须冻结每个 warm key 的预填时间和 TTL 安全余量；W2 warm 的最后一个测量响应必须在其对应预填后、TTL 到期前完成。若 pilot 证明完整连续序列无法在 TTL 安全余量内完成，可保留每阶段独立预填的 warm 测量点，但 W2 warm 同进程恢复结论必须标为 indeterminate，不得在中途重填缓存来宣称恢复。不得为满足时限修改冻结配置或语料。正式样本前冻结恢复时长、最小样本数、无错误/shortfall 条件和 p95/p99 判据：恢复 stage 在参考负载下须全数 correct-on-time、无 late/wrong/protocol/transport/timeout/sender-shortfall，且 p95/p99 不超过 pilot 中至少三次稳定参考 stage 的对应最大值。参考数据或样本数不足时标为 indeterminate，不宣称恢复。记录发生器/fixture CPU、计划/实际发送和 headroom。可试 SUT 单核、发生器加 fixtures 另一核的公平**单核 SUT**对比，须证实发生端有余量。若共机干扰或发送不足，只报告有效低负载与不确定性，不宣称多核扩展或容量上限；真正多核结论需额外负载机或更大且可隔离的主机。
+固定速率发送与响应速度解耦；短 pilot 后冻结正常参考、常用负载、接近饱和、高速探测和同进程末尾健康检查的阶梯，不在规划时伪造 QPS/容量。每个有效点至少三次，Go/Rust 交错先后；保留全部无效/失败尝试。各阶段在同一 SUT PID、同一 fixture session 内连续运行，中途不重启或重置。归档 fixture 的 A 应答 TTL 为 30 秒，正式样本前冻结每个 warm key 的预填时间和 TTL 安全余量；W2 warm 的最后一个测量响应必须在对应预填后、TTL 到期前完成。若完整连续序列无法在 TTL 安全余量内完成，可按 manifest 使用每阶段独立预填的 warm 点，但不得把它称为同进程恢复，也不得在中途重填缓存。由于 pilot 未建立稳定过载，本任务 manifest 冻结 `recovery_assessment_mode=indeterminate-no-overload-evidence`：末尾同速率阶段只作 post-sequence health check，所有 service-recovery 结论保持 indeterminate，即使阶段检查通过也不宣称“已恢复”。后续若需要 service-recovery 结论，须在新 manifest/新任务中预先定义并验证客观过载证据规则。冻结的样本数和 p95/p99 参考带只用于末尾健康检查判据。记录发生器/fixture CPU、计划/实际发送和 headroom。可试 SUT 单核、发生器加 fixtures 另一核的公平**单核 SUT**对比，须证实发生端有余量。若共机干扰或发送不足，只报告有效点与不确定性，不宣称多核扩展或容量上限；真正多核结论需额外负载机或更大且可隔离的主机。
 
 ### R5. Metrics and honest interpretation
 
-每 stage 保存 offered/scheduled/sent/received/correct/correct-on-time、预期负响应、错误答案/协议/传输错误、超时及 shortfall；p50/p95/p99 注明样本量和统计对象，超时单列且不可静默排除。记录 user+system CPU、CPU/有效查询、稳定/峰值 RSS、FD、上游计数。W3 每个有效请求必须能关联至有序 route event 序列，逐请求检查精确 leg 数与顺序；如候选重写上游 DNS ID，则以规范化 question tuple 的 occurrence 顺序关联，并强制同 tuple 请求不重叠，fixture DNS ID 仅作诊断。过载和同进程恢复分开报告；只有满足 R4 冻结判据才标记 service-recovered，缺少连续 PID、参考样本或足够样本时标记 indeterminate。大量失败时不能挑快速成功响应宣称低 p99。对比所有重复的分布/噪声；无预先冻结业务 SLA 时，本轮提供曲线和回归线索，不制造最终性能 PASS 百分比。差异在波动内写持平/不确定；功能缺陷优先于性能；W1/W2/W3 不可推广为全量产品。
+每 stage 保存 offered/scheduled/sent/received/correct/correct-on-time、预期负响应、错误答案/协议/传输错误、超时及 shortfall；p50/p95/p99 注明样本量和统计对象，超时单列且不可静默排除。记录 user+system CPU、CPU/有效查询、稳定/峰值 RSS、FD、上游计数。W3 每个有效请求必须通过 fixture 事件的 `occurred_at` 落入客户端请求 `sent_at`→`finished_at` 区间进行逐请求关联，并精确核对 leg 数与顺序；同 question tuple 单飞用于消除边界歧义，上游 DNS ID 仅作诊断。W2 independent-prefilled 结果必须按生命周期读取对应 stage 文件、传播 prefill/TTL 无效原因，并将 recovery 标记为 indeterminate。此任务所有末尾同速率点都只报告 health-check 指标；service-recovery 结论按冻结模式保持 indeterminate。大量失败时不能挑快速成功响应宣称低 p99。对比所有重复的分布/噪声；无预先冻结业务 SLA 时，本轮提供曲线和回归线索，不制造最终性能 PASS 百分比。差异在波动内写持平/不确定；功能缺陷优先于性能；W1/W2/W3 不可推广为全量产品。
 
 ## Acceptance criteria
 
 - [ ] 双方 Linux amd64 独立 binary 的来源、构建、运行条件及 SHA-256 可追溯；七个固定语料哈希与归档一致；生产机无变更。
 - [ ] 原样 W1/W2/W3 配置/语料的双边 smoke 通过共享严格 DNS oracle、W2 counter oracle、逐请求 W3 route-event oracle（每条路径精确 leg 数及顺序）、进程清理和端口回收；未通过者留缺陷证据且无性能结论。
 - [ ] Pilot 与发生器/fixture headroom 获 review；本 VM 新 manifest 在正式运行前冻结，official runner 每次校验 manifest 和全部固定输入哈希，并验证 harness/SUT 实际 CPU 亲和性。
-- [ ] 每个恢复结论都有同一进程的正常参考→过载→恢复阶段、冻结的 R4 判据和足够样本；W2 warm 还须证明每个测量响应都在对应 key 的 30 秒 fixture TTL 与冻结安全余量内完成。无法满足者可保留独立预填的 warm 点，但恢复标为 indeterminate，不称为 recovery。
+- [ ] 每个同进程末尾 health-check 点都有同一进程的阶段身份、冻结样本/延迟判据和完整结果；本任务冻结的 service-recovery 结论一律为 indeterminate，因为未冻结客观过载触发条件。W2 warm 还须证明每个测量响应都在对应 key 的 30 秒 fixture TTL 与安全余量内完成；独立预填点不得称为同进程恢复。
 - [ ] 各有效场景/负载点至少三次交错 Go/Rust 重复，全部无效尝试保留；条件不足者明确标记原因。
 - [ ] 报告有逐 stage 的正确性、尾延迟、有效吞吐、CPU/RSS/FD、样本量、上游计数、波动、原始证据索引和复现命令。
 - [ ] Reviewer 明确只接受首轮 W1/W2/W3 子集结论，不把本任务写成 Phase 5A 全部完成或生产放行。
 
 ## Execution boundary
 
-规划提交后保持 `planning`。由用户另选执行对话；执行者先读 `design.md`、`implement.md`、`.trellis/workflow.md` 和仓库规范，做独立规划 review，再 `task.py start`。条件不足时保留证据并报告受限结果，不强行填满矩阵。
+任务最初以 `planning` 建立并经独立规划 review。用户随后授权执行，执行对话已用 `task.py start` 将任务置为 `in_progress`。Slice 0 的每次工具/方法修订都须绑定精确提交并复审；官方 manifest 只在 Slice 0 reviewer PASS 后冻结。条件不足时保留证据并报告受限结果，不强行填满矩阵。

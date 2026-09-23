@@ -1,0 +1,15 @@
+ssh_host_alias=mosdns-rust
+hostname=mosdns-rust
+kernel=Linux mosdns-rust 7.0.9-x64v3-xanmod1 #0~20260517.ga456799 SMP PREEMPT_DYNAMIC Sun May 17 20:10:49 UTC x86_64 GNU/Linux
+online_cpus=2
+memory=4102578176
+disk_filesystem=ext4
+open_file_limit=1024
+go_base_launcher=go version go1.24.4 linux/amd64
+go_project_selected_toolchain=go version go1.26.4 linux/amd64
+go_helper_build_toolchain=go1.26.4
+go_candidate_build_toolchain=not-applicable
+rust_toolchain=rustc 1.95.0 (59807616e 2026-04-14)
+cpu_cgroup=0::/user.slice/user-0.slice/session-263.scope;
+harness_requested_cpus=1
+sut_requested_cpus=0

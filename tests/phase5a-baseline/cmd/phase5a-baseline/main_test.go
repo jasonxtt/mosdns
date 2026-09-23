@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -297,7 +298,7 @@ func TestVerifyRoutingEventsProvesExactOrderedPathPerRequest(t *testing.T) {
 	}
 }
 
-func TestVerifyRoutingEventsCorrelatesRewrittenUpstreamIDsByQuestionOccurrence(t *testing.T) {
+func TestVerifyRoutingEventsCorrelatesRewrittenUpstreamIDsByRequestTimeWindow(t *testing.T) {
 	cases, requests, events, stage := validRouteEvidence()
 	if err := verifyRoutingEvents(cases, requests, events, stage); err != nil {
 		t.Fatalf("upstream-assigned DNS IDs must not break ordered question correlation: %v", err)
@@ -313,6 +314,7 @@ func TestVerifyRoutingEventsCorrelatesRewrittenUpstreamIDsByQuestionOccurrence(t
 	extraEvent := events[0]
 	extraEvent.FixtureSeq = 106
 	extraEvent.DNSID = 7
+	extraEvent.OccurredAt = repeated.SentAt.Add(time.Microsecond)
 	events = append(events, extraEvent)
 	stage.RequestSeqEnd = 4
 	stage.FixtureSeqEnd = 106
@@ -321,6 +323,151 @@ func TestVerifyRoutingEventsCorrelatesRewrittenUpstreamIDsByQuestionOccurrence(t
 	if err := verifyRoutingEvents(cases, requests, events, stage); err != nil {
 		t.Fatalf("sequential repeated questions should correlate by ordered occurrence: %v", err)
 	}
+}
+
+func TestVerifyRoutingEventsRejectsRedistributedLegsAcrossRepeatedQuestions(t *testing.T) {
+	base := time.Date(2026, time.September, 24, 12, 0, 0, 0, time.UTC)
+	cases := []workloadCase{{
+		CaseID: "domain-hit", Scenario: "w3", Transport: "udp", QName: "domain-hit.test.", QType: "A",
+		ExpectedRouteClass: "DOMAIN_HIT", Weight: 1,
+	}}
+	requests := []requestRecord{
+		{RunID: "run-1", StageID: "w3-normal", RequestSeq: 1, DNSID: 101, CaseID: "domain-hit", QName: cases[0].QName, QType: "A", QClass: dns.ClassINET, Sent: true, SentAt: base, FinishedAt: base.Add(5 * time.Millisecond), Outcome: "correct_on_time"},
+		{RunID: "run-1", StageID: "w3-normal", RequestSeq: 2, DNSID: 102, CaseID: "domain-hit", QName: cases[0].QName, QType: "A", QClass: dns.ClassINET, Sent: true, SentAt: base.Add(6 * time.Millisecond), FinishedAt: base.Add(10 * time.Millisecond), Outcome: "correct_on_time"},
+	}
+	events := []fixtureEvent{
+		{FixtureSeq: 1, OccurredAt: base.Add(time.Millisecond), DNSID: 0, QName: cases[0].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-a"},
+		{FixtureSeq: 2, OccurredAt: base.Add(2 * time.Millisecond), DNSID: 1, QName: cases[0].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-a"},
+	}
+	stage := stageResult{
+		RunID: "run-1", Stage: "w3-normal", FixtureSeqStart: 0, FixtureSeqEnd: 2,
+		RequestSeqStart: 1, RequestSeqEnd: 2,
+		Counters: stageCounters{Sent: 2, CorrectOnTime: 2},
+	}
+	if err := verifyRoutingEvents(cases, requests, events, stage); err == nil {
+		t.Fatal("both route-a events falling inside the first request must not be split across repeated same-question requests")
+	}
+}
+
+func TestCollectPairedStageObservationsSupportsW2IndependentPrefillLifecycle(t *testing.T) {
+	schedule, err := buildPairSchedule(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	manifest := officialManifest{
+		OfficialFrozen:         true,
+		RecoveryAssessmentMode: recoveryAssessmentMode,
+		PairSchedule:           schedule,
+		Inputs:                 []manifestInput{{Path: "input", SHA256: strings.Repeat("1", 64)}},
+		Runner:                 manifestArtifact{Path: "runner.sh", SHA256: strings.Repeat("2", 64)},
+		Helper:                 manifestHelper{SourcePath: "helper.go", SourceSHA256: strings.Repeat("3", 64), BinaryPath: "helper", BinarySHA256: strings.Repeat("4", 64), Version: helperVersion},
+		Candidates: map[string]manifestCandidate{
+			"go":   {SourceCommit: "go-source", BinaryPath: "mosdns-go", BinarySHA256: strings.Repeat("5", 64)},
+			"rust": {SourceCommit: "rust-source", BinaryPath: "mosdns-rust", BinarySHA256: strings.Repeat("6", 64)},
+		},
+		Scenarios: map[string]manifestScenario{"w2": {
+			StageDurationMS: 3000, NormalReferenceQPS: 200, CommonLoadQPS: 400,
+			NearSaturationQPS: 800, OverloadQPS: 1000, RequestDeadlineMS: 500,
+			LateDrainMS: 100, HarnessCPUSet: "1", SUTCPUSet: "0",
+			RecoveryMinimumSamples: 1, RecoveryP95CeilingUS: 1000, RecoveryP99CeilingUS: 2000,
+			W2WarmLifecycle: "independent-prefilled", W2CacheTTLMS: 30000, W2TTLSafetyMarginMS: 500,
+		}},
+	}
+	manifestSHA := strings.Repeat("a", 64)
+	resultsRoot := filepath.Join(root, "results")
+	writeOfficialRunFixtures(t, resultsRoot, "w2", schedule, manifestSHA, manifest, manifest.Scenarios["w2"])
+	failedGoRun := filepath.Join(resultsRoot, "w2", "repetition-2", "go")
+	if err := os.WriteFile(filepath.Join(failedGoRun, "invalid-stages.tsv"), []byte("common-load-prefill\tper-key prefill failed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	observations, err := collectPairedStageObservations(resultsRoot, manifest, manifestSHA)
+	if err != nil {
+		t.Fatalf("independent-prefilled W2 rows and stage-scoped prefill failure should be collected: %v", err)
+	}
+	var recovered []pairedStageObservation
+	var commonGo *pairedStageObservation
+	for i := range observations {
+		observation := observations[i]
+		if observation.Stage == "recovery" && observation.Repetition == 1 && observation.Candidate == "go" {
+			recovered = append(recovered, observation)
+		}
+		if observation.Stage == "common-load" && observation.Repetition == 2 && observation.Candidate == "go" {
+			commonGo = &observations[i]
+		}
+	}
+	if len(recovered) != 1 || !strings.Contains(recovered[0].RecoveryAssessment, "independent-prefilled") {
+		t.Fatalf("independent W2 recovery row must be retained with an indeterminate assessment: %+v", recovered)
+	}
+	if commonGo == nil || !strings.Contains(commonGo.InvalidReason, "per-key prefill failed") {
+		t.Fatalf("stage-specific W2 prefill failure was not propagated: %+v", commonGo)
+	}
+	aggregates, err := aggregatePairedStages(observations, schedule, manifestSHA)
+	if err != nil {
+		t.Fatalf("independent W2 rows should aggregate: %v", err)
+	}
+	for _, aggregate := range aggregates {
+		if aggregate.Stage == "recovery" && !strings.Contains(aggregate.RecoveryAssessment, "independent-prefilled") {
+			t.Fatalf("aggregate recovery row lost its indeterminate lifecycle assessment: %+v", aggregate)
+		}
+	}
+}
+
+func TestMissingRecoveryAssessmentEvidenceIsRetainedAsInvalidPair(t *testing.T) {
+	schedule, err := buildPairSchedule(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	manifestPath := filepath.Join(root, "manifest.json")
+	manifest := officialManifest{
+		OfficialFrozen: true, RecoveryAssessmentMode: recoveryAssessmentMode,
+		PairSchedule: schedule,
+		Inputs:       []manifestInput{{Path: "input", SHA256: strings.Repeat("1", 64)}},
+		Runner:       manifestArtifact{Path: "runner", SHA256: strings.Repeat("2", 64)},
+		Helper:       manifestHelper{SourcePath: "helper.go", SourceSHA256: strings.Repeat("3", 64), BinaryPath: "helper", BinarySHA256: strings.Repeat("4", 64), Version: helperVersion},
+		Candidates: map[string]manifestCandidate{
+			"go":   {SourceCommit: "go-source", BinaryPath: "mosdns-go", BinarySHA256: strings.Repeat("5", 64)},
+			"rust": {SourceCommit: "rust-source", BinaryPath: "mosdns-rust", BinarySHA256: strings.Repeat("6", 64)},
+		},
+		Scenarios: map[string]manifestScenario{"w1-udp": {
+			StageDurationMS: 3000, NormalReferenceQPS: 200, CommonLoadQPS: 400,
+			NearSaturationQPS: 800, OverloadQPS: 1000, RequestDeadlineMS: 500,
+			LateDrainMS: 100, HarnessCPUSet: "1", SUTCPUSet: "0",
+			RecoveryMinimumSamples: 1, RecoveryP95CeilingUS: 1000, RecoveryP99CeilingUS: 2000,
+		}},
+	}
+	if err := writeJSONFile(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifestSHA, err := sha256File(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultsRoot := filepath.Join(root, "results")
+	writeOfficialRunFixtures(t, resultsRoot, "w1-udp", schedule, manifestSHA, manifest, manifest.Scenarios["w1-udp"])
+	missingRun := filepath.Join(resultsRoot, "w1-udp", "repetition-1", "go")
+	if err := os.Remove(filepath.Join(missingRun, "service-recovery-assessment.txt")); err != nil {
+		t.Fatal(err)
+	}
+	observations, err := collectPairedStageObservations(resultsRoot, manifest, manifestSHA)
+	if err != nil {
+		t.Fatalf("missing recovery evidence should be retained as an invalid stage, not abort collection: %v", err)
+	}
+	aggregates, err := aggregatePairedStages(observations, schedule, manifestSHA)
+	if err != nil {
+		t.Fatalf("invalid recovery evidence should remain reportable: %v", err)
+	}
+	for _, aggregate := range aggregates {
+		if aggregate.Stage == "recovery" {
+			if aggregate.ValidPairs != 2 || len(aggregate.InvalidPairs) != 1 || !strings.Contains(aggregate.InvalidPairs[0].Reason, "service recovery assessment") {
+				t.Fatalf("missing assessment should invalidate only that paired recovery point: %+v", aggregate)
+			}
+			return
+		}
+	}
+	t.Fatal("missing recovery aggregate")
 }
 
 func TestVerifyRoutingCounterTotalsMatchCompleteEventJournal(t *testing.T) {
@@ -419,6 +566,20 @@ func TestVerifyRoutingEventsRejectsInvalidEvidence(t *testing.T) {
 			name: "event outside stage barrier",
 			mutate: func(c []workloadCase, r []requestRecord, e []fixtureEvent, _ *stageResult) ([]workloadCase, []requestRecord, []fixtureEvent) {
 				e[0].FixtureSeq = 100
+				return c, r, e
+			},
+		},
+		{
+			name: "event outside client request interval",
+			mutate: func(c []workloadCase, r []requestRecord, e []fixtureEvent, _ *stageResult) ([]workloadCase, []requestRecord, []fixtureEvent) {
+				e[0].OccurredAt = r[0].FinishedAt.Add(time.Nanosecond)
+				return c, r, e
+			},
+		},
+		{
+			name: "missing fixture occurrence timestamp",
+			mutate: func(c []workloadCase, r []requestRecord, e []fixtureEvent, _ *stageResult) ([]workloadCase, []requestRecord, []fixtureEvent) {
+				e[0].OccurredAt = time.Time{}
 				return c, r, e
 			},
 		},
@@ -611,6 +772,57 @@ func TestVerifyContinuousStagesRequiresOneOrderedSessionAndFrozenRecoveryBand(t 
 	}
 }
 
+func TestAllHealthyContinuousSequenceDoesNotClaimServiceRecovery(t *testing.T) {
+	assessment, err := assessServiceRecovery(validContinuousStages(), recoveryCriteria{
+		MinimumSamples: 5, P95CeilingUS: 1200, P99CeilingUS: 1500,
+	})
+	if err != nil {
+		t.Fatalf("healthy continuous stages should pass the same-session health check: %v", err)
+	}
+	if assessment.Status != "indeterminate" || assessment.Mode != recoveryAssessmentMode || !strings.Contains(assessment.Reason, "no objective overload-evidence criterion") {
+		t.Fatalf("healthy five-stage sequence must not be called service recovery: %+v", assessment)
+	}
+}
+
+func TestFailedContinuousHealthCheckStillReportsIndeterminateServiceRecovery(t *testing.T) {
+	stages := validContinuousStages()
+	stages[4].LatencySamplesUS[9] = 1201
+	stages[4].P95US = 1201
+	stages[4].P99US = 1201
+	assessment, err := assessServiceRecovery(stages, recoveryCriteria{
+		MinimumSamples: 5, P95CeilingUS: 1200, P99CeilingUS: 1500,
+	})
+	if err == nil {
+		t.Fatal("a terminal health check above the frozen latency ceiling must fail its health gate")
+	}
+	if assessment.Status != "indeterminate" || assessment.Mode != recoveryAssessmentMode || !strings.Contains(assessment.Reason, "health check failed") {
+		t.Fatalf("failed terminal health check must still preserve the categorical service-recovery assessment: %+v", assessment)
+	}
+
+	stagePath := filepath.Join(t.TempDir(), "stages.jsonl")
+	writeJSONLines(t, stagePath, stages)
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStdout := os.Stdout
+	os.Stdout = writer
+	commandErr := verifyContinuousCommand([]string{
+		"--stage-result", stagePath, "--run-id", "run-1", "--minimum-samples", "5",
+		"--p95-ceiling-us", "1200", "--p99-ceiling-us", "1500",
+	})
+	_ = writer.Close()
+	os.Stdout = previousStdout
+	output, readErr := io.ReadAll(reader)
+	_ = reader.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if commandErr == nil || !strings.Contains(string(output), "status=indeterminate") || !strings.Contains(string(output), "terminal health check failed") {
+		t.Fatalf("failed health-check command must emit its indeterminate assessment before returning an error: err=%v output=%s", commandErr, output)
+	}
+}
+
 func TestParseCPUListAndRequireDisjointPlacement(t *testing.T) {
 	cpus, err := parseCPUList("0-1,4,6-7")
 	if err != nil {
@@ -661,6 +873,25 @@ func TestOfficialManifestVerifiesEveryFrozenInputAndCandidate(t *testing.T) {
 	}
 	if err := verifyOfficialManifest(opts); err == nil {
 		t.Fatal("a changed corpus input must invalidate official execution")
+	}
+}
+
+func TestOfficialManifestFreezesIndeterminateRecoveryAssessmentMode(t *testing.T) {
+	root := t.TempDir()
+	manifest, opts := validManifestFixture(t, root)
+	manifest.RecoveryAssessmentMode = "claim-recovered-without-overload-proof"
+	manifestPath := filepath.Join(root, "manifest.json")
+	if err := writeJSONFile(manifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifestSHA, err := sha256File(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.ManifestPath = manifestPath
+	opts.ExpectedSHA256 = manifestSHA
+	if err := verifyOfficialManifest(opts); err == nil {
+		t.Fatal("official manifest must reject a recovery claim without a frozen overload criterion")
 	}
 }
 
@@ -776,8 +1007,9 @@ func TestAggregatePairedStagesCommandRequiresFrozenManifestAndNeverOverwrites(t 
 	root := t.TempDir()
 	manifestPath := filepath.Join(root, "manifest.json")
 	manifest := officialManifest{
-		OfficialFrozen: true,
-		PairSchedule:   schedule,
+		OfficialFrozen:         true,
+		RecoveryAssessmentMode: recoveryAssessmentMode,
+		PairSchedule:           schedule,
 		Inputs: []manifestInput{
 			{Path: "input-1", SHA256: strings.Repeat("1", 64)},
 			{Path: "input-2", SHA256: strings.Repeat("2", 64)},
@@ -849,11 +1081,12 @@ func TestCollectPairedStageObservationsIncludesW2ColdWarmAndStageInvalidReasons(
 	root := t.TempDir()
 	manifestPath := filepath.Join(root, "manifest.json")
 	manifest := officialManifest{
-		OfficialFrozen: true,
-		PairSchedule:   schedule,
-		Inputs:         []manifestInput{{Path: "input", SHA256: strings.Repeat("1", 64)}},
-		Runner:         manifestArtifact{Path: "runner", SHA256: strings.Repeat("2", 64)},
-		Helper:         manifestHelper{SourcePath: "helper.go", SourceSHA256: strings.Repeat("3", 64), BinaryPath: "helper", BinarySHA256: strings.Repeat("4", 64), Version: helperVersion},
+		OfficialFrozen:         true,
+		RecoveryAssessmentMode: recoveryAssessmentMode,
+		PairSchedule:           schedule,
+		Inputs:                 []manifestInput{{Path: "input", SHA256: strings.Repeat("1", 64)}},
+		Runner:                 manifestArtifact{Path: "runner", SHA256: strings.Repeat("2", 64)},
+		Helper:                 manifestHelper{SourcePath: "helper.go", SourceSHA256: strings.Repeat("3", 64), BinaryPath: "helper", BinarySHA256: strings.Repeat("4", 64), Version: helperVersion},
 		Candidates: map[string]manifestCandidate{
 			"go":   {SourceCommit: "go-source", BinaryPath: "mosdns-go", BinarySHA256: strings.Repeat("5", 64)},
 			"rust": {SourceCommit: "rust-source", BinaryPath: "mosdns-rust", BinarySHA256: strings.Repeat("6", 64)},
@@ -929,6 +1162,23 @@ func TestExpandInvalidStageReasonsScopesRunLevelOracles(t *testing.T) {
 			t.Errorf("W2 stage %s did not inherit prefill failure: %q", stage, w2Reasons[stage])
 		}
 	}
+	independentW2Stages, err := phase5aPlannedStages("w2", manifestScenario{
+		StageDurationMS: 3000, NormalReferenceQPS: 200, CommonLoadQPS: 400,
+		NearSaturationQPS: 800, OverloadQPS: 1000, W2WarmLifecycle: "independent-prefilled",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	independentReasons, err := expandInvalidStageReasons("w2", independentW2Stages, map[string]string{"common-load-prefill": "per-key prefill failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(independentReasons["common-load"], "per-key prefill failed") {
+		t.Fatalf("independent W2 prefill failure was not mapped to its measurement stage: %q", independentReasons["common-load"])
+	}
+	if independentReasons["normal-reference"] != "" {
+		t.Fatalf("a stage-specific prefill failure contaminated another W2 stage: %q", independentReasons["normal-reference"])
+	}
 
 	w3Stages, err := phase5aPlannedStages("w3", plan)
 	if err != nil {
@@ -966,12 +1216,24 @@ func writeOfficialRunFixtures(t *testing.T, resultsRoot, scenario string, schedu
 			metadata := strings.Join([]string{
 				"scenario=" + scenario,
 				"run_mode=official",
+				"recovery_assessment_mode=" + recoveryAssessmentMode,
 				"candidate=" + candidate,
 				"repetition=" + strconv.Itoa(pair.Repetition),
 				"pair_position=" + strconv.Itoa(position+1),
 				"manifest_sha256=" + manifestSHA,
 			}, "\n") + "\n"
+			if scenario == "w2" {
+				metadata += "w2_warm_lifecycle=" + plan.W2WarmLifecycle + "\n"
+			}
 			if err := os.WriteFile(filepath.Join(runDir, "run-metadata.txt"), []byte(metadata), 0644); err != nil {
+				t.Fatal(err)
+			}
+			assessmentReason := "no frozen overload-evidence criterion; this is a post-sequence same-rate health check"
+			if scenario == "w2" && plan.W2WarmLifecycle == "independent-prefilled" {
+				assessmentReason = "independent-prefilled W2 sessions; no same-process recovery is measured"
+			}
+			assessment := "status=indeterminate\nmode=" + recoveryAssessmentMode + "\nreason=" + assessmentReason + "\n"
+			if err := os.WriteFile(filepath.Join(runDir, "service-recovery-assessment.txt"), []byte(assessment), 0644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(runDir, "manifest.sha256"), []byte(manifestSHA+"  manifest.json\n"), 0644); err != nil {
@@ -1017,15 +1279,36 @@ func writeOfficialRunFixtures(t *testing.T, resultsRoot, scenario string, schedu
 				if err := os.MkdirAll(coldDir, 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.MkdirAll(warmDir, 0755); err != nil {
-					t.Fatal(err)
-				}
 				writeJSONLines(t, filepath.Join(coldDir, "stages.jsonl"), []stageResult{makeStage("official-w2-cold", plan.NormalReferenceQPS)})
-				warmStages := make([]stageResult, 0, len(continuousStageSequence))
-				for _, name := range continuousStageSequence {
-					warmStages = append(warmStages, makeStage(name, stageQPS[name]))
+				if plan.W2WarmLifecycle == "independent-prefilled" {
+					independentDir := filepath.Join(runDir, "w2-warm-independent")
+					if err := os.MkdirAll(independentDir, 0755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(independentDir, "recovery-status.txt"), []byte("indeterminate: independent-prefilled W2 sessions; no same-process recovery is measured\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
+					for _, name := range continuousStageSequence {
+						stageDir := filepath.Join(independentDir, name)
+						if err := os.MkdirAll(filepath.Join(stageDir, "prefill"), 0755); err != nil {
+							t.Fatal(err)
+						}
+						writeJSONLines(t, filepath.Join(stageDir, "stages.jsonl"), []stageResult{makeStage(name, stageQPS[name])})
+						writeJSONLines(t, filepath.Join(stageDir, "prefill", "stages.jsonl"), []stageResult{makeStage("warm-prefill", plan.NormalReferenceQPS)})
+					}
+				} else {
+					if err := os.MkdirAll(warmDir, 0755); err != nil {
+						t.Fatal(err)
+					}
+					warmStages := make([]stageResult, 0, len(continuousStageSequence))
+					for _, name := range continuousStageSequence {
+						warmStages = append(warmStages, makeStage(name, stageQPS[name]))
+					}
+					writeJSONLines(t, filepath.Join(warmDir, "stages.jsonl"), warmStages)
+					if err := os.WriteFile(filepath.Join(warmDir, "recovery-status.txt"), []byte("TTL-eligible\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
 				}
-				writeJSONLines(t, filepath.Join(warmDir, "stages.jsonl"), warmStages)
 			} else {
 				stages := make([]stageResult, 0, len(continuousStageSequence))
 				for _, name := range continuousStageSequence {
@@ -1160,7 +1443,7 @@ func validManifestFixture(t *testing.T, root string) (officialManifest, manifest
 		t.Fatal(err)
 	}
 	manifest := officialManifest{
-		SchemaVersion: 1, OfficialFrozen: true, Inputs: inputs,
+		SchemaVersion: 1, OfficialFrozen: true, RecoveryAssessmentMode: recoveryAssessmentMode, Inputs: inputs,
 		Runner: manifestArtifact{Path: runnerRel, SHA256: runnerHash},
 		Helper: manifestHelper{SourcePath: helperSourceRel, SourceSHA256: helperSourceHash, BinaryPath: helperPath, BinarySHA256: helperHash, Version: helperVersion},
 		Candidates: map[string]manifestCandidate{
@@ -1219,11 +1502,11 @@ func validRouteEvidence() ([]workloadCase, []requestRecord, []fixtureEvent, stag
 		{RunID: "run-1", StageID: "w3-normal", RequestSeq: 3, DNSID: 103, CaseID: "ip-rule-miss", QName: cases[2].QName, QType: "A", QClass: dns.ClassINET, Sent: true, SentAt: base.Add(2 * time.Millisecond), FinishedAt: base.Add(12 * time.Millisecond), Outcome: "correct_on_time"},
 	}
 	events := []fixtureEvent{
-		{FixtureSeq: 101, DNSID: 0, QName: cases[0].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-a"},
-		{FixtureSeq: 102, DNSID: 0, QName: cases[1].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-b"},
-		{FixtureSeq: 103, DNSID: 1, QName: cases[1].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-a"},
-		{FixtureSeq: 104, DNSID: 0, QName: cases[2].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-b"},
-		{FixtureSeq: 105, DNSID: 0, QName: cases[2].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-c"},
+		{FixtureSeq: 101, OccurredAt: base.Add(5 * time.Millisecond), DNSID: 0, QName: cases[0].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-a"},
+		{FixtureSeq: 102, OccurredAt: base.Add(3 * time.Millisecond), DNSID: 0, QName: cases[1].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-b"},
+		{FixtureSeq: 103, OccurredAt: base.Add(4 * time.Millisecond), DNSID: 1, QName: cases[1].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-a"},
+		{FixtureSeq: 104, OccurredAt: base.Add(6 * time.Millisecond), DNSID: 0, QName: cases[2].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-b"},
+		{FixtureSeq: 105, OccurredAt: base.Add(7 * time.Millisecond), DNSID: 0, QName: cases[2].QName, QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-c"},
 	}
 	stage := stageResult{RunID: "run-1", Stage: "w3-normal", FixtureSeqStart: 100, FixtureSeqEnd: 105, RequestSeqStart: 1, RequestSeqEnd: 3, Counters: stageCounters{Sent: 3, CorrectOnTime: 3}}
 	return cases, requests, events, stage
@@ -1277,8 +1560,8 @@ func TestFixtureResponseJournalsRouteEventBeforeReturningResponse(t *testing.T) 
 		t.Fatalf("fixture journal contains %d events, want 1", len(events))
 	}
 	want := fixtureEvent{FixtureSeq: 1, DNSID: query.Id, QName: "ip-hit.test.", QType: dns.TypeA, QClass: dns.ClassINET, Upstream: "route-b"}
-	if events[0] != want {
-		t.Fatalf("fixture event=%+v, want %+v", events[0], want)
+	if events[0].FixtureSeq != want.FixtureSeq || events[0].DNSID != want.DNSID || events[0].QName != want.QName || events[0].QType != want.QType || events[0].QClass != want.QClass || events[0].Upstream != want.Upstream || events[0].OccurredAt.IsZero() {
+		t.Fatalf("fixture event=%+v, want fields %+v with an occurrence timestamp", events[0], want)
 	}
 }
 
