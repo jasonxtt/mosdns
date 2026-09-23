@@ -1,6 +1,6 @@
 # Design — paired Go-only / Rust-native W1–W3 measurement
 
-Status: in progress — Slice 0 reviewer PASS; manifest v1 was rejected because its digest was derived from the mutable file. Replacement manifest v2 pins its reviewed digest in the driver and received Slice 1 reviewer PASS at `8b09f56fcbf194e04d0f95c924c4f28392291d89`. The authorized official matrix is next; no official measurements have run.
+Status: in progress — Slice 0 and pre-run manifest v2 reviews passed. The frozen official matrix completed 24 candidate attempts; all raw files remain index-verified. W2 TTL/counter and W3 per-request route-event evidence passed postrun revalidation. Twelve of 21 scenario/stage groups have three valid pairs; the report records all partial/invalid groups and is awaiting final independent review.
 
 ## Evidence model
 

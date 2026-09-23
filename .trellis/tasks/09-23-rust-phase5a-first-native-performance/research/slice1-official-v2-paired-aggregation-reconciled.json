@@ -1,0 +1,1749 @@
+{
+  "manifest_sha256": "3d8b76e8799bf709ef7e19df9edd6245936f05f9c4e09230dd49ecdaaf000f13",
+  "groups": [
+    {
+      "scenario": "w1-tcp",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 194,
+          "median": 197,
+          "max": 304
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 320,
+          "median": 323,
+          "max": 480
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 466,
+          "median": 474,
+          "max": 690
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 171,
+          "median": 209,
+          "max": 221
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 302,
+          "median": 315,
+          "max": 368
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 412,
+          "median": 447,
+          "max": 491
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -165,
+        "median": -21,
+        "max": 48
+      }
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 180,
+          "median": 204,
+          "max": 250
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 279,
+          "median": 303,
+          "max": 386
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 440,
+          "median": 457,
+          "max": 570
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 161,
+          "median": 183,
+          "max": 194
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 265,
+          "median": 289,
+          "max": 319
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 362,
+          "median": 396,
+          "max": 538
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -67,
+        "median": -14,
+        "max": -14
+      }
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 227,
+          "median": 271,
+          "max": 282
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 412,
+          "median": 486,
+          "max": 519
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 564,
+          "median": 654,
+          "max": 720
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 191,
+          "median": 194,
+          "max": 209
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 323,
+          "median": 326,
+          "max": 367
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 425,
+          "median": 480,
+          "max": 515
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -160,
+        "median": -152,
+        "max": -89
+      }
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 201,
+          "median": 220,
+          "max": 231
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 331,
+          "median": 385,
+          "max": 391
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 416,
+          "median": 507,
+          "max": 617
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 132,
+          "median": 158,
+          "max": 190
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 220,
+          "median": 259,
+          "max": 293
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 298,
+          "median": 374,
+          "max": 459
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -171,
+        "median": -126,
+        "max": -38
+      }
+    },
+    {
+      "scenario": "w1-tcp",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 72,
+          "median": 79,
+          "max": 111
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 179,
+          "median": 182,
+          "max": 248
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 321,
+          "median": 333,
+          "max": 358
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 71,
+          "median": 78,
+          "max": 101
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 150,
+          "median": 208,
+          "max": 221
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 269,
+          "median": 344,
+          "max": 354
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -98,
+        "median": 29,
+        "max": 39
+      }
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 2,
+      "go": {
+        "p50_us": {
+          "n": 2,
+          "min": 84,
+          "median": 93.5,
+          "max": 103
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 170,
+          "median": 179,
+          "max": 188
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 295,
+          "median": 311,
+          "max": 327
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 2,
+          "min": 65,
+          "median": 65,
+          "max": 65
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 138,
+          "median": 152.5,
+          "max": 167
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 268,
+          "median": 288,
+          "max": 308
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 2,
+        "min": -50,
+        "median": -26.5,
+        "max": -3
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "sender shortfall or scheduled query not sent"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 96,
+          "median": 100,
+          "max": 130
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 230,
+          "median": 238,
+          "max": 301
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 299,
+          "median": 367,
+          "max": 402
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 85,
+          "median": 91,
+          "max": 98
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 232,
+          "median": 245,
+          "max": 258
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 313,
+          "median": 314,
+          "max": 334
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -43,
+        "median": -6,
+        "max": 15
+      }
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 2,
+      "go": {
+        "p50_us": {
+          "n": 2,
+          "min": 72,
+          "median": 72.5,
+          "max": 73
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 161,
+          "median": 164.5,
+          "max": 168
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 306,
+          "median": 312,
+          "max": 318
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 2,
+          "min": 61,
+          "median": 69.5,
+          "max": 78
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 130,
+          "median": 144.5,
+          "max": 159
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 265,
+          "median": 288.5,
+          "max": 312
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 2,
+        "min": -31,
+        "median": -20,
+        "max": -9
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "sender shortfall or scheduled query not sent"
+        }
+      ]
+    },
+    {
+      "scenario": "w1-udp",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 0,
+      "go": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p95_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "p99_us": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "effective_throughput_qps": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "latency_sample_count": {
+          "n": 0,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 0,
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 44,
+          "median": 54,
+          "max": 108
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 103,
+          "median": 119,
+          "max": 205
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 163,
+          "median": 193,
+          "max": 335
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 38,
+          "median": 73,
+          "max": 88
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 89,
+          "median": 130,
+          "max": 154
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 174,
+          "median": 182,
+          "max": 225
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -51,
+        "median": -30,
+        "max": 27
+      }
+    },
+    {
+      "scenario": "w2",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 2,
+      "go": {
+        "p50_us": {
+          "n": 2,
+          "min": 38,
+          "median": 60,
+          "max": 82
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 91,
+          "median": 114.5,
+          "max": 138
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 137,
+          "median": 158.5,
+          "max": 180
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 2,
+          "min": 49,
+          "median": 51.5,
+          "max": 54
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 93,
+          "median": 96,
+          "max": 99
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 131,
+          "median": 143.5,
+          "max": 156
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 2,
+        "min": -39,
+        "median": -18.5,
+        "max": 2
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "sender shortfall or scheduled query not sent"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 60,
+          "median": 89,
+          "max": 102
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 156,
+          "median": 196,
+          "max": 213
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 218,
+          "median": 254,
+          "max": 277
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 49,
+          "median": 77,
+          "max": 93
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 122,
+          "median": 165,
+          "max": 185
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 170,
+          "median": 211,
+          "max": 220
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -48,
+        "median": -34,
+        "max": -11
+      }
+    },
+    {
+      "scenario": "w2",
+      "stage": "official-w2-cold",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 71,
+          "median": 73,
+          "max": 116
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 176,
+          "median": 217,
+          "max": 224
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 259,
+          "median": 366,
+          "max": 378
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 51,
+          "median": 54,
+          "max": 74
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 129,
+          "median": 132,
+          "max": 170
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 171,
+          "median": 178,
+          "max": 223
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -95,
+        "median": -85,
+        "max": -6
+      }
+    },
+    {
+      "scenario": "w2",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 2,
+      "go": {
+        "p50_us": {
+          "n": 2,
+          "min": 48,
+          "median": 50.5,
+          "max": 53
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 102,
+          "median": 105,
+          "max": 108
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 168,
+          "median": 170.5,
+          "max": 173
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 2,
+          "min": 43,
+          "median": 47.5,
+          "max": 52
+        },
+        "p95_us": {
+          "n": 2,
+          "min": 89,
+          "median": 93.5,
+          "max": 98
+        },
+        "p99_us": {
+          "n": 2,
+          "min": 120,
+          "median": 129,
+          "max": 138
+        },
+        "effective_throughput_qps": {
+          "n": 2,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 2,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 2,
+        "min": -19,
+        "median": -11.5,
+        "max": -4
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "sender shortfall or scheduled query not sent"
+        }
+      ]
+    },
+    {
+      "scenario": "w2",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 1,
+      "go": {
+        "p50_us": {
+          "n": 1,
+          "min": 68,
+          "median": 68,
+          "max": 68
+        },
+        "p95_us": {
+          "n": 1,
+          "min": 154,
+          "median": 154,
+          "max": 154
+        },
+        "p99_us": {
+          "n": 1,
+          "min": 211,
+          "median": 211,
+          "max": 211
+        },
+        "effective_throughput_qps": {
+          "n": 1,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 1,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 1,
+          "min": 51,
+          "median": 51,
+          "max": 51
+        },
+        "p95_us": {
+          "n": 1,
+          "min": 137,
+          "median": 137,
+          "max": 137
+        },
+        "p99_us": {
+          "n": 1,
+          "min": 185,
+          "median": 185,
+          "max": 185
+        },
+        "effective_throughput_qps": {
+          "n": 1,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 1,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 1,
+        "min": -17,
+        "median": -17,
+        "max": -17
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 2,
+          "candidate": "rust",
+          "reason": "same-process recovery criteria failed"
+        }
+      ]
+    },
+    {
+      "scenario": "w3",
+      "stage": "common-load",
+      "target_qps": 400,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 145,
+          "median": 165,
+          "max": 208
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 330,
+          "median": 347,
+          "max": 405
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 534,
+          "median": 608,
+          "max": 612
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 143,
+          "median": 152,
+          "max": 283
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 307,
+          "median": 313,
+          "max": 483
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 448,
+          "median": 464,
+          "max": 623
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 400,
+          "median": 400,
+          "max": 400
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 1200,
+          "median": 1200,
+          "max": 1200
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -98,
+        "median": -17,
+        "max": 136
+      }
+    },
+    {
+      "scenario": "w3",
+      "stage": "near-saturation",
+      "target_qps": 800,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 143,
+          "median": 152,
+          "max": 182
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 305,
+          "median": 314,
+          "max": 355
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 451,
+          "median": 461,
+          "max": 469
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 140,
+          "median": 141,
+          "max": 226
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 281,
+          "median": 285,
+          "max": 439
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 407,
+          "median": 407,
+          "max": 696
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 800,
+          "median": 800,
+          "max": 800
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 2400,
+          "median": 2400,
+          "max": 2400
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -74,
+        "median": -20,
+        "max": 125
+      }
+    },
+    {
+      "scenario": "w3",
+      "stage": "normal-reference",
+      "target_qps": 200,
+      "complete_pairs": 3,
+      "valid_pairs": 3,
+      "go": {
+        "p50_us": {
+          "n": 3,
+          "min": 165,
+          "median": 166,
+          "max": 230
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 376,
+          "median": 393,
+          "max": 429
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 463,
+          "median": 525,
+          "max": 576
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 3,
+          "min": 162,
+          "median": 201,
+          "max": 213
+        },
+        "p95_us": {
+          "n": 3,
+          "min": 337,
+          "median": 389,
+          "max": 398
+        },
+        "p99_us": {
+          "n": 3,
+          "min": 487,
+          "median": 504,
+          "max": 571
+        },
+        "effective_throughput_qps": {
+          "n": 3,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 3,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 3,
+        "min": -92,
+        "median": -4,
+        "max": 22
+      }
+    },
+    {
+      "scenario": "w3",
+      "stage": "overload",
+      "target_qps": 1000,
+      "complete_pairs": 3,
+      "valid_pairs": 1,
+      "go": {
+        "p50_us": {
+          "n": 1,
+          "min": 129,
+          "median": 129,
+          "max": 129
+        },
+        "p95_us": {
+          "n": 1,
+          "min": 274,
+          "median": 274,
+          "max": 274
+        },
+        "p99_us": {
+          "n": 1,
+          "min": 421,
+          "median": 421,
+          "max": 421
+        },
+        "effective_throughput_qps": {
+          "n": 1,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 1,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 1,
+          "min": 157,
+          "median": 157,
+          "max": 157
+        },
+        "p95_us": {
+          "n": 1,
+          "min": 292,
+          "median": 292,
+          "max": 292
+        },
+        "p99_us": {
+          "n": 1,
+          "min": 439,
+          "median": 439,
+          "max": 439
+        },
+        "effective_throughput_qps": {
+          "n": 1,
+          "min": 1000,
+          "median": 1000,
+          "max": 1000
+        },
+        "latency_sample_count": {
+          "n": 1,
+          "min": 3000,
+          "median": 3000,
+          "max": 3000
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 1,
+        "min": 18,
+        "median": 18,
+        "max": 18
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "sender shortfall or scheduled query not sent"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "sender shortfall or scheduled query not sent"
+        }
+      ]
+    },
+    {
+      "scenario": "w3",
+      "stage": "recovery",
+      "target_qps": 200,
+      "recovery_assessment": "status=indeterminate; mode=indeterminate-no-overload-evidence; reason=service recovery assessment evidence is incomplete or inconsistent",
+      "complete_pairs": 3,
+      "valid_pairs": 1,
+      "go": {
+        "p50_us": {
+          "n": 1,
+          "min": 159,
+          "median": 159,
+          "max": 159
+        },
+        "p95_us": {
+          "n": 1,
+          "min": 354,
+          "median": 354,
+          "max": 354
+        },
+        "p99_us": {
+          "n": 1,
+          "min": 445,
+          "median": 445,
+          "max": 445
+        },
+        "effective_throughput_qps": {
+          "n": 1,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 1,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust": {
+        "p50_us": {
+          "n": 1,
+          "min": 188,
+          "median": 188,
+          "max": 188
+        },
+        "p95_us": {
+          "n": 1,
+          "min": 377,
+          "median": 377,
+          "max": 377
+        },
+        "p99_us": {
+          "n": 1,
+          "min": 535,
+          "median": 535,
+          "max": 535
+        },
+        "effective_throughput_qps": {
+          "n": 1,
+          "min": 200,
+          "median": 200,
+          "max": 200
+        },
+        "latency_sample_count": {
+          "n": 1,
+          "min": 600,
+          "median": 600,
+          "max": 600
+        }
+      },
+      "rust_minus_go_p95_us": {
+        "n": 1,
+        "min": 23,
+        "median": 23,
+        "max": 23
+      },
+      "invalid_pairs": [
+        {
+          "repetition": 1,
+          "candidate": "rust",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "go",
+          "reason": "same-process recovery criteria failed"
+        },
+        {
+          "repetition": 3,
+          "candidate": "rust",
+          "reason": "same-process recovery criteria failed"
+        }
+      ]
+    }
+  ]
+}

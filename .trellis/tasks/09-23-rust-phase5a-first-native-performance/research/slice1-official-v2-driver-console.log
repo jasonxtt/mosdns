@@ -1,0 +1,58 @@
+official-manifest-v2.json: OK
+prelaunch_manifest_sha256=3d8b76e8799bf709ef7e19df9edd6245936f05f9c4e09230dd49ecdaaf000f13
+prelaunch_driver_sha256=d7cd9cc786afcf343a0546a1ffe97883a064a39dd3686769128fc1077dcb8c18
+prelaunch_result_root=absent
+prelaunch_ports=free
+manifest_sha256=3d8b76e8799bf709ef7e19df9edd6245936f05f9c4e09230dd49ecdaaf000f13
+matrix_driver_sha256=d7cd9cc786afcf343a0546a1ffe97883a064a39dd3686769128fc1077dcb8c18
+manifest_tuple_validated	w1-udp	1	1	go
+manifest_tuple_validated	w1-udp	1	2	rust
+manifest_tuple_validated	w1-udp	2	1	rust
+manifest_tuple_validated	w1-udp	2	2	go
+manifest_tuple_validated	w1-udp	3	1	go
+manifest_tuple_validated	w1-udp	3	2	rust
+manifest_tuple_validated	w1-tcp	1	1	go
+manifest_tuple_validated	w1-tcp	1	2	rust
+manifest_tuple_validated	w1-tcp	2	1	rust
+manifest_tuple_validated	w1-tcp	2	2	go
+manifest_tuple_validated	w1-tcp	3	1	go
+manifest_tuple_validated	w1-tcp	3	2	rust
+manifest_tuple_validated	w2	1	1	go
+manifest_tuple_validated	w2	1	2	rust
+manifest_tuple_validated	w2	2	1	rust
+manifest_tuple_validated	w2	2	2	go
+manifest_tuple_validated	w2	3	1	go
+manifest_tuple_validated	w2	3	2	rust
+manifest_tuple_validated	w3	1	1	go
+manifest_tuple_validated	w3	1	2	rust
+manifest_tuple_validated	w3	2	1	rust
+manifest_tuple_validated	w3	2	2	go
+manifest_tuple_validated	w3	3	1	go
+manifest_tuple_validated	w3	3	2	rust
+official_attempt_complete	w1-udp	1	1	go	exit=1
+official_attempt_complete	w1-udp	1	2	rust	exit=1
+official_attempt_complete	w1-udp	2	1	rust	exit=0
+official_attempt_complete	w1-udp	2	2	go	exit=1
+official_attempt_complete	w1-udp	3	1	go	exit=1
+official_attempt_complete	w1-udp	3	2	rust	exit=0
+official_attempt_complete	w1-tcp	1	1	go	exit=1
+official_attempt_complete	w1-tcp	1	2	rust	exit=1
+official_attempt_complete	w1-tcp	2	1	rust	exit=1
+official_attempt_complete	w1-tcp	2	2	go	exit=1
+official_attempt_complete	w1-tcp	3	1	go	exit=1
+official_attempt_complete	w1-tcp	3	2	rust	exit=0
+official_attempt_complete	w2	1	1	go	exit=1
+official_attempt_complete	w2	1	2	rust	exit=1
+official_attempt_complete	w2	2	1	rust	exit=1
+official_attempt_complete	w2	2	2	go	exit=0
+official_attempt_complete	w2	3	1	go	exit=0
+official_attempt_complete	w2	3	2	rust	exit=0
+official_attempt_complete	w3	1	1	go	exit=0
+official_attempt_complete	w3	1	2	rust	exit=1
+official_attempt_complete	w3	2	1	rust	exit=0
+official_attempt_complete	w3	2	2	go	exit=0
+official_attempt_complete	w3	3	1	go	exit=1
+official_attempt_complete	w3	3	2	rust	exit=1
+completed_candidate_attempts=24
+runner_nonzero_exits=15
+attempt_status=/root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2/attempt-status.tsv
