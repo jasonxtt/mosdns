@@ -1,6 +1,6 @@
 # Rust Phase 5A — first native whole-process comparison
 
-Status: **in progress — Slice 0 PASS; manifest v1 is frozen and all 24 tuples validate, awaiting Slice 1 review before official samples**. The user authorized execution after the planning review passed. No official measurements have started; production deployment is outside scope.
+Status: **in progress — Slice 0 PASS; Slice 1 manifest v1 review found and rejected a mutable-digest gap. Replacement manifest v2 pins its reviewed digest; regression and 24-tuple validation pass, awaiting Slice 1 review before official samples.** The user authorized execution after the planning review passed. No official measurements have started; production deployment is outside scope.
 
 ## Goal
 

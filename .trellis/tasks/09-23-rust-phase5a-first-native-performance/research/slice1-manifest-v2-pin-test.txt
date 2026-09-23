@@ -1,0 +1,1 @@
+manifest pin regression: PASS (valid tuple count=24; tampered manifest rejected before helper)

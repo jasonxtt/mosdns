@@ -1,6 +1,6 @@
 # Implementation plan — first native whole-process comparison
 
-Status: **in progress — Slice 0 reviewer PASS; official manifest v1 is frozen and all 24 tuples validate, with Slice 1 review pending before measurements**. Planning review passed and execution was authorized in this task. No official samples have run.
+Status: **in progress — Slice 0 reviewer PASS; official manifest v1 was rejected at Slice 1 review for a mutable-digest gap. Replacement manifest v2 pins the reviewed SHA in the matrix driver; its mutation regression and 24-tuple VM validation pass, with Slice 1 review pending before measurements.** Planning review passed and execution was authorized in this task. No official samples have run.
 
 ## Before start
 
@@ -44,12 +44,16 @@ The reviewer returned three P1 findings against commit `4c2631d0ab9cb68939699e7c
 
 Allowed edits: this task's `research/**` manifest/results and small benchmark-tool remediation reviewed before fresh official runs. No product change or archived evidence rewrite.
 
-- [x] Freeze a new task-owned manifest v1 **before** official samples: exact Go/Rust source/binary/helper and corpus hashes, VM/environment, config parity, CPU placement, scenario/order/repetition/QPS/duration/deadline, TCP policy, per-key W2 prefill timestamp capture, 30-second fixture TTL and safety margin, W3 event schema, continuous stage sequence, terminal health-check rate/duration/sample minimum/p95-p99 ceilings, categorical recovery assessment mode, logs/audit and criteria for invalid stage. Record SHA-256.
-- [x] Validate all 24 candidate/scenario/repetition tuples against the frozen manifest and confirm the dry-run schedule; no SUT or official samples were started.
+- [x] Freeze replacement task-owned manifest v2 before official samples, preserving rejected v1 unchanged. Pin its SHA-256 in the matrix driver and sidecar; retain exact Go/Rust source/binary/helper and corpus hashes, VM/environment, config parity, CPU placement, scenario/order/repetition/QPS/duration/deadline, TCP policy, per-key W2 prefill timestamp capture, 30-second fixture TTL and safety margin, W3 event schema, continuous stage sequence, terminal health-check rate/duration/sample minimum/p95-p99 ceilings, categorical recovery assessment mode, logs/audit and invalid-stage criteria.
+- [x] Test the digest gate first: reproduce that v1 accepted a coherently changed manifest, then verify v2 accepts the frozen manifest and rejects a modified QPS field before invoking the helper. Validate all 24 candidate/scenario/repetition tuples twice on the VM and confirm the 24-row dry-run schedule; no SUT or official samples were started.
 - [ ] Obtain independent Slice 1 reviewer PASS before official samples.
 - [ ] Run frozen open-loop matrix at least three times per valid point; alternate candidate order. Preserve the same SUT PID/fixture session across each staged sequence, while W2 cold and W2 warm retain their separately declared lifecycle. Keep all valid/invalid attempts with separate directories and reasons. Verify manifest/input hashes, correct-on-time counters, exact W3 event path per sent request, stage sequence barriers, terminal health-check criterion and indeterminate recovery assessment, resource samples and headroom after each run.
 - [ ] Inspect overloading/recovery behavior separately and ensure missing responses, timeouts and sender shortfall are not hidden. If a method/manifest change is required, issue a new manifest and rerun both candidates at all affected points.
 - [ ] Check cleanup on VM (task-owned processes/listeners only), retain hashes and exact commands; commit/push evidence index and obtain Slice 1 reviewer PASS.
+
+### Slice 1 manifest review attempt — v1
+
+Independent review returned **FAIL** for commit `31e86c90dab7ee8b6073dfec26b5942043b9558d`, manifest SHA-256 `2ff4e0804b26af77db41c1357e107b00ea9539127665784087b29add3e43698f`. The driver calculated the manifest's expected hash from the current file and passed that same value to the helper, so changing the manifest and recomputing dependent hashes could bypass the review freeze. No official sample ran. Preserve the rejected v1 artifacts and review record unchanged. Manifest v2 removes the circular driver-hash field, pins the reviewed manifest SHA directly in the driver, requires the independent `.sha256` sidecar to match, and checks both before every driver mode. A test-first regression reproduces v1 acceptance and verifies that v2 rejects a changed QPS field before the helper runs.
 
 ## Slice 2 — comparison report and closure
 
