@@ -1,6 +1,6 @@
 # Rust Phase 5A — first native whole-process comparison
 
-Status: **planning only**. The user will choose another conversation to execute. Planning/review does not authorize official benchmark runs or deployment.
+Status: **planning only** in this conversation. The user will choose another conversation to execute the reviewed plan on `ssh mosdns-rust`; that execution is already requested. Production deployment is outside scope.
 
 ## Goal
 
