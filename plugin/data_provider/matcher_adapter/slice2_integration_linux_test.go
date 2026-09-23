@@ -11,8 +11,18 @@ func TestSlice2RealDomainAdapterRejectsUnsafeRegexp(t *testing.T) {
 		t.Fatal("unsafe regexp unexpectedly built in the Rust domain adapter")
 	}
 	if snapshot != nil {
-		_ = snapshot.Close()
-		t.Fatal("unsafe regexp returned a Rust snapshot despite the build error")
+		t.Fatalf("unsafe regexp returned a non-nil Rust snapshot despite the build error: %T", snapshot)
+	}
+}
+
+func TestSlice2RealIPAdapterRejectsInvalidPrefix(t *testing.T) {
+	t.Setenv(BackendEnv, "rust")
+	snapshot, err := BuildIPSnapshot([]string{"not-an-ip"})
+	if err == nil {
+		t.Fatal("invalid prefix unexpectedly built in the Rust IP adapter")
+	}
+	if snapshot != nil {
+		t.Fatalf("invalid prefix returned a non-nil Rust IP snapshot despite the build error: %T", snapshot)
 	}
 }
 
@@ -39,7 +49,6 @@ func TestSlice2RealValuedAdapterRejectsUnsafeRegexp(t *testing.T) {
 		t.Fatal("unsafe regexp unexpectedly built in the Rust valued adapter")
 	}
 	if snapshot != nil {
-		_ = snapshot.Close()
-		t.Fatal("unsafe regexp returned a valued Rust snapshot despite the build error")
+		t.Fatalf("unsafe regexp returned a non-nil valued Rust snapshot despite the build error: %T", snapshot)
 	}
 }

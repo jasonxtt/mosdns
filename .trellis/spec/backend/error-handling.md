@@ -7,6 +7,24 @@
 - Log an error at the operational boundary that handles it; do not log and repeatedly wrap the same failure at every layer.
 - Preserve the current HTTP status/body behavior when replacing an API implementation. Tests such as `coremain/api_special_groups_test.go` and `coremain/config_manager_api_test.go` are the contract.
 
+When returning a concrete pointer through an interface, handle the error before
+converting the pointer to the interface. A nil concrete pointer stored in an
+interface is not a nil interface, so return an untyped `nil` on failures:
+
+```go
+func buildSnapshot() (Snapshot, error) {
+	concrete, err := buildConcreteSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	return concrete, nil
+}
+```
+
+Do not directly forward `(*snapshot, error)` from a helper into a public
+`(Snapshot, error)` result; when the helper returns a nil `*snapshot` and an
+error, callers can observe a non-nil `Snapshot` and invoke its methods.
+
 ## Rust and FFI conventions
 
 - No Rust panic may cross `extern "C"`. Catch it at the boundary and return a stable status code.
