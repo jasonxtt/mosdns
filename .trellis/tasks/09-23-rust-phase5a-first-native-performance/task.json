@@ -3,7 +3,7 @@
   "name": "rust-phase5a-first-native-performance",
   "title": "Rust Phase 5A first native performance comparison",
   "description": "Plan a reproducible Linux amd64 Go-only versus Rust-native W1/W2/W3 process comparison with correctness and resource evidence.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "benchmark",
   "package": null,

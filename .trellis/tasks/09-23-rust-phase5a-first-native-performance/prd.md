@@ -1,6 +1,6 @@
 # Rust Phase 5A — first native whole-process comparison
 
-Status: **planning only** in this conversation. The user will choose another conversation to execute the reviewed plan on `ssh mosdns-rust`; that execution is already requested. Production deployment is outside scope.
+Status: **in progress — Slice 0 pilot complete; scoped changes awaiting reviewer PASS**. The user authorized execution after the planning review passed. No official measurements have started and the official manifest is not frozen; production deployment is outside scope.
 
 ## Goal
 
@@ -28,25 +28,26 @@ Status: **planning only** in this conversation. The user will choose another con
 
 ### R2. Correctness hard gate
 
-每个场景先双边 smoke。校验请求 ID、qname/qtype、rcode、答案/路由类别和期限；合法负响应可计正确，错误、串包、超时、传输失败不可算有效吞吐。W2 校验冷/热 upstream 增量，W3 校验 route leg/order。任何未解释语义差异都暂停该场景性能结论，不能用宽松 Rust oracle。
+每个场景先对 Go 与 Rust 分别运行相同的未修改 smoke cases。共享 oracle 校验完整 DNS 响应：response bit、request ID、匹配 opcode、单个 echoed question（name/type/class）、预期 rcode、无意外 truncation、精确预期 answer set；预期负响应只有在 rcode 正确且 answer 为空时才算正确。两端都执行相同期限、W2 cold 每个唯一 key 一次 miss / warm 零增量和 W3 必须/禁止 route legs 检查。错误、错配、迟到、超时或传输失败不可计入有效吞吐。任何未解释的语义差异都暂停该场景性能结论，不得为 Rust 放宽 oracle。
 
 ### R3. Freeze a new VM manifest before official runs
 
-短 pilot 仅检验发生器/fixture 余量并选择阶梯。正式样本前冻结新 manifest：源/binary/config/workload 哈希，启动命令，场景和 Go/Rust 交错顺序、QPS 阶梯、stage 时长、期限、warmup/prefill、TCP 连接策略、缓存/日志/审计设置、CPU 亲和性。SHA-256 必须由 official runner 校验。变更需新版本并双边重跑；不得覆写历史证据。
+短 pilot 仅检验发生器/fixture 余量并选择阶梯。正式样本前冻结新 manifest：源/binary/config/workload/helper 哈希，启动命令，场景和 Go/Rust 交错顺序、QPS 阶梯、stage 时长、期限、warmup/prefill、TCP 连接策略、缓存/日志/审计设置、CPU 亲和性、W3 事件证据格式与 stage 边界、连续恢复阶段顺序和恢复判据。SHA-256 必须由 official runner 校验。变更需新版本并双边重跑；不得覆写历史证据。
 
 ### R4. Valid load on a 2-CPU VM
 
-固定速率发送与响应速度解耦；短 pilot 后冻结低负载→常用负载→接近饱和→过载→恢复点，不能在规划时伪造 QPS/容量。每个有效点至少三次，Go/Rust 交错先后；保留全部无效/失败尝试。记录发生器/fixture CPU、计划/实际发送和 headroom。可试 SUT 单核、发生器加 fixtures 另一核的公平**单核 SUT**对比，须证实发生端有余量。若共机干扰或发送不足，只报告有效低负载与不确定性，不宣称多核扩展或容量上限；真正多核结论需额外负载机或更大且可隔离的主机。
+固定速率发送与响应速度解耦；短 pilot 后冻结低/正常参考负载→常用负载→接近饱和→过载→恢复的阶梯，不能在规划时伪造 QPS/容量。每个有效点至少三次，Go/Rust 交错先后；保留全部无效/失败尝试。恢复声称必须在同一 SUT PID、同一 fixture session 内按“正常参考→过载→同一正常参考”连续运行，中途不得重启或重置；W2 cold 单独启动，W2 warm 在显式预热后运行自己的连续序列。归档 fixture 的 A 应答 TTL 为 30 秒，正式样本前须冻结每个 warm key 的预填时间和 TTL 安全余量；W2 warm 的最后一个测量响应必须在其对应预填后、TTL 到期前完成。若 pilot 证明完整连续序列无法在 TTL 安全余量内完成，可保留每阶段独立预填的 warm 测量点，但 W2 warm 同进程恢复结论必须标为 indeterminate，不得在中途重填缓存来宣称恢复。不得为满足时限修改冻结配置或语料。正式样本前冻结恢复时长、最小样本数、无错误/shortfall 条件和 p95/p99 判据：恢复 stage 在参考负载下须全数 correct-on-time、无 late/wrong/protocol/transport/timeout/sender-shortfall，且 p95/p99 不超过 pilot 中至少三次稳定参考 stage 的对应最大值。参考数据或样本数不足时标为 indeterminate，不宣称恢复。记录发生器/fixture CPU、计划/实际发送和 headroom。可试 SUT 单核、发生器加 fixtures 另一核的公平**单核 SUT**对比，须证实发生端有余量。若共机干扰或发送不足，只报告有效低负载与不确定性，不宣称多核扩展或容量上限；真正多核结论需额外负载机或更大且可隔离的主机。
 
 ### R5. Metrics and honest interpretation
 
-每 stage 保存 offered/scheduled/sent/received/correct/correct-on-time、预期负响应、错误答案/协议/传输错误、超时及 shortfall；p50/p95/p99 注明样本量和统计对象，超时单列且不可静默排除。记录 user+system CPU、CPU/有效查询、稳定/峰值 RSS、FD、上游计数。过载和恢复分开报告；大量失败时不能挑快速成功响应宣称低 p99。对比所有重复的分布/噪声；无预先冻结业务 SLA 时，本轮提供曲线和回归线索，不制造最终性能 PASS 百分比。差异在波动内写持平/不确定；功能缺陷优先于性能；W1/W2/W3 不可推广为全量产品。
+每 stage 保存 offered/scheduled/sent/received/correct/correct-on-time、预期负响应、错误答案/协议/传输错误、超时及 shortfall；p50/p95/p99 注明样本量和统计对象，超时单列且不可静默排除。记录 user+system CPU、CPU/有效查询、稳定/峰值 RSS、FD、上游计数。W3 每个有效请求必须能关联至有序 route event 序列，逐请求检查精确 leg 数与顺序；如候选重写上游 DNS ID，则以规范化 question tuple 的 occurrence 顺序关联，并强制同 tuple 请求不重叠，fixture DNS ID 仅作诊断。过载和同进程恢复分开报告；只有满足 R4 冻结判据才标记 service-recovered，缺少连续 PID、参考样本或足够样本时标记 indeterminate。大量失败时不能挑快速成功响应宣称低 p99。对比所有重复的分布/噪声；无预先冻结业务 SLA 时，本轮提供曲线和回归线索，不制造最终性能 PASS 百分比。差异在波动内写持平/不确定；功能缺陷优先于性能；W1/W2/W3 不可推广为全量产品。
 
 ## Acceptance criteria
 
-- [ ] 双方 Linux amd64 独立 binary 的来源、构建、运行条件及 SHA-256 可追溯；生产机无变更。
-- [ ] 原样 W1/W2/W3 配置/语料的双边 smoke、W2/W3 oracle、进程清理/端口回收通过；未通过者留缺陷证据且无性能结论。
-- [ ] Pilot 与发生器/fixture headroom 获 review；本 VM 新 manifest 在正式运行前冻结，每次 official run 核验哈希。
+- [ ] 双方 Linux amd64 独立 binary 的来源、构建、运行条件及 SHA-256 可追溯；七个固定语料哈希与归档一致；生产机无变更。
+- [ ] 原样 W1/W2/W3 配置/语料的双边 smoke 通过共享严格 DNS oracle、W2 counter oracle、逐请求 W3 route-event oracle（每条路径精确 leg 数及顺序）、进程清理和端口回收；未通过者留缺陷证据且无性能结论。
+- [ ] Pilot 与发生器/fixture headroom 获 review；本 VM 新 manifest 在正式运行前冻结，official runner 每次校验 manifest 和全部固定输入哈希，并验证 harness/SUT 实际 CPU 亲和性。
+- [ ] 每个恢复结论都有同一进程的正常参考→过载→恢复阶段、冻结的 R4 判据和足够样本；W2 warm 还须证明每个测量响应都在对应 key 的 30 秒 fixture TTL 与冻结安全余量内完成。无法满足者可保留独立预填的 warm 点，但恢复标为 indeterminate，不称为 recovery。
 - [ ] 各有效场景/负载点至少三次交错 Go/Rust 重复，全部无效尝试保留；条件不足者明确标记原因。
 - [ ] 报告有逐 stage 的正确性、尾延迟、有效吞吐、CPU/RSS/FD、样本量、上游计数、波动、原始证据索引和复现命令。
 - [ ] Reviewer 明确只接受首轮 W1/W2/W3 子集结论，不把本任务写成 Phase 5A 全部完成或生产放行。
