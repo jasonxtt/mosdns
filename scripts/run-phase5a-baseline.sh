@@ -9,7 +9,7 @@ RESULT_DIR="${RESULT_DIR:-}"
 HELPER_BINARY="${HELPER_BINARY:-}"
 OFFERED_QPS="${OFFERED_QPS:-}"
 MANIFEST_SHA256="${MANIFEST_SHA256:-}"
-MANIFEST_PATH="${MANIFEST_PATH:-${ROOT_DIR}/.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline/research/run-manifest.json}"
+MANIFEST_PATH="${MANIFEST_PATH:-}"
 SUT_CPU_SET="${SUT_CPU_SET:-}"
 HARNESS_CPU_SET="${HARNESS_CPU_SET:-}"
 SUT_STARTUP_MARGIN="${SUT_STARTUP_MARGIN:-3}"
@@ -55,6 +55,10 @@ case "${RUN_MODE}" in
   smoke|pilot|official) ;;
   *) echo "unsupported RUN_MODE: ${RUN_MODE}" >&2; exit 2 ;;
 esac
+if [[ "${RUN_MODE}" == "official" && -z "${MANIFEST_PATH}" ]]; then
+  echo "official mode requires an explicit MANIFEST_PATH to a reviewed, compatible manifest" >&2
+  exit 2
+fi
 
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   if [[ -z "${RESULT_DIR}" || -z "${HELPER_BINARY}" || -z "${CANDIDATE}" || -z "${REPETITION}" || -z "${PAIR_POSITION}" ]]; then
@@ -228,7 +232,7 @@ if [[ "${RUN_MODE}" == "official" ]]; then
     MANIFEST="${ROOT_DIR}/${MANIFEST}"
   fi
   if [[ ! -f "${MANIFEST}" ]]; then
-    echo "official mode requires run-manifest.json" >&2
+    echo "official mode requires an existing MANIFEST_PATH: ${MANIFEST}" >&2
     exit 2
   fi
   if [[ -z "${MANIFEST_SHA256}" || -z "${CANDIDATE}" || -z "${REPETITION}" || -z "${PAIR_POSITION}" || -z "${STAGE_DURATION_MS}" || -z "${NORMAL_REFERENCE_QPS}" || -z "${COMMON_LOAD_QPS}" || -z "${NEAR_SATURATION_QPS}" || -z "${OVERLOAD_QPS}" || -z "${RECOVERY_MINIMUM_SAMPLES}" || -z "${RECOVERY_P95_CEILING_US}" || -z "${RECOVERY_P99_CEILING_US}" ]]; then
