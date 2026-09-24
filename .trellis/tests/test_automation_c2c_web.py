@@ -47,12 +47,14 @@ class FakeC2CHost:
         verification=None,
         baseline_text="old reviewer result",
         assistant_id="new-assistant",
+        baseline_assistant_id="old-assistant",
     ):
         self.responses = list(responses)
         self.failed_sends = failed_sends
         self.verification = verification
         self.baseline_text = baseline_text
         self.assistant_id = assistant_id
+        self.baseline_assistant_id = baseline_assistant_id
         self.baseline_read = False
         self.verify_calls = []
         self.send_attempts = []
@@ -73,13 +75,12 @@ class FakeC2CHost:
         self.read_calls.append((target, cursor))
         if cursor is None and not self.baseline_read:
             self.baseline_read = True
+            baseline_message = {"text": self.baseline_text, "status": "completed"}
+            if self.baseline_assistant_id is not None:
+                baseline_message["id"] = self.baseline_assistant_id
             return {
                 "cursor": "baseline",
-                "latestAssistantMessage": {
-                    "id": "old-assistant",
-                    "text": self.baseline_text,
-                    "status": "completed",
-                },
+                "latestAssistantMessage": baseline_message,
             }
         if self.responses:
             payload = self.responses.pop(0)
@@ -536,6 +537,14 @@ class C2CReviewerTransportTest(unittest.TestCase):
         transport.verify_target(self._target())
         transport.send({"text": "[C2C] REVIEW_ONLY request"})
         self.assertFalse(transport.wait_result(0.75))
+
+    def test_refuses_to_send_without_a_pre_send_assistant_identity(self):
+        host = FakeC2CHost(baseline_assistant_id=None)
+        transport = C2CWebReviewerTransport(host, self._target())
+        transport.verify_target(self._target())
+        with self.assertRaisesRegex(C2CReviewerBindingError, "pre-send assistant message identity"):
+            transport.send({"text": "[C2C] REVIEW_ONLY request"})
+        self.assertEqual(host.send_attempts, [])
 
 
 if __name__ == "__main__":
