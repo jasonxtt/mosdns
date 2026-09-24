@@ -1,6 +1,6 @@
 # Slice 1 preflight and manifest v2
 
-Status: prelaunch snapshot — replacement manifest v2 received independent Slice 1 **PASS** at exact commit `8b09f56fcbf194e04d0f95c924c4f28392291d89`; its digest-mutation regression and all 24 tuple validations passed before the official launch. The later official run and postrun evidence are recorded in [the comparison report](../../../../docs/rust/phase5a-native-comparison.md) and `slice1-official-v2-correctness-audit.md`.
+Status: prelaunch snapshot — replacement manifest v2 received independent Slice 1 **PASS** at exact commit `8b09f56fcbf194e04d0f95c924c4f28392291d89`; its digest-mutation regression and all 24 tuple validations passed before the official launch. The later official run and postrun evidence are recorded in [the comparison report](../../../../../../docs/rust/phase5a-native-comparison.md) and `slice1-official-v2-correctness-audit.md`.
 
 ## Superseded v1 review
 
