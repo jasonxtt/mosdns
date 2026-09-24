@@ -162,6 +162,29 @@ class C2CReviewerBindingTest(unittest.TestCase):
         stored = json.loads((self.root / ".trellis/.runtime/automation/codex_test.json").read_text())
         self.assertEqual(stored["reviewer"], current_turn)
 
+        changed = {"provider": "codex", "reference": "different-current-turn"}
+        with self.assertRaisesRegex(ActivationError, "frozen authorization"):
+            authorize(
+                self.root,
+                task_dir,
+                "Slice 0",
+                context_key="codex_test",
+                reviewer_target=changed,
+                reviewer_transport_evidence=self._evidence(changed),
+            )
+
+        (task_dir / "task.json").write_text(json.dumps({"status": "in_progress"}), encoding="utf-8")
+        activate(self.root, task_dir, context_key="codex_test")
+        with self.assertRaisesRegex(ActivationError, "frozen authorization"):
+            authorize(
+                self.root,
+                task_dir,
+                "Slice 0",
+                context_key="codex_test",
+                reviewer_target=changed,
+                reviewer_transport_evidence=self._evidence(changed),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

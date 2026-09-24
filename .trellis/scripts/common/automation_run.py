@@ -487,10 +487,18 @@ def authorize(
     current implementation plan or accepts a fresh verification assertion.
     """
 
+    if reviewer_target is not None and not validate_target(reviewer_target):
+        raise ActivationError("current-turn reviewer target is invalid")
+    frozen_snapshot = load_authorization(repo_root, context_key) if reviewer_target is not None else None
+    if reviewer_target is not None and frozen_snapshot is not None and frozen_snapshot.reviewer != reviewer_target:
+        raise ActivationError("current-turn reviewer target differs from the frozen authorization snapshot")
+
     existing = load_run(repo_root, context_key)
     if existing is not None:
         if existing.status == "blocked":
             raise ActivationError(existing.blocked_reason or "automation run is blocked")
+        if reviewer_target is not None and frozen_snapshot is None:
+            raise ActivationError("current-turn reviewer target cannot change an activated run")
         _, task_relative = _task_path(repo_root, task_dir)
         if existing.task != task_relative:
             raise ActivationError("another automation run already exists for this context")
@@ -500,8 +508,6 @@ def authorize(
     context = load_context(repo_root, context_key)
     resolved_target = False
     if reviewer_target is not None:
-        if not validate_target(reviewer_target):
-            raise ActivationError("current-turn reviewer target is invalid")
         context.reviewer = copy.deepcopy(reviewer_target)
         resolved_target = True
     elif context.reviewer is None and reviewer_resolver is not None:
@@ -518,6 +524,8 @@ def authorize(
         if existing_snapshot is not None:
             if existing_snapshot.task != task_relative:
                 raise ActivationError("another authorization snapshot already exists for this context")
+            if existing_snapshot.reviewer != context.reviewer:
+                raise ActivationError("reviewer target changed after authorization; explicit re-authorization is required")
             return existing_snapshot
 
         evidence = reviewer_transport_evidence
