@@ -22,7 +22,7 @@ CPU、RSS 和 FD 取样支持这台 VM 上的**有条件单核对照**。CPU 时
 
     taskset --cpu-list 1 bash /root/mosdns-rust-phase5a-first-native-performance-605c305/evidence-official-v2/run-official-matrix-v2.sh --execute
 
-完整 manifest、构建身份、driver transcript 和执行状态表见本任务的 [manifest v2](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/official-manifest-v2.json)、[构建身份](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-build-identities-v1.txt)、[driver transcript](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-driver-console.log) 和 [24 次尝试状态](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-attempt-status.tsv)。
+完整 manifest、构建身份、driver transcript 和执行状态表见本任务的 [manifest v2](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/official-manifest-v2.json)、[构建身份](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-build-identities-v1.txt)、[driver transcript](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-driver-console.log) 和 [24 次尝试状态](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-attempt-status.tsv)。
 
 ## 正确性与阶段覆盖
 
@@ -59,7 +59,7 @@ W3 的 6 组 Go/Rust 运行共完成 30 个阶段的逐请求 route-event 校验
 | W3 / overload | 17,998 | route-a/b/c：11,999 / 11,998 / 5,999 |
 | W3 / recovery health-check | 3,600 | route-a/b/c：2,400 / 2,400 / 1,200 |
 
-完整的 [132 行 upstream observation 表](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-upstream-observations.tsv)包含每候选、每重复、每阶段的实际计数、W3 预期/观测 leg 对照、无效原因、原始文件清单及逐行源证据 SHA-256。只读[汇总脚本](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/summarize-official-v2-upstreams.py)会先复验 718 个冻结原始文件；结果索引 SHA-256 为 `7dd7597fc175efa9f124ed62fccf4fee32aeaf365d90afe3684b1feb3b017ea8`，脚本 SHA-256 为 `35d5d96109f99ef463f7a386e4fd979cbdac12a94c725468c78f05d0c66ed6d4`，观察表 SHA-256 为 `6e04b326f3237e468178a86c9ad2528df97e1670adcffa8880a7fbd508896aeb`。远端导出命令为：
+完整的 [132 行 upstream observation 表](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-upstream-observations.tsv)包含每候选、每重复、每阶段的实际计数、W3 预期/观测 leg 对照、无效原因、原始文件清单及逐行源证据 SHA-256。只读[汇总脚本](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/summarize-official-v2-upstreams.py)会先复验 718 个冻结原始文件；结果索引 SHA-256 为 `7dd7597fc175efa9f124ed62fccf4fee32aeaf365d90afe3684b1feb3b017ea8`，脚本 SHA-256 为 `35d5d96109f99ef463f7a386e4fd979cbdac12a94c725468c78f05d0c66ed6d4`，观察表 SHA-256 为 `6e04b326f3237e468178a86c9ad2528df97e1670adcffa8880a7fbd508896aeb`。远端导出命令为：
 
     python3 /root/mosdns-rust-phase5a-first-native-performance-605c305/evidence-official-v2/summarize-official-v2-upstreams.py --results-root /root/mosdns-rust-phase5a-first-native-performance-605c305/results/official-v2 --result-index /root/mosdns-rust-phase5a-first-native-performance-605c305/evidence-official-v2/official-results-index.sha256 --output /root/mosdns-rust-phase5a-first-native-performance-605c305/evidence-official-v2/upstream-observations.tsv
 
@@ -110,7 +110,7 @@ W3 的 6 组 Go/Rust 运行共完成 30 个阶段的逐请求 route-event 校验
 | W3 / common-load (400) | 165 [145–208] / 347 [330–405] / 608 [534–612] | 152 [143–283] / 313 [307–483] / 464 [448–623] | -17 [-98–136] |
 | W3 / near-saturation (800) | 152 [143–182] / 314 [305–355] / 461 [451–469] | 141 [140–226] / 285 [281–439] / 407 [407–696] | -20 [-74–125] |
 
-每次有效配对的原始 p50/p95/p99、样本数、correct-on-time 数、有效吞吐、错误计数、runner exit 和配对有效性都在 [126 行 stage observation 表](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-stage-observations.tsv)。每行保留一方的一次尝试；相同 repetition 的 Go/Rust 行即可复算逐次配对差值。每个 600 样本行的 p99 只由尾端少量观测决定；三次重复范围比单一汇总数更能显示本轮不确定性。
+每次有效配对的原始 p50/p95/p99、样本数、correct-on-time 数、有效吞吐、错误计数、runner exit 和配对有效性都在 [126 行 stage observation 表](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-stage-observations.tsv)。每行保留一方的一次尝试；相同 repetition 的 Go/Rust 行即可复算逐次配对差值。每个 600 样本行的 p99 只由尾端少量观测决定；三次重复范围比单一汇总数更能显示本轮不确定性。
 
 ## 资源观察
 
@@ -123,7 +123,7 @@ W3 的 6 组 Go/Rust 运行共完成 30 个阶段的逐请求 route-event 校验
 
 /proc CPU 时钟为 100 ticks/s，一个 tick 是 10 ms；一个 tick 对应每阶段 0.333 个单核 CPU 百分点，以及按该阶段响应数折算的 3.3–16.7 µs/query 上界。Rust 的 4 个 0-tick 窗口只支持“小于一个 tick”（低于 0.333% 单核）的上界，不是 0 CPU。表中的 CPU/query 中位数只统计非零 tick 窗口；这个分辨率不足以据此排名 CPU/query。
 
-有效三次配对组中，load generator 与全部 fixtures 的合计 CPU 峰值为 harness 单核的 15.979%（最高样本在 W3 near-saturation 800 QPS）。同时，六个候选尝试仍出现 sender shortfall；因此这个观测只说明有效样本中未见 harness 接近单核饱和，不能抹去 shortfall 或保证所有尝试均有足够发送余量。完整角色和逐阶段资源见 [438 行 resource observation 表](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-resource-observations.tsv)。
+有效三次配对组中，load generator 与全部 fixtures 的合计 CPU 峰值为 harness 单核的 15.979%（最高样本在 W3 near-saturation 800 QPS）。同时，六个候选尝试仍出现 sender shortfall；因此这个观测只说明有效样本中未见 harness 接近单核饱和，不能抹去 shortfall 或保证所有尝试均有足够发送余量。完整角色和逐阶段资源见 [438 行 resource observation 表](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-resource-observations.tsv)。
 
 ## 结果整理、无效尝试和复核
 
@@ -137,7 +137,7 @@ W3 的 6 组 Go/Rust 运行共完成 30 个阶段的逐请求 route-event 校验
 
 最终 reconciled paired aggregation SHA-256 为 e2079495f10848a19d783a39ad06072a6240618feb77904fcf949d0b29c4d6ba；status map SHA-256 为 1416ac51bfe262128d2c7224249824c0104639696229a2705fa9a090a6f557cb。stage/resource observation 表分别为 3a78e9ace9ff59430af5ecd13b77111da4e7b7bdc3246e04322ecfa95c7ed21d 和 0ae00f044581e34c025378910abea602156a030de076cb2b11cc5f271df7d517。overlay 的三项回归测试通过，覆盖 24 次状态映射、原始结果不变、拒绝错误 driver hash 和拒绝不同 schedule。
 
-复核明细见 [W2/W3 raw-result correctness audit](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-correctness-audit.md)、[reconciled aggregate](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-paired-aggregation-reconciled.json)、[rejected aggregate](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-paired-aggregation-rejected.json) 和 [status map](../../.trellis/tasks/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-attempt-exit-status-map.tsv)。
+复核明细见 [W2/W3 raw-result correctness audit](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-correctness-audit.md)、[reconciled aggregate](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-paired-aggregation-reconciled.json)、[rejected aggregate](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-paired-aggregation-rejected.json) 和 [status map](../../.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/research/slice1-official-v2-attempt-exit-status-map.tsv)。
 
 运行结束后，718/718 原始索引仍通过；没有任务候选/helper 进程，10 个 benchmark 端口均无 listener。测试 VM 上既有的 mosdns 服务仍在运行，本任务没有操作它；生产 mos 没有压测或改动。
 
