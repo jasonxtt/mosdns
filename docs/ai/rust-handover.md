@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-09-22`
+Last verified: `2026-09-24`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
@@ -35,21 +35,24 @@ Concise cross-session handover for the Rust migration on branch `rust`.
   `rust` branch is a future pure Rust-native replacement, not an intermediate
   production runtime.
 
-## Status as of 2026-09-22
+## Status as of 2026-09-24
 
-`rust-phase5a-native-forwarding` completed all five approved slices on branch
-`rust`; `HEAD` and `origin/rust` are `7af4dd3e3cae4405af0a7cf4451619e811b71674`.
-The authoritative reviewer conversation `000` reviewed the exact final range
-`bdfd01614b689fcc7eaabe868e8aeb5195008147` → `7af4dd3e3cae4405af0a7cf4451619e811b71674`
-and returned `FINAL: PASS`, authorizing only normal Trellis finish/archive and
-stop. The task-local record contains the final workspace gates and the
-authorized Linux W1 correctness-only evidence; no performance verdict,
-deployment, or production/default wiring was performed. The expected archive
-path is `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-forwarding/`.
+The Rust-native host has reviewed, bounded W1 UDP/TCP forwarding, W2 simple
+cache, and W3 domain/IP routing evidence; those tasks are archived. The first
+Go/Rust native-process comparison task is also reviewed and archived. Its
+[report](../rust/phase5a-native-comparison.md) supports only the stated
+W1/W2/W3 cases: 12/21 scenario-stage groups formed three valid pairs, with
+no objective overload point, no resolved service-recovery result, and no
+multi-core capacity claim. None of these gates enables a production/default
+cutover.
 
-The Rust native host remains an experimental W1 UDP/TCP forwarding foundation:
-existing Go behavior is unchanged, no default Rust cutover is enabled, and no
-follow-up task is authorized by this closeout.
+The next [stage plan](../rust/next-stage-plan.md) creates only
+`rust-phase5a-native-query-observability` in `planning` state. Its
+[PRD](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/prd.md),
+design, and implementation plan are proposals for review; no runtime work,
+benchmark, or deployment is authorized by writing them. Inspect the live
+Trellis task state before resuming, because archive moves and task pointers
+may change independently of this concise handover.
 
 Completed milestones (all archived; each archive holds its own evidence):
 
@@ -65,6 +68,8 @@ Completed milestones (all archived; each archive holds its own evidence):
 | Phase 4 dual-stack selection | Resolver extension: explicit `bootstrap_version=0` A+AAAA candidate collection, A-preferred selection, per-family TTL/state. No connection fallback or Happy Eyeballs. | `.trellis/tasks/archive/2026-09/09-18-rust-phase4-dual-stack-endpoint-selection/` |
 | Phase 4 connection reuse | `rust/upstream-core` reuse owner: explicit reuse key over numeric dial + transport + secure identity/authority/ALPN, serial-per-connection minimum, bounded idle/pending limits, typed errors. | `.trellis/tasks/archive/2026-09/09-18-rust-phase4-connection-reuse-pipeline/` |
 | Phase 4 QUIC/HTTP3/DoQ foundation | `rust/upstream-core` fresh one-shot DoQ and DoH3 clients with exact ALPN, identity separation, bounded response validation, lifecycle/commit semantics, and no fallback. | `.trellis/tasks/archive/2026-09/09-18-rust-phase4-quic-http3-doq-foundation/` |
+| Phase 5A W1/W2/W3 host | Strict native YAML subset, W1 UDP/TCP forwarding, W2 simple cache, and W3 bounded routing, each with scoped Linux correctness gates. | `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-forwarding/`, `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-cache/`, `.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-routing/` |
+| Phase 5A first process comparison | Frozen paired W1/W2/W3 Go/Rust run with retained invalid attempts and explicit uncertainty. | `.trellis/tasks/archive/2026-09/09-23-rust-phase5a-first-native-performance/` |
 
 The workspace also holds `rust/runtime`, the transitional single `staticlib`
 from the earlier hybrid work. New Phase 3B+ modules compose as plain Rust
@@ -101,40 +106,21 @@ stability are the primary improvements. Memory is secondary with no required
 reduction percentage; bounded, reclaimable extra memory is acceptable when
 measurements justify the performance benefit.
 
-The bounded **Phase 5A minimal native host** W1 task is closed after the YAML
-subset -> UDP/TCP listener -> async sequence -> existing upstream -> response
-path passed its final gate. The follow-on `rust-phase5a-native-cache` task has
-completed its bounded W2 Linux evidence at reviewed source
-`b558d153cad9ad8e3ffaf18a6e2dde82329e32e0`: strict four-plugin YAML, one
-host-owned cache, plain UDP W2 hit/miss/expiry and the existing W1 UDP/TCP
-path passed the Linux amd64 correctness and cgo regression gates. Final
-review returned PASS at `c6b7f80226a13fa9ab81945fe782fe2c7c6bb5d0`;
-the user authorized archive after independent checks. Its exact commands,
-hashes and limits are in
-`.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-cache/`.
-
-This is still only a bounded W2 subset. Full cache behavior (lazy policy,
-EDNS-aware product integration, dump/persistence, API/WebUI, metrics and
-complete plugin/routing compatibility) remains a later Phase 5A/5B/5C gate;
-no production/default wiring was enabled. Any broader host work requires a
-separately scoped task and review.
-
-The follow-on `rust-phase5a-native-routing` Slice 3 evidence has now run on
-Linux amd64 at exact source `33e826ccd89a5db039bfc4d92aaf0593907dd95b`: the
-native-host W1/W2/W3 targets, Rust workspace tests/clippy, runtime ABI tests,
-and the real UDP W3 corpus passed. The evidence records exact `A`, `B -> A`,
-and `B -> C` route order, cancellation/close/rebind behavior, unchanged
-baseline/corpus digests, and the legacy tagged cgo matcher limitation. This
-remains a bounded W3 subset only; basic observability, comparable native
-performance, full plugin/routing compatibility, and the final reviewer result
-remain open. No production/default cutover or deployment was performed.
+The immediate Phase 5A gap is native basic audit/metrics: the strict host
+currently rejects `enable_audit: true` and lacks a terminal query snapshot.
+The planned task makes W1/W2/W3 outcomes and overhead measurable without
+claiming full C08 audit/API parity. After it, a separate measurement/profiling
+task must repair offered-load validity and examine W1 TCP/W2 and multi-core
+scaling before selecting optimizations. Full cache behavior, remaining
+plugins/transports and representative production query combinations remain
+5B/Phase 4 work; management and persistence remain 5C work.
 
 Remaining Phase 4 foundations compose with **5B full query features**; **5C full
 control plane** covers APIs, existing UI, persistent state and updates; **5D**
 validates full-system performance and stability; **Phase 6** retires hybrid
-scaffolding before production replacement. Current sequence foundation and
-serial transport reuse are not evidence of completed async host wiring or
-final concurrency performance.
+scaffolding before production replacement. Current single-thread local-set
+runtime and serial transport reuse are not evidence of final concurrency or
+multi-core performance.
 
 - Architecture, dependencies, and gates: `docs/ai/rust-rewrite-plan.md`.
 - Feature ownership and native acceptance inventory:
@@ -142,9 +128,9 @@ final concurrency performance.
 - Reproducible performance/stability workloads and threshold-freeze rules:
   `docs/rust/performance-validation.md`.
 
-This handover update does not authorize a new task, runtime expansion,
-benchmark campaign, or deployment. Later implementation needs its own scoped
-task and review.
+The current task is planning only. Implementation requires review of its latest
+PRD/design/implement summary in a later user message; benchmarks and deployment
+remain separately gated by that task's exact scope and the project rules.
 
 ## Non-negotiable constraints
 

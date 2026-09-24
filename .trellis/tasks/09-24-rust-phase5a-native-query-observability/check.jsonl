@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Rust and Linux verification gate"}
+{"file": ".trellis/tasks/09-24-rust-phase5a-native-query-observability/research/source-audit.md", "reason": "Evidence and scope audit"}
