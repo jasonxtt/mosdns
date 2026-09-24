@@ -366,6 +366,8 @@ class C2CWebReviewerTransport:
         self._attempted_message: str | None = None
         self._verified_target: dict[str, Any] | None = None
         self._cursor: str | None = None
+        self._baseline_ready = False
+        self._post_send_response_seen = False
         self._latest_text = ""
         self._latest_payload: Any = None
         self._final_candidate: str | None = None
@@ -413,6 +415,15 @@ class C2CWebReviewerTransport:
         if self._verified_target != self.target:
             raise C2CReviewerBindingError("C2C review target must be verified before sending")
         self._validate_target(self.target)
+        if not self._baseline_ready:
+            baseline = self.host.read_thread(copy.deepcopy(self.target), None)
+            if not isinstance(baseline, dict) or not isinstance(baseline.get("cursor"), str) or not baseline["cursor"]:
+                raise C2CReviewerBindingError("C2C reviewer transport requires a pre-send message cursor")
+            baseline_status = str(baseline.get("status", "")).lower()
+            if baseline_status in {"error", "failed", "dead", "not_found"} or baseline.get("error"):
+                raise C2CReviewerBindingError("C2C reviewer transport failed while reading the pre-send cursor")
+            self._cursor = baseline["cursor"]
+            self._baseline_ready = True
         self._send_attempted = True
         self._attempted_message = message
         result = self.host.send_message(copy.deepcopy(self.target), message)
@@ -426,16 +437,26 @@ class C2CWebReviewerTransport:
         while True:
             payload = self.host.read_thread(copy.deepcopy(self.target), self._cursor)
             self._latest_payload = payload
-            if isinstance(payload, dict) and isinstance(payload.get("cursor"), str):
-                self._cursor = payload["cursor"]
+            if not isinstance(payload, dict) or not isinstance(payload.get("cursor"), str) or not payload["cursor"]:
+                raise C2CReviewerBindingError("C2C reviewer transport response has no message cursor")
+            returned_cursor = payload["cursor"]
             status = str(payload.get("status", "")).lower() if isinstance(payload, dict) else ""
             if status in {"error", "failed", "dead", "not_found"} or (
                 isinstance(payload, dict) and payload.get("error")
             ):
                 raise C2CReviewerBindingError("C2C reviewer transport failed while waiting")
-            text = _payload_text(payload)
-            if text:
-                self._latest_text = text
+            cursor_changed = returned_cursor != self._cursor
+            if not self._post_send_response_seen and not cursor_changed:
+                text = ""
+            else:
+                if cursor_changed:
+                    self._cursor = returned_cursor
+                    self._latest_text = _payload_text(payload)
+                else:
+                    text = _payload_text(payload)
+                    if text:
+                        self._latest_text = text
+                self._post_send_response_seen = True
             parsed = parse_c2c_review_result(self._latest_text)
             if parsed["status"] in {"pass", "fail"}:
                 if self._latest_text == self._final_candidate:
