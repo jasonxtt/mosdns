@@ -19,7 +19,7 @@ from common.automation import (
     set_executor,
     set_reviewer,
 )
-from common.automation_c2c_web import resolve_reviewer_target
+from common.automation_c2c_web import parse_c2c_review_result, resolve_reviewer_target
 from common.automation_run import (
     ActivationError,
     AutomationRunError,
@@ -90,6 +90,12 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--context")
     review.add_argument("--unit", required=True)
     review.add_argument("--text", required=True)
+    review.add_argument(
+        "--provider",
+        choices=("generic", "c2c-web"),
+        default="generic",
+        help="reviewer response contract to parse",
+    )
 
     complete_command = sub.add_parser("complete", help="advance after a recorded PASS")
     complete_command.add_argument("--context")
@@ -160,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "record-fail":
         context = record_fail(root, key, unit=args.unit, result=_result(args.result))
     elif args.command == "record-review":
-        context = persist_review_result(root, key, args.unit, parse_review_result(args.text))
+        parser = parse_c2c_review_result if args.provider == "c2c-web" else parse_review_result
+        context = persist_review_result(root, key, args.unit, parser(args.text))
     elif args.command == "complete":
         context = complete(root, key)
     elif args.command == "migrate":
