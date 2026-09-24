@@ -477,6 +477,7 @@ def authorize(
     context_key: str,
     reviewer_transport_evidence: dict[str, Any] | None = None,
     transport_verifier: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    reviewer_resolver: Callable[[Any], dict[str, Any]] | None = None,
 ) -> AuthorizationSnapshot | AutomationRun:
     """Freeze authorization before start, or activate it after start.
 
@@ -496,6 +497,13 @@ def authorize(
 
     task_path, task_relative = _task_path(repo_root, task_dir)
     context = load_context(repo_root, context_key)
+    resolved_default = False
+    if context.reviewer is None and reviewer_resolver is not None:
+        resolved = reviewer_resolver(context)
+        if not validate_target(resolved):
+            raise ActivationError("reviewer resolver returned an invalid target")
+        context.reviewer = copy.deepcopy(resolved)
+        resolved_default = True
     if context.reviewer is None:
         raise ActivationError("reviewer target must be resolved before automation authorization")
     status = _task_status(task_path)
@@ -511,6 +519,8 @@ def authorize(
             evidence = transport_verifier(context.reviewer)
         if not _valid_reviewer_evidence(evidence, context.reviewer):
             raise ActivationError("reviewer transport evidence must be verified before task.py start")
+        if resolved_default:
+            context.save(repo_root)
         authorized_units = _select_units(parse_implementation_units(task_path), units)
         snapshot = AuthorizationSnapshot(
             context_key=context_key,

@@ -19,6 +19,7 @@ from common.automation import (
     set_executor,
     set_reviewer,
 )
+from common.automation_c2c_web import resolve_reviewer_target
 from common.automation_run import (
     ActivationError,
     AutomationRunError,
@@ -141,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             args.units,
             context_key=key,
             reviewer_transport_evidence=_result(args.reviewer_evidence),
+            reviewer_resolver=lambda current: resolve_reviewer_target(current, root)[0],
         )
     elif args.command == "activate":
         context = activate(root, args.task, context_key=key)
