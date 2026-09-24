@@ -224,16 +224,43 @@ archive/finish, a new task, production, or deployment. Stop for a major issue
 or the five-round remediation limit; otherwise continue through the authorized
 range and leave task lifecycle writes to `task.py`.
 
+Planning and execution remain in the current Codex conversation; selecting a
+reviewer never transfers planning or execution authority. An explicit
+current-turn or persisted reviewer target wins over every default. Only when
+both are absent may the `c2c-web` default resolve a dedicated `c2c reviewer`
+binding, and that binding must be verified before authorization; it must never
+reuse the ordinary planning `c2c session` pointer or silently fall back when
+the binding is missing, changed, or ambiguous. For this integration task, the
+explicit bootstrap reviewer is Codex task
+`codex://threads/01a0d43d-d0aa-7401-af0f-2ca3a45ba519` (`002reviewer`); the
+dedicated C2C web reviewer is reserved for later host-level acceptance.
+
 Automation runbook: before `task.py start`, resolve the reviewer, verify its
 platform-native transport, and snapshot the user-authorized unit range. The
 post-start run may be created only from that frozen snapshot. For each unit,
-record the exact parent/head SHA and reviewer target before sending a request;
-send the full self-contained bootstrap once per task, then use compact
-re-review requests. Pending, idle, silent, or partial reviewer responses are
-not PASS. A scoped FAIL records its finding ledger and is remediated only
-within the current unit; the initial finding count is zero and the same root
-cause blocks at five failed remediation rounds. Out-of-scope findings and
-reviewer transport failures are immediate blocked/major-issue stops.
+record the exact parent/head SHA and reviewer target before sending a request.
+Every review attempt is one atomic, self-contained message: compose the full
+scope, evidence, prohibitions, and PASS/FAIL request before sending it, then
+send it once. While the reviewer is thinking, pending, idle, silent, or
+returning partial output, do not send supplemental/follow-up/correction
+messages and do not interrupt the turn. If bounded waiting plus platform
+evidence confirms that the conversation is stuck or its transport is dead,
+resend the exact previous complete message unchanged; do not append new
+information. A compact re-review request is allowed only after an explicit
+reviewer result (normally a scoped FAIL), never as a mid-turn supplement.
+Pending, idle, silent, or partial reviewer responses are not PASS. A scoped
+FAIL records its finding ledger and is remediated only within the current
+unit; the initial finding count is zero and the same root cause blocks at five
+failed remediation rounds. Out-of-scope findings and reviewer transport
+failures are immediate blocked/major-issue stops.
+
+When the selected provider is `c2c-web`, the transport sends a bounded
+`[C2C] MODE: REVIEW_ONLY` request containing the exact committed parent/head
+SHAs, changed paths, validation, and scope prohibitions, with no diff or file
+body. The web conversation may inspect the range through read-only
+`git_compare`, but its `PLAN`, `DONE`, `BLOCKED`, and iteration state are
+transport content only; Trellis remains the sole lifecycle and verdict
+controller.
 [/workflow-state:in_progress]
 
 ### Phase 3: Finish

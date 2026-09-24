@@ -46,6 +46,17 @@ conversation when the user explicitly chooses self-review. The user remains
 the authority for which executor/reviewer is used and whether the next phase
 may begin.
 
+Planning and execution stay in the current Codex conversation; a reviewer
+selection does not transfer either authority. For the `c2c-web` provider, a
+dedicated reviewer binding is resolved only when there is no explicit
+current-turn or persisted reviewer target, and only after the binding's
+project, chat, and connector identity has been verified. The default binding
+is separate from the ordinary C2C planning-session pointer; a missing,
+changed, or ambiguous binding blocks rather than falling back to another chat.
+This integration task uses the explicitly selected Codex bootstrap reviewer
+`codex://threads/01a0d43d-d0aa-7401-af0f-2ca3a45ba519` (`002reviewer`); the
+dedicated C2C web reviewer is enabled only after later host-level acceptance.
+
 ### 2. Roles and handoff contract
 
 - Local Codex reads the repository, task artifacts, specs, and current review
@@ -76,6 +87,24 @@ Every review request must include:
   unrelated implementation;
 - a request for a formal PASS/FAIL and the next authorized scope.
 
+Review delivery is atomic. Compose all requirements, evidence, prohibited
+actions, and the requested decision in one complete, self-contained message
+and send it once for that review attempt. While the reviewer is thinking,
+pending, idle, silent, or producing partial output, do not send supplemental,
+follow-up, or correction messages and do not interrupt the turn. If bounded
+waiting plus platform evidence confirms that the conversation is stuck or its
+transport is dead, resend the exact previous complete request unchanged; this
+is a retry, not an opportunity to append information. Compact re-review
+requests are permitted only after an explicit reviewer result, normally a
+scoped `FAIL`.
+
+For `c2c-web`, the atomic request uses `MODE: REVIEW_ONLY`, `STATE: REVIEW`,
+and `CONTROLLER: TRELLIS`, includes exact committed parent/head SHAs and
+changed paths, and carries no diff or file body. The web reviewer may inspect
+the range only through read-only `git_compare`. Its `PLAN`, `DONE`, `BLOCKED`,
+or iteration state is transport content and never changes Trellis lifecycle,
+scope, or verdict authority.
+
 Codex must read the conversation result after sending the request. An active,
 pending, or incomplete response is not PASS. A PASS must be explicit; Codex
 must not infer it from a successful push, a green local check, or silence. If
@@ -96,6 +125,10 @@ evidence, Codex stops and asks the user before continuing.
   latest cursor when one is available.
 - A pending review is an expected wait state, not permission to speculate,
   modify code, start another task, archive the task, or claim acceptance.
+- If bounded waiting and platform evidence confirm a stuck/dead conversation
+  or transport, resend the exact previous complete request unchanged; never
+  send a supplement or correction. If the retry also fails, stop under the
+  reviewer transport-failure rule.
 - When the reviewer returns a scoped `FAIL`, Codex automatically applies only
   the requested remediation, runs the focused checks, inspects the exact diff,
   stages exact paths, commits, pushes, and sends a new review request to the
@@ -198,15 +231,19 @@ state. Review granularity comes from the authorized Slice range, not from the
 executor provider or host surface.
 
 Each authorized unit follows implement → validate → exact commit/push →
-independent reviewer. The first request is a self-contained bootstrap; same-
-task re-reviews are compact and pinned to exact parent/head SHAs. Only an
-explicit `FINAL: PASS` advances to the next pre-authorized unit. Pending,
-partial, idle, or silent responses are not PASS. A scoped FAIL may be
-remediated and resubmitted, but the initial discovery is round zero and the
-same semantic root cause blocks after five executed remediation rounds. Open
-findings, out-of-scope requests, contradictory PASS results, corrupt run state,
-or transport failure fail closed. Final PASS leaves the task `in_progress` and
-never archives, finishes, starts another task, wires production, or deploys.
+independent reviewer. The first request for each task/unit is a self-contained
+bootstrap, and every review attempt is sent once as one complete message.
+Same-task re-reviews may be compact only after an explicit reviewer result and
+must remain pinned to exact parent/head SHAs; they are never mid-turn
+supplements. If the reviewer conversation is confirmed stuck/dead, resend the
+exact previous complete request unchanged. Only an explicit `FINAL: PASS`
+advances to the next pre-authorized unit. Pending, partial, idle, or silent
+responses are not PASS. A scoped FAIL may be remediated and resubmitted, but
+the initial discovery is round zero and the same semantic root cause blocks
+after five executed remediation rounds. Open findings, out-of-scope requests,
+contradictory PASS results, corrupt run state, or transport failure fail
+closed. Final PASS leaves the task `in_progress` and never archives, finishes,
+starts another task, wires production, or deploys.
 
 Legacy routing imports are compatibility-only. The deprecated shim forwards
 context reads/writes to `common.automation` and raises for removed surface,
