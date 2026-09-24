@@ -1,6 +1,6 @@
 # Rust Phase 5A — first native whole-process comparison
 
-Status: **in progress — Slice 0 and pre-run Slice 1 manifest v2 reviews passed; the frozen official matrix completed 24 candidate attempts. Twelve of 21 scenario/stage groups have three valid pairs; all other stages and failure reasons are retained. The comparison report and raw-result audit are prepared; final independent review is pending. Production deployment is outside scope.**
+Status: **final review passed; ready for Trellis archive**. The frozen official matrix retained 24 candidate attempts; 12 of 21 scenario/stage groups have three valid pairs. The report and raw-result audit are accepted only for this bounded comparison. Production deployment is outside scope.
 
 ## Goal
 
@@ -50,7 +50,7 @@ Status: **in progress — Slice 0 and pre-run Slice 1 manifest v2 reviews passed
 - [x] 每个同进程末尾 health-check 点都有同一进程的阶段身份、冻结样本/延迟判据和完整结果；本任务冻结的 service-recovery 结论一律为 indeterminate，因为未冻结客观过载触发条件。W2 warm 还须证明每个测量响应都在对应 key 的 30 秒 fixture TTL 与安全余量内完成；独立预填点不得称为同进程恢复。
 - [x] 各有效场景/负载点至少三次交错 Go/Rust 重复，全部无效尝试保留；条件不足者明确标记原因。
 - [x] 报告有逐 stage 的正确性、尾延迟、有效吞吐、CPU/RSS/FD、样本量、上游计数、波动、原始证据索引和复现命令。
-- [ ] 最终 reviewer 明确只接受首轮 W1/W2/W3 子集结论，不把本任务写成 Phase 5A 全部完成或生产放行。
+- [x] 最终 reviewer 明确只接受首轮 W1/W2/W3 子集结论，不把本任务写成 Phase 5A 全部完成或生产放行；精确提交范围和后续归档路径复审见 `research/closure-review.md`。
 
 ## Execution boundary
 
