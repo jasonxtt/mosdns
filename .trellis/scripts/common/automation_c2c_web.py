@@ -193,6 +193,7 @@ _STRICT_FINDING = re.compile(
 )
 _FINDING_MARKER = re.compile(r"(?im)^\s*P[0-3]-\d+\b")
 _FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+_IN_PROGRESS_STATES = {"active", "generating", "in_progress", "pending", "queued", "running", "streaming", "working"}
 
 
 def _compact(value: Any, default: str = "(not supplied)") -> str:
@@ -327,21 +328,45 @@ class C2CWebHost(Protocol):
 
 
 def _payload_text(payload: Any) -> str:
-    if isinstance(payload, str):
-        return payload
     if not isinstance(payload, dict):
-        return ""
-    for key in ("text", "message"):
-        if isinstance(payload.get(key), str):
-            return payload[key]
+        return payload if isinstance(payload, str) else ""
     latest = payload.get("latestAssistantMessage")
-    if isinstance(latest, dict) and isinstance(latest.get("text"), str):
-        return latest["text"]
+    if isinstance(latest, dict):
+        for key in ("text", "message"):
+            if isinstance(latest.get(key), str):
+                return latest[key]
     content = payload.get("content")
     if isinstance(content, list):
         parts = [item.get("text") for item in content if isinstance(item, dict) and isinstance(item.get("text"), str)]
         return "\n".join(parts)
+    for key in ("text", "message"):
+        if isinstance(payload.get(key), str):
+            return payload[key]
     return ""
+
+
+def _assistant_message_id(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    latest = payload.get("latestAssistantMessage")
+    if isinstance(latest, dict):
+        for key in ("id", "messageId", "message_id"):
+            if isinstance(latest.get(key), str) and latest[key].strip():
+                return latest[key].strip()
+    for key in ("latestAssistantMessageId", "assistantMessageId", "assistant_message_id"):
+        if isinstance(payload.get(key), str) and payload[key].strip():
+            return payload[key].strip()
+    return None
+
+
+def _assistant_in_progress(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    statuses: list[Any] = [payload.get("status"), payload.get("assistantStatus"), payload.get("assistant_status")]
+    latest = payload.get("latestAssistantMessage")
+    if isinstance(latest, dict):
+        statuses.extend((latest.get("status"), latest.get("phase")))
+    return any(isinstance(status, str) and status.strip().lower() in _IN_PROGRESS_STATES for status in statuses)
 
 
 class C2CWebReviewerTransport:
@@ -367,7 +392,9 @@ class C2CWebReviewerTransport:
         self._verified_target: dict[str, Any] | None = None
         self._cursor: str | None = None
         self._baseline_ready = False
+        self._baseline_assistant_id: str | None = None
         self._post_send_response_seen = False
+        self._candidate_assistant_id: str | None = None
         self._latest_text = ""
         self._latest_payload: Any = None
         self._final_candidate: str | None = None
@@ -423,6 +450,7 @@ class C2CWebReviewerTransport:
             if baseline_status in {"error", "failed", "dead", "not_found"} or baseline.get("error"):
                 raise C2CReviewerBindingError("C2C reviewer transport failed while reading the pre-send cursor")
             self._cursor = baseline["cursor"]
+            self._baseline_assistant_id = _assistant_message_id(baseline)
             self._baseline_ready = True
         self._send_attempted = True
         self._attempted_message = message
@@ -446,17 +474,46 @@ class C2CWebReviewerTransport:
             ):
                 raise C2CReviewerBindingError("C2C reviewer transport failed while waiting")
             cursor_changed = returned_cursor != self._cursor
-            if not self._post_send_response_seen and not cursor_changed:
-                text = ""
-            else:
-                if cursor_changed:
-                    self._cursor = returned_cursor
-                    self._latest_text = _payload_text(payload)
-                else:
-                    text = _payload_text(payload)
-                    if text:
-                        self._latest_text = text
+            if cursor_changed:
+                self._cursor = returned_cursor
+            assistant_id = _assistant_message_id(payload)
+            if not self._post_send_response_seen:
+                if (
+                    not cursor_changed
+                    or _assistant_in_progress(payload)
+                    or assistant_id is None
+                    or (self._baseline_assistant_id is not None and assistant_id == self._baseline_assistant_id)
+                ):
+                    self._latest_text = ""
+                    self._final_candidate = None
+                    self._final_candidate_polls = 0
+                    remaining = deadline - self.clock()
+                    if remaining <= 0:
+                        return False
+                    if self.poll_interval <= 0:
+                        return False
+                    self.sleep(min(self.poll_interval, remaining))
+                    continue
                 self._post_send_response_seen = True
+                self._candidate_assistant_id = assistant_id
+                self._latest_text = _payload_text(payload)
+            else:
+                if _assistant_in_progress(payload) or assistant_id is None:
+                    self._latest_text = ""
+                    self._final_candidate = None
+                    self._final_candidate_polls = 0
+                    remaining = deadline - self.clock()
+                    if remaining <= 0:
+                        return False
+                    if self.poll_interval <= 0:
+                        return False
+                    self.sleep(min(self.poll_interval, remaining))
+                    continue
+                if self._candidate_assistant_id != assistant_id:
+                    self._candidate_assistant_id = assistant_id
+                    self._final_candidate = None
+                    self._final_candidate_polls = 0
+                self._latest_text = _payload_text(payload)
             parsed = parse_c2c_review_result(self._latest_text)
             if parsed["status"] in {"pass", "fail"}:
                 if self._latest_text == self._final_candidate:
