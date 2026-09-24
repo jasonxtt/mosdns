@@ -451,6 +451,8 @@ class C2CWebReviewerTransport:
                 raise C2CReviewerBindingError("C2C reviewer transport failed while reading the pre-send cursor")
             self._cursor = baseline["cursor"]
             self._baseline_assistant_id = _assistant_message_id(baseline)
+            if self._baseline_assistant_id is None:
+                raise C2CReviewerBindingError("C2C reviewer transport requires a pre-send assistant message identity")
             self._baseline_ready = True
         self._send_attempted = True
         self._attempted_message = message
