@@ -6,10 +6,21 @@ from pathlib import Path
 from common.automation import AutomationContext, save_context, set_reviewer
 from common.automation_c2c_web import (
     C2CReviewerBindingError,
+    C2CWebReviewerTransport,
+    build_reviewer_only_request,
     normalize_c2c_binding,
+    parse_c2c_review_result,
     resolve_reviewer_target,
 )
-from common.automation_run import ActivationError, activate, authorize, authorization_path
+from common.automation_review import read_review_round_trip, verify_reviewer_transport
+from common.automation_run import (
+    ActivationError,
+    AutomationRun,
+    AutomationRunError,
+    activate,
+    authorize,
+    authorization_path,
+)
 
 
 PROJECT = "https://chatgpt.com/g/g-p-reviewproject/project"
@@ -25,6 +36,33 @@ class FakeBindingSource:
     def read(self, repo_root: Path):
         self.calls.append(repo_root)
         return self.payload
+
+
+class FakeC2CHost:
+    def __init__(self, responses=(), *, failed_sends=0, verification=None):
+        self.responses = list(responses)
+        self.failed_sends = failed_sends
+        self.verification = verification
+        self.verify_calls = []
+        self.send_attempts = []
+        self.read_calls = []
+
+    def verify_target(self, target):
+        self.verify_calls.append(target)
+        return self.verification or {"mechanism": "fake-chatgpt-platform"}
+
+    def send_message(self, target, message):
+        self.send_attempts.append((target, message))
+        if self.failed_sends:
+            self.failed_sends -= 1
+            raise RuntimeError("temporary host failure")
+        return {"accepted": True}
+
+    def read_thread(self, target, cursor=None):
+        self.read_calls.append((target, cursor))
+        if self.responses:
+            return self.responses.pop(0)
+        return {"cursor": cursor, "text": "still working"}
 
 
 class C2CReviewerBindingTest(unittest.TestCase):
@@ -128,7 +166,8 @@ class C2CReviewerBindingTest(unittest.TestCase):
         )
         self.assertEqual(snapshot.reviewer, target)
         self.assertTrue(authorization_path(self.root, "codex_test").exists())
-        self.assertEqual(json.loads((self.root / ".trellis/.runtime/automation/codex_test.json").read_text())["reviewer"], target)
+        stored = json.loads((self.root / ".trellis/.runtime/automation/codex_test.json").read_text())
+        self.assertEqual(stored["reviewer"], target)
 
         (task_dir / "task.json").write_text(json.dumps({"status": "in_progress"}), encoding="utf-8")
         changed = AutomationContext("codex_test")
@@ -184,6 +223,210 @@ class C2CReviewerBindingTest(unittest.TestCase):
                 reviewer_target=changed,
                 reviewer_transport_evidence=self._evidence(changed),
             )
+
+
+class C2CReviewerOnlyContractTest(unittest.TestCase):
+    def _target(self):
+        return {
+            "provider": "c2c-web",
+            "reference": CHAT,
+            "label": "Root reviewer",
+            "metadata": {
+                "project_url": PROJECT,
+                "chat_url": CHAT,
+                "connector_name": CONNECTOR,
+                "binding_source": "c2c-reviewer",
+            },
+        }
+
+    def _run(self):
+        return AutomationRun(
+            context_key="codex_test",
+            task=".trellis/tasks/example",
+            authorized_units=["Slice 1"],
+            authorized_at="2026-09-25T00:00:00Z",
+            current_unit="Slice 1",
+            units={
+                "Slice 1": {
+                    "phase": "implementing",
+                    "submission": {
+                        "parent_sha": None,
+                        "head_sha": None,
+                        "review_round": 0,
+                        "request_kind": None,
+                        "submitted_to": None,
+                    },
+                    "findings": {},
+                    "result": None,
+                }
+            },
+        )
+
+    def _evidence(self):
+        return {
+            "reviewer": self._target(),
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "changed_paths": [".trellis/scripts/common/automation_c2c_web.py"],
+            "validation": ["48 tests passed", "git diff --check"],
+            "acceptance": "reviewer-only transport is bounded and fail-closed",
+            "forbidden_scope": ["MosDNS runtime", "browser automation", "credential storage"],
+            "body": "secret source body must never be copied",
+            "log": "secret validation log must never be copied",
+        }
+
+    def test_request_is_atomic_bounded_exact_range_and_body_free(self):
+        request = build_reviewer_only_request(self._run(), "Slice 1", self._evidence())
+        text = request["text"]
+        self.assertEqual(request["kind"], "bootstrap")
+        self.assertLessEqual(len(text.encode("utf-8")), 4096)
+        for required in (
+            "MODE: REVIEW_ONLY",
+            "STATE: REVIEW",
+            "CONTROLLER: TRELLIS",
+            "BASE_SHA: " + "a" * 40,
+            "HEAD_SHA: " + "b" * 40,
+            "PATHS:",
+            "git_compare(base_sha, head_sha, path, offset, max_bytes)",
+            "Do not plan, execute, edit",
+            "FINAL: PASS or FINAL: FAIL",
+            "P0/P1/P2/P3-N",
+        ):
+            self.assertIn(required, text)
+        self.assertNotIn("secret source body", text)
+        self.assertNotIn("secret validation log", text)
+
+        oversized = self._evidence()
+        oversized["validation"] = ["x" * 5000]
+        with self.assertRaisesRegex(ValueError, "bounded message"):
+            build_reviewer_only_request(self._run(), "Slice 1", oversized)
+
+    def test_rereview_includes_existing_ledger_without_changing_controller(self):
+        run = self._run()
+        run.reviewer_bootstrap_sent = True
+        run.units["Slice 1"]["findings"] = {
+            "P1-1": {"root_cause": "unsafe retry", "status": "open"}
+        }
+        with self.assertRaisesRegex(AutomationRunError, "explicit prior result"):
+            build_reviewer_only_request(run, "Slice 1", self._evidence())
+
+        state = run.units["Slice 1"]
+        state["submission"].update(
+            {
+                "parent_sha": "b" * 40,
+                "head_sha": "c" * 40,
+                "request_kind": "rereview",
+                "review_round": 1,
+            }
+        )
+        state["result"] = {"status": "fail"}
+        state["review_result_recorded"] = False
+        evidence = self._evidence()
+        evidence["base_sha"] = "b" * 40
+        evidence["head_sha"] = "c" * 40
+        request = build_reviewer_only_request(run, "Slice 1", evidence)
+        self.assertEqual(request["kind"], "rereview")
+        self.assertIn("PREVIOUS_FINDINGS:", request["text"])
+        self.assertIn("unsafe retry", request["text"])
+        self.assertIn("CONTROLLER: TRELLIS", request["text"])
+
+    def test_parser_requires_one_final_line_and_explicit_stable_findings(self):
+        self.assertEqual(parse_c2c_review_result("")["status"], "pending")
+        self.assertEqual(parse_c2c_review_result("still working")["status"], "pending")
+        self.assertEqual(parse_c2c_review_result("summary\nFINAL: PASS")["status"], "pass")
+
+        failed = parse_c2c_review_result(
+            "P1-1: unsafe retry ordering [open]\n"
+            "P2-1 — documentation wording is stale [closed]\n"
+            "FINAL: FAIL"
+        )
+        self.assertEqual(failed["status"], "fail")
+        self.assertEqual([item["id"] for item in failed["findings"]], ["P1-1", "P2-1"])
+        self.assertEqual([item["status"] for item in failed["findings"]], ["open", "closed"])
+
+        for invalid in (
+            "P1-1: missing final status [open]",
+            "FINAL: FAIL",
+            "P1-1: finding [open]\nFINAL: PASS",
+            "P1-1: duplicate one [open]\nP1-1: duplicate two [open]\nFINAL: FAIL",
+            "P1-1: final is not last [open]\nFINAL: FAIL\nsummary",
+        ):
+            self.assertEqual(parse_c2c_review_result(invalid)["status"], "pending", invalid)
+
+
+class C2CReviewerTransportTest(unittest.TestCase):
+    def _target(self):
+        return {
+            "provider": "c2c-web",
+            "reference": CHAT,
+            "metadata": {
+                "project_url": PROJECT,
+                "chat_url": CHAT,
+                "connector_name": CONNECTOR,
+                "binding_source": "c2c-reviewer",
+            },
+        }
+
+    def test_verifies_target_sends_once_and_polls_partial_response(self):
+        host = FakeC2CHost(
+            [
+                {"cursor": "one", "text": "review is still running"},
+                {"cursor": "two", "text": "partial finding"},
+                {"cursor": "three", "text": "summary\nFINAL: PASS"},
+            ]
+        )
+        now = [0.0]
+        transport = C2CWebReviewerTransport(
+            host,
+            self._target(),
+            poll_interval=0.25,
+            clock=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        )
+        evidence = verify_reviewer_transport(self._target(), transport)
+        self.assertEqual(evidence["target"], self._target())
+        self.assertEqual(len(host.verify_calls), 1)
+
+        result = read_review_round_trip(transport, {"text": "[C2C] REVIEW_ONLY request"}, timeout=2)
+        self.assertEqual(parse_c2c_review_result(result)["status"], "pass")
+        self.assertEqual(len(host.send_attempts), 1)
+        self.assertEqual([cursor for _, cursor in host.read_calls], [None, "one", "two"])
+        with self.assertRaisesRegex(C2CReviewerBindingError, "already sent"):
+            transport.send({"text": "[C2C] REVIEW_ONLY request"})
+
+    def test_timeout_is_pending_and_failed_send_can_only_retry_exact_message(self):
+        host = FakeC2CHost(failed_sends=1)
+        transport = C2CWebReviewerTransport(host, self._target())
+        request = {"text": "[C2C] REVIEW_ONLY request"}
+        with self.assertRaisesRegex(RuntimeError, "temporary host failure"):
+            transport.send(request)
+        with self.assertRaisesRegex(C2CReviewerBindingError, "exact same message"):
+            transport.send({"text": "[C2C] different request"})
+        self.assertEqual(transport.send(request), {"accepted": True})
+        with self.assertRaisesRegex(C2CReviewerBindingError, "already sent"):
+            transport.send({"text": "[C2C] different request"})
+
+        clock = [0.0]
+        pending_host = FakeC2CHost([{"cursor": "one", "text": "still working"}])
+        pending = C2CWebReviewerTransport(
+            pending_host,
+            self._target(),
+            poll_interval=0.5,
+            clock=lambda: clock[0],
+            sleep=lambda delay: clock.__setitem__(0, clock[0] + delay),
+        )
+        pending.send(request)
+        self.assertFalse(pending.wait_result(1))
+        self.assertEqual(parse_c2c_review_result(pending.read())["status"], "pending")
+
+    def test_rejects_mismatched_host_identity_and_read_before_send(self):
+        different = dict(self._target(), reference="https://chatgpt.com/c/other")
+        host = FakeC2CHost(verification={"target": different, "mechanism": "fake"})
+        transport = C2CWebReviewerTransport(host, self._target())
+        with self.assertRaisesRegex(C2CReviewerBindingError, "different target"):
+            transport.verify_target(self._target())
+        with self.assertRaisesRegex(C2CReviewerBindingError, "before the request"):
+            transport.wait_result(0)
 
 
 if __name__ == "__main__":

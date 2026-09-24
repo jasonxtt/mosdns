@@ -11,12 +11,15 @@ import copy
 import json
 import re
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlsplit
 
 from .automation import AutomationContext, make_target, validate_target
+from .automation_review import build_review_request
+from .automation_run import AutomationRun, AutomationRunError
 
 
 class C2CReviewerBindingError(ValueError):
@@ -181,3 +184,238 @@ def resolve_reviewer_target(
         ),
         "c2c-reviewer-binding",
     )
+
+
+MAX_REVIEW_ONLY_MESSAGE_BYTES = 4096
+_FINAL_LINE = re.compile(r"(?im)^\s*FINAL\s*:\s*(PASS|FAIL)\s*$")
+_STRICT_FINDING = re.compile(
+    r"(?im)^\s*(P[0-3]-\d+)\s*(?:[-—:]\s*)?(.+?)\s+\[(open|closed)\]\s*$"
+)
+_FINDING_MARKER = re.compile(r"(?im)^\s*P[0-3]-\d+\b")
+_FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+def _compact(value: Any, default: str = "(not supplied)") -> str:
+    if value is None:
+        return default
+    if isinstance(value, (list, tuple, set)):
+        compacted = [_compact(item, "") for item in value]
+        rendered = ", ".join(item for item in compacted if item)
+        return rendered or default
+    if isinstance(value, dict):
+        rendered = ", ".join(f"{key}={_compact(item, '')}" for key, item in value.items())
+        return rendered or default
+    return re.sub(r"\s+", " ", str(value).strip()) or default
+
+
+def build_reviewer_only_request(
+    run: AutomationRun,
+    unit: str,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """Wrap Trellis evidence in the bounded external C2C review contract."""
+
+    base_request = build_review_request(run, unit, evidence)
+    for field in ("base_sha", "head_sha"):
+        value = evidence.get(field)
+        if not isinstance(value, str) or _FULL_SHA.fullmatch(value.strip()) is None:
+            raise ValueError(f"review-only request requires a full {field}")
+    state = run.units[unit]
+    submission = state.get("submission") if isinstance(state.get("submission"), dict) else {}
+    if base_request["kind"] == "rereview":
+        if (
+            submission.get("request_kind") != "rereview"
+            or state.get("review_result_recorded") is not False
+            or not isinstance(state.get("result"), dict)
+            or state["result"].get("status") not in {"pass", "fail"}
+        ):
+            raise AutomationRunError("re-review request requires an explicit prior result and submitted remediation")
+    if submission.get("parent_sha") and submission.get("head_sha"):
+        if (
+            evidence["base_sha"].strip() != submission["parent_sha"]
+            or evidence["head_sha"].strip() != submission["head_sha"]
+        ):
+            raise AutomationRunError("review-only evidence must match the submitted parent/head SHA pair")
+    lines = [
+        "[C2C]",
+        "MODE: REVIEW_ONLY",
+        "STATE: REVIEW",
+        "CONTROLLER: TRELLIS",
+        f"TASK_ID: {run.task}",
+        f"UNIT: {unit}",
+        f"REQUEST_KIND: {base_request['kind']}",
+        f"BASE_SHA: {_compact(evidence['base_sha'])}",
+        f"HEAD_SHA: {_compact(evidence['head_sha'])}",
+        f"PATHS: {_compact(evidence.get('changed_paths'))}",
+        f"VALIDATION: {_compact(evidence.get('validation'))}",
+        f"ACCEPTANCE: {_compact(evidence.get('acceptance'))}",
+        f"FORBIDDEN_SCOPE: {_compact(evidence.get('forbidden_scope'))}",
+        "EVIDENCE: Use read-only git_compare(base_sha, head_sha, path, offset, max_bytes) for the exact committed range.",
+        "INSTRUCTION: Review only this unit. Do not plan, execute, edit, create tasks, change Trellis state, or treat C2C DONE/PLAN/iteration limits as controller authority.",
+        "OUTPUT: Return one final line, FINAL: PASS or FINAL: FAIL. PASS has no findings. FAIL uses P0/P1/P2/P3-N: root cause [open|closed]; keep the same ID for the same root cause on re-review.",
+    ]
+    previous = state.get("findings") or {}
+    if base_request["kind"] == "rereview" and previous:
+        lines.insert(-2, f"PREVIOUS_FINDINGS: {_compact(previous)}")
+    text = "\n".join(lines)
+    if len(text.encode("utf-8")) > MAX_REVIEW_ONLY_MESSAGE_BYTES:
+        raise ValueError("review-only request exceeds the bounded message size")
+    return {"kind": base_request["kind"], "task": run.task, "unit": unit, "text": text}
+
+
+def parse_c2c_review_result(text: Any) -> dict[str, Any]:
+    """Parse the strict reviewer-only PASS/FAIL and stable finding contract."""
+
+    pending = {"status": "pending", "findings": [], "raw": text}
+    if not isinstance(text, str) or not text.strip():
+        return pending
+    finals = list(_FINAL_LINE.finditer(text))
+    if len(finals) != 1 or text.rstrip().splitlines()[-1].strip() != finals[0].group(0).strip():
+        return pending
+    finding_markers = list(_FINDING_MARKER.finditer(text))
+    findings: list[dict[str, Any]] = []
+    for match in _STRICT_FINDING.finditer(text):
+        findings.append(
+            {
+                "id": match.group(1),
+                "root_cause": match.group(2).strip(),
+                "status": match.group(3).lower(),
+                "out_of_scope": "out-of-scope" in match.group(2).lower(),
+            }
+        )
+    if len(findings) != len(finding_markers):
+        return pending
+    if len({finding["id"] for finding in findings}) != len(findings):
+        return pending
+    status = finals[0].group(1).lower()
+    if status == "pass" and findings:
+        return pending
+    if status == "fail" and not findings:
+        return pending
+    return {"status": status, "findings": findings, "raw": text}
+
+
+class C2CWebHost(Protocol):
+    """Platform-native ChatGPT capability injected by the host."""
+
+    def verify_target(self, target: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    def send_message(self, target: dict[str, Any], message: str) -> Any:
+        ...
+
+    def read_thread(self, target: dict[str, Any], cursor: str | None = None) -> Any:
+        ...
+
+
+def _payload_text(payload: Any) -> str:
+    if isinstance(payload, str):
+        return payload
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("text", "message"):
+        if isinstance(payload.get(key), str):
+            return payload[key]
+    latest = payload.get("latestAssistantMessage")
+    if isinstance(latest, dict) and isinstance(latest.get("text"), str):
+        return latest["text"]
+    content = payload.get("content")
+    if isinstance(content, list):
+        parts = [item.get("text") for item in content if isinstance(item, dict) and isinstance(item.get("text"), str)]
+        return "\n".join(parts)
+    return ""
+
+
+class C2CWebReviewerTransport:
+    """Exactly-once, bounded send/read transport for a C2C reviewer target."""
+
+    def __init__(
+        self,
+        host: C2CWebHost,
+        target: dict[str, Any],
+        *,
+        poll_interval: float = 1.0,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self.host = host
+        self.target = copy.deepcopy(target)
+        self.poll_interval = max(0.0, float(poll_interval))
+        self.clock = clock
+        self.sleep = sleep
+        self._sent = False
+        self._send_attempted = False
+        self._attempted_message: str | None = None
+        self._cursor: str | None = None
+        self._latest_text = ""
+        self._latest_payload: Any = None
+
+    def _validate_target(self, target: dict[str, Any]) -> None:
+        if not validate_target(target) or target.get("provider") != "c2c-web":
+            raise C2CReviewerBindingError("C2C transport requires a c2c-web target")
+        metadata = target.get("metadata")
+        if not isinstance(metadata, dict):
+            raise C2CReviewerBindingError("C2C target metadata is missing")
+        if metadata.get("chat_url") != target.get("reference"):
+            raise C2CReviewerBindingError("C2C target chat identity is inconsistent")
+        for key in ("project_url", "connector_name", "binding_source"):
+            if not isinstance(metadata.get(key), str) or not metadata[key].strip():
+                raise C2CReviewerBindingError(f"C2C target metadata is missing {key}")
+
+    def verify_target(self, target: dict[str, Any]) -> dict[str, Any]:
+        self._validate_target(target)
+        result = self.host.verify_target(copy.deepcopy(target))
+        if result is False or not isinstance(result, dict):
+            raise C2CReviewerBindingError("C2C reviewer target could not be verified")
+        if result.get("target") is not None and result.get("target") != target:
+            raise C2CReviewerBindingError("C2C reviewer verification returned a different target")
+        verified = copy.deepcopy(result)
+        verified.setdefault("target", copy.deepcopy(target))
+        verified.setdefault("mechanism", "chatgpt-platform-native")
+        return verified
+
+    def send(self, request: Any) -> Any:
+        if self._sent:
+            raise C2CReviewerBindingError("C2C review request was already sent")
+        message = request.get("text") if isinstance(request, dict) else request
+        if not isinstance(message, str) or not message.startswith("[C2C]"):
+            raise C2CReviewerBindingError("C2C review request must be a structured message")
+        if len(message.encode("utf-8")) > MAX_REVIEW_ONLY_MESSAGE_BYTES:
+            raise C2CReviewerBindingError("C2C review request exceeds the bounded message size")
+        if self._send_attempted and message != self._attempted_message:
+            raise C2CReviewerBindingError("a failed C2C send may only be retried with the exact same message")
+        self._validate_target(self.target)
+        self._send_attempted = True
+        self._attempted_message = message
+        result = self.host.send_message(copy.deepcopy(self.target), message)
+        self._sent = True
+        return result
+
+    def wait_result(self, timeout: float) -> Any:
+        if not self._sent:
+            raise C2CReviewerBindingError("C2C reviewer result cannot be read before the request is sent")
+        deadline = self.clock() + max(0.0, float(timeout))
+        while True:
+            payload = self.host.read_thread(copy.deepcopy(self.target), self._cursor)
+            self._latest_payload = payload
+            if isinstance(payload, dict) and isinstance(payload.get("cursor"), str):
+                self._cursor = payload["cursor"]
+            status = str(payload.get("status", "")).lower() if isinstance(payload, dict) else ""
+            if status in {"error", "failed", "dead", "not_found"} or (
+                isinstance(payload, dict) and payload.get("error")
+            ):
+                raise C2CReviewerBindingError("C2C reviewer transport failed while waiting")
+            text = _payload_text(payload)
+            if text:
+                self._latest_text = text
+            if _FINAL_LINE.search(self._latest_text):
+                return "ready"
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                return False
+            if self.poll_interval <= 0:
+                return False
+            self.sleep(min(self.poll_interval, remaining))
+
+    def read(self) -> str:
+        return self._latest_text
