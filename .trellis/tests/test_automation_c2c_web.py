@@ -39,11 +39,20 @@ class FakeBindingSource:
 
 
 class FakeC2CHost:
-    def __init__(self, responses=(), *, failed_sends=0, verification=None, baseline_text="old reviewer result"):
+    def __init__(
+        self,
+        responses=(),
+        *,
+        failed_sends=0,
+        verification=None,
+        baseline_text="old reviewer result",
+        assistant_id="new-assistant",
+    ):
         self.responses = list(responses)
         self.failed_sends = failed_sends
         self.verification = verification
         self.baseline_text = baseline_text
+        self.assistant_id = assistant_id
         self.baseline_read = False
         self.verify_calls = []
         self.send_attempts = []
@@ -64,10 +73,26 @@ class FakeC2CHost:
         self.read_calls.append((target, cursor))
         if cursor is None and not self.baseline_read:
             self.baseline_read = True
-            return {"cursor": "baseline", "text": self.baseline_text}
+            return {
+                "cursor": "baseline",
+                "latestAssistantMessage": {
+                    "id": "old-assistant",
+                    "text": self.baseline_text,
+                    "status": "completed",
+                },
+            }
         if self.responses:
-            return self.responses.pop(0)
-        return {"cursor": cursor or "baseline", "text": "still working"}
+            payload = self.responses.pop(0)
+        else:
+            payload = {"cursor": cursor or "baseline", "text": "still working"}
+        if "latestAssistantMessage" not in payload and "text" in payload:
+            payload = dict(payload)
+            payload["latestAssistantMessage"] = {
+                "id": self.assistant_id,
+                "text": payload.pop("text"),
+                "status": payload.pop("assistant_status", "completed"),
+            }
+        return payload
 
 
 class C2CReviewerBindingTest(unittest.TestCase):
@@ -487,7 +512,19 @@ class C2CReviewerTransportTest(unittest.TestCase):
         self.assertFalse(transport.wait_result(0.75))
 
     def test_ignores_pre_send_final_until_a_new_message_cursor_exists(self):
-        host = FakeC2CHost(baseline_text="old review\nFINAL: PASS")
+        host = FakeC2CHost(
+            [
+                {
+                    "cursor": "user-message",
+                    "latestAssistantMessage": {
+                        "id": "old-assistant",
+                        "text": "old review\nFINAL: PASS",
+                        "status": "completed",
+                    },
+                }
+            ],
+            baseline_text="old review\nFINAL: PASS",
+        )
         now = [0.0]
         transport = C2CWebReviewerTransport(
             host,
