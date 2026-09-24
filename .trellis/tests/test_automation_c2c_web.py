@@ -546,6 +546,39 @@ class C2CReviewerTransportTest(unittest.TestCase):
             transport.send({"text": "[C2C] REVIEW_ONLY request"})
         self.assertEqual(host.send_attempts, [])
 
+    def test_rejects_a_return_to_the_baseline_assistant_during_polling(self):
+        host = FakeC2CHost(
+            [
+                {
+                    "cursor": "new-one",
+                    "latestAssistantMessage": {
+                        "id": "new-assistant",
+                        "text": "summary\nFINAL: PASS",
+                        "status": "completed",
+                    },
+                },
+                {
+                    "cursor": "old-two",
+                    "latestAssistantMessage": {
+                        "id": "old-assistant",
+                        "text": "old review\nFINAL: PASS",
+                        "status": "completed",
+                    },
+                },
+            ]
+        )
+        now = [0.0]
+        transport = C2CWebReviewerTransport(
+            host,
+            self._target(),
+            poll_interval=0.25,
+            clock=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        )
+        transport.verify_target(self._target())
+        transport.send({"text": "[C2C] REVIEW_ONLY request"})
+        self.assertFalse(transport.wait_result(0.75))
+
 
 if __name__ == "__main__":
     unittest.main()

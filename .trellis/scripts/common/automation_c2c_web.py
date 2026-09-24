@@ -500,7 +500,11 @@ class C2CWebReviewerTransport:
                 self._candidate_assistant_id = assistant_id
                 self._latest_text = _payload_text(payload)
             else:
-                if _assistant_in_progress(payload) or assistant_id is None:
+                if (
+                    _assistant_in_progress(payload)
+                    or assistant_id is None
+                    or (self._baseline_assistant_id is not None and assistant_id == self._baseline_assistant_id)
+                ):
                     self._latest_text = ""
                     self._final_candidate = None
                     self._final_candidate_polls = 0
