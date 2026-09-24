@@ -64,6 +64,10 @@ def _parser() -> argparse.ArgumentParser:
     authorize_command.add_argument("--units", default="all")
     authorize_command.add_argument("--context")
     authorize_command.add_argument(
+        "--reviewer-target",
+        help="JSON current-turn reviewer target; overrides the persisted/default reviewer for this authorization",
+    )
+    authorize_command.add_argument(
         "--reviewer-evidence",
         required=False,
         help="JSON evidence envelope returned by the host-level reviewer transport probe",
@@ -141,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             args.task,
             args.units,
             context_key=key,
+            reviewer_target=_result(args.reviewer_target),
             reviewer_transport_evidence=_result(args.reviewer_evidence),
             reviewer_resolver=lambda current: resolve_reviewer_target(current, root)[0],
         )
