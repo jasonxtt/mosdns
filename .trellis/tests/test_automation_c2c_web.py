@@ -137,6 +137,31 @@ class C2CReviewerBindingTest(unittest.TestCase):
         with self.assertRaisesRegex(ActivationError, "changed"):
             activate(self.root, task_dir, context_key="codex_test")
 
+    def test_authorize_current_turn_target_overrides_persisted_and_default(self):
+        task_dir = self._task()
+        source = FakeBindingSource(self._payload())
+        context = AutomationContext("codex_test")
+        persisted = {"provider": "codex", "reference": "persisted-reviewer"}
+        set_reviewer(context, persisted["provider"], persisted["reference"])
+        save_context(self.root, context)
+        current_turn = {"provider": "codex", "reference": "current-turn-reviewer"}
+
+        snapshot = authorize(
+            self.root,
+            task_dir,
+            "Slice 0",
+            context_key="codex_test",
+            reviewer_target=current_turn,
+            reviewer_transport_evidence=self._evidence(current_turn),
+            reviewer_resolver=lambda current: resolve_reviewer_target(
+                current, self.root, binding_source=source
+            )[0],
+        )
+        self.assertEqual(snapshot.reviewer, current_turn)
+        self.assertEqual(source.calls, [])
+        stored = json.loads((self.root / ".trellis/.runtime/automation/codex_test.json").read_text())
+        self.assertEqual(stored["reviewer"], current_turn)
+
 
 if __name__ == "__main__":
     unittest.main()
