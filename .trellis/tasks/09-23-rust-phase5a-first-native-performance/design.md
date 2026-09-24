@@ -1,6 +1,6 @@
 # Design — paired Go-only / Rust-native W1–W3 measurement
 
-Status: in progress — Slice 0 and pre-run manifest v2 reviews passed. The frozen official matrix completed 24 candidate attempts; all raw files remain index-verified. W2 TTL/counter and W3 per-request route-event evidence passed postrun revalidation. Twelve of 21 scenario/stage groups have three valid pairs; the report records all partial/invalid groups and is awaiting final independent review.
+Status: final independent review and archive-path closeout review passed; ready for Trellis archive. The frozen official matrix completed 24 candidate attempts; all raw files remain index-verified. W2 TTL/counter and W3 per-request route-event evidence passed postrun revalidation. Twelve of 21 scenario/stage groups have three valid pairs; the report retains all partial/invalid groups.
 
 ## Evidence model
 

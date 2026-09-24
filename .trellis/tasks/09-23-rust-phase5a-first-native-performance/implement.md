@@ -1,6 +1,6 @@
 # Implementation plan — first native whole-process comparison
 
-Status: **in progress — Slice 0 and pre-run manifest v2 reviews passed. The frozen official matrix completed 24 alternating candidate attempts, retaining 15 nonzero runner exits and every invalid stage. Twelve of 21 stage groups have three valid pairs. Postrun correctness, resource, and raw-index audits are complete; report/evidence commit and final review remain.**
+Status: **final review and archive-path closeout review passed; ready for Trellis archive**. The frozen official matrix completed 24 alternating candidate attempts, retaining 15 nonzero runner exits and every invalid stage. Twelve of 21 stage groups have three valid pairs. Postrun correctness, resource, and raw-index audits are complete.
 
 ## Before start
 
@@ -50,7 +50,7 @@ Allowed edits: this task's `research/**` manifest/results and small benchmark-to
 - [x] Run the frozen open-loop matrix: all 24 candidate/scenario/repetition attempts were retained in the alternating schedule. The postrun audit rechecked hashes, W2 cold/prefill/warm counters and per-key TTL, exact W3 event paths for every sent request, stage barriers, health-check criteria and indeterminate recovery assessment.
 - [x] Inspect sender shortfall and health-check failures without hiding or rerunning them. No method or manifest change was made after the official matrix.
 - [x] Verify VM cleanup, all 718 result-index entries, hashes and exact commands. Final report and evidence are prepared.
-- [ ] Commit and push the report/evidence; obtain final independent Slice 1 review for the exact pushed commit.
+- [x] Commit and push the report/evidence; obtain final independent Slice 1 review for the exact pushed commit. Original report/evidence commit `1abf1e20c954e8d25157f19b31d26189a8323ff1` received `FINAL: PASS`; subsequent path-only closeout ended at `c04210c88841cdc09909ebf81e7f7278273e2221` with `CLOSEOUT FIX: PASS`. See `research/closure-review.md`.
 
 ### Slice 1 manifest review attempt — v1
 
@@ -67,7 +67,7 @@ Allowed edits: task evidence and `docs/rust/phase5a-native-comparison.md` (or eq
 - [x] No code hotspot can be located from these end-to-end samples; the official matrix did not freeze profiler instrumentation, and a later profiled run cannot be backfilled as an official sample. The report labels this limit and recommends a separate, pre-frozen profile task before choosing an optimization.
 - [x] Report scope limits: W1/W2/W3 subset, controlled local upstream, 2-CPU VM, no production config, no full-feature/soak/cutover conclusion. The global handover remains unchanged pending final review; the result report is the authoritative task evidence.
 - [x] Run final documentation/link/hash/upstream-count consistency checks, `task.py validate`, and `git diff --check` after all report/evidence edits; all pass. The 718-file raw result index reverified, and the 132-row upstream export reconciles W1 sent/counter deltas, W2 per-key miss deltas, and W3 per-upstream leg counts.
-- [ ] Commit/push only the exact task files and comparison report; obtain the final independent review and retain its actual result. Do not pre-fill PASS or run task lifecycle finish/archive.
+- [x] Commit/push only the exact task files and comparison report; obtain the final independent review and retain its actual result. The accepted range, scoped closeout FAIL/PASS, and limitations are recorded in `research/closure-review.md`; normal task lifecycle finish/archive follows the user's 2026-09-24 request.
 
 ## Stop rules
 
