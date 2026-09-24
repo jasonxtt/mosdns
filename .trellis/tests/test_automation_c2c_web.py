@@ -39,10 +39,12 @@ class FakeBindingSource:
 
 
 class FakeC2CHost:
-    def __init__(self, responses=(), *, failed_sends=0, verification=None):
+    def __init__(self, responses=(), *, failed_sends=0, verification=None, baseline_text="old reviewer result"):
         self.responses = list(responses)
         self.failed_sends = failed_sends
         self.verification = verification
+        self.baseline_text = baseline_text
+        self.baseline_read = False
         self.verify_calls = []
         self.send_attempts = []
         self.read_calls = []
@@ -60,9 +62,12 @@ class FakeC2CHost:
 
     def read_thread(self, target, cursor=None):
         self.read_calls.append((target, cursor))
+        if cursor is None and not self.baseline_read:
+            self.baseline_read = True
+            return {"cursor": "baseline", "text": self.baseline_text}
         if self.responses:
             return self.responses.pop(0)
-        return {"cursor": cursor, "text": "still working"}
+        return {"cursor": cursor or "baseline", "text": "still working"}
 
 
 class C2CReviewerBindingTest(unittest.TestCase):
@@ -412,7 +417,10 @@ class C2CReviewerTransportTest(unittest.TestCase):
         result = read_review_round_trip(transport, {"text": "[C2C] REVIEW_ONLY request"}, timeout=2)
         self.assertEqual(parse_c2c_review_result(result)["status"], "pass")
         self.assertEqual(len(host.send_attempts), 1)
-        self.assertEqual([cursor for _, cursor in host.read_calls], [None, "one", "two", "three"])
+        self.assertEqual(
+            [cursor for _, cursor in host.read_calls],
+            [None, "baseline", "one", "two", "three"],
+        )
         with self.assertRaisesRegex(C2CReviewerBindingError, "already sent"):
             transport.send({"text": "[C2C] REVIEW_ONLY request"})
 
@@ -466,6 +474,20 @@ class C2CReviewerTransportTest(unittest.TestCase):
                 {"cursor": "two", "text": "P1-1: late finding\nFINAL: FAIL"},
             ]
         )
+        now = [0.0]
+        transport = C2CWebReviewerTransport(
+            host,
+            self._target(),
+            poll_interval=0.25,
+            clock=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        )
+        transport.verify_target(self._target())
+        transport.send({"text": "[C2C] REVIEW_ONLY request"})
+        self.assertFalse(transport.wait_result(0.75))
+
+    def test_ignores_pre_send_final_until_a_new_message_cursor_exists(self):
+        host = FakeC2CHost(baseline_text="old review\nFINAL: PASS")
         now = [0.0]
         transport = C2CWebReviewerTransport(
             host,
