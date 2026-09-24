@@ -18,7 +18,7 @@ from typing import Any, Callable, Protocol
 from urllib.parse import urlsplit
 
 from .automation import AutomationContext, make_target, validate_target
-from .automation_review import build_review_request
+from .automation_review import build_review_request, is_blocked
 from .automation_run import AutomationRun, AutomationRunError
 
 
@@ -216,10 +216,19 @@ def build_reviewer_only_request(
     """Wrap Trellis evidence in the bounded external C2C review contract."""
 
     base_request = build_review_request(run, unit, evidence)
+    if run.status == "blocked" or is_blocked(run, unit):
+        raise AutomationRunError("review-only request is unavailable for a blocked run or finding limit")
     for field in ("base_sha", "head_sha"):
         value = evidence.get(field)
         if not isinstance(value, str) or _FULL_SHA.fullmatch(value.strip()) is None:
             raise ValueError(f"review-only request requires a full {field}")
+    paths = evidence.get("changed_paths")
+    if (
+        not isinstance(paths, (list, tuple, set))
+        or not paths
+        or any(not isinstance(path, str) or not path.strip() for path in paths)
+    ):
+        raise ValueError("review-only request requires non-empty changed_paths")
     state = run.units[unit]
     submission = state.get("submission") if isinstance(state.get("submission"), dict) else {}
     if base_request["kind"] == "rereview":
@@ -230,10 +239,19 @@ def build_reviewer_only_request(
             or state["result"].get("status") not in {"pass", "fail"}
         ):
             raise AutomationRunError("re-review request requires an explicit prior result and submitted remediation")
-    if submission.get("parent_sha") and submission.get("head_sha"):
         if (
-            evidence["base_sha"].strip() != submission["parent_sha"]
-            or evidence["head_sha"].strip() != submission["head_sha"]
+            _FULL_SHA.fullmatch(str(submission.get("parent_sha", ""))) is None
+            or _FULL_SHA.fullmatch(str(submission.get("head_sha", ""))) is None
+        ):
+            raise AutomationRunError("re-review request requires a complete submitted parent/head SHA pair")
+    submitted_parent = submission.get("parent_sha")
+    submitted_head = submission.get("head_sha")
+    if bool(submitted_parent) != bool(submitted_head):
+        raise AutomationRunError("review-only submission has an incomplete parent/head SHA pair")
+    if submitted_parent and submitted_head:
+        if (
+            evidence["base_sha"].strip() != submitted_parent
+            or evidence["head_sha"].strip() != submitted_head
         ):
             raise AutomationRunError("review-only evidence must match the submitted parent/head SHA pair")
     lines = [
@@ -346,9 +364,12 @@ class C2CWebReviewerTransport:
         self._sent = False
         self._send_attempted = False
         self._attempted_message: str | None = None
+        self._verified_target: dict[str, Any] | None = None
         self._cursor: str | None = None
         self._latest_text = ""
         self._latest_payload: Any = None
+        self._final_candidate: str | None = None
+        self._final_candidate_polls = 0
 
     def _validate_target(self, target: dict[str, Any]) -> None:
         if not validate_target(target) or target.get("provider") != "c2c-web":
@@ -364,14 +385,19 @@ class C2CWebReviewerTransport:
 
     def verify_target(self, target: dict[str, Any]) -> dict[str, Any]:
         self._validate_target(target)
+        if target != self.target:
+            raise C2CReviewerBindingError("C2C reviewer verification target differs from the transport target")
         result = self.host.verify_target(copy.deepcopy(target))
         if result is False or not isinstance(result, dict):
             raise C2CReviewerBindingError("C2C reviewer target could not be verified")
+        if any(result.get(key) is False for key in ("verified", "valid", "available", "ok")):
+            raise C2CReviewerBindingError("C2C reviewer target was not verified")
         if result.get("target") is not None and result.get("target") != target:
             raise C2CReviewerBindingError("C2C reviewer verification returned a different target")
         verified = copy.deepcopy(result)
         verified.setdefault("target", copy.deepcopy(target))
         verified.setdefault("mechanism", "chatgpt-platform-native")
+        self._verified_target = copy.deepcopy(target)
         return verified
 
     def send(self, request: Any) -> Any:
@@ -384,6 +410,8 @@ class C2CWebReviewerTransport:
             raise C2CReviewerBindingError("C2C review request exceeds the bounded message size")
         if self._send_attempted and message != self._attempted_message:
             raise C2CReviewerBindingError("a failed C2C send may only be retried with the exact same message")
+        if self._verified_target != self.target:
+            raise C2CReviewerBindingError("C2C review target must be verified before sending")
         self._validate_target(self.target)
         self._send_attempted = True
         self._attempted_message = message
@@ -408,8 +436,18 @@ class C2CWebReviewerTransport:
             text = _payload_text(payload)
             if text:
                 self._latest_text = text
-            if _FINAL_LINE.search(self._latest_text):
-                return "ready"
+            parsed = parse_c2c_review_result(self._latest_text)
+            if parsed["status"] in {"pass", "fail"}:
+                if self._latest_text == self._final_candidate:
+                    self._final_candidate_polls += 1
+                else:
+                    self._final_candidate = self._latest_text
+                    self._final_candidate_polls = 1
+                if self._final_candidate_polls >= 2:
+                    return "ready"
+            else:
+                self._final_candidate = None
+                self._final_candidate_polls = 0
             remaining = deadline - self.clock()
             if remaining <= 0:
                 return False

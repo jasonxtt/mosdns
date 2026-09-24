@@ -300,6 +300,10 @@ class C2CReviewerOnlyContractTest(unittest.TestCase):
         oversized["validation"] = ["x" * 5000]
         with self.assertRaisesRegex(ValueError, "bounded message"):
             build_reviewer_only_request(self._run(), "Slice 1", oversized)
+        missing_paths = self._evidence()
+        missing_paths["changed_paths"] = []
+        with self.assertRaisesRegex(ValueError, "changed_paths"):
+            build_reviewer_only_request(self._run(), "Slice 1", missing_paths)
 
     def test_rereview_includes_existing_ledger_without_changing_controller(self):
         run = self._run()
@@ -311,6 +315,12 @@ class C2CReviewerOnlyContractTest(unittest.TestCase):
             build_reviewer_only_request(run, "Slice 1", self._evidence())
 
         state = run.units["Slice 1"]
+        state["submission"]["request_kind"] = "rereview"
+        state["result"] = {"status": "fail"}
+        state["review_result_recorded"] = False
+        with self.assertRaisesRegex(AutomationRunError, "complete submitted"):
+            build_reviewer_only_request(run, "Slice 1", self._evidence())
+
         state["submission"].update(
             {
                 "parent_sha": "b" * 40,
@@ -329,6 +339,17 @@ class C2CReviewerOnlyContractTest(unittest.TestCase):
         self.assertIn("PREVIOUS_FINDINGS:", request["text"])
         self.assertIn("unsafe retry", request["text"])
         self.assertIn("CONTROLLER: TRELLIS", request["text"])
+
+        blocked = self._run()
+        blocked.status = "blocked"
+        with self.assertRaisesRegex(AutomationRunError, "blocked run"):
+            build_reviewer_only_request(blocked, "Slice 1", self._evidence())
+        limited = self._run()
+        limited.units["Slice 1"]["findings"] = {
+            "P1-1": {"status": "open", "failed_remediation_rounds": 5}
+        }
+        with self.assertRaisesRegex(AutomationRunError, "blocked run"):
+            build_reviewer_only_request(limited, "Slice 1", self._evidence())
 
     def test_parser_requires_one_final_line_and_explicit_stable_findings(self):
         self.assertEqual(parse_c2c_review_result("")["status"], "pending")
@@ -373,6 +394,7 @@ class C2CReviewerTransportTest(unittest.TestCase):
                 {"cursor": "one", "text": "review is still running"},
                 {"cursor": "two", "text": "partial finding"},
                 {"cursor": "three", "text": "summary\nFINAL: PASS"},
+                {"cursor": "four", "text": "summary\nFINAL: PASS"},
             ]
         )
         now = [0.0]
@@ -390,7 +412,7 @@ class C2CReviewerTransportTest(unittest.TestCase):
         result = read_review_round_trip(transport, {"text": "[C2C] REVIEW_ONLY request"}, timeout=2)
         self.assertEqual(parse_c2c_review_result(result)["status"], "pass")
         self.assertEqual(len(host.send_attempts), 1)
-        self.assertEqual([cursor for _, cursor in host.read_calls], [None, "one", "two"])
+        self.assertEqual([cursor for _, cursor in host.read_calls], [None, "one", "two", "three"])
         with self.assertRaisesRegex(C2CReviewerBindingError, "already sent"):
             transport.send({"text": "[C2C] REVIEW_ONLY request"})
 
@@ -398,6 +420,7 @@ class C2CReviewerTransportTest(unittest.TestCase):
         host = FakeC2CHost(failed_sends=1)
         transport = C2CWebReviewerTransport(host, self._target())
         request = {"text": "[C2C] REVIEW_ONLY request"}
+        transport.verify_target(self._target())
         with self.assertRaisesRegex(RuntimeError, "temporary host failure"):
             transport.send(request)
         with self.assertRaisesRegex(C2CReviewerBindingError, "exact same message"):
@@ -415,18 +438,45 @@ class C2CReviewerTransportTest(unittest.TestCase):
             clock=lambda: clock[0],
             sleep=lambda delay: clock.__setitem__(0, clock[0] + delay),
         )
+        pending.verify_target(self._target())
         pending.send(request)
         self.assertFalse(pending.wait_result(1))
         self.assertEqual(parse_c2c_review_result(pending.read())["status"], "pending")
 
     def test_rejects_mismatched_host_identity_and_read_before_send(self):
-        different = dict(self._target(), reference="https://chatgpt.com/c/other")
+        different_reference = "https://chatgpt.com/c/other"
+        different = dict(
+            self._target(),
+            reference=different_reference,
+            metadata=dict(self._target()["metadata"], chat_url=different_reference),
+        )
         host = FakeC2CHost(verification={"target": different, "mechanism": "fake"})
         transport = C2CWebReviewerTransport(host, self._target())
+        with self.assertRaisesRegex(C2CReviewerBindingError, "differs from the transport"):
+            transport.verify_target(different)
         with self.assertRaisesRegex(C2CReviewerBindingError, "different target"):
             transport.verify_target(self._target())
         with self.assertRaisesRegex(C2CReviewerBindingError, "before the request"):
             transport.wait_result(0)
+
+    def test_does_not_accept_a_single_unstable_final_response(self):
+        host = FakeC2CHost(
+            [
+                {"cursor": "one", "text": "summary\nFINAL: PASS"},
+                {"cursor": "two", "text": "P1-1: late finding\nFINAL: FAIL"},
+            ]
+        )
+        now = [0.0]
+        transport = C2CWebReviewerTransport(
+            host,
+            self._target(),
+            poll_interval=0.25,
+            clock=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        )
+        transport.verify_target(self._target())
+        transport.send({"text": "[C2C] REVIEW_ONLY request"})
+        self.assertFalse(transport.wait_result(0.75))
 
 
 if __name__ == "__main__":
