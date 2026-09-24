@@ -565,6 +565,14 @@ class C2CReviewerTransportTest(unittest.TestCase):
                         "status": "completed",
                     },
                 },
+                {
+                    "cursor": "old-three",
+                    "latestAssistantMessage": {
+                        "id": "old-assistant",
+                        "text": "old review\nFINAL: PASS",
+                        "status": "completed",
+                    },
+                },
             ]
         )
         now = [0.0]
