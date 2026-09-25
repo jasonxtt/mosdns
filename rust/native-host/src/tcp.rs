@@ -188,6 +188,7 @@ async fn process_connection(task: ConnectionTask) {
             &question,
             connection_shutdown.clone(),
         );
+        let progress = admitted.execution_progress();
         let mut request_options = options.clone();
         request_options.admission_deadline = Some(Instant::now() + options.request_deadline);
         let mut execution = execute_request(
@@ -201,8 +202,19 @@ async fn process_connection(task: ConnectionTask) {
             },
             &forwards,
             connection_shutdown.clone(),
+            progress,
         )
         .await;
+        admitted.capture_execution(&TerminalObservation {
+            outcome: QueryTerminalOutcome::NoResponse,
+            response: execution.response.clone(),
+            cache_status: execution.cache_status,
+            final_sequence: execution.final_sequence.clone(),
+            final_upstream: execution.final_upstream.clone(),
+            upstream_attempts: execution.upstream_attempts.clone(),
+            failure_provenance: execution.failure_provenance.clone(),
+            elapsed: Duration::ZERO,
+        });
         let terminal = if connection_shutdown.is_cancelled() {
             QueryTerminalOutcome::Canceled
         } else if matches!(execution.response, ResponseState::NoResponse) {
