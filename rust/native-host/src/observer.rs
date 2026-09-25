@@ -11,6 +11,7 @@ const DURATION_BUCKET_UPPER_BOUNDS_MICROS: [u64; 15] = [
     50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000, 250_000, 500_000,
     1_000_000, 2_500_000,
 ];
+const DURATION_HISTOGRAM_BUCKET_COUNT: usize = DURATION_BUCKET_UPPER_BOUNDS_MICROS.len() + 1;
 
 /// The lifecycle result of an admitted query at the existing transport boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -187,20 +188,46 @@ impl Default for DurationHistogramSnapshot {
     }
 }
 
-impl DurationHistogramSnapshot {
-    #[cfg_attr(not(test), allow(dead_code))] // Listener terminalization is wired in Slice 2.
+/// Non-cumulative counters used on the per-query hot path. The public
+/// cumulative view is constructed only when a metrics snapshot is requested.
+#[derive(Clone, Debug, Default)]
+struct DurationHistogramState {
+    bucket_counts: [u64; DURATION_HISTOGRAM_BUCKET_COUNT],
+    count: u64,
+    sum_micros: u128,
+}
+
+impl DurationHistogramState {
     fn observe(&mut self, elapsed: Duration) {
         let micros = elapsed.as_micros();
-        for bucket in &mut self.buckets {
-            if bucket
-                .upper_bound_micros
-                .is_none_or(|upper_bound| micros <= u128::from(upper_bound))
-            {
-                bucket.cumulative_count = bucket.cumulative_count.saturating_add(1);
-            }
-        }
+        let bucket_index = DURATION_BUCKET_UPPER_BOUNDS_MICROS
+            .partition_point(|upper_bound| micros > u128::from(*upper_bound));
+        self.bucket_counts[bucket_index] = self.bucket_counts[bucket_index].saturating_add(1);
         self.count = self.count.saturating_add(1);
         self.sum_micros = self.sum_micros.saturating_add(micros);
+    }
+
+    fn snapshot(&self) -> DurationHistogramSnapshot {
+        let mut cumulative_count = 0_u64;
+        let mut buckets = Vec::with_capacity(DURATION_HISTOGRAM_BUCKET_COUNT);
+        for (index, upper_bound_micros) in DURATION_BUCKET_UPPER_BOUNDS_MICROS.iter().enumerate() {
+            cumulative_count = cumulative_count.saturating_add(self.bucket_counts[index]);
+            buckets.push(DurationHistogramBucket {
+                upper_bound_micros: Some(*upper_bound_micros),
+                cumulative_count,
+            });
+        }
+        cumulative_count = cumulative_count
+            .saturating_add(self.bucket_counts[DURATION_HISTOGRAM_BUCKET_COUNT - 1]);
+        buckets.push(DurationHistogramBucket {
+            upper_bound_micros: None,
+            cumulative_count,
+        });
+        DurationHistogramSnapshot {
+            buckets,
+            count: self.count,
+            sum_micros: self.sum_micros,
+        }
     }
 }
 
@@ -386,7 +413,7 @@ struct MetricsState {
     cache_undetermined_total: u64,
     forward_attempts_by_upstream: BTreeMap<String, UpstreamAttemptMetricsSnapshot>,
     unknown_forward_attempts_total: u64,
-    duration: DurationHistogramSnapshot,
+    duration: DurationHistogramState,
 }
 
 impl MetricsState {
@@ -407,7 +434,7 @@ impl MetricsState {
             cache_undetermined_total: self.cache_undetermined_total,
             forward_attempts_by_upstream: self.forward_attempts_by_upstream.clone(),
             unknown_forward_attempts_total: self.unknown_forward_attempts_total,
-            duration: self.duration.clone(),
+            duration: self.duration.snapshot(),
         }
     }
 }

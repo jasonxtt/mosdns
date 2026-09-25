@@ -109,6 +109,17 @@ intermediate response cannot become the final response or final upstream; a
 cache-free interrupted request is classified `NotApplicable` rather than
 `Undetermined`.
 
+The first Linux v1 matrix completed 27 attempts but crossed four predeclared
+latency regression guards; its assessment and per-repetition data are in
+`research/slice3-v1-pilot-assessment.md` and the adjacent TSVs. W3 repetition 3
+Rust-before also missed one sender slot at each of 350/400 QPS, so its 400 QPS
+pair is inconclusive with no replacement attempt. The repeatable v1 signals
+blocked review. The per-query histogram now increments only its one internal
+bucket and materializes the same cumulative public histogram on snapshot. A
+second full matrix for this new candidate is required before this checklist
+item can be completed; v1 raw files remain on the test VM with a checked hash
+manifest.
+
 Validation commands and outcomes:
 
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed (42 unit tests and all package integration suites before assertion extraction).
@@ -116,6 +127,8 @@ Validation commands and outcomes:
 - `cargo fmt --manifest-path rust/Cargo.toml --all` — passed; final `-- --check` is repeated after the remaining evidence edits.
 - `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed, including all workspace integration tests and doctests.
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` — passed after extracting W3 assertion helpers. The first run failed only on `clippy::similar_names` and `clippy::too_many_lines` in the new integration assertions; those were resolved by indexing the bounded upstream map directly and extracting the assertions.
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked duration_histogram` — passed after the histogram hot-path change (1 matching test); the first compile caught an ambiguous integer type in snapshot accumulation, fixed with an explicit `u64` accumulator.
+- `cargo test --manifest-path rust/Cargo.toml --workspace --locked` and `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` — passed again after the v1 performance correction.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 

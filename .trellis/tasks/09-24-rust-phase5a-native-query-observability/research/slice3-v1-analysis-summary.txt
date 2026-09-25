@@ -1,0 +1,59 @@
+primary rows: 63
+paired assessments: 56
+valid primary rows: 62/63
+w1-tcp main 200 after_off_vs_before_off p95_us n=3 deltas=[-1.8617,-27.6636,2.8120] guard=12.71% above=0 no repeatable regression under frozen guard
+w1-tcp main 200 after_off_vs_before_off p99_us n=3 deltas=[-1.7647,-14.8936,-6.1485] guard=44.54% above=0 no repeatable regression under frozen guard
+w1-tcp main 200 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[25.0000,-28.5714,28.5714] guard=25.00% above=1 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w1-tcp main 200 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[-0.7853,1.7926,5.5777] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w1-tcp main 200 after_on_vs_after_off p95_us n=3 deltas=[-7.8591,82.1705,20.8547] guard=10.00% above=2 repeatable regression
+w1-tcp main 200 after_on_vs_after_off p99_us n=3 deltas=[-13.7725,95.5000,27.3177] guard=33.00% above=1 no repeatable regression under frozen guard
+w1-tcp main 200 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[0.0000,100.0000,11.1111] guard=25.00% above=1 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w1-tcp main 200 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[16.7546,14.5912,13.2075] guard=32768 KiB above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_off_vs_before_off p95_us n=3 deltas=[-16.0494,-9.6601,42.7553] guard=10.00% above=1 no repeatable regression under frozen guard
+w1-tcp main 400 after_off_vs_before_off p99_us n=3 deltas=[-19.0217,25.5841,67.9276] guard=18.42% above=2 repeatable regression
+w1-tcp main 400 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[10.0000,0.0000,53.8462] guard=30.77% above=1 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w1-tcp main 400 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[-0.9150,1.7903,5.5703] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off p95_us n=3 deltas=[-22.9412,-7.9208,-14.6423] guard=38.02% above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off p99_us n=3 deltas=[-13.4228,-38.0465,-25.8570] guard=10.58% above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[-27.2727,-13.3333,-20.0000] guard=53.33% above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[63.0607,58.2915,57.6633] guard=32768 KiB above=0 no repeatable regression under frozen guard
+w2 cold 200 after_off_vs_before_off p95_us n=3 deltas=[24.9158,160.1286,-9.4512] guard=10.00% above=2 repeatable regression
+w2 cold 200 after_off_vs_before_off p99_us n=3 deltas=[16.4216,92.1105,-34.4234] guard=29.19% above=1 no repeatable regression under frozen guard
+w2 cold 200 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[0.0000,100.0000,0.0000] guard=25.00% above=1 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w2 cold 200 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[6.3857,1.8496,5.6194] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w2 cold 200 after_on_vs_after_off p95_us n=3 deltas=[28.3019,-59.3325,15.1515] guard=39.89% above=0 no repeatable regression under frozen guard
+w2 cold 200 after_on_vs_after_off p99_us n=3 deltas=[61.6842,-52.5667,63.7795] guard=39.58% above=2 repeatable regression
+w2 cold 200 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[33.3333,-25.0000,33.3333] guard=25.00% above=2 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w2 cold 200 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[0.8403,3.6320,4.2322] guard=32768 KiB above=0 no repeatable regression under frozen guard
+w2 warm 200 after_off_vs_before_off p95_us n=3 deltas=[7.1618,44.4444,-2.2436] guard=10.00% above=1 no repeatable regression under frozen guard
+w2 warm 200 after_off_vs_before_off p99_us n=3 deltas=[-1.0309,78.8136,13.4884] guard=54.24% above=1 no repeatable regression under frozen guard
+w2 warm 200 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[33.3333,33.3333,0.0000] guard=25.00% above=2 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w2 warm 200 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[6.4885,2.1519,-2.0859] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w2 warm 200 after_on_vs_after_off p95_us n=3 deltas=[-6.9307,-24.5726,12.1311] guard=31.68% above=0 no repeatable regression under frozen guard
+w2 warm 200 after_on_vs_after_off p99_us n=3 deltas=[-16.3542,-42.7488,23.3607] guard=19.79% above=1 no repeatable regression under frozen guard
+w2 warm 200 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[-25.0000,-25.0000,0.0000] guard=25.00% above=0 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w2 warm 200 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[2.5090,6.3197,3.7594] guard=32768 KiB above=0 no repeatable regression under frozen guard
+w2 warm 400 after_off_vs_before_off p95_us n=3 deltas=[-24.8815,18.5185,-60.4520] guard=46.45% above=0 no repeatable regression under frozen guard
+w2 warm 400 after_off_vs_before_off p99_us n=3 deltas=[-25.5919,42.0650,-63.4218] guard=29.31% above=1 no repeatable regression under frozen guard
+w2 warm 400 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[33.3333,0.0000,-37.5000] guard=28.57% above=1 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w2 warm 400 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[6.4803,2.0228,-2.2059] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w2 warm 400 after_on_vs_after_off p95_us n=3 deltas=[12.9338,-10.9375,37.1429] guard=42.27% above=0 no repeatable regression under frozen guard
+w2 warm 400 after_on_vs_after_off p99_us n=3 deltas=[-12.8788,-1.6151,13.7097] guard=25.15% above=0 no repeatable regression under frozen guard
+w2 warm 400 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[-12.5000,14.2857,40.0000] guard=28.57% above=1 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w2 warm 400 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[31.7422,36.8030,34.5865] guard=32768 KiB above=0 no repeatable regression under frozen guard
+w3 main 200 after_off_vs_before_off p95_us n=3 deltas=[218.3099,0.4918,7.7099] guard=39.56% above=1 no repeatable regression under frozen guard
+w3 main 200 after_off_vs_before_off p99_us n=3 deltas=[353.6534,-15.6481,-3.0266] guard=21.89% above=1 no repeatable regression under frozen guard
+w3 main 200 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[250.0000,11.1111,10.0000] guard=25.00% above=1 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w3 main 200 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[-0.3663,5.3021,1.6949] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w3 main 200 after_on_vs_after_off p95_us n=3 deltas=[-61.1504,-16.2045,-13.9771] guard=56.77% above=0 no repeatable regression under frozen guard
+w3 main 200 after_on_vs_after_off p99_us n=3 deltas=[-71.5140,-17.6486,-16.5210] guard=55.10% above=0 no repeatable regression under frozen guard
+w3 main 200 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[-57.1429,-10.0000,0.0000] guard=25.00% above=0 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w3 main 200 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[11.8873,7.4941,12.7381] guard=32768 KiB above=0 no repeatable regression under frozen guard
+w3 main 400 after_off_vs_before_off p95_us n=2 deltas=[46.3277,-29.8387] guard=123.13% above=0 inconclusive: fewer than 3 valid pairs
+w3 main 400 after_off_vs_before_off p99_us n=2 deltas=[50.5929,-23.8869] guard=139.33% above=0 inconclusive: fewer than 3 valid pairs
+w3 main 400 after_off_vs_before_off cpu_us_per_correct_query n=2 deltas=[83.3333,-5.2632] guard=104.00% above=0 inconclusive: fewer than 3 valid pairs
+w3 main 400 after_off_vs_before_off rss_peak_kib_sampled n=2 deltas=[1.5873,5.3021] guard=8192 KiB above=0 inconclusive: fewer than 3 valid pairs
+w3 main 400 after_on_vs_after_off p95_us n=3 deltas=[-13.1274,61.4943,3.5245] guard=77.20% above=0 no repeatable regression under frozen guard
+w3 main 400 after_on_vs_after_off p99_us n=3 deltas=[19.4226,77.3909,-4.7557] guard=87.00% above=0 no repeatable regression under frozen guard
+w3 main 400 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[-18.1818,5.5556,0.0000] guard=25.00% above=0 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w3 main 400 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[53.6058,53.1616,56.9560] guard=32768 KiB above=0 no repeatable regression under frozen guard
