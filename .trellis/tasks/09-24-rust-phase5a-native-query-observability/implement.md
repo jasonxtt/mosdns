@@ -49,10 +49,37 @@ warnings` passed.
 
 ## Slice 2 — execution provenance and listener terminalization
 
-- [ ] Add red tests at the native execution seam for W1 direct forward, W2 cold/warm, W3 A/B→A/B→C, upstream/local SERVFAIL, timeout, and failed leg. Public surface: native `execute_request` result/snapshot via UDP/TCP integration tests; mock only controlled upstream responses and transport send failure where needed.
-- [ ] Assert lifecycle outcome independently from response state/source and per-attempt/failure provenance. A local SERVFAIL after timeout has a local response source plus upstream-timeout provenance; a valid upstream SERVFAIL has the upstream source/identity; a failed leg followed by a successful fallback records both ordered attempts but names only the accepted final upstream. Public surface: retained audit snapshot and transport result; mock boundaries: controlled upstream responses/errors, injected send failure, and cancellation token; never infer delivery or response source from nonempty wire bytes.
-- [ ] Carry actual cache/leg/final-response facts out of the existing execution driver without changing its sequence or cache semantics. Finalize once at the listener after framing/send or cancellation; count malformed/partial requests outside admitted-query totals.
-- [ ] Exercise deterministic UDP and TCP send failure/cancellation and multiple TCP requests on one connection. Check final response code, transport/client/question identity, elapsed time, and that no canceled query is marked sent.
+- [x] Add red tests at the native execution seam for W1 direct forward, W2 cold/warm, W3 A/B→A/B→C, upstream/local SERVFAIL, timeout, and failed leg. Public surface: native `execute_request` result/snapshot via UDP/TCP integration tests; mock only controlled upstream responses and transport send failure where needed.
+- [x] Assert lifecycle outcome independently from response state/source and per-attempt/failure provenance. A local SERVFAIL after timeout has a local response source plus upstream-timeout provenance; a valid upstream SERVFAIL has the upstream source/identity; a failed leg followed by a successful fallback records both ordered attempts but names only the accepted final upstream. Public surface: retained audit snapshot and transport result; mock boundaries: controlled upstream responses/errors, injected send failure, and cancellation token; never infer delivery or response source from nonempty wire bytes.
+- [x] Carry actual cache/leg/final-response facts out of the existing execution driver without changing its sequence or cache semantics. Finalize once at the listener after framing/send or cancellation; count malformed/partial requests outside admitted-query totals.
+- [x] Exercise deterministic UDP and TCP send failure/cancellation and multiple TCP requests on one connection. Check final response code, transport/client/question identity, elapsed time, and that no canceled query is marked sent.
+
+Slice 2 evidence (2026-09-25): the first focused execution test compiled red because
+the execution-observation result surface did not exist. The native request driver
+now returns response source/code, cache disposition, executed sequence, accepted
+final upstream, ordered configured-upstream attempts, and typed failure provenance
+alongside the unchanged wire response. Tests cover W1 direct forwarding; W2 cold
+and warm paths; W3 A, B→A, B→C, and B SERVFAIL→C; local timeout SERVFAIL versus a
+valid upstream SERVFAIL; and failed first/second legs without changing the
+existing stop-on-transport-error policy.
+
+Both listeners now share the host-owned observer. A request is admitted only after
+DNS query parsing; a guard records exactly one terminal result after send, send
+failure, cancellation, or an unfinished-task drop. UDP malformed datagrams and
+TCP invalid/truncated frames increment `malformed_total` without admission. The
+UDP/TCP tests inject send errors and cancellation at their I/O boundary; real
+listener tests verify client/question identity, response facts, successful-send
+counts, multiple TCP queries on one connection, partial-frame accounting, and
+zero in-flight after each completed query. Dropped requests consult their
+cancellation scope, so task shutdown is not mislabeled as a send success.
+
+Validation: `cargo fmt --all -- --check`, `cargo test -p mosdns-native-host
+--locked` (39 unit tests plus all native-host integration suites),
+`cargo clippy -p mosdns-native-host --all-targets --locked -- -D warnings`, and
+`git diff --check` pass. W1/W2/W3 response and cache regression suites remain
+green. Transport-error execution continues to terminate as local SERVFAIL under
+the existing sequence contract; the added fallback case is an upstream B
+SERVFAIL response followed by the existing C route, with only C marked final.
 
 ## Slice 3 — concurrency, lifecycle, Linux evidence, review
 
