@@ -70,6 +70,7 @@ pub(crate) struct ExecutionResult {
 }
 
 struct ExecutionFacts<'a> {
+    capture_audit_details: bool,
     cache_status: CacheStatus,
     response_source: Option<ResponseSource>,
     final_upstream: Option<String>,
@@ -79,6 +80,59 @@ struct ExecutionFacts<'a> {
     checkpoint: &'a mut ExecutionCheckpoint,
     in_flight_upstream: Option<String>,
     completed: bool,
+}
+
+impl ExecutionFacts<'_> {
+    fn set_response_source(&mut self, source: ResponseSource) {
+        if self.capture_audit_details {
+            self.response_source = Some(source);
+        }
+    }
+
+    fn set_failure_provenance(&mut self, provenance: FailureProvenance) {
+        if self.capture_audit_details {
+            self.failure_provenance = Some(provenance);
+        }
+    }
+
+    fn record_upstream_response(&mut self, upstream: String) {
+        if self.capture_audit_details {
+            self.upstream_attempts.push(UpstreamAttemptRecord {
+                upstream: upstream.clone(),
+                outcome: UpstreamAttemptOutcome::Response,
+            });
+            self.final_upstream = Some(upstream.clone());
+            self.response_source = Some(ResponseSource::Upstream(upstream));
+        } else {
+            self.upstream_attempts.push(UpstreamAttemptRecord {
+                upstream,
+                outcome: UpstreamAttemptOutcome::Response,
+            });
+        }
+    }
+
+    fn record_upstream_failure(
+        &mut self,
+        upstream: String,
+        outcome: UpstreamAttemptOutcome,
+        timed_out: bool,
+    ) {
+        if self.capture_audit_details {
+            self.failure_provenance = Some(if timed_out {
+                FailureProvenance::UpstreamTimeout {
+                    upstream: upstream.clone(),
+                }
+            } else {
+                FailureProvenance::UpstreamFailure {
+                    upstream: upstream.clone(),
+                }
+            });
+            self.response_source = Some(ResponseSource::Local);
+            self.final_upstream = None;
+        }
+        self.upstream_attempts
+            .push(UpstreamAttemptRecord { upstream, outcome });
+    }
 }
 
 impl Drop for ExecutionFacts<'_> {
@@ -141,7 +195,7 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
     executor: &E,
     request_shutdown: TransportCancellation,
 ) -> Vec<u8> {
-    let mut checkpoint = ExecutionCheckpoint::new();
+    let mut checkpoint = ExecutionCheckpoint::new(true);
     execute_request_with_observation(request, executor, request_shutdown, &mut checkpoint)
         .await
         .response_wire
@@ -161,7 +215,10 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         header,
         question,
     } = request;
+    let capture_audit_details = checkpoint.capture_audit_details();
+    let multi_forward = config.program.externals.len() > usize::from(config.cache.is_some()) + 1;
     let mut facts = ExecutionFacts {
+        capture_audit_details,
         cache_status: if config.cache.is_some() {
             CacheStatus::Undetermined
         } else {
@@ -169,9 +226,13 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         },
         response_source: None,
         final_upstream: None,
-        upstream_attempts: Vec::new(),
+        upstream_attempts: Vec::with_capacity(if multi_forward {
+            config.forwards.len()
+        } else {
+            0
+        }),
         failure_provenance: None,
-        final_sequence: Some(config.sequence.tag.clone()),
+        final_sequence: capture_audit_details.then(|| config.sequence.tag.clone()),
         checkpoint,
         in_flight_upstream: None,
         completed: false,
@@ -185,7 +246,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         Ok(machine) => machine,
         Err(_) => {
             facts.cache_status = CacheStatus::NotApplicable;
-            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+            facts.set_failure_provenance(FailureProvenance::LocalFailure(
                 LocalFailureKind::InternalExecution,
             ));
             return result_from_wire(protocol_error(&header, &question, SERVFAIL), facts);
@@ -195,12 +256,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     let mut pending_store: Option<PendingStore> = None;
     let mut upstream_response = false;
     let mut publication_deadline = None;
-    let multi_forward = config.program.externals.len() > usize::from(config.cache.is_some()) + 1;
     let mut step = match machine.step() {
         Ok(step) => step,
         Err(_) => {
             facts.cache_status = CacheStatus::NotApplicable;
-            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+            facts.set_failure_provenance(FailureProvenance::LocalFailure(
                 LocalFailureKind::InternalExecution,
             ));
             return result_from_wire(protocol_error(&header, &question, SERVFAIL), facts);
@@ -237,7 +297,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     let lookup = cache.lookup(raw).ok().flatten();
                     if let Some(wire) = lookup {
                         facts.cache_status = CacheStatus::Hit;
-                        facts.response_source = Some(ResponseSource::Cache);
+                        facts.set_response_source(ResponseSource::Cache);
                         facts.final_upstream = None;
                         facts.failure_provenance = None;
                         machine.state_mut().set_raw_response(wire);
@@ -246,7 +306,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         {
                             Ok(step) => step,
                             Err(_) => {
-                                facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                                facts.set_failure_provenance(FailureProvenance::LocalFailure(
                                     LocalFailureKind::InternalExecution,
                                 ));
                                 return result_from_state(&machine, &header, &question, facts);
@@ -261,7 +321,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     {
                         Ok(step) => step,
                         Err(_) => {
-                            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
                                 LocalFailureKind::InternalExecution,
                             ));
                             return result_from_state(&machine, &header, &question, facts);
@@ -275,9 +335,9 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 }
                 if multi_forward && Instant::now() >= request_deadline {
                     set_servfail(&mut machine);
-                    facts.response_source = Some(ResponseSource::Local);
+                    facts.set_response_source(ResponseSource::Local);
                     facts.final_upstream = None;
-                    facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                    facts.set_failure_provenance(FailureProvenance::LocalFailure(
                         LocalFailureKind::NoUsableUpstreamResponse,
                     ));
                     return result_from_state(&machine, &header, &question, facts);
@@ -313,13 +373,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         match accepted {
                             Some(wire) => {
                                 if let Some(upstream) = upstream {
-                                    facts.upstream_attempts.push(UpstreamAttemptRecord {
-                                        upstream: upstream.clone(),
-                                        outcome: UpstreamAttemptOutcome::Response,
-                                    });
-                                    facts.final_upstream = Some(upstream.clone());
-                                    facts.response_source =
-                                        Some(ResponseSource::Upstream(upstream));
+                                    facts.record_upstream_response(upstream);
                                 }
                                 facts.failure_provenance = None;
                                 upstream_response = true;
@@ -327,23 +381,19 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             }
                             None => {
                                 if let Some(upstream) = upstream {
-                                    facts.upstream_attempts.push(UpstreamAttemptRecord {
-                                        upstream: upstream.clone(),
-                                        outcome: UpstreamAttemptOutcome::Failed,
-                                    });
-                                    facts.failure_provenance =
-                                        Some(FailureProvenance::UpstreamFailure {
-                                            upstream: upstream.clone(),
-                                        });
+                                    facts.record_upstream_failure(
+                                        upstream,
+                                        UpstreamAttemptOutcome::Failed,
+                                        false,
+                                    );
                                 } else {
-                                    facts.failure_provenance =
-                                        Some(FailureProvenance::LocalFailure(
-                                            LocalFailureKind::InternalExecution,
-                                        ));
+                                    facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                        LocalFailureKind::InternalExecution,
+                                    ));
                                 }
                                 upstream_response = false;
                                 set_servfail(&mut machine);
-                                facts.response_source = Some(ResponseSource::Local);
+                                facts.set_response_source(ResponseSource::Local);
                                 facts.final_upstream = None;
                                 if multi_forward {
                                     return result_from_state(&machine, &header, &question, facts);
@@ -352,12 +402,12 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         }
                     }
                     Err(ExchangeError::UnknownExecutable(_)) => {
-                        facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
                             LocalFailureKind::InternalExecution,
                         ));
                         upstream_response = false;
                         set_servfail(&mut machine);
-                        facts.response_source = Some(ResponseSource::Local);
+                        facts.set_response_source(ResponseSource::Local);
                         facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
@@ -374,23 +424,15 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             } else {
                                 UpstreamAttemptOutcome::Failed
                             };
-                            facts.upstream_attempts.push(UpstreamAttemptRecord {
-                                upstream: upstream.clone(),
-                                outcome,
-                            });
-                            facts.failure_provenance = Some(if timeout {
-                                FailureProvenance::UpstreamTimeout { upstream }
-                            } else {
-                                FailureProvenance::UpstreamFailure { upstream }
-                            });
+                            facts.record_upstream_failure(upstream, outcome, timeout);
                         } else {
-                            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
                                 LocalFailureKind::InternalExecution,
                             ));
                         }
                         upstream_response = false;
                         set_servfail(&mut machine);
-                        facts.response_source = Some(ResponseSource::Local);
+                        facts.set_response_source(ResponseSource::Local);
                         facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
@@ -400,7 +442,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Continue)) {
                     Ok(step) => step,
                     Err(_) => {
-                        facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
                             LocalFailureKind::InternalExecution,
                         ));
                         return result_from_state(&machine, &header, &question, facts);
@@ -594,6 +636,7 @@ pub(crate) fn frame_native_response(response: &[u8], mode: FrameMode) -> Option<
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::num::NonZeroUsize;
     use std::rc::Rc;
     use std::sync::Arc;
     use std::time::Duration;
@@ -619,8 +662,8 @@ mod tests {
         SequenceConfig, compile_yaml,
     };
     use crate::observer::{
-        CacheStatus, FailureProvenance, QueryObserver, QueryTransport, ResponseSource,
-        ResponseState,
+        CacheStatus, FailureProvenance, QueryObserver, QueryTerminalOutcome, QueryTransport,
+        ResponseSource, ResponseState, TerminalObservation,
     };
 
     struct MockExchange {
@@ -1011,7 +1054,7 @@ mod tests {
         executor: &E,
     ) -> super::ExecutionResult {
         let (header, question) = parse_query(request).expect("query");
-        let mut checkpoint = ExecutionCheckpoint::new();
+        let mut checkpoint = ExecutionCheckpoint::new(true);
         futures_like_block_on(super::execute_request_with_observation(
             super::ExecutionRequest {
                 config,
@@ -1025,6 +1068,80 @@ mod tests {
             TransportCancellation::new(),
             &mut checkpoint,
         ))
+    }
+
+    #[test]
+    fn audit_disabled_execution_keeps_metric_facts_without_audit_details() {
+        let config = compile_yaml(include_str!(
+            "../../../tests/phase5a-baseline/configs/forward-udp.yaml"
+        ))
+        .expect("W1 configuration");
+        let request = query(30);
+        let (_, question) = parse_query(&request).expect("query");
+        let executor = MockExchange {
+            calls: Rc::new(Cell::new(0)),
+            response: response(&request),
+            fail: false,
+        };
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let cancellation = TransportCancellation::new();
+        let observer = Arc::new(QueryObserver::new(
+            false,
+            ["phase5a_forward".to_owned()],
+            NonZeroUsize::new(8).expect("nonzero audit capacity"),
+        ));
+        let mut admitted = observer.admit(
+            "192.0.2.30:53000".parse().expect("client address"),
+            QueryTransport::Udp,
+            &question,
+            cancellation.clone(),
+        );
+        let (header, question) = parse_query(&request).expect("query");
+        let result = futures_like_block_on(execute_request_with_observation(
+            ExecutionRequest {
+                config: &config,
+                cache: &cache,
+                options: &HostOptions::default(),
+                raw: &request,
+                header,
+                question,
+            },
+            &executor,
+            cancellation,
+            admitted.execution_checkpoint(),
+        ));
+        assert!(result.final_sequence.is_none());
+        assert!(result.final_upstream.is_none());
+        assert!(result.failure_provenance.is_none());
+        assert_eq!(result.upstream_attempts.len(), 1);
+        assert_eq!(result.upstream_attempts[0].upstream, "phase5a_forward");
+
+        admitted.capture_execution(TerminalObservation {
+            outcome: QueryTerminalOutcome::SendSucceeded,
+            response: result.response,
+            cache_status: result.cache_status,
+            final_sequence: result.final_sequence,
+            final_upstream: result.final_upstream,
+            upstream_attempts: result.upstream_attempts,
+            failure_provenance: result.failure_provenance,
+            elapsed: Duration::ZERO,
+        });
+        admitted.finish(QueryTerminalOutcome::SendSucceeded);
+
+        let metrics = observer.metrics_snapshot();
+        assert_eq!(metrics.admitted_total, 1);
+        assert_eq!(metrics.completed_total, 1);
+        assert_eq!(metrics.in_flight, 0);
+        assert_eq!(metrics.send_succeeded_total, 1);
+        assert_eq!(metrics.response_code_totals.get(&0), Some(&1));
+        assert_eq!(metrics.cache_not_applicable_total, 1);
+        let forward = metrics
+            .forward_attempts_by_upstream
+            .get("phase5a_forward")
+            .expect("configured forward metrics");
+        assert_eq!(forward.attempts_total, 1);
+        assert_eq!(forward.responses_total, 1);
+        assert!(observer.audit_snapshot().records.is_empty());
     }
 
     #[test]

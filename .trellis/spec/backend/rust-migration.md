@@ -1011,3 +1011,69 @@ let endpoint = DoqEndpoint::new(resolve(identity.dns_name())?, identity);
 let endpoint = DoqEndpoint::new(published.dial(), identity.clone())
     .map_err(|_| ResolverError::ZeroPort)?;
 ```
+
+## Scenario: Phase 5A native query observation hot path
+
+### 1. Scope / Trigger
+
+Use this contract when native-host request execution feeds the Phase 5A
+observer. The sole supported listener's audit flag controls detailed record
+capture; basic metrics remain active in either mode.
+
+### 2. Signatures
+
+- `ExecutionCheckpoint::new(capture_audit_details: bool)` carries the
+  admission-time capture decision into request execution.
+- `QueryObserver::metrics_snapshot()` and `audit_snapshot()` return read-only
+  host-owned snapshots.
+
+### 3. Contracts
+
+- With detailed capture disabled, do not materialize per-query sequence,
+  response-source identity, or failure-provenance strings. Keep response
+  code, cache disposition, lifecycle, and configured upstream attempt identity
+  plus outcome available to basic metrics.
+- Upstream-attempt identity is required for bounded per-configured-upstream
+  metric aggregation; question names, client addresses, and trace identifiers
+  never become metric labels.
+- With capture enabled, preserve the same executed route, ordered attempts,
+  final response source, sequence, and failure provenance as the execution
+  result; the observer flag must not change DNS wire or forwarding behavior.
+- W1/W2 start with an empty attempt vector. Bounded W3 execution reserves from
+  the configured forward count before dispatch, avoiding growth on each leg.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| audit disabled, successful upstream response | no audit record or audit-only route strings; response/cache/lifecycle and upstream metrics remain correct |
+| audit enabled | existing route, cache, ordered-attempt, and provenance fields remain intact |
+| W2 cache hit | cache-hit metric, no upstream attempt |
+| W3 forwarding | each configured leg contributes its actual attempt outcome; reserved capacity is bounded by configured forwards |
+
+### 5. Good/Base/Bad Cases
+
+- Good: branch at the execution fact-construction boundary using the
+  checkpoint's captured audit flag, while recording metric-required attempts.
+- Base: assert disabled-audit metrics and empty retention through a real
+  observer admission/finish guard; retain enabled-audit W1/W2/W3 coverage.
+- Bad: build route/provenance strings on every request and discard them only
+  after the observer notices that audit capture is disabled.
+
+### 6. Tests Required
+
+- Disabled-audit execution must retain correct lifecycle, response-code,
+  cache, and configured-upstream attempt metrics while retaining no audit row.
+- Enabled-audit execution and cancellation tests must preserve the detailed
+  route and failure fields.
+- Frozen Linux evidence must confirm that the candidate reduces the intended
+  audit-off overhead without changing correctness or the predeclared guards.
+
+### 7. Wrong vs Correct
+
+Wrong: create an upstream `ResponseSource` and final sequence for every query,
+then rely on the observer to drop them when detailed audit is disabled.
+
+Correct: carry the admission-time capture bit into execution and only build
+audit-only strings when it is set; always retain the bounded attempt facts
+needed by metrics.
