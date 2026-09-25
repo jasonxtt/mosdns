@@ -1,0 +1,51 @@
+preflight_utc=2026-09-25T20:22:12Z
+host=mosdns-rust
+kernel=Linux mosdns-rust 7.0.9-x64v3-xanmod1 #0~20260517.ga456799 SMP PREEMPT_DYNAMIC Sun May 17 20:10:49 UTC x86_64 GNU/Linux
+online_cpus=2
+mem_bytes=4102578176
+open_file_limit=1024
+result_filesystem=ext4
+loadavg=0.07 0.22 0.22 1/118 224469
+runner_sha256=dd9749238cf917d1360f33fd732cca48c4ae7906ab76d1cb8f5f941e10e1e3d8
+helper_sha256=df4515d7045ddcfd30139b0407e8e9933277c1560137d71ee0f7360d7d537065
+before_sha256=370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa
+after_sha256=b0917f6fd57eb2f57996aa7125a60a42871edfd67c789bafd31e253c9ffd37b7
+mode=pilot (the frozen manifest specifies pilot mode because the archived official driver digest differs)
+matrix=27 balanced attempts; W1 TCP, W2 same-process cold/warm, W3
+stages=200,300,350,400 QPS plus 200 QPS health; 3000 ms each; deadline 500 ms; late drain 100 ms
+w2_ttl_ms=30000; w2_ttl_safety_margin_ms=500; sut_cpu=0; harness_cpu=1
+production_service=untouched; no connection to mosdns production service
+driver_sha256=da2cc059d47581ebd5b16286b04bfcc0a82bfafc4e0d788972a7439f1148873c
+plan_sha256=58c1ca03201dbe13fab7f5af49d4bfbefa9a5db20dfa0a41fb9b8650e41029ee
+identity_sha256=7ca25cff7af10cfb42ff462ade4c569e1f7cefacfb242e71dcbe1204dcd6a90e
+analysis_script_sha256=3b3b4559b62d10088e45e41aa59b46bfa43b8897a8805e57edf08abbee622dc6
+manifest_sha256=b687be8014a78008127d9df818123c839b69ffdda4764eb99c174b9e085965a8
+attempt_utc=2026-09-25T20:22:31Z scenario=w1-tcp repetition=1 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r1-before_off
+attempt_utc=2026-09-25T20:22:49Z scenario=w1-tcp repetition=1 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r1-after_off
+attempt_utc=2026-09-25T20:23:08Z scenario=w1-tcp repetition=1 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r1-after_on
+attempt_utc=2026-09-25T20:23:26Z scenario=w1-tcp repetition=2 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r2-after_off
+attempt_utc=2026-09-25T20:23:45Z scenario=w1-tcp repetition=2 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r2-after_on
+attempt_utc=2026-09-25T20:24:03Z scenario=w1-tcp repetition=2 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r2-before_off
+attempt_utc=2026-09-25T20:24:22Z scenario=w1-tcp repetition=3 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r3-after_on
+attempt_utc=2026-09-25T20:24:40Z scenario=w1-tcp repetition=3 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r3-before_off
+attempt_utc=2026-09-25T20:24:59Z scenario=w1-tcp repetition=3 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w1-tcp-r3-after_off
+attempt_utc=2026-09-25T20:25:28Z scenario=w2 repetition=1 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r1-before_off
+attempt_utc=2026-09-25T20:25:57Z scenario=w2 repetition=1 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r1-after_off
+attempt_utc=2026-09-25T20:26:26Z scenario=w2 repetition=1 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r1-after_on
+attempt_utc=2026-09-25T20:26:55Z scenario=w2 repetition=2 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r2-after_off
+attempt_utc=2026-09-25T20:27:23Z scenario=w2 repetition=2 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r2-after_on
+attempt_utc=2026-09-25T20:27:52Z scenario=w2 repetition=2 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r2-before_off
+attempt_utc=2026-09-25T20:28:21Z scenario=w2 repetition=3 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r3-after_on
+attempt_utc=2026-09-25T20:28:50Z scenario=w2 repetition=3 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r3-before_off
+attempt_utc=2026-09-25T20:29:19Z scenario=w2 repetition=3 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w2-r3-after_off
+attempt_utc=2026-09-25T20:29:41Z scenario=w3 repetition=1 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r1-before_off
+attempt_utc=2026-09-25T20:30:03Z scenario=w3 repetition=1 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r1-after_off
+attempt_utc=2026-09-25T20:30:24Z scenario=w3 repetition=1 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r1-after_on
+attempt_utc=2026-09-25T20:30:46Z scenario=w3 repetition=2 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r2-after_off
+attempt_utc=2026-09-25T20:31:08Z scenario=w3 repetition=2 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r2-after_on
+attempt_utc=2026-09-25T20:31:29Z scenario=w3 repetition=2 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r2-before_off
+attempt_utc=2026-09-25T20:31:51Z scenario=w3 repetition=3 variant=after_on pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r3-after_on
+attempt_utc=2026-09-25T20:32:13Z scenario=w3 repetition=3 variant=before_off pair_position=1 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r3-before_off
+attempt_utc=2026-09-25T20:32:34Z scenario=w3 repetition=3 variant=after_off pair_position=2 runner_exit=0 result=/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/w3-r3-after_off
+matrix_finished_utc=2026-09-25T20:32:34Z
+loadavg=0.32 0.28 0.23 1/114 234863
