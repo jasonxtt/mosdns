@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod execution;
 mod matchers;
+mod observer;
 mod tcp;
 mod udp;
 
@@ -18,6 +19,12 @@ pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
     CachePluginConfig, CompiledConfig, ConfigError, ForwardConfig, ListenerConfig, ListenerKind,
     LogLevel, SequenceConfig, compile_yaml, load_yaml,
+};
+pub use observer::{
+    AuditRecord, AuditSnapshot, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,
+    FailureProvenance, LocalFailureKind, MetricsSnapshot, QueryTerminalOutcome, QueryTransport,
+    ResponseSource, ResponseState, UpstreamAttemptMetricsSnapshot, UpstreamAttemptOutcome,
+    UpstreamAttemptRecord,
 };
 pub use tcp::{TcpServer, TcpServerError};
 pub use udp::{UdpServer, UdpServerError};

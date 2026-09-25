@@ -160,9 +160,8 @@ fn a_second_listener_with_a_mixed_audit_flag_is_rejected_before_assembly() {
         "{UDP}\n  - tag: phase5a_extra_listener\n    type: udp_server\n    args: {{ entry: phase5a_entry, listen: \"127.0.0.1:16553\", enable_audit: true }}\n"
     );
 
-    let error = match compile_yaml(&yaml) {
-        Err(error) => error,
-        Ok(_) => panic!("a second listener remains unsupported"),
+    let Err(error) = compile_yaml(&yaml) else {
+        panic!("a second listener remains unsupported");
     };
     assert!(
         error.reason.contains("exactly one listener"),
