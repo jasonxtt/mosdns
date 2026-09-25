@@ -488,7 +488,7 @@ mod tests {
                 cache_status: CacheStatus::NotApplicable,
                 final_sequence: None,
                 final_upstream: None,
-                upstream_attempts: Vec::new(),
+                upstream_attempts: crate::observer::UpstreamAttemptList::default(),
                 failure_provenance: None,
                 elapsed: std::time::Duration::ZERO,
             });

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::ops::Index;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -92,6 +93,116 @@ pub struct UpstreamAttemptRecord {
     pub upstream: String,
     /// Outcome observed for this attempt.
     pub outcome: UpstreamAttemptOutcome,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+enum UpstreamAttemptStorage {
+    #[default]
+    Empty,
+    One(UpstreamAttemptRecord),
+    Many(Vec<UpstreamAttemptRecord>),
+}
+
+/// Keeps the common zero-or-one upstream attempt inline and allocates only
+/// when execution records a second leg.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct UpstreamAttemptList {
+    storage: UpstreamAttemptStorage,
+    capacity_hint: usize,
+}
+
+impl UpstreamAttemptList {
+    pub(crate) fn with_capacity_hint(capacity_hint: usize) -> Self {
+        Self {
+            storage: UpstreamAttemptStorage::Empty,
+            capacity_hint,
+        }
+    }
+
+    pub(crate) fn push(&mut self, attempt: UpstreamAttemptRecord) {
+        self.storage = match std::mem::take(&mut self.storage) {
+            UpstreamAttemptStorage::Empty => UpstreamAttemptStorage::One(attempt),
+            UpstreamAttemptStorage::One(first) => {
+                let mut attempts = Vec::with_capacity(self.capacity_hint.max(2));
+                attempts.push(first);
+                attempts.push(attempt);
+                UpstreamAttemptStorage::Many(attempts)
+            }
+            UpstreamAttemptStorage::Many(mut attempts) => {
+                attempts.push(attempt);
+                UpstreamAttemptStorage::Many(attempts)
+            }
+        };
+    }
+
+    pub(crate) fn as_slice(&self) -> &[UpstreamAttemptRecord] {
+        match &self.storage {
+            UpstreamAttemptStorage::Empty => &[],
+            UpstreamAttemptStorage::One(attempt) => std::slice::from_ref(attempt),
+            UpstreamAttemptStorage::Many(attempts) => attempts,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, UpstreamAttemptRecord> {
+        self.as_slice().iter()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.as_slice().is_empty()
+    }
+
+    pub(crate) fn into_vec(self) -> Vec<UpstreamAttemptRecord> {
+        match self.storage {
+            UpstreamAttemptStorage::Empty => Vec::new(),
+            UpstreamAttemptStorage::One(attempt) => vec![attempt],
+            UpstreamAttemptStorage::Many(attempts) => attempts,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_inline(&self) -> bool {
+        !matches!(self.storage, UpstreamAttemptStorage::Many(_))
+    }
+}
+
+impl From<Vec<UpstreamAttemptRecord>> for UpstreamAttemptList {
+    fn from(mut attempts: Vec<UpstreamAttemptRecord>) -> Self {
+        match attempts.len() {
+            0 => Self::default(),
+            1 => Self {
+                storage: UpstreamAttemptStorage::One(attempts.remove(0)),
+                capacity_hint: 0,
+            },
+            _ => Self {
+                storage: UpstreamAttemptStorage::Many(attempts),
+                capacity_hint: 0,
+            },
+        }
+    }
+}
+
+impl From<UpstreamAttemptRecord> for UpstreamAttemptList {
+    fn from(attempt: UpstreamAttemptRecord) -> Self {
+        Self {
+            storage: UpstreamAttemptStorage::One(attempt),
+            capacity_hint: 0,
+        }
+    }
+}
+
+impl Index<usize> for UpstreamAttemptList {
+    type Output = UpstreamAttemptRecord;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.as_slice()[index]
+    }
 }
 
 /// Classification for a local failure that produced or prevented a response.
@@ -304,7 +415,7 @@ pub(crate) struct TerminalObservation {
     pub cache_status: CacheStatus,
     pub final_sequence: Option<String>,
     pub final_upstream: Option<String>,
-    pub upstream_attempts: Vec<UpstreamAttemptRecord>,
+    pub upstream_attempts: UpstreamAttemptList,
     pub failure_provenance: Option<FailureProvenance>,
     pub elapsed: Duration,
 }
@@ -316,7 +427,7 @@ pub(crate) struct ExecutionCheckpoint {
     cache_status: CacheStatus,
     final_sequence: Option<String>,
     final_upstream: Option<String>,
-    upstream_attempts: Vec<UpstreamAttemptRecord>,
+    upstream_attempts: UpstreamAttemptList,
     failure_provenance: Option<FailureProvenance>,
     in_flight_upstream: Option<String>,
     completed_observation: Option<TerminalObservation>,
@@ -330,7 +441,7 @@ impl ExecutionCheckpoint {
             cache_status: CacheStatus::Undetermined,
             final_sequence: None,
             final_upstream: None,
-            upstream_attempts: Vec::new(),
+            upstream_attempts: UpstreamAttemptList::default(),
             failure_provenance: None,
             in_flight_upstream: None,
             completed_observation: None,
@@ -573,7 +684,7 @@ impl QueryObserver {
                 observation.outcome,
                 &observation.response,
                 observation.cache_status,
-                &observation.upstream_attempts,
+                observation.upstream_attempts.as_slice(),
                 observation.elapsed,
             );
             self.decrement_in_flight();
@@ -696,7 +807,7 @@ impl AdmittedQueryGuard {
                 cache_status: observation.cache_status,
                 final_sequence: observation.final_sequence,
                 final_upstream: observation.final_upstream,
-                upstream_attempts: observation.upstream_attempts,
+                upstream_attempts: observation.upstream_attempts.into_vec(),
                 failure_provenance: observation.failure_provenance,
             }
         });
@@ -773,7 +884,8 @@ mod tests {
     use super::{
         AuditRecord, CacheStatus, FailureProvenance, INITIAL_AUDIT_RECORD_CAPACITY,
         LocalFailureKind, QueryObserver, QueryTerminalOutcome, QueryTransport, ResponseSource,
-        ResponseState, TerminalObservation, UpstreamAttemptOutcome, UpstreamAttemptRecord,
+        ResponseState, TerminalObservation, UpstreamAttemptList, UpstreamAttemptOutcome,
+        UpstreamAttemptRecord,
     };
 
     fn observer(audit_enabled: bool, capacity: usize) -> QueryObserver {
@@ -782,6 +894,29 @@ mod tests {
             ["route-a".to_owned(), "route-b".to_owned()],
             NonZeroUsize::new(capacity).expect("non-zero capacity"),
         )
+    }
+
+    #[test]
+    fn upstream_attempt_list_keeps_one_attempt_inline_and_promotes_in_order() {
+        let mut attempts = UpstreamAttemptList::with_capacity_hint(3);
+        assert!(attempts.is_inline());
+        attempts.push(UpstreamAttemptRecord {
+            upstream: "route-a".to_owned(),
+            outcome: UpstreamAttemptOutcome::Response,
+        });
+        assert!(attempts.is_inline());
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].upstream, "route-a");
+
+        attempts.push(UpstreamAttemptRecord {
+            upstream: "route-b".to_owned(),
+            outcome: UpstreamAttemptOutcome::Failed,
+        });
+        assert!(!attempts.is_inline());
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].upstream, "route-a");
+        assert_eq!(attempts[1].upstream, "route-b");
+        assert_eq!(attempts[1].outcome, UpstreamAttemptOutcome::Failed);
     }
 
     #[test]
@@ -823,10 +958,10 @@ mod tests {
             cache_status: CacheStatus::Miss,
             final_sequence: Some("w1".to_owned()),
             final_upstream: Some("route-a".to_owned()),
-            upstream_attempts: vec![UpstreamAttemptRecord {
+            upstream_attempts: UpstreamAttemptList::from(vec![UpstreamAttemptRecord {
                 upstream: "route-a".to_owned(),
                 outcome: UpstreamAttemptOutcome::Response,
-            }],
+            }]),
             failure_provenance: None,
             elapsed: Duration::ZERO,
         });
@@ -935,10 +1070,10 @@ mod tests {
                 cache_status: CacheStatus::Miss,
                 final_sequence: Some("entry".to_owned()),
                 final_upstream: None,
-                upstream_attempts: vec![UpstreamAttemptRecord {
+                upstream_attempts: UpstreamAttemptList::from(vec![UpstreamAttemptRecord {
                     upstream: "route-a".to_owned(),
                     outcome: UpstreamAttemptOutcome::Response,
-                }],
+                }]),
                 failure_provenance: Some(FailureProvenance::UpstreamFailure {
                     upstream: "route-a".to_owned(),
                 }),
@@ -982,7 +1117,7 @@ mod tests {
                 cache_status: CacheStatus::Undetermined,
                 final_sequence: Some("entry".to_owned()),
                 final_upstream: None,
-                upstream_attempts: Vec::new(),
+                upstream_attempts: UpstreamAttemptList::default(),
                 failure_provenance: None,
                 elapsed: Duration::ZERO,
             },
@@ -1032,10 +1167,10 @@ mod tests {
             cache_status: CacheStatus::Miss,
             final_sequence: Some("entry".to_owned()),
             final_upstream: Some("route-a".to_owned()),
-            upstream_attempts: vec![UpstreamAttemptRecord {
+            upstream_attempts: UpstreamAttemptList::from(vec![UpstreamAttemptRecord {
                 upstream: "route-a".to_owned(),
                 outcome: UpstreamAttemptOutcome::Response,
-            }],
+            }]),
             failure_provenance: None,
             elapsed,
         }
@@ -1057,7 +1192,7 @@ mod tests {
             cache_status: observation.cache_status,
             final_sequence: Some("entry".to_owned()),
             final_upstream: Some("route-a".to_owned()),
-            upstream_attempts: observation.upstream_attempts,
+            upstream_attempts: observation.upstream_attempts.into_vec(),
             failure_provenance: None,
         }
     }
@@ -1213,7 +1348,7 @@ mod tests {
                     cache_status,
                     final_sequence: None,
                     final_upstream: None,
-                    upstream_attempts,
+                    upstream_attempts: upstream_attempts.into(),
                     failure_provenance: None,
                     elapsed: Duration::from_micros(250),
                 },
