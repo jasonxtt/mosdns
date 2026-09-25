@@ -1039,8 +1039,11 @@ capture; basic metrics remain active in either mode.
 - With capture enabled, preserve the same executed route, ordered attempts,
   final response source, sequence, and failure provenance as the execution
   result; the observer flag must not change DNS wire or forwarding behavior.
-- W1/W2 start with an empty attempt vector. Bounded W3 execution reserves from
-  the configured forward count before dispatch, avoiding growth on each leg.
+- W1/W2 keep the zero-or-one attempt list inline. On a second W3 leg, promote
+  it to a vector with capacity hinted from the configured forward count.
+- Move the in-flight upstream identity into the terminal attempt after the
+  exchange; do not resolve and allocate the same identity again. Keep it in
+  the cancellation checkpoint while the exchange is pending.
 
 ### 4. Validation & Error Matrix
 
@@ -1049,7 +1052,7 @@ capture; basic metrics remain active in either mode.
 | audit disabled, successful upstream response | no audit record or audit-only route strings; response/cache/lifecycle and upstream metrics remain correct |
 | audit enabled | existing route, cache, ordered-attempt, and provenance fields remain intact |
 | W2 cache hit | cache-hit metric, no upstream attempt |
-| W3 forwarding | each configured leg contributes its actual attempt outcome; reserved capacity is bounded by configured forwards |
+| W3 forwarding | each configured leg contributes its actual ordered attempt outcome; a second leg promotes inline storage with bounded reserved capacity |
 
 ### 5. Good/Base/Bad Cases
 
@@ -1064,6 +1067,8 @@ capture; basic metrics remain active in either mode.
 
 - Disabled-audit execution must retain correct lifecycle, response-code,
   cache, and configured-upstream attempt metrics while retaining no audit row.
+- The attempt list keeps its first entry inline and promotes on a second entry
+  without changing attempt order or outcomes.
 - Enabled-audit execution and cancellation tests must preserve the detailed
   route and failure fields.
 - Frozen Linux evidence must confirm that the candidate reduces the intended

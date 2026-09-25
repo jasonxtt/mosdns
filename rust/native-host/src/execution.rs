@@ -19,7 +19,7 @@ use crate::config::CompiledConfig;
 use crate::observer::{
     CacheStatus, ExecutionCheckpoint, FailureProvenance, LocalFailureKind, QueryTerminalOutcome,
     ResponseSource, ResponseState as ObservedResponseState, TerminalObservation,
-    UpstreamAttemptOutcome, UpstreamAttemptRecord,
+    UpstreamAttemptList, UpstreamAttemptOutcome, UpstreamAttemptRecord,
 };
 
 const DEFAULT_FUEL: u64 = 64;
@@ -65,7 +65,7 @@ pub(crate) struct ExecutionResult {
     pub cache_status: CacheStatus,
     pub final_sequence: Option<String>,
     pub final_upstream: Option<String>,
-    pub upstream_attempts: Vec<UpstreamAttemptRecord>,
+    pub upstream_attempts: UpstreamAttemptList,
     pub failure_provenance: Option<FailureProvenance>,
 }
 
@@ -74,7 +74,7 @@ struct ExecutionFacts<'a> {
     cache_status: CacheStatus,
     response_source: Option<ResponseSource>,
     final_upstream: Option<String>,
-    upstream_attempts: Vec<UpstreamAttemptRecord>,
+    upstream_attempts: UpstreamAttemptList,
     failure_provenance: Option<FailureProvenance>,
     final_sequence: Option<String>,
     checkpoint: &'a mut ExecutionCheckpoint,
@@ -226,7 +226,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         },
         response_source: None,
         final_upstream: None,
-        upstream_attempts: Vec::with_capacity(if multi_forward {
+        upstream_attempts: UpstreamAttemptList::with_capacity_hint(if multi_forward {
             config.forwards.len()
         } else {
             0
@@ -352,14 +352,13 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         request_shutdown.clone(),
                     )
                     .await;
-                facts.in_flight_upstream = None;
+                let in_flight_upstream = facts.in_flight_upstream.take();
                 if request_shutdown.is_cancelled() {
-                    record_canceled_attempt(config, dispatch.executable(), &exchange, &mut facts);
+                    record_canceled_attempt(&exchange, in_flight_upstream, &mut facts);
                     return canceled_execution(facts);
                 }
                 match exchange {
                     Ok(response) => {
-                        let upstream = upstream_identity(config, dispatch.executable());
                         let accepted = if multi_forward {
                             qualify_response(response.wire(), header.id, &question)
                         } else {
@@ -372,7 +371,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         };
                         match accepted {
                             Some(wire) => {
-                                if let Some(upstream) = upstream {
+                                if let Some(upstream) = in_flight_upstream {
                                     facts.record_upstream_response(upstream);
                                 }
                                 facts.failure_provenance = None;
@@ -380,7 +379,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 machine.state_mut().set_raw_response(wire);
                             }
                             None => {
-                                if let Some(upstream) = upstream {
+                                if let Some(upstream) = in_flight_upstream {
                                     facts.record_upstream_failure(
                                         upstream,
                                         UpstreamAttemptOutcome::Failed,
@@ -414,7 +413,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         }
                     }
                     Err(error @ ExchangeError::Upstream(_)) => {
-                        if let Some(upstream) = upstream_identity(config, dispatch.executable()) {
+                        if let Some(upstream) = in_flight_upstream {
                             let timeout = matches!(
                                 &error,
                                 ExchangeError::Upstream(upstream) if is_timeout(upstream)
@@ -493,12 +492,11 @@ fn is_canceled(error: &UpstreamError) -> bool {
 }
 
 fn record_canceled_attempt(
-    config: &CompiledConfig,
-    executable: ExecutableId,
     exchange: &Result<ExchangeResponse, ExchangeError>,
+    upstream: Option<String>,
     facts: &mut ExecutionFacts,
 ) {
-    let Some(upstream) = upstream_identity(config, executable) else {
+    let Some(upstream) = upstream else {
         return;
     };
     let outcome = match exchange {
@@ -1115,6 +1113,7 @@ mod tests {
         assert!(result.failure_provenance.is_none());
         assert_eq!(result.upstream_attempts.len(), 1);
         assert_eq!(result.upstream_attempts[0].upstream, "phase5a_forward");
+        assert!(result.upstream_attempts.is_inline());
 
         admitted.capture_execution(TerminalObservation {
             outcome: QueryTerminalOutcome::SendSucceeded,
@@ -1170,6 +1169,7 @@ mod tests {
         assert_eq!(direct.cache_status, CacheStatus::NotApplicable);
         assert_eq!(direct.final_upstream.as_deref(), Some("phase5a_forward"));
         assert_eq!(direct.upstream_attempts.len(), 1);
+        assert!(direct.upstream_attempts.is_inline());
         assert_eq!(
             direct.upstream_attempts[0].outcome,
             super::UpstreamAttemptOutcome::Response

@@ -303,7 +303,7 @@ V10 Linux amd64 release build passed on Rust 1.95.0 from source commit `65a31ff5
 
 V10 preflight passed before any attempt. The official matrix then completed all 27 attempts without replacement; 26 runner exits were zero and the only nonzero exit came from a dropped slot at the 350 QPS supporting stage plus its recovery check. All 63 primary rows were valid, and all 54,000 scheduled primary requests were sent, received, and correct on time. The 902-file raw result manifest verified remotely (digest `c862ae80466ee8255166a325486e20dec5c592614f6308abe1486894cd15b309`). Nine paired p95/p99 comparisons crossed frozen guards; no CPU comparison crossed, 13/14 CPU comparisons were inconclusive at 100-Hz resolution, and paired RSS increases stayed within budget. V10 is not reviewable; see `research/slice3-v10-pilot-assessment.md` and the adjacent raw-hash, audit, attempt-order, derived measurement, binary, and preflight evidence.
 
-V11's source-backed hypothesis targets the common one-upstream request path: every request currently allocates a `Vec<UpstreamAttemptRecord>` for its first attempt even though W1 and W2 can only attempt one configured forward. Replace that hot-path vector with an inline empty/one-attempt representation that transitions to a bounded vector only for a second W3 leg. Preserve attempt order and identities, cancellation checkpoints, metrics aggregation, and the enabled-audit `Vec` snapshot. This does not change thresholds; V11 still requires a separately pinned full matrix.
+V11 implements the source-backed hot-path hypothesis in `observer.rs` and `execution.rs`: the zero-or-one upstream attempt remains inline and promotes to a vector on a second W3 leg, reserving from the configured forward count. The exchange reuses the already materialized in-flight upstream identity for its terminal attempt record instead of resolving and allocating the same name twice; cancellation keeps that identity in its checkpoint until the exchange completes. The enabled-audit snapshot still exposes an ordered `Vec`, and the disabled path feeds the same attempt facts to metrics without allocating a vector. A regression test proves inline storage and ordered promotion; W1/W2/W3 and cancellation suites pass. Workspace tests, strict Clippy, rustfmt, task-context validation, and `git diff --check` all pass; the final QUIC group took 224.77 seconds. Thresholds are unchanged, and V11 still needs its separately pinned Linux matrix.
 
 Validation commands and outcomes:
 
@@ -340,6 +340,10 @@ Validation commands and outcomes:
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed on V10 (45 unit tests and all native-host integration suites).
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed on V10.
 - `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed on V10 across workspace tests and doctests; the final 23-case QUIC group completed in 224.78 seconds.
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed on V11 (46 unit tests and all native-host integration suites).
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed on V11.
+- `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed on V11 across workspace tests and doctests; the final 23-case QUIC group completed in 224.77 seconds.
+- `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed on V11.
 
 ## Review and rollback points
 
