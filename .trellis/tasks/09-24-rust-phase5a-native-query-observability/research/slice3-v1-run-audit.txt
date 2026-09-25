@@ -1,0 +1,8 @@
+Candidate: Rust-after v1 commit 545ba29fe6c02d47db1ee1be40b781c04646cac0
+Attempts: 27 (3 scenarios x 3 repetitions x 3 variants)
+Runner exits: 26 zero, 1 nonzero
+Input recheck: 0 mismatched per-attempt hashes after correcting the audit script's runner-hash literal
+Port checks: no frozen port busy
+Nonempty invalid-stage record: w3-r3-before_off; 350 QPS and 400 QPS each had one scheduled sender slot short, recovery criteria then failed
+No replacement attempt was made.
+The pre-run frozen-manifest mismatch for tests/phase5a-baseline/workloads/routing.jsonl is documented in slice3-candidate-identity.md; the clean tracked input and staged input both hash to dbb582dc9d623af54e501639b7a52538b1e1d9e493fa0f0f6a4f4714ea0176c1.
