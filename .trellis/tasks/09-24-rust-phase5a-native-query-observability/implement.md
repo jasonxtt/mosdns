@@ -215,8 +215,14 @@ plausible contributor to V6's high-rate audit-off crossings, but the matrix
 does not prove causality. V7 will move the completed `TerminalObservation`
 into a boxed listener-owned slot. This preserves lock-free successful
 finalization while reducing the listener guard's inline state that was a
-possible W2 cold 200 QPS factor in V5. V7 needs a new pinned identity and full
-matrix before review.
+possible W2 cold 200 QPS factor in V5. V7 implements that boxed slot. The
+normal finish path moves boxed facts directly into terminal accounting and
+avoids both completed-event checkpoint locks; interrupted execution still
+reads partial facts from the shared checkpoint. The native-host package suite,
+strict workspace clippy, rustfmt, and complete workspace test suite all
+passed, including the 224.78-second QUIC case. The V7 Linux release identity
+is pinned separately before its new matrix; no result from earlier candidates
+is reused.
 
 Validation commands and outcomes:
 
@@ -236,6 +242,8 @@ Validation commands and outcomes:
 - `cargo build --manifest-path rust/Cargo.toml --package mosdns-native-host --bin mosdns --release --locked` — passed on the Linux benchmark host with Rust 1.95.0 for source commit `cd96b0adf76767cfede5f20a929ad7ad36e0ce44`; the resulting candidate binary passed helper v8 validation.
 - `sha256sum --quiet -c slice3-v6-rust-source-files.sha256` — passed on the Linux candidate source before the V6 release build (107 tracked Rust files).
 - V6 frozen 27-attempt matrix — completed without replacements; all 27 runner exits were zero, 63/63 primary rows were valid, and the 901-file raw tree hash manifest verified remotely. The frozen analyzer reported four repeatable p95/p99 guard crossings; Slice 3 remains blocked from review pending a new candidate.
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after the V7 boxed terminal observation change (44 unit tests plus all native-host integration suites).
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings`, `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, and `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — all passed after V7; the QUIC suite completed in 224.78 seconds.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 
