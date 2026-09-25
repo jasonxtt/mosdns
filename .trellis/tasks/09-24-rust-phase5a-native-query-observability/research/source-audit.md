@@ -12,8 +12,12 @@
 | Phase scope | `docs/ai/rust-rewrite-plan.md`, Phase 5A–5D | 5A requires basic audit/metrics; 5C owns complete management/API, 5D full-system performance. |
 | First native comparison | `docs/rust/phase5a-native-comparison.md` | 12/21 three-pair groups; no objective overload point, indeterminate recovery, and no multi-core conclusion. Measure observability overhead only under valid offered load. |
 
+## Verified listener constraint
+
+The strict compiler rejects a second listener plugin and requires exactly one listener per host. W1 selects UDP or TCP; W2 and W3 select UDP. The supported 5A host therefore cannot mix listener audit flags. Treat the sole listener's flag as the capture choice for all admitted queries, and keep the duplicate-listener rejection as a regression check.
+
 ## Decision inventory
 
 - User intent already established: pure Rust-native final host; DNS correctness, latency, concurrency, stability, and effective throughput first; memory secondary; Linux amd64 primary. The user requested that this planning be made executable and has not authorized implementation in this turn.
 - This task's bounded 5A surface is typed Rust snapshots, with the existing YAML flag enabling in-memory capture. Full public audit, Prometheus, and WebUI semantics are explicitly deferred to 5C. No additional product decision blocks writing this proposal; the planning summary must be reviewed before `task.py start`.
-- The collector's exact fixed histogram buckets and performance regression budget are technical values to freeze in the execution manifest before official candidate runs, not values to select after seeing measurements.
+- The fixed histogram bucket edges are frozen in the PRD and design before runtime implementation. The performance manifest will repeat those edges and freeze the performance regression budget before official candidate runs; neither may be selected after seeing measurements.
