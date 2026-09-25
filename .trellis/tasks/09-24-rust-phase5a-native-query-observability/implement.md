@@ -289,9 +289,7 @@ V9 local validation on the current source passed:
 - `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed.
 - `cargo test --workspace` from `rust/` — passed across all workspace tests and doctests; the final 23-case QUIC test group took 224.79 seconds.
 
-The pinned Linux build, binary validation, and frozen 27-attempt V9 matrix are
-still pending. No review request is eligible until the matrix satisfies the
-frozen correctness and performance gates.
+The pinned Linux build passed for source commit `f22c558365f1fc929752ecf214b29d510118d619`; its 2,303,968-byte release binary passed helper v8 validation. The first generated matrix driver expected helper v9 and exited at preflight before any benchmark attempt. The corrected pinned driver checks the frozen helper v8 and uses the fresh `results-v9-run` directory. Its helper/binary, CPU-set, and audit-overlay preflight checks pass. The frozen 27-attempt V9 matrix is still pending; no review request is eligible until it satisfies the frozen correctness and performance gates.
 
 Validation commands and outcomes:
 
