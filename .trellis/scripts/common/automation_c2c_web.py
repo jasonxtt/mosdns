@@ -462,6 +462,7 @@ class C2CWebReviewerTransport:
         self._send_attempted = False
         self._send_failed = False
         self._attempted_message: str | None = None
+        self._replacement_attempted = False
         self._verified_target: dict[str, Any] | None = None
         self._cursor: str | None = None
         self._baseline_ready = False
@@ -548,12 +549,15 @@ class C2CWebReviewerTransport:
 
         if not self._send_failed or self._attempted_message is None:
             raise C2CReviewerBindingError("C2C review transport has no ambiguous failed send to retry")
+        if self._replacement_attempted:
+            raise C2CReviewerBindingError("C2C replacement transport was already attempted")
         message = request.get("text") if isinstance(request, dict) else request
         if message != self._attempted_message:
             raise C2CReviewerBindingError("a replacement C2C send must reuse the exact failed message")
         budget = max(0.0, float(timeout))
         if budget <= 0:
             raise C2CReviewerBindingError("replacement C2C send requires a positive evidence timeout")
+        self._replacement_attempted = True
         confirm_retry = getattr(self.host, "confirm_retry", None)
         if not callable(confirm_retry):
             raise C2CReviewerBindingError("replacement C2C send requires host retry evidence")

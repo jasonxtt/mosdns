@@ -556,6 +556,10 @@ class C2CReviewerTransportTest(unittest.TestCase):
         self.assertIsInstance(replacement, C2CWebReviewerTransport)
         self.assertEqual(len(evidence_host.send_attempts), 2)
         self.assertEqual(len(evidence_host.retry_evidence_calls), 1)
+        with self.assertRaisesRegex(C2CReviewerBindingError, "already attempted"):
+            failed.retry_after_failure(request, timeout=1)
+        self.assertEqual(len(evidence_host.send_attempts), 2)
+        self.assertEqual(len(evidence_host.retry_evidence_calls), 1)
 
         clock = [0.0]
         pending_host = FakeC2CHost([{"cursor": "one", "text": "still working"}])
