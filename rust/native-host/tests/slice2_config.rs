@@ -5,6 +5,7 @@ use mosdns_sequence_core::{
 };
 
 const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
+const TCP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
 const CACHE: &str = include_str!("../../../tests/phase5a-baseline/configs/cache.yaml");
 const ROUTING: &str = include_str!("../../../tests/phase5a-baseline/configs/routing.yaml");
 
@@ -91,7 +92,7 @@ fn w2_cache_allowlist_and_graph_shape_are_strict() {
         ),
         CACHE.replace("  - tag: phase5a_udp", "  - tag: phase5a_tcp").replace("type: udp_server", "type: tcp_server"),
         CACHE.replace("udp://127.0.0.1:15455", "tcp://127.0.0.1:15455"),
-        CACHE.replace("enable_audit: false", "enable_audit: true"),
+        CACHE.replace("enable_audit: false", "enable_audit: \"true\""),
         CACHE.replace(
             "- exec: $phase5a_cache\n      - exec: $phase5a_forward",
             "- exec: $phase5a_forward\n      - exec: $phase5a_cache",
@@ -117,6 +118,60 @@ fn w2_cache_allowlist_and_graph_shape_are_strict() {
 fn w1_graph_remains_accepted_and_cache_is_not_implicit() {
     let config = compile_yaml(UDP).expect("frozen W1 graph must compile");
     assert!(config.cache.is_none());
+}
+
+#[test]
+fn audit_enabled_is_accepted_for_every_supported_single_listener_graph() {
+    let cases = [
+        (
+            "W1 UDP",
+            UDP.replace("enable_audit: false", "enable_audit: true"),
+            ListenerKind::Udp,
+        ),
+        (
+            "W1 TCP",
+            TCP.replace("enable_audit: false", "enable_audit: true"),
+            ListenerKind::Tcp,
+        ),
+        (
+            "W2",
+            CACHE.replace("enable_audit: false", "enable_audit: true"),
+            ListenerKind::Udp,
+        ),
+        (
+            "W3",
+            ROUTING.replace("enable_audit: false", "enable_audit: true"),
+            ListenerKind::Udp,
+        ),
+    ];
+
+    for (name, yaml, listener_kind) in cases {
+        let config = compile_yaml(&yaml).unwrap_or_else(|error| {
+            panic!("{name} with the existing audit flag enabled must compile: {error}")
+        });
+        assert_eq!(config.listener.kind, listener_kind, "{name} listener kind");
+        assert!(config.listener.enable_audit, "{name} must retain the flag");
+    }
+}
+
+#[test]
+fn a_second_listener_with_a_mixed_audit_flag_is_rejected_before_assembly() {
+    let yaml = format!(
+        "{UDP}\n  - tag: phase5a_extra_listener\n    type: udp_server\n    args: {{ entry: phase5a_entry, listen: \"127.0.0.1:16553\", enable_audit: true }}\n"
+    );
+
+    let error = match compile_yaml(&yaml) {
+        Err(error) => error,
+        Ok(_) => panic!("a second listener remains unsupported"),
+    };
+    assert!(
+        error.reason.contains("exactly one listener"),
+        "unexpected rejection: {error}"
+    );
+    assert!(matches!(
+        HostAssembly::from_yaml(&yaml),
+        Err(AssemblyError::Config(_))
+    ));
 }
 
 #[test]
