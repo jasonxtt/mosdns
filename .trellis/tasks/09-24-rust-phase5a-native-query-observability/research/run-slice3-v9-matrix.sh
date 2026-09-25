@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE=/root/mosdns-rust-phase5a-native-query-observability-545ba29
-RESULT_ROOT="${BASE}/results-v9"
+RESULT_ROOT="${BASE}/results-v9-run"
 RUNNER="${BASE}/runner-root/scripts/run-phase5a-baseline.sh"
 CONFIG_DIR="${BASE}/runner-root/tests/phase5a-baseline/configs"
 HELPER=/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/phase5a-baseline-helper
@@ -76,7 +76,7 @@ check_hash 72db879e9fbee4fb87400b54da31dfd41f82f6766dbe6081ab3d4690e42df24c "${O
 check_hash c973586aee0f0381d96256afb305ef773f240a4aab7033303990c013d4cf7158 "${OVERLAY_DIR}/cache.yaml"
 check_hash 0cc96555e135529a9acb7b49dbbefdf94d1d8b9e8cf2c2d4c37a980e099521b5 "${OVERLAY_DIR}/routing.yaml"
 [[ "$(rustc --version)" == "rustc 1.95.0 (59807616e 2026-04-14)" ]]
-[[ "$("${HELPER}" version)" == "phase5a-baseline-helper/v9" ]]
+[[ "$("${HELPER}" version)" == "phase5a-baseline-helper/v8" ]]
 RESULT_FS="$(df -PT "${RESULT_ROOT}" | awk 'NR == 2 {print $2}')"
 case "${RESULT_FS}" in
   tmpfs|ramfs|"") echo "V9 results must use a disk-backed filesystem (found ${RESULT_FS:-unknown})" >&2; exit 2 ;;

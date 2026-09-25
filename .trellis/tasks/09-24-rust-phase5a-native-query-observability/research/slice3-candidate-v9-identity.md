@@ -33,7 +33,7 @@ untouched. V1 through V9 use the same tracked workload bytes. The runner uses
 from the archived official matrix driver.
 
 The V9 driver SHA-256 is
-`cb97c4bf3e718eaa432182dae8836c1b10df1947187e19c444cdc669395b75a9`; the
+`da2cc059d47581ebd5b16286b04bfcc0a82bfafc4e0d788972a7439f1148873c`; the
 frozen runner SHA-256 is
 `dd9749238cf917d1360f33fd732cca48c4ae7906ab76d1cb8f5f941e10e1e3d8`; and the
 Linux helper v8 SHA-256 is
@@ -42,7 +42,7 @@ Rust-before executable remains pinned at
 `370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa`.
 
 The ninth matrix has a distinct disk-backed result directory,
-`/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9/`.
+`/root/mosdns-rust-phase5a-native-query-observability-545ba29/results-v9-run/`.
 It uses the frozen 27-attempt balanced order, 200/300/350/400 QPS ladder plus
 the 200 QPS health stage, 3,000 ms per stage, 500 ms request deadline, 100 ms
 late drain, W2 TTL/safety margin 30,000/500 ms, SUT CPU 0, and harness CPU 1.
@@ -56,3 +56,10 @@ Rust-before binary, candidate binary, source manifest and every manifested Rust
 file, lockfile, base YAML files, workloads, audit-on overlays, and toolchain.
 Each attempt records port availability and restores fixture configs;
 production service `mos` is not contacted.
+
+The first generated driver incorrectly expected helper v9 after a mechanical
+V8-to-V9 rename. The frozen helper is v8, so preflight exited before starting an
+attempt. Its staged-input snapshots are retained in `results-v9` and
+`results-v9-preflight`. The corrected driver pins helper v8, uses the fresh
+`results-v9-run` directory, and passed manual helper/binary, CPU-set, and
+overlay preflight checks. No benchmark attempt has started.
