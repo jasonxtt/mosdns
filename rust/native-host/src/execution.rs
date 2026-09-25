@@ -17,8 +17,9 @@ use crate::assembly::{ForwardAdapter, ForwardCatalog, HostOptions};
 use crate::cache::{NativeCacheAdapter, PendingStore};
 use crate::config::CompiledConfig;
 use crate::observer::{
-    CacheStatus, FailureProvenance, LocalFailureKind, ResponseSource,
-    ResponseState as ObservedResponseState, UpstreamAttemptOutcome, UpstreamAttemptRecord,
+    CacheStatus, ExecutionProgress, FailureProvenance, LocalFailureKind, QueryTerminalOutcome,
+    ResponseSource, ResponseState as ObservedResponseState, TerminalObservation,
+    UpstreamAttemptOutcome, UpstreamAttemptRecord,
 };
 
 const DEFAULT_FUEL: u64 = 64;
@@ -70,23 +71,72 @@ pub(crate) struct ExecutionResult {
 
 struct ExecutionFacts {
     cache_status: CacheStatus,
+    response: ObservedResponseState,
     response_source: Option<ResponseSource>,
     final_upstream: Option<String>,
     upstream_attempts: Vec<UpstreamAttemptRecord>,
     failure_provenance: Option<FailureProvenance>,
     final_sequence: Option<String>,
+    progress: ExecutionProgress,
+    in_flight_upstream: Option<String>,
+    completed: bool,
 }
 
-impl Default for ExecutionFacts {
-    fn default() -> Self {
-        Self {
-            cache_status: CacheStatus::NotApplicable,
-            response_source: None,
-            final_upstream: None,
-            upstream_attempts: Vec::new(),
-            failure_provenance: None,
-            final_sequence: None,
+impl Drop for ExecutionFacts {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
         }
+        self.progress.capture(
+            &TerminalObservation {
+                outcome: QueryTerminalOutcome::NoResponse,
+                response: self.response.clone(),
+                cache_status: self.cache_status,
+                final_sequence: self.final_sequence.clone(),
+                final_upstream: self.final_upstream.clone(),
+                upstream_attempts: self.upstream_attempts.clone(),
+                failure_provenance: self.failure_provenance.clone(),
+                elapsed: std::time::Duration::ZERO,
+            },
+            self.in_flight_upstream.clone(),
+        );
+    }
+}
+
+impl ExecutionFacts {
+    fn capture_machine_response(&mut self, machine: &ExecutionMachine<'_>) {
+        self.response = match &machine.state().response {
+            MachineResponseState::None => ObservedResponseState::NoResponse,
+            MachineResponseState::Raw(wire) => observed_response(
+                wire.as_bytes(),
+                self.response_source
+                    .clone()
+                    .unwrap_or(ResponseSource::Local),
+            ),
+            MachineResponseState::Synthesized(response) => ObservedResponseState::Dns {
+                rcode: response.rcode(),
+                source: self
+                    .response_source
+                    .clone()
+                    .unwrap_or(ResponseSource::Local),
+            },
+        };
+    }
+
+    fn capture_response_wire(&mut self, wire: &[u8]) {
+        self.response = observed_response(
+            wire,
+            self.response_source
+                .clone()
+                .unwrap_or(ResponseSource::Local),
+        );
+    }
+
+    fn capture_local_servfail(&mut self) {
+        self.response = ObservedResponseState::Dns {
+            rcode: u16::from(SERVFAIL),
+            source: ResponseSource::Local,
+        };
     }
 }
 
@@ -114,8 +164,9 @@ pub(crate) async fn execute_request(
     request: ExecutionRequest<'_>,
     forwards: &ForwardCatalog,
     request_shutdown: TransportCancellation,
+    progress: ExecutionProgress,
 ) -> ExecutionResult {
-    execute_request_with_observation(request, forwards, request_shutdown).await
+    execute_request_with_observation(request, forwards, request_shutdown, progress).await
 }
 
 #[cfg(test)]
@@ -124,15 +175,21 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
     executor: &E,
     request_shutdown: TransportCancellation,
 ) -> Vec<u8> {
-    execute_request_with_observation(request, executor, request_shutdown)
-        .await
-        .response_wire
+    execute_request_with_observation(
+        request,
+        executor,
+        request_shutdown,
+        ExecutionProgress::new(),
+    )
+    .await
+    .response_wire
 }
 
 pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Sized>(
     request: ExecutionRequest<'_>,
     executor: &E,
     request_shutdown: TransportCancellation,
+    progress: ExecutionProgress,
 ) -> ExecutionResult {
     let ExecutionRequest {
         config,
@@ -143,9 +200,16 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         question,
     } = request;
     let mut facts = ExecutionFacts {
-        cache_status: CacheStatus::NotApplicable,
+        cache_status: CacheStatus::Undetermined,
+        response: ObservedResponseState::NoResponse,
+        response_source: None,
+        final_upstream: None,
+        upstream_attempts: Vec::new(),
+        failure_provenance: None,
         final_sequence: Some(config.sequence.tag.clone()),
-        ..ExecutionFacts::default()
+        progress,
+        in_flight_upstream: None,
+        completed: false,
     };
     let state = ExecutionState::new(header, question.clone());
     // Every external leg shares this one request-owned absolute budget.
@@ -155,6 +219,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     let mut machine = match config.new_machine(state, ExecutionControl::with_fuel(DEFAULT_FUEL)) {
         Ok(machine) => machine,
         Err(_) => {
+            facts.cache_status = CacheStatus::NotApplicable;
             facts.failure_provenance = Some(FailureProvenance::LocalFailure(
                 LocalFailureKind::InternalExecution,
             ));
@@ -169,6 +234,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     let mut step = match machine.step() {
         Ok(step) => step,
         Err(_) => {
+            facts.cache_status = CacheStatus::NotApplicable;
             facts.failure_provenance = Some(FailureProvenance::LocalFailure(
                 LocalFailureKind::InternalExecution,
             ));
@@ -198,6 +264,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 return result_from_state(&machine, &header, &question, facts);
             }
             MachineStep::Dispatch(dispatch) => {
+                facts.capture_machine_response(&machine);
                 if config
                     .cache
                     .as_ref()
@@ -209,6 +276,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         facts.response_source = Some(ResponseSource::Cache);
                         facts.final_upstream = None;
                         facts.failure_provenance = None;
+                        facts.capture_response_wire(&wire);
                         machine.state_mut().set_raw_response(wire);
                         step = match machine
                             .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
@@ -245,6 +313,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 if multi_forward && Instant::now() >= request_deadline {
                     set_servfail(&mut machine);
                     facts.response_source = Some(ResponseSource::Local);
+                    facts.capture_local_servfail();
                     facts.final_upstream = None;
                     facts.failure_provenance = Some(FailureProvenance::LocalFailure(
                         LocalFailureKind::NoUsableUpstreamResponse,
@@ -252,6 +321,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     return result_from_state(&machine, &header, &question, facts);
                 }
                 publication_deadline = Some(request_deadline);
+                facts.in_flight_upstream = upstream_identity(config, dispatch.executable());
                 let exchange = executor
                     .exchange(
                         dispatch.executable(),
@@ -260,6 +330,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         request_shutdown.clone(),
                     )
                     .await;
+                facts.in_flight_upstream = None;
                 if request_shutdown.is_cancelled() {
                     record_canceled_attempt(config, dispatch.executable(), &exchange, &mut facts);
                     return canceled_execution(facts);
@@ -290,6 +361,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 }
                                 facts.failure_provenance = None;
                                 upstream_response = true;
+                                facts.capture_response_wire(&wire);
                                 machine.state_mut().set_raw_response(wire);
                             }
                             None => {
@@ -311,6 +383,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 upstream_response = false;
                                 set_servfail(&mut machine);
                                 facts.response_source = Some(ResponseSource::Local);
+                                facts.capture_local_servfail();
                                 facts.final_upstream = None;
                                 if multi_forward {
                                     return result_from_state(&machine, &header, &question, facts);
@@ -325,6 +398,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         upstream_response = false;
                         set_servfail(&mut machine);
                         facts.response_source = Some(ResponseSource::Local);
+                        facts.capture_local_servfail();
                         facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
@@ -358,6 +432,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         upstream_response = false;
                         set_servfail(&mut machine);
                         facts.response_source = Some(ResponseSource::Local);
+                        facts.capture_local_servfail();
                         facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
@@ -406,6 +481,17 @@ fn is_timeout(error: &UpstreamError) -> bool {
     }
 }
 
+fn is_canceled(error: &UpstreamError) -> bool {
+    match error {
+        UpstreamError::Cancelled(_) => true,
+        UpstreamError::Diagnosed { cause, .. } => {
+            matches!(cause, mosdns_upstream_core::TerminalError::Cancelled(_))
+        }
+        UpstreamError::TcpFallback { cause, .. } => is_canceled(cause),
+        _ => false,
+    }
+}
+
 fn record_canceled_attempt(
     config: &CompiledConfig,
     executable: ExecutableId,
@@ -419,6 +505,9 @@ fn record_canceled_attempt(
         Ok(_) => UpstreamAttemptOutcome::Response,
         Err(ExchangeError::Upstream(error)) if is_timeout(error) => {
             UpstreamAttemptOutcome::TimedOut
+        }
+        Err(ExchangeError::Upstream(error)) if is_canceled(error) => {
+            UpstreamAttemptOutcome::Canceled
         }
         Err(ExchangeError::Upstream(_)) => UpstreamAttemptOutcome::Failed,
         Err(ExchangeError::UnknownExecutable(_)) => return,
@@ -438,41 +527,53 @@ fn result_from_state(
     machine: &ExecutionMachine<'_>,
     header: &QueryHeader,
     question: &QuestionInfo,
-    facts: ExecutionFacts,
+    mut facts: ExecutionFacts,
 ) -> ExecutionResult {
+    if facts.cache_status == CacheStatus::Undetermined {
+        facts.cache_status = CacheStatus::NotApplicable;
+    }
     let response = response_from_state(machine, header, question);
     result_from_wire(response, facts)
 }
 
-fn result_from_wire(response_wire: Vec<u8>, facts: ExecutionFacts) -> ExecutionResult {
-    let response = if response_wire.is_empty() {
-        ObservedResponseState::NoResponse
-    } else {
-        let rcode = observe_response_metadata(&response_wire)
-            .map(|metadata| metadata.rcode)
-            .unwrap_or_else(|_| {
-                u16::from(response_wire.get(3).copied().unwrap_or_default() & 0x0f)
-            });
-        ObservedResponseState::Dns {
-            rcode,
-            source: facts.response_source.unwrap_or(ResponseSource::Local),
-        }
-    };
+fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> ExecutionResult {
+    let response = observed_response(
+        &response_wire,
+        facts
+            .response_source
+            .take()
+            .unwrap_or(ResponseSource::Local),
+    );
+    facts.response = response.clone();
     let final_upstream = match &response {
         ObservedResponseState::Dns {
             source: ResponseSource::Upstream(_),
             ..
-        } => facts.final_upstream,
+        } => facts.final_upstream.take(),
         ObservedResponseState::Dns { .. } | ObservedResponseState::NoResponse => None,
     };
+    facts.completed = true;
     ExecutionResult {
         response_wire,
         response,
         cache_status: facts.cache_status,
-        final_sequence: facts.final_sequence,
+        final_sequence: facts.final_sequence.take(),
         final_upstream,
-        upstream_attempts: facts.upstream_attempts,
-        failure_provenance: facts.failure_provenance,
+        upstream_attempts: std::mem::take(&mut facts.upstream_attempts),
+        failure_provenance: facts.failure_provenance.take(),
+    }
+}
+
+fn observed_response(response_wire: &[u8], source: ResponseSource) -> ObservedResponseState {
+    if response_wire.is_empty() {
+        ObservedResponseState::NoResponse
+    } else {
+        let rcode = observe_response_metadata(response_wire)
+            .map(|metadata| metadata.rcode)
+            .unwrap_or_else(|_| {
+                u16::from(response_wire.get(3).copied().unwrap_or_default() & 0x0f)
+            });
+        ObservedResponseState::Dns { rcode, source }
     }
 }
 
@@ -550,14 +651,20 @@ mod tests {
         UpstreamError,
     };
 
-    use super::{ExchangeExecutor, execute_request_with_executor};
+    use super::{
+        ExchangeExecutor, ExecutionRequest, execute_request_with_executor,
+        execute_request_with_observation,
+    };
     use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
     use crate::config::{
         CachePluginConfig, CompiledConfig, ForwardConfig, ListenerConfig, ListenerKind, LogLevel,
         SequenceConfig, compile_yaml,
     };
-    use crate::observer::{CacheStatus, FailureProvenance, ResponseSource, ResponseState};
+    use crate::observer::{
+        CacheStatus, FailureProvenance, QueryObserver, QueryTransport, ResponseSource,
+        ResponseState,
+    };
 
     struct MockExchange {
         calls: Rc<Cell<u32>>,
@@ -581,6 +688,10 @@ mod tests {
     }
 
     struct TimeoutExchange;
+
+    struct PendingExchange {
+        entered: Rc<Cell<bool>>,
+    }
 
     struct RoutePathExchange {
         b: ExecutableId,
@@ -612,6 +723,26 @@ mod tests {
         > {
             self.calls.borrow_mut().push(executable);
             Box::pin(async { Err(super::ExchangeError::Upstream(UpstreamError::Connect)) })
+        }
+    }
+
+    impl ExchangeExecutor for PendingExchange {
+        fn exchange<'a>(
+            &'a self,
+            _executable: ExecutableId,
+            _query: &'a [u8],
+            _deadline: std::time::Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            self.entered.set(true);
+            Box::pin(async {
+                std::future::pending::<Result<ExchangeResponse, super::ExchangeError>>().await
+            })
         }
     }
 
@@ -895,6 +1026,7 @@ mod tests {
             },
             executor,
             TransportCancellation::new(),
+            crate::observer::ExecutionProgress::new(),
         ))
     }
 
@@ -1012,6 +1144,88 @@ mod tests {
             }
         );
         assert_eq!(upstream_servfail_result.failure_provenance, None);
+    }
+
+    #[test]
+    fn dropped_w2_execution_retains_cache_miss_and_interrupted_forward_attempt() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let local = tokio::task::LocalSet::new();
+        let observer = std::sync::Arc::new(QueryObserver::new(
+            true,
+            ["forward".to_owned()],
+            std::num::NonZeroUsize::new(2).expect("audit capacity"),
+        ));
+        let entered = Rc::new(Cell::new(false));
+
+        local.block_on(&runtime, async {
+            let task_observer = std::sync::Arc::clone(&observer);
+            let task_entered = Rc::clone(&entered);
+            let runner = tokio::task::spawn_local(async move {
+                let config = config();
+                let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("W2 cache");
+                let options = HostOptions::default();
+                let raw = query(84);
+                let (header, question) = parse_query(&raw).expect("query");
+                let cancellation = TransportCancellation::new();
+                let admitted = task_observer.admit(
+                    "192.0.2.84:53000".parse().expect("client address"),
+                    QueryTransport::Udp,
+                    &question,
+                    cancellation.clone(),
+                );
+                let progress = admitted.execution_progress();
+                let _ = execute_request_with_observation(
+                    ExecutionRequest {
+                        config: &config,
+                        cache: &cache,
+                        options: &options,
+                        raw: &raw,
+                        header,
+                        question,
+                    },
+                    &PendingExchange {
+                        entered: task_entered,
+                    },
+                    cancellation,
+                    progress,
+                )
+                .await;
+                panic!("pending upstream exchange unexpectedly returned");
+            });
+
+            while !entered.get() {
+                tokio::task::yield_now().await;
+            }
+            runner.abort();
+            let _ = runner.await;
+        });
+
+        let audit = observer.audit_snapshot();
+        assert_eq!(audit.records.len(), 1);
+        let record = &audit.records[0];
+        assert_eq!(record.cache_status, CacheStatus::Miss);
+        assert_eq!(record.final_sequence.as_deref(), Some("root"));
+        assert_eq!(record.final_upstream, None);
+        assert_eq!(record.response, ResponseState::NoResponse);
+        assert_eq!(record.upstream_attempts.len(), 1);
+        assert_eq!(record.upstream_attempts[0].upstream, "forward");
+        assert_eq!(
+            record.upstream_attempts[0].outcome,
+            super::UpstreamAttemptOutcome::Interrupted
+        );
+        let metrics = observer.metrics_snapshot();
+        assert_eq!(metrics.cache_misses_total, 1);
+        assert_eq!(metrics.cache_not_applicable_total, 0);
+        assert_eq!(metrics.cache_undetermined_total, 0);
+        let forward = metrics
+            .forward_attempts_by_upstream
+            .get("forward")
+            .expect("forward metrics");
+        assert_eq!(forward.attempts_total, 1);
+        assert_eq!(forward.interrupted_total, 1);
     }
 
     #[test]

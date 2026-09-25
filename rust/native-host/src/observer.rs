@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
@@ -37,6 +37,8 @@ pub enum QueryTransport {
 /// Cache disposition for one admitted query.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CacheStatus {
+    /// Execution ended before cache disposition was established.
+    Undetermined,
     /// The graph does not contain a cache dispatch.
     NotApplicable,
     /// The cache supplied the final response.
@@ -74,6 +76,10 @@ pub enum UpstreamAttemptOutcome {
     TimedOut,
     /// The attempt failed without a DNS response.
     Failed,
+    /// The request was canceled while the attempt was still in progress.
+    Canceled,
+    /// The request was dropped while the attempt was still in progress.
+    Interrupted,
 }
 
 /// One actual upstream attempt made by the request execution path.
@@ -209,6 +215,10 @@ pub struct UpstreamAttemptMetricsSnapshot {
     pub failures_total: u64,
     /// Attempts that reached their deadline.
     pub timeouts_total: u64,
+    /// Attempts interrupted by request cancellation.
+    pub canceled_total: u64,
+    /// Attempts interrupted by a non-cancellation drop or unwind.
+    pub interrupted_total: u64,
 }
 
 /// Read-only point-in-time copy of the host's basic metrics.
@@ -238,6 +248,8 @@ pub struct MetricsSnapshot {
     pub cache_misses_total: u64,
     /// Queries whose graph has no cache dispatch.
     pub cache_not_applicable_total: u64,
+    /// Queries terminalized before execution established cache disposition.
+    pub cache_undetermined_total: u64,
     /// Forward-attempt outcomes keyed only by configured upstream identity.
     pub forward_attempts_by_upstream: BTreeMap<String, UpstreamAttemptMetricsSnapshot>,
     /// Forward attempts whose identity was absent from the compiled catalog.
@@ -268,6 +280,95 @@ pub(crate) struct TerminalObservation {
     pub elapsed: Duration,
 }
 
+#[derive(Clone, Debug)]
+struct ExecutionCheckpoint {
+    response: ResponseState,
+    cache_status: CacheStatus,
+    final_sequence: Option<String>,
+    final_upstream: Option<String>,
+    upstream_attempts: Vec<UpstreamAttemptRecord>,
+    failure_provenance: Option<FailureProvenance>,
+    in_flight_upstream: Option<String>,
+}
+
+/// Shared progress between an execution future and its listener-owned guard.
+/// The execution future publishes its local facts if cancellation drops it.
+#[derive(Clone, Debug)]
+pub(crate) struct ExecutionProgress(Arc<Mutex<ExecutionCheckpoint>>);
+
+impl ExecutionProgress {
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(Mutex::new(ExecutionCheckpoint {
+            response: ResponseState::NoResponse,
+            cache_status: CacheStatus::Undetermined,
+            final_sequence: None,
+            final_upstream: None,
+            upstream_attempts: Vec::new(),
+            failure_provenance: None,
+            in_flight_upstream: None,
+        })))
+    }
+
+    pub(crate) fn capture(
+        &self,
+        observation: &TerminalObservation,
+        in_flight_upstream: Option<String>,
+    ) {
+        let mut checkpoint = self.lock();
+        checkpoint.response = observation.response.clone();
+        checkpoint.cache_status = observation.cache_status;
+        checkpoint
+            .final_sequence
+            .clone_from(&observation.final_sequence);
+        checkpoint
+            .final_upstream
+            .clone_from(&observation.final_upstream);
+        checkpoint
+            .upstream_attempts
+            .clone_from(&observation.upstream_attempts);
+        checkpoint
+            .failure_provenance
+            .clone_from(&observation.failure_provenance);
+        checkpoint.in_flight_upstream = in_flight_upstream;
+    }
+
+    fn terminal_observation(
+        &self,
+        outcome: QueryTerminalOutcome,
+        canceled: bool,
+        elapsed: Duration,
+    ) -> TerminalObservation {
+        let checkpoint = self.lock();
+        let mut upstream_attempts = checkpoint.upstream_attempts.clone();
+        if let Some(upstream) = &checkpoint.in_flight_upstream {
+            upstream_attempts.push(UpstreamAttemptRecord {
+                upstream: upstream.clone(),
+                outcome: if canceled {
+                    UpstreamAttemptOutcome::Canceled
+                } else {
+                    UpstreamAttemptOutcome::Interrupted
+                },
+            });
+        }
+        TerminalObservation {
+            outcome,
+            response: checkpoint.response.clone(),
+            cache_status: checkpoint.cache_status,
+            final_sequence: checkpoint.final_sequence.clone(),
+            final_upstream: checkpoint.final_upstream.clone(),
+            upstream_attempts,
+            failure_provenance: checkpoint.failure_provenance.clone(),
+            elapsed,
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, ExecutionCheckpoint> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct MetricsState {
     admitted_total: u64,
@@ -282,6 +383,7 @@ struct MetricsState {
     cache_hits_total: u64,
     cache_misses_total: u64,
     cache_not_applicable_total: u64,
+    cache_undetermined_total: u64,
     forward_attempts_by_upstream: BTreeMap<String, UpstreamAttemptMetricsSnapshot>,
     unknown_forward_attempts_total: u64,
     duration: DurationHistogramSnapshot,
@@ -302,6 +404,7 @@ impl MetricsState {
             cache_hits_total: self.cache_hits_total,
             cache_misses_total: self.cache_misses_total,
             cache_not_applicable_total: self.cache_not_applicable_total,
+            cache_undetermined_total: self.cache_undetermined_total,
             forward_attempts_by_upstream: self.forward_attempts_by_upstream.clone(),
             unknown_forward_attempts_total: self.unknown_forward_attempts_total,
             duration: self.duration.clone(),
@@ -395,6 +498,10 @@ impl QueryObserver {
             *total = total.saturating_add(1);
         }
         match observation.cache_status {
+            CacheStatus::Undetermined => {
+                metrics.cache_undetermined_total =
+                    metrics.cache_undetermined_total.saturating_add(1);
+            }
             CacheStatus::NotApplicable => {
                 metrics.cache_not_applicable_total =
                     metrics.cache_not_applicable_total.saturating_add(1);
@@ -416,6 +523,8 @@ impl QueryObserver {
                     UpstreamAttemptOutcome::Response => &mut counters.responses_total,
                     UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
                     UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
+                    UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
+                    UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
                 };
                 *counter = counter.saturating_add(1);
             } else {
@@ -456,6 +565,7 @@ impl QueryObserver {
             admitted_at,
             audit_context,
             cancellation,
+            execution_progress: ExecutionProgress::new(),
             finalized: false,
         }
     }
@@ -496,10 +606,19 @@ pub(crate) struct AdmittedQueryGuard {
     admitted_at: Instant,
     audit_context: Option<AuditContext>,
     cancellation: TransportCancellation,
+    execution_progress: ExecutionProgress,
     finalized: bool,
 }
 
 impl AdmittedQueryGuard {
+    pub(crate) fn execution_progress(&self) -> ExecutionProgress {
+        self.execution_progress.clone()
+    }
+
+    pub(crate) fn capture_execution(&self, observation: &TerminalObservation) {
+        self.execution_progress.capture(observation, None);
+    }
+
     pub(crate) fn finish(mut self, mut observation: TerminalObservation) {
         observation.elapsed = self.admitted_at.elapsed();
         self.record(observation);
@@ -533,20 +652,16 @@ impl AdmittedQueryGuard {
 impl Drop for AdmittedQueryGuard {
     fn drop(&mut self) {
         if !self.finalized {
-            self.record(TerminalObservation {
-                outcome: if self.cancellation.is_cancelled() {
+            let canceled = self.cancellation.is_cancelled();
+            self.record(self.execution_progress.terminal_observation(
+                if canceled {
                     QueryTerminalOutcome::Canceled
                 } else {
                     QueryTerminalOutcome::NoResponse
                 },
-                response: ResponseState::NoResponse,
-                cache_status: CacheStatus::NotApplicable,
-                final_sequence: None,
-                final_upstream: None,
-                upstream_attempts: Vec::new(),
-                failure_provenance: None,
-                elapsed: self.admitted_at.elapsed(),
-            });
+                canceled,
+                self.admitted_at.elapsed(),
+            ));
         }
     }
 }
@@ -654,6 +769,116 @@ mod tests {
         assert_eq!(
             observer.audit_snapshot().records[1].terminal_outcome,
             QueryTerminalOutcome::Canceled
+        );
+    }
+
+    #[test]
+    fn unfinished_execution_preserves_known_facts_and_marks_unresolved_facts() {
+        let observer = std::sync::Arc::new(observer(true, 4));
+        let question = mosdns_dns_core::QuestionInfo {
+            qname_wire: vec![3, b'w', b'2', 0],
+            qtype: 1,
+            qclass: 1,
+        };
+        let guard = observer.admit(
+            "192.0.2.52:53000".parse().expect("client address"),
+            QueryTransport::Udp,
+            &question,
+            TransportCancellation::new(),
+        );
+        let progress = guard.execution_progress();
+        progress.capture(
+            &TerminalObservation {
+                outcome: QueryTerminalOutcome::NoResponse,
+                response: ResponseState::NoResponse,
+                cache_status: CacheStatus::Miss,
+                final_sequence: Some("entry".to_owned()),
+                final_upstream: None,
+                upstream_attempts: vec![UpstreamAttemptRecord {
+                    upstream: "route-a".to_owned(),
+                    outcome: UpstreamAttemptOutcome::Response,
+                }],
+                failure_provenance: Some(FailureProvenance::UpstreamFailure {
+                    upstream: "route-a".to_owned(),
+                }),
+                elapsed: Duration::ZERO,
+            },
+            Some("route-b".to_owned()),
+        );
+        drop(guard);
+
+        let audit = observer.audit_snapshot();
+        let record = &audit.records[0];
+        assert_eq!(record.cache_status, CacheStatus::Miss);
+        assert_eq!(record.final_sequence.as_deref(), Some("entry"));
+        assert_eq!(record.final_upstream, None);
+        assert_eq!(record.upstream_attempts.len(), 2);
+        assert_eq!(
+            record.upstream_attempts[1],
+            UpstreamAttemptRecord {
+                upstream: "route-b".to_owned(),
+                outcome: UpstreamAttemptOutcome::Interrupted,
+            }
+        );
+        assert_eq!(
+            record.failure_provenance,
+            Some(FailureProvenance::UpstreamFailure {
+                upstream: "route-a".to_owned(),
+            })
+        );
+
+        let cancellation = TransportCancellation::new();
+        let guard = observer.admit(
+            "192.0.2.53:53000".parse().expect("client address"),
+            QueryTransport::Tcp,
+            &question,
+            cancellation.clone(),
+        );
+        let progress = guard.execution_progress();
+        progress.capture(
+            &TerminalObservation {
+                outcome: QueryTerminalOutcome::NoResponse,
+                response: ResponseState::NoResponse,
+                cache_status: CacheStatus::Undetermined,
+                final_sequence: Some("entry".to_owned()),
+                final_upstream: None,
+                upstream_attempts: Vec::new(),
+                failure_provenance: None,
+                elapsed: Duration::ZERO,
+            },
+            Some("route-a".to_owned()),
+        );
+        cancellation.cancel();
+        drop(guard);
+
+        let audit = observer.audit_snapshot();
+        assert_eq!(audit.records[1].cache_status, CacheStatus::Undetermined);
+        assert_eq!(
+            audit.records[1].upstream_attempts,
+            [UpstreamAttemptRecord {
+                upstream: "route-a".to_owned(),
+                outcome: UpstreamAttemptOutcome::Canceled,
+            }]
+        );
+        let metrics = observer.metrics_snapshot();
+        assert_eq!(metrics.cache_misses_total, 1);
+        assert_eq!(metrics.cache_not_applicable_total, 0);
+        assert_eq!(metrics.cache_undetermined_total, 1);
+        assert_eq!(
+            metrics
+                .forward_attempts_by_upstream
+                .get("route-b")
+                .expect("route-b metrics")
+                .interrupted_total,
+            1
+        );
+        assert_eq!(
+            metrics
+                .forward_attempts_by_upstream
+                .get("route-a")
+                .expect("route-a metrics")
+                .canceled_total,
+            1
         );
     }
 

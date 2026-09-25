@@ -164,6 +164,7 @@ async fn process_request(task: RequestTask) {
         &question,
         request_shutdown.clone(),
     );
+    let progress = admitted.execution_progress();
 
     let mut execution = execute_request(
         ExecutionRequest {
@@ -176,8 +177,19 @@ async fn process_request(task: RequestTask) {
         },
         &forwards,
         request_shutdown.clone(),
+        progress,
     )
     .await;
+    admitted.capture_execution(&TerminalObservation {
+        outcome: QueryTerminalOutcome::NoResponse,
+        response: execution.response.clone(),
+        cache_status: execution.cache_status,
+        final_sequence: execution.final_sequence.clone(),
+        final_upstream: execution.final_upstream.clone(),
+        upstream_attempts: execution.upstream_attempts.clone(),
+        failure_provenance: execution.failure_provenance.clone(),
+        elapsed: std::time::Duration::ZERO,
+    });
     let terminal = if request_shutdown.is_cancelled() {
         QueryTerminalOutcome::Canceled
     } else if matches!(

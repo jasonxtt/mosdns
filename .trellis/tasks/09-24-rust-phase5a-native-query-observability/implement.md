@@ -71,15 +71,25 @@ UDP/TCP tests inject send errors and cancellation at their I/O boundary; real
 listener tests verify client/question identity, response facts, successful-send
 counts, multiple TCP queries on one connection, partial-frame accounting, and
 zero in-flight after each completed query. Dropped requests consult their
-cancellation scope, so task shutdown is not mislabeled as a send success.
+cancellation scope, so task shutdown is not mislabeled as a send success. The
+C2C Slice 2 review found that unfinished-query Drop finalization discarded
+partial execution facts. The guard now shares an execution checkpoint with the
+request future, preserving established cache/sequence/response/attempt/failure
+facts and marking unresolved cache disposition explicitly. An upstream leg
+dropped while pending is counted as canceled or interrupted according to the
+cancellation scope. A W2 cancellation test aborts the request while its cold
+cache miss is awaiting the forward and verifies the retained cache miss,
+sequence, and interrupted attempt.
 
-Validation: `cargo fmt --all -- --check`, `cargo test -p mosdns-native-host
---locked` (39 unit tests plus all native-host integration suites),
-`cargo clippy -p mosdns-native-host --all-targets --locked -- -D warnings`, and
-`git diff --check` pass. W1/W2/W3 response and cache regression suites remain
-green. Transport-error execution continues to terminate as local SERVFAIL under
-the existing sequence contract; the added fallback case is an upstream B
-SERVFAIL response followed by the existing C route, with only C marked final.
+Validation: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+`cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked`
+(41 unit tests plus all native-host integration suites),
+`cargo clippy --manifest-path rust/Cargo.toml -p mosdns-native-host --all-targets
+--locked -- -D warnings`, and `git diff --check` pass. W1/W2/W3 response and
+cache regression suites remain green. Transport-error execution continues to
+terminate as local SERVFAIL under the existing sequence contract; the added
+fallback case is an upstream B SERVFAIL response followed by the existing C
+route, with only C marked final.
 
 ## Slice 3 — concurrency, lifecycle, Linux evidence, review
 
