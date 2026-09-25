@@ -364,6 +364,13 @@ is in `research/slice3-v11-preflight/`. The single official 27-attempt matrix
 is pending and will use a fresh `results-v11-run` directory with no replacement
 attempts.
 
+
+## V11 official matrix result
+
+The single frozen V11 matrix completed with all 27 runner exits at zero and no replacement attempts or invalid stages. All 63/63 primary rows were valid; all 54,000 scheduled primary requests were sent, received, and correct on time, with no late/wrong responses, protocol or transport errors, timeouts, or sender shortfalls. The 901-entry raw hash manifest (SHA-256 `533356cafd58da4684f428fb3812206beb8105793313d5d6cfd895b03c1e1372`) and its sidecar verified remotely; the full ~61 MiB raw run remains on the Linux host, and the derived evidence is captured under `research/slice3-v11-run/`.
+
+Seven p95/p99 paired guards repeated: W1 TCP 200 audit-off versus Rust-before (p95 and p99), W1 TCP 400 audit-off versus Rust-before (p99), W2 cold 200 audit-off versus Rust-before (p99), W3 200 audit-on versus audit-off (p95), and W3 400 audit-off versus Rust-before (p99) plus audit-on versus audit-off (p95). No CPU guard repeated, 13/14 CPU comparisons were inconclusive at 100-Hz resolution, and paired sampled RSS remained within budget (+132 KiB maximum audit-off versus Rust-before; +1,964 KiB maximum audit-on versus audit-off). V11 is not reviewable; see `research/slice3-v11-pilot-assessment.md`. Source inspection suggests testing the upstream identity allocation's move onto the pre-exchange critical path and duplicate audit-on identity storage as bounded follow-up hypotheses; neither is yet confirmed as causal.
+
 ## Review and rollback points
 
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.
