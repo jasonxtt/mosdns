@@ -345,6 +345,25 @@ Validation commands and outcomes:
 - `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed on V11 across workspace tests and doctests; the final 23-case QUIC group completed in 224.77 seconds.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed on V11.
 
+
+## V11 pinned benchmark preflight
+
+The pinned Linux amd64 release candidate for source commit
+`7b7a0822b3820b4b7d56a5270893ed3eb6f13c69` built successfully with Rust
+1.95.0. Its 2,307,104-byte executable passed helper v8 validation with SHA-256
+`a50ac020785f9e55f42c2455690d5ceaedf0edd37e5d33e39fde649352e3f75c`. The
+107-file source manifest matched before build. Candidate identity, frozen
+27-attempt order, and driver are pinned in `research/slice3-candidate-v11-identity.md`
+and adjacent V11 files.
+
+The V11 preflight passed on 2026-09-25 21:45:53 UTC using the frozen runner,
+helper, fixtures, overlays, CPU sets, and ext4 result storage. Both binary
+identities and the source manifest validated; the attempt-order output contains
+only its header, so no benchmark attempt ran during preflight. Captured evidence
+is in `research/slice3-v11-preflight/`. The single official 27-attempt matrix
+is pending and will use a fresh `results-v11-run` directory with no replacement
+attempts.
+
 ## Review and rollback points
 
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.
