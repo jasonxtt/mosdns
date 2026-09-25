@@ -1,0 +1,28 @@
+log:
+  level: error
+
+plugins:
+  - tag: phase5a_cache
+    type: cache
+    args:
+      size: 64
+      lazy_cache_ttl: 0
+
+  - tag: phase5a_forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:15455"
+
+  - tag: phase5a_entry
+    type: sequence
+    args:
+      - exec: $phase5a_cache
+      - exec: $phase5a_forward
+
+  - tag: phase5a_udp
+    type: udp_server
+    args:
+      entry: phase5a_entry
+      listen: "127.0.0.1:15355"
+      enable_audit: false
