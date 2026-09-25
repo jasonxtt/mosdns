@@ -18,6 +18,13 @@ rejection; the new audit-enabled acceptance test fails because
 `compile_listener` still rejects `true`. That behavior changes in the next
 approved slice.
 
+Slice 0 review remediation: C2C finding P1-1 identified incomplete evidence
+that the frozen Rust-before binary matches the complete pre-change source/build
+graph. The manifest now records the identical full `rust/` tree IDs, matching
+`Cargo.lock` content hashes, absence of repository build overrides, and the
+archived source archive, build command, compiler, and binary identities. The
+bounded C2C re-review is pending; Slice 1 remains gated on its explicit PASS.
+
 ## Slice 1 — host-owned observer and bounded snapshot
 
 - [ ] Add red tests around a public read-only host snapshot: audit off retains no query/client details; metrics count fixed outcomes; audit on retains terminal entries; test-only small capacity evicts oldest with an exact visible count. Boundary: in-process observer, no HTTP or disk mock.
