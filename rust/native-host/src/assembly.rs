@@ -241,6 +241,10 @@ impl HostAssembly {
         Rc::clone(&self.cache)
     }
 
+    pub(crate) fn observer_handle(&self) -> Arc<QueryObserver> {
+        Arc::clone(&self.observer)
+    }
+
     /// Binds and serves the configured UDP listener without opening any
     /// listener socket during assembly.
     pub fn run_udp(&self) -> Result<(), UdpServerError> {

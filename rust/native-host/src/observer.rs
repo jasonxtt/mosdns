@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
+use std::time::Instant;
 use std::time::{Duration, SystemTime};
+
+use mosdns_upstream_core::TransportCancellation;
 
 const DURATION_BUCKET_UPPER_BOUNDS_MICROS: [u64; 15] = [
     50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000, 250_000, 500_000,
@@ -258,7 +261,10 @@ pub(crate) struct TerminalObservation {
     pub outcome: QueryTerminalOutcome,
     pub response: ResponseState,
     pub cache_status: CacheStatus,
+    pub final_sequence: Option<String>,
+    pub final_upstream: Option<String>,
     pub upstream_attempts: Vec<UpstreamAttemptRecord>,
+    pub failure_provenance: Option<FailureProvenance>,
     pub elapsed: Duration,
 }
 
@@ -428,6 +434,32 @@ impl QueryObserver {
         }
     }
 
+    pub(crate) fn admit(
+        self: &std::sync::Arc<Self>,
+        client_addr: SocketAddr,
+        transport: QueryTransport,
+        question: &mosdns_dns_core::QuestionInfo,
+        cancellation: TransportCancellation,
+    ) -> AdmittedQueryGuard {
+        let admitted_at = Instant::now();
+        let audit_context = self.audit_enabled.then(|| AuditContext {
+            timestamp: SystemTime::now(),
+            client_addr,
+            transport,
+            qname: render_qname(&question.qname_wire),
+            qtype: question.qtype,
+            qclass: question.qclass,
+        });
+        self.admit_query();
+        AdmittedQueryGuard {
+            observer: std::sync::Arc::clone(self),
+            admitted_at,
+            audit_context,
+            cancellation,
+            finalized: false,
+        }
+    }
+
     pub(crate) fn metrics_snapshot(&self) -> MetricsSnapshot {
         self.lock().metrics.snapshot()
     }
@@ -447,12 +479,117 @@ impl QueryObserver {
     }
 }
 
+struct AuditContext {
+    timestamp: SystemTime,
+    client_addr: SocketAddr,
+    transport: QueryTransport,
+    qname: String,
+    qtype: u16,
+    qclass: u16,
+}
+
+/// Finalizes one admitted request. Dropping an unfinished request records one
+/// canceled terminal event if its cancellation scope fired, or a no-response
+/// event for another unwind path.
+pub(crate) struct AdmittedQueryGuard {
+    observer: std::sync::Arc<QueryObserver>,
+    admitted_at: Instant,
+    audit_context: Option<AuditContext>,
+    cancellation: TransportCancellation,
+    finalized: bool,
+}
+
+impl AdmittedQueryGuard {
+    pub(crate) fn finish(mut self, mut observation: TerminalObservation) {
+        observation.elapsed = self.admitted_at.elapsed();
+        self.record(observation);
+    }
+
+    fn record(&mut self, observation: TerminalObservation) {
+        self.finalized = true;
+        let audit_context = self.audit_context.take();
+        self.observer.record_terminal(observation, |observation| {
+            let context = audit_context.expect("audit context exists when capture is enabled");
+            AuditRecord {
+                timestamp: context.timestamp,
+                client_addr: context.client_addr,
+                transport: context.transport,
+                qname: context.qname,
+                qtype: context.qtype,
+                qclass: context.qclass,
+                elapsed: observation.elapsed,
+                terminal_outcome: observation.outcome,
+                response: observation.response.clone(),
+                cache_status: observation.cache_status,
+                final_sequence: observation.final_sequence.clone(),
+                final_upstream: observation.final_upstream.clone(),
+                upstream_attempts: observation.upstream_attempts.clone(),
+                failure_provenance: observation.failure_provenance.clone(),
+            }
+        });
+    }
+}
+
+impl Drop for AdmittedQueryGuard {
+    fn drop(&mut self) {
+        if !self.finalized {
+            self.record(TerminalObservation {
+                outcome: if self.cancellation.is_cancelled() {
+                    QueryTerminalOutcome::Canceled
+                } else {
+                    QueryTerminalOutcome::NoResponse
+                },
+                response: ResponseState::NoResponse,
+                cache_status: CacheStatus::NotApplicable,
+                final_sequence: None,
+                final_upstream: None,
+                upstream_attempts: Vec::new(),
+                failure_provenance: None,
+                elapsed: self.admitted_at.elapsed(),
+            });
+        }
+    }
+}
+
+fn render_qname(wire: &[u8]) -> String {
+    let mut labels = Vec::new();
+    let mut offset = 0;
+    while offset < wire.len() {
+        let length = usize::from(wire[offset]);
+        offset += 1;
+        if length == 0 {
+            break;
+        }
+        let Some(label) = wire.get(offset..offset.saturating_add(length)) else {
+            break;
+        };
+        let mut rendered = String::new();
+        for byte in label {
+            match *byte {
+                b'.' => rendered.push_str("\\."),
+                b'\\' => rendered.push_str("\\\\"),
+                0x21..=0x7e => rendered.push(char::from(*byte)),
+                _ => rendered.push_str(&format!("\\{byte:03}")),
+            }
+        }
+        labels.push(rendered);
+        offset += length;
+    }
+    if labels.is_empty() {
+        ".".to_owned()
+    } else {
+        format!("{}.", labels.join("."))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
     use std::net::SocketAddr;
     use std::num::NonZeroUsize;
     use std::time::{Duration, SystemTime};
+
+    use mosdns_upstream_core::TransportCancellation;
 
     use super::{
         AuditRecord, CacheStatus, FailureProvenance, LocalFailureKind, QueryObserver,
@@ -468,6 +605,58 @@ mod tests {
         )
     }
 
+    #[test]
+    fn unfinished_admission_is_finalized_once_using_its_cancellation_scope() {
+        let observer = std::sync::Arc::new(observer(true, 2));
+        let question = mosdns_dns_core::QuestionInfo {
+            qname_wire: vec![3, b'a', b'.', b'\\', 0],
+            qtype: 1,
+            qclass: 1,
+        };
+        let guard = observer.admit(
+            "192.0.2.50:53000".parse().expect("client address"),
+            QueryTransport::Udp,
+            &question,
+            TransportCancellation::new(),
+        );
+        drop(guard);
+
+        let metrics = observer.metrics_snapshot();
+        assert_eq!(metrics.admitted_total, 1);
+        assert_eq!(metrics.completed_total, 1);
+        assert_eq!(metrics.in_flight, 0);
+        assert_eq!(metrics.no_response_total, 1);
+        assert_eq!(metrics.canceled_total, 0);
+        assert_eq!(metrics.duration.count, 1);
+        let audit = observer.audit_snapshot();
+        assert_eq!(audit.records.len(), 1);
+        assert_eq!(audit.records[0].qname, "a\\.\\\\.");
+        assert_eq!(audit.records[0].response, ResponseState::NoResponse);
+        assert_eq!(
+            audit.records[0].terminal_outcome,
+            QueryTerminalOutcome::NoResponse
+        );
+
+        let cancellation = TransportCancellation::new();
+        let guard = observer.admit(
+            "192.0.2.51:53000".parse().expect("client address"),
+            QueryTransport::Tcp,
+            &question,
+            cancellation.clone(),
+        );
+        cancellation.cancel();
+        drop(guard);
+        let metrics = observer.metrics_snapshot();
+        assert_eq!(metrics.admitted_total, 2);
+        assert_eq!(metrics.completed_total, 2);
+        assert_eq!(metrics.no_response_total, 1);
+        assert_eq!(metrics.canceled_total, 1);
+        assert_eq!(
+            observer.audit_snapshot().records[1].terminal_outcome,
+            QueryTerminalOutcome::Canceled
+        );
+    }
+
     fn observation(elapsed: Duration) -> TerminalObservation {
         TerminalObservation {
             outcome: QueryTerminalOutcome::SendSucceeded,
@@ -476,10 +665,13 @@ mod tests {
                 source: ResponseSource::Upstream("route-a".to_owned()),
             },
             cache_status: CacheStatus::Miss,
+            final_sequence: Some("entry".to_owned()),
+            final_upstream: Some("route-a".to_owned()),
             upstream_attempts: vec![UpstreamAttemptRecord {
                 upstream: "route-a".to_owned(),
                 outcome: UpstreamAttemptOutcome::Response,
             }],
+            failure_provenance: None,
             elapsed,
         }
     }
@@ -654,7 +846,10 @@ mod tests {
                     outcome,
                     response,
                     cache_status,
+                    final_sequence: None,
+                    final_upstream: None,
                     upstream_attempts,
+                    failure_provenance: None,
                     elapsed: Duration::from_micros(250),
                 },
                 |_| unreachable!("disabled audit must not construct a record"),

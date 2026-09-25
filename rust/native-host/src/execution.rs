@@ -9,13 +9,17 @@ use mosdns_dns_core::{
 };
 use mosdns_sequence_core::{
     ExecutableId, ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep,
-    ResponseState,
+    ResponseState as MachineResponseState,
 };
 use mosdns_upstream_core::{ExchangeResponse, TransportCancellation, UpstreamError};
 
 use crate::assembly::{ForwardAdapter, ForwardCatalog, HostOptions};
 use crate::cache::{NativeCacheAdapter, PendingStore};
 use crate::config::CompiledConfig;
+use crate::observer::{
+    CacheStatus, FailureProvenance, LocalFailureKind, ResponseSource,
+    ResponseState as ObservedResponseState, UpstreamAttemptOutcome, UpstreamAttemptRecord,
+};
 
 const DEFAULT_FUEL: u64 = 64;
 const SERVFAIL: u8 = 2;
@@ -51,6 +55,41 @@ pub(crate) struct ExecutionRequest<'a> {
     pub question: QuestionInfo,
 }
 
+/// Facts produced by the canonical execution path for one parsed query.
+/// Listener-owned framing and terminal transport outcome are added later.
+#[derive(Clone, Debug)]
+pub(crate) struct ExecutionResult {
+    pub response_wire: Vec<u8>,
+    pub response: ObservedResponseState,
+    pub cache_status: CacheStatus,
+    pub final_sequence: Option<String>,
+    pub final_upstream: Option<String>,
+    pub upstream_attempts: Vec<UpstreamAttemptRecord>,
+    pub failure_provenance: Option<FailureProvenance>,
+}
+
+struct ExecutionFacts {
+    cache_status: CacheStatus,
+    response_source: Option<ResponseSource>,
+    final_upstream: Option<String>,
+    upstream_attempts: Vec<UpstreamAttemptRecord>,
+    failure_provenance: Option<FailureProvenance>,
+    final_sequence: Option<String>,
+}
+
+impl Default for ExecutionFacts {
+    fn default() -> Self {
+        Self {
+            cache_status: CacheStatus::NotApplicable,
+            response_source: None,
+            final_upstream: None,
+            upstream_attempts: Vec::new(),
+            failure_provenance: None,
+            final_sequence: None,
+        }
+    }
+}
+
 impl ExchangeExecutor for ForwardAdapter {
     fn exchange<'a>(
         &'a self,
@@ -75,15 +114,26 @@ pub(crate) async fn execute_request(
     request: ExecutionRequest<'_>,
     forwards: &ForwardCatalog,
     request_shutdown: TransportCancellation,
-) -> Vec<u8> {
-    execute_request_with_executor(request, forwards, request_shutdown).await
+) -> ExecutionResult {
+    execute_request_with_observation(request, forwards, request_shutdown).await
 }
 
+#[cfg(test)]
 pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
     request: ExecutionRequest<'_>,
     executor: &E,
     request_shutdown: TransportCancellation,
 ) -> Vec<u8> {
+    execute_request_with_observation(request, executor, request_shutdown)
+        .await
+        .response_wire
+}
+
+pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Sized>(
+    request: ExecutionRequest<'_>,
+    executor: &E,
+    request_shutdown: TransportCancellation,
+) -> ExecutionResult {
     let ExecutionRequest {
         config,
         cache,
@@ -92,6 +142,11 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
         header,
         question,
     } = request;
+    let mut facts = ExecutionFacts {
+        cache_status: CacheStatus::NotApplicable,
+        final_sequence: Some(config.sequence.tag.clone()),
+        ..ExecutionFacts::default()
+    };
     let state = ExecutionState::new(header, question.clone());
     // Every external leg shares this one request-owned absolute budget.
     let request_deadline = options
@@ -99,7 +154,12 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
         .unwrap_or_else(|| Instant::now() + options.request_deadline);
     let mut machine = match config.new_machine(state, ExecutionControl::with_fuel(DEFAULT_FUEL)) {
         Ok(machine) => machine,
-        Err(_) => return protocol_error(&header, &question, SERVFAIL),
+        Err(_) => {
+            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                LocalFailureKind::InternalExecution,
+            ));
+            return result_from_wire(protocol_error(&header, &question, SERVFAIL), facts);
+        }
     };
 
     let mut pending_store: Option<PendingStore> = None;
@@ -108,7 +168,12 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
     let multi_forward = config.program.externals.len() > usize::from(config.cache.is_some()) + 1;
     let mut step = match machine.step() {
         Ok(step) => step,
-        Err(_) => return protocol_error(&header, &question, SERVFAIL),
+        Err(_) => {
+            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                LocalFailureKind::InternalExecution,
+            ));
+            return result_from_wire(protocol_error(&header, &question, SERVFAIL), facts);
+        }
     };
 
     loop {
@@ -123,12 +188,14 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                         // insert. The token itself rechecks response
                         // eligibility and obtains the publication time.
                         let _ = token.publish(match &machine.state().response {
-                            ResponseState::Raw(wire) => wire.as_bytes(),
-                            ResponseState::None | ResponseState::Synthesized(_) => &[],
+                            MachineResponseState::Raw(wire) => wire.as_bytes(),
+                            MachineResponseState::None | MachineResponseState::Synthesized(_) => {
+                                &[]
+                            }
                         });
                     }
                 }
-                return response_from_state(&machine, &header, &question);
+                return result_from_state(&machine, &header, &question, facts);
             }
             MachineStep::Dispatch(dispatch) => {
                 if config
@@ -138,31 +205,51 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                 {
                     let lookup = cache.lookup(raw).ok().flatten();
                     if let Some(wire) = lookup {
+                        facts.cache_status = CacheStatus::Hit;
+                        facts.response_source = Some(ResponseSource::Cache);
+                        facts.final_upstream = None;
+                        facts.failure_provenance = None;
                         machine.state_mut().set_raw_response(wire);
                         step = match machine
                             .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
                         {
                             Ok(step) => step,
-                            Err(_) => return response_from_state(&machine, &header, &question),
+                            Err(_) => {
+                                facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                                    LocalFailureKind::InternalExecution,
+                                ));
+                                return result_from_state(&machine, &header, &question, facts);
+                            }
                         };
                         continue;
                     }
+                    facts.cache_status = CacheStatus::Miss;
                     pending_store = cache.begin_store(raw).ok().flatten();
                     step = match machine
                         .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
                     {
                         Ok(step) => step,
-                        Err(_) => return response_from_state(&machine, &header, &question),
+                        Err(_) => {
+                            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
                     };
                     continue;
                 }
 
                 if request_shutdown.is_cancelled() {
-                    return Vec::new();
+                    return canceled_execution(facts);
                 }
                 if multi_forward && Instant::now() >= request_deadline {
                     set_servfail(&mut machine);
-                    return response_from_state(&machine, &header, &question);
+                    facts.response_source = Some(ResponseSource::Local);
+                    facts.final_upstream = None;
+                    facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                        LocalFailureKind::NoUsableUpstreamResponse,
+                    ));
+                    return result_from_state(&machine, &header, &question, facts);
                 }
                 publication_deadline = Some(request_deadline);
                 let exchange = executor
@@ -174,10 +261,12 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                     )
                     .await;
                 if request_shutdown.is_cancelled() {
-                    return Vec::new();
+                    record_canceled_attempt(config, dispatch.executable(), &exchange, &mut facts);
+                    return canceled_execution(facts);
                 }
                 match exchange {
                     Ok(response) => {
+                        let upstream = upstream_identity(config, dispatch.executable());
                         let accepted = if multi_forward {
                             qualify_response(response.wire(), header.id, &question)
                         } else {
@@ -190,32 +279,200 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
                         };
                         match accepted {
                             Some(wire) => {
+                                if let Some(upstream) = upstream {
+                                    facts.upstream_attempts.push(UpstreamAttemptRecord {
+                                        upstream: upstream.clone(),
+                                        outcome: UpstreamAttemptOutcome::Response,
+                                    });
+                                    facts.final_upstream = Some(upstream.clone());
+                                    facts.response_source =
+                                        Some(ResponseSource::Upstream(upstream));
+                                }
+                                facts.failure_provenance = None;
                                 upstream_response = true;
                                 machine.state_mut().set_raw_response(wire);
                             }
                             None => {
+                                if let Some(upstream) = upstream {
+                                    facts.upstream_attempts.push(UpstreamAttemptRecord {
+                                        upstream: upstream.clone(),
+                                        outcome: UpstreamAttemptOutcome::Failed,
+                                    });
+                                    facts.failure_provenance =
+                                        Some(FailureProvenance::UpstreamFailure {
+                                            upstream: upstream.clone(),
+                                        });
+                                } else {
+                                    facts.failure_provenance =
+                                        Some(FailureProvenance::LocalFailure(
+                                            LocalFailureKind::InternalExecution,
+                                        ));
+                                }
                                 upstream_response = false;
                                 set_servfail(&mut machine);
+                                facts.response_source = Some(ResponseSource::Local);
+                                facts.final_upstream = None;
                                 if multi_forward {
-                                    return response_from_state(&machine, &header, &question);
+                                    return result_from_state(&machine, &header, &question, facts);
                                 }
                             }
                         }
                     }
-                    Err(_) => {
+                    Err(ExchangeError::UnknownExecutable(_)) => {
+                        facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                            LocalFailureKind::InternalExecution,
+                        ));
                         upstream_response = false;
                         set_servfail(&mut machine);
+                        facts.response_source = Some(ResponseSource::Local);
+                        facts.final_upstream = None;
                         if multi_forward {
-                            return response_from_state(&machine, &header, &question);
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    }
+                    Err(error @ ExchangeError::Upstream(_)) => {
+                        if let Some(upstream) = upstream_identity(config, dispatch.executable()) {
+                            let timeout = matches!(
+                                &error,
+                                ExchangeError::Upstream(upstream) if is_timeout(upstream)
+                            );
+                            let outcome = if timeout {
+                                UpstreamAttemptOutcome::TimedOut
+                            } else {
+                                UpstreamAttemptOutcome::Failed
+                            };
+                            facts.upstream_attempts.push(UpstreamAttemptRecord {
+                                upstream: upstream.clone(),
+                                outcome,
+                            });
+                            facts.failure_provenance = Some(if timeout {
+                                FailureProvenance::UpstreamTimeout { upstream }
+                            } else {
+                                FailureProvenance::UpstreamFailure { upstream }
+                            });
+                        } else {
+                            facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                        }
+                        upstream_response = false;
+                        set_servfail(&mut machine);
+                        facts.response_source = Some(ResponseSource::Local);
+                        facts.final_upstream = None;
+                        if multi_forward {
+                            return result_from_state(&machine, &header, &question, facts);
                         }
                     }
                 }
                 step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Continue)) {
                     Ok(step) => step,
-                    Err(_) => return response_from_state(&machine, &header, &question),
+                    Err(_) => {
+                        facts.failure_provenance = Some(FailureProvenance::LocalFailure(
+                            LocalFailureKind::InternalExecution,
+                        ));
+                        return result_from_state(&machine, &header, &question, facts);
+                    }
                 };
             }
         }
+    }
+}
+
+fn upstream_identity(config: &CompiledConfig, executable: ExecutableId) -> Option<String> {
+    config
+        .forwards
+        .iter()
+        .find(|forward| forward.executable == executable)
+        .map(|forward| {
+            forward
+                .upstream_tag
+                .as_deref()
+                .unwrap_or(&forward.tag)
+                .to_owned()
+        })
+}
+
+fn is_timeout(error: &UpstreamError) -> bool {
+    match error {
+        UpstreamError::DeadlineExceeded(_) => true,
+        UpstreamError::Diagnosed { cause, .. } => {
+            matches!(
+                cause,
+                mosdns_upstream_core::TerminalError::DeadlineExceeded(_)
+            )
+        }
+        UpstreamError::TcpFallback { cause, .. } => is_timeout(cause),
+        _ => false,
+    }
+}
+
+fn record_canceled_attempt(
+    config: &CompiledConfig,
+    executable: ExecutableId,
+    exchange: &Result<ExchangeResponse, ExchangeError>,
+    facts: &mut ExecutionFacts,
+) {
+    let Some(upstream) = upstream_identity(config, executable) else {
+        return;
+    };
+    let outcome = match exchange {
+        Ok(_) => UpstreamAttemptOutcome::Response,
+        Err(ExchangeError::Upstream(error)) if is_timeout(error) => {
+            UpstreamAttemptOutcome::TimedOut
+        }
+        Err(ExchangeError::Upstream(_)) => UpstreamAttemptOutcome::Failed,
+        Err(ExchangeError::UnknownExecutable(_)) => return,
+    };
+    facts
+        .upstream_attempts
+        .push(UpstreamAttemptRecord { upstream, outcome });
+}
+
+fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
+    facts.response_source = None;
+    facts.final_upstream = None;
+    result_from_wire(Vec::new(), facts)
+}
+
+fn result_from_state(
+    machine: &ExecutionMachine<'_>,
+    header: &QueryHeader,
+    question: &QuestionInfo,
+    facts: ExecutionFacts,
+) -> ExecutionResult {
+    let response = response_from_state(machine, header, question);
+    result_from_wire(response, facts)
+}
+
+fn result_from_wire(response_wire: Vec<u8>, facts: ExecutionFacts) -> ExecutionResult {
+    let response = if response_wire.is_empty() {
+        ObservedResponseState::NoResponse
+    } else {
+        let rcode = observe_response_metadata(&response_wire)
+            .map(|metadata| metadata.rcode)
+            .unwrap_or_else(|_| {
+                u16::from(response_wire.get(3).copied().unwrap_or_default() & 0x0f)
+            });
+        ObservedResponseState::Dns {
+            rcode,
+            source: facts.response_source.unwrap_or(ResponseSource::Local),
+        }
+    };
+    let final_upstream = match &response {
+        ObservedResponseState::Dns {
+            source: ResponseSource::Upstream(_),
+            ..
+        } => facts.final_upstream,
+        ObservedResponseState::Dns { .. } | ObservedResponseState::NoResponse => None,
+    };
+    ExecutionResult {
+        response_wire,
+        response,
+        cache_status: facts.cache_status,
+        final_sequence: facts.final_sequence,
+        final_upstream,
+        upstream_attempts: facts.upstream_attempts,
+        failure_provenance: facts.failure_provenance,
     }
 }
 
@@ -256,12 +513,12 @@ pub(crate) fn response_from_state(
     question: &QuestionInfo,
 ) -> Vec<u8> {
     match &machine.state().response {
-        ResponseState::Raw(wire) => wire.0.clone(),
-        ResponseState::Synthesized(response) => {
+        MachineResponseState::Raw(wire) => wire.0.clone(),
+        MachineResponseState::Synthesized(response) => {
             let rcode = u8::try_from(response.rcode()).unwrap_or(SERVFAIL);
             protocol_error(header, question, rcode)
         }
-        ResponseState::None => protocol_error(header, question, REFUSED),
+        MachineResponseState::None => protocol_error(header, question, REFUSED),
     }
 }
 
@@ -289,7 +546,8 @@ mod tests {
         MatcherSpecInput, ProgramSpec, RuleSpec, SequenceSpec,
     };
     use mosdns_upstream_core::{
-        Endpoint, ExchangeResponse, Transport, TransportCancellation, UpstreamError,
+        Endpoint, ExchangeResponse, SideEffectState, Transport, TransportCancellation,
+        UpstreamError,
     };
 
     use super::{ExchangeExecutor, execute_request_with_executor};
@@ -297,8 +555,9 @@ mod tests {
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
     use crate::config::{
         CachePluginConfig, CompiledConfig, ForwardConfig, ListenerConfig, ListenerKind, LogLevel,
-        SequenceConfig,
+        SequenceConfig, compile_yaml,
     };
+    use crate::observer::{CacheStatus, FailureProvenance, ResponseSource, ResponseState};
 
     struct MockExchange {
         calls: Rc<Cell<u32>>,
@@ -319,6 +578,15 @@ mod tests {
         calls: Rc<RefCell<Vec<ExecutableId>>>,
         first_response: Vec<u8>,
         fail_id: ExecutableId,
+    }
+
+    struct TimeoutExchange;
+
+    struct RoutePathExchange {
+        b: ExecutableId,
+        calls: Rc<RefCell<Vec<ExecutableId>>>,
+        b_answer_ip: [u8; 4],
+        b_servfail: bool,
     }
 
     struct InterleavedExchange {
@@ -344,6 +612,64 @@ mod tests {
         > {
             self.calls.borrow_mut().push(executable);
             Box::pin(async { Err(super::ExchangeError::Upstream(UpstreamError::Connect)) })
+        }
+    }
+
+    impl ExchangeExecutor for TimeoutExchange {
+        fn exchange<'a>(
+            &'a self,
+            _executable: ExecutableId,
+            _query: &'a [u8],
+            _deadline: std::time::Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            Box::pin(async {
+                Err(super::ExchangeError::Upstream(
+                    UpstreamError::DeadlineExceeded(SideEffectState::Sent),
+                ))
+            })
+        }
+    }
+
+    impl ExchangeExecutor for RoutePathExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            query: &'a [u8],
+            _deadline: std::time::Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            self.calls.borrow_mut().push(executable);
+            let response = if executable == self.b && self.b_servfail {
+                upstream_servfail(query)
+            } else {
+                let answer_ip = if executable == self.b {
+                    self.b_answer_ip
+                } else {
+                    [198, 51, 100, 1]
+                };
+                response_with_ip(query, answer_ip)
+            };
+            Box::pin(async move {
+                let id = u16::from_be_bytes([response[0], response[1]]);
+                Ok(ExchangeResponse::new(
+                    response,
+                    id,
+                    id,
+                    Transport::Udp,
+                    false,
+                ))
+            })
         }
     }
 
@@ -531,6 +857,297 @@ mod tests {
         response.extend_from_slice(&[0, 1, 0, 1]);
         response.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 10, 0, 4, 192, 0, 2, 1]);
         response
+    }
+
+    fn response_with_ip(query: &[u8], address: [u8; 4]) -> Vec<u8> {
+        let mut response = response(query);
+        let address_offset = response.len() - address.len();
+        response[address_offset..].copy_from_slice(&address);
+        response
+    }
+
+    fn query_name(id: u16, name: &str) -> Vec<u8> {
+        let mut query = vec![(id >> 8) as u8, id as u8, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0];
+        for label in name.trim_end_matches('.').split('.') {
+            query.push(u8::try_from(label.len()).expect("test label length"));
+            query.extend_from_slice(label.as_bytes());
+        }
+        query.extend_from_slice(&[0, 0, 1, 0, 1]);
+        query
+    }
+
+    fn execute_observed<E: ExchangeExecutor + ?Sized>(
+        config: &CompiledConfig,
+        cache: &NativeCacheAdapter,
+        options: &HostOptions,
+        request: &[u8],
+        executor: &E,
+    ) -> super::ExecutionResult {
+        let (header, question) = parse_query(request).expect("query");
+        futures_like_block_on(super::execute_request_with_observation(
+            super::ExecutionRequest {
+                config,
+                cache,
+                options,
+                raw: request,
+                header,
+                question,
+            },
+            executor,
+            TransportCancellation::new(),
+        ))
+    }
+
+    #[test]
+    fn execution_observation_tracks_w1_w2_and_servfail_provenance() {
+        let w1 = compile_yaml(include_str!(
+            "../../../tests/phase5a-baseline/configs/forward-udp.yaml"
+        ))
+        .expect("W1 configuration");
+        let w1_cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("W1 cache");
+        let request = query(31);
+        let w1_executor = MockExchange {
+            calls: Rc::new(Cell::new(0)),
+            response: response(&request),
+            fail: false,
+        };
+        let direct = execute_observed(
+            &w1,
+            &w1_cache,
+            &HostOptions::default(),
+            &request,
+            &w1_executor,
+        );
+        assert!(
+            matches!(direct.response, ResponseState::Dns { rcode: 0, source: ResponseSource::Upstream(ref upstream) } if upstream == "phase5a_forward")
+        );
+        assert_eq!(direct.cache_status, CacheStatus::NotApplicable);
+        assert_eq!(direct.final_upstream.as_deref(), Some("phase5a_forward"));
+        assert_eq!(direct.upstream_attempts.len(), 1);
+        assert_eq!(
+            direct.upstream_attempts[0].outcome,
+            super::UpstreamAttemptOutcome::Response
+        );
+
+        let w2 = config();
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(100)).expect("W2 cache");
+        let calls = Rc::new(Cell::new(0));
+        let executor = MockExchange {
+            calls: Rc::clone(&calls),
+            response: response(&request),
+            fail: false,
+        };
+        let cold = execute_observed(&w2, &cache, &HostOptions::default(), &request, &executor);
+        let warm_request = query(32);
+        let warm = execute_observed(
+            &w2,
+            &cache,
+            &HostOptions::default(),
+            &warm_request,
+            &executor,
+        );
+        assert_eq!(cold.cache_status, CacheStatus::Miss);
+        assert_eq!(cold.final_upstream.as_deref(), Some("forward"));
+        assert_eq!(warm.cache_status, CacheStatus::Hit);
+        assert_eq!(
+            warm.response,
+            ResponseState::Dns {
+                rcode: 0,
+                source: ResponseSource::Cache
+            }
+        );
+        assert_eq!(warm.final_upstream, None);
+        assert!(warm.upstream_attempts.is_empty());
+        assert_eq!(calls.get(), 1, "warm cache hit must not dispatch upstream");
+
+        let timeout = execute_observed(
+            &w2,
+            &NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("timeout cache"),
+            &HostOptions::default(),
+            &query(33),
+            &TimeoutExchange,
+        );
+        assert_eq!(
+            timeout.response,
+            ResponseState::Dns {
+                rcode: 2,
+                source: ResponseSource::Local
+            }
+        );
+        assert_eq!(
+            timeout.failure_provenance,
+            Some(FailureProvenance::UpstreamTimeout {
+                upstream: "forward".to_owned()
+            })
+        );
+        assert_eq!(timeout.upstream_attempts.len(), 1);
+        assert_eq!(
+            timeout.upstream_attempts[0].outcome,
+            super::UpstreamAttemptOutcome::TimedOut
+        );
+
+        let mut upstream_servfail = response(&request);
+        upstream_servfail[3] = 0x82;
+        upstream_servfail[6] = 0;
+        upstream_servfail[7] = 0;
+        upstream_servfail
+            .truncate(12 + parse_query(&request).expect("question").1.qname_wire.len() + 4);
+        let upstream_servfail_executor = MockExchange {
+            calls: Rc::new(Cell::new(0)),
+            response: upstream_servfail,
+            fail: false,
+        };
+        let upstream_servfail_result = execute_observed(
+            &w1,
+            &w1_cache,
+            &HostOptions::default(),
+            &request,
+            &upstream_servfail_executor,
+        );
+        assert_eq!(
+            upstream_servfail_result.response,
+            ResponseState::Dns {
+                rcode: 2,
+                source: ResponseSource::Upstream("phase5a_forward".to_owned())
+            }
+        );
+        assert_eq!(upstream_servfail_result.failure_provenance, None);
+    }
+
+    #[test]
+    fn execution_observation_reports_actual_w3_final_route_and_ordered_legs() {
+        let config = compile_yaml(include_str!(
+            "../../../tests/phase5a-baseline/configs/routing.yaml"
+        ))
+        .expect("W3 configuration");
+        let a = config
+            .forwards
+            .iter()
+            .find(|forward| forward.upstream_tag.as_deref() == Some("route_a"))
+            .expect("route A");
+        let b = config
+            .forwards
+            .iter()
+            .find(|forward| forward.upstream_tag.as_deref() == Some("route_b"))
+            .expect("route B");
+        let c = config
+            .forwards
+            .iter()
+            .find(|forward| forward.upstream_tag.as_deref() == Some("route_c"))
+            .expect("route C");
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+
+        let direct_calls = Rc::new(RefCell::new(Vec::new()));
+        let direct_executor = RoutePathExchange {
+            b: b.executable,
+            calls: Rc::clone(&direct_calls),
+            b_answer_ip: [192, 0, 2, 11],
+            b_servfail: false,
+        };
+        let direct = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &query_name(41, "domain-hit.test"),
+            &direct_executor,
+        );
+        assert_eq!(direct_calls.borrow().as_slice(), &[a.executable]);
+        assert_eq!(direct.final_upstream.as_deref(), Some("route_a"));
+
+        let route_a_calls = Rc::new(RefCell::new(Vec::new()));
+        let route_a_executor = RoutePathExchange {
+            b: b.executable,
+            calls: Rc::clone(&route_a_calls),
+            b_answer_ip: [192, 0, 2, 10],
+            b_servfail: false,
+        };
+        let route_a = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &query_name(42, "unmatched.test"),
+            &route_a_executor,
+        );
+        assert_eq!(
+            route_a_calls.borrow().as_slice(),
+            &[b.executable, a.executable]
+        );
+        assert_eq!(
+            route_a
+                .upstream_attempts
+                .iter()
+                .map(|attempt| attempt.upstream.as_str())
+                .collect::<Vec<_>>(),
+            ["route_b", "route_a"]
+        );
+        assert_eq!(route_a.final_upstream.as_deref(), Some("route_a"));
+
+        let route_c_calls = Rc::new(RefCell::new(Vec::new()));
+        let route_c_executor = RoutePathExchange {
+            b: b.executable,
+            calls: Rc::clone(&route_c_calls),
+            b_answer_ip: [192, 0, 2, 11],
+            b_servfail: false,
+        };
+        let route_c = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &query_name(43, "unmatched-c.test"),
+            &route_c_executor,
+        );
+        assert_eq!(
+            route_c_calls.borrow().as_slice(),
+            &[b.executable, c.executable]
+        );
+        assert_eq!(
+            route_c
+                .upstream_attempts
+                .iter()
+                .map(|attempt| attempt.upstream.as_str())
+                .collect::<Vec<_>>(),
+            ["route_b", "route_c"]
+        );
+        assert_eq!(route_c.final_upstream.as_deref(), Some("route_c"));
+
+        let negative_b_calls = Rc::new(RefCell::new(Vec::new()));
+        let negative_b_executor = RoutePathExchange {
+            b: b.executable,
+            calls: Rc::clone(&negative_b_calls),
+            b_answer_ip: [192, 0, 2, 11],
+            b_servfail: true,
+        };
+        let negative_b = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &query_name(44, "negative-b.test"),
+            &negative_b_executor,
+        );
+        assert_eq!(
+            negative_b_calls.borrow().as_slice(),
+            &[b.executable, c.executable]
+        );
+        assert_eq!(
+            negative_b
+                .upstream_attempts
+                .iter()
+                .map(|attempt| (attempt.upstream.as_str(), attempt.outcome))
+                .collect::<Vec<_>>(),
+            [
+                ("route_b", super::UpstreamAttemptOutcome::Response),
+                ("route_c", super::UpstreamAttemptOutcome::Response),
+            ]
+        );
+        assert_eq!(negative_b.final_upstream.as_deref(), Some("route_c"));
+        assert_eq!(negative_b.failure_provenance, None);
+        assert_eq!(
+            negative_b.response,
+            ResponseState::Dns {
+                rcode: 0,
+                source: ResponseSource::Upstream("route_c".to_owned())
+            }
+        );
     }
 
     fn malformed_address_response(query: &[u8]) -> Vec<u8> {
@@ -730,27 +1347,39 @@ mod tests {
     fn failed_first_multi_forward_leg_stops_before_the_next_external() {
         let (config, a, b) = two_leg_config();
         let request = query(13);
-        let (header, question) = parse_query(&request).expect("query");
         let calls = Rc::new(RefCell::new(Vec::new()));
         let executor = FailingExchange {
             calls: Rc::clone(&calls),
         };
         let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
-        let options = HostOptions::default();
-        let response = futures_like_block_on(execute_request_with_executor(
-            super::ExecutionRequest {
-                config: &config,
-                cache: &cache,
-                options: &options,
-                raw: &request,
-                header,
-                question,
-            },
+        let execution = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &request,
             &executor,
-            mosdns_upstream_core::TransportCancellation::new(),
-        ));
-        validate_response(&response).expect("SERVFAIL response");
-        assert_eq!(response[3] & 0x0f, super::SERVFAIL);
+        );
+        validate_response(&execution.response_wire).expect("SERVFAIL response");
+        assert_eq!(execution.response_wire[3] & 0x0f, super::SERVFAIL);
+        assert_eq!(
+            execution.response,
+            ResponseState::Dns {
+                rcode: 2,
+                source: ResponseSource::Local
+            }
+        );
+        assert_eq!(execution.final_upstream, None);
+        assert_eq!(
+            execution.failure_provenance,
+            Some(FailureProvenance::UpstreamFailure {
+                upstream: "b".to_owned()
+            })
+        );
+        assert_eq!(execution.upstream_attempts.len(), 1);
+        assert_eq!(
+            execution.upstream_attempts[0].outcome,
+            super::UpstreamAttemptOutcome::Failed
+        );
         let calls = calls.borrow();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0], b);
@@ -824,7 +1453,6 @@ mod tests {
     fn failed_second_multi_forward_leg_does_not_republish_first_answer() {
         let (config, a, b) = two_leg_config();
         let request = query(16);
-        let (header, question) = parse_query(&request).expect("query");
         let calls = Rc::new(RefCell::new(Vec::new()));
         let executor = SecondLegFailExchange {
             calls: Rc::clone(&calls),
@@ -832,20 +1460,33 @@ mod tests {
             fail_id: a,
         };
         let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
-        let response = futures_like_block_on(execute_request_with_executor(
-            super::ExecutionRequest {
-                config: &config,
-                cache: &cache,
-                options: &HostOptions::default(),
-                raw: &request,
-                header,
-                question,
-            },
+        let execution = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &request,
             &executor,
-            TransportCancellation::new(),
-        ));
-        validate_response(&response).expect("SERVFAIL response");
-        assert_eq!(response[3] & 0x0f, super::SERVFAIL);
+        );
+        validate_response(&execution.response_wire).expect("SERVFAIL response");
+        assert_eq!(execution.response_wire[3] & 0x0f, super::SERVFAIL);
+        assert_eq!(execution.final_upstream, None);
+        assert_eq!(
+            execution.failure_provenance,
+            Some(FailureProvenance::UpstreamFailure {
+                upstream: "a".to_owned()
+            })
+        );
+        assert_eq!(
+            execution
+                .upstream_attempts
+                .iter()
+                .map(|attempt| (attempt.upstream.as_str(), attempt.outcome))
+                .collect::<Vec<_>>(),
+            [
+                ("b", super::UpstreamAttemptOutcome::Response),
+                ("a", super::UpstreamAttemptOutcome::Failed),
+            ]
+        );
         assert_eq!(calls.borrow().as_slice(), &[b, a]);
     }
 
