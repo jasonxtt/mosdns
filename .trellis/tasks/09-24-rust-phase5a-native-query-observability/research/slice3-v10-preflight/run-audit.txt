@@ -1,0 +1,24 @@
+preflight_utc=2026-09-25T21:06:05Z
+host=mosdns-rust
+kernel=Linux mosdns-rust 7.0.9-x64v3-xanmod1 #0~20260517.ga456799 SMP PREEMPT_DYNAMIC Sun May 17 20:10:49 UTC x86_64 GNU/Linux
+online_cpus=2
+mem_bytes=4102578176
+open_file_limit=1024
+result_filesystem=ext4
+loadavg=0.10 0.31 0.22 1/119 238421
+runner_sha256=dd9749238cf917d1360f33fd732cca48c4ae7906ab76d1cb8f5f941e10e1e3d8
+helper_sha256=df4515d7045ddcfd30139b0407e8e9933277c1560137d71ee0f7360d7d537065
+before_sha256=370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa
+after_sha256=bb13371306d6a26228bcca7e496e8f1354e1d9ac0ecfa2ef36bb5c7b01dba2bd
+mode=pilot (the frozen manifest specifies pilot mode because the archived official driver digest differs)
+matrix=27 balanced attempts; W1 TCP, W2 same-process cold/warm, W3
+stages=200,300,350,400 QPS plus 200 QPS health; 3000 ms each; deadline 500 ms; late drain 100 ms
+w2_ttl_ms=30000; w2_ttl_safety_margin_ms=500; sut_cpu=0; harness_cpu=1
+production_service=untouched; no connection to mosdns production service
+driver_sha256=af1105c8f1525199b1f07c06da67d76fe48bb5973c0c607e7fec4ecccc0ddb09
+plan_sha256=6efa44160e7aae671d5a71bff46c1a262302b95047f6231c6d5ec6a4cdb903e7
+identity_sha256=d2247dc56ca971f4ba94d7e23c5fcd1d5b63070bb6b96992607227b4f9429552
+analysis_script_sha256=3b3b4559b62d10088e45e41aa59b46bfa43b8897a8805e57edf08abbee622dc6
+manifest_sha256=b687be8014a78008127d9df818123c839b69ffdda4764eb99c174b9e085965a8
+preflight_only=1
+preflight_completed_utc=2026-09-25T21:06:05Z
