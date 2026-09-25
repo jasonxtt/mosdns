@@ -220,9 +220,29 @@ normal finish path moves boxed facts directly into terminal accounting and
 avoids both completed-event checkpoint locks; interrupted execution still
 reads partial facts from the shared checkpoint. The native-host package suite,
 strict workspace clippy, rustfmt, and complete workspace test suite all
-passed, including the 224.78-second QUIC case. The V7 Linux release identity
-is pinned separately before its new matrix; no result from earlier candidates
-is reused.
+passed, including the 224.78-second QUIC case. Its 27-attempt matrix completed
+with all runner exits zero, 63/63 valid primary rows, and 56 paired
+assessments; the 901-file raw tree passed remote SHA-256 verification
+(manifest digest
+`30d461d2c102075fbe0c18e9f64c6a0a2d45412c15b0ef0f48806ef30b6c0a43`). Wrong
+responses, protocol/transport errors, timeouts, and sender shortfalls were
+zero. Paired RSS stayed under budget (+196 KiB audit-off versus Rust-before;
++2,276 KiB audit-on versus off), while CPU comparisons remained inconclusive
+at 100-Hz sampling resolution. Ten latency guards crossed repeatably: W1 TCP
+200 QPS audit-off versus Rust-before p95/p99; W2 cold 200 QPS audit-on versus
+audit-off p95/p99; W2 warm 200 QPS audit-on versus audit-off p95/p99; and W2
+warm 400 QPS for both audit-off versus Rust-before and audit-on versus
+audit-off p95/p99. W1 TCP 400 QPS crossings from V6 did not repeat. See
+`research/slice3-v7-pilot-assessment.md` and its adjacent identity, source
+manifest, run audit, attempt-order, derived TSV, and raw-hash evidence.
+
+Source review found two observer mutex acquisitions on the audit-off request
+path: one for admission counters and one for terminal metrics. V8 will replace
+the admission lock with an atomic in-flight counter and derive admitted totals
+as completed plus in-flight when taking a metrics snapshot. The terminal
+metrics transition remains under the existing mutex, preserving a consistent
+completion/in-flight snapshot boundary. This change needs its own pinned
+identity and full matrix before review.
 
 Validation commands and outcomes:
 
@@ -244,6 +264,9 @@ Validation commands and outcomes:
 - V6 frozen 27-attempt matrix — completed without replacements; all 27 runner exits were zero, 63/63 primary rows were valid, and the 901-file raw tree hash manifest verified remotely. The frozen analyzer reported four repeatable p95/p99 guard crossings; Slice 3 remains blocked from review pending a new candidate.
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after the V7 boxed terminal observation change (44 unit tests plus all native-host integration suites).
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings`, `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, and `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — all passed after V7; the QUIC suite completed in 224.78 seconds.
+- `cargo build --manifest-path rust/Cargo.toml --package mosdns-native-host --bin mosdns --release --locked` — passed on the Linux benchmark host with Rust 1.95.0 for source commit `ad0097ea73374425652586b6fe6d06748309c362`; the resulting candidate binary passed helper v8 validation.
+- `sha256sum --quiet -c slice3-v7-rust-source-files.sha256` — passed on the Linux candidate source before the V7 release build (107 tracked Rust files).
+- V7 frozen 27-attempt matrix — completed without replacements; all 27 runner exits were zero, 63/63 primary rows were valid, and the 901-file raw tree hash manifest verified remotely. The frozen analyzer reported ten repeatable p95/p99 guard crossings; Slice 3 remains blocked from review pending another candidate.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 
