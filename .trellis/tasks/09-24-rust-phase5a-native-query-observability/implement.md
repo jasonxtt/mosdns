@@ -346,6 +346,13 @@ Validation commands and outcomes:
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed on V11.
 
 
+
+## V12 source correction and local checks
+
+V12 responds to V11's repeated guards without changing frozen inputs or budgets. While an upstream exchange is pending, execution now checkpoints the copyable `ExecutableId` rather than resolving and allocating its identity before the network await. A normal completion resolves the identity once after the exchange; the unfinished-execution drop hook resolves it only when it must publish a canceled/interrupted attempt. The duplicate execution-level `final_upstream` string was removed; enabled audit materialization derives the public field from the existing upstream response source, preserving the `AuditRecord` value while avoiding a second owned copy in request facts.
+
+On the V12 source, `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` passed (46 unit tests and all native-host integration suites), `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` passed, `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` passed, and `cargo test --manifest-path rust/Cargo.toml --workspace --locked` passed across workspace integration tests and doctests; the 23-case QUIC group completed in 224.78 seconds. Linux build, candidate identity, and frozen matrix are pending.
+
 ## V11 pinned benchmark preflight
 
 The pinned Linux amd64 release candidate for source commit

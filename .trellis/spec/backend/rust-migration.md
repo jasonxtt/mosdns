@@ -1041,18 +1041,26 @@ capture; basic metrics remain active in either mode.
   result; the observer flag must not change DNS wire or forwarding behavior.
 - W1/W2 keep the zero-or-one attempt list inline. On a second W3 leg, promote
   it to a vector with capacity hinted from the configured forward count.
-- Move the in-flight upstream identity into the terminal attempt after the
-  exchange; do not resolve and allocate the same identity again. Keep it in
-  the cancellation checkpoint while the exchange is pending.
+- While an exchange is pending, keep its `ExecutableId` in the checkpoint;
+  do not look up or allocate the upstream identity on the successful path
+  before the network await. Resolve it once after completion and move it into
+  the terminal attempt. If execution is dropped while pending, resolve the
+  identity in the drop hook so cancellation/interruption still records the
+  real attempt.
+- Derive public `AuditRecord.final_upstream` from the existing upstream
+  `ResponseSource` only when materializing an enabled audit record. Do not
+  keep a second owned copy in normal execution facts or the cancellation
+  checkpoint.
 
 ### 4. Validation & Error Matrix
 
 | Condition | Required result |
 |---|---|
 | audit disabled, successful upstream response | no audit record or audit-only route strings; response/cache/lifecycle and upstream metrics remain correct |
-| audit enabled | existing route, cache, ordered-attempt, and provenance fields remain intact |
+| audit enabled | existing route, cache, ordered-attempt, `final_upstream`, and provenance fields remain intact |
 | W2 cache hit | cache-hit metric, no upstream attempt |
 | W3 forwarding | each configured leg contributes its actual ordered attempt outcome; a second leg promotes inline storage with bounded reserved capacity |
+| exchange dropped while pending | drop hook resolves the checkpointed executable and records the attempt as canceled or interrupted according to the existing cancellation scope |
 
 ### 5. Good/Base/Bad Cases
 
@@ -1070,15 +1078,18 @@ capture; basic metrics remain active in either mode.
 - The attempt list keeps its first entry inline and promotes on a second entry
   without changing attempt order or outcomes.
 - Enabled-audit execution and cancellation tests must preserve the detailed
-  route and failure fields.
+  route and failure fields, deriving `final_upstream` from the formed upstream
+  response only at audit materialization.
 - Frozen Linux evidence must confirm that the candidate reduces the intended
   audit-off overhead without changing correctness or the predeclared guards.
 
 ### 7. Wrong vs Correct
 
-Wrong: create an upstream `ResponseSource` and final sequence for every query,
-then rely on the observer to drop them when detailed audit is disabled.
+Wrong: resolve and allocate an upstream identity before awaiting the exchange,
+then hold another owned copy of that identity as a separate final-upstream fact.
 
-Correct: carry the admission-time capture bit into execution and only build
-audit-only strings when it is set; always retain the bounded attempt facts
-needed by metrics.
+Correct: carry the admission-time capture bit into execution, checkpoint the
+copyable executable identifier while awaiting the exchange, and materialize
+the identity once at terminalization. Derive `final_upstream` from the response
+source only when creating an enabled audit record; always retain the attempt
+facts needed by metrics and cancellation.

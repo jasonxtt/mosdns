@@ -229,7 +229,6 @@ async fn process_connection(task: ConnectionTask) {
             response: execution.response,
             cache_status: execution.cache_status,
             final_sequence: execution.final_sequence,
-            final_upstream: execution.final_upstream,
             upstream_attempts: execution.upstream_attempts,
             failure_provenance: execution.failure_provenance,
             elapsed: Duration::ZERO,

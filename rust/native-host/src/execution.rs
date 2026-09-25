@@ -64,7 +64,6 @@ pub(crate) struct ExecutionResult {
     pub response: ObservedResponseState,
     pub cache_status: CacheStatus,
     pub final_sequence: Option<String>,
-    pub final_upstream: Option<String>,
     pub upstream_attempts: UpstreamAttemptList,
     pub failure_provenance: Option<FailureProvenance>,
 }
@@ -73,12 +72,12 @@ struct ExecutionFacts<'a> {
     capture_audit_details: bool,
     cache_status: CacheStatus,
     response_source: Option<ResponseSource>,
-    final_upstream: Option<String>,
     upstream_attempts: UpstreamAttemptList,
     failure_provenance: Option<FailureProvenance>,
     final_sequence: Option<String>,
+    config: &'a CompiledConfig,
     checkpoint: &'a mut ExecutionCheckpoint,
-    in_flight_upstream: Option<String>,
+    in_flight_executable: Option<ExecutableId>,
     completed: bool,
 }
 
@@ -101,7 +100,6 @@ impl ExecutionFacts<'_> {
                 upstream: upstream.clone(),
                 outcome: UpstreamAttemptOutcome::Response,
             });
-            self.final_upstream = Some(upstream.clone());
             self.response_source = Some(ResponseSource::Upstream(upstream));
         } else {
             self.upstream_attempts.push(UpstreamAttemptRecord {
@@ -128,7 +126,6 @@ impl ExecutionFacts<'_> {
                 }
             });
             self.response_source = Some(ResponseSource::Local);
-            self.final_upstream = None;
         }
         self.upstream_attempts
             .push(UpstreamAttemptRecord { upstream, outcome });
@@ -150,12 +147,12 @@ impl Drop for ExecutionFacts<'_> {
                 response: ObservedResponseState::NoResponse,
                 cache_status: self.cache_status,
                 final_sequence: self.final_sequence.clone(),
-                final_upstream: None,
                 upstream_attempts: self.upstream_attempts.clone(),
                 failure_provenance: self.failure_provenance.clone(),
                 elapsed: std::time::Duration::ZERO,
             },
-            self.in_flight_upstream.clone(),
+            self.in_flight_executable
+                .and_then(|executable| upstream_identity(self.config, executable)),
         );
     }
 }
@@ -225,7 +222,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
             CacheStatus::NotApplicable
         },
         response_source: None,
-        final_upstream: None,
         upstream_attempts: UpstreamAttemptList::with_capacity_hint(if multi_forward {
             config.forwards.len()
         } else {
@@ -233,8 +229,9 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         }),
         failure_provenance: None,
         final_sequence: capture_audit_details.then(|| config.sequence.tag.clone()),
+        config,
         checkpoint,
-        in_flight_upstream: None,
+        in_flight_executable: None,
         completed: false,
     };
     let state = ExecutionState::new(header, question.clone());
@@ -298,7 +295,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     if let Some(wire) = lookup {
                         facts.cache_status = CacheStatus::Hit;
                         facts.set_response_source(ResponseSource::Cache);
-                        facts.final_upstream = None;
                         facts.failure_provenance = None;
                         machine.state_mut().set_raw_response(wire);
                         step = match machine
@@ -336,14 +332,13 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 if multi_forward && Instant::now() >= request_deadline {
                     set_servfail(&mut machine);
                     facts.set_response_source(ResponseSource::Local);
-                    facts.final_upstream = None;
                     facts.set_failure_provenance(FailureProvenance::LocalFailure(
                         LocalFailureKind::NoUsableUpstreamResponse,
                     ));
                     return result_from_state(&machine, &header, &question, facts);
                 }
                 publication_deadline = Some(request_deadline);
-                facts.in_flight_upstream = upstream_identity(config, dispatch.executable());
+                facts.in_flight_executable = Some(dispatch.executable());
                 let exchange = executor
                     .exchange(
                         dispatch.executable(),
@@ -352,9 +347,9 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         request_shutdown.clone(),
                     )
                     .await;
-                let in_flight_upstream = facts.in_flight_upstream.take();
+                let in_flight_executable = facts.in_flight_executable.take();
                 if request_shutdown.is_cancelled() {
-                    record_canceled_attempt(&exchange, in_flight_upstream, &mut facts);
+                    record_canceled_attempt(config, in_flight_executable, &exchange, &mut facts);
                     return canceled_execution(facts);
                 }
                 match exchange {
@@ -371,7 +366,9 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         };
                         match accepted {
                             Some(wire) => {
-                                if let Some(upstream) = in_flight_upstream {
+                                if let Some(upstream) = in_flight_executable
+                                    .and_then(|executable| upstream_identity(config, executable))
+                                {
                                     facts.record_upstream_response(upstream);
                                 }
                                 facts.failure_provenance = None;
@@ -379,7 +376,9 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 machine.state_mut().set_raw_response(wire);
                             }
                             None => {
-                                if let Some(upstream) = in_flight_upstream {
+                                if let Some(upstream) = in_flight_executable
+                                    .and_then(|executable| upstream_identity(config, executable))
+                                {
                                     facts.record_upstream_failure(
                                         upstream,
                                         UpstreamAttemptOutcome::Failed,
@@ -393,7 +392,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 upstream_response = false;
                                 set_servfail(&mut machine);
                                 facts.set_response_source(ResponseSource::Local);
-                                facts.final_upstream = None;
                                 if multi_forward {
                                     return result_from_state(&machine, &header, &question, facts);
                                 }
@@ -407,13 +405,14 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         upstream_response = false;
                         set_servfail(&mut machine);
                         facts.set_response_source(ResponseSource::Local);
-                        facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
                         }
                     }
                     Err(error @ ExchangeError::Upstream(_)) => {
-                        if let Some(upstream) = in_flight_upstream {
+                        if let Some(upstream) = in_flight_executable
+                            .and_then(|executable| upstream_identity(config, executable))
+                        {
                             let timeout = matches!(
                                 &error,
                                 ExchangeError::Upstream(upstream) if is_timeout(upstream)
@@ -432,7 +431,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         upstream_response = false;
                         set_servfail(&mut machine);
                         facts.set_response_source(ResponseSource::Local);
-                        facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
                         }
@@ -492,10 +490,12 @@ fn is_canceled(error: &UpstreamError) -> bool {
 }
 
 fn record_canceled_attempt(
+    config: &CompiledConfig,
+    executable: Option<ExecutableId>,
     exchange: &Result<ExchangeResponse, ExchangeError>,
-    upstream: Option<String>,
     facts: &mut ExecutionFacts,
 ) {
+    let upstream = executable.and_then(|executable| upstream_identity(config, executable));
     let Some(upstream) = upstream else {
         return;
     };
@@ -517,7 +517,6 @@ fn record_canceled_attempt(
 
 fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
     facts.response_source = None;
-    facts.final_upstream = None;
     result_from_wire(Vec::new(), facts)
 }
 
@@ -542,20 +541,12 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
             .take()
             .unwrap_or(ResponseSource::Local),
     );
-    let final_upstream = match &response {
-        ObservedResponseState::Dns {
-            source: ResponseSource::Upstream(_),
-            ..
-        } => facts.final_upstream.take(),
-        ObservedResponseState::Dns { .. } | ObservedResponseState::NoResponse => None,
-    };
     facts.completed = true;
     ExecutionResult {
         response_wire,
         response,
         cache_status: facts.cache_status,
         final_sequence: facts.final_sequence.take(),
-        final_upstream,
         upstream_attempts: std::mem::take(&mut facts.upstream_attempts),
         failure_provenance: facts.failure_provenance.take(),
     }
@@ -1109,7 +1100,6 @@ mod tests {
             admitted.execution_checkpoint(),
         ));
         assert!(result.final_sequence.is_none());
-        assert!(result.final_upstream.is_none());
         assert!(result.failure_provenance.is_none());
         assert_eq!(result.upstream_attempts.len(), 1);
         assert_eq!(result.upstream_attempts[0].upstream, "phase5a_forward");
@@ -1120,7 +1110,6 @@ mod tests {
             response: result.response,
             cache_status: result.cache_status,
             final_sequence: result.final_sequence,
-            final_upstream: result.final_upstream,
             upstream_attempts: result.upstream_attempts,
             failure_provenance: result.failure_provenance,
             elapsed: Duration::ZERO,
@@ -1167,7 +1156,6 @@ mod tests {
             matches!(direct.response, ResponseState::Dns { rcode: 0, source: ResponseSource::Upstream(ref upstream) } if upstream == "phase5a_forward")
         );
         assert_eq!(direct.cache_status, CacheStatus::NotApplicable);
-        assert_eq!(direct.final_upstream.as_deref(), Some("phase5a_forward"));
         assert_eq!(direct.upstream_attempts.len(), 1);
         assert!(direct.upstream_attempts.is_inline());
         assert_eq!(
@@ -1193,7 +1181,13 @@ mod tests {
             &executor,
         );
         assert_eq!(cold.cache_status, CacheStatus::Miss);
-        assert_eq!(cold.final_upstream.as_deref(), Some("forward"));
+        assert!(matches!(
+            cold.response,
+            ResponseState::Dns {
+                source: ResponseSource::Upstream(ref upstream),
+                ..
+            } if upstream == "forward"
+        ));
         assert_eq!(warm.cache_status, CacheStatus::Hit);
         assert_eq!(
             warm.response,
@@ -1202,7 +1196,6 @@ mod tests {
                 source: ResponseSource::Cache
             }
         );
-        assert_eq!(warm.final_upstream, None);
         assert!(warm.upstream_attempts.is_empty());
         assert_eq!(calls.get(), 1, "warm cache hit must not dispatch upstream");
 
@@ -1457,7 +1450,13 @@ mod tests {
             &direct_executor,
         );
         assert_eq!(direct_calls.borrow().as_slice(), &[a.executable]);
-        assert_eq!(direct.final_upstream.as_deref(), Some("route_a"));
+        assert!(matches!(
+            direct.response,
+            ResponseState::Dns {
+                source: ResponseSource::Upstream(ref upstream),
+                ..
+            } if upstream == "route_a"
+        ));
 
         let route_a_calls = Rc::new(RefCell::new(Vec::new()));
         let route_a_executor = RoutePathExchange {
@@ -1485,7 +1484,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["route_b", "route_a"]
         );
-        assert_eq!(route_a.final_upstream.as_deref(), Some("route_a"));
+        assert!(matches!(
+            route_a.response,
+            ResponseState::Dns {
+                source: ResponseSource::Upstream(ref upstream),
+                ..
+            } if upstream == "route_a"
+        ));
 
         let route_c_calls = Rc::new(RefCell::new(Vec::new()));
         let route_c_executor = RoutePathExchange {
@@ -1513,7 +1518,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["route_b", "route_c"]
         );
-        assert_eq!(route_c.final_upstream.as_deref(), Some("route_c"));
+        assert!(matches!(
+            route_c.response,
+            ResponseState::Dns {
+                source: ResponseSource::Upstream(ref upstream),
+                ..
+            } if upstream == "route_c"
+        ));
 
         let negative_b_calls = Rc::new(RefCell::new(Vec::new()));
         let negative_b_executor = RoutePathExchange {
@@ -1544,7 +1555,6 @@ mod tests {
                 ("route_c", super::UpstreamAttemptOutcome::Response),
             ]
         );
-        assert_eq!(negative_b.final_upstream.as_deref(), Some("route_c"));
         assert_eq!(negative_b.failure_provenance, None);
         assert_eq!(
             negative_b.response,
@@ -1773,7 +1783,6 @@ mod tests {
                 source: ResponseSource::Local
             }
         );
-        assert_eq!(execution.final_upstream, None);
         assert_eq!(
             execution.failure_provenance,
             Some(FailureProvenance::UpstreamFailure {
@@ -1874,7 +1883,6 @@ mod tests {
         );
         validate_response(&execution.response_wire).expect("SERVFAIL response");
         assert_eq!(execution.response_wire[3] & 0x0f, super::SERVFAIL);
-        assert_eq!(execution.final_upstream, None);
         assert_eq!(
             execution.failure_provenance,
             Some(FailureProvenance::UpstreamFailure {
