@@ -359,6 +359,17 @@ impl ExecutionProgress {
         checkpoint.in_flight_upstream = in_flight_upstream;
     }
 
+    pub(crate) fn capture_owned(&self, observation: TerminalObservation) {
+        let mut checkpoint = self.lock();
+        checkpoint.response = observation.response;
+        checkpoint.cache_status = observation.cache_status;
+        checkpoint.final_sequence = observation.final_sequence;
+        checkpoint.final_upstream = observation.final_upstream;
+        checkpoint.upstream_attempts = observation.upstream_attempts;
+        checkpoint.failure_provenance = observation.failure_provenance;
+        checkpoint.in_flight_upstream = None;
+    }
+
     fn terminal_observation(
         &self,
         outcome: QueryTerminalOutcome,
@@ -385,6 +396,35 @@ impl ExecutionProgress {
             final_upstream: checkpoint.final_upstream.clone(),
             upstream_attempts,
             failure_provenance: checkpoint.failure_provenance.clone(),
+            elapsed,
+        }
+    }
+
+    fn take_terminal_observation(
+        &self,
+        outcome: QueryTerminalOutcome,
+        elapsed: Duration,
+    ) -> TerminalObservation {
+        let mut checkpoint = self.lock();
+        let mut upstream_attempts = std::mem::take(&mut checkpoint.upstream_attempts);
+        if let Some(upstream) = checkpoint.in_flight_upstream.take() {
+            upstream_attempts.push(UpstreamAttemptRecord {
+                upstream,
+                outcome: if outcome == QueryTerminalOutcome::Canceled {
+                    UpstreamAttemptOutcome::Canceled
+                } else {
+                    UpstreamAttemptOutcome::Interrupted
+                },
+            });
+        }
+        TerminalObservation {
+            outcome,
+            response: std::mem::replace(&mut checkpoint.response, ResponseState::NoResponse),
+            cache_status: checkpoint.cache_status,
+            final_sequence: checkpoint.final_sequence.take(),
+            final_upstream: checkpoint.final_upstream.take(),
+            upstream_attempts,
+            failure_provenance: checkpoint.failure_provenance.take(),
             elapsed,
         }
     }
@@ -494,11 +534,8 @@ impl QueryObserver {
     pub(crate) fn record_terminal(
         &self,
         observation: TerminalObservation,
-        make_audit_record: impl FnOnce(&TerminalObservation) -> AuditRecord,
+        make_audit_record: impl FnOnce(TerminalObservation) -> AuditRecord,
     ) {
-        // Construct sensitive details only when the sole listener enabled capture,
-        // and keep allocation outside the mutex-protected metrics update.
-        let audit_record = self.audit_enabled.then(|| make_audit_record(&observation));
         let mut state = self.lock();
         let metrics = &mut state.metrics;
         metrics.completed_total = metrics.completed_total.saturating_add(1);
@@ -561,7 +598,11 @@ impl QueryObserver {
         }
         metrics.duration.observe(observation.elapsed);
 
-        if let Some(record) = audit_record {
+        if self.audit_enabled {
+            // Metrics consume only borrowed facts; move the owned event into
+            // retention after those updates so normal terminalization avoids
+            // cloning its strings and upstream-attempt vector.
+            let record = make_audit_record(observation);
             if state.audit_records.len() == self.audit_capacity.get() {
                 state.audit_records.pop_front();
                 state.evicted_total = state.evicted_total.saturating_add(1);
@@ -642,12 +683,14 @@ impl AdmittedQueryGuard {
         self.execution_progress.clone()
     }
 
-    pub(crate) fn capture_execution(&self, observation: &TerminalObservation) {
-        self.execution_progress.capture(observation, None);
+    pub(crate) fn capture_execution(&self, observation: TerminalObservation) {
+        self.execution_progress.capture_owned(observation);
     }
 
-    pub(crate) fn finish(mut self, mut observation: TerminalObservation) {
-        observation.elapsed = self.admitted_at.elapsed();
+    pub(crate) fn finish(mut self, outcome: QueryTerminalOutcome) {
+        let observation = self
+            .execution_progress
+            .take_terminal_observation(outcome, self.admitted_at.elapsed());
         self.record(observation);
     }
 
@@ -665,12 +708,12 @@ impl AdmittedQueryGuard {
                 qclass: context.qclass,
                 elapsed: observation.elapsed,
                 terminal_outcome: observation.outcome,
-                response: observation.response.clone(),
+                response: observation.response,
                 cache_status: observation.cache_status,
-                final_sequence: observation.final_sequence.clone(),
-                final_upstream: observation.final_upstream.clone(),
-                upstream_attempts: observation.upstream_attempts.clone(),
-                failure_provenance: observation.failure_provenance.clone(),
+                final_sequence: observation.final_sequence,
+                final_upstream: observation.final_upstream,
+                upstream_attempts: observation.upstream_attempts,
+                failure_provenance: observation.failure_provenance,
             }
         });
     }
@@ -928,7 +971,7 @@ mod tests {
         }
     }
 
-    fn audit_record(observation: &TerminalObservation, qname: &str) -> AuditRecord {
+    fn audit_record(observation: TerminalObservation, qname: &str) -> AuditRecord {
         AuditRecord {
             timestamp: SystemTime::UNIX_EPOCH,
             client_addr: "192.0.2.99:53000"
@@ -940,11 +983,11 @@ mod tests {
             qclass: 1,
             elapsed: observation.elapsed,
             terminal_outcome: observation.outcome,
-            response: observation.response.clone(),
+            response: observation.response,
             cache_status: observation.cache_status,
             final_sequence: Some("entry".to_owned()),
             final_upstream: Some("route-a".to_owned()),
-            upstream_attempts: observation.upstream_attempts.clone(),
+            upstream_attempts: observation.upstream_attempts,
             failure_provenance: None,
         }
     }

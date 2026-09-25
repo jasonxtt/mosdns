@@ -205,33 +205,28 @@ async fn process_connection(task: ConnectionTask) {
             progress,
         )
         .await;
-        admitted.capture_execution(&TerminalObservation {
-            outcome: QueryTerminalOutcome::NoResponse,
-            response: execution.response.clone(),
-            cache_status: execution.cache_status,
-            final_sequence: execution.final_sequence.clone(),
-            final_upstream: execution.final_upstream.clone(),
-            upstream_attempts: execution.upstream_attempts.clone(),
-            failure_provenance: execution.failure_provenance.clone(),
-            elapsed: Duration::ZERO,
-        });
+        let response_formed = matches!(&execution.response, ResponseState::Dns { .. });
+        let mut framed_response = None;
         let terminal = if connection_shutdown.is_cancelled() {
-            QueryTerminalOutcome::Canceled
-        } else if matches!(execution.response, ResponseState::NoResponse) {
-            QueryTerminalOutcome::NoResponse
+            Some(QueryTerminalOutcome::Canceled)
+        } else if !response_formed {
+            Some(QueryTerminalOutcome::NoResponse)
         } else {
             match frame_response(&execution.response_wire, FrameMode::Stream) {
-                Ok(framed) => write_response(&mut stream, &framed, &connection_shutdown).await,
+                Ok(framed) => {
+                    framed_response = Some(framed);
+                    None
+                }
                 Err(_) => {
                     execution.failure_provenance = Some(FailureProvenance::LocalFailure(
                         LocalFailureKind::ResponseConstruction,
                     ));
-                    QueryTerminalOutcome::SendFailed
+                    Some(QueryTerminalOutcome::SendFailed)
                 }
             }
         };
-        admitted.finish(TerminalObservation {
-            outcome: terminal,
+        admitted.capture_execution(TerminalObservation {
+            outcome: terminal.unwrap_or(QueryTerminalOutcome::NoResponse),
             response: execution.response,
             cache_status: execution.cache_status,
             final_sequence: execution.final_sequence,
@@ -240,6 +235,18 @@ async fn process_connection(task: ConnectionTask) {
             failure_provenance: execution.failure_provenance,
             elapsed: Duration::ZERO,
         });
+        let terminal = match terminal {
+            Some(outcome) => outcome,
+            None => {
+                write_response(
+                    &mut stream,
+                    &framed_response.expect("response is framed before the send await"),
+                    &connection_shutdown,
+                )
+                .await
+            }
+        };
+        admitted.finish(terminal);
         if matches!(
             terminal,
             QueryTerminalOutcome::SendFailed

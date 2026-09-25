@@ -15,9 +15,7 @@ use crate::assembly::{ForwardCatalog, HostAssembly, HostOptions};
 use crate::cache::NativeCacheAdapter;
 use crate::config::{CompiledConfig, ListenerKind};
 use crate::execution::{ExecutionRequest, execute_request};
-use crate::observer::{
-    AdmittedQueryGuard, QueryObserver, QueryTerminalOutcome, QueryTransport, TerminalObservation,
-};
+use crate::observer::{QueryObserver, QueryTerminalOutcome, QueryTransport, TerminalObservation};
 
 const MAX_UDP_PACKET: usize = 65535;
 #[cfg(test)]
@@ -180,45 +178,32 @@ async fn process_request(task: RequestTask) {
         progress,
     )
     .await;
-    admitted.capture_execution(&TerminalObservation {
-        outcome: QueryTerminalOutcome::NoResponse,
-        response: execution.response.clone(),
-        cache_status: execution.cache_status,
-        final_sequence: execution.final_sequence.clone(),
-        final_upstream: execution.final_upstream.clone(),
-        upstream_attempts: execution.upstream_attempts.clone(),
-        failure_provenance: execution.failure_provenance.clone(),
-        elapsed: std::time::Duration::ZERO,
-    });
+    let response_formed = matches!(
+        &execution.response,
+        crate::observer::ResponseState::Dns { .. }
+    );
+    let mut framed_response = None;
     let terminal = if request_shutdown.is_cancelled() {
-        QueryTerminalOutcome::Canceled
-    } else if matches!(
-        execution.response,
-        crate::observer::ResponseState::NoResponse
-    ) {
-        QueryTerminalOutcome::NoResponse
+        Some(QueryTerminalOutcome::Canceled)
+    } else if !response_formed {
+        Some(QueryTerminalOutcome::NoResponse)
     } else {
         match frame_response(&execution.response_wire, FrameMode::Udp) {
-            Ok(framed) => send_response(socket, framed, peer, request_shutdown).await,
+            Ok(framed) => {
+                framed_response = Some(framed);
+                None
+            }
             Err(_) => {
                 execution.failure_provenance =
                     Some(crate::observer::FailureProvenance::LocalFailure(
                         crate::observer::LocalFailureKind::ResponseConstruction,
                     ));
-                QueryTerminalOutcome::SendFailed
+                Some(QueryTerminalOutcome::SendFailed)
             }
         }
     };
-    finalize_admitted(admitted, terminal, execution);
-}
-
-fn finalize_admitted(
-    admitted: AdmittedQueryGuard,
-    outcome: QueryTerminalOutcome,
-    execution: crate::execution::ExecutionResult,
-) {
-    admitted.finish(TerminalObservation {
-        outcome,
+    admitted.capture_execution(TerminalObservation {
+        outcome: terminal.unwrap_or(QueryTerminalOutcome::NoResponse),
         response: execution.response,
         cache_status: execution.cache_status,
         final_sequence: execution.final_sequence,
@@ -227,6 +212,19 @@ fn finalize_admitted(
         failure_provenance: execution.failure_provenance,
         elapsed: std::time::Duration::ZERO,
     });
+    let terminal = match terminal {
+        Some(outcome) => outcome,
+        None => {
+            send_response(
+                socket,
+                framed_response.expect("response is framed before the send await"),
+                peer,
+                request_shutdown,
+            )
+            .await
+        }
+    };
+    admitted.finish(terminal);
 }
 
 async fn send_response(
@@ -486,7 +484,7 @@ mod tests {
             gate.notify_one();
             let outcome = send.await.expect("send task");
             assert_eq!(outcome, QueryTerminalOutcome::Canceled);
-            admitted.finish(TerminalObservation {
+            admitted.capture_execution(TerminalObservation {
                 outcome,
                 response: ResponseState::NoResponse,
                 cache_status: CacheStatus::NotApplicable,
@@ -496,6 +494,7 @@ mod tests {
                 failure_provenance: None,
                 elapsed: std::time::Duration::ZERO,
             });
+            admitted.finish(outcome);
             let metrics = observer.metrics_snapshot();
             assert_eq!(metrics.completed_total, 1);
             assert_eq!(metrics.canceled_total, 1);

@@ -116,9 +116,28 @@ Rust-before also missed one sender slot at each of 350/400 QPS, so its 400 QPS
 pair is inconclusive with no replacement attempt. The repeatable v1 signals
 blocked review. The per-query histogram now increments only its one internal
 bucket and materializes the same cumulative public histogram on snapshot. A
-second full matrix for this new candidate is required before this checklist
-item can be completed; v1 raw files remain on the test VM with a checked hash
-manifest.
+second full matrix was run for this candidate, but did not clear the guards;
+see the V2 assessment below. A further pinned candidate and full matrix are
+required before Slice 3 is eligible for review. V1 raw files remain on the test
+VM with a checked hash manifest.
+
+The V2 matrix completed all 27 attempts with exit code 0 and 63/63 valid primary
+stages. It crossed 13 frozen p95/p99 guards and one CPU guard, so it was not
+submitted for review. Its 901-file raw result tree passed remote SHA-256
+verification; the manifest digest is recorded in
+`research/slice3-v2-pilot-assessment.md`. The first summary invocation rejected
+the V2 attempt-order header; the original table and analyzer were retained, and
+a header-aware analyzer produced the final TSVs without changing or rerunning
+measurements. V2 shows RSS under the frozen budgets and host load remained low.
+
+The next candidate removes normal-path clones of completed execution facts:
+the listener transfers those facts into its cancellation checkpoint before
+send, then terminalization moves them into metrics and, when enabled, audit
+retention. The interrupted-future checkpoint path still preserves partial
+facts. The focused native-host suite passed (42 unit tests plus all package
+integration suites), strict workspace clippy passed, and the complete Rust
+workspace test suite passed, including the 224.77-second QUIC case. A new
+Linux release identity and complete frozen matrix remain required.
 
 Validation commands and outcomes:
 
