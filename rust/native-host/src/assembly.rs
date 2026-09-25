@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::cache::{CacheAdapterError, CacheClock, NativeCacheAdapter};
@@ -11,8 +13,15 @@ use mosdns_upstream_core::{
 
 use crate::config::{CompiledConfig, ConfigError, compile_yaml};
 use crate::execution::{ExchangeError, ExchangeExecutor};
+use crate::observer::{AuditSnapshot, MetricsSnapshot, QueryObserver};
 use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
+
+const DEFAULT_AUDIT_CAPACITY: usize = 100_000;
+
+fn default_audit_capacity() -> NonZeroUsize {
+    NonZeroUsize::new(DEFAULT_AUDIT_CAPACITY).expect("the default audit capacity is nonzero")
+}
 
 /// Host-side options reserved for tests and the later request runner.
 /// Configuration files cannot override these values in this task.
@@ -22,6 +31,7 @@ pub struct HostOptions {
     pub cancellation: Option<TransportCancellation>,
     pub cache_clock: Rc<dyn CacheClock>,
     pub(crate) admission_deadline: Option<std::time::Instant>,
+    pub(crate) audit_capacity: NonZeroUsize,
 }
 
 impl Default for HostOptions {
@@ -31,6 +41,7 @@ impl Default for HostOptions {
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
             admission_deadline: None,
+            audit_capacity: default_audit_capacity(),
         }
     }
 }
@@ -45,6 +56,7 @@ impl HostOptions {
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
             admission_deadline: None,
+            audit_capacity: default_audit_capacity(),
         }
     }
 
@@ -58,6 +70,13 @@ impl HostOptions {
     #[must_use]
     pub fn with_cache_clock(mut self, cache_clock: Rc<dyn CacheClock>) -> Self {
         self.cache_clock = cache_clock;
+        self
+    }
+
+    /// Sets a focused-test audit retention capacity without changing YAML.
+    #[must_use]
+    pub fn with_audit_capacity(mut self, audit_capacity: NonZeroUsize) -> Self {
+        self.audit_capacity = audit_capacity;
         self
     }
 }
@@ -99,6 +118,7 @@ pub struct HostAssembly {
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
     cache: Rc<NativeCacheAdapter>,
+    observer: Arc<QueryObserver>,
     runtime: HostRuntime,
     options: HostOptions,
 }
@@ -129,10 +149,27 @@ impl HostAssembly {
             NativeCacheAdapter::with_clock(options.cache_clock.clone())
                 .map_err(AssemblyError::Cache)?,
         );
+        let upstream_identities = config
+            .forwards
+            .iter()
+            .map(|forward| {
+                forward
+                    .upstream_tag
+                    .as_deref()
+                    .unwrap_or(&forward.tag)
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        let observer = Arc::new(QueryObserver::new(
+            config.listener.enable_audit,
+            upstream_identities,
+            options.audit_capacity,
+        ));
         Ok(Self {
             config,
             forwards,
             cache,
+            observer,
             runtime: HostRuntime::new()?,
             options,
         })
@@ -153,6 +190,18 @@ impl HostAssembly {
     #[must_use]
     pub fn cache(&self) -> &NativeCacheAdapter {
         &self.cache
+    }
+
+    /// Copies the host's fixed-cardinality metrics at one consistent snapshot boundary.
+    #[must_use]
+    pub fn metrics_snapshot(&self) -> MetricsSnapshot {
+        self.observer.metrics_snapshot()
+    }
+
+    /// Copies the bounded audit ring in oldest-to-newest order.
+    #[must_use]
+    pub fn audit_snapshot(&self) -> AuditSnapshot {
+        self.observer.audit_snapshot()
     }
 
     #[must_use]
@@ -405,6 +454,11 @@ mod tests {
             HostAssembly::from_yaml(&invalid),
             Err(AssemblyError::Config(ConfigError { .. }))
         ));
+    }
+
+    #[test]
+    fn audit_retention_defaults_to_the_frozen_hundred_thousand_record_limit() {
+        assert_eq!(HostOptions::default().audit_capacity.get(), 100_000);
     }
 
     #[test]

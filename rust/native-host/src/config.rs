@@ -904,12 +904,6 @@ fn compile_listener(
         args.required("enable_audit", path)?,
         &format!("{path}.enable_audit"),
     )?;
-    if enable_audit {
-        return Err(ConfigError::new(
-            format!("{path}.enable_audit"),
-            "audit is outside the supported subset; use false",
-        ));
-    }
     let idle_timeout = if is_tcp {
         let timeout = expect_positive_integer(
             args.required("idle_timeout", path)?,

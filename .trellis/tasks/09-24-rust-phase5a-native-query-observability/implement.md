@@ -27,10 +27,25 @@ bounded C2C re-review is pending; Slice 1 remains gated on its explicit PASS.
 
 ## Slice 1 — host-owned observer and bounded snapshot
 
-- [ ] Add red tests around a public read-only host snapshot: audit off retains no query/client details; metrics count fixed outcomes; audit on retains terminal entries; test-only small capacity evicts oldest with an exact visible count. Boundary: in-process observer, no HTTP or disk mock.
-- [ ] Add red histogram tests that inject explicit elapsed Duration values through the observer's shared aggregation path and inspect metrics_snapshot(): every frozen inclusive cumulative edge, +infinity, nondecreasing counts, histogram count == completed, and admitted == completed + in-flight. Production supplies monotonic elapsed time; bucket tests use no sleeps. Public surfaces: HostAssembly::metrics_snapshot() and audit_snapshot(); mock boundary: deterministic elapsed Duration only, no clock/network mock.
-- [ ] Implement the host-owned typed observer and snapshot, fixed metric dimensions/buckets, bounded retention, and reset-on-new-assembly lifetime. Keep synchronization compatible with a later multi-core host; review allocations/locks on the disabled hot path.
-- [ ] Make the existing YAML `enable_audit` value select capture while retaining strict rejection of all other unsupported config shapes. Verify before-I/O errors and W1/W2/W3 audit-off regression.
+- [x] Add red tests around a public read-only host snapshot: audit off retains no query/client details; metrics count fixed outcomes; audit on retains terminal entries; test-only small capacity evicts oldest with an exact visible count. Boundary: in-process observer, no HTTP or disk mock.
+- [x] Add red histogram tests that inject explicit elapsed Duration values through the observer's shared aggregation path and inspect metrics_snapshot(): every frozen inclusive cumulative edge, +infinity, nondecreasing counts, histogram count == completed, and admitted == completed + in-flight. Production supplies monotonic elapsed time; bucket tests use no sleeps. Public surfaces: HostAssembly::metrics_snapshot() and audit_snapshot(); mock boundary: deterministic elapsed Duration only, no clock/network mock.
+- [x] Implement the host-owned typed observer and snapshot, fixed metric dimensions/buckets, bounded retention, and reset-on-new-assembly lifetime. Keep synchronization compatible with a later multi-core host; review allocations/locks on the disabled hot path.
+- [x] Make the existing YAML `enable_audit` value select capture while retaining strict rejection of all other unsupported config shapes. Verify before-I/O errors and W1/W2/W3 audit-off regression.
+
+Slice 1 evidence (2026-09-25): `HostAssembly` owns an `Arc`-backed observer;
+public metrics/audit snapshots are consistent copies; audit-disabled recording
+updates metrics without invoking the sensitive-record builder; enabled capture
+retains only the newest configured number of records and increments an exact
+eviction count. Typed response/lifecycle/cache/upstream/failure fields and all
+15 inclusive histogram bounds plus `+infinity` are covered by deterministic
+tests. The sole-listener `enable_audit: true` value now assembles for W1 UDP/TCP,
+W2, and W3 while mixed/additional listeners remain rejected. Listener request
+admission and terminal event wiring remains in Slice 2.
+
+Validation: 6 observer unit tests, the 100,000-record default-capacity test,
+2 public snapshot tests, and 10 focused config tests passed. `cargo fmt --all --
+--check` and `cargo clippy -p mosdns-native-host --all-targets --locked -- -D
+warnings` passed.
 
 ## Slice 2 — execution provenance and listener terminalization
 
