@@ -477,6 +477,70 @@ impl MetricsState {
             duration: self.duration.snapshot(),
         }
     }
+
+    fn record_terminal(
+        &mut self,
+        outcome: QueryTerminalOutcome,
+        response: &ResponseState,
+        cache_status: CacheStatus,
+        upstream_attempts: &[UpstreamAttemptRecord],
+        elapsed: Duration,
+    ) {
+        self.completed_total = self.completed_total.saturating_add(1);
+        self.in_flight = self
+            .in_flight
+            .checked_sub(1)
+            .expect("terminal query must have a matching admission");
+        match outcome {
+            QueryTerminalOutcome::SendSucceeded => {
+                self.send_succeeded_total = self.send_succeeded_total.saturating_add(1);
+            }
+            QueryTerminalOutcome::SendFailed => {
+                self.send_failed_total = self.send_failed_total.saturating_add(1);
+            }
+            QueryTerminalOutcome::Canceled => {
+                self.canceled_total = self.canceled_total.saturating_add(1);
+            }
+            QueryTerminalOutcome::NoResponse => {
+                self.no_response_total = self.no_response_total.saturating_add(1);
+            }
+        }
+        if let ResponseState::Dns { rcode, .. } = response {
+            let total = self.response_code_totals.entry(*rcode).or_default();
+            *total = total.saturating_add(1);
+        }
+        match cache_status {
+            CacheStatus::Undetermined => {
+                self.cache_undetermined_total = self.cache_undetermined_total.saturating_add(1);
+            }
+            CacheStatus::NotApplicable => {
+                self.cache_not_applicable_total = self.cache_not_applicable_total.saturating_add(1);
+            }
+            CacheStatus::Hit => {
+                self.cache_hits_total = self.cache_hits_total.saturating_add(1);
+            }
+            CacheStatus::Miss => {
+                self.cache_misses_total = self.cache_misses_total.saturating_add(1);
+            }
+        }
+        for attempt in upstream_attempts {
+            if let Some(counters) = self.forward_attempts_by_upstream.get_mut(&attempt.upstream) {
+                counters.attempts_total = counters.attempts_total.saturating_add(1);
+                let counter = match attempt.outcome {
+                    UpstreamAttemptOutcome::Response => &mut counters.responses_total,
+                    UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
+                    UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
+                    UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
+                    UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
+                };
+                *counter = counter.saturating_add(1);
+            } else {
+                self.unknown_forward_attempts_total =
+                    self.unknown_forward_attempts_total.saturating_add(1);
+            }
+        }
+        self.duration.observe(elapsed);
+    }
 }
 
 #[derive(Default)]
@@ -536,78 +600,30 @@ impl QueryObserver {
         observation: TerminalObservation,
         make_audit_record: impl FnOnce(TerminalObservation) -> AuditRecord,
     ) {
-        let mut state = self.lock();
-        let metrics = &mut state.metrics;
-        metrics.completed_total = metrics.completed_total.saturating_add(1);
-        metrics.in_flight = metrics
-            .in_flight
-            .checked_sub(1)
-            .expect("terminal query must have a matching admission");
-        match observation.outcome {
-            QueryTerminalOutcome::SendSucceeded => {
-                metrics.send_succeeded_total = metrics.send_succeeded_total.saturating_add(1);
-            }
-            QueryTerminalOutcome::SendFailed => {
-                metrics.send_failed_total = metrics.send_failed_total.saturating_add(1);
-            }
-            QueryTerminalOutcome::Canceled => {
-                metrics.canceled_total = metrics.canceled_total.saturating_add(1);
-            }
-            QueryTerminalOutcome::NoResponse => {
-                metrics.no_response_total = metrics.no_response_total.saturating_add(1);
-            }
-        }
-        if let ResponseState::Dns { rcode, .. } = &observation.response {
-            let total = metrics.response_code_totals.entry(*rcode).or_default();
-            *total = total.saturating_add(1);
-        }
-        match observation.cache_status {
-            CacheStatus::Undetermined => {
-                metrics.cache_undetermined_total =
-                    metrics.cache_undetermined_total.saturating_add(1);
-            }
-            CacheStatus::NotApplicable => {
-                metrics.cache_not_applicable_total =
-                    metrics.cache_not_applicable_total.saturating_add(1);
-            }
-            CacheStatus::Hit => {
-                metrics.cache_hits_total = metrics.cache_hits_total.saturating_add(1);
-            }
-            CacheStatus::Miss => {
-                metrics.cache_misses_total = metrics.cache_misses_total.saturating_add(1);
-            }
-        }
-        for attempt in &observation.upstream_attempts {
-            if let Some(counters) = metrics
-                .forward_attempts_by_upstream
-                .get_mut(&attempt.upstream)
-            {
-                counters.attempts_total = counters.attempts_total.saturating_add(1);
-                let counter = match attempt.outcome {
-                    UpstreamAttemptOutcome::Response => &mut counters.responses_total,
-                    UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
-                    UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
-                    UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
-                    UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
-                };
-                *counter = counter.saturating_add(1);
-            } else {
-                metrics.unknown_forward_attempts_total =
-                    metrics.unknown_forward_attempts_total.saturating_add(1);
-            }
-        }
-        metrics.duration.observe(observation.elapsed);
-
         if self.audit_enabled {
-            // Metrics consume only borrowed facts; move the owned event into
-            // retention after those updates so normal terminalization avoids
-            // cloning its strings and upstream-attempt vector.
             let record = make_audit_record(observation);
+            let mut state = self.lock();
+            state.metrics.record_terminal(
+                record.terminal_outcome,
+                &record.response,
+                record.cache_status,
+                &record.upstream_attempts,
+                record.elapsed,
+            );
             if state.audit_records.len() == self.audit_capacity.get() {
                 state.audit_records.pop_front();
                 state.evicted_total = state.evicted_total.saturating_add(1);
             }
             state.audit_records.push_back(record);
+        } else {
+            let mut state = self.lock();
+            state.metrics.record_terminal(
+                observation.outcome,
+                &observation.response,
+                observation.cache_status,
+                &observation.upstream_attempts,
+                observation.elapsed,
+            );
         }
     }
 

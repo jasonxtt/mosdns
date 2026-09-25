@@ -137,7 +137,28 @@ retention. The interrupted-future checkpoint path still preserves partial
 facts. The focused native-host suite passed (42 unit tests plus all package
 integration suites), strict workspace clippy passed, and the complete Rust
 workspace test suite passed, including the 224.77-second QUIC case. A new
-Linux release identity and complete frozen matrix remain required.
+Linux release identity was pinned before its matrix as V3. The V3 matrix
+completed all 27 scheduled attempts with no replacements; 25 runner exits were
+zero, 62/63 derived primary rows were valid, and the 901-file raw tree passed
+remote SHA-256 verification (manifest digest
+`b2236d6cf3a16c5abf27b84ab23d57b3b2a57e8a9e80aa3248a588bdcdb8cead`). Two W1
+attempts had invalid overload/recovery stages, including one sender shortfall;
+wrong responses, protocol errors, transport errors, and timeouts were zero.
+V3 remained over the latency budget in six paired assessments: W1 TCP 400 QPS
+after-off p99, W2 warm 200 QPS after-off p99, W2 warm 400 QPS audit-on p95 and
+p99, and W3 400 QPS audit-on p95 and p99. RSS deltas stayed below the frozen
+budgets (maximum +188 KiB after-off versus before-off and +496 KiB audit-on
+versus off); CPU comparisons were inconclusive at the 100-Hz sampling
+resolution. See `research/slice3-v3-pilot-assessment.md` and its adjacent
+identity, TSV, run-audit, and hash-manifest evidence.
+
+Source inspection localized a likely audit-on tail-latency cost in V3:
+`AuditRecord` construction happened while holding the shared observer mutex.
+The next candidate retains the ownership transfers but constructs the record
+before acquiring that mutex; metrics and bounded-ring insertion remain atomic
+inside one critical section. Its package tests, strict workspace clippy, and
+full Rust workspace tests passed. A new Linux release identity and complete
+frozen matrix remain required before review.
 
 Validation commands and outcomes:
 
