@@ -196,8 +196,27 @@ V6 passed the focused native-host package suite (44 unit tests plus all package
 integration suites), strict workspace clippy, rustfmt check, and the full Rust
 workspace test suite including all integration tests and doctests. The full
 workspace run completed its QUIC suite in 224.79 seconds. The V5 assessment
-and its verified raw manifest are preserved before starting a fresh V6 matrix;
-V6 remains ineligible for review until that matrix clears every frozen guard.
+and raw manifest are preserved. The V6 matrix completed all 27 attempts with
+zero runner exits, 63/63 valid primary rows, and 56 paired assessments; its
+901-file raw tree passed remote SHA-256 verification (manifest digest
+`1ab82e212c6e2651993a0c2219abf29ddc58b95581e8119acfbfb7f046b2844f`). There
+were no wrong responses, protocol/transport errors, timeouts, or sender
+shortfalls. Peak paired RSS increases were +168 KiB audit-off versus
+Rust-before and +2,228 KiB audit-on versus off; CPU comparisons remained
+inconclusive at 100-Hz sampling resolution. V6 crossed four latency guards
+repeatably: W1 TCP 400 QPS audit-off versus Rust-before p95/p99 and W2 warm
+400 QPS audit-off versus Rust-before p95/p99. All other paired latency guards,
+including the V5 W2 cold 200 QPS crossings, cleared. See
+`research/slice3-v6-pilot-assessment.md` and its adjacent identity, source
+manifest, run audit, attempt-order, derived TSV, and raw-hash evidence.
+
+Source inspection makes the restored completed-event checkpoint lock pair a
+plausible contributor to V6's high-rate audit-off crossings, but the matrix
+does not prove causality. V7 will move the completed `TerminalObservation`
+into a boxed listener-owned slot. This preserves lock-free successful
+finalization while reducing the listener guard's inline state that was a
+possible W2 cold 200 QPS factor in V5. V7 needs a new pinned identity and full
+matrix before review.
 
 Validation commands and outcomes:
 
@@ -214,6 +233,9 @@ Validation commands and outcomes:
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after V6 restored heap-backed terminal checkpoints (44 unit tests and all native-host integration suites).
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed after V6 changes.
 - `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed after V6 changes, including all integration tests/doctests and the 224.79-second QUIC suite.
+- `cargo build --manifest-path rust/Cargo.toml --package mosdns-native-host --bin mosdns --release --locked` — passed on the Linux benchmark host with Rust 1.95.0 for source commit `cd96b0adf76767cfede5f20a929ad7ad36e0ce44`; the resulting candidate binary passed helper v8 validation.
+- `sha256sum --quiet -c slice3-v6-rust-source-files.sha256` — passed on the Linux candidate source before the V6 release build (107 tracked Rust files).
+- V6 frozen 27-attempt matrix — completed without replacements; all 27 runner exits were zero, 63/63 primary rows were valid, and the 901-file raw tree hash manifest verified remotely. The frozen analyzer reported four repeatable p95/p99 guard crossings; Slice 3 remains blocked from review pending a new candidate.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 
