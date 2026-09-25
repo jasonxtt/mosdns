@@ -421,6 +421,8 @@ class C2CWebReviewerTransport:
             raise C2CReviewerBindingError("C2C reviewer target could not be verified")
         if any(result.get(key) is False for key in ("verified", "valid", "available", "ok")):
             raise C2CReviewerBindingError("C2C reviewer target was not verified")
+        if not any(result.get(key) is True for key in ("verified", "valid", "available", "ok")):
+            raise C2CReviewerBindingError("C2C reviewer target verification was not affirmative")
         if result.get("target") is not None and result.get("target") != target:
             raise C2CReviewerBindingError("C2C reviewer verification returned a different target")
         verified = copy.deepcopy(result)
