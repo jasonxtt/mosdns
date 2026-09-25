@@ -243,12 +243,32 @@ derives admitted totals as completed plus in-flight when taking a metrics
 snapshot. The terminal metrics transition remains under the existing mutex,
 preserving a consistent completion/in-flight snapshot boundary. A focused
 assertion verifies the admitted/completed/in-flight values while a request is
-still active. The native-host package suite, strict workspace clippy, rustfmt,
-and complete Rust workspace suite passed after this change, including the
-224.78-second QUIC test and doctests. One earlier full-suite attempt had an
-unrelated `reuse_doh` idle-half-close H2 test fail with `MaybeSent`; the exact
-test passed alone and the complete rerun passed. V8 needs its own pinned Linux
-identity and full matrix before review.
+active. The native-host package suite, strict workspace clippy, rustfmt, and
+full Rust workspace suite passed after this change, including the 224.78-second
+QUIC test and doctests. One earlier full-suite attempt had an unrelated
+`reuse_doh` idle-half-close H2 test fail with `MaybeSent`; the exact test passed
+alone and the complete rerun passed. V8's matrix completed all 27 attempts with
+25 zero runner exits, 62/63 valid primary rows, and 56 paired assessments; its
+901-file raw tree passed remote SHA-256 verification (manifest digest
+`fa14246231c100634173dbd94be208d7b4960b45087322e97b4bc188e56f3821`). The two
+exit-1 runs were retained without replacements: W2 warm r3 Rust-before missed
+one 400 QPS overload slot, and W3 audit-on r1 missed one 350 QPS supporting
+slot while both primary points remained valid. Wrong responses,
+protocol/transport errors, and timeouts were zero. Peak paired RSS deltas were
++172 KiB audit-off versus Rust-before and +2,324 KiB audit-on versus off; CPU
+comparisons remained inconclusive. Eight p95/p99 comparisons crossed frozen
+guards repeatedly, so V8 is not reviewable. See
+`research/slice3-v8-pilot-assessment.md` and its adjacent identity, source
+manifest, audit, attempt-order, derived TSV, and raw-hash evidence.
+
+Source inspection found that each query still allocates and clones an
+`Arc<Mutex<ExecutionCheckpoint>>` used only when execution is interrupted.
+V9 will store the checkpoint in a box owned by the listener guard and lend a
+mutable reference to execution. ExecutionFacts Drop can then publish partial
+facts directly without the shared Arc, mutex, or clone; normal completion
+stores its terminal observation in the same box. This preserves the
+interrupted-query fallback and keeps large state off the listener future's
+inline frame. V9 needs a new pinned identity and full matrix before review.
 
 Validation commands and outcomes:
 
@@ -276,6 +296,9 @@ Validation commands and outcomes:
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after the V8 atomic admission counter (44 unit tests plus all native-host integration suites).
 - `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed on the final V8 source, including all integration tests and doctests; QUIC completed in 224.78 seconds. The preceding attempt's isolated `reuse_doh` failure passed when run alone and did not recur in the full rerun.
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed on the final V8 source.
+- `cargo build --manifest-path rust/Cargo.toml --package mosdns-native-host --bin mosdns --release --locked` — passed on the Linux benchmark host with Rust 1.95.0 for source commit `b7c4935e176809bdd3fc46fbea0cca13887a89f4`; the resulting candidate binary passed helper v8 validation.
+- `sha256sum --quiet -c slice3-v8-rust-source-files.sha256` — passed on the Linux candidate source before the V8 release build (107 tracked Rust files).
+- V8 frozen 27-attempt matrix — completed without replacements; all 27 attempts ran, 25 runner exits were zero, 62/63 primary rows were valid, and the 901-file raw tree hash manifest verified remotely. The frozen analyzer reported eight repeatable p95/p99 guard crossings; Slice 3 remains blocked from review pending another candidate.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 
