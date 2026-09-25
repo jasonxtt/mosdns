@@ -19,7 +19,11 @@ from common.automation import (
     set_executor,
     set_reviewer,
 )
-from common.automation_c2c_web import parse_c2c_review_result, resolve_reviewer_target
+from common.automation_c2c_web import (
+    CommandC2CWorkspaceIdentitySource,
+    parse_c2c_review_result,
+    resolve_reviewer_target,
+)
 from common.automation_run import (
     ActivationError,
     AutomationRunError,
@@ -153,7 +157,11 @@ def main(argv: list[str] | None = None) -> int:
             context_key=key,
             reviewer_target=_result(args.reviewer_target),
             reviewer_transport_evidence=_result(args.reviewer_evidence),
-            reviewer_resolver=lambda current: resolve_reviewer_target(current, root)[0],
+            reviewer_resolver=lambda current: resolve_reviewer_target(
+                current,
+                root,
+                workspace_identity_source=CommandC2CWorkspaceIdentitySource(),
+            )[0],
         )
     elif args.command == "activate":
         context = activate(root, args.task, context_key=key)

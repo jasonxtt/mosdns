@@ -235,10 +235,13 @@ independent reviewer. The first request for each task/unit is a self-contained
 bootstrap, and every review attempt is sent once as one complete message.
 Same-task re-reviews may be compact only after an explicit reviewer result and
 must remain pinned to exact parent/head SHAs; they are never mid-turn
-supplements. If the reviewer conversation is confirmed stuck/dead, resend the
-exact previous complete request unchanged. Only an explicit `FINAL: PASS`
-advances to the next pre-authorized unit. Pending, partial, idle, or silent
-responses are not PASS. A scoped FAIL may be remediated and resubmitted, but
+supplements. A send exception is terminal for that transport instance and
+never permits an immediate retry, even with the same message. If the host
+provides bounded evidence that the reviewer conversation or transport is
+stuck/dead, a new verified transport may resend the exact previous complete
+request unchanged; it may not append a supplement. Only an explicit
+`FINAL: PASS` advances to the next pre-authorized unit. Pending, partial,
+idle, or silent responses are not PASS. A scoped FAIL may be remediated and resubmitted, but
 the initial discovery is round zero and the same semantic root cause blocks
 after five executed remediation rounds. Open findings, out-of-scope requests,
 contradictory PASS results, corrupt run state, or transport failure fail
