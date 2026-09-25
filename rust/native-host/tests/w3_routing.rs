@@ -10,8 +10,11 @@ use mosdns_dns_core::{
     QuestionInfo, inspect_response_header, observe_answer_addresses, observe_response_metadata,
     parse_query, validate_response,
 };
-use mosdns_native_host::{HostAssembly, HostOptions, UdpServer, compile_yaml};
-use mosdns_upstream_core::TransportCancellation;
+use mosdns_native_host::{
+    CacheStatus, HostAssembly, HostOptions, QueryTerminalOutcome, ResponseSource, ResponseState,
+    UdpServer, UpstreamAttemptOutcome, compile_yaml,
+};
+use mosdns_upstream_core::{LifecycleState, TransportCancellation};
 use serde::Deserialize;
 
 const ROUTING_CONFIG: &str = include_str!("../../../tests/phase5a-baseline/configs/routing.yaml");
@@ -250,6 +253,157 @@ fn expected_routes(case: &RoutingCase) -> &'static [&'static str] {
     }
 }
 
+fn assert_frozen_w3_observations(
+    assembly: &HostAssembly,
+    cases: &[RoutingCase],
+    events: &[RouteEvent],
+) {
+    let audit = assembly.audit_snapshot();
+    assert_eq!(audit.records.len(), cases.len());
+    assert_eq!(audit.evicted_total, 0);
+    for (index, case) in cases.iter().enumerate() {
+        let id = 0x7101_u16 + u16::try_from(index).expect("corpus index");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.id == id && event.qname == qname_wire(&case.qname))
+        );
+        let record = audit
+            .records
+            .iter()
+            .find(|record| record.qname == case.qname)
+            .unwrap_or_else(|| panic!("missing audit record for {}", case.case_id));
+        let expected = expected_routes(case);
+        let final_upstream = format!("route_{}", expected.last().expect("route"));
+        assert_eq!(record.transport, mosdns_native_host::QueryTransport::Udp);
+        assert_eq!(record.qtype, 1);
+        assert_eq!(record.qclass, 1);
+        assert_eq!(record.terminal_outcome, QueryTerminalOutcome::SendSucceeded);
+        assert_eq!(
+            record.response,
+            ResponseState::Dns {
+                rcode: 0,
+                source: ResponseSource::Upstream(final_upstream.clone()),
+            }
+        );
+        assert_eq!(record.cache_status, CacheStatus::NotApplicable);
+        assert_eq!(record.final_sequence.as_deref(), Some("phase5a_entry"));
+        assert_eq!(
+            record.final_upstream.as_deref(),
+            Some(final_upstream.as_str())
+        );
+        let actual_attempts = record
+            .upstream_attempts
+            .iter()
+            .map(|attempt| attempt.upstream.as_str())
+            .collect::<Vec<_>>();
+        let expected_attempts = expected
+            .iter()
+            .map(|route| format!("route_{route}"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_attempts,
+            expected_attempts
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            record
+                .upstream_attempts
+                .iter()
+                .all(|attempt| attempt.outcome == UpstreamAttemptOutcome::Response)
+        );
+    }
+    let metrics = assembly.metrics_snapshot();
+    assert_eq!(metrics.admitted_total, 3);
+    assert_eq!(metrics.completed_total, 3);
+    assert_eq!(metrics.in_flight, 0);
+    assert_eq!(metrics.send_succeeded_total, 3);
+    assert_eq!(metrics.send_failed_total, 0);
+    assert_eq!(metrics.canceled_total, 0);
+    assert_eq!(metrics.no_response_total, 0);
+    assert_eq!(metrics.response_code_totals.get(&0), Some(&3));
+    assert_eq!(metrics.cache_not_applicable_total, 3);
+    assert_eq!(metrics.duration.count, 3);
+    let attempts = &metrics.forward_attempts_by_upstream;
+    assert_eq!(attempts["route_a"].attempts_total, 2);
+    assert_eq!(attempts["route_b"].attempts_total, 2);
+    assert_eq!(attempts["route_c"].attempts_total, 1);
+    assert_eq!(attempts["route_a"].responses_total, 2);
+    assert_eq!(attempts["route_b"].responses_total, 2);
+    assert_eq!(attempts["route_c"].responses_total, 1);
+}
+
+fn assert_w3_shutdown_observations(assembly: &HostAssembly, events: &[RouteEvent]) {
+    let audit = assembly.audit_snapshot();
+    assert_eq!(audit.records.len(), 2);
+    for (id, qname, expected_attempts) in [
+        (
+            0x7501,
+            "ip-hit.test.",
+            vec![
+                ("route_b", UpstreamAttemptOutcome::Response),
+                ("route_a", UpstreamAttemptOutcome::Canceled),
+            ],
+        ),
+        (
+            0x7502,
+            "ip-miss.test.",
+            vec![
+                ("route_b", UpstreamAttemptOutcome::Response),
+                ("route_c", UpstreamAttemptOutcome::Canceled),
+            ],
+        ),
+    ] {
+        let fixture_events = events
+            .iter()
+            .filter(|event| event.id == id)
+            .collect::<Vec<_>>();
+        assert!(
+            fixture_events
+                .iter()
+                .all(|event| event.qname == qname_wire(qname))
+        );
+        let record = audit
+            .records
+            .iter()
+            .find(|record| record.qname == qname)
+            .unwrap_or_else(|| panic!("missing shutdown audit for {qname}"));
+        assert_eq!(record.terminal_outcome, QueryTerminalOutcome::Canceled);
+        assert_eq!(record.response, ResponseState::NoResponse);
+        assert_eq!(record.cache_status, CacheStatus::NotApplicable);
+        assert_eq!(record.final_upstream, None);
+        assert_eq!(
+            record
+                .upstream_attempts
+                .iter()
+                .map(|attempt| (attempt.upstream.as_str(), attempt.outcome))
+                .collect::<Vec<_>>(),
+            expected_attempts
+        );
+    }
+    let metrics = assembly.metrics_snapshot();
+    assert_eq!(metrics.admitted_total, 2);
+    assert_eq!(metrics.completed_total, 2);
+    assert_eq!(metrics.in_flight, 0);
+    assert_eq!(metrics.canceled_total, 2);
+    assert_eq!(metrics.send_succeeded_total, 0);
+    assert_eq!(metrics.send_failed_total, 0);
+    assert_eq!(metrics.no_response_total, 0);
+    assert_eq!(metrics.response_code_totals.len(), 0);
+    assert_eq!(metrics.duration.count, 2);
+    assert_eq!(metrics.cache_not_applicable_total, 2);
+    let attempts = &metrics.forward_attempts_by_upstream;
+    assert_eq!(attempts["route_a"].canceled_total, 1);
+    assert_eq!(attempts["route_b"].responses_total, 2);
+    assert_eq!(attempts["route_c"].canceled_total, 1);
+    assert_eq!(
+        assembly.forward().upstream().lifecycle_state(),
+        LifecycleState::Closed
+    );
+}
+
 fn verify_route_evidence(cases: &[RoutingCase], events: &[RouteEvent]) -> Result<(), String> {
     for (index, case) in cases.iter().enumerate() {
         let id = 0x7101_u16 + u16::try_from(index).map_err(|_| "too many cases".to_owned())?;
@@ -372,7 +526,8 @@ fn frozen_w3_corpus_routes_over_real_udp_and_preserves_order() {
     let route_a = RouteFixture::start("a", &events);
     let route_b = RouteFixture::start("b", &events);
     let route_c = RouteFixture::start("c", &events);
-    let yaml = routing_yaml(route_a.address, route_b.address, route_c.address);
+    let yaml = routing_yaml(route_a.address, route_b.address, route_c.address)
+        .replace("enable_audit: false", "enable_audit: true");
     let config = compile_yaml(&yaml).expect("W3 config");
     let assembly =
         HostAssembly::with_options(config, HostOptions::with_deadline(Duration::from_secs(1)))
@@ -418,6 +573,7 @@ fn frozen_w3_corpus_routes_over_real_udp_and_preserves_order() {
     }
     let snapshot = events.lock().expect("route events").clone();
     verify_route_evidence(&cases, &snapshot).expect("frozen route evidence");
+    assert_frozen_w3_observations(&assembly, &cases, &snapshot);
     route_a.stop();
     route_b.stop();
     route_c.stop();
@@ -591,6 +747,16 @@ fn w3_shutdown_after_b_is_observed_prevents_late_response_and_rebinds() {
     server_result.expect("W3 server shutdown");
     let snapshot = events.lock().expect("route events").clone();
     assert_eq!(route_sequence(&snapshot, 0x7401), vec!["b"]);
+    assert!(assembly.audit_snapshot().records.is_empty());
+    let metrics = assembly.metrics_snapshot();
+    assert_eq!(metrics.admitted_total, 1);
+    assert_eq!(metrics.completed_total, 1);
+    assert_eq!(metrics.canceled_total, 1);
+    assert_eq!(metrics.in_flight, 0);
+    assert_eq!(
+        assembly.forward().upstream().lifecycle_state(),
+        LifecycleState::Closed
+    );
     let rebound = assembly
         .block_on(UdpServer::bind(&assembly, listener))
         .expect("W3 listener must rebind after shutdown");
@@ -607,11 +773,10 @@ fn w3_shutdown_cancels_a_and_c_in_flight_without_late_responses() {
     let route_b = RouteFixture::start("b", &events);
     let route_c = RouteFixture::start_with_delay("c", &events, Duration::from_millis(200));
     let assembly = HostAssembly::with_options(
-        compile_yaml(&routing_yaml(
-            route_a.address,
-            route_b.address,
-            route_c.address,
-        ))
+        compile_yaml(
+            &routing_yaml(route_a.address, route_b.address, route_c.address)
+                .replace("enable_audit: false", "enable_audit: true"),
+        )
         .expect("W3 config"),
         HostOptions::default(),
     )
@@ -678,6 +843,7 @@ fn w3_shutdown_cancels_a_and_c_in_flight_without_late_responses() {
     let snapshot = events.lock().expect("route events").clone();
     assert_eq!(route_sequence(&snapshot, 0x7501), vec!["b", "a"]);
     assert_eq!(route_sequence(&snapshot, 0x7502), vec!["b", "c"]);
+    assert_w3_shutdown_observations(&assembly, &snapshot);
     let rebound = assembly
         .block_on(UdpServer::bind(&assembly, listener))
         .expect("W3 listener must rebind after A/C shutdown");
