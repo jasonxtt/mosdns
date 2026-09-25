@@ -238,8 +238,9 @@ must remain pinned to exact parent/head SHAs; they are never mid-turn
 supplements. A send exception is terminal for that transport instance and
 never permits an immediate retry, even with the same message. If the host
 provides bounded evidence that the reviewer conversation or transport is
-stuck/dead, a new verified transport may resend the exact previous complete
-request unchanged; it may not append a supplement. Only an explicit
+stuck/dead, use the transport's evidence-gated replacement operation to create
+a new verified transport and resend the exact previous complete request
+unchanged; it may not append a supplement. Only an explicit
 `FINAL: PASS` advances to the next pre-authorized unit. Pending, partial,
 idle, or silent responses are not PASS. A scoped FAIL may be remediated and resubmitted, but
 the initial discovery is round zero and the same semantic root cause blocks

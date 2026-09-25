@@ -59,6 +59,7 @@ class FakeC2CHost:
         baseline_text="old reviewer result",
         assistant_id="new-assistant",
         baseline_assistant_id="old-assistant",
+        retry_evidence=None,
     ):
         self.responses = list(responses)
         self.failed_sends = failed_sends
@@ -66,10 +67,12 @@ class FakeC2CHost:
         self.baseline_text = baseline_text
         self.assistant_id = assistant_id
         self.baseline_assistant_id = baseline_assistant_id
+        self.retry_evidence = retry_evidence
         self.baseline_read = False
         self.verify_calls = []
         self.send_attempts = []
         self.read_calls = []
+        self.retry_evidence_calls = []
 
     def verify_target(self, target):
         self.verify_calls.append(target)
@@ -84,6 +87,10 @@ class FakeC2CHost:
             self.failed_sends -= 1
             raise RuntimeError("temporary host failure")
         return {"accepted": True}
+
+    def confirm_retry(self, target, message, timeout):
+        self.retry_evidence_calls.append((target, message, timeout))
+        return self.retry_evidence
 
     def read_thread(self, target, cursor=None):
         self.read_calls.append((target, cursor))
@@ -178,6 +185,7 @@ class C2CReviewerBindingTest(unittest.TestCase):
             (PROJECT, CONNECTOR),
         )
         for payload in (
+            {"ok": False, "conversation": self._workspace_identity()["conversation"]},
             {"ok": True, "conversation": {"mode": "long-chat", "connectorName": CONNECTOR}},
             {"ok": True, "conversation": {"mode": "project", "projectUrl": PROJECT}},
         ):
@@ -525,6 +533,29 @@ class C2CReviewerTransportTest(unittest.TestCase):
         with self.assertRaisesRegex(C2CReviewerBindingError, "terminal"):
             transport.send(request)
         self.assertEqual(len(host.send_attempts), 1)
+        with self.assertRaisesRegex(C2CReviewerBindingError, "host retry evidence"):
+            transport.retry_after_failure(request, timeout=1)
+
+        evidence_host = FakeC2CHost(
+            failed_sends=1,
+            retry_evidence={
+                "confirmed": True,
+                "retryable": True,
+                "bounded": True,
+                "state": "dead",
+                "target": self._target(),
+                "message": request["text"],
+                "observed_at": "2026-09-25T00:00:00Z",
+            },
+        )
+        failed = C2CWebReviewerTransport(evidence_host, self._target())
+        failed.verify_target(self._target())
+        with self.assertRaisesRegex(RuntimeError, "temporary host failure"):
+            failed.send(request)
+        replacement = failed.retry_after_failure(request, timeout=1)
+        self.assertIsInstance(replacement, C2CWebReviewerTransport)
+        self.assertEqual(len(evidence_host.send_attempts), 2)
+        self.assertEqual(len(evidence_host.retry_evidence_calls), 1)
 
         clock = [0.0]
         pending_host = FakeC2CHost([{"cursor": "one", "text": "still working"}])
