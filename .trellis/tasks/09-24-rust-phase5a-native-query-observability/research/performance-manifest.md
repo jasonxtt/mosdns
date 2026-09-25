@@ -11,8 +11,9 @@ file after it is built and before any official probe run.
 |---|---|
 | Rust-before source | `605c30577b79d397b5695618dbd2980e550ca6f3` |
 | Rust-before Linux amd64 binary | `/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust`; SHA-256 `370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa`; verified present on `mosdns-rust` on 2026-09-25 |
-| Native Rust source comparison | `git diff 605c30577b79d397b5695618dbd2980e550ca6f3..64d9cf51468ced016f813bcde84d08337a1c1872 -- rust/native-host/src rust/native-host/tests` is empty. The older binary is therefore the exact current pre-change native-host build. |
+| Rust-before source/build-graph comparison | Full tracked `rust/` subtree is identical between `605c30577b79d397b5695618dbd2980e550ca6f3` and pre-change baseline `64d9cf51468ced016f813bcde84d08337a1c1872`: both have tree `b6f33a14fcbdba8b0d652932e2a9905f4cc405cb`, and `git diff --exit-code OLD..BASE -- rust` is empty. This covers every workspace member, source/test file, and Cargo manifest, not only `native-host`. |
 | Rust lockfile | `rust/Cargo.lock`, SHA-256 `d78f204b017fc01f316e5af84e23bef30ef0597ea56952aa87c062fe8a51b6ca` |
+| Rust build metadata | The tracked Rust subtree contains no `build.rs`, repository `.cargo/config*`, or `rust-toolchain*` at either revision. The lockfile content hash is identical at both revisions. The archived old-binary record identifies source commit `605c30577b79d397b5695618dbd2980e550ca6f3`, the locked release build command, and `rustc 1.95.0 (59807616e 2026-04-14)`; the frozen candidate build uses the same Rust toolchain and locked workspace graph. |
 | Phase 5A runner | `scripts/run-phase5a-baseline.sh`, SHA-256 `dd9749238cf917d1360f33fd732cca48c4ae7906ab76d1cb8f5f941e10e1e3d8` |
 | Helper source | `tests/phase5a-baseline/cmd/phase5a-baseline/main.go`, SHA-256 `2dec4788eaa3dad251061e380cbd8c32c9122285b852acf8b9a0b2eb81f64da1` |
 | Linux helper binary | `/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/phase5a-baseline-helper`; version `phase5a-baseline-helper/v8`; SHA-256 `df4515d7045ddcfd30139b0407e8e9933277c1560137d71ee0f7360d7d537065` |
@@ -26,6 +27,21 @@ retained for every attempt. The archived v2 comparison remains historical
 evidence only. Its 800/1000 QPS attempts, sender-shortfall stages, and
 recovery-labelled health checks are not used to prove overhead, overload, or
 recovery here.
+
+The Rust-before binary provenance is recorded in the archived
+`09-23-rust-phase5a-first-native-performance/research/slice1-build-identities-v1.txt`:
+it was built from the full source archive for commit `605c30577b79d397b5695618dbd2980e550ca6f3`
+with `cargo build --manifest-path …/rust/Cargo.toml --package
+mosdns-native-host --bin mosdns --release --locked`, using
+`rustc 1.95.0 (59807616e 2026-04-14)`, and its binary SHA-256 is the value
+frozen above. The archived source archive SHA-256 is
+`28c3a4e9eb9d0f78c4e0da2dce253a9a1fe4aa81a983897b1287533581086e3b`.
+Comparing the complete tracked `rust/` trees and lockfile establishes that
+every local workspace source, manifest, and locked dependency input affecting
+`mosdns-native-host` is unchanged through the pre-change baseline commit
+`64d9cf51468ced016f813bcde84d08337a1c1872`. This establishes source/build-graph
+equivalence for the frozen Rust-before comparator; it is not a claim of
+bit-for-bit reproducibility across build directories.
 
 The frozen fixture inputs are the existing Phase 5A files:
 
