@@ -360,6 +360,17 @@ impl ExecutionProgress {
         checkpoint.in_flight_upstream = in_flight_upstream;
     }
 
+    pub(crate) fn capture_owned(&self, observation: TerminalObservation) {
+        let mut checkpoint = self.lock();
+        checkpoint.response = observation.response;
+        checkpoint.cache_status = observation.cache_status;
+        checkpoint.final_sequence = observation.final_sequence;
+        checkpoint.final_upstream = observation.final_upstream;
+        checkpoint.upstream_attempts = observation.upstream_attempts;
+        checkpoint.failure_provenance = observation.failure_provenance;
+        checkpoint.in_flight_upstream = None;
+    }
+
     fn terminal_observation(
         &self,
         outcome: QueryTerminalOutcome,
@@ -386,6 +397,35 @@ impl ExecutionProgress {
             final_upstream: checkpoint.final_upstream.clone(),
             upstream_attempts,
             failure_provenance: checkpoint.failure_provenance.clone(),
+            elapsed,
+        }
+    }
+
+    fn take_terminal_observation(
+        &self,
+        outcome: QueryTerminalOutcome,
+        elapsed: Duration,
+    ) -> TerminalObservation {
+        let mut checkpoint = self.lock();
+        let mut upstream_attempts = std::mem::take(&mut checkpoint.upstream_attempts);
+        if let Some(upstream) = checkpoint.in_flight_upstream.take() {
+            upstream_attempts.push(UpstreamAttemptRecord {
+                upstream,
+                outcome: if outcome == QueryTerminalOutcome::Canceled {
+                    UpstreamAttemptOutcome::Canceled
+                } else {
+                    UpstreamAttemptOutcome::Interrupted
+                },
+            });
+        }
+        TerminalObservation {
+            outcome,
+            response: std::mem::replace(&mut checkpoint.response, ResponseState::NoResponse),
+            cache_status: checkpoint.cache_status,
+            final_sequence: checkpoint.final_sequence.take(),
+            final_upstream: checkpoint.final_upstream.take(),
+            upstream_attempts,
+            failure_provenance: checkpoint.failure_provenance.take(),
             elapsed,
         }
     }
@@ -617,7 +657,6 @@ impl QueryObserver {
             audit_context,
             cancellation,
             execution_progress: ExecutionProgress::new(),
-            terminal_observation: None,
             finalized: false,
         }
     }
@@ -659,7 +698,6 @@ pub(crate) struct AdmittedQueryGuard {
     audit_context: Option<AuditContext>,
     cancellation: TransportCancellation,
     execution_progress: ExecutionProgress,
-    terminal_observation: Option<TerminalObservation>,
     finalized: bool,
 }
 
@@ -668,17 +706,14 @@ impl AdmittedQueryGuard {
         self.execution_progress.clone()
     }
 
-    pub(crate) fn capture_execution(&mut self, observation: TerminalObservation) {
-        self.terminal_observation = Some(observation);
+    pub(crate) fn capture_execution(&self, observation: TerminalObservation) {
+        self.execution_progress.capture_owned(observation);
     }
 
     pub(crate) fn finish(mut self, outcome: QueryTerminalOutcome) {
-        let mut observation = self
-            .terminal_observation
-            .take()
-            .expect("terminal query must carry completed execution facts");
-        observation.outcome = outcome;
-        observation.elapsed = self.admitted_at.elapsed();
+        let observation = self
+            .execution_progress
+            .take_terminal_observation(outcome, self.admitted_at.elapsed());
         self.record(observation);
     }
 
@@ -711,21 +746,15 @@ impl Drop for AdmittedQueryGuard {
     fn drop(&mut self) {
         if !self.finalized {
             let canceled = self.cancellation.is_cancelled();
-            let outcome = if canceled {
-                QueryTerminalOutcome::Canceled
-            } else {
-                QueryTerminalOutcome::NoResponse
-            };
-            let elapsed = self.admitted_at.elapsed();
-            let observation = self.terminal_observation.take().unwrap_or_else(|| {
-                self.execution_progress
-                    .terminal_observation(outcome, canceled, elapsed)
-            });
-            self.record(TerminalObservation {
-                outcome,
-                elapsed,
-                ..observation
-            });
+            self.record(self.execution_progress.terminal_observation(
+                if canceled {
+                    QueryTerminalOutcome::Canceled
+                } else {
+                    QueryTerminalOutcome::NoResponse
+                },
+                canceled,
+                self.admitted_at.elapsed(),
+            ));
         }
     }
 }
@@ -800,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn dropped_send_uses_owned_terminal_facts_and_cancellation_outcome() {
+    fn dropped_send_preserves_completed_facts_from_checkpoint() {
         let observer = std::sync::Arc::new(observer(true, 4));
         let cancellation = TransportCancellation::new();
         let question = mosdns_dns_core::QuestionInfo {
@@ -808,7 +837,7 @@ mod tests {
             qtype: 1,
             qclass: 1,
         };
-        let mut guard = observer.admit(
+        let guard = observer.admit(
             "192.0.2.54:53000".parse().expect("client address"),
             QueryTransport::Udp,
             &question,
