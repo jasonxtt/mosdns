@@ -248,9 +248,10 @@ send it once. While the reviewer is thinking, pending, idle, silent, or
 returning partial output, do not send supplemental/follow-up/correction
 messages and do not interrupt the turn. If bounded waiting plus platform
 evidence confirms that the conversation is stuck or its transport is dead,
-the failed transport remains terminal; create a new verified transport and
-resend the exact previous complete message unchanged. Do not retry on the
-same transport or append new information. A compact re-review request is
+the failed transport remains terminal; use the transport's evidence-gated
+replacement operation to create a new verified transport and resend the exact
+previous complete message unchanged. Do not retry on the same transport or
+append new information. A compact re-review request is
 allowed only after an explicit reviewer result (normally a scoped FAIL), never
 as a mid-turn supplement.
 Pending, idle, silent, or partial reviewer responses are not PASS. A scoped

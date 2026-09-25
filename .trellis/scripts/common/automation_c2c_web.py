@@ -137,6 +137,8 @@ def normalize_c2c_workspace_identity(payload: Any) -> tuple[str, str]:
 
     if not isinstance(payload, dict):
         raise C2CReviewerBindingError("C2C workspace identity response must be an object")
+    if payload.get("ok") is False:
+        raise C2CReviewerBindingError("C2C workspace identity query was not successful")
     conversation = payload.get("conversation")
     if not isinstance(conversation, dict) or conversation.get("mode") != "project":
         raise C2CReviewerBindingError("C2C workspace identity must be in project mode")
@@ -389,6 +391,10 @@ class C2CWebHost(Protocol):
     def send_message(self, target: dict[str, Any], message: str) -> Any:
         ...
 
+    def confirm_retry(self, target: dict[str, Any], message: str, timeout: float) -> dict[str, Any]:
+        """Return bounded platform evidence that an ambiguous send is retryable."""
+        ...
+
     def read_thread(self, target: dict[str, Any], cursor: str | None = None) -> Any:
         ...
 
@@ -455,6 +461,7 @@ class C2CWebReviewerTransport:
         self._sent = False
         self._send_attempted = False
         self._send_failed = False
+        self._attempted_message: str | None = None
         self._verified_target: dict[str, Any] | None = None
         self._cursor: str | None = None
         self._baseline_ready = False
@@ -527,6 +534,7 @@ class C2CWebReviewerTransport:
                 raise C2CReviewerBindingError("C2C reviewer transport requires a pre-send assistant message identity")
             self._baseline_ready = True
         self._send_attempted = True
+        self._attempted_message = message
         try:
             result = self.host.send_message(copy.deepcopy(self.target), message)
         except Exception:
@@ -534,6 +542,51 @@ class C2CWebReviewerTransport:
             raise
         self._sent = True
         return result
+
+    def retry_after_failure(self, request: Any, *, timeout: float) -> "C2CWebReviewerTransport":
+        """Create a replacement transport only after explicit bounded host evidence."""
+
+        if not self._send_failed or self._attempted_message is None:
+            raise C2CReviewerBindingError("C2C review transport has no ambiguous failed send to retry")
+        message = request.get("text") if isinstance(request, dict) else request
+        if message != self._attempted_message:
+            raise C2CReviewerBindingError("a replacement C2C send must reuse the exact failed message")
+        budget = max(0.0, float(timeout))
+        if budget <= 0:
+            raise C2CReviewerBindingError("replacement C2C send requires a positive evidence timeout")
+        confirm_retry = getattr(self.host, "confirm_retry", None)
+        if not callable(confirm_retry):
+            raise C2CReviewerBindingError("replacement C2C send requires host retry evidence")
+        evidence_started = self.clock()
+        try:
+            evidence = confirm_retry(copy.deepcopy(self.target), message, budget)
+        except Exception as exc:
+            raise C2CReviewerBindingError(f"host retry evidence query failed: {exc}") from exc
+        if self.clock() - evidence_started > budget:
+            raise C2CReviewerBindingError("host retry evidence exceeded its bounded timeout")
+        if not isinstance(evidence, dict):
+            raise C2CReviewerBindingError("replacement C2C send requires structured host retry evidence")
+        if evidence.get("confirmed") is not True or evidence.get("retryable") is not True:
+            raise C2CReviewerBindingError("host retry evidence did not confirm a safe replacement send")
+        if evidence.get("bounded") is not True:
+            raise C2CReviewerBindingError("host retry evidence must be bounded")
+        if evidence.get("state") not in {"stuck", "dead", "transport_dead"}:
+            raise C2CReviewerBindingError("host retry evidence has no terminal stuck/dead state")
+        if evidence.get("target") != self.target or evidence.get("message") != message:
+            raise C2CReviewerBindingError("host retry evidence does not match the failed request")
+        if not _valid_timestamp(evidence.get("observed_at")):
+            raise C2CReviewerBindingError("host retry evidence timestamp is invalid")
+
+        replacement = type(self)(
+            self.host,
+            self.target,
+            poll_interval=self.poll_interval,
+            clock=self.clock,
+            sleep=self.sleep,
+        )
+        replacement.verify_target(self.target)
+        replacement.send({"text": message})
+        return replacement
 
     def wait_result(self, timeout: float) -> Any:
         if not self._sent:
