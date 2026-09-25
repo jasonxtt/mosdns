@@ -9,6 +9,7 @@ from common.automation_c2c_web import (
     C2CWebReviewerTransport,
     build_reviewer_only_request,
     normalize_c2c_binding,
+    normalize_c2c_workspace_identity,
     parse_c2c_review_result,
     resolve_reviewer_target,
 )
@@ -29,6 +30,16 @@ CONNECTOR = "Codex with ChatGPT · mosdns-rust"
 
 
 class FakeBindingSource:
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = []
+
+    def read(self, repo_root: Path):
+        self.calls.append(repo_root)
+        return self.payload
+
+
+class FakeWorkspaceIdentitySource:
     def __init__(self, payload):
         self.payload = payload
         self.calls = []
@@ -119,6 +130,16 @@ class C2CReviewerBindingTest(unittest.TestCase):
             },
         }
 
+    def _workspace_identity(self):
+        return {
+            "ok": True,
+            "conversation": {
+                "mode": "project",
+                "projectUrl": PROJECT,
+                "connectorName": CONNECTOR,
+            },
+        }
+
     def _task(self):
         task_dir = self.root / ".trellis/tasks/example"
         task_dir.mkdir(parents=True)
@@ -151,6 +172,18 @@ class C2CReviewerBindingTest(unittest.TestCase):
         with self.assertRaises(C2CReviewerBindingError):
             normalize_c2c_binding(self._payload(), expected_project_url="https://chatgpt.com/g/g-p-other/project")
 
+    def test_normalizes_workspace_identity_without_using_the_planning_chat(self):
+        self.assertEqual(
+            normalize_c2c_workspace_identity(self._workspace_identity()),
+            (PROJECT, CONNECTOR),
+        )
+        for payload in (
+            {"ok": True, "conversation": {"mode": "long-chat", "connectorName": CONNECTOR}},
+            {"ok": True, "conversation": {"mode": "project", "projectUrl": PROJECT}},
+        ):
+            with self.assertRaises(C2CReviewerBindingError):
+                normalize_c2c_workspace_identity(payload)
+
     def test_explicit_and_persisted_reviewers_precede_default_source(self):
         explicit = {"provider": "codex", "reference": "01a0d43d"}
         source = FakeBindingSource(self._payload())
@@ -174,11 +207,31 @@ class C2CReviewerBindingTest(unittest.TestCase):
 
     def test_default_resolves_only_when_context_has_no_reviewer(self):
         source = FakeBindingSource(self._payload())
+        identity = FakeWorkspaceIdentitySource(self._workspace_identity())
         context = AutomationContext("codex_test")
-        target, provenance = resolve_reviewer_target(context, self.root, binding_source=source)
+        target, provenance = resolve_reviewer_target(
+            context,
+            self.root,
+            binding_source=source,
+            workspace_identity_source=identity,
+        )
         self.assertEqual(target["provider"], "c2c-web")
         self.assertEqual(provenance, "c2c-reviewer-binding")
         self.assertEqual(source.calls, [self.root])
+        self.assertEqual(identity.calls, [self.root])
+
+    def test_default_blocks_binding_that_does_not_match_workspace_identity(self):
+        binding = self._payload()
+        binding["binding"]["projectUrl"] = "https://chatgpt.com/g/g-p-other/project"
+        source = FakeBindingSource(binding)
+        identity = FakeWorkspaceIdentitySource(self._workspace_identity())
+        with self.assertRaisesRegex(C2CReviewerBindingError, "does not match"):
+            resolve_reviewer_target(
+                AutomationContext("codex_test"),
+                self.root,
+                binding_source=source,
+                workspace_identity_source=identity,
+            )
 
     def test_authorize_persists_default_and_activation_rejects_identity_drift(self):
         task_dir = self._task()
@@ -186,8 +239,15 @@ class C2CReviewerBindingTest(unittest.TestCase):
         context = AutomationContext("codex_test")
         save_context(self.root, context)
 
+        identity = FakeWorkspaceIdentitySource(self._workspace_identity())
+
         def resolve(context):
-            return resolve_reviewer_target(context, self.root, binding_source=source)[0]
+            return resolve_reviewer_target(
+                context,
+                self.root,
+                binding_source=source,
+                workspace_identity_source=identity,
+            )[0]
 
         target = normalize_c2c_binding(self._payload())
         snapshot = authorize(
@@ -453,18 +513,18 @@ class C2CReviewerTransportTest(unittest.TestCase):
         with self.assertRaisesRegex(C2CReviewerBindingError, "already sent"):
             transport.send({"text": "[C2C] REVIEW_ONLY request"})
 
-    def test_timeout_is_pending_and_failed_send_can_only_retry_exact_message(self):
+    def test_timeout_is_pending_and_failed_send_is_terminal(self):
         host = FakeC2CHost(failed_sends=1)
         transport = C2CWebReviewerTransport(host, self._target())
         request = {"text": "[C2C] REVIEW_ONLY request"}
         transport.verify_target(self._target())
         with self.assertRaisesRegex(RuntimeError, "temporary host failure"):
             transport.send(request)
-        with self.assertRaisesRegex(C2CReviewerBindingError, "exact same message"):
+        with self.assertRaisesRegex(C2CReviewerBindingError, "terminal"):
             transport.send({"text": "[C2C] different request"})
-        self.assertEqual(transport.send(request), {"accepted": True})
-        with self.assertRaisesRegex(C2CReviewerBindingError, "already sent"):
-            transport.send({"text": "[C2C] different request"})
+        with self.assertRaisesRegex(C2CReviewerBindingError, "terminal"):
+            transport.send(request)
+        self.assertEqual(len(host.send_attempts), 1)
 
         clock = [0.0]
         pending_host = FakeC2CHost([{"cursor": "one", "text": "still working"}])

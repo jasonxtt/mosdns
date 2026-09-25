@@ -33,6 +33,13 @@ class C2CReviewerBindingSource(Protocol):
         ...
 
 
+class C2CWorkspaceIdentitySource(Protocol):
+    """Read the configured C2C Project/connector identity for this workspace."""
+
+    def read(self, repo_root: Path) -> Any:
+        ...
+
+
 class CommandC2CReviewerBindingSource:
     """Read a binding through the installed C2C CLI without using a shell."""
 
@@ -59,6 +66,34 @@ class CommandC2CReviewerBindingSource:
             return json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
             raise C2CReviewerBindingError("c2c reviewer get returned invalid JSON") from exc
+
+
+class CommandC2CWorkspaceIdentitySource:
+    """Read workspace identity without using its planning chat as a reviewer."""
+
+    def __init__(self, command: tuple[str, ...] = ("c2c",), *, timeout: float = 10.0):
+        self.command = command
+        self.timeout = timeout
+
+    def read(self, repo_root: Path) -> Any:
+        try:
+            completed = subprocess.run(
+                (*self.command, "session", "get", "-w", str(repo_root), "--json"),
+                cwd=str(repo_root),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise C2CReviewerBindingError(f"C2C workspace identity query failed: {exc}") from exc
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or "c2c session get returned a failure"
+            raise C2CReviewerBindingError(detail)
+        try:
+            return json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise C2CReviewerBindingError("c2c session get returned invalid JSON") from exc
 
 
 def _normalize_project_url(value: Any) -> str | None:
@@ -95,6 +130,23 @@ def _valid_timestamp(value: Any) -> bool:
     except ValueError:
         return False
     return True
+
+
+def normalize_c2c_workspace_identity(payload: Any) -> tuple[str, str]:
+    """Return the configured Project and connector identity, not the chat URL."""
+
+    if not isinstance(payload, dict):
+        raise C2CReviewerBindingError("C2C workspace identity response must be an object")
+    conversation = payload.get("conversation")
+    if not isinstance(conversation, dict) or conversation.get("mode") != "project":
+        raise C2CReviewerBindingError("C2C workspace identity must be in project mode")
+    project_url = _normalize_project_url(conversation.get("projectUrl"))
+    connector_name = conversation.get("connectorName")
+    if not project_url:
+        raise C2CReviewerBindingError("C2C workspace Project identity is invalid")
+    if not isinstance(connector_name, str) or not connector_name.strip() or len(connector_name.strip()) > 200:
+        raise C2CReviewerBindingError("C2C workspace connector identity is invalid")
+    return project_url, connector_name.strip()
 
 
 def normalize_c2c_binding(
@@ -155,6 +207,7 @@ def resolve_reviewer_target(
     *,
     current_turn: dict[str, Any] | None = None,
     binding_source: C2CReviewerBindingSource | None = None,
+    workspace_identity_source: C2CWorkspaceIdentitySource | None = None,
     expected_project_url: str | None = None,
     expected_connector_name: str | None = None,
 ) -> tuple[dict[str, Any], str]:
@@ -168,6 +221,19 @@ def resolve_reviewer_target(
         if not validate_target(context.reviewer):
             raise C2CReviewerBindingError("persisted reviewer target is invalid")
         return copy.deepcopy(context.reviewer), "persisted-explicit"
+
+    if expected_project_url is None or expected_connector_name is None:
+        identity_source = workspace_identity_source or CommandC2CWorkspaceIdentitySource()
+        try:
+            workspace_project_url, workspace_connector_name = normalize_c2c_workspace_identity(
+                identity_source.read(Path(repo_root))
+            )
+        except C2CReviewerBindingError:
+            raise
+        except Exception as exc:
+            raise C2CReviewerBindingError(f"C2C workspace identity source failed: {exc}") from exc
+        expected_project_url = expected_project_url or workspace_project_url
+        expected_connector_name = expected_connector_name or workspace_connector_name
 
     source = binding_source or CommandC2CReviewerBindingSource()
     try:
@@ -388,7 +454,7 @@ class C2CWebReviewerTransport:
         self.sleep = sleep
         self._sent = False
         self._send_attempted = False
-        self._attempted_message: str | None = None
+        self._send_failed = False
         self._verified_target: dict[str, Any] | None = None
         self._cursor: str | None = None
         self._baseline_ready = False
@@ -439,8 +505,12 @@ class C2CWebReviewerTransport:
             raise C2CReviewerBindingError("C2C review request must be a structured message")
         if len(message.encode("utf-8")) > MAX_REVIEW_ONLY_MESSAGE_BYTES:
             raise C2CReviewerBindingError("C2C review request exceeds the bounded message size")
-        if self._send_attempted and message != self._attempted_message:
-            raise C2CReviewerBindingError("a failed C2C send may only be retried with the exact same message")
+        if self._send_attempted:
+            if self._send_failed:
+                raise C2CReviewerBindingError(
+                    "a failed C2C send is terminal for this transport; create a new verified transport only after host evidence"
+                )
+            raise C2CReviewerBindingError("C2C review request was already sent")
         if self._verified_target != self.target:
             raise C2CReviewerBindingError("C2C review target must be verified before sending")
         self._validate_target(self.target)
@@ -457,8 +527,11 @@ class C2CWebReviewerTransport:
                 raise C2CReviewerBindingError("C2C reviewer transport requires a pre-send assistant message identity")
             self._baseline_ready = True
         self._send_attempted = True
-        self._attempted_message = message
-        result = self.host.send_message(copy.deepcopy(self.target), message)
+        try:
+            result = self.host.send_message(copy.deepcopy(self.target), message)
+        except Exception:
+            self._send_failed = True
+            raise
         self._sent = True
         return result
 

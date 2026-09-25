@@ -230,7 +230,10 @@ current-turn or persisted reviewer target wins over every default. Only when
 both are absent may the `c2c-web` default resolve a dedicated `c2c reviewer`
 binding, and that binding must be verified before authorization; it must never
 reuse the ordinary planning `c2c session` pointer or silently fall back when
-the binding is missing, changed, or ambiguous. For this integration task, the
+the binding is missing, changed, or ambiguous. Default resolution may read the
+workspace's configured Project/connector identity from C2C session metadata
+only to compare the dedicated binding; it must never use that metadata's
+planning `session.url` as the reviewer target. For this integration task, the
 explicit bootstrap reviewer is Codex task
 `codex://threads/01a0d43d-d0aa-7401-af0f-2ca3a45ba519` (`002reviewer`); the
 dedicated C2C web reviewer is reserved for later host-level acceptance.
@@ -245,9 +248,11 @@ send it once. While the reviewer is thinking, pending, idle, silent, or
 returning partial output, do not send supplemental/follow-up/correction
 messages and do not interrupt the turn. If bounded waiting plus platform
 evidence confirms that the conversation is stuck or its transport is dead,
-resend the exact previous complete message unchanged; do not append new
-information. A compact re-review request is allowed only after an explicit
-reviewer result (normally a scoped FAIL), never as a mid-turn supplement.
+the failed transport remains terminal; create a new verified transport and
+resend the exact previous complete message unchanged. Do not retry on the
+same transport or append new information. A compact re-review request is
+allowed only after an explicit reviewer result (normally a scoped FAIL), never
+as a mid-turn supplement.
 Pending, idle, silent, or partial reviewer responses are not PASS. A scoped
 FAIL records its finding ledger and is remediated only within the current
 unit; the initial finding count is zero and the same root cause blocks at five
