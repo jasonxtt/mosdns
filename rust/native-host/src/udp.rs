@@ -162,8 +162,6 @@ async fn process_request(task: RequestTask) {
         &question,
         request_shutdown.clone(),
     );
-    let progress = admitted.execution_progress();
-
     let mut execution = execute_request(
         ExecutionRequest {
             config: &config,
@@ -175,7 +173,7 @@ async fn process_request(task: RequestTask) {
         },
         &forwards,
         request_shutdown.clone(),
-        progress,
+        admitted.execution_checkpoint(),
     )
     .await;
     let response_formed = matches!(

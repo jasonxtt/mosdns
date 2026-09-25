@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
@@ -309,8 +309,8 @@ pub(crate) struct TerminalObservation {
     pub elapsed: Duration,
 }
 
-#[derive(Clone, Debug)]
-struct ExecutionCheckpoint {
+#[derive(Debug)]
+pub(crate) struct ExecutionCheckpoint {
     response: ResponseState,
     cache_status: CacheStatus,
     final_sequence: Option<String>,
@@ -318,16 +318,12 @@ struct ExecutionCheckpoint {
     upstream_attempts: Vec<UpstreamAttemptRecord>,
     failure_provenance: Option<FailureProvenance>,
     in_flight_upstream: Option<String>,
+    completed_observation: Option<TerminalObservation>,
 }
 
-/// Shared progress between an execution future and its listener-owned guard.
-/// The execution future publishes its local facts if cancellation drops it.
-#[derive(Clone, Debug)]
-pub(crate) struct ExecutionProgress(Arc<Mutex<ExecutionCheckpoint>>);
-
-impl ExecutionProgress {
+impl ExecutionCheckpoint {
     pub(crate) fn new() -> Self {
-        Self(Arc::new(Mutex::new(ExecutionCheckpoint {
+        Self {
             response: ResponseState::NoResponse,
             cache_status: CacheStatus::Undetermined,
             final_sequence: None,
@@ -335,30 +331,24 @@ impl ExecutionProgress {
             upstream_attempts: Vec::new(),
             failure_provenance: None,
             in_flight_upstream: None,
-        })))
+            completed_observation: None,
+        }
     }
 
-    pub(crate) fn capture(
-        &self,
+    pub(crate) fn capture_partial(
+        &mut self,
         observation: &TerminalObservation,
         in_flight_upstream: Option<String>,
     ) {
-        let mut checkpoint = self.lock();
-        checkpoint.response = observation.response.clone();
-        checkpoint.cache_status = observation.cache_status;
-        checkpoint
-            .final_sequence
-            .clone_from(&observation.final_sequence);
-        checkpoint
-            .final_upstream
-            .clone_from(&observation.final_upstream);
-        checkpoint
-            .upstream_attempts
+        self.response = observation.response.clone();
+        self.cache_status = observation.cache_status;
+        self.final_sequence.clone_from(&observation.final_sequence);
+        self.final_upstream.clone_from(&observation.final_upstream);
+        self.upstream_attempts
             .clone_from(&observation.upstream_attempts);
-        checkpoint
-            .failure_provenance
+        self.failure_provenance
             .clone_from(&observation.failure_provenance);
-        checkpoint.in_flight_upstream = in_flight_upstream;
+        self.in_flight_upstream = in_flight_upstream;
     }
 
     fn terminal_observation(
@@ -367,9 +357,8 @@ impl ExecutionProgress {
         canceled: bool,
         elapsed: Duration,
     ) -> TerminalObservation {
-        let checkpoint = self.lock();
-        let mut upstream_attempts = checkpoint.upstream_attempts.clone();
-        if let Some(upstream) = &checkpoint.in_flight_upstream {
+        let mut upstream_attempts = self.upstream_attempts.clone();
+        if let Some(upstream) = &self.in_flight_upstream {
             upstream_attempts.push(UpstreamAttemptRecord {
                 upstream: upstream.clone(),
                 outcome: if canceled {
@@ -381,20 +370,14 @@ impl ExecutionProgress {
         }
         TerminalObservation {
             outcome,
-            response: checkpoint.response.clone(),
-            cache_status: checkpoint.cache_status,
-            final_sequence: checkpoint.final_sequence.clone(),
-            final_upstream: checkpoint.final_upstream.clone(),
+            response: self.response.clone(),
+            cache_status: self.cache_status,
+            final_sequence: self.final_sequence.clone(),
+            final_upstream: self.final_upstream.clone(),
             upstream_attempts,
-            failure_provenance: checkpoint.failure_provenance.clone(),
+            failure_provenance: self.failure_provenance.clone(),
             elapsed,
         }
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, ExecutionCheckpoint> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -621,8 +604,7 @@ impl QueryObserver {
             admitted_at,
             audit_context,
             cancellation,
-            execution_progress: ExecutionProgress::new(),
-            terminal_observation: None,
+            execution_checkpoint: Box::new(ExecutionCheckpoint::new()),
             finalized: false,
         }
     }
@@ -666,23 +648,23 @@ pub(crate) struct AdmittedQueryGuard {
     admitted_at: Instant,
     audit_context: Option<AuditContext>,
     cancellation: TransportCancellation,
-    execution_progress: ExecutionProgress,
-    terminal_observation: Option<Box<TerminalObservation>>,
+    execution_checkpoint: Box<ExecutionCheckpoint>,
     finalized: bool,
 }
 
 impl AdmittedQueryGuard {
-    pub(crate) fn execution_progress(&self) -> ExecutionProgress {
-        self.execution_progress.clone()
+    pub(crate) fn execution_checkpoint(&mut self) -> &mut ExecutionCheckpoint {
+        &mut self.execution_checkpoint
     }
 
     pub(crate) fn capture_execution(&mut self, observation: TerminalObservation) {
-        self.terminal_observation = Some(Box::new(observation));
+        self.execution_checkpoint.completed_observation = Some(observation);
     }
 
     pub(crate) fn finish(mut self, outcome: QueryTerminalOutcome) {
-        let mut observation = *self
-            .terminal_observation
+        let mut observation = self
+            .execution_checkpoint
+            .completed_observation
             .take()
             .expect("terminal query must carry completed execution facts");
         observation.outcome = outcome;
@@ -724,16 +706,17 @@ impl Drop for AdmittedQueryGuard {
             } else {
                 QueryTerminalOutcome::NoResponse
             };
-            let mut observation = self.terminal_observation.take().map_or_else(
-                || {
-                    self.execution_progress.terminal_observation(
+            let mut observation = self
+                .execution_checkpoint
+                .completed_observation
+                .take()
+                .unwrap_or_else(|| {
+                    self.execution_checkpoint.terminal_observation(
                         outcome,
                         canceled,
                         self.admitted_at.elapsed(),
                     )
-                },
-                |observation| *observation,
-            );
+                });
             observation.outcome = outcome;
             observation.elapsed = self.admitted_at.elapsed();
             self.record(observation);
@@ -933,14 +916,13 @@ mod tests {
             qtype: 1,
             qclass: 1,
         };
-        let guard = observer.admit(
+        let mut guard = observer.admit(
             "192.0.2.52:53000".parse().expect("client address"),
             QueryTransport::Udp,
             &question,
             TransportCancellation::new(),
         );
-        let progress = guard.execution_progress();
-        progress.capture(
+        guard.execution_checkpoint().capture_partial(
             &TerminalObservation {
                 outcome: QueryTerminalOutcome::NoResponse,
                 response: ResponseState::NoResponse,
@@ -981,14 +963,13 @@ mod tests {
         );
 
         let cancellation = TransportCancellation::new();
-        let guard = observer.admit(
+        let mut guard = observer.admit(
             "192.0.2.53:53000".parse().expect("client address"),
             QueryTransport::Tcp,
             &question,
             cancellation.clone(),
         );
-        let progress = guard.execution_progress();
-        progress.capture(
+        guard.execution_checkpoint().capture_partial(
             &TerminalObservation {
                 outcome: QueryTerminalOutcome::NoResponse,
                 response: ResponseState::NoResponse,

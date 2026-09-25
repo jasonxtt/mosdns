@@ -270,6 +270,29 @@ stores its terminal observation in the same box. This preserves the
 interrupted-query fallback and keeps large state off the listener future's
 inline frame. V9 needs a new pinned identity and full matrix before review.
 
+V9 implementation is now in the worktree. `AdmittedQueryGuard` owns the boxed
+checkpoint from admission through terminalization; execution borrows it
+mutably, and its cancellation Drop hook writes partial facts directly. A
+successful terminal observation occupies the checkpoint's existing allocation,
+so the completed path no longer allocates a separate boxed observation. The
+guard retains the completed facts through send finalization, while an
+interrupted execution still records the known response/cache/route/attempt
+facts and the in-flight attempt outcome. TCP, UDP, cancellation, and dropped
+W2/W3 execution tests cover both paths. The frozen code change is limited to
+the native observer, request execution seam, and its two listeners; response,
+cache, route, or configuration behavior was not changed.
+
+V9 local validation on the current source passed:
+
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed (44 unit tests and all native-host integration suites).
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` — passed.
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed.
+- `cargo test --workspace` from `rust/` — passed across all workspace tests and doctests; the final 23-case QUIC test group took 224.79 seconds.
+
+The pinned Linux build, binary validation, and frozen 27-attempt V9 matrix are
+still pending. No review request is eligible until the matrix satisfies the
+frozen correctness and performance gates.
+
 Validation commands and outcomes:
 
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed (42 unit tests and all package integration suites before assertion extraction).
