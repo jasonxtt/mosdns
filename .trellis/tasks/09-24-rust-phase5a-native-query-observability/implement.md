@@ -237,11 +237,17 @@ audit-off p95/p99. W1 TCP 400 QPS crossings from V6 did not repeat. See
 manifest, run audit, attempt-order, derived TSV, and raw-hash evidence.
 
 Source review found two observer mutex acquisitions on the audit-off request
-path: one for admission counters and one for terminal metrics. V8 will replace
-the admission lock with an atomic in-flight counter and derive admitted totals
-as completed plus in-flight when taking a metrics snapshot. The terminal
-metrics transition remains under the existing mutex, preserving a consistent
-completion/in-flight snapshot boundary. This change needs its own pinned
+path: one for admission counters and one for terminal metrics. V8 replaces the
+admission lock with a sequentially consistent atomic in-flight counter and
+derives admitted totals as completed plus in-flight when taking a metrics
+snapshot. The terminal metrics transition remains under the existing mutex,
+preserving a consistent completion/in-flight snapshot boundary. A focused
+assertion verifies the admitted/completed/in-flight values while a request is
+still active. The native-host package suite, strict workspace clippy, rustfmt,
+and complete Rust workspace suite passed after this change, including the
+224.78-second QUIC test and doctests. One earlier full-suite attempt had an
+unrelated `reuse_doh` idle-half-close H2 test fail with `MaybeSent`; the exact
+test passed alone and the complete rerun passed. V8 needs its own pinned Linux
 identity and full matrix before review.
 
 Validation commands and outcomes:
@@ -267,6 +273,9 @@ Validation commands and outcomes:
 - `cargo build --manifest-path rust/Cargo.toml --package mosdns-native-host --bin mosdns --release --locked` — passed on the Linux benchmark host with Rust 1.95.0 for source commit `ad0097ea73374425652586b6fe6d06748309c362`; the resulting candidate binary passed helper v8 validation.
 - `sha256sum --quiet -c slice3-v7-rust-source-files.sha256` — passed on the Linux candidate source before the V7 release build (107 tracked Rust files).
 - V7 frozen 27-attempt matrix — completed without replacements; all 27 runner exits were zero, 63/63 primary rows were valid, and the 901-file raw tree hash manifest verified remotely. The frozen analyzer reported ten repeatable p95/p99 guard crossings; Slice 3 remains blocked from review pending another candidate.
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after the V8 atomic admission counter (44 unit tests plus all native-host integration suites).
+- `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed on the final V8 source, including all integration tests and doctests; QUIC completed in 224.78 seconds. The preceding attempt's isolated `reuse_doh` failure passed when run alone and did not recur in the full rerun.
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed on the final V8 source.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 

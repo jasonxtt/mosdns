@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
@@ -399,9 +400,7 @@ impl ExecutionProgress {
 
 #[derive(Clone, Debug, Default)]
 struct MetricsState {
-    admitted_total: u64,
     completed_total: u64,
-    in_flight: u64,
     malformed_total: u64,
     send_succeeded_total: u64,
     send_failed_total: u64,
@@ -418,11 +417,11 @@ struct MetricsState {
 }
 
 impl MetricsState {
-    fn snapshot(&self) -> MetricsSnapshot {
+    fn snapshot(&self, in_flight: u64) -> MetricsSnapshot {
         MetricsSnapshot {
-            admitted_total: self.admitted_total,
+            admitted_total: self.completed_total.saturating_add(in_flight),
             completed_total: self.completed_total,
-            in_flight: self.in_flight,
+            in_flight,
             malformed_total: self.malformed_total,
             send_succeeded_total: self.send_succeeded_total,
             send_failed_total: self.send_failed_total,
@@ -448,10 +447,6 @@ impl MetricsState {
         elapsed: Duration,
     ) {
         self.completed_total = self.completed_total.saturating_add(1);
-        self.in_flight = self
-            .in_flight
-            .checked_sub(1)
-            .expect("terminal query must have a matching admission");
         match outcome {
             QueryTerminalOutcome::SendSucceeded => {
                 self.send_succeeded_total = self.send_succeeded_total.saturating_add(1);
@@ -516,6 +511,7 @@ struct ObserverState {
 pub(crate) struct QueryObserver {
     audit_enabled: bool,
     audit_capacity: NonZeroUsize,
+    in_flight: AtomicU64,
     state: Mutex<ObserverState>,
 }
 
@@ -537,6 +533,7 @@ impl QueryObserver {
         Self {
             audit_enabled,
             audit_capacity,
+            in_flight: AtomicU64::new(0),
             state: Mutex::new(ObserverState {
                 metrics: MetricsState {
                     forward_attempts_by_upstream,
@@ -550,9 +547,7 @@ impl QueryObserver {
 
     #[cfg_attr(not(test), allow(dead_code))] // Listener admission is wired in Slice 2.
     pub(crate) fn admit_query(&self) {
-        let mut state = self.lock();
-        state.metrics.admitted_total = state.metrics.admitted_total.saturating_add(1);
-        state.metrics.in_flight = state.metrics.in_flight.saturating_add(1);
+        self.in_flight.fetch_add(1, Ordering::SeqCst);
     }
 
     #[cfg_attr(not(test), allow(dead_code))] // Malformed-input accounting is wired in Slice 2.
@@ -577,6 +572,7 @@ impl QueryObserver {
                 &record.upstream_attempts,
                 record.elapsed,
             );
+            self.decrement_in_flight();
             if state.audit_records.len() == self.audit_capacity.get() {
                 state.audit_records.pop_front();
                 state.evicted_total = state.evicted_total.saturating_add(1);
@@ -591,7 +587,16 @@ impl QueryObserver {
                 &observation.upstream_attempts,
                 observation.elapsed,
             );
+            self.decrement_in_flight();
         }
+    }
+
+    fn decrement_in_flight(&self) {
+        self.in_flight
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                current.checked_sub(1)
+            })
+            .expect("terminal query must have a matching admission");
     }
 
     pub(crate) fn admit(
@@ -623,7 +628,10 @@ impl QueryObserver {
     }
 
     pub(crate) fn metrics_snapshot(&self) -> MetricsSnapshot {
-        self.lock().metrics.snapshot()
+        let state = self.lock();
+        state
+            .metrics
+            .snapshot(self.in_flight.load(Ordering::SeqCst))
     }
 
     pub(crate) fn audit_snapshot(&self) -> AuditSnapshot {
@@ -875,6 +883,10 @@ mod tests {
             &question,
             TransportCancellation::new(),
         );
+        let in_flight = observer.metrics_snapshot();
+        assert_eq!(in_flight.admitted_total, 1);
+        assert_eq!(in_flight.completed_total, 0);
+        assert_eq!(in_flight.in_flight, 1);
         drop(guard);
 
         let metrics = observer.metrics_snapshot();
