@@ -62,7 +62,10 @@ class FakeC2CHost:
 
     def verify_target(self, target):
         self.verify_calls.append(target)
-        return self.verification or {"mechanism": "fake-chatgpt-platform"}
+        return self.verification if self.verification is not None else {
+            "verified": True,
+            "mechanism": "fake-chatgpt-platform",
+        }
 
     def send_message(self, target, message):
         self.send_attempts.append((target, message))
@@ -484,7 +487,7 @@ class C2CReviewerTransportTest(unittest.TestCase):
             reference=different_reference,
             metadata=dict(self._target()["metadata"], chat_url=different_reference),
         )
-        host = FakeC2CHost(verification={"target": different, "mechanism": "fake"})
+        host = FakeC2CHost(verification={"verified": True, "target": different, "mechanism": "fake"})
         transport = C2CWebReviewerTransport(host, self._target())
         with self.assertRaisesRegex(C2CReviewerBindingError, "differs from the transport"):
             transport.verify_target(different)
@@ -492,6 +495,18 @@ class C2CReviewerTransportTest(unittest.TestCase):
             transport.verify_target(self._target())
         with self.assertRaisesRegex(C2CReviewerBindingError, "before the request"):
             transport.wait_result(0)
+
+    def test_requires_affirmative_host_target_verification(self):
+        for verification, message in (
+            ({}, "affirmative"),
+            ({"mechanism": "fake"}, "affirmative"),
+            ({"verified": False}, "not verified"),
+            ({"verified": "true"}, "affirmative"),
+        ):
+            host = FakeC2CHost(verification=verification)
+            transport = C2CWebReviewerTransport(host, self._target())
+            with self.assertRaisesRegex(C2CReviewerBindingError, message):
+                transport.verify_target(self._target())
 
     def test_does_not_accept_a_single_unstable_final_response(self):
         host = FakeC2CHost(
