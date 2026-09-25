@@ -154,11 +154,26 @@ identity, TSV, run-audit, and hash-manifest evidence.
 
 Source inspection localized a likely audit-on tail-latency cost in V3:
 `AuditRecord` construction happened while holding the shared observer mutex.
-The next candidate retains the ownership transfers but constructs the record
-before acquiring that mutex; metrics and bounded-ring insertion remain atomic
-inside one critical section. Its package tests, strict workspace clippy, and
-full Rust workspace tests passed. A new Linux release identity and complete
-frozen matrix remain required before review.
+V4 constructs the record before acquiring that mutex; metrics and bounded-ring
+insertion remain atomic inside one critical section. Its full matrix completed
+27 attempts with no replacements, 26 runner exits of zero, and 62/63 valid
+primary rows. V4 eliminated V3's repeated W3 audit-on 400 QPS latency
+crossings, but retained two repeated guards: W1 TCP 200 QPS after-off p95 and
+W2 cold 200 QPS audit-on p99. One W1 after-off overload row was invalid because
+the sender missed a slot. The 901-file raw tree passed remote SHA-256
+verification; the manifest digest is recorded in
+`research/slice3-v4-pilot-assessment.md`.
+
+V5 removes the successful-request checkpoint write/read pair. The listener
+guard owns completed execution facts through the send await, and its Drop path
+uses those facts if send is interrupted; the shared execution checkpoint stays
+for cancellations during execution. The audit ring reserves at most 1,024
+entries at assembly when capture is enabled and allocates no ring storage when
+audit is disabled. The focused native-host suite passed (44 unit tests plus
+package integration suites), strict workspace clippy and rustfmt passed, and
+the full Rust workspace test suite passed, including the 224.79-second QUIC
+case. A new Linux release identity and complete frozen matrix remain required
+before review.
 
 Validation commands and outcomes:
 
@@ -169,6 +184,9 @@ Validation commands and outcomes:
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` — passed after extracting W3 assertion helpers. The first run failed only on `clippy::similar_names` and `clippy::too_many_lines` in the new integration assertions; those were resolved by indexing the bounded upstream map directly and extracting the assertions.
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked duration_histogram` — passed after the histogram hot-path change (1 matching test); the first compile caught an ambiguous integer type in snapshot accumulation, fixed with an explicit `u64` accumulator.
 - `cargo test --manifest-path rust/Cargo.toml --workspace --locked` and `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` — passed again after the v1 performance correction.
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after V5 listener-owned finalization and bounded audit-ring reservation (44 unit tests and all native-host integration suites).
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed after V5 changes.
+- `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed after V5 changes; the QUIC suite completed in 224.79 seconds.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 
