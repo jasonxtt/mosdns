@@ -311,6 +311,7 @@ pub(crate) struct TerminalObservation {
 
 #[derive(Debug)]
 pub(crate) struct ExecutionCheckpoint {
+    capture_audit_details: bool,
     response: ResponseState,
     cache_status: CacheStatus,
     final_sequence: Option<String>,
@@ -322,8 +323,9 @@ pub(crate) struct ExecutionCheckpoint {
 }
 
 impl ExecutionCheckpoint {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(capture_audit_details: bool) -> Self {
         Self {
+            capture_audit_details,
             response: ResponseState::NoResponse,
             cache_status: CacheStatus::Undetermined,
             final_sequence: None,
@@ -333,6 +335,10 @@ impl ExecutionCheckpoint {
             in_flight_upstream: None,
             completed_observation: None,
         }
+    }
+
+    pub(crate) fn capture_audit_details(&self) -> bool {
+        self.capture_audit_details
     }
 
     pub(crate) fn capture_partial(
@@ -604,7 +610,7 @@ impl QueryObserver {
             admitted_at,
             audit_context,
             cancellation,
-            execution_checkpoint: Box::new(ExecutionCheckpoint::new()),
+            execution_checkpoint: Box::new(ExecutionCheckpoint::new(self.audit_enabled)),
             finalized: false,
         }
     }
