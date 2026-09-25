@@ -182,7 +182,7 @@ async fn process_connection(task: ConnectionTask) {
             observer.record_malformed();
             return;
         };
-        let mut admitted = observer.admit(
+        let admitted = observer.admit(
             client_addr,
             QueryTransport::Tcp,
             &question,

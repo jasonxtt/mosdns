@@ -172,8 +172,32 @@ entries at assembly when capture is enabled and allocates no ring storage when
 audit is disabled. The focused native-host suite passed (44 unit tests plus
 package integration suites), strict workspace clippy and rustfmt passed, and
 the full Rust workspace test suite passed, including the 224.79-second QUIC
-case. A new Linux release identity and complete frozen matrix remain required
-before review.
+case. The V5 matrix completed 27 attempts with no replacements; 26 runner exits
+were zero and 62/63 primary rows were valid. Its 901-file raw tree passed
+remote SHA-256 verification (manifest digest
+`3ae43b69531bfdf01dd8280e6c0dc50ae9beb5bc016bc9a0aa7cdcd08d28e51d`). One W2
+cold after-off overload row was invalid because the sender missed a slot. The
+matrix crossed three latency guards repeatedly: W2 cold 200 QPS after-off
+p95/p99 versus Rust-before and W3 200 QPS audit-on p99 versus after-off. RSS
+stayed under budget; CPU comparisons remained inconclusive. The W2 cold
+audit-on versus off p99 crossing from V4 did not repeat, but the after-off
+baseline comparison regressed. Full results are in
+`research/slice3-v5-pilot-assessment.md`.
+
+Source inspection suggests that storing the completed event inline in
+`AdmittedQueryGuard`, which lives across the send await, may enlarge the
+listener future and contribute to the W2 cold audit-off regression. This is a
+hypothesis rather than a measured cause. V6 restores completed facts to the
+heap-backed execution checkpoint while retaining V4's lock-outside audit
+record construction and V5's bounded initial ring reservation. A new pinned
+Linux identity and full matrix are required before review.
+
+V6 passed the focused native-host package suite (44 unit tests plus all package
+integration suites), strict workspace clippy, rustfmt check, and the full Rust
+workspace test suite including all integration tests and doctests. The full
+workspace run completed its QUIC suite in 224.79 seconds. The V5 assessment
+and its verified raw manifest are preserved before starting a fresh V6 matrix;
+V6 remains ineligible for review until that matrix clears every frozen guard.
 
 Validation commands and outcomes:
 
@@ -187,6 +211,9 @@ Validation commands and outcomes:
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after V5 listener-owned finalization and bounded audit-ring reservation (44 unit tests and all native-host integration suites).
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed after V5 changes.
 - `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed after V5 changes; the QUIC suite completed in 224.79 seconds.
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed after V6 restored heap-backed terminal checkpoints (44 unit tests and all native-host integration suites).
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` — passed after V6 changes.
+- `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed after V6 changes, including all integration tests/doctests and the 224.79-second QUIC suite.
 - `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
 - `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 

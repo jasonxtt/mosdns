@@ -156,7 +156,7 @@ async fn process_request(task: RequestTask) {
         return;
     };
 
-    let mut admitted = observer.admit(
+    let admitted = observer.admit(
         peer,
         QueryTransport::Udp,
         &question,
@@ -469,7 +469,7 @@ mod tests {
                 qtype: 1,
                 qclass: 1,
             };
-            let mut admitted =
+            let admitted =
                 observer.admit(peer, QueryTransport::Udp, &question, cancellation.clone());
             let gate = Arc::new(Notify::new());
             let send = tokio::task::spawn_local(send_response_after_gate(
