@@ -1,0 +1,21 @@
+log:
+  level: error
+
+plugins:
+  - tag: phase5a_forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:15453"
+
+  - tag: phase5a_entry
+    type: sequence
+    args:
+      - exec: $phase5a_forward
+
+  - tag: phase5a_udp
+    type: udp_server
+    args:
+      entry: phase5a_entry
+      listen: "127.0.0.1:15353"
+      enable_audit: false
