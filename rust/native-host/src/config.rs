@@ -1360,10 +1360,6 @@ plugins:
                 UDP.replace("- exec: $phase5a_forward", "- goto: another_sequence"),
             ),
             (
-                "audit true",
-                UDP.replace("enable_audit: false", "enable_audit: true"),
-            ),
-            (
                 "negative TCP timeout",
                 TCP.replace("idle_timeout: 2", "idle_timeout: -1"),
             ),

@@ -1,6 +1,6 @@
 # Design: native query observability, bounded Phase 5A subset
 
-Read `prd.md` and `research/source-audit.md` first. This design is a planning gate, not an implementation authorization.
+Read `prd.md` and `research/source-audit.md` first. This design is the approved implementation contract for the active task.
 
 ## Boundary and data flow
 

@@ -1,13 +1,22 @@
 # Execution plan: Phase 5A native query observability
 
-Planning only. Do not call `task.py start` until the user reviews the final planning summary in a later message. Read `prd.md`, `design.md`, `research/source-audit.md`, `AGENTS.md`, and the relevant backend specs before editing runtime code. Preserve unrelated dirty paths and keep Trellis auto-commit disabled.
+Approved execution scope: Slices 0–3, authorized on 2026-09-25 after the planning review passed. Read `prd.md`, `design.md`, `research/source-audit.md`, `AGENTS.md`, and the relevant backend specs before editing runtime code. Preserve unrelated dirty paths and keep Trellis auto-commit disabled.
 
 ## Slice 0 — freeze contracts and evidence plan
 
-- [ ] Record the exact W1/W2/W3 YAML/corpus hashes, native source commit, Go audit field discovery, current metric names, and before-state behavior in task research. Freeze the typed audit/metrics snapshot field contract, lifecycle terminal enum, response source/state, per-attempt and failure provenance, sole-listener audit-flag rule, fixed histogram edges, and event-retention invariant as separate contracts.
-- [ ] Before implementation, freeze the old Rust source/binary identity, Linux VM topology, runner/fixtures, valid offered-rate stages, repetition/order, resource collection, invalid-run rules, and review budgets. Pin the new source/binary hash after building and before official candidate runs. Reuse the earlier harness only after checking its current hash and limitations.
-- [ ] Add red focused tests for accepting `enable_audit: true` in existing strict graphs and for unchanged negative-config behavior. Public surface: `compile_yaml`/`HostAssembly`; boundary: no socket on compilation errors.
-- [ ] Add a red config test proving a second listener plugin still rejects before assembly/I/O, including when the two listeners specify different audit values. The current 5A compiler permits exactly one listener; W1 selects UDP or TCP and W2/W3 use UDP. Public surface: compile_yaml; mock boundary: none, compile only.
+- [x] Record the exact W1/W2/W3 YAML/corpus hashes, native source commit, Go audit field discovery, current metric names, and before-state behavior in task research. Freeze the typed audit/metrics snapshot field contract, lifecycle terminal enum, response source/state, per-attempt and failure provenance, sole-listener audit-flag rule, fixed histogram edges, and event-retention invariant as separate contracts.
+- [x] Before implementation, freeze the old Rust source/binary identity, Linux VM topology, runner/fixtures, valid offered-rate stages, repetition/order, resource collection, invalid-run rules, and review budgets. Pin the new source/binary hash after building and before official candidate runs. Reuse the earlier harness only after checking its current hash and limitations.
+- [x] Add red focused tests for accepting `enable_audit: true` in existing strict graphs and for unchanged negative-config behavior. Public surface: `compile_yaml`/`HostAssembly`; boundary: no socket on compilation errors.
+- [x] Add a red config test proving a second listener plugin still rejects before assembly/I/O, including when the two listeners specify different audit values. The current 5A compiler permits exactly one listener; W1 selects UDP or TCP and W2/W3 use UDP. Public surface: compile_yaml; mock boundary: none, compile only.
+
+Slice 0 evidence (2026-09-25): `performance-manifest.md` is pinned by
+`performance-manifest.sha256`; the old Linux binary and helper hashes were
+verified on `mosdns-rust`. `cargo fmt --all -- --check`, task-context
+validation, and `git diff --check` pass. Focused `slice2_config` tests produce
+the intended red result: 9 pass, including the mixed-audit duplicate-listener
+rejection; the new audit-enabled acceptance test fails because
+`compile_listener` still rejects `true`. That behavior changes in the next
+approved slice.
 
 ## Slice 1 — host-owned observer and bounded snapshot
 

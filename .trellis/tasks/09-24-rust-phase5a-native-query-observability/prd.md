@@ -1,6 +1,6 @@
 # Rust Phase 5A native query observability
 
-Status: planning. This task is ready for review, not authorized for implementation. Base branch: `rust`.
+Status: in progress. Planning review passed and the user authorized Slices 0–3 on 2026-09-25. Base branch: `rust`.
 
 ## Goal and value
 
