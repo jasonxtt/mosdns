@@ -188,7 +188,6 @@ async fn process_connection(task: ConnectionTask) {
             &question,
             connection_shutdown.clone(),
         );
-        let progress = admitted.execution_progress();
         let mut request_options = options.clone();
         request_options.admission_deadline = Some(Instant::now() + options.request_deadline);
         let mut execution = execute_request(
@@ -202,7 +201,7 @@ async fn process_connection(task: ConnectionTask) {
             },
             &forwards,
             connection_shutdown.clone(),
-            progress,
+            admitted.execution_checkpoint(),
         )
         .await;
         let response_formed = matches!(&execution.response, ResponseState::Dns { .. });

@@ -17,7 +17,7 @@ use crate::assembly::{ForwardAdapter, ForwardCatalog, HostOptions};
 use crate::cache::{NativeCacheAdapter, PendingStore};
 use crate::config::CompiledConfig;
 use crate::observer::{
-    CacheStatus, ExecutionProgress, FailureProvenance, LocalFailureKind, QueryTerminalOutcome,
+    CacheStatus, ExecutionCheckpoint, FailureProvenance, LocalFailureKind, QueryTerminalOutcome,
     ResponseSource, ResponseState as ObservedResponseState, TerminalObservation,
     UpstreamAttemptOutcome, UpstreamAttemptRecord,
 };
@@ -69,24 +69,24 @@ pub(crate) struct ExecutionResult {
     pub failure_provenance: Option<FailureProvenance>,
 }
 
-struct ExecutionFacts {
+struct ExecutionFacts<'a> {
     cache_status: CacheStatus,
     response_source: Option<ResponseSource>,
     final_upstream: Option<String>,
     upstream_attempts: Vec<UpstreamAttemptRecord>,
     failure_provenance: Option<FailureProvenance>,
     final_sequence: Option<String>,
-    progress: ExecutionProgress,
+    checkpoint: &'a mut ExecutionCheckpoint,
     in_flight_upstream: Option<String>,
     completed: bool,
 }
 
-impl Drop for ExecutionFacts {
+impl Drop for ExecutionFacts<'_> {
     fn drop(&mut self) {
         if self.completed {
             return;
         }
-        self.progress.capture(
+        self.checkpoint.capture_partial(
             &TerminalObservation {
                 outcome: QueryTerminalOutcome::NoResponse,
                 // A response observed by an earlier leg is not necessarily
@@ -130,9 +130,9 @@ pub(crate) async fn execute_request(
     request: ExecutionRequest<'_>,
     forwards: &ForwardCatalog,
     request_shutdown: TransportCancellation,
-    progress: ExecutionProgress,
+    checkpoint: &mut ExecutionCheckpoint,
 ) -> ExecutionResult {
-    execute_request_with_observation(request, forwards, request_shutdown, progress).await
+    execute_request_with_observation(request, forwards, request_shutdown, checkpoint).await
 }
 
 #[cfg(test)]
@@ -141,21 +141,17 @@ pub(crate) async fn execute_request_with_executor<E: ExchangeExecutor + ?Sized>(
     executor: &E,
     request_shutdown: TransportCancellation,
 ) -> Vec<u8> {
-    execute_request_with_observation(
-        request,
-        executor,
-        request_shutdown,
-        ExecutionProgress::new(),
-    )
-    .await
-    .response_wire
+    let mut checkpoint = ExecutionCheckpoint::new();
+    execute_request_with_observation(request, executor, request_shutdown, &mut checkpoint)
+        .await
+        .response_wire
 }
 
 pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Sized>(
     request: ExecutionRequest<'_>,
     executor: &E,
     request_shutdown: TransportCancellation,
-    progress: ExecutionProgress,
+    checkpoint: &mut ExecutionCheckpoint,
 ) -> ExecutionResult {
     let ExecutionRequest {
         config,
@@ -176,7 +172,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         upstream_attempts: Vec::new(),
         failure_provenance: None,
         final_sequence: Some(config.sequence.tag.clone()),
-        progress,
+        checkpoint,
         in_flight_upstream: None,
         completed: false,
     };
@@ -613,7 +609,7 @@ mod tests {
     };
 
     use super::{
-        ExchangeExecutor, ExecutionRequest, execute_request_with_executor,
+        ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, execute_request_with_executor,
         execute_request_with_observation,
     };
     use crate::assembly::{ForwardAdapter, HostOptions};
@@ -1015,6 +1011,7 @@ mod tests {
         executor: &E,
     ) -> super::ExecutionResult {
         let (header, question) = parse_query(request).expect("query");
+        let mut checkpoint = ExecutionCheckpoint::new();
         futures_like_block_on(super::execute_request_with_observation(
             super::ExecutionRequest {
                 config,
@@ -1026,7 +1023,7 @@ mod tests {
             },
             executor,
             TransportCancellation::new(),
-            crate::observer::ExecutionProgress::new(),
+            &mut checkpoint,
         ))
     }
 
@@ -1170,13 +1167,12 @@ mod tests {
                 let raw = query(84);
                 let (header, question) = parse_query(&raw).expect("query");
                 let cancellation = TransportCancellation::new();
-                let admitted = task_observer.admit(
+                let mut admitted = task_observer.admit(
                     "192.0.2.84:53000".parse().expect("client address"),
                     QueryTransport::Udp,
                     &question,
                     cancellation.clone(),
                 );
-                let progress = admitted.execution_progress();
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
                         config: &config,
@@ -1190,7 +1186,7 @@ mod tests {
                         entered: task_entered,
                     },
                     cancellation,
-                    progress,
+                    admitted.execution_checkpoint(),
                 )
                 .await;
                 panic!("pending upstream exchange unexpectedly returned");
@@ -1252,13 +1248,12 @@ mod tests {
                 let raw = query_name(85, "dropped-w3.test");
                 let (header, question) = parse_query(&raw).expect("query");
                 let cancellation = TransportCancellation::new();
-                let admitted = task_observer.admit(
+                let mut admitted = task_observer.admit(
                     "192.0.2.85:53000".parse().expect("client address"),
                     QueryTransport::Udp,
                     &question,
                     cancellation.clone(),
                 );
-                let progress = admitted.execution_progress();
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
                         config: &config,
@@ -1273,7 +1268,7 @@ mod tests {
                         entered_pending_leg: task_entered,
                     },
                     cancellation,
-                    progress,
+                    admitted.execution_checkpoint(),
                 )
                 .await;
                 panic!("second upstream leg unexpectedly returned");
