@@ -299,6 +299,8 @@ V10 implementation is complete in `rust/native-host/src/observer.rs` and `rust/n
 
 The backend Rust migration spec now records the Phase 5A observer hot-path contract: gate audit-only materialization at execution, preserve the per-upstream attempt facts needed by metrics, reserve bounded W3 attempts, and keep enabled-audit provenance covered.
 
+V10 Linux amd64 release build passed on Rust 1.95.0 from source commit `65a31ff57046e0047006ea401aa023519c658c16`; the 2,304,904-byte executable passed helper v8 validation with SHA-256 `bb13371306d6a26228bcca7e496e8f1354e1d9ac0ecfa2ef36bb5c7b01dba2bd`. The 107-file Rust source manifest, 27-attempt order, driver, frozen-input hashes, and candidate identity are recorded in `research/slice3-candidate-v10-identity.md` and its adjacent files. No V10 benchmark attempt has started; preflight and the one official matrix remain pending.
+
 Validation commands and outcomes:
 
 - `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed (42 unit tests and all package integration suites before assertion extraction).
