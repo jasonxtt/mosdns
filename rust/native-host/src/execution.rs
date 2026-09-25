@@ -71,7 +71,6 @@ pub(crate) struct ExecutionResult {
 
 struct ExecutionFacts {
     cache_status: CacheStatus,
-    response: ObservedResponseState,
     response_source: Option<ResponseSource>,
     final_upstream: Option<String>,
     upstream_attempts: Vec<UpstreamAttemptRecord>,
@@ -90,53 +89,20 @@ impl Drop for ExecutionFacts {
         self.progress.capture(
             &TerminalObservation {
                 outcome: QueryTerminalOutcome::NoResponse,
-                response: self.response.clone(),
+                // A response observed by an earlier leg is not necessarily
+                // the final response. Only result_from_wire can establish
+                // final response provenance, so an unfinished execution
+                // must not publish an intermediate W3 answer here.
+                response: ObservedResponseState::NoResponse,
                 cache_status: self.cache_status,
                 final_sequence: self.final_sequence.clone(),
-                final_upstream: self.final_upstream.clone(),
+                final_upstream: None,
                 upstream_attempts: self.upstream_attempts.clone(),
                 failure_provenance: self.failure_provenance.clone(),
                 elapsed: std::time::Duration::ZERO,
             },
             self.in_flight_upstream.clone(),
         );
-    }
-}
-
-impl ExecutionFacts {
-    fn capture_machine_response(&mut self, machine: &ExecutionMachine<'_>) {
-        self.response = match &machine.state().response {
-            MachineResponseState::None => ObservedResponseState::NoResponse,
-            MachineResponseState::Raw(wire) => observed_response(
-                wire.as_bytes(),
-                self.response_source
-                    .clone()
-                    .unwrap_or(ResponseSource::Local),
-            ),
-            MachineResponseState::Synthesized(response) => ObservedResponseState::Dns {
-                rcode: response.rcode(),
-                source: self
-                    .response_source
-                    .clone()
-                    .unwrap_or(ResponseSource::Local),
-            },
-        };
-    }
-
-    fn capture_response_wire(&mut self, wire: &[u8]) {
-        self.response = observed_response(
-            wire,
-            self.response_source
-                .clone()
-                .unwrap_or(ResponseSource::Local),
-        );
-    }
-
-    fn capture_local_servfail(&mut self) {
-        self.response = ObservedResponseState::Dns {
-            rcode: u16::from(SERVFAIL),
-            source: ResponseSource::Local,
-        };
     }
 }
 
@@ -200,8 +166,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         question,
     } = request;
     let mut facts = ExecutionFacts {
-        cache_status: CacheStatus::Undetermined,
-        response: ObservedResponseState::NoResponse,
+        cache_status: if config.cache.is_some() {
+            CacheStatus::Undetermined
+        } else {
+            CacheStatus::NotApplicable
+        },
         response_source: None,
         final_upstream: None,
         upstream_attempts: Vec::new(),
@@ -264,7 +233,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 return result_from_state(&machine, &header, &question, facts);
             }
             MachineStep::Dispatch(dispatch) => {
-                facts.capture_machine_response(&machine);
                 if config
                     .cache
                     .as_ref()
@@ -276,7 +244,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         facts.response_source = Some(ResponseSource::Cache);
                         facts.final_upstream = None;
                         facts.failure_provenance = None;
-                        facts.capture_response_wire(&wire);
                         machine.state_mut().set_raw_response(wire);
                         step = match machine
                             .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
@@ -313,7 +280,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 if multi_forward && Instant::now() >= request_deadline {
                     set_servfail(&mut machine);
                     facts.response_source = Some(ResponseSource::Local);
-                    facts.capture_local_servfail();
                     facts.final_upstream = None;
                     facts.failure_provenance = Some(FailureProvenance::LocalFailure(
                         LocalFailureKind::NoUsableUpstreamResponse,
@@ -361,7 +327,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 }
                                 facts.failure_provenance = None;
                                 upstream_response = true;
-                                facts.capture_response_wire(&wire);
                                 machine.state_mut().set_raw_response(wire);
                             }
                             None => {
@@ -383,7 +348,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 upstream_response = false;
                                 set_servfail(&mut machine);
                                 facts.response_source = Some(ResponseSource::Local);
-                                facts.capture_local_servfail();
                                 facts.final_upstream = None;
                                 if multi_forward {
                                     return result_from_state(&machine, &header, &question, facts);
@@ -398,7 +362,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         upstream_response = false;
                         set_servfail(&mut machine);
                         facts.response_source = Some(ResponseSource::Local);
-                        facts.capture_local_servfail();
                         facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
@@ -432,7 +395,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         upstream_response = false;
                         set_servfail(&mut machine);
                         facts.response_source = Some(ResponseSource::Local);
-                        facts.capture_local_servfail();
                         facts.final_upstream = None;
                         if multi_forward {
                             return result_from_state(&machine, &header, &question, facts);
@@ -544,7 +506,6 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
             .take()
             .unwrap_or(ResponseSource::Local),
     );
-    facts.response = response.clone();
     let final_upstream = match &response {
         ObservedResponseState::Dns {
             source: ResponseSource::Upstream(_),
@@ -693,6 +654,11 @@ mod tests {
         entered: Rc<Cell<bool>>,
     }
 
+    struct FirstLegThenPendingExchange {
+        first_leg: ExecutableId,
+        entered_pending_leg: Rc<Cell<bool>>,
+    }
+
     struct RoutePathExchange {
         b: ExecutableId,
         calls: Rc<RefCell<Vec<ExecutableId>>>,
@@ -740,6 +706,40 @@ mod tests {
             >,
         > {
             self.entered.set(true);
+            Box::pin(async {
+                std::future::pending::<Result<ExchangeResponse, super::ExchangeError>>().await
+            })
+        }
+    }
+
+    impl ExchangeExecutor for FirstLegThenPendingExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            query: &'a [u8],
+            _deadline: std::time::Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            if executable == self.first_leg {
+                let response = response(query);
+                return Box::pin(async move {
+                    let id = u16::from_be_bytes([response[0], response[1]]);
+                    Ok(ExchangeResponse::new(
+                        response,
+                        id,
+                        id,
+                        Transport::Udp,
+                        false,
+                    ))
+                });
+            }
+
+            self.entered_pending_leg.set(true);
             Box::pin(async {
                 std::future::pending::<Result<ExchangeResponse, super::ExchangeError>>().await
             })
@@ -1226,6 +1226,85 @@ mod tests {
             .expect("forward metrics");
         assert_eq!(forward.attempts_total, 1);
         assert_eq!(forward.interrupted_total, 1);
+    }
+
+    #[test]
+    fn dropped_w3_execution_does_not_publish_intermediate_response_as_final() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let local = tokio::task::LocalSet::new();
+        let observer = std::sync::Arc::new(QueryObserver::new(
+            true,
+            ["a".to_owned(), "b".to_owned()],
+            std::num::NonZeroUsize::new(2).expect("audit capacity"),
+        ));
+        let entered_pending_leg = Rc::new(Cell::new(false));
+
+        local.block_on(&runtime, async {
+            let task_observer = std::sync::Arc::clone(&observer);
+            let task_entered = Rc::clone(&entered_pending_leg);
+            let runner = tokio::task::spawn_local(async move {
+                let (config, _a, b) = two_leg_config();
+                let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+                let options = HostOptions::default();
+                let raw = query_name(85, "dropped-w3.test");
+                let (header, question) = parse_query(&raw).expect("query");
+                let cancellation = TransportCancellation::new();
+                let admitted = task_observer.admit(
+                    "192.0.2.85:53000".parse().expect("client address"),
+                    QueryTransport::Udp,
+                    &question,
+                    cancellation.clone(),
+                );
+                let progress = admitted.execution_progress();
+                let _ = execute_request_with_observation(
+                    ExecutionRequest {
+                        config: &config,
+                        cache: &cache,
+                        options: &options,
+                        raw: &raw,
+                        header,
+                        question,
+                    },
+                    &FirstLegThenPendingExchange {
+                        first_leg: b,
+                        entered_pending_leg: task_entered,
+                    },
+                    cancellation,
+                    progress,
+                )
+                .await;
+                panic!("second upstream leg unexpectedly returned");
+            });
+
+            while !entered_pending_leg.get() {
+                tokio::task::yield_now().await;
+            }
+            runner.abort();
+            let _ = runner.await;
+        });
+
+        let audit = observer.audit_snapshot();
+        assert_eq!(audit.records.len(), 1);
+        let record = &audit.records[0];
+        assert_eq!(record.qname, "dropped-w3.test.");
+        assert_eq!(record.cache_status, CacheStatus::NotApplicable);
+        assert_eq!(record.final_sequence.as_deref(), Some("root"));
+        assert_eq!(record.final_upstream, None);
+        assert_eq!(record.response, ResponseState::NoResponse);
+        assert_eq!(
+            record
+                .upstream_attempts
+                .iter()
+                .map(|attempt| (attempt.upstream.as_str(), attempt.outcome))
+                .collect::<Vec<_>>(),
+            [
+                ("b", super::UpstreamAttemptOutcome::Response),
+                ("a", super::UpstreamAttemptOutcome::Interrupted),
+            ]
+        );
     }
 
     #[test]

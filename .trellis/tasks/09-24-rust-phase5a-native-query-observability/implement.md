@@ -93,10 +93,31 @@ route, with only C marked final.
 
 ## Slice 3 — concurrency, lifecycle, Linux evidence, review
 
-- [ ] Run mixed requests with distinct IDs/routes and shutdown barriers. Verify exact audit-to-request correlation, counters, no late send or extra upstream leg, in-flight zero after drain, owner close, and rebind. Keep W1/W2/W3 correctness oracles and cache publication tests intact.
-- [ ] From `rust/`, run `cargo fmt --all -- --check`, focused native-host tests, `cargo test --workspace --locked`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and applicable existing Go/cgo regression checks from the repo root. Record exact commands, commit, failures and fixes.
+- [x] Run mixed requests with distinct IDs/routes and shutdown barriers. Verify exact audit-to-request correlation, counters, no late send or extra upstream leg, in-flight zero after drain, owner close, and rebind. Keep W1/W2/W3 correctness oracles and cache publication tests intact.
+- [x] From `rust/`, run `cargo fmt --all -- --check`, focused native-host tests, `cargo test --workspace --locked`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and applicable existing Go/cgo regression checks from the repo root. Record exact commands, commit, failures and fixes.
 - [ ] Build the pinned native binary for Linux amd64 and run W1/W2/W3 audit-on/off E2E on `ssh mosdns-rust`; do not use production `mos`. Run only the frozen valid low/moderate Rust-before/Rust-after probe. Report p50/p95/p99, correct-on-time throughput, CPU, RSS, audit-on overhead, raw hashes, and invalid stages. Treat unrepeatable or sender-limited runs as inconclusive.
 - [ ] Ask the designated reviewer for a scoped A1–A6 review and fix findings. Update coverage/handover with bounded evidence, perform `trellis-check`/`trellis-update-spec` only where a lasting rule emerged, audit exact changed paths, and commit/push only task-owned changes. After final PASS, follow the normal finish/archive lifecycle; do not deploy or start the next task automatically.
+
+Slice 3 local evidence (2026-09-25): W3's concurrent frozen-corpus test now
+matches each distinct DNS ID and qname to its audit route, final response,
+ordered upstream attempts, and metric deltas. The barrier-driven shutdown test
+matches both canceled audit records to the B→A and B→C fixture events, confirms
+there was no successful send or late upstream leg, and checks zero in-flight,
+closed primary owner, and listener rebind. The audit-off shutdown case still
+retains no detailed records. An actual aborted B→A execution now proves that B's
+intermediate response cannot become the final response or final upstream; a
+cache-free interrupted request is classified `NotApplicable` rather than
+`Undetermined`.
+
+Validation commands and outcomes:
+
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked` — passed (42 unit tests and all package integration suites before assertion extraction).
+- `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-host --locked --test w3_routing` — passed (6 W3 integration tests after extraction).
+- `cargo fmt --manifest-path rust/Cargo.toml --all` — passed; final `-- --check` is repeated after the remaining evidence edits.
+- `cargo test --manifest-path rust/Cargo.toml --workspace --locked` — passed, including all workspace integration tests and doctests.
+- `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings` — passed after extracting W3 assertion helpers. The first run failed only on `clippy::similar_names` and `clippy::too_many_lines` in the new integration assertions; those were resolved by indexing the bounded upstream map directly and extracting the assertions.
+- `go test ./...`, `go build ./...`, and `go vet ./...` — passed from the repository root on macOS. No Go/cgo source is changed in this native-host task; Linux-tagged hybrid bridge suites remain outside this task's affected surface.
+- `python3 .trellis/scripts/task.py validate .trellis/tasks/09-24-rust-phase5a-native-query-observability` and `git diff --check` — passed.
 
 ## Review and rollback points
 
