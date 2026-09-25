@@ -1,0 +1,22 @@
+log:
+  level: error
+
+plugins:
+  - tag: phase5a_forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "tcp://127.0.0.1:15454"
+
+  - tag: phase5a_entry
+    type: sequence
+    args:
+      - exec: $phase5a_forward
+
+  - tag: phase5a_tcp
+    type: tcp_server
+    args:
+      entry: phase5a_entry
+      listen: "127.0.0.1:15354"
+      idle_timeout: 2
+      enable_audit: false
