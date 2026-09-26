@@ -149,13 +149,29 @@ def run_one(args,slot,root):
     (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n');return result
 
 
+def verify_reviewed_tools(head):
+    preflight=(HERE/'m10-preflight/identity.json').relative_to(t.REPO)
+    frozen=json.loads(subprocess.check_output(['git','show',head+':'+str(preflight)],cwd=t.REPO))
+    if set(frozen['local_tools'])!=set(TOOLS):raise ValueError('reviewed tool set differs')
+    for name in TOOLS:
+        path=(HERE/name).relative_to(t.REPO)
+        committed=subprocess.check_output(['git','show',head+':'+str(path)],cwd=t.REPO)
+        digest=hashlib.sha256((HERE/name).read_bytes()).hexdigest()
+        if digest!=hashlib.sha256(committed).hexdigest() or digest!=frozen['local_tools'][name]:
+            raise ValueError('tool differs from reviewed commit/preflight: '+name)
+    return frozen
+
+
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--mode',choices=('preflight','run'),required=True);parser.add_argument('--result-root',type=Path,required=True);parser.add_argument('--client-control',required=True);parser.add_argument('--reviewed-head');args=parser.parse_args()
     head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=t.REPO,text=True).strip()
     if args.mode=='run' and args.reviewed_head!=head:raise ValueError('exact reviewed HEAD required')
+    reviewed=verify_reviewed_tools(head) if args.mode=='run' else None
     root=args.result_root.resolve();root.mkdir(parents=True,exist_ok=False)
     for client in (False,True):(root/('client.txt' if client else 'server.txt')).write_text(inventory(args,client))
-    frozen=identity(args);(root/'identity.json').write_text(json.dumps(frozen,indent=2)+'\n');(root/'plan.json').write_text(json.dumps(plan(),indent=2)+'\n');(root/'source-head.txt').write_text(head+'\n');rows=[]
+    frozen=identity(args)
+    if reviewed is not None and frozen!=reviewed:raise ValueError('inputs differ from committed reviewed preflight')
+    (root/'identity.json').write_text(json.dumps(frozen,indent=2)+'\n');(root/'plan.json').write_text(json.dumps(plan(),indent=2)+'\n');(root/'source-head.txt').write_text(head+'\n');rows=[]
     (root/'rows.json').write_text('[]\n')
     if args.mode=='preflight':return 0
     for slot in plan():
@@ -163,6 +179,7 @@ def main():
     result=assess(rows)
     try:
         if identity(args)!=frozen:raise ValueError('inputs changed during run')
+        if verify_reviewed_tools(head)!=reviewed:raise ValueError('reviewed tools changed during run')
     except (OSError,ValueError,subprocess.SubprocessError) as e:
         result['passed']=False;result['failures'].append('final identity verification failed')
         (root/'identity-error.txt').write_text(t.error_evidence(e))

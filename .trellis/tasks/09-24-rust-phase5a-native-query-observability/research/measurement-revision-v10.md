@@ -47,7 +47,13 @@ m10-w3-rN-variant. Driver/controller copy already corrected M9 paths/logic,
 restrict matrix/oracles to W3 and remove unused cold/warm execution. M9 originals
 remain unchanged. Existing M5 sampler/merge and M6 SSH/hash utilities reused.
 
-Exact input hashes checked before/after. Owned PID/start cleanup guard runs
+Exact input hashes checked before/after. Run mode verifies every tool's working
+bytes against both the exact
+reviewed commit and that commit's preflight local_tools hashes. Runtime remote
+inputs must equal the committed preflight identity, not newly accepted hashes.
+Mismatch fails before any session launch; tool identity is rechecked after the
+batch. HEAD alone cannot authorize changed uncommitted execution scripts.
+Owned PID/start cleanup guard runs
 even when SSH launch reply is lost. Each host tree hashed after owned stop;
 transfers verified, completed primary merges independently reconstructed.
 Full raw ledgers and route journals kept durably with SHA manifest; failures
