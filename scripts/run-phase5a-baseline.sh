@@ -31,18 +31,42 @@ RECOVERY_P99_CEILING_US="${RECOVERY_P99_CEILING_US:-}"
 MEASUREMENT_PROFILE="${PHASE5A_MEASUREMENT_PROFILE:-legacy}"
 case "${MEASUREMENT_PROFILE}" in
   legacy) ;;
-  m2)
+  m2|m3)
     if [[ "${GOMAXPROCS:-}" != 1 ]]; then
-      echo "m2 measurement requires GOMAXPROCS=1" >&2
+      echo "${MEASUREMENT_PROFILE} measurement requires GOMAXPROCS=1" >&2
       exit 2
     fi
     if [[ "${CANDIDATE}" != rust || "${RUN_MODE}" != pilot ]]; then
-      echo "m2 measurement supports only isolated Rust pilot runs" >&2
+      echo "${MEASUREMENT_PROFILE} measurement supports only isolated Rust pilot runs" >&2
       exit 2
     fi
     ;;
   *) echo "unsupported measurement profile: ${MEASUREMENT_PROFILE}" >&2; exit 2 ;;
 esac
+
+measurement_stage_specs() {
+  printf '%s\n' "normal-reference:${NORMAL_REFERENCE_QPS}"
+  if [[ "${MEASUREMENT_PROFILE}" != m3 ]]; then
+    printf '%s\n' "common-load:${COMMON_LOAD_QPS}" "near-saturation:${NEAR_SATURATION_QPS}"
+  fi
+  printf '%s\n' "overload:${OVERLOAD_QPS}"
+  if [[ "${MEASUREMENT_PROFILE}" != m3 ]]; then
+    printf '%s\n' "recovery:${NORMAL_REFERENCE_QPS}"
+  fi
+}
+if [[ "${MEASUREMENT_PROFILE}" == m3 ]]; then
+  if [[ "${STAGE_DURATION_MS}" != 25000 || "${NORMAL_REFERENCE_QPS}" != 200 || "${OVERLOAD_QPS}" != 400 || "${REQUEST_DEADLINE_MS}" != 500 || "${LATE_DRAIN_MS}" != 100 ]]; then
+    echo "m3 requires reviewed 25000ms, 200/400 QPS, 500ms deadline and 100ms drain" >&2; exit 2
+  fi
+  if [[ "${SCENARIO}" == w2 && ( "${W2_WARM_LIFECYCLE:-}" != independent-prefilled || "${W2_CACHE_TTL_MS:-}" != 30000 || "${W2_TTL_SAFETY_MARGIN_MS:-}" != 500 ) ]]; then
+    echo "m3 W2 requires independent-prefilled lifecycle and frozen TTL settings" >&2; exit 2
+  fi
+fi
+# Read-only plan output uses the same stage list as execution, before any SUT starts.
+if [[ "${PHASE5A_PLAN_ONLY:-0}" == 1 ]]; then
+  measurement_stage_specs
+  exit 0
+fi
 
 if [[ -n "${HARNESS_CPU_SET}" && "${PHASE5A_HARNESS_PINNED:-0}" != "1" ]]; then
   command -v taskset >/dev/null 2>&1 || { echo "HARNESS_CPU_SET requires taskset" >&2; exit 2; }
@@ -160,8 +184,8 @@ if [[ "${RUN_MODE}" != "smoke" ]]; then
     echo "unsupported helper version: ${helper_version}" >&2
     exit 2
   fi
-  if [[ "${MEASUREMENT_PROFILE}" == m2 && "${helper_version}" != "phase5a-baseline-helper/v9" ]]; then
-    echo "m2 measurement requires helper v9" >&2
+  if [[ "${MEASUREMENT_PROFILE}" != legacy && "${helper_version}" != "phase5a-baseline-helper/v9" ]]; then
+    echo "${MEASUREMENT_PROFILE} measurement requires helper v9" >&2
     exit 2
   fi
 fi
@@ -513,11 +537,16 @@ run_one_stage() {
 
 run_continuous_sequence() {
   local stage_dir="$1" ledger_path="$2" use_one_pass="$3"
-  run_one_stage normal-reference "${NORMAL_REFERENCE_QPS}" "${stage_dir}" "${ledger_path}" "${use_one_pass}" warm
-  run_one_stage common-load "${COMMON_LOAD_QPS}" "${stage_dir}" "${ledger_path}" false warm
-  run_one_stage near-saturation "${NEAR_SATURATION_QPS}" "${stage_dir}" "${ledger_path}" false warm
-  run_one_stage overload "${OVERLOAD_QPS}" "${stage_dir}" "${ledger_path}" false warm
-  run_one_stage recovery "${NORMAL_REFERENCE_QPS}" "${stage_dir}" "${ledger_path}" false warm
+  local stage_spec stage stage_qps
+  while IFS= read -r stage_spec; do
+    stage="${stage_spec%%:*}"; stage_qps="${stage_spec#*:}"
+    run_one_stage "${stage}" "${stage_qps}" "${stage_dir}" "${ledger_path}" "${use_one_pass}" warm
+    use_one_pass=false
+  done < <(measurement_stage_specs)
+  if [[ "${MEASUREMENT_PROFILE}" == m3 ]]; then
+    printf '%s\n' "status=indeterminate" "mode=indeterminate-no-overload-evidence" "reason=M3 primary latency points only; no recovery measurement" > "${RESULT_DIR}/service-recovery-assessment.txt"
+    return
+  fi
   if ! "${HELPER_BINARY}" verify-continuous --stage-result "${stage_dir}/stages.jsonl" --run-id "${SESSION_RUN_ID}" \
     --minimum-samples "${RECOVERY_MINIMUM_SAMPLES}" --p95-ceiling-us "${RECOVERY_P95_CEILING_US}" --p99-ceiling-us "${RECOVERY_P99_CEILING_US}" \
     > "${RESULT_DIR}/service-recovery-assessment.txt"; then
@@ -527,17 +556,10 @@ run_continuous_sequence() {
 
 run_w2_independent_points() {
   local stage stage_qps stage_dir ledger_path prefill_dir prefill_before prefill_after
-  local stage_specs=(
-    "normal-reference:${NORMAL_REFERENCE_QPS}"
-    "common-load:${COMMON_LOAD_QPS}"
-    "near-saturation:${NEAR_SATURATION_QPS}"
-    "overload:${OVERLOAD_QPS}"
-    "recovery:${NORMAL_REFERENCE_QPS}"
-  )
   mkdir -p "${RESULT_DIR}/w2-warm-independent"
   printf '%s\n' "indeterminate: W2 warm stages use independent prefilled SUT sessions; no same-process recovery claim" > "${RESULT_DIR}/w2-warm-independent/recovery-status.txt"
   printf '%s\n' "status=indeterminate" "mode=indeterminate-no-overload-evidence" "reason=independent-prefilled W2 sessions; no same-process recovery is measured" > "${RESULT_DIR}/service-recovery-assessment.txt"
-  for stage_spec in "${stage_specs[@]}"; do
+  while IFS= read -r stage_spec; do
     stage="${stage_spec%%:*}"
     stage_qps="${stage_spec#*:}"
     stage_dir="${RESULT_DIR}/w2-warm-independent/${stage}"
@@ -575,7 +597,7 @@ run_w2_independent_points() {
       --prefill-stage warm-prefill --warm-stage "${stage}" --ttl "${W2_CACHE_TTL}" --safety-margin "${W2_TTL_SAFETY_MARGIN}"; then
       record_invalid "${stage}" "independent W2 warm point exceeded per-key TTL or correctness gate"
     fi
-  done
+  done < <(measurement_stage_specs)
 }
 
 start_fixtures
@@ -676,7 +698,7 @@ if [[ "${SCENARIO}" != "w2" ]]; then
 fi
 if [[ "${SCENARIO}" == "w3" ]]; then
   cp "${FIXTURE_EVENT_JOURNAL}" "${RESULT_DIR}/fixture-routing-events.jsonl"
-  if [[ "${RUN_MODE}" == "smoke" ]]; then LAST_STAGE="${RUN_MODE}-${SCENARIO}"; else LAST_STAGE=recovery; fi
+  if [[ "${RUN_MODE}" == "smoke" ]]; then LAST_STAGE="${RUN_MODE}-${SCENARIO}"; elif [[ "${MEASUREMENT_PROFILE}" == m3 ]]; then LAST_STAGE=overload; else LAST_STAGE=recovery; fi
   if ! "${HELPER_BINARY}" verify-event-journal --event-journal "${RESULT_DIR}/fixture-routing-events.jsonl" --stage-result "${RESULT_DIR}/stages.jsonl" --last-stage "${LAST_STAGE}"; then
     record_invalid events "fixture event journal has a tail mismatch"
   fi

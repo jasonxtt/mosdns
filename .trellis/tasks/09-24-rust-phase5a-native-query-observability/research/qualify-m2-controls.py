@@ -24,9 +24,9 @@ def interval(values):
     return center - half, center + half
 
 
-def qualify(root):
+def qualify(root, groups=GROUPS, profile='m2'):
     failures, batches, intervals = [], [], []
-    expected = {(s, p, q, v, r) for s, p, q in GROUPS
+    expected = {(s, p, q, v, r) for s, p, q in groups
                 for v in VARIANTS for r in range(1, 4)}
     for batch in ('batch1', 'batch2'):
         directory = root / batch
@@ -46,21 +46,32 @@ def qualify(root):
                                                      'protocol_error', 'transport_error',
                                                      'timeout', 'sender_shortfall'))):
                 failures.append(f'{batch}: invalid primary row {key}')
-        if len(rows) != 63 or set(indexed) != expected:
+        if len(rows) != len(expected) or set(indexed) != expected:
             failures.append(f'{batch}: primary matrix is incomplete or unexpected')
-        for scenario in ('w1-tcp', 'w2', 'w3'):
+        for scenario in sorted({g[0] for g in groups}):
             for repetition in range(1, 4):
                 for variant in VARIANTS:
                     attempt = directory / f'{scenario}-r{repetition}-{variant}'
                     evidence = dict(line.split('=', 1) for line in (attempt / 'environment.txt').read_text().splitlines() if '=' in line)
-                    if evidence.get('measurement_profile') != 'm2' or evidence.get('gomaxprocs_environment') != '1':
+                    if evidence.get('measurement_profile') != profile or evidence.get('gomaxprocs_environment') != '1':
                         failures.append(f'{batch}: missing/wrong runtime profile in {attempt.name}')
+                    if profile == 'm3':
+                        metadata = dict(line.split('=', 1) for line in (attempt / 'run-metadata.txt').read_text().splitlines() if '=' in line)
+                        settings = {'stage_duration_ms': '25000', 'normal_reference_qps': '200', 'overload_qps': '400', 'request_deadline_ms': '500', 'late_drain_ms': '100'}
+                        if scenario == 'w2':
+                            settings['w2_warm_lifecycle'] = 'independent-prefilled'
+                        if any(metadata.get(k) != v for k, v in settings.items()):
+                            failures.append(f'{batch}: wrong M3 measurement settings in {attempt.name}')
                     binary = json.loads((attempt / 'sut.json').read_text())
                     if binary.get('sha256') != '370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa':
                         failures.append(f'{batch}: wrong identical-baseline binary in {attempt.name}')
+        if profile == 'm3':
+            for key, row in indexed.items():
+                if int(row['scheduled']) != key[2] * 25:
+                    failures.append(f'{batch}: wrong M3 request count {key}')
         with (directory / 'derived-paired-assessments.tsv').open() as f:
             pairs = list(csv.DictReader(f, delimiter='\t'))
-        expected_pairs = {(s, p, q, comp, metric) for s, p, q in GROUPS
+        expected_pairs = {(s, p, q, comp, metric) for s, p, q in groups
                           for comp in ('after_off_vs_before_off', 'after_on_vs_after_off')
                           for metric in ('p95_us', 'p99_us', 'cpu_us_per_correct_query', 'rss_peak_kib_sampled')}
         actual_pairs = set()
@@ -70,12 +81,12 @@ def qualify(root):
                 failures.append(f'{batch}: paired comparison lacks three valid pairs')
             if pair['metric'] in ('p95_us', 'p99_us') and int(pair['pairs_above_guard']) > 0:
                 failures.append(f"{batch}: individual original latency guard crosses: {pair['scenario']} {pair['phase']} {pair['qps']} {pair['comparison']} {pair['metric']}")
-        if len(pairs) != 56 or actual_pairs != expected_pairs:
+        if len(pairs) != len(expected_pairs) or actual_pairs != expected_pairs:
             failures.append(f'{batch}: original paired assessment matrix is incomplete or unexpected')
         batches.append(indexed)
     if any(set(batch) != expected for batch in batches):
         return {'qualified': False, 'failures': failures, 'intervals': []}
-    for scenario, phase, qps in GROUPS:
+    for scenario, phase, qps in groups:
         for control, candidate in (('before_off', 'after_off'), ('after_off', 'after_on')):
             for metric in ('p95_us', 'p99_us'):
                 values = []
@@ -100,7 +111,7 @@ def qualify(root):
                 intervals.append(row)
                 if not qualified:
                     failures.append(f'{scenario} {phase} {qps} {candidate}_vs_{control} {metric}: equivalence interval outside margin')
-    return {'qualified': not failures, 'scope': 'identical-baseline M2 calibration only',
+    return {'qualified': not failures, 'scope': f'identical-baseline {profile.upper()} calibration only',
             'failures': failures, 'intervals': intervals}
 
 
