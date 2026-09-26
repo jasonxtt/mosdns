@@ -434,6 +434,14 @@ Linux build SHA is recorded in the revision. No Rust runtime source changed.
 The reviewed protocol must qualify fixed controls before candidate acceptance
 is resumed; calibration by itself cannot approve A5.
 
+M2 unit 1 review returned scoped FAIL with P1-1 (individual guard crossings
+still permitted) and P2-1 (parallelism enforcement/evidence missing). The
+remediation prohibits every individual latency crossing and enforces/records
+the M2 runtime profile. Its red runner test reproduced both omissions against
+the exact submitted parent; green helper tests and eight qualification tests
+cover the fixes. See `research/m2-review-ledger.md`. No calibration attempt
+has run; re-review remains required before unit 2.
+
 ## Review and rollback points
 
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.

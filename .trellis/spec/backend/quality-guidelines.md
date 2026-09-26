@@ -55,7 +55,10 @@ restarts. Source evidence: the active query-observability task's
    `readResourceSample(pid int, hz int64)`.
 3. **Contract:** resolve before `executeStage` records its start timestamp;
    reuse the positive frequency for every role/sample. M2's diagnostic
-   `GOMAXPROCS=1` applies to Go helpers/fixtures and is pinned in run evidence.
+   `PHASE5A_MEASUREMENT_PROFILE=m2` requires `GOMAXPROCS=1`, Rust pilot mode,
+   and helper v9. The runner records `measurement_profile` and
+   `gomaxprocs_environment` in each `environment.txt`; qualification validates
+   these fields per attempt. Legacy protocols keep their original behavior.
 4. **Errors:** missing command, malformed, zero, or negative CLK_TCK fails
    before measured load; never silently substitute 100 on Linux.
 5. **Cases:** valid frequency preserves CPU tick/second conversions; archived
@@ -63,7 +66,9 @@ restarts. Source evidence: the active query-observability task's
    during measured traffic are forbidden.
 6. **Tests:** Linux sampling with a fake PATH clock command must not execute
    it; retain per-role RSS/FD samples. Exercise valid/invalid/missing host
-   constant resolution. Preserve existing DNS/counter/event helper tests.
+   constant resolution. Missing/wrong M2 parallelism must fail before SUT
+   launch. A single old latency guard crossing blocks control qualification
+   even if pooled equivalence intervals pass. Preserve existing DNS/counter/event helper tests.
 7. **Wrong vs correct:** spawning `getconf` from `readResourceSample` disturbs
    measured traffic. Resolve once before load and pass `hz` into the sampler.
 
