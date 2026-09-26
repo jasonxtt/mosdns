@@ -468,7 +468,8 @@ its fixed9runs:all27000planned/sent/received/correct,zero shortfall/errors;
 four pairedmedian ratios<=1.10. M8 bounded100QPS W1screen PASSED. First
 audit-on p99ratio1.2715 disclosed, no every-round/stability/capacity claim.
 251fullmanifest entries/18remote source trees verified,244selected files
-retained. Consolidated evidence review pending; no extra traffic/fullA5.
+retained. M8-REPORT-001 review passed10:06:16UTC for this bounded result/
+evidence/stop only; no extra traffic/fullA5.
 
 ### Post-M7 user-authorized bounded remediation
 

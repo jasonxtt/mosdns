@@ -73,3 +73,6 @@ Submit one consolidated result review. This batch is consumed; no new runs
 or expanded workload authorized. M7 and higher-loadV12FAIL/M2–M6unqualified
 remain unchanged; fullA5,W2/W3,capacity,production and lifecycle closure stay
 outside scope. This screen supports only the stated100QPS W1TCP result.
+
+M8-REPORT-001 returned FINAL: PASS10:06:16UTC for this limited result,
+complete evidence and stop. It authorizes no further batch or broadergate.
