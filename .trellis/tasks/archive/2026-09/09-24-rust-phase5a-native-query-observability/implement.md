@@ -729,3 +729,11 @@ M8 W1/M9 W2/latest Linux evidence remain as previously reviewed. No reviewer
 tests/traffic. All six criteria for this basic-observability subset are now
 accepted; full Phase5A/C08/capacity/production are outside this verdict.
 Task status remains in_progress; no archive, deployment or new task authorized.
+
+## User-authorized lifecycle closure — 2026-09-26
+
+After M10-FINAL-001 bounded A1–A6 PASS, user explicitly authorized finishing,
+archiving this task and committing/pushing to GitHub. Archive via task.py with
+auto-commit disabled. This closes only the basic W1/W2/W3 observability task;
+full Phase5A, C08, capacity, production/deployment and new tasks remain gated.
+Earlier in-progress/no-closure statements retain their historical meaning.
