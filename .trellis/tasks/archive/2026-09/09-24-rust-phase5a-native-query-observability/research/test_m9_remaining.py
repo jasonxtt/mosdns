@@ -7,6 +7,8 @@ import re
 from unittest.mock import patch
 from pathlib import Path
 
+from repo_paths import repo_root
+
 
 def load():
     spec=importlib.util.spec_from_file_location('remaining',Path(__file__).with_name('run-m9-remaining.py'))
@@ -17,7 +19,7 @@ class RemainingTests(unittest.TestCase):
     def test_fixture_ids_match_the_helper_answer_contract(self):
         spec=importlib.util.spec_from_file_location('control',Path(__file__).with_name('m9-server-control.py'))
         m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
-        helper=Path(__file__).resolve().parents[4]/'tests/phase5a-baseline/cmd/phase5a-baseline/main.go'
+        helper=repo_root(Path(__file__))/'tests/phase5a-baseline/cmd/phase5a-baseline/main.go'
         source=helper.read_text().split('func fixtureAnswer(')[1].split('func runStage(')[0]
         recognized=set(re.findall(r'case "([^"]+)":',source))
         for scenario in ('w2','w3'):

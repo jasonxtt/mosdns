@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+from repo_paths import repo_root
+
 HERE=Path(__file__).resolve().parent
 
 
@@ -30,8 +32,11 @@ class W3RemediationTests(unittest.TestCase):
         originals={name:('committed '+name).encode() for name in tools}
         identity={'local_tools':{name:hashlib.sha256(data).hexdigest() for name,data in originals.items()}}
         def git_read(command,**kwargs):
+            if command[1]=='ls-tree':
+                recorded=[*tools,'m10-preflight/identity.json']
+                return '\0'.join('.trellis/tasks/'+m.TASK_DIR+'/research/'+name for name in recorded)+'\0'
             path=command[-1].split(':',1)[1]
-            return json.dumps(identity).encode() if path.endswith('m10-preflight/identity.json') else originals[path]
+            return json.dumps(identity).encode() if path.endswith('m10-preflight/identity.json') else originals[Path(path).name]
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
             for name,data in originals.items():(root/name).write_bytes(data)
@@ -65,7 +70,7 @@ class W3RemediationTests(unittest.TestCase):
 
     def test_fixture_ids_match_real_helper_dispatch_and_ports(self):
         m=load('m10-server-control.py')
-        source=(HERE.parents[3]/'tests/phase5a-baseline/cmd/phase5a-baseline/main.go').read_text().split('func fixtureAnswer(')[1].split('func runStage(')[0]
+        source=(repo_root(HERE)/'tests/phase5a-baseline/cmd/phase5a-baseline/main.go').read_text().split('func fixtureAnswer(')[1].split('func runStage(')[0]
         recognized=set(re.findall(r'case "([^"]+)":',source))
         specs=m.fixture_specs('w3')
         self.assertEqual([s[2] for s in specs],[15456,15457,15458])

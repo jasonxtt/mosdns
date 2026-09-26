@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 HERE=Path(__file__).resolve().parent
+TASK_DIR=HERE.parent.name
+TASK_PREFIX='.trellis/tasks/'
 
 
 def load(file):
@@ -149,13 +151,38 @@ def run_one(args,slot,root):
     (root/'summary.json').write_text(json.dumps(result,indent=2)+'\n');return result
 
 
+def committed_research_root(head):
+    """Locate the research directory in a measuring commit.
+
+    A task directory moves into ``archive/<month>/`` when the task closes, so
+    the current path is not the path that commit recorded. Read that commit's
+    tree and fail unless exactly one task research directory is recorded there.
+    """
+    try:listing=subprocess.check_output(['git','ls-tree','-r','--name-only','-z',head],cwd=t.REPO,text=True)
+    except subprocess.CalledProcessError as error:raise ValueError(head+' has exactly one '+TASK_DIR+' research directory: unresolvable ('+str(error)+')') from error
+    marker=f'/{TASK_DIR}/research/';required={'m10-preflight/identity.json',*TOOLS};found={}
+    for name in listing.split('\0'):
+        directory,separator,relative=name.partition(marker)
+        if not separator or not relative:continue
+        directory+=marker
+        if not directory.startswith(TASK_PREFIX):continue
+        found.setdefault(directory,set()).add(relative)
+    matches=sorted(directory for directory,names in found.items() if required<=names)
+    if len(matches)!=1:raise ValueError(head+' has exactly one '+TASK_DIR+' research directory: found '+str(matches))
+    return Path(matches[0])
+
+
+def committed_bytes(head,path):
+    try:return subprocess.check_output(['git','show',head+':'+str(path)],cwd=t.REPO)
+    except subprocess.CalledProcessError as error:raise ValueError(str(path)+' is missing in '+head) from error
+
+
 def verify_reviewed_tools(head):
-    preflight=(HERE/'m10-preflight/identity.json').relative_to(t.REPO)
-    frozen=json.loads(subprocess.check_output(['git','show',head+':'+str(preflight)],cwd=t.REPO))
+    research=committed_research_root(head)
+    frozen=json.loads(committed_bytes(head,research/'m10-preflight/identity.json'))
     if set(frozen['local_tools'])!=set(TOOLS):raise ValueError('reviewed tool set differs')
     for name in TOOLS:
-        path=(HERE/name).relative_to(t.REPO)
-        committed=subprocess.check_output(['git','show',head+':'+str(path)],cwd=t.REPO)
+        committed=committed_bytes(head,research/name)
         digest=hashlib.sha256((HERE/name).read_bytes()).hexdigest()
         if digest!=hashlib.sha256(committed).hexdigest() or digest!=frozen['local_tools'][name]:
             raise ValueError('tool differs from reviewed commit/preflight: '+name)
