@@ -1,5 +1,17 @@
 # Measurement state, 2026-09-26
 
+## Current authorized step: M7
+
+User approved simplifying to100QPS30s, old/new-off/new-on three times each.
+The bounded W1 regression now uses a predeclared paired median10% latency
+screen, without another self-control calibration loop. See
+measurement-revision-v7.md. M2–M6 and higher-load V12 failures remain unchanged;
+full A5/capacity/W2/W3 acceptance stays closed. No-query two-host preflight
+passed and51 focused harness tests passed (one Linux-only skip on macOS).
+Prospective review is required before the fixed nine actual runs.
+
+## Historical states (authorization at each prior boundary)
+
 The user authorized correction/review, qualified stable controls, then
 resumption of acceptance. M2–M4 corrections and prospective reviews are complete;
 stable controls have **not** been established. Acceptance must stay closed.
