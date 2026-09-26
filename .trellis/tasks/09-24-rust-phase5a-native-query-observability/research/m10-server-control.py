@@ -33,7 +33,7 @@ def terminate_owned(record):
     pid = record['pid']
     try:
         identity = process_start(pid)
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return
     if identity != record['start_identity']:
         raise ValueError('process ownership changed; refusing signal')
@@ -53,7 +53,7 @@ def terminate_owned(record):
     while Path(f'/proc/{pid}/stat').exists():
         try:
             text = Path(f'/proc/{pid}/stat').read_text()
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return
         if text[text.rindex(')') + 2:].split()[0] == 'Z':
             return

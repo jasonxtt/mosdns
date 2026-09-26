@@ -1,0 +1,1 @@
+{"GOMAXPROCS": "1", "GOGC": "off", "GODEBUG": "gctrace=1", "GOMEMLIMIT": ""}

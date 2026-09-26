@@ -52,11 +52,14 @@ The [stage plan](../rust/next-stage-plan.md) created
 design and implementation plan record the authorized Slices0–3 and bounded
 validation. Basic host-owned audit/metrics are implemented and Linux workspace
 regression passes. M8 W1 TCP100QPS and M9 W2 warm100QPS screens pass; W2 cold
-has correctness-only evidence. M9 W3 was stopped because this task's harness
-used unsupported fixture IDs, so A5 and final acceptance remain closed.
-The fixture naming repair has a RED→GREEN regression test but has not been
-staged or measured. See the task's research/m9-final-assessment.md; no product
-release or task closure is authorized. Inspect the live
+has correctness-only evidence. M9 wrong-fixture W3 remains invalid. The separately
+authorized M10 nine-session W3 batch completed 27000 correct queries and 45000
+ordered routing events; unchanged paired median gates pass. Original driver
+FAIL (shared-clock route oracle and one exited-process cleanup race) is retained.
+A separate unique-ID offline proof and complete process-exit receipts pass;
+final A5/A6 acceptance awaits explicit review of that repair. See the task's
+research/m10-w3-assessment.md. No release or task closure is authorized. Inspect
+live
 Trellis task state before resuming, because archive moves and task pointers
 may change independently of this concise handover.
 
@@ -115,8 +118,7 @@ measurements justify the performance benefit.
 The strict W1 UDP/TCP and W2/W3 native host now accepts its sole listener's
 `enable_audit` flag and exposes read-only basic metrics/terminal audit snapshots.
 Linux functional tests cover bounded provenance, retention and lifecycle;
-the current task still lacks valid W3 final performance evidence due to its
-fixture naming defect. Full C08 audit/API parity remains Phase5C. Later
+M10 W3 evidence and offline validation repair await scoped final review. Full C08 audit/API parity remains Phase5C. Later
 measurement/profiling must separately examine higher-load offered-load validity
 and multi-core scaling; current100QPS screens do not establish capacity.
 Full cache behavior, remaining
@@ -136,10 +138,10 @@ multi-core performance.
 - Reproducible performance/stability workloads and threshold-freeze rules:
   `docs/rust/performance-validation.md`.
 
-The current task is in progress with final A5 acceptance blocked. The single
-M9 batch has been stopped and must not be silently replaced. Read its latest
-PRD/design/implement and final report before proposing a separately authorized
-W3 correction batch. Deployment and lifecycle closure remain gated.
+The current task stays in progress. M10 supplied the separately authorized W3
+correction batch; retain M9's invalid verdict and submit M10's raw and derived
+proofs for final A5/A6 review. No further traffic is authorized by this report.
+Deployment and lifecycle closure remain gated.
 
 ## Non-negotiable constraints
 

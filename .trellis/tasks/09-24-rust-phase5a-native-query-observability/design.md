@@ -42,6 +42,16 @@ An in-memory snapshot avoids a premature management API and keeps the query path
 Before implementation, freeze the old Rust source/binary, W1/W2/W3 fixtures, runner hash, offered rates, duration/repetition, affinity/VM topology, validity gates, and latency/throughput/CPU/RSS regression budgets in `research/performance-manifest.md`. Pin the new commit/binary before official Linux candidate runs. Compare old versus new with audit off; compare new audit on versus new audit off, since the old host rejects audit on. The prior report's sender shortfalls and absent overload trigger prohibit using an invalid high-rate stage to excuse or prove overhead. Use only valid low/moderate offered load for this task; a later dedicated profiling/measurement task owns overload discovery and multi-core analysis. Preserve rejected attempts and limitations in the result report. Never test on production `mos`.
 # M9 final bounded validation clarification
 
+M10's authorized W3-only supplement retains the exact DNS/route and numeric
+contracts. Distributed validation repairs are offline and disclosed separately
+from immutable raw runner failures: this native-only subset preserves unique
+per-session DNS IDs, so full question+ID joins and fixture-sequence path checks
+prove every A/B→A/B→C request without comparing unsynchronized host timestamps.
+ID reuse or unmatched/extra/missing events fail closed. An ESRCH cleanup receipt
+can establish that the exact owned PID/start records have exited; other errors
+remain blocking. No raw timing/count value or historical verdict is rewritten.
+Acceptance requires explicit scoped reviewer approval of these evidence repairs.
+
 User authorized the remaining Linux regression, W2/W3 supplement and final
 A1–A6 review in one sequence. See PRD final R7 interpretation and
 research/measurement-revision-v9.md. Runtime/metrics/audit contracts remain

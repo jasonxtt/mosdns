@@ -1,6 +1,18 @@
 # Measurement state, 2026-09-26
 
-## Current step: M9 stopped; final acceptance closed
+## Current step: M10 evidence complete; scoped final review pending
+
+Separately authorized nine W3 sessions completed once:27000 correct queries,
+45000 ordered route events verified offline, zero DNS errors/shortfall. Four
+unchanged paired median p95/p99 gates pass. Original driver FAIL is preserved:
+its route oracle assumes shared clocks/barriers; one cleanup logged ESRCH.
+Independent unique-ID route proof and all36 owned-process exit receipts pass.
+Offline oracle/controller repairs have70 local regressions passing(oneLinux
+skip). Linux/W1/W2 evidence reused without traffic. A5/A6 await explicit review
+of this validation repair; no lifecycle/production/extra traffic authorization.
+See m10-w3-assessment.md and m10-review-ledger.md.
+
+## M9 historical state
 
 User authorized unify remaining criteria, one Linux regression, W2/W3 supplement
 and one final review. M9 preparation review passed12:52:56UTC. Linux workspace

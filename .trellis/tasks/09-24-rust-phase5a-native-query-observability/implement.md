@@ -128,6 +128,20 @@ dirty driver/controller/protocol and rejection before inventory/result creation.
 Six focused/58 measurement tests pass (oneLinux-onlyskip). Refreshed zero-query
 preflight; no traffic. Remediation re-review required before M10 batch.
 
+M10-UNIT1-002 PASS13:36:08UTC authorized exactly one9W3 batch. All27000
+actual queries correct withzero error/shortfall. All27 response/sender/counter
+oracles pass. Legacy routing oracle fails0/0 client barriers and assumes shared
+host timestamps; raw FAIL preserved. Separate offline uniqueDNSID+question/
+ordered-event oracle verifies all27000 requests/45000 legs without clock
+alignment or raw changes. One post-stage ESRCH cleanup diagnostic is retained;
+independent receipt proves all36 owners stopped; controller read-race fix has
+RED→GREEN tests and was not staged/measured. Offline route tests reject all
+missing/extra/ambiguous/mismatched evidence; nanosecond precision covered.
+All four paired median latency ratios<=1.10, individual p99 variability disclosed.
+70 measurement tests pass(oneLinux-onlyskip);18 source trees/9 merges and349
+bundle entries verified. See research/m10-w3-assessment.md for exact disclosure
+and scope. Final A5/A6 remediation re-review pending; no extra traffic/lifecycle.
+
 ## Authorized final bounded acceptance (M9, 2026-09-26)
 
 User authorized one sequence: unify remaining acceptance, one Linux regression,

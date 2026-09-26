@@ -601,3 +601,47 @@ on a separately authorized fixed batch before measured acceptance.
 Wrong: treat successful UDP bind as proof that route_a works, then repeat
 failed measurements until passing. Correct: verify exact helper identities,
 retain invalid evidence, repair offline and authorize/pin any new traffic batch.
+
+## Native distributed W3 offline routing evidence
+
+### 1. Scope / Trigger
+
+A native-only before/after W3 batch uses separate client/server clocks and the
+legacy shared-clock/barrier oracle cannot validate its retained journals.
+
+### 2. Signatures
+
+`m10-route-oracle.py --raw-root PATH --result-root NEW_PATH --workload PATH
+--cleanup-proof PATH --postbatch-identity PATH` derives separate evidence.
+
+### 3. Contracts
+
+Join each unique client DNS ID plus exact question to every upstream event;
+require complete request/fixture sequences and frozen A, B→A, B→C order.
+Validate client intervals at nanosecond precision on the client clock only.
+Preserve original FAIL, rows and timestamps. Verify reviewed tool/config/binary
+identities, all other oracles, manifests and unchanged latency/count gates.
+
+### 4. Validation & Error Matrix
+
+Reused IDs, gaps, duplicates, unmatched/extra/missing events, question/run/count
+mismatch or wrong route reject. Only exact known ESRCH cleanup diagnostics may
+use a complete independently verified PID/start exit receipt. Any other error
+blocks. Handle ProcessLookupError at initial /proc read and post-signal polling.
+
+### 5. Good / Base / Bad Cases
+
+Good: complete unique-ID proof without clock adjustment. Base: original failed
+oracle remains in the bundle. Bad: assume matching qnames imply identity, shift
+server timestamps, overwrite runner failure, or waive missing cleanup evidence.
+
+### 6. Tests Required
+
+Cover unsynchronized clocks, unique-ID ambiguity, path/order and completeness
+tampering, nanosecond intervals, and both /proc exit races. Reuse original batch
+only with explicit final review of the independent proof; no automatic rerun.
+
+### 7. Wrong vs Correct
+
+Wrong: rename the original driver verdict PASS. Correct: keep it FAIL and submit
+separate reproducible offline proofs and exit receipts for bounded acceptance.
