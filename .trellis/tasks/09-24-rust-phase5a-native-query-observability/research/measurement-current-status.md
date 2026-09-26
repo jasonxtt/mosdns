@@ -11,7 +11,9 @@ Four completed W3 sessions each returned3000 wrong responses; fifth was
 interrupted and four remaining slots never started. Major harness issue stops
 this single batch without replacement. W3 performance/A5 remain closed;
 fixture ID repair and direct helper-contract regression test are green offline,
-not staged or measured. Final A1–A6 review pending; no production or lifecycle
+not staged or measured. Final A1–A6 review M9-FINAL-001 returned FAIL13:12:13UTC
+for missing valid W3/A5 evidence; A1–A4/W2 and archive/cleanup supported.
+No production or lifecycle
 closure. See m9-final-assessment.md and m9-review-ledger.md.
 
 ## M8 historical state
