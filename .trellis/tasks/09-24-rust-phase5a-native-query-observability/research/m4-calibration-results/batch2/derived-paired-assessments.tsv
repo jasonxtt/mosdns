@@ -1,0 +1,17 @@
+scenario	phase	qps	comparison	metric	valid_pairs	control_values	candidate_values	paired_delta_pct	control_relative_mad	guard	pairs_above_guard	tick_resolution_limited_pairs	verdict
+w1-tcp	main	200	after_off_vs_before_off	p95_us	3	584.0000,609.0000,539.0000	584.0000,593.0000,520.0000	0.0000,-2.6273,-3.5250	0.0428	10.00%	0		no repeatable regression under frozen guard
+w1-tcp	main	200	after_off_vs_before_off	p99_us	3	1035.0000,1048.0000,804.0000	1098.0000,984.0000,812.0000	6.0870,-6.1069,0.9950	0.0126	10.00%	0		no repeatable regression under frozen guard
+w1-tcp	main	200	after_off_vs_before_off	cpu_us_per_correct_query	3	130.0000,138.0000,128.0000	130.0000,132.0000,124.0000	0.0000,-4.3478,-3.1250	0.0154	25.00%	0	1	inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w1-tcp	main	200	after_off_vs_before_off	rss_peak_kib_sampled	3	3120.0000,3136.0000,3156.0000	3136.0000,3040.0000,3108.0000	0.5128,-3.0612,-1.5209	0.0051	8192 KiB	0		no repeatable regression under frozen guard
+w1-tcp	main	200	after_on_vs_after_off	p95_us	3	584.0000,593.0000,520.0000	580.0000,539.0000,705.0000	-0.6849,-9.1062,35.5769	0.0154	10.00%	1		no repeatable regression under frozen guard
+w1-tcp	main	200	after_on_vs_after_off	p99_us	3	1098.0000,984.0000,812.0000	986.0000,835.0000,1211.0000	-10.2004,-15.1423,49.1379	0.1159	23.17%	1		no repeatable regression under frozen guard
+w1-tcp	main	200	after_on_vs_after_off	cpu_us_per_correct_query	3	130.0000,132.0000,124.0000	138.0000,130.0000,140.0000	6.1538,-1.5152,12.9032	0.0154	25.00%	0	1	inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w1-tcp	main	200	after_on_vs_after_off	rss_peak_kib_sampled	3	3136.0000,3040.0000,3108.0000	3056.0000,3064.0000,3108.0000	-2.5510,0.7895,0.0000	0.0090	32768 KiB	0		no repeatable regression under frozen guard
+w1-tcp	main	400	after_off_vs_before_off	p95_us	3	533.0000,540.0000,508.0000	526.0000,489.0000,466.0000	-1.3133,-9.4444,-8.2677	0.0131	10.00%	0		no repeatable regression under frozen guard
+w1-tcp	main	400	after_off_vs_before_off	p99_us	3	921.0000,956.0000,883.0000	930.0000,833.0000,739.0000	0.9772,-12.8661,-16.3080	0.0380	10.00%	0		no repeatable regression under frozen guard
+w1-tcp	main	400	after_off_vs_before_off	cpu_us_per_correct_query	3	110.0000,111.0000,108.0000	113.0000,105.0000,103.0000	2.7273,-5.4054,-4.6296	0.0091	25.00%	0	0	no repeatable regression under frozen guard
+w1-tcp	main	400	after_off_vs_before_off	rss_peak_kib_sampled	3	3124.0000,3140.0000,3160.0000	3140.0000,3044.0000,3112.0000	0.5122,-3.0573,-1.5190	0.0051	8192 KiB	0		no repeatable regression under frozen guard
+w1-tcp	main	400	after_on_vs_after_off	p95_us	3	526.0000,489.0000,466.0000	491.0000,519.0000,486.0000	-6.6540,6.1350,4.2918	0.0470	10.00%	0		no repeatable regression under frozen guard
+w1-tcp	main	400	after_on_vs_after_off	p99_us	3	930.0000,833.0000,739.0000	753.0000,879.0000,795.0000	-19.0323,5.5222,7.5778	0.1128	22.57%	0		no repeatable regression under frozen guard
+w1-tcp	main	400	after_on_vs_after_off	cpu_us_per_correct_query	3	113.0000,105.0000,103.0000	109.0000,112.0000,105.0000	-3.5398,6.6667,1.9417	0.0190	25.00%	0	0	no repeatable regression under frozen guard
+w1-tcp	main	400	after_on_vs_after_off	rss_peak_kib_sampled	3	3140.0000,3044.0000,3112.0000	3060.0000,3068.0000,3112.0000	-2.5478,0.7884,0.0000	0.0090	32768 KiB	0		no repeatable regression under frozen guard
