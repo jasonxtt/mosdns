@@ -1,0 +1,12 @@
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w3-r1-after_off.jsonl --stage normal-reference
+stage normal-reference is not fully correct-on-time: {Scheduled:3000 Sent:3000 Received:3000 CorrectOnTime:0 CorrectLate:0 ExpectedNegativeOnTime:0 WrongResponse:3000 ProtocolError:0 TransportError:0 Timeout:0 SenderShortfall:0}
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w3-r1-after_off.jsonl --stage normal-reference
+sender schedule verified: stage=normal-reference scheduled=3000 sent=3000
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-routing-events --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/workloads/routing.jsonl --request-ledger /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w3-r1-after_off.jsonl.requests --event-journal /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m9-server/m9-w3-r1-after_off/routing-events.jsonl --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w3-r1-after_off.jsonl --stage normal-reference
+invalid W3 request 1: sent=true outcome=wrong_response
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-counters --scenario w3 --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/workloads/routing.jsonl --event-journal /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m9-server/m9-w3-r1-after_off/routing-events.jsonl --route-a /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m9-server/m9-w3-r1-after_off/fixture-route_a.json --route-b /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m9-server/m9-w3-r1-after_off/fixture-route_b.json --route-c /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m9-server/m9-w3-r1-after_off/fixture-route_c.json
+route counter missing route-a for ip-rule-hit (IP_RULE_HIT)
+exit=1

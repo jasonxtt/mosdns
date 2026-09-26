@@ -1,0 +1,12 @@
+{
+  "reason": "major harness defect: route_a/b/c fixture IDs unsupported; stopping without replacement",
+  "runner_exit": 130,
+  "completed_sessions": 13,
+  "interrupted_run_id": "m9-w3-r2-after_on",
+  "unstarted_run_ids": [
+    "m9-w3-r2-before_off",
+    "m9-w3-r3-after_on",
+    "m9-w3-r3-before_off",
+    "m9-w3-r3-after_off"
+  ]
+}

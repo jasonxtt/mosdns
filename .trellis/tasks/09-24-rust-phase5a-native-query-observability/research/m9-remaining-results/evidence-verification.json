@@ -1,0 +1,111 @@
+{
+  "source_trees_verified": 28,
+  "primary_merges_reconstructed": 13,
+  "unchanged_executed_input_identity": true,
+  "offline_fix_not_staged": true,
+  "owned_processes_active": 0,
+  "oracle_pass": 58,
+  "oracle_fail": 12,
+  "ledger_summaries": [
+    {
+      "run_id": "m9-w2-r1-after_off",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r1-after_on",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r1-before_off",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r2-after_off",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r2-after_on",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r2-before_off",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r3-after_off",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r3-after_on",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w2-r3-before_off",
+      "records": 2502,
+      "outcomes": {
+        "correct_on_time": 2502
+      }
+    },
+    {
+      "run_id": "m9-w3-r1-after_off",
+      "records": 3000,
+      "outcomes": {
+        "wrong_response": 3000
+      }
+    },
+    {
+      "run_id": "m9-w3-r1-after_on",
+      "records": 3000,
+      "outcomes": {
+        "wrong_response": 3000
+      }
+    },
+    {
+      "run_id": "m9-w3-r1-before_off",
+      "records": 3000,
+      "outcomes": {
+        "wrong_response": 3000
+      }
+    },
+    {
+      "run_id": "m9-w3-r2-after_off",
+      "records": 3000,
+      "outcomes": {
+        "wrong_response": 3000
+      }
+    },
+    {
+      "run_id": "m9-w3-r2-after_on",
+      "records": 299,
+      "outcomes": {
+        "timeout": 111,
+        "transport_error": 34,
+        "wrong_response": 154
+      }
+    }
+  ]
+}

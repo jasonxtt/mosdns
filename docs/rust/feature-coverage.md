@@ -116,6 +116,16 @@
 
 switch1–17 逐项保留配置和持久化语义；位号必须遵守 [config-notes](../ai/config-notes.md) 的共享命名空间，特别是 fast_mark 48 和 switch17/bit 49。不能通过调整内部布局改变生成规则结果。
 
+### 5A 基础观测的有界证据（2026-09-26）
+
+当前任务 [native query observability](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/prd.md)
+已在严格 W1 UDP/TCP、W2/W3 单 listener 子集中接入审计开关、终态记录、
+基本指标和有界快照，Linux 功能回归通过。M8 W1 与 M9 W2 暖缓存仅通过
+100QPS 筛查；冷缓存只验证正确性。M9 W3 因测试夹具名称错误停止，完整
+A5 未通过，修复后的脚本未补跑。见 [当前验收报告](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/research/m9-final-assessment.md)。
+这不将 C08、P37/P38 或任何完整产品验收条目改为完成；完整审计 API、
+Prometheus、WebUI、持久化仍归5C，容量和整机验收仍待后续阶段。
+
 ## 5. 跨模块和管理面覆盖
 
 以下均为待原生接入/验收。Go 来源提供发现入口；具体参数、HTTP method/path、JSON schema、指标和格式清单由拥有任务从源代码及基线提取并冻结。

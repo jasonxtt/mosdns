@@ -554,3 +554,50 @@ Rebuilt helper must be identical across old/off/on variants and both hosts;
 artifact generation filenames need not change its CLI interface version.
 Pin source/binary hashes, verify staged tracked Rust files, use new result
 roots and never overwrite old evidence or replace an old failed attempt.
+
+## Fixture answer IDs must match the helper contract
+
+### 1. Scope / Trigger
+
+When a real-host driver launches Phase5A fixtures, listener readiness alone
+does not establish that the fixture implements the intended answers/routes.
+M9 accepted underscore IDs and returned NXDOMAIN for every W3 query.
+
+### 2. Signatures
+
+`phase5a-baseline-helper fixture --upstream-id ID --network udp --addr ADDRESS`
+feeds `fixtureAnswer(upstreamID, qname, qtype)`. Controller fixture specs must
+use the exact IDs recognized by that helper function.
+
+### 3. Contracts
+
+Current recognized IDs:forward,cache,route-a,route-b,route-c. Routing IDs use
+hyphens; counter filenames/journal identities must match. A socket bind and
+affinity check do not validate the answer contract. No DNS readiness warm-up
+is allowed before a cold-cache measurement.
+
+### 4. Validation & Error Matrix
+
+Unknown ID may still bind successfully but returns the fallback NXDOMAIN;
+response/routing/counter oracles then fail and block acceptance. Wrong fixture
+answers are measurement defects, not a candidate performance result. Stop a
+major mismatch and preserve failed/unstarted slots without silent replacements.
+
+### 5. Good / Base / Bad Cases
+
+Good:route-a appears in helper switch and controller specs. Base:cache uses
+its recognized identity without pre-warming. Bad:route_a binds yet cannot
+answer the expected W3 cases.
+
+### 6. Tests Required
+
+Check controller fixture IDs independently against helper answer dispatch
+cases; the M9 regression is RED for underscore IDs and GREEN for hyphens.
+Existing response, ordered-route journal and per-upstream counters must pass
+on a separately authorized fixed batch before measured acceptance.
+
+### 7. Wrong vs Correct
+
+Wrong: treat successful UDP bind as proof that route_a works, then repeat
+failed measurements until passing. Correct: verify exact helper identities,
+retain invalid evidence, repair offline and authorize/pin any new traffic batch.

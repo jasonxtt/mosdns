@@ -1,0 +1,15 @@
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w2-r3-after_on.jsonl --stage warm-reference
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w2-r3-after_on.jsonl --stage warm-reference
+sender schedule verified: stage=warm-reference scheduled=2500 sent=2500
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w2-r3-after_on.jsonl.cold --stage warm-prefill
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w2-r3-after_on.jsonl.cold --stage warm-prefill
+sender schedule verified: stage=warm-prefill scheduled=2 sent=2
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-session-counters --scenario w2 --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/workloads/cache.jsonl --counter /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m9-server/m9-w2-r3-after_on/fixture-cache.json --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w2-r3-after_on.jsonl.combined --run-id m9-w2-r3-after_on
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11 verify-warm-ttl --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/workloads/cache.jsonl --request-ledger /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/derived/m9-w2-r3-after_on.jsonl.requests --prefill-stage warm-prefill --warm-stage warm-reference --ttl 30000ms --safety-margin 500ms
+W2 warm TTL verified for 1 stage(s) with ttl=30s safety_margin=500ms
+exit=0

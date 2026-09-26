@@ -148,7 +148,7 @@ def run_one(args,slot,root):
         else:
             server_ledger=merged+'.requests';t.transfer(args,False,str(root/'client/requests.jsonl'),server_ledger,upload=True)
             checks.append([helper,'verify-routing-events','--workload',workload,'--request-ledger',server_ledger,'--event-journal',server+'/routing-events.jsonl','--stage-result',merged,'--stage',stage_name])
-            checks.append([helper,'verify-counters','--scenario','w3','--workload',workload,'--event-journal',server+'/routing-events.jsonl','--route-a',server+'/fixture-route_a.json','--route-b',server+'/fixture-route_b.json','--route-c',server+'/fixture-route_c.json'])
+            checks.append([helper,'verify-counters','--scenario','w3','--workload',workload,'--event-journal',server+'/routing-events.jsonl','--route-a',server+'/fixture-route-a.json','--route-b',server+'/fixture-route-b.json','--route-c',server+'/fixture-route-c.json'])
         for cmd in checks:
             response=t.remote(args,False,t.quoted(cmd),check=False);code=max(code,response.returncode)
             with (root/'oracles.txt').open('a') as f:f.write(t.quoted(cmd)+'\n'+response.stdout+response.stderr+f'exit={response.returncode}\n')

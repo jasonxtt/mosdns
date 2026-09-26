@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-09-24`
+Last verified: `2026-09-26`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
@@ -46,11 +46,17 @@ no objective overload point, no resolved service-recovery result, and no
 multi-core capacity claim. None of these gates enables a production/default
 cutover.
 
-The next [stage plan](../rust/next-stage-plan.md) creates only
-`rust-phase5a-native-query-observability` in `planning` state. Its
+The [stage plan](../rust/next-stage-plan.md) created
+`rust-phase5a-native-query-observability`, now `in_progress`. Its
 [PRD](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/prd.md),
-design, and implementation plan are proposals for review; no runtime work,
-benchmark, or deployment is authorized by writing them. Inspect the live
+design and implementation plan record the authorized Slices0–3 and bounded
+validation. Basic host-owned audit/metrics are implemented and Linux workspace
+regression passes. M8 W1 TCP100QPS and M9 W2 warm100QPS screens pass; W2 cold
+has correctness-only evidence. M9 W3 was stopped because this task's harness
+used unsupported fixture IDs, so A5 and final acceptance remain closed.
+The fixture naming repair has a RED→GREEN regression test but has not been
+staged or measured. See the task's research/m9-final-assessment.md; no product
+release or task closure is authorized. Inspect the live
 Trellis task state before resuming, because archive moves and task pointers
 may change independently of this concise handover.
 
@@ -106,12 +112,14 @@ stability are the primary improvements. Memory is secondary with no required
 reduction percentage; bounded, reclaimable extra memory is acceptable when
 measurements justify the performance benefit.
 
-The immediate Phase 5A gap is native basic audit/metrics: the strict host
-currently rejects `enable_audit: true` and lacks a terminal query snapshot.
-The planned task makes W1/W2/W3 outcomes and overhead measurable without
-claiming full C08 audit/API parity. After it, a separate measurement/profiling
-task must repair offered-load validity and examine W1 TCP/W2 and multi-core
-scaling before selecting optimizations. Full cache behavior, remaining
+The strict W1 UDP/TCP and W2/W3 native host now accepts its sole listener's
+`enable_audit` flag and exposes read-only basic metrics/terminal audit snapshots.
+Linux functional tests cover bounded provenance, retention and lifecycle;
+the current task still lacks valid W3 final performance evidence due to its
+fixture naming defect. Full C08 audit/API parity remains Phase5C. Later
+measurement/profiling must separately examine higher-load offered-load validity
+and multi-core scaling; current100QPS screens do not establish capacity.
+Full cache behavior, remaining
 plugins/transports and representative production query combinations remain
 5B/Phase 4 work; management and persistence remain 5C work.
 
@@ -128,9 +136,10 @@ multi-core performance.
 - Reproducible performance/stability workloads and threshold-freeze rules:
   `docs/rust/performance-validation.md`.
 
-The current task is planning only. Implementation requires review of its latest
-PRD/design/implement summary in a later user message; benchmarks and deployment
-remain separately gated by that task's exact scope and the project rules.
+The current task is in progress with final A5 acceptance blocked. The single
+M9 batch has been stopped and must not be silently replaced. Read its latest
+PRD/design/implement and final report before proposing a separately authorized
+W3 correction batch. Deployment and lifecycle closure remain gated.
 
 ## Non-negotiable constraints
 

@@ -1,0 +1,30 @@
+{
+  "host": "mosdns-rust",
+  "files": {
+    "fixture-profile.json": "929047dfda299ae69417394499b4c18a7c2021b7764d7a0427b91ce6c8acd129",
+    "fixture-route_a.json": "2fee1164d781b27c078dce24797908e993d06d485dcbfa221f19aa333e780f65",
+    "fixture-route_b.json": "85d6c782051af651ba441e61412b0f72940fea439554cc4c1540bbbf2f3a9830",
+    "fixture-route_c.json": "f2f4a7fb02da4c733ab7e1566c441375d3b6a7c2ababe30f67a5b8395b02216d",
+    "fixture.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture_b-profile.json": "929047dfda299ae69417394499b4c18a7c2021b7764d7a0427b91ce6c8acd129",
+    "fixture_b.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture_b.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture_c-profile.json": "929047dfda299ae69417394499b4c18a7c2021b7764d7a0427b91ce6c8acd129",
+    "fixture_c.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture_c.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "owned.json": "29dd442c38aee2184ecaf1fb04f292efeac62e345253ab48bbb15b2c9c1deafd",
+    "ready": "90ec9e0a18aa452ab22bdcde78f2ef288bd2131163cc0105919e2a63f027a4bf",
+    "routing-events.jsonl": "d252d021c7daf939ad3f6cc804b78d0be1ca41890d356bfc5da91eb1b768f3a3",
+    "routing-events.jsonl.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sampler.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sampler.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "samples/metadata.json": "e3c406e2bf10121286e916d25c1faf25c671d8689960c48d13eb3f444372485d",
+    "samples/ready": "90ec9e0a18aa452ab22bdcde78f2ef288bd2131163cc0105919e2a63f027a4bf",
+    "samples/resource-samples.jsonl": "1c39b501378dc7766903159ad6153c631764e189653b7746bcd6a5a7fbfe483c",
+    "samples/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sut.json": "86ee9921275322ded303cd971e473e3947501af216427f7097906b1722e2736b",
+    "sut.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sut.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
