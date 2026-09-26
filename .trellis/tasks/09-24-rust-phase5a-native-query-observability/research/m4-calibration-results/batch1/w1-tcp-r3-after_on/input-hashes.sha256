@@ -1,0 +1,11 @@
+f6758fb2b2eb8056d6d1c2aef320a3357d005b92685136dec457d5543bd9d729  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/configs/forward-udp.yaml
+1a2280f44ad07ec2111eeb09f6d1904e66b65d52a20f2df1bb14fff22458b8a1  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/configs/forward-tcp.yaml
+7f521ae011c28b4e102ff75437ebb943ba11f4bdc09aa656c41290ccde4b61c7  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/configs/cache.yaml
+66f358dbe2315df2aab1ad81668cec980b2f11aa68f863acad522c8e0c9fc651  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/configs/routing.yaml
+32ae1a43cae5f4e85b0a058d389d2071a8d7cf844aad98b31137f95b57715aa2  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/workloads/forward.jsonl
+7680cd55ccf477972cd700c05e72c83c52ab1a55643b9a98bb610629035214ed  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/workloads/cache.jsonl
+dbb582dc9d623af54e501639b7a52538b1e1d9e493fa0f0f6a4f4714ea0176c1  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/workloads/routing.jsonl
+d888d849f9f314e49b6d1d4fc8a0abe5412a841b5ccf5bc20f52a2c890390bee  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/scripts/run-phase5a-baseline.sh
+397bdacf708a47894362d42b0cc12575a6c41ca34714db8d3d0be393ccbd654a  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/repo/tests/phase5a-baseline/cmd/phase5a-baseline/main.go
+254500ec00527850f0f137bcc7e9ac26ff4953d6600bfc00eb7a7fbc2afc436d  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v4/phase5a-baseline-helper-v9
+370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa  /root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust

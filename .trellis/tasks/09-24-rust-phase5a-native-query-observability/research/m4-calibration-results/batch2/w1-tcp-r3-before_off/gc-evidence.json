@@ -1,0 +1,20 @@
+{
+  "logs": [
+    {
+      "path": "pilot.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gc_trace_lines": 0
+    },
+    {
+      "path": ".run.d4q360/forward.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gc_trace_lines": 0
+    }
+  ],
+  "gc_trace_lines": 0,
+  "sampled_rss_peaks_kib": {
+    "load-generator": 48612,
+    "fixture-1": 21252
+  },
+  "qualified": true
+}
