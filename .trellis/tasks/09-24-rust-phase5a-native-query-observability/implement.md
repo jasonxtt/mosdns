@@ -91,6 +91,34 @@ terminate as local SERVFAIL under the existing sequence contract; the added
 fallback case is an upstream B SERVFAIL response followed by the existing C
 route, with only C marked final.
 
+## Authorized W3-only remediation (M10, 2026-09-26)
+
+User confirmed authorization to run only corrected W3 nine sessions once and
+re-review the missing evidence finding M9-FINAL-001/P1-1. Executor inline;
+selected002reviewer unchanged. Unit1 pins corrected harness in independent
+M10 roots, runs focused harness checks and no-query preflight, then prospective
+review. Unit2 after PASS executes exactly nine W3 sessions, consolidates
+evidence and submits scoped A5/A6 remediation re-review. Existing Linux/M8 W1/
+M9 W2 and A1–A4 evidence retained; do not rerun them. No tuning, replacement,
+extra load, runtime changes, deployment, archive or lifecycle closure.
+
+Same old/off/on balanced three repetitions,100QPS30s,3000queries per session,
+zero errors/shortfall and existing route journal/counter/response/sender oracles.
+Paired median p95/p99 off/old and on/off<=1.10; CPU/RSS auxiliary. Same binary,
+helper, corpus, configs, CPU masks and hardware. Only fixture naming repair
+and fresh generation paths differ from M9. See measurement-revision-v10.md.
+
+M10 preparation: four focused tests RED on missing new driver/controller then
+GREEN; all56 measurement regressions pass (one Linux-only skip). Inline
+trellis-check verifies W3-only nine-slot order, unchanged numeric gate/oracles,
+helper-contract IDs/ports, owned UDP readiness and lost-SSH-reply cleanup.
+Read-only preflight rows[] passes, fixed UDP ports available without DNS
+probes.120 existing staged source/input hashes remain identical; same Rusttree
+and executable identities allow reuse of completed Linux/W1/W2 evidence.
+No new runtime/spec contract; M9 quality guideline already covers exact fixture
+IDs. M10 traffic awaits prospective PASS. Source/doc whitespace checks pass;
+immutable raw inventory spaces retained with original hashes.
+
 ## Authorized final bounded acceptance (M9, 2026-09-26)
 
 User authorized one sequence: unify remaining acceptance, one Linux regression,
