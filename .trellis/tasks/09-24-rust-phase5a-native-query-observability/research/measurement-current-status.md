@@ -2,6 +2,13 @@
 
 ## Current authorized step: M7
 
+Post-M7 source-cost remediation is complete: exact-sized audit qname rendering
+and64KiB buffered helper ledger writes with flush/error preservation.
+POST-M7-CODE-001 review PASS09:37:53UTC confirms code only. See
+post-m7-remediation.md/post-m7-review-ledger.md; no new measured evidence,
+M7 performance failure unchanged. Revised sources need rebuilt pinned binaries
+and a separately frozen performance validation before any new claims.
+
 User approved simplifying to100QPS30s, old/new-off/new-on three times each.
 The bounded W1 regression now uses a predeclared paired median10% latency
 screen, without another self-control calibration loop. See
