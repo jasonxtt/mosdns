@@ -24,6 +24,10 @@ was changed by M2–M4; no new candidate acceptance data were collected.
 See `m2-calibration-assessment.md`, `m3-calibration-assessment.md`,
 `m4-calibration-assessment.md`, their adjacent selected raw/derived evidence,
 and each review ledger. Complete raw remains on mosdns-rust and is hashed.
+Final evidence/stop review `M4-REPORT-002` returned PASS at03:34:33 UTC,
+verified all120 selected M4 files and the manifest sidecar, and confirmed
+the unqualified control result and closed acceptance. This is report PASS,
+never calibration/A5 PASS; it authorizes no resampling or acceptance.
 Unit tests and shell checks cover profile enforcement, stage selection,
 qualification failure paths and GC/resource evidence on macOS/Linux.
 
