@@ -1,0 +1,1 @@
+stage normal-reference has correctness failures: {Scheduled:4996 Sent:4996 Received:4996 CorrectOnTime:4996 CorrectLate:0 ExpectedNegativeOnTime:1665 WrongResponse:0 ProtocolError:0 TransportError:0 Timeout:0 SenderShortfall:4}

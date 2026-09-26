@@ -1,0 +1,26 @@
+{
+  "host": "mosdns-rust",
+  "files": {
+    "fixture-forward.json": "580a21ea758398251c6f37cae8dc55317fe4219f16e4010ac6ece5575a6ed27a",
+    "fixture-profile.json": "929047dfda299ae69417394499b4c18a7c2021b7764d7a0427b91ce6c8acd129",
+    "fixture.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "owned.json": "f129c10d93432c7a0bfdc22df012a6d218830c27a1c4e38ca1fb1d12db8443a7",
+    "ready": "ccb5d96d867024c9447067a918d26b50c7295756f0b0daaa224dbcd36d3e27e5",
+    "sampler-normal-reference.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sampler-normal-reference.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sampler-overload.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sampler-overload.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "server-normal-reference/metadata.json": "140194cd7cbc470999c609ed5e4ff1ffb9e587c7ba5bcff777029453cd22aba5",
+    "server-normal-reference/ready": "ccb5d96d867024c9447067a918d26b50c7295756f0b0daaa224dbcd36d3e27e5",
+    "server-normal-reference/resource-samples.jsonl": "b1cf0ea4c3fc118eaad16038c93beca29e4eecff09a7042b0e4d2b93223699c5",
+    "server-normal-reference/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "server-overload/metadata.json": "710180c372d5b59a7accf131c180cb489f2e507889426c95c5479b5a1d384d2e",
+    "server-overload/ready": "ccb5d96d867024c9447067a918d26b50c7295756f0b0daaa224dbcd36d3e27e5",
+    "server-overload/resource-samples.jsonl": "30c167e49cf48ff4a2593afd724ecd120e9aeb2485943f58e35644fad3078a92",
+    "server-overload/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sut.json": "7409fd1e6de28945f16832fa5c904d2387588c329109fa897aae738d05916a8a",
+    "sut.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sut.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

@@ -1,0 +1,298 @@
+{
+  "full_local_entries_verified": 764,
+  "selected_files": 748,
+  "omitted_ledgers": 18,
+  "manifest_sha256": "fd1a8df3581cce2ad93cbc7bb886ea836ed35ed405b875c1abb81b0a1e84d5ea",
+  "raw_evidence_checks": [
+    {
+      "run_id": "w1-tcp-r1-before_off",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r1-after_off",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r1-after_on",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r2-after_off",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r2-after_on",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r2-before_off",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r3-after_on",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r3-before_off",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r3-after_off",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r1-before_off",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r1-after_off",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r1-after_on",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r2-after_off",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r2-after_on",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r2-before_off",
+      "evidence_check": "PASS"
+    },
+    {
+      "run_id": "w1-tcp-r3-after_on",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r3-before_off",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    },
+    {
+      "run_id": "w1-tcp-r3-after_off",
+      "evidence_check": "FAIL: sender/stage oracles; preceding raw/identity/coverage/GC/RSS checks pass"
+    }
+  ],
+  "remote_source_manifests": [
+    {
+      "run_id": "m6-batch1-w1-tcp-r1-after_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r1-after_on",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r1-before_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r2-after_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r2-after_on",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r2-before_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r3-after_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r3-after_on",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r3-before_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r1-after_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r1-after_on",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r1-before_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r2-after_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r2-after_on",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r2-before_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r3-after_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r3-after_on",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r3-before_off",
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r1-after_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r1-after_on",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r1-before_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r2-after_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r2-after_on",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r2-before_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r3-after_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r3-after_on",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch1-w1-tcp-r3-before_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r1-after_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r1-after_on",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r1-before_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r2-after_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r2-after_on",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r2-before_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r3-after_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r3-after_on",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    },
+    {
+      "run_id": "m6-batch2-w1-tcp-r3-before_off",
+      "host": "Debian",
+      "entries": 10,
+      "verified": true
+    }
+  ]
+}
