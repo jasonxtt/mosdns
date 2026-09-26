@@ -2,6 +2,58 @@
 
 ## Change discipline
 
+## Scenario: distributed Phase5A control evidence
+
+### 1. Scope / Trigger
+
+Split query generation and server sampling only under a prospectively reviewed
+measurement revision. Keep old/new server slots on the same fixed server;
+different client hardware is permitted. W1 qualification alone cannot pass A5.
+
+### 2. Signatures
+
+Helper v10 `run --sample-self` rejects `--sut-pid`/`--fixture-pid`. Server
+`m5-remote-tools.py sample-server` brackets locally owned SUT/fixture PIDs;
+`merge-stage` joins original host-local files offline. `run-m5-w1.py --mode
+run --reviewed-head SHA` requires the approved current source commit.
+
+### 3. Contracts
+
+Client stage records `harness_host`, `harness_go_profile`, own PID/CPU and
+`sut_pid=0`. Merged `server_resources` contains server host, PID/start/CPU,
+counts and bounded bracket duration. Equal numeric PIDs across hosts are
+valid. Both Go roles use GOMAXPROCS=1/GOGC=off/GODEBUG=gctrace=1 and absent
+GOMEMLIMIT; sample RSS cap262144KiB. Original latency/counters stay unchanged.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| cohost evidence, PID reuse, affinity mismatch, missing role | invalid |
+| bracket outside25–35.5s, fewer25 samples per role | invalid |
+| GC trace, wrong actual environment, RSS over cap | invalid |
+| fixed order/input identity mismatch or oracle exit nonzero | invalid |
+| original latency guard or 90% interval exceeds frozen margin | unqualified |
+
+### 5. Good/Base/Bad Cases
+
+Good: rebuild merged evidence from immutable client/server originals before
+qualification. Base: controls use identical archived baseline in every slot.
+Bad: read server PID from client /proc, subtract cross-host clocks, or treat
+W1 control PASS as candidate acceptance.
+
+### 6. Tests Required
+
+Reject conflicting PID options; Linux loopback DNS self-sampling records only
+the generator; readiness follows first sample and stop adds final sample;
+merge preserves latency and separates identical numeric PIDs; short coverage
+and wrong profile fail; PID ownership change refuses signal; exit race is benign.
+
+### 7. Wrong vs Correct
+
+Wrong: server PID passed to remote client sampling. Correct: client samples
+itself; server samples its own processes; merge enriches separate namespaces.
+
 - Make the minimum change that satisfies the active task. Do not refactor adjacent code or reformat unrelated files.
 - Every changed line must trace to a requirement in the task. Remove only imports or code made unused by that change.
 - Preserve unrelated dirty worktree changes. Trellis auto-commit is disabled for this repository.

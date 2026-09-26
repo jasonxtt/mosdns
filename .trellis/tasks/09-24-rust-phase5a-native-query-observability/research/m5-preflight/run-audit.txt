@@ -1,0 +1,2 @@
+start_utc=2026-09-26T07:14:07.806663+00:00
+mode=identical-baseline W1 calibration; every slot audit off

@@ -1,8 +1,13 @@
 # Measurement state, 2026-09-26
 
 The user authorized correction/review, qualified stable controls, then
-resumption of acceptance. Corrections and prospective reviews are complete;
+resumption of acceptance. M2–M4 corrections and prospective reviews are complete;
 stable controls have **not** been established. Acceptance must stay closed.
+
+M5 is being prepared with10.0.0.50 as client and mosdns-rust as server.
+Read-only preflight passed; zero measured attempts. Unit1 prospective review
+must pass before the fixed18-attempt W1 control run. No extra hardware or
+resource allocation is required; thresholds and old verdicts remain unchanged.
 
 | Revision | Fixed attempts | Valid primary | Correct on time | Qualified latency intervals | Control result |
 |---|---:|---:|---:|---:|---|

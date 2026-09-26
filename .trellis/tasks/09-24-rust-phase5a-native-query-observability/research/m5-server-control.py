@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Start/stop only owned W1 sessions; no benchmark traffic is generated here."""
+import argparse
+import hashlib
+import json
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+BASE = Path('/root/mosdns-rust-phase5a-native-query-observability-545ba29')
+INPUT = BASE / 'measurement-v5'
+RESULTS = BASE / 'results-m5-server'
+BEFORE = Path('/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust')
+BASELINE_SHA = '370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa'
+HELPER_SHA = '28d5faf5f5129aa990aac51efd8752eba655b852f0bcb27619b216e572c0450e'
+
+
+def process_start(pid):
+    text = Path(f'/proc/{pid}/stat').read_text()
+    return text[text.rindex(')') + 2:].split()[19]
+
+
+def terminate_owned(record):
+    pid = record['pid']
+    try:
+        identity = process_start(pid)
+    except FileNotFoundError:
+        return
+    if identity != record['start_identity']:
+        raise ValueError('process ownership changed; refusing signal')
+    try:
+        descriptor = os.pidfd_open(pid)
+    except ProcessLookupError:
+        return
+    try:
+        if process_start(pid) != identity:
+            raise ValueError('process ownership changed before signal')
+        signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+    except (FileNotFoundError, ProcessLookupError):
+        return
+    finally:
+        os.close(descriptor)
+    deadline = time.monotonic() + 5
+    while Path(f'/proc/{pid}/stat').exists():
+        try:
+            text = Path(f'/proc/{pid}/stat').read_text()
+        except FileNotFoundError:
+            return
+        if text[text.rindex(')') + 2:].split()[0] == 'Z':
+            return
+        if time.monotonic() >= deadline:
+            raise ValueError('owned process did not stop within bound')
+        time.sleep(.05)
+
+
+def start(root):
+    helper = INPUT / 'phase5a-baseline-helper-v10'
+    config = INPUT / 'forward-tcp-lan.yaml'
+    if socket.gethostname() != 'mosdns-rust' or int(subprocess.check_output(['getconf', '_NPROCESSORS_ONLN'])) != 2:
+        raise ValueError('wrong fixed server host/topology')
+    for path, expected in ((BEFORE, BASELINE_SHA), (helper, HELPER_SHA)):
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError('wrong fixed executable identity')
+    original = (INPUT / 'repo/tests/phase5a-baseline/configs/forward-tcp.yaml').read_bytes()
+    if hashlib.sha256(original).hexdigest() != '1a2280f44ad07ec2111eeb09f6d1904e66b65d52a20f2df1bb14fff22458b8a1':
+        raise ValueError('wrong original TCP config')
+    if config.read_bytes() != original.replace(b'listen: "127.0.0.1:15354"', b'listen: "10.0.0.92:15354"'):
+        raise ValueError('LAN overlay changes more than listener bind')
+    for address in (('10.0.0.92', 15354), ('127.0.0.1', 15454)):
+        with socket.socket() as probe:
+            probe.bind(address)
+    root.mkdir(parents=True, exist_ok=False)
+    env = dict(os.environ, GOMAXPROCS='1', GOGC='off', GODEBUG='gctrace=1')
+    env.pop('GOMEMLIMIT', None)
+    owned = {}
+    try:
+        def launch(role, cpus, command, environment):
+            with (root / f'{role}.stdout').open('x') as stdout, (root / f'{role}.stderr').open('x') as stderr:
+                child = subprocess.Popen(['taskset', '-c', cpus, *command], env=environment,
+                                         stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
+            owned[role] = dict(pid=child.pid, start_identity=process_start(child.pid))
+            (root / 'owned.json').write_text(json.dumps(owned, indent=2))
+            return child
+        fixture = launch('fixture', '1', [str(helper), 'fixture', '--network', 'tcp', '--addr', '127.0.0.1:15454',
+                         '--upstream-id', 'forward', '--counter', str(root / 'fixture-forward.json')], env)
+        deadline = time.monotonic() + 5
+        while not (root / 'fixture-forward.json').exists():
+            if fixture.poll() is not None or time.monotonic() >= deadline:
+                raise ValueError('fixture startup failed')
+            time.sleep(.05)
+        sut = launch('sut', '0', [str(BEFORE), 'start', '-c', str(config)], os.environ.copy())
+        deadline = time.monotonic() + 5
+        while True:
+            if sut.poll() is not None or time.monotonic() >= deadline:
+                raise ValueError('SUT startup failed')
+            try:
+                with socket.create_connection(('10.0.0.92', 15354), timeout=.2):
+                    break
+            except OSError:
+                time.sleep(.05)
+        for role, cpus in (('sut', '0'), ('fixture', '1')):
+            subprocess.run([str(helper), 'verify-affinity', '--pid', str(owned[role]['pid']), '--expected', cpus], check=True)
+        actual_env = dict(item.split('=', 1) for item in Path(f'/proc/{fixture.pid}/environ').read_text().split('\0') if '=' in item)
+        (root / 'fixture-profile.json').write_text(json.dumps({key: actual_env.get(key, '') for key in ('GOMAXPROCS', 'GOGC', 'GODEBUG', 'GOMEMLIMIT')}))
+        (root / 'sut.json').write_text(json.dumps({'sha256': BASELINE_SHA, 'path': str(BEFORE)}))
+        (root / 'ready').write_text(root.name + '\n')
+    except Exception:
+        for role in ('sut', 'fixture'):
+            if role in owned:
+                terminate_owned(owned[role])
+        raise
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('command', choices=('start', 'stop'))
+    parser.add_argument('--result', required=True)
+    args = parser.parse_args()
+    root = Path(args.result).resolve()
+    if root.parent != RESULTS or not re.fullmatch(r'm5-[a-z0-9_-]+', root.name):
+        raise ValueError('result must be a fresh owned M5 server session')
+    if args.command == 'start':
+        start(root)
+    else:
+        records = json.loads((root / 'owned.json').read_text())
+        if not set(records) <= {'sut', 'fixture'}:
+            raise ValueError('unexpected ownership record')
+        for role in ('sut', 'fixture'):
+            if role in records:
+                terminate_owned(records[role])
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)

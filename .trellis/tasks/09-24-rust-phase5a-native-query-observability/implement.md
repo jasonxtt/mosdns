@@ -453,6 +453,32 @@ control run then started in the separate `results-m2-calibration` root.
 
 ## Review and rollback points
 
+### Frozen M5 authorization (2026-09-26)
+
+User authorized using the only available hardware: 10.0.0.50 generates
+queries, mosdns-rust runs all server slots. No resource allocation or
+physical hardware comparison. Executor=current inline; reviewer=002reviewer
+(01a0d43d-d0aa-7401-af0f-2ca3a45ba519).
+
+Unit1: implement/check/freeze distributed W1 helper v10, bounded owned server
+control, resource merge, driver and qualification. Submit exact committed
+parent/head prospectively. Unit2 after PASS: one fixed18-attempt W1 control
+run (two9-attempt balanced batches,36 windows,270000 requests), assess and
+retain every result. W2/W3 extension requires separate prospective review
+after qualified W1; candidate acceptance remains closed until full controls
+qualify and its supplement is separately reviewed. No deployment, archive,
+lifecycle completion or Rust-runtime changes are authorized here.
+
+Red/green evidence: client-only sampling flag initially failed as unknown;
+Linux controlled DNS self-sampling then passed. Missing remote sampler,
+merge, fixed-plan driver, and qualifier initially failed focused tests;
+implementations are green. Process-exit race failed with ProcessLookupError
+before the pidfd fix and passes afterwards. Six Python regressions and Go
+helper tests/vet pass locally. Read-only two-host preflight passes with both
+attempt ledgers header-only: zero measured SUT attempts. See
+research/measurement-revision-v5.md. M2–M4 and V12 verdicts stay unchanged.
+Review PASS is required before M5 traffic.
+
 Latest measurement state: M4's fixed18 W1 attempts completed03:31:06 UTC,
 36 valid primary rows/270000 correct on time. Zero GC traces, max Go-role
 sampledRSS50548KiB; only1/8 intervals qualified and batch1 repeatedTCP400
