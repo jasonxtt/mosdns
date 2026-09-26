@@ -8,6 +8,13 @@ M8roots and pinned hashes, no-query two-host preflight passed.55harness tests
 pass(oneLinux-only skip on macOS). Prospective review pending; noM8traffic.
 See measurement-revision-v8.md,m8-build-identity.json,m8-preflight.json.
 
+M8 subsequently received prospectivePASS09:56:21UTC and completed its fixed
+9run batch. All27000planned queries sent/received/correct,zero shortfall or
+responseerrors/timeouts. Pairedmedian newon/off p951.0588,p991.0579;
+newoff/old p951.0178,p990.9074. M8 passed its bounded100QPS W1screen;
+first-round audit-on p99ratio1.2715 remains disclosed. Consolidated result
+review pending; no broader acceptance. See m8-regression-assessment.md.
+
 ## M7 and remediation history
 
 Post-M7 source-cost remediation is complete: exact-sized audit qname rendering

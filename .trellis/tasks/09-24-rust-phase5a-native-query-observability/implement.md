@@ -463,6 +463,13 @@ new-on runs once and submits all results. M7 numeric/error/oracle rules remain,
 no threshold change/resampling/tuning or new workloads. No fullA5/capacity/
 production/taskclosure. See research/measurement-revision-v8.md.
 
+Unit1 received M8-UNIT1-001 PASS09:56:21UTC on a4c2fec7. Unit2 consumed
+its fixed9runs:all27000planned/sent/received/correct,zero shortfall/errors;
+four pairedmedian ratios<=1.10. M8 bounded100QPS W1screen PASSED. First
+audit-on p99ratio1.2715 disclosed, no every-round/stability/capacity claim.
+251fullmanifest entries/18remote source trees verified,244selected files
+retained. Consolidated evidence review pending; no extra traffic/fullA5.
+
 ### Post-M7 user-authorized bounded remediation
 
 User requested fixing discovered issues after discussion of audit-path costs
