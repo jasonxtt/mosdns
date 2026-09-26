@@ -47,6 +47,26 @@ measurement protocol needs explicit authorization and review before acceptance
 restarts. Source evidence: the active query-observability task's
 `research/slice3-self-control-assessment.md` (W1 TCP 400 p95/p99 false crossings).
 
+## Measurement clock sampling contract
+
+1. **Scope:** the Phase 5A helper v9 resource sampler on Linux.
+2. **Signatures:** `resourceClockTicksPerSecond() (int64, error)` resolves the
+   host constant; `sampleProcessGroup(..., clockTicks int64)` passes it to
+   `readResourceSample(pid int, hz int64)`.
+3. **Contract:** resolve before `executeStage` records its start timestamp;
+   reuse the positive frequency for every role/sample. M2's diagnostic
+   `GOMAXPROCS=1` applies to Go helpers/fixtures and is pinned in run evidence.
+4. **Errors:** missing command, malformed, zero, or negative CLK_TCK fails
+   before measured load; never silently substitute 100 on Linux.
+5. **Cases:** valid frequency preserves CPU tick/second conversions; archived
+   v8 remains selectable only with its pinned identity; per-target subprocesses
+   during measured traffic are forbidden.
+6. **Tests:** Linux sampling with a fake PATH clock command must not execute
+   it; retain per-role RSS/FD samples. Exercise valid/invalid/missing host
+   constant resolution. Preserve existing DNS/counter/event helper tests.
+7. **Wrong vs correct:** spawning `getconf` from `readResourceSample` disturbs
+   measured traffic. Resolve once before load and pass `hz` into the sampler.
+
 ## External ChatGPT planning and root-review loop
 
 ### 1. Scope / Trigger

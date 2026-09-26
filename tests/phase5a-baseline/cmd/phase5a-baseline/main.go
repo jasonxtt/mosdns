@@ -183,7 +183,7 @@ func usage() {
 }
 
 const (
-	helperVersion          = "phase5a-baseline-helper/v8"
+	helperVersion          = "phase5a-baseline-helper/v9"
 	fixtureEventSchema     = "fixture-event-v3-occurrence-time"
 	recoveryAssessmentMode = "indeterminate-no-overload-evidence"
 )
@@ -3023,6 +3023,15 @@ func executeStage(opts stageOptions) error {
 	if runtime.GOOS == "linux" && harnessCPUSet == "" {
 		return errors.New("could not capture helper process CPU affinity")
 	}
+	// Resolve the host constant before any measured-stage work. Sampling must
+	// never fork a clock query alongside the load generator and fixtures.
+	clockTicks := int64(100)
+	if opts.sutPID > 0 && runtime.GOOS == "linux" {
+		clockTicks, err = resourceClockTicksPerSecond()
+		if err != nil {
+			return fmt.Errorf("resolve resource clock before stage: %w", err)
+		}
+	}
 	started := time.Now().UTC()
 	ledger, err := openRequestLedger(opts.ledgerPath)
 	if err != nil {
@@ -3048,7 +3057,7 @@ func executeStage(opts stageOptions) error {
 			defer sampleWG.Done()
 			targets := []resourceTarget{{Role: "sut", PID: opts.sutPID}, {Role: "load-generator", PID: os.Getpid()}}
 			targets = append(targets, opts.fixtureTargets...)
-			resourceCounts = sampleProcessGroup(targets, opts.runID, opts.stage, resourcePath, stopSamples)
+			resourceCounts = sampleProcessGroup(targets, opts.runID, opts.stage, resourcePath, stopSamples, clockTicks)
 			resourceCount = resourceCounts["sut"]
 		}()
 	}
@@ -3854,7 +3863,19 @@ func hasStageFailure(c stageCounters) bool {
 	return c.WrongResponse > 0 || c.ProtocolError > 0 || c.TransportError > 0 || c.Timeout > 0 || c.SenderShortfall > 0
 }
 
-func readResourceSample(pid int) (resourceSample, bool) {
+func resourceClockTicksPerSecond() (int64, error) {
+	out, err := exec.Command("getconf", "CLK_TCK").Output()
+	if err != nil {
+		return 0, err
+	}
+	hz, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil || hz <= 0 {
+		return 0, fmt.Errorf("invalid CLK_TCK %q", strings.TrimSpace(string(out)))
+	}
+	return hz, nil
+}
+
+func readResourceSample(pid int, hz int64) (resourceSample, bool) {
 	if runtime.GOOS != "linux" {
 		return resourceSample{}, false
 	}
@@ -3892,16 +3913,10 @@ func readResourceSample(pid int) (resourceSample, bool) {
 			}
 		}
 	}
-	hz := int64(100)
-	if out, err := exec.Command("getconf", "CLK_TCK").Output(); err == nil {
-		if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64); parseErr == nil && parsed > 0 {
-			hz = parsed
-		}
-	}
 	return resourceSample{Timestamp: time.Now().UTC(), PID: pid, UserTicks: utime, SystemTicks: stime, ClockTicksPerSecond: hz, UserSeconds: float64(utime) / float64(hz), SystemSeconds: float64(stime) / float64(hz), RSSKiB: rss, FDCount: len(fdEntries)}, true
 }
 
-func sampleProcessGroup(targets []resourceTarget, runID, stageID, path string, stop <-chan struct{}) map[string]int {
+func sampleProcessGroup(targets []resourceTarget, runID, stageID, path string, stop <-chan struct{}, clockTicks int64) map[string]int {
 	counts := make(map[string]int, len(targets))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -3912,7 +3927,7 @@ func sampleProcessGroup(targets []resourceTarget, runID, stageID, path string, s
 	write := func() bool {
 		ok := true
 		for _, target := range targets {
-			sample, sampleOK := readResourceSample(target.PID)
+			sample, sampleOK := readResourceSample(target.PID, clockTicks)
 			if !sampleOK {
 				ok = false
 				continue

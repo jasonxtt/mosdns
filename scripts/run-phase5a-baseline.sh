@@ -141,7 +141,7 @@ fi
 HELPER_BINARY="$(cd "$(dirname "${HELPER_BINARY}")" && pwd)/$(basename "${HELPER_BINARY}")"
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   helper_version="$("${HELPER_BINARY}" version)"
-  if [[ "${helper_version}" != "phase5a-baseline-helper/v8" ]]; then
+  if [[ "${helper_version}" != "phase5a-baseline-helper/v8" && "${helper_version}" != "phase5a-baseline-helper/v9" ]]; then
     echo "unsupported helper version: ${helper_version}" >&2
     exit 2
   fi

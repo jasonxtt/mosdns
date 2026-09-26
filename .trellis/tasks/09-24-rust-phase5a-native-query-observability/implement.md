@@ -419,6 +419,21 @@ pending an explicitly authorized measurement correction and reviewed frozen
 protocol. No acceptance review, finish/archive, new task, or deployment is
 authorized by this diagnostic.
 
+## Authorized measurement correction (2026-09-26)
+
+The user authorized correcting/reviewing measurement, establishing stable
+controls, and then resuming acceptance. The scoped unit sequence and explicit
+reviewer are frozen in `research/measurement-revision-v2.md`. This authorizes
+diagnostic correction within this task; the old V12 gate remains unmet.
+
+Unit 1 changes only the helper's clock-frequency resolution and version plus
+runner version compatibility. Linux red: the fake-getconf regression test
+failed because resource sampling spawned a subprocess. Green: the complete
+helper package passed on Linux and macOS, and macOS `go vet` passed. The v9
+Linux build SHA is recorded in the revision. No Rust runtime source changed.
+The reviewed protocol must qualify fixed controls before candidate acceptance
+is resumed; calibration by itself cannot approve A5.
+
 ## Review and rollback points
 
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.
