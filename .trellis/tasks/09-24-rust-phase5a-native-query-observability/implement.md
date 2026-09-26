@@ -474,6 +474,16 @@ one Linux-specific skip (covered on Linux). Remote stderr and disjoint18 IDs
 are covered. Fresh read-only dual-host preflight passes; both ledgers are
 header-only. Go/Rust/helper binary/immutable M5 sampler/analyzer unchanged.
 
+M6 prospective unit1 received FINAL: PASS at07:37:41UTC. Unit2 consumed the
+fixed18-attempt run07:38:03–07:54:50UTC: all starts succeed,8 valid attempts/
+16 valid primary windows,269960 correct actual queries and40 sender-shortfall.
+Controls remain UNQUALIFIED. Full764-entry manifest and36 remote source
+manifests verified;748 selected files retained. M6-REPORT-002 received FINAL:
+PASS at08:03:31UTC for report/stop only after correcting count unit wording.
+No W2/W3/candidate, exclusions or rerun. Sender lag cause remains unisolated;
+the next diagnostic unit is not frozen/reviewed. Acceptance stays closed and
+task remains in_progress; no lifecycle closure or deployment.
+
 ### Frozen M5 authorization (2026-09-26)
 
 User authorized using the only available hardware: 10.0.0.50 generates

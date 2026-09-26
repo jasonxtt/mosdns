@@ -1,5 +1,12 @@
 # M6 prospective review ledger
 
+Report remediation parent `99798c129abf6884ed985859f0d9e74ec8c87f22`,
+head `7755471985a913e2ade85e1c136c69cacf7356d5`, same002reviewer.
+M6-REPORT-002 atomic re-review requested after explicit F1 FAIL; counts wording
+only, no source/raw/threshold/traffic changes. Pending explicit verdict.
+FINAL: PASS — M6-REPORT-002 at2026-09-26T08:03:31Z; F1 closed. Report
+and stop only. M6 remains unqualified; no further measured run authorized.
+
 Report review parent `b664bade4e0b78b11305b2b70c9b86c76ea216ff`,
 head `99798c129abf6884ed985859f0d9e74ec8c87f22`, same002reviewer.
 Scope results/evidence/stop only; no extra run or source changes. Atomic

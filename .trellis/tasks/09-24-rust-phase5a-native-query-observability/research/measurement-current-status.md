@@ -15,10 +15,11 @@ qualify controls or authorize a further run. Startup-check correction and a
 separately frozen/reviewed next protocol are still required.
 
 User authorized the next step; M6 startup correction and disjoint generation
-are prepared. Five Linux M6 tests and local49-test measurement suite pass
+were prepared. Five Linux M6 tests and local49-test measurement suite passed
 (Linux-only TIME_WAIT case is skipped on macOS and passes on Linux). Fresh
 two-host read-only preflight passes with zero attempt ledgers. M6 prospective
-review is required before its one fixed18-attempt W1 run. No M6 traffic yet.
+review was required before its one fixed18-attempt W1 run. This paragraph
+records its zero-traffic preflight state, before the run reported below.
 
 M6 subsequently received prospective PASS and completed its one fixed18-slot
 run07:54:50UTC: all sessions start correctly, but8/18 attempts pass and16/36
@@ -26,6 +27,8 @@ windows are valid.269960 actual queries are correct on time;40 planned slots
 are dropped by the sender. Controls remain UNQUALIFIED; the mechanically
 computed8 intervals include invalid load and are diagnostic only (0/8 inside
 margin). See m6-calibration-assessment.md; acceptance stays closed.
+M6-REPORT-002 passed08:03:31UTC for evidence and stop only, after clarifying
+affected-window vs missed-request count units. No further run authorized.
 
 | Revision | Fixed attempts | Valid primary | Correct on time | Qualified latency intervals | Control result |
 |---|---:|---:|---:|---:|---|
