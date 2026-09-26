@@ -1,6 +1,20 @@
 # Measurement state, 2026-09-26
 
-## Current authorized step: M8
+## Current step: M9 stopped; final acceptance closed
+
+User authorized unify remaining criteria, one Linux regression, W2/W3 supplement
+and one final review. M9 preparation review passed12:52:56UTC. Linux workspace
+869 tests/strict Clippy/rustfmt and helper race/vet pass. All9 W2 sessions pass:
+22500 warm +18 cold queries correct, zero errors/shortfall; paired medians<=1.10.
+W3 controller incorrectly passed route_a/b/c instead of helper route-a/b/c.
+Four completed W3 sessions each returned3000 wrong responses; fifth was
+interrupted and four remaining slots never started. Major harness issue stops
+this single batch without replacement. W3 performance/A5 remain closed;
+fixture ID repair and direct helper-contract regression test are green offline,
+not staged or measured. Final A1–A6 review pending; no production or lifecycle
+closure. See m9-final-assessment.md and m9-review-ledger.md.
+
+## M8 historical state
 
 User authorized rebuilding and repeating the same simplified nine-run plan
 after reviewed source changes. Native/helper rebuilt from18d71c8c with fresh

@@ -1,0 +1,230 @@
+[
+  {
+    "run_id": "m9-w2-r1-after_off",
+    "role": "fixture",
+    "pid": 344438,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r1-after_off",
+    "role": "sut",
+    "pid": 344445,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r1-after_on",
+    "role": "fixture",
+    "pid": 344706,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r1-after_on",
+    "role": "sut",
+    "pid": 344712,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r1-before_off",
+    "role": "fixture",
+    "pid": 344172,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r1-before_off",
+    "role": "sut",
+    "pid": 344179,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r2-after_off",
+    "role": "fixture",
+    "pid": 344971,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r2-after_off",
+    "role": "sut",
+    "pid": 344977,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r2-after_on",
+    "role": "fixture",
+    "pid": 345237,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r2-after_on",
+    "role": "sut",
+    "pid": 345243,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r2-before_off",
+    "role": "fixture",
+    "pid": 345502,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r2-before_off",
+    "role": "sut",
+    "pid": 345508,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r3-after_off",
+    "role": "fixture",
+    "pid": 346297,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r3-after_off",
+    "role": "sut",
+    "pid": 346304,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r3-after_on",
+    "role": "fixture",
+    "pid": 345768,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r3-after_on",
+    "role": "sut",
+    "pid": 345775,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r3-before_off",
+    "role": "fixture",
+    "pid": 346033,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w2-r3-before_off",
+    "role": "sut",
+    "pid": 346040,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_off",
+    "role": "fixture",
+    "pid": 346805,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_off",
+    "role": "fixture_b",
+    "pid": 346812,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_off",
+    "role": "fixture_c",
+    "pid": 346818,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_off",
+    "role": "sut",
+    "pid": 346825,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_on",
+    "role": "fixture",
+    "pid": 347047,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_on",
+    "role": "fixture_b",
+    "pid": 347054,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_on",
+    "role": "fixture_c",
+    "pid": 347060,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-after_on",
+    "role": "sut",
+    "pid": 347066,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-before_off",
+    "role": "fixture",
+    "pid": 346563,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-before_off",
+    "role": "fixture_b",
+    "pid": 346569,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-before_off",
+    "role": "fixture_c",
+    "pid": 346575,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r1-before_off",
+    "role": "sut",
+    "pid": 346581,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_off",
+    "role": "fixture",
+    "pid": 347286,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_off",
+    "role": "fixture_b",
+    "pid": 347293,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_off",
+    "role": "fixture_c",
+    "pid": 347300,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_off",
+    "role": "sut",
+    "pid": 347306,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_on",
+    "role": "fixture",
+    "pid": 347531,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_on",
+    "role": "fixture_b",
+    "pid": 347540,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_on",
+    "role": "fixture_c",
+    "pid": 347546,
+    "owned_process_active": false
+  },
+  {
+    "run_id": "m9-w3-r2-after_on",
+    "role": "sut",
+    "pid": 347552,
+    "owned_process_active": false
+  }
+]

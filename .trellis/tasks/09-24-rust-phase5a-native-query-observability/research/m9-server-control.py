@@ -82,6 +82,10 @@ def start(root):
         raise
 
 
+def fixture_specs(scenario):
+    return [('fixture', 'cache', 15455)] if scenario == 'w2' else [('fixture', 'route-a', 15456), ('fixture_b', 'route-b', 15457), ('fixture_c', 'route-c', 15458)]
+
+
 def start_session(root):
     helper = INPUT / 'phase5a-baseline-helper-v11'
     config = INPUT / (SCENARIO + ('-on.yaml' if VARIANT == 'after_on' else '-off.yaml'))
@@ -100,7 +104,7 @@ def start_session(root):
         expected = expected.replace(b'enable_audit: false', b'enable_audit: true')
     if config.read_bytes() != expected:
         raise ValueError('LAN overlay changes more than listener bind')
-    specs = [('fixture', 'cache', 15455)] if SCENARIO == 'w2' else [('fixture', 'route_a', 15456), ('fixture_b', 'route_b', 15457), ('fixture_c', 'route_c', 15458)]
+    specs = fixture_specs(SCENARIO)
     for address in [('10.0.0.92', port)] + [('127.0.0.1', item[2]) for item in specs]:
         probe_available(address)
     env = dict(os.environ, GOMAXPROCS='1', GOGC='off', GODEBUG='gctrace=1')

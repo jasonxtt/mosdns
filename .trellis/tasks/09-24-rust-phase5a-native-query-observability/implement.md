@@ -124,6 +124,19 @@ same-commit dependencies restored without source changes. Source120 files
 match local pinned HEAD, no-query dual-host preflight rows[] passes. One-off
 test protocol stays task-local; no product spec change was introduced.
 
+M9 preparation received FINAL: PASS — M9-UNIT1-00112:52:56UTC. The one
+batch then completed9 valid W2 sessions:22500 warm +18 cold correct,zero errors
+or shortfall;54 W2 oracles pass and all4 paired medians<=1.10. W3 exposed this
+controller's unsupported underscore fixture IDs.4 complete W3 sessions have
+3000 wrong responses each; fifth interrupted,4slots not started. Major issue
+stops M9 without replacement; W3/A5 acceptance remains closed. Offline fixture
+ID/counter filename correction has a direct helper-contract RED→GREEN test,
+5 focused tests pass; repair is not staged or measured. All28 source trees,
+13 merges and480 fullmanifest entries verified; owned processes stopped.
+Final report research/m9-final-assessment.md maps A1–A6; coverage/handover
+and lasting fixture contract lesson updated. Final review pending, task remains
+in_progress. No archive,production,additional tests/traffic or next task.
+
 ## Slice 3 — concurrency, lifecycle, Linux evidence, review
 
 - [x] Run mixed requests with distinct IDs/routes and shutdown barriers. Verify exact audit-to-request correlation, counters, no late send or extra upstream leg, in-flight zero after drain, owner close, and rebind. Keep W1/W2/W3 correctness oracles and cache publication tests intact.

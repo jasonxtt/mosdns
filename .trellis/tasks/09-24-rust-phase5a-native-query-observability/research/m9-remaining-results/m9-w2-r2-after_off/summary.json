@@ -1,0 +1,18 @@
+{
+  "scenario": "w2",
+  "repetition": 2,
+  "variant": "after_off",
+  "run_id": "m9-w2-r2-after_off",
+  "qps": 100,
+  "duration_ms": 25000,
+  "planned": 2500,
+  "runner_exit": 0,
+  "correct": 2500,
+  "shortfall": 0,
+  "errors": 0,
+  "p95_us": 772,
+  "p99_us": 1758,
+  "p50_us": 348,
+  "rss_peak_kib": 3344,
+  "cpu_seconds_bracket": 0.23
+}
