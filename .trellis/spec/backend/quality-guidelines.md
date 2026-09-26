@@ -30,6 +30,7 @@ GOMEMLIMIT; sample RSS cap262144KiB. Original latency/counters stay unchanged.
 | Condition | Result |
 |---|---|
 | cohost evidence, PID reuse, affinity mismatch, missing role | invalid |
+| first sample start differs from owned.json or remote source manifest mismatch | invalid |
 | bracket outside25–35.5s, fewer25 samples per role | invalid |
 | GC trace, wrong actual environment, RSS over cap | invalid |
 | fixed order/input identity mismatch or oracle exit nonzero | invalid |

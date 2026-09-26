@@ -2,8 +2,8 @@ Debian
 Linux 6.19.9-x64v3-xanmod1 x86_64 GNU/Linux
 1
 100
-1635928
+1635984
 Filesystem     Type 1024-blocks    Used Available Capacity Mounted on
-/dev/sda2      ext4     9688372 2332020   6842612      26% /
+/dev/sda2      ext4     9688372 2332032   6842600      26% /
 10.0.0.92 dev ens33 src 10.0.0.50 uid 0 
     cache 

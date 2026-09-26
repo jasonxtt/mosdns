@@ -93,6 +93,11 @@ are recorded; only the four measurement environment keys are persisted.
 Qualification reconstructs merged files from originals, requires25 samples
 per role and a25–35.5-second bracket, zeroGC traces and all seven oracle exits
 zero. SourceHEAD and the exact reviewer-approved HEAD are required for run.
+Samplers require owned start identities at the first and every sample;
+qualification compares both brackets to owned.json. After session shutdown,
+each endpoint produces source-manifest.json locally; copied exact file sets
+and hashes must match before merge and again during qualification. Derived
+oracle input stays outside the immutable remote raw tree.
 The preflight snapshot in `m5-preflight/` includes two empty attempt ledgers;
 its source-head names the prospective unit's parent because it preceded commit.
 

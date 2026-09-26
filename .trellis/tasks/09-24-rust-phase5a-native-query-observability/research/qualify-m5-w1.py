@@ -31,6 +31,9 @@ def check_coverage(stage):
 
 
 def check_attempt(root):
+    driver = load('transfer_verification', 'run-m5-w1.py')
+    driver.verify_transfer(root / 'client', 'Debian')
+    driver.verify_transfer(root / 'server', 'mosdns-rust')
     # Rebuild the merge from original files instead of trusting its valid bit.
     with tempfile.TemporaryDirectory() as temp:
         regenerated = Path(temp)
@@ -48,6 +51,11 @@ def check_attempt(root):
         check_coverage(stage)
         if stage['server_resources']['host'] != 'mosdns-rust':
             raise ValueError('wrong server namespace')
+        owned = json.loads((root / 'server/owned.json').read_text())
+        for role, owner_role in (('sut', 'sut'), ('fixture-1', 'fixture')):
+            process = stage['server_resources']['processes'][role]
+            if any(str(process[key]) != str(owned[owner_role][key]) for key in ('pid', 'start_identity')):
+                raise ValueError('sampled process differs from owned server process')
     if stages[0]['server_resources']['processes'] != stages[1]['server_resources']['processes']:
         raise ValueError('server process identity changed between windows')
     if json.loads((root / 'server/fixture-profile.json').read_text()) != PROFILE:
