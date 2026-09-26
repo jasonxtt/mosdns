@@ -25,7 +25,7 @@ func TestSampleProcessGroupRecordsRSSAndFDCountsByStageAndRole(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "resource-samples.jsonl")
 	stop := make(chan struct{})
 	close(stop)
-	counts := sampleProcessGroup([]resourceTarget{{Role: "load-generator", PID: os.Getpid()}}, "run-1", "normal-reference", path, stop)
+	counts := sampleProcessGroup([]resourceTarget{{Role: "load-generator", PID: os.Getpid()}}, "run-1", "normal-reference", path, stop, 100)
 	if counts["load-generator"] != 1 {
 		t.Fatalf("sample count = %d, want 1", counts["load-generator"])
 	}
@@ -43,6 +43,52 @@ func TestSampleProcessGroupRecordsRSSAndFDCountsByStageAndRole(t *testing.T) {
 	}
 	if sample.RunID != "run-1" || sample.StageID != "normal-reference" || sample.Role != "load-generator" || sample.PID != os.Getpid() || sample.FDCount <= 0 || sample.RSSKiB <= 0 {
 		t.Fatalf("resource sample is missing stage, role, RSS, or FD evidence: %+v", sample)
+	}
+}
+
+func TestResourceSamplingDoesNotSpawnClockQueries(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("/proc resource samples are Linux-specific")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "spawned")
+	script := "#!/bin/sh\nprintf called >> '" + marker + "'\nprintf '100\\n'\n"
+	if err := os.WriteFile(filepath.Join(dir, "getconf"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	stop := make(chan struct{})
+	close(stop)
+	counts := sampleProcessGroup([]resourceTarget{{Role: "sut", PID: os.Getpid()}, {Role: "load-generator", PID: os.Getpid()}}, "clock-test", "normal-reference", filepath.Join(dir, "samples.jsonl"), stop, 100)
+	if counts["sut"] != 1 || counts["load-generator"] != 1 {
+		t.Fatalf("missing samples: %v", counts)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("resource sampling spawned getconf during the measured stage: %v", err)
+	}
+}
+
+func TestResourceClockRejectsInvalidOrMissingHostConstant(t *testing.T) {
+	for _, output := range []string{"0", "-1", "invalid", "100"} {
+		t.Run(output, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "getconf"), []byte("#!/bin/sh\nprintf '%s\\n' '"+output+"'\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir)
+			hz, err := resourceClockTicksPerSecond()
+			if output == "100" {
+				if err != nil || hz != 100 {
+					t.Fatalf("clock = %d, %v", hz, err)
+				}
+			} else if err == nil {
+				t.Fatalf("invalid clock %q was accepted", output)
+			}
+		})
+	}
+	t.Setenv("PATH", t.TempDir())
+	if _, err := resourceClockTicksPerSecond(); err == nil {
+		t.Fatal("missing getconf must fail before measurement")
 	}
 }
 
