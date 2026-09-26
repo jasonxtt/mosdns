@@ -31,7 +31,7 @@ RECOVERY_P99_CEILING_US="${RECOVERY_P99_CEILING_US:-}"
 MEASUREMENT_PROFILE="${PHASE5A_MEASUREMENT_PROFILE:-legacy}"
 case "${MEASUREMENT_PROFILE}" in
   legacy) ;;
-  m2|m3)
+  m2|m3|m4)
     if [[ "${GOMAXPROCS:-}" != 1 ]]; then
       echo "${MEASUREMENT_PROFILE} measurement requires GOMAXPROCS=1" >&2
       exit 2
@@ -43,18 +43,23 @@ case "${MEASUREMENT_PROFILE}" in
     ;;
   *) echo "unsupported measurement profile: ${MEASUREMENT_PROFILE}" >&2; exit 2 ;;
 esac
+if [[ "${MEASUREMENT_PROFILE}" == m4 && ( "${GOGC:-}" != off || "${GODEBUG:-}" != gctrace=1 || -n "${GOMEMLIMIT:-}" ) ]]; then
+  echo "m4 requires GOGC=off, GODEBUG=gctrace=1 and unset GOMEMLIMIT for test helpers" >&2; exit 2
+fi
+
+primary_only_profile() { [[ "${MEASUREMENT_PROFILE}" == m3 || "${MEASUREMENT_PROFILE}" == m4 ]]; }
 
 measurement_stage_specs() {
   printf '%s\n' "normal-reference:${NORMAL_REFERENCE_QPS}"
-  if [[ "${MEASUREMENT_PROFILE}" != m3 ]]; then
+  if ! primary_only_profile; then
     printf '%s\n' "common-load:${COMMON_LOAD_QPS}" "near-saturation:${NEAR_SATURATION_QPS}"
   fi
   printf '%s\n' "overload:${OVERLOAD_QPS}"
-  if [[ "${MEASUREMENT_PROFILE}" != m3 ]]; then
+  if ! primary_only_profile; then
     printf '%s\n' "recovery:${NORMAL_REFERENCE_QPS}"
   fi
 }
-if [[ "${MEASUREMENT_PROFILE}" == m3 ]]; then
+if primary_only_profile; then
   if [[ "${STAGE_DURATION_MS}" != 25000 || "${NORMAL_REFERENCE_QPS}" != 200 || "${OVERLOAD_QPS}" != 400 || "${REQUEST_DEADLINE_MS}" != 500 || "${LATE_DRAIN_MS}" != 100 ]]; then
     echo "m3 requires reviewed 25000ms, 200/400 QPS, 500ms deadline and 100ms drain" >&2; exit 2
   fi
@@ -543,7 +548,7 @@ run_continuous_sequence() {
     run_one_stage "${stage}" "${stage_qps}" "${stage_dir}" "${ledger_path}" "${use_one_pass}" warm
     use_one_pass=false
   done < <(measurement_stage_specs)
-  if [[ "${MEASUREMENT_PROFILE}" == m3 ]]; then
+  if primary_only_profile; then
     printf '%s\n' "status=indeterminate" "mode=indeterminate-no-overload-evidence" "reason=M3 primary latency points only; no recovery measurement" > "${RESULT_DIR}/service-recovery-assessment.txt"
     return
   fi
@@ -698,7 +703,7 @@ if [[ "${SCENARIO}" != "w2" ]]; then
 fi
 if [[ "${SCENARIO}" == "w3" ]]; then
   cp "${FIXTURE_EVENT_JOURNAL}" "${RESULT_DIR}/fixture-routing-events.jsonl"
-  if [[ "${RUN_MODE}" == "smoke" ]]; then LAST_STAGE="${RUN_MODE}-${SCENARIO}"; elif [[ "${MEASUREMENT_PROFILE}" == m3 ]]; then LAST_STAGE=overload; else LAST_STAGE=recovery; fi
+  if [[ "${RUN_MODE}" == "smoke" ]]; then LAST_STAGE="${RUN_MODE}-${SCENARIO}"; elif primary_only_profile; then LAST_STAGE=overload; else LAST_STAGE=recovery; fi
   if ! "${HELPER_BINARY}" verify-event-journal --event-journal "${RESULT_DIR}/fixture-routing-events.jsonl" --stage-result "${RESULT_DIR}/stages.jsonl" --last-stage "${LAST_STAGE}"; then
     record_invalid events "fixture event journal has a tail mismatch"
   fi
@@ -719,6 +724,7 @@ printf '%s\n' "request_deadline_ms=${REQUEST_DEADLINE_MS}" "late_drain_ms=${LATE
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   {
     printf 'measurement_profile=%s\ngomaxprocs_environment=%s\n' "${MEASUREMENT_PROFILE}" "${GOMAXPROCS:-unset}"
+    printf 'gogc_environment=%s\ngodebug_environment=%s\ngomemlimit_environment=%s\n' "${GOGC:-unset}" "${GODEBUG:-unset}" "${GOMEMLIMIT:-unset}"
     printf 'ssh_host_alias=%s\n' "${TEST_HOST_ALIAS}"
     printf 'hostname=%s\n' "$(hostname -f)"
     printf 'kernel=%s\n' "$(uname -a)"

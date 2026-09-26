@@ -453,6 +453,13 @@ control run then started in the separate `results-m2-calibration` root.
 
 ## Review and rollback points
 
+M3 completed its fixed18 W1 attempts:36 valid primary rows,270000 correct on
+time, both batches repeatedTCP200 p99 guard, only1/8 equivalent intervals.
+It stopped before W2/W3 as declared; see `research/m3-calibration-assessment.md`.
+M4 is a prospective, separately reviewed bounded helper-GC intervention;
+it keeps the same latency budgets and forbids candidate acceptance before
+qualified controls. No M4 measured traffic before its review PASS.
+
 M3 prospective revision is in `research/measurement-revision-v3.md`: longer
 25-second primary windows, TTL-checked independent warm points, fixed W1-first
 conditional calibration and unchanged latency margin/individual guards. No
