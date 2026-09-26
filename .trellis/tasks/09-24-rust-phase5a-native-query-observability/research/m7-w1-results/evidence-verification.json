@@ -1,0 +1,144 @@
+{
+  "manifest_entries_before_verification": 250,
+  "all_manifest_entries_verified": true,
+  "local": [
+    {
+      "run_id": "m7-r1-before_off",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r1-after_off",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r1-after_on",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r2-after_off",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r2-after_on",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r2-before_off",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r3-after_on",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r3-before_off",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    },
+    {
+      "run_id": "m7-r3-after_off",
+      "source_manifests": true,
+      "reconstructed_merge": true,
+      "owned_samples": true
+    }
+  ],
+  "remote": [
+    {
+      "role": "server",
+      "verified": [
+        {
+          "run_id": "m7-r1-after_off",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r1-after_on",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r1-before_off",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r2-after_off",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r2-after_on",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r2-before_off",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r3-after_off",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r3-after_on",
+          "files": 15
+        },
+        {
+          "run_id": "m7-r3-before_off",
+          "files": 15
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "verified": [
+        {
+          "run_id": "m7-r1-after_off",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r1-after_on",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r1-before_off",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r2-after_off",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r2-after_on",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r2-before_off",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r3-after_off",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r3-after_on",
+          "files": 6
+        },
+        {
+          "run_id": "m7-r3-before_off",
+          "files": 6
+        }
+      ]
+    }
+  ]
+}

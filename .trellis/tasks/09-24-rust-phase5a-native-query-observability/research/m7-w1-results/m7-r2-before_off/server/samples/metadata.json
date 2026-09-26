@@ -1,0 +1,25 @@
+{
+  "valid": true,
+  "host": "mosdns-rust",
+  "run_id": "m7-r2-before_off",
+  "stage": "normal-reference",
+  "proc_root": "/proc",
+  "counts": {
+    "sut": 32,
+    "fixture-1": 32
+  },
+  "processes": {
+    "sut": {
+      "pid": 325226,
+      "start_identity": "22955212",
+      "cpus": "0"
+    },
+    "fixture-1": {
+      "pid": 325220,
+      "start_identity": "22955207",
+      "cpus": "1"
+    }
+  },
+  "clock_ticks_per_second": 100,
+  "bracket_seconds": 30.918813196010888
+}

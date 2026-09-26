@@ -1,0 +1,15 @@
+{
+  "repetition": 2,
+  "variant": "before_off",
+  "run_id": "m7-r2-before_off",
+  "qps": 100,
+  "duration_ms": 30000,
+  "runner_exit": 0,
+  "correct": 3000,
+  "shortfall": 0,
+  "errors": 0,
+  "p95_us": 1143,
+  "p99_us": 2033,
+  "rss_peak_kib": 3140,
+  "cpu_seconds_bracket": 0.57
+}

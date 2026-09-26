@@ -8,7 +8,12 @@ screen, without another self-control calibration loop. See
 measurement-revision-v7.md. M2–M6 and higher-load V12 failures remain unchanged;
 full A5/capacity/W2/W3 acceptance stays closed. No-query two-host preflight
 passed and51 focused harness tests passed (one Linux-only skip on macOS).
-Prospective review is required before the fixed nine actual runs.
+Prospective M7-UNIT1-002 review passed08:28:41UTC; its nine-run batch then
+completed.26997actual queries all correct,3sender slots missed in2runs,
+zero response errors/timeouts. Audit-on diagnostic paired median p99ratio
+1.1101 exceeds1.10. M7 NOT PASSED; no reruns. Complete report and retained
+evidence are m7-regression-assessment.md and m7-w1-results. Consolidated
+result review is pending; full acceptance remains closed.
 
 ## Historical states (authorization at each prior boundary)
 

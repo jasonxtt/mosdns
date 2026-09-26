@@ -1,0 +1,20 @@
+{
+  "host": "mosdns-rust",
+  "files": {
+    "fixture-forward.json": "3931c21f971d186069875c61ce326bb4ba5e42c0219411539355832b4821d158",
+    "fixture-profile.json": "929047dfda299ae69417394499b4c18a7c2021b7764d7a0427b91ce6c8acd129",
+    "fixture.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "fixture.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "owned.json": "eda225fab24fd3baa2014e7d4076f413ebf4e6337e533f6c1884b30ebf281293",
+    "ready": "18b4f6099918f8c33a17659614f7a26c7216e190492ec795ebddfed00cc5b74d",
+    "sampler.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sampler.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "samples/metadata.json": "5ebb38d2dfafaddd5a58ec6a5350261c118f58806ca675c10f536566f7705ec3",
+    "samples/ready": "18b4f6099918f8c33a17659614f7a26c7216e190492ec795ebddfed00cc5b74d",
+    "samples/resource-samples.jsonl": "f04295c20414daeb25b8882fa60f0243c959e49d46c68964f7da65a8b15e845a",
+    "samples/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sut.json": "9f7fc0806cb71e1be3a77bc8bacb47ddae2db2080232ce90e27b889f50b28828",
+    "sut.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sut.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
