@@ -473,7 +473,8 @@ its single9run batch:7valid/2sender-shortfall failures,26997actual queries
 correct on time,3missed planned slots,zero responseerrors/timeouts. Paired
 median audit-on p99 diagnosticratio1.1101 exceeds1.10. M7 NOT PASSED;
 251manifest entries/18remote source trees verified;244selected files retained.
-Consolidated report review pending, no rerun or expanded acceptance.
+Consolidated M7-REPORT-001 review passed08:40:43UTC for evidence/stop only;
+M7 remains NOT PASSED, no rerun or expanded acceptance.
 
 ### M6 authorized range (user: continue next step)
 

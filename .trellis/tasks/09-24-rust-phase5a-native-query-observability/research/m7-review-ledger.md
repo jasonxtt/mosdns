@@ -21,3 +21,13 @@ FINAL: PASS; F1 closed. Reviewer verified attempted-start cleanup,
 owned PID/start stop, failed-cleanup evidence, regression and no-query hashes.
 PASS authorizes only the single frozen nine-run M7 W1 screen followed by
 consolidated evidence review, not fullA5. Execution uses this exact HEAD.
+
+M7-REPORT-001: parent ba0f4a890e96adf2210d70576bb1c4c9b82a809d,
+head8e76acec (resolve full commit in Git). One atomic consolidated request;
+turn01a0dcdd-48e9-7f02-b0e0-f345e57e7572 completed08:40:43UTC.
+FINAL: PASS — evidence and stop only; M7 regression remains NOT PASSED.
+Reviewer verified actual binary/audit variants,9total runs/3per variant,
+26997correct/3sender shortfall,failed sender/stage and passing fixture oracles,
+251fullmanifest entries/omitted9ledgers/sidecar,absence of cleanup failures.
+No new traffic, resampling, W2/W3,capacity or fullA5 authorized. Unit consumed;
+task stays in_progress, no production or lifecycle changes.
