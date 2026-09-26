@@ -1,5 +1,15 @@
 # M6 prospective review ledger
 
+Report review parent `b664bade4e0b78b11305b2b70c9b86c76ea216ff`,
+head `99798c129abf6884ed985859f0d9e74ec8c87f22`, same002reviewer.
+Scope results/evidence/stop only; no extra run or source changes. Atomic
+M6-REPORT-001 requested; pending explicit verdict.
+FINAL: FAIL — M6-REPORT-001 at2026-09-26T08:02:16Z. F1: report count unit
+should distinguish affected windows from missed requests. Corrected to3
+windows/8 missed requests at200QPS and9 windows/32 missed requests at400QPS.
+All other counts/manifests/stop decision independently verified by reviewer.
+Findings1, failed remediation rounds0; no raw data, threshold or traffic change.
+
 Attempt1 exact parent `b1ab386184f8f8c6c5f864370aad08817d1292e2`,
 head `b664bade4e0b78b11305b2b70c9b86c76ea216ff`, pushed origin/rust;
 same002reviewer. Atomic M6-UNIT1-001 sent for readiness only.

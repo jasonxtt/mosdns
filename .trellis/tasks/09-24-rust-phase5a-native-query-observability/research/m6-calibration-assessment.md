@@ -28,7 +28,9 @@ tree and every failed sender/stage oracle remain retained. No exclusion,
 replacement, resampling, parameter or threshold change.
 
 **M6 is UNQUALIFIED.** Ten attempts fail the unchanged zero-shortfall offered
-load gate. Shortfall occurs in12 windows:8 slots at200QPS and32 at400QPS.
+load gate. Shortfall occurs in12 windows:3 affected windows at200QPS miss
+8 planned requests;9 affected windows at400QPS miss32 planned requests.
+There are40 missed planned requests in total, not40 affected windows.
 Observed maximum sender lag is39376us. The offered-load gap is a measured
 sender-schedule fact; host interference, scheduling, logging, helper work or
 network causes are not isolated. Correct receipt of every actual sent query
