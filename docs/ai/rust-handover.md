@@ -47,8 +47,8 @@ multi-core capacity claim. None of these gates enables a production/default
 cutover.
 
 The [stage plan](../rust/next-stage-plan.md) created
-`rust-phase5a-native-query-observability`, now `in_progress`. Its
-[PRD](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/prd.md),
+`rust-phase5a-native-query-observability`, completed and archived on 2026-09-26. Its
+[PRD](../../.trellis/tasks/archive/2026-09/09-24-rust-phase5a-native-query-observability/prd.md),
 design and implementation plan record the authorized Slices0–3 and bounded
 validation. Basic host-owned audit/metrics are implemented and Linux workspace
 regression passes. M8 W1 TCP100QPS and M9 W2 warm100QPS screens pass; W2 cold
@@ -58,8 +58,8 @@ ordered routing events; unchanged paired median gates pass. Original driver
 FAIL (shared-clock route oracle and one exited-process cleanup race) is retained.
 A separate unique-ID offline proof and complete process-exit receipts pass;
 M10-FINAL-001 explicitly approved the repair and bounded A5/A6 acceptance.
-See the task's research/m10-w3-assessment.md. No release or task closure is
-authorized. Inspect live Trellis task state before resuming, because archive moves and task pointers
+See the task's research/m10-w3-assessment.md. User authorized lifecycle closure and GitHub push; production remains gated.
+Inspect live Trellis task state before resuming, because archive moves and task pointers
 may change independently of this concise handover.
 
 Completed milestones (all archived; each archive holds its own evidence):
@@ -137,10 +137,10 @@ multi-core performance.
 - Reproducible performance/stability workloads and threshold-freeze rules:
   `docs/rust/performance-validation.md`.
 
-The current task stays in progress. M10 supplied the separately authorized W3
-correction batch. Retain M9's invalid verdict and M10's raw and derived proofs
-with M10-FINAL-001 bounded A5/A6 PASS. This report authorizes no further traffic.
-Deployment and lifecycle closure remain gated.
+The basic-observability task completed and archived after explicit user
+authorization following M10-FINAL-001 PASS. Preserve M9's invalid verdict and
+M10's raw/derived evidence. No further traffic, deployment or next task is
+authorized by this closure. Read the stage plan before choosing subsequent work.
 
 ## Non-negotiable constraints
 

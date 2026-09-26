@@ -1,6 +1,6 @@
 # Rust Phase 5A native query observability
 
-Status: in progress; bounded A1–A6 acceptance passed M10-FINAL-001 on 2026-09-26. Lifecycle closure remains separately gated. Planning review passed and the user authorized Slices 0–3 on 2026-09-25. Base branch: `rust`.
+Status: completed; bounded A1–A6 acceptance passed M10-FINAL-001 on 2026-09-26. User authorized archive and GitHub push on 2026-09-26. Planning review passed and the user authorized Slices 0–3 on 2026-09-25. Base branch: `rust`.
 
 ## Goal and value
 
@@ -54,3 +54,11 @@ A1–A6 review complete this bounded gate; no capacity/production/Phase5 closure
 ## Out of scope and deferred gates
 
 Complete Go audit v1/v2 JSON/API schema, audit start/stop/capacity/clear endpoints, persistent audit settings, Vue/compatibility UI, Prometheus `/metrics`, `metrics_collector`/`query_summary` plugin parity, other transports/listeners, arbitrary plugin graphs, production deployment, Go/Rust rerun, full overload/soak, multi-core runtime migration, hybrid retirement, and default release remain separate tasks. The task may add a test-only small retention capacity through host options; the product YAML shape stays fixed. Phase 5A is not fully closed by this one task or by the earlier limited performance comparison.
+
+## User-authorized lifecycle closure — 2026-09-26
+
+After M10-FINAL-001 bounded A1–A6 PASS, user explicitly authorized finishing,
+archiving this task and committing/pushing to GitHub. Archive via task.py with
+auto-commit disabled. This closes only the basic W1/W2/W3 observability task;
+full Phase5A, C08, capacity, production/deployment and new tasks remain gated.
+Earlier in-progress/no-closure statements retain their historical meaning.
