@@ -4,6 +4,9 @@ import socket
 import subprocess
 import tempfile
 import unittest
+import hashlib
+import json
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,6 +19,30 @@ def load(file='run-m10-w3.py'):
 
 
 class W3RemediationTests(unittest.TestCase):
+    def test_review_gate_rejects_modified_committed_tools(self):
+        m=load();tools=('driver.py','controller.py','protocol.md')
+        originals={name:('committed '+name).encode() for name in tools}
+        identity={'local_tools':{name:hashlib.sha256(data).hexdigest() for name,data in originals.items()}}
+        def git_read(command,**kwargs):
+            path=command[-1].split(':',1)[1]
+            return json.dumps(identity).encode() if path.endswith('m10-preflight/identity.json') else originals[path]
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            for name,data in originals.items():(root/name).write_bytes(data)
+            with patch.object(m,'HERE',root),patch.object(m,'TOOLS',tools),patch.object(m.t,'REPO',root),patch.object(m.subprocess,'check_output',side_effect=git_read):
+                self.assertEqual(m.verify_reviewed_tools('reviewed'),identity)
+                for name in tools:
+                    (root/name).write_bytes(b'changed after review')
+                    with self.assertRaises(ValueError):m.verify_reviewed_tools('reviewed')
+                    (root/name).write_bytes(originals[name])
+
+    def test_main_checks_reviewed_tools_before_any_host_operations(self):
+        m=load()
+        with tempfile.TemporaryDirectory() as d,patch.object(sys,'argv',['driver','--mode','run','--result-root',str(Path(d)/'result'),'--client-control','control','--reviewed-head','reviewed']),patch.object(m.subprocess,'check_output',return_value='reviewed\n'),patch.object(m,'verify_reviewed_tools',side_effect=ValueError('dirty reviewed tools')) as gate,patch.object(m,'inventory') as inventory:
+            with self.assertRaises(ValueError):m.main()
+            gate.assert_called_once_with('reviewed');inventory.assert_not_called()
+            self.assertFalse((Path(d)/'result').exists())
+
     def test_nine_balanced_w3_only_slots_with_new_ids(self):
         p=load().plan();self.assertEqual(len(p),9)
         self.assertEqual([s['variant'] for s in p],['before_off','after_off','after_on','after_off','after_on','before_off','after_on','before_off','after_off'])

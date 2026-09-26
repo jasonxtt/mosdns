@@ -119,6 +119,15 @@ No new runtime/spec contract; M9 quality guideline already covers exact fixture
 IDs. M10 traffic awaits prospective PASS. Source/doc whitespace checks pass;
 immutable raw inventory spaces retained with original hashes.
 
+M10 preparation review001 returned FAIL: HEAD-only gate did not prohibit
+uncommitted scripts after review. Scoped repair adds verify_reviewed_tools:
+all five executing tools equal reviewed git objects and committed preflight
+hashes before host operations; remote identity equals committed preflight;
+recheck tools after run. Two focused tests RED missing gate→GREEN, including
+dirty driver/controller/protocol and rejection before inventory/result creation.
+Six focused/58 measurement tests pass (oneLinux-onlyskip). Refreshed zero-query
+preflight; no traffic. Remediation re-review required before M10 batch.
+
 ## Authorized final bounded acceptance (M9, 2026-09-26)
 
 User authorized one sequence: unify remaining acceptance, one Linux regression,

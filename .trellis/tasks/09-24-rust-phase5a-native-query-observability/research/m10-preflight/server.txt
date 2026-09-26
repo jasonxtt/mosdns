@@ -2,8 +2,8 @@ mosdns-rust
 Linux 7.0.9-x64v3-xanmod1 x86_64 GNU/Linux
 2
 100
-3413276
+3416824
 Filesystem     Type 1024-blocks     Used Available Capacity Mounted on
-/dev/sda1      ext4    24560264 21186312   2326116      91% /
+/dev/sda1      ext4    24560264 21186352   2326076      91% /
 10.0.0.50 dev eth0 src 10.0.0.92 uid 0 
     cache 
