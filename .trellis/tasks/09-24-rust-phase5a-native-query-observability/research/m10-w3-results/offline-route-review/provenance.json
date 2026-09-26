@@ -1,0 +1,12 @@
+{
+  "original_driver_assessment_sha256": "b0fd2f8390d320c10c58e8d66549b98651edbbd6fe659fb22400199d642d19a6",
+  "original_rows_sha256": "1b264b716744c41847d90fa121048d8878660166e19f71a280af2f3585f246c1",
+  "original_verdict_unchanged": true,
+  "original_helper_routing_failures": 9,
+  "other_original_helper_oracles_passed": 27,
+  "cleanup_exit_receipts": 1,
+  "cleanup_proof_sha256": "f9e555df11f5ebc1b3ff6d21a38bc93fc5b2b12880d2689e68640a18911579fe",
+  "postbatch_identity_sha256": "95135f3afa0dae54c9e1d8a7b7d7692b1f106e972e3be3be6825f95e67327e57",
+  "new_queries": 0,
+  "oracle_sha256": "55bff2ecab36990e91217d9a4691d9dc3be622357d342738b70bad2fe9d814e7"
+}

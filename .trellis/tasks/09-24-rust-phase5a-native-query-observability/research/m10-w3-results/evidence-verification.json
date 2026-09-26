@@ -1,0 +1,17 @@
+{
+  "raw_manifest_entries": 341,
+  "source_trees_verified": 18,
+  "primary_merges_reconstructed": 9,
+  "owned_sample_identities_verified": 9,
+  "owned_processes_active": 0,
+  "original_route_oracle_failures": 9,
+  "original_response_sender_counter_passes": 27,
+  "offline_route_passes": 9,
+  "requests_verified": 27000,
+  "fixture_events_verified": 45000,
+  "cleanup_error_sessions": [
+    "m10-w3-r1-after_off"
+  ],
+  "cleanup_receipt_resolves_stopped_state": true,
+  "new_queries_after_batch": 0
+}

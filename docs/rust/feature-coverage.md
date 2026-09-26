@@ -121,8 +121,10 @@ switch1–17 逐项保留配置和持久化语义；位号必须遵守 [config-n
 当前任务 [native query observability](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/prd.md)
 已在严格 W1 UDP/TCP、W2/W3 单 listener 子集中接入审计开关、终态记录、
 基本指标和有界快照，Linux 功能回归通过。M8 W1 与 M9 W2 暖缓存仅通过
-100QPS 筛查；冷缓存只验证正确性。M9 W3 因测试夹具名称错误停止，完整
-A5 未通过，修复后的脚本未补跑。见 [当前验收报告](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/research/m9-final-assessment.md)。
+100QPS 筛查；冷缓存只验证正确性。M9 错误夹具 W3 仍无效。另行授权的
+M10 九场 W3 完成 27000 个正确查询，45000 条路由事件离线核对通过，四项
+配对中位数门槛通过。原始驱动 FAIL 和退出竞态日志保留；独立 DNS ID 路由
+证明及完整退出回执待最终评审，A5/A6 尚未验收。见 [当前验收报告](../../.trellis/tasks/09-24-rust-phase5a-native-query-observability/research/m10-w3-assessment.md)。
 这不将 C08、P37/P38 或任何完整产品验收条目改为完成；完整审计 API、
 Prometheus、WebUI、持久化仍归5C，容量和整机验收仍待后续阶段。
 

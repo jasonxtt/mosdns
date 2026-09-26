@@ -1,0 +1,18 @@
+{
+  "fixture": {
+    "pid": 348824,
+    "start_identity": "24784142"
+  },
+  "fixture_b": {
+    "pid": 348830,
+    "start_identity": "24784143"
+  },
+  "fixture_c": {
+    "pid": 348836,
+    "start_identity": "24784144"
+  },
+  "sut": {
+    "pid": 348843,
+    "start_identity": "24784144"
+  }
+}

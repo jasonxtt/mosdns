@@ -1,0 +1,18 @@
+{
+  "scenario": "w3",
+  "repetition": 3,
+  "variant": "after_off",
+  "run_id": "m10-w3-r3-after_off",
+  "qps": 100,
+  "duration_ms": 30000,
+  "planned": 3000,
+  "runner_exit": 1,
+  "correct": 3000,
+  "shortfall": 0,
+  "errors": 0,
+  "p95_us": 1067,
+  "p99_us": 1838,
+  "p50_us": 651,
+  "rss_peak_kib": 3364,
+  "cpu_seconds_bracket": 0.5
+}

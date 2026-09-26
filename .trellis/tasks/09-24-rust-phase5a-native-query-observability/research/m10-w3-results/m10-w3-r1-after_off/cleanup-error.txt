@@ -1,0 +1,4 @@
+Command '['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'mosdns-rust', 'python3 /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v10/m10-server-control.py stop --result /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m10-server/m10-w3-r1-after_off']' returned non-zero exit status 1.
+stderr:
+[Errno 3] No such process
+

@@ -19,6 +19,12 @@ def load(file='run-m10-w3.py'):
 
 
 class W3RemediationTests(unittest.TestCase):
+    def test_owned_process_exit_race_before_and_after_signal_is_clean(self):
+        m=load('m10-server-control.py')
+        for boundary in ('before','after'):
+            with self.subTest(boundary=boundary),patch.object(m,'process_start',side_effect=ProcessLookupError('already exited') if boundary=='before' else ['123','123']),patch.object(m.os,'pidfd_open',return_value=5,create=True),patch.object(m.os,'close'),patch.object(m.signal,'pidfd_send_signal',create=True),patch.object(m.Path,'exists',return_value=True),patch.object(m.Path,'read_text',side_effect=ProcessLookupError('already exited')):
+                m.terminate_owned(dict(pid=12345,start_identity='123'))
+
     def test_review_gate_rejects_modified_committed_tools(self):
         m=load();tools=('driver.py','controller.py','protocol.md')
         originals={name:('committed '+name).encode() for name in tools}

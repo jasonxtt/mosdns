@@ -1,0 +1,119 @@
+{
+  "m10-w3-r1-before_off": {
+    "passed": true,
+    "run_id": "m10-w3-r1-before_off",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r1-after_off": {
+    "passed": true,
+    "run_id": "m10-w3-r1-after_off",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r1-after_on": {
+    "passed": true,
+    "run_id": "m10-w3-r1-after_on",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r2-after_off": {
+    "passed": true,
+    "run_id": "m10-w3-r2-after_off",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r2-after_on": {
+    "passed": true,
+    "run_id": "m10-w3-r2-after_on",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r2-before_off": {
+    "passed": true,
+    "run_id": "m10-w3-r2-before_off",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r3-after_on": {
+    "passed": true,
+    "run_id": "m10-w3-r3-after_on",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r3-before_off": {
+    "passed": true,
+    "run_id": "m10-w3-r3-before_off",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  },
+  "m10-w3-r3-after_off": {
+    "passed": true,
+    "run_id": "m10-w3-r3-after_off",
+    "requests_verified": 3000,
+    "events_verified": 5000,
+    "unique_dns_ids": 3000,
+    "case_counts": {
+      "domain-hit": 1000,
+      "ip-rule-hit": 1000,
+      "ip-rule-miss": 1000
+    },
+    "join": "unique session DNS ID + exact question; ordered fixture sequence; no shared clock"
+  }
+}
