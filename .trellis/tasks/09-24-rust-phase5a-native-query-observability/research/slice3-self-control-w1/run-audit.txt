@@ -1,0 +1,18 @@
+diagnostic=all slots identical Rust-before binary and audit-disabled YAML
+start_utc=2026-09-26T01:31:06Z
+370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa  /root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust
+1a2280f44ad07ec2111eeb09f6d1904e66b65d52a20f2df1bb14fff22458b8a1  /root/mosdns-rust-phase5a-native-query-observability-545ba29/runner-root/tests/phase5a-baseline/configs/forward-tcp.yaml
+dd9749238cf917d1360f33fd732cca48c4ae7906ab76d1cb8f5f941e10e1e3d8  /root/mosdns-rust-phase5a-native-query-observability-545ba29/runner-root/scripts/run-phase5a-baseline.sh
+df4515d7045ddcfd30139b0407e8e9933277c1560137d71ee0f7360d7d537065  /root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/phase5a-baseline-helper
+86c5617eb2c4fe52215f3f07d478eea7df80f13f64183a0dc79d5dcf07f352db  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-self-control-w1/run-slice3-self-control-w1.sh
+52d223872c7be1b9752a02aac6b402de2eb391a069ed9f00ad9d9995f675a105  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-self-control-w1/slice3-self-control-protocol.md
+slot_utc=2026-09-26T01:31:24Z repetition=1 slot=before_off runner_exit=0
+slot_utc=2026-09-26T01:31:43Z repetition=1 slot=after_off runner_exit=0
+slot_utc=2026-09-26T01:32:01Z repetition=1 slot=after_on runner_exit=0
+slot_utc=2026-09-26T01:32:20Z repetition=2 slot=after_off runner_exit=0
+slot_utc=2026-09-26T01:32:38Z repetition=2 slot=after_on runner_exit=0
+slot_utc=2026-09-26T01:32:57Z repetition=2 slot=before_off runner_exit=0
+slot_utc=2026-09-26T01:33:15Z repetition=3 slot=after_on runner_exit=0
+slot_utc=2026-09-26T01:33:34Z repetition=3 slot=before_off runner_exit=0
+slot_utc=2026-09-26T01:33:52Z repetition=3 slot=after_off runner_exit=0
+finished_utc=2026-09-26T01:33:52Z
