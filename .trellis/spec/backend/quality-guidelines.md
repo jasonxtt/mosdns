@@ -548,3 +548,9 @@ W1/W2/W3 regressions before review.
 Wrong: buffer records but ignore Flush errors, then claim sender jitter fixed.
 Correct: preserve error/oracle gates, rebuild/pin revised helper and candidate,
 and require separately frozen measured evidence before a performance claim.
+
+M8 post-remediation validation retains M7's exact nine-run100QPS30s rules.
+Rebuilt helper must be identical across old/off/on variants and both hosts;
+artifact generation filenames need not change its CLI interface version.
+Pin source/binary hashes, verify staged tracked Rust files, use new result
+roots and never overwrite old evidence or replace an old failed attempt.

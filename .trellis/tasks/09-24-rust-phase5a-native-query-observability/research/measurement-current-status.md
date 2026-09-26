@@ -1,6 +1,14 @@
 # Measurement state, 2026-09-26
 
-## Current authorized step: M7
+## Current authorized step: M8
+
+User authorized rebuilding and repeating the same simplified nine-run plan
+after reviewed source changes. Native/helper rebuilt from18d71c8c with fresh
+M8roots and pinned hashes, no-query two-host preflight passed.55harness tests
+pass(oneLinux-only skip on macOS). Prospective review pending; noM8traffic.
+See measurement-revision-v8.md,m8-build-identity.json,m8-preflight.json.
+
+## M7 and remediation history
 
 Post-M7 source-cost remediation is complete: exact-sized audit qname rendering
 and64KiB buffered helper ledger writes with flush/error preservation.
