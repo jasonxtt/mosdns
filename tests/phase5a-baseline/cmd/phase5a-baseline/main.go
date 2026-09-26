@@ -2912,8 +2912,10 @@ type stageOptions struct {
 }
 
 type requestLedgerWriter struct {
-	mu sync.Mutex
-	f  *os.File
+	mu     sync.Mutex
+	f      *os.File
+	buffer *bufio.Writer
+	closed bool
 }
 
 type requestIDAllocator struct {
@@ -2974,7 +2976,7 @@ func openRequestLedger(path string) (*requestLedgerWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &requestLedgerWriter{f: f}, nil
+	return &requestLedgerWriter{f: f, buffer: bufio.NewWriterSize(f, 64*1024)}, nil
 }
 
 func (w *requestLedgerWriter) write(record requestRecord) error {
@@ -2985,13 +2987,24 @@ func (w *requestLedgerWriter) write(record requestRecord) error {
 	data = append(data, '\n')
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_, err = w.f.Write(data)
+	if w.closed {
+		return os.ErrClosed
+	}
+	_, err = w.buffer.Write(data)
 	return err
 }
 
 func (w *requestLedgerWriter) close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.closed {
+		return os.ErrClosed
+	}
+	w.closed = true
+	if err := w.buffer.Flush(); err != nil {
+		_ = w.f.Close()
+		return fmt.Errorf("flush request ledger: %w", err)
+	}
 	if err := w.f.Sync(); err != nil {
 		_ = w.f.Close()
 		return err

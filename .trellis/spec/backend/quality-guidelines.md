@@ -501,3 +501,50 @@ Incomplete evidence must fail closed. Unit tests cover exact ordering,
 shortfall and repeated latency regression; one prospective and one result
 review suffice for the authorized nine-run batch. Never silently reinterpret
 this as high-load equivalence or rerun until a desirable result appears.
+
+## Audit rendering and benchmark evidence buffering
+
+### 1. Scope / Trigger
+
+Audit-enabled admission and Phase5A client ledger I/O are per-query paths.
+Remove avoidable work without treating source-level improvements as measured
+tail-latency fixes. Old measurement artifacts remain immutable.
+
+### 2. Signatures
+
+`QueryObserver::admit` renders parsed qname only with audit enabled.
+`requestLedgerWriter.write(requestRecord) error` and `close() error` retain
+their interfaces; no new flags or configuration values.
+
+### 3. Contracts
+
+Rendering preserves root/trailing dot, escaped dot/backslash and three-digit
+decimal nonprintable-byte encoding; one final-sized String, no label Vec or
+formatted temporary strings. Ledger buffers at most64KiB under its existing
+mutex, persists full buffers and flushes then syncs/closes at normal completion.
+JSONL content/record counts and sender rules stay unchanged.
+
+### 4. Validation & Error Matrix
+
+Buffered write/flush/sync/close failures invalidate the run; closed writer
+rejects writes. Abnormal process termination may omit pending buffered records;
+missing/incomplete evidence is never a PASS. No dropped schedule slot is excused.
+
+### 5. Good / Base / Bad Cases
+
+Good:20concurrent records stay buffered then close writes exactly20valid rows.
+Base:400records cross64KiB and all remain readable after close.
+Bad:closed backing file causes final flush error rather than successful stage.
+
+### 6. Tests Required
+
+Admission tests assert output/capacity for root, multi-label and escaped names,
+plus metrics/eviction. Ledger tests assert concurrency, bounded full-buffer
+flush, final flush error and post-close rejection; run Go race/vet and native
+W1/W2/W3 regressions before review.
+
+### 7. Wrong vs Correct
+
+Wrong: buffer records but ignore Flush errors, then claim sender jitter fixed.
+Correct: preserve error/oracle gates, rebuild/pin revised helper and candidate,
+and require separately frozen measured evidence before a performance claim.

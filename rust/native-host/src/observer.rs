@@ -844,34 +844,54 @@ impl Drop for AdmittedQueryGuard {
 }
 
 fn render_qname(wire: &[u8]) -> String {
-    let mut labels = Vec::new();
-    let mut offset = 0;
-    while offset < wire.len() {
-        let length = usize::from(wire[offset]);
-        offset += 1;
-        if length == 0 {
-            break;
-        }
-        let Some(label) = wire.get(offset..offset.saturating_add(length)) else {
-            break;
-        };
-        let mut rendered = String::new();
+    fn labels(mut wire: &[u8]) -> impl Iterator<Item = &[u8]> {
+        std::iter::from_fn(move || {
+            let (&length, rest) = wire.split_first()?;
+            if length == 0 {
+                return None;
+            }
+            let label = rest.get(..usize::from(length))?;
+            wire = &rest[usize::from(length)..];
+            Some(label)
+        })
+    }
+
+    // Two bounded passes over an already parsed DNS name avoid allocating a
+    // string per label, a label vector, join output and formatted escapes.
+    let length = labels(wire)
+        .map(|label| {
+            1 + label
+                .iter()
+                .map(|byte| match *byte {
+                    b'.' | b'\\' => 2,
+                    0x21..=0x7e => 1,
+                    _ => 4,
+                })
+                .sum::<usize>()
+        })
+        .sum::<usize>()
+        .max(1);
+    let mut rendered = String::with_capacity(length);
+    for label in labels(wire) {
         for byte in label {
             match *byte {
                 b'.' => rendered.push_str("\\."),
                 b'\\' => rendered.push_str("\\\\"),
                 0x21..=0x7e => rendered.push(char::from(*byte)),
-                _ => rendered.push_str(&format!("\\{byte:03}")),
+                _ => {
+                    rendered.push('\\');
+                    rendered.push(char::from(b'0' + byte / 100));
+                    rendered.push(char::from(b'0' + (byte / 10) % 10));
+                    rendered.push(char::from(b'0' + byte % 10));
+                }
             }
         }
-        labels.push(rendered);
-        offset += length;
+        rendered.push('.');
     }
-    if labels.is_empty() {
-        ".".to_owned()
-    } else {
-        format!("{}.", labels.join("."))
+    if rendered.is_empty() {
+        rendered.push('.');
     }
+    rendered
 }
 
 #[cfg(test)]
@@ -896,6 +916,37 @@ mod tests {
             ["route-a".to_owned(), "route-b".to_owned()],
             NonZeroUsize::new(capacity).expect("non-zero capacity"),
         )
+    }
+
+    #[test]
+    fn audit_admission_renders_escaped_question_in_exact_sized_buffer() {
+        let observer = std::sync::Arc::new(observer(true, 2));
+        for (wire, expected) in [
+            (vec![0], "."),
+            (vec![1, b'a', 1, b'b', 0], "a.b."),
+            (vec![4, b'.', b'\\', 0, 255, 0], "\\.\\\\\\000\\255."),
+        ] {
+            let question = mosdns_dns_core::QuestionInfo {
+                qname_wire: wire,
+                qtype: 1,
+                qclass: 1,
+            };
+            let guard = observer.admit(
+                "127.0.0.1:1234".parse().expect("client"),
+                QueryTransport::Tcp,
+                &question,
+                TransportCancellation::new(),
+            );
+            let name = &guard.audit_context.as_ref().expect("audit enabled").qname;
+            assert_eq!(name, expected);
+            assert_eq!(name.capacity(), expected.len(), "reserve only final output");
+            drop(guard);
+        }
+        assert_eq!(observer.metrics_snapshot().completed_total, 3);
+        let audit = observer.audit_snapshot();
+        assert_eq!(audit.records.len(), 2);
+        assert_eq!(audit.evicted_total, 1);
+        assert_eq!(audit.records[1].qname, "\\.\\\\\\000\\255.");
     }
 
     #[test]

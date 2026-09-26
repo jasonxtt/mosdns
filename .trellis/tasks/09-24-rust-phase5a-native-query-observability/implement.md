@@ -455,6 +455,28 @@ control run then started in the separate `results-m2-calibration` root.
 
 ### M7 user-authorized simplified real-host regression
 
+### Post-M7 user-authorized bounded remediation
+
+User requested fixing discovered issues after discussion of audit-path costs
+and client sender shortfall. Executor inline, reviewer remains002reviewer
+01a0d43d-d0aa-7401-af0f-2ca3a45ba519. Unit: remove qname-render temporary
+allocations with exact output-capacity/escaping regression at admission;
+buffer client request-ledger writes with bounded64KiB memory, complete flush/
+sync/close error propagation and unchanged JSONL/oracles. Red then green each,
+focused Rust/Go checks, spec sync, commit/push and consolidated code review.
+These are source-backed avoidable costs, not proven M7 root causes. No
+schedule tolerance, load rules, metrics/audit/DNS contract or old evidence
+changes. No new measured traffic, deployment, task closure or new tasks in
+this unit. Performance validation remains a separately frozen boundary.
+
+Both source-backed cost changes are complete. Admission exact-sized qname
+regression red(capacity8vs4) then green; ledger buffer regression red(4180
+immediate filebytes) then green. Full-buffer400records/flush-error/post-close
+tests pass. Native-host88tests,clippy(alltargets,-Dwarnings),workspacefmtcheck
+pass; Go helper fullrace tests,focused ledger race and vet pass. trellis-check
+performed inline against frozen event/DNS/evidence contracts; spec updated.
+See research/post-m7-remediation.md. No new benchmark results or speedup claim.
+
 User explicitly approved the proposed simplification and instructed execution.
 Unit1 fixes the scope/protocol and reuses existing transport/owned cleanup/
 sampling/DNS oracles for9 balanced runs: baseline off,candidate off,candidate
