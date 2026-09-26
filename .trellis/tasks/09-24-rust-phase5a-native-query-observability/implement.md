@@ -134,7 +134,9 @@ ID/counter filename correction has a direct helper-contract RED→GREEN test,
 5 focused tests pass; repair is not staged or measured. All28 source trees,
 13 merges and480 fullmanifest entries verified; owned processes stopped.
 Final report research/m9-final-assessment.md maps A1–A6; coverage/handover
-and lasting fixture contract lesson updated. Final review pending, task remains
+and lasting fixture contract lesson updated. Final review M9-FINAL-001 returned
+FAIL13:12:13UTC for missing valid W3/A5; supports A1–A4/W2 and evidence/cleanup.
+No replacement run authorized; task remains
 in_progress. No archive,production,additional tests/traffic or next task.
 
 ## Slice 3 — concurrency, lifecycle, Linux evidence, review

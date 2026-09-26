@@ -13,6 +13,12 @@ It affects both old and new binaries. No W3 tail-performance inference is valid.
 The batch was stopped on this major issue:9 complete W2,4 complete failed W3,
 1 interrupted W3,4 W3 slots never started. No new traffic is authorized.
 
+Final002reviewer result M9-FINAL-00113:12:13UTC: **FINAL: FAIL** with one
+blocking finding, missing valid W3/A5 evidence. Reviewer supports bounded W2
+and the stated A1–A4 gates and independently confirms archive/cleanup records.
+No additional report-integrity or offline-repair finding was raised. Remain
+in_progress; only separately authorized W3 validation can resolve this finding.
+
 ## Linux and source gate
 
 Unchanged Rust/helper source18d71c8c, Rusttree029d171b; latest Linux workspace
@@ -102,7 +108,7 @@ Only a separately authorized, pinned W3 batch can close this evidence gap.
 | A3 | Linux observer tests: cumulative inclusive histogram, partition/reconciliation, bounded labels, exact ring eviction and100000 default capacity pass. |
 | A4 | Linux W1 UDP/TCP,W2,W3 integration: mixed identity/route, deadlines, malformed input, canceled cold publication, shutdown/drain/rebind pass. |
 | A5 | Linux functional gate and bounded M8 W1/M9 W2 pass; valid W3 comparison is missing. **FAIL/BLOCKED**, no full task acceptance. |
-| A6 | Coverage/handover updated only for proven subset, exact-path audit and consolidated review submitted. Final reviewer verdict required; cannot close while A5 is blocked. |
+| A6 | Coverage/handover updated only for proven subset, exact-path audit and consolidated review completed with FINAL: FAIL due A5. Final acceptance stays open. |
 
 Implementation discovery/refinement range for semantic review is
 c0e905612960ff6e5b3102397e500f1be50cd83c..18d71c8c06d98a405d889b1bee54021d899616b8,
