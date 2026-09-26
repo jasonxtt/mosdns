@@ -355,8 +355,8 @@ On the V12 source, `cargo test --manifest-path rust/Cargo.toml -p mosdns-native-
 helper v8, source and binary identities, fixtures, overlays, CPU sets, and ext4
 result storage. Its attempt-order output contains only the header, so no
 benchmark attempt ran during preflight; captured evidence is under
-`research/slice3-v12-preflight/`. The one official 27-attempt matrix is now
-ready to run in the fresh `results-v12-run` directory with no replacements.
+`research/slice3-v12-preflight/`. The one official 27-attempt matrix subsequently
+ran in the fresh `results-v12-run` directory with no replacements.
 
 ## V11 pinned benchmark preflight
 
@@ -382,6 +382,25 @@ attempts.
 The single frozen V11 matrix completed with all 27 runner exits at zero and no replacement attempts or invalid stages. All 63/63 primary rows were valid; all 54,000 scheduled primary requests were sent, received, and correct on time, with no late/wrong responses, protocol or transport errors, timeouts, or sender shortfalls. The 901-entry raw hash manifest (SHA-256 `533356cafd58da4684f428fb3812206beb8105793313d5d6cfd895b03c1e1372`) and its sidecar verified remotely; the full ~61 MiB raw run remains on the Linux host, and the derived evidence is captured under `research/slice3-v11-run/`.
 
 Seven p95/p99 paired guards repeated: W1 TCP 200 audit-off versus Rust-before (p95 and p99), W1 TCP 400 audit-off versus Rust-before (p99), W2 cold 200 audit-off versus Rust-before (p99), W3 200 audit-on versus audit-off (p95), and W3 400 audit-off versus Rust-before (p99) plus audit-on versus audit-off (p95). No CPU guard repeated, 13/14 CPU comparisons were inconclusive at 100-Hz resolution, and paired sampled RSS remained within budget (+132 KiB maximum audit-off versus Rust-before; +1,964 KiB maximum audit-on versus audit-off). V11 is not reviewable; see `research/slice3-v11-pilot-assessment.md`. Source inspection suggests testing the upstream identity allocation's move onto the pre-exchange critical path and duplicate audit-on identity storage as bounded follow-up hypotheses; neither is yet confirmed as causal.
+
+## V12 official matrix result
+
+The single frozen V12 matrix completed without replacement attempts: all 27
+runner exits were zero, all 63/63 primary rows were valid, and all 54,000
+scheduled requests were sent, received, and correct on time. No late or wrong
+responses, protocol or transport errors, timeouts, or sender shortfalls were
+recorded. The 901-file raw hash manifest verified remotely (SHA-256
+`52b9b1be2dc59ada84beb304b317f00e58b1b0ecbade1cd544d3c4cb51e26c34`);
+derived evidence is under `research/slice3-v12-run/` and the full ~61 MiB raw
+tree remains on the Linux benchmark host.
+
+Five frozen p95/p99 paired guards repeated: W1 TCP 200 audit-off versus
+Rust-before p95/p99, W1 TCP 400 audit-on versus audit-off p95/p99, and W2 warm
+200 audit-off versus Rust-before p95. No CPU guard repeated, though all 14 CPU
+comparisons were inconclusive at 100-Hz resolution. Sampled RSS remained within
+budget (+192 KiB maximum audit-off versus Rust-before; +1,884 KiB maximum
+audit-on versus audit-off). V12 remains blocked from review; see
+`research/slice3-v12-pilot-assessment.md`.
 
 ## Review and rollback points
 
