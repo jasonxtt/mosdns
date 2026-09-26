@@ -70,3 +70,6 @@ qualifies prior M2–M6 nor erases higher-load V12FAIL; fullA5/W2/W3/capacity
 and production acceptance stay closed. Submit this whole outcome once for
 result review; no automatic rerun or threshold change. Further fixes should
 start from these retained sender/latency records, with bounded scope.
+
+M7-REPORT-001 returned FINAL: PASS08:40:43UTC for report/evidence and stop
+only. It confirms the retained outcome, not regression/fullA5 acceptance.

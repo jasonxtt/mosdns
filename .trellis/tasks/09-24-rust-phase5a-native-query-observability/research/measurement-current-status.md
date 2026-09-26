@@ -13,7 +13,8 @@ completed.26997actual queries all correct,3sender slots missed in2runs,
 zero response errors/timeouts. Audit-on diagnostic paired median p99ratio
 1.1101 exceeds1.10. M7 NOT PASSED; no reruns. Complete report and retained
 evidence are m7-regression-assessment.md and m7-w1-results. Consolidated
-result review is pending; full acceptance remains closed.
+result review M7-REPORT-001 passed08:40:43UTC for evidence/stop only;
+M7 remains NOT PASSED and full acceptance remains closed.
 
 ## Historical states (authorization at each prior boundary)
 
