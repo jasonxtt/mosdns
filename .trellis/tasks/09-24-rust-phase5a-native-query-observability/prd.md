@@ -30,6 +30,18 @@ R6. Preserve W1/W2/W3 response bytes, upstream leg counts/order, deadlines, canc
 
 R7. Validate the new enabled/disabled paths on Linux amd64 with a frozen source/input manifest and correctness oracles. Capture a small same-host Rust-before/Rust-after probe for W1 TCP, W2 cold/warm, and W3 under valid offered load; report p50/p95/p99, correct-on-time throughput, CPU, RSS, and audit-on overhead with invalid-run reasons. Freeze thresholds before official candidate runs. Treat this as a regression check, not a new Go/Rust capacity conclusion or an optimization task.
 
+### User-authorized final R7 interpretation (M9, 2026-09-26)
+
+The simplified remaining gate retains M8 W1 TCP evidence without repetition.
+W2 cold is a two-query correctness/cache-publication check for each fresh
+session; its latency observations are diagnostic, not a cold-tail statistical
+claim. W2 warm is100QPS25s within unchanged30s TTL; W3 is100QPS30s. Each
+has old/off/on balanced three repetitions, zero errors/shortfall and paired
+median p95/p99 off/old and on/off ratios<=1.10. Report p50/p95/p99, valid
+correct-on-time throughput and auxiliary CPU/RSS. Higher-load failures remain
+failures. One latest-source Linux workspace/helper regression and one final
+A1–A6 review complete this bounded gate; no capacity/production/Phase5 closure.
+
 ## Acceptance criteria
 
 - [ ] A1 (R1/R5): unchanged supported YAML with audit disabled still compiles; audit enabled compiles for W1 UDP/TCP, W2, and W3; the compiler still rejects a second listener, unknown fields, and unsupported graphs before I/O. With the sole listener's audit flag disabled, snapshots retain no query/client data.

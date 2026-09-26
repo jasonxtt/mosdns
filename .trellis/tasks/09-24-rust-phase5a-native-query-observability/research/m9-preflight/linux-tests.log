@@ -1,0 +1,1233 @@
+   Compiling mosdns-runtime v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/runtime)
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/native-host)
+   Compiling mosdns-matcher-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/matcher-core)
+   Compiling mosdns-sequence-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/sequence-core)
+   Compiling mosdns-dns-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/dns-core)
+   Compiling mosdns-upstream-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/upstream-core)
+   Compiling mosdns-cache-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/cache-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
+     Running unittests src/lib.rs (target/debug/deps/mosdns_cache_core-dce6bc7189c6bcde)
+
+running 11 tests
+test tests::native_cache_objects_are_isolated_and_return_owned_payloads ... ok
+test tests::native_and_abi_lookup_results_match_at_the_same_time ... ok
+test tests::native_cache_overwrite_and_expiry_are_exact_without_cumulative_ttl_age ... ok
+test tests::native_cache_rejects_malformed_wire_and_keeps_capacity_bounded ... ok
+test tests::panic_is_contained_at_boundary ... ok
+test wire::tests::accepts_empty_nxdomain_and_servfail_responses ... ok
+test wire::tests::ages_compressed_answer_and_preserves_opt_flags ... ok
+test wire::tests::lazy_ttl_replacement_skips_opt ... ok
+test wire::tests::rejects_invalid_label_encoding ... ok
+test wire::tests::rejects_truncated_rr_without_returning_partial_output ... ok
+test wire::tests::ttl_aging_saturates_at_zero ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mosdns_dns_core-0557bdf087dab9c7)
+
+running 56 tests
+test edns::tests::detects_presence_udp_and_do ... ok
+test edns::tests::absent_without_opt ... ok
+test edns::tests::extracts_ipv4_ecs ... ok
+test edns::tests::extracts_ipv6_ecs ... ok
+test edns::tests::family0_nonzero_netmask_is_an_error ... ok
+test edns::tests::family0_zero_netmask_yields_mapped_zero_address ... ok
+test edns::tests::family_netmask_scope_bounds_are_enforced ... ok
+test edns::tests::first_ecs_wins_and_unknown_option_skipped ... ok
+test edns::tests::ipv4_extra_wire_bytes_truncated ... ok
+test edns::tests::malformed_non_opt_body_is_not_accepted ... ok
+test edns::tests::malformed_opt_does_not_mutate_input ... ok
+test edns::tests::malformed_rdlength_is_an_error ... ok
+test edns::tests::non_root_owner_opt_is_detected ... ok
+test edns::tests::option_length_overflow_is_an_error ... ok
+test edns::tests::pointer_owner_resolves_to_in_slice_name ... ok
+test edns::tests::pointer_owner_uses_full_packet_base ... ok
+test edns::tests::self_pointer_owner_is_rejected ... ok
+test edns::tests::truncated_or_illegal_owner_is_an_error ... ok
+test edns::tests::undersized_ecs_is_an_error ... ok
+test edns::tests::unknown_family_is_a_typed_error ... ok
+test edns::tests::unsupported_extra_is_rejected_safely ... ok
+test header::tests::framing_input_not_modified ... ok
+test header::tests::patch_does_not_touch_other_flags ... ok
+test header::tests::patch_error_produces_no_partial_output_and_no_mutation ... ok
+test header::tests::http_passes_through_over_max ... ok
+test header::tests::patch_is_a_copy_not_aliased ... ok
+test header::tests::patch_rejects_qr_clear ... ok
+test header::tests::patch_rejects_short_input ... ok
+test header::tests::patch_zero_id_allowed ... ok
+test header::tests::patches_id_big_endian_into_bytes_0_1 ... ok
+test header::tests::patches_ra_bit_only ... ok
+test header::tests::stream_and_udp_reject_over_max ... ok
+test header::tests::stream_prefixes_length_big_endian ... ok
+test header::tests::synthesizes_a_self_contained_question_from_compressed_query_input ... ok
+test header::tests::synthesizes_associated_servfail_and_refused_responses ... ok
+test header::tests::udp_and_http_pass_through_without_prefix ... ok
+test header::tests::unknown_mode_is_not_constructible ... ok
+test header::tests::zero_length_response_is_framed ... ok
+test query::tests::accepts_valid_queries ... ok
+test query::tests::rejects_malformed_wire ... ok
+test query::tests::rejects_names_over_dns_wire_limit ... ok
+test query::tests::rejects_unsupported_shapes ... ok
+test resolver::tests::accepts_the_full_default_policy ... ok
+test resolver::tests::family_selects_the_expected_wire_record ... ok
+test resolver::tests::policy_bounds_are_rejected ... ok
+test resolver::tests::rejects_names_outside_plain_hostname_syntax ... ok
+test response::tests::accepts_valid_responses ... ok
+test response::tests::ages_each_non_opt_and_saturates_at_zero ... ok
+test response::tests::cache_wire_fixture_parity ... ok
+test response::tests::observes_minimal_ttl_and_count ... ok
+test response::tests::observes_zero_when_no_records ... ok
+test response::tests::observes_only_answer_addresses_but_validates_every_declared_section ... ok
+test response::tests::rejects_non_response ... ok
+test response::tests::rejects_malformed_responses ... ok
+test response::tests::rejects_truncated_rr_without_partial_output ... ok
+test response::tests::replaces_ttls_skipping_opt ... ok
+
+test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cache_core_parity.rs (target/debug/deps/cache_core_parity-0263a0fef5f5637b)
+
+running 1 test
+test aged_response_matches_dns_core_age ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/public_api.rs (target/debug/deps/public_api-22fb3e0dd80e6d8f)
+
+running 2 tests
+test crate_root_query_error_is_typed ... ok
+test crate_root_query_parse_is_usable ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resolver_wire.rs (target/debug/deps/resolver_wire-ee51167d664ade57)
+
+running 42 tests
+test accepts_matching_a_answer ... ok
+test accepts_matching_aaaa_answer ... ok
+test accepts_uncompressed_owner_equal_to_qname ... ok
+test an_owner_outside_the_chain_never_selects ... ok
+test appends_root_opt_advertising_1200_without_do_bit ... ok
+test branching_cname_chooses_the_first_reachable_address_deterministically ... ok
+test builds_a_query_for_normalized_fqdn ... ok
+test builds_aaaa_query_for_ipv6_family ... ok
+test effective_ttl_is_clamped_at_both_bounds ... ok
+test effective_ttl_uses_only_the_selected_path ... ok
+test follows_bounded_cname_chain_and_takes_minimum_ttl ... ok
+test enforces_the_chain_length_bound ... ok
+test id_and_opcode_still_precede_question_correlation ... ok
+test ignores_unrelated_authority_records_and_trailing_bytes ... ok
+test matching_question_still_reports_rcode_and_truncation ... ok
+test non_matching_question_is_classified_before_rcode_and_truncation ... ok
+test parses_are_pure_and_do_not_mutate_input ... ok
+test query_encoding_is_stable_across_calls ... ok
+test parses_opt_with_the_executable_version_field ... ok
+test reads_the_extended_rcode_from_the_opt_ttl_upper_byte ... ok
+test rejects_a_dangling_cname_in_the_chain ... ok
+test rejects_a_malformed_opt_record ... ok
+test rejects_cname_loops_and_overlong_chains ... ok
+test rejects_an_opt_record_whose_owner_is_not_the_root ... ok
+test rejects_empty_and_cname_only_answers ... ok
+test rejects_empty_and_overlong_names ... ok
+test rejects_mismatched_id ... ok
+test rejects_malformed_message_bounds ... ok
+test rejects_non_noerror_rcodes ... ok
+test rejects_query_packets_and_non_query_opcodes ... ok
+test rejects_question_mismatch ... ok
+test rejects_truncated_flagged_responses ... ok
+test rejects_wrong_family_answers ... ok
+test resolves_a_chain_whose_address_precedes_its_cname_link ... ok
+test resolves_a_two_link_chain_emitted_backwards ... ok
+test selects_first_matching_address_in_wire_order ... ok
+test selects_the_first_matching_address_even_when_a_later_one_differs ... ok
+test truncated_is_reported_before_a_cut_record_walk ... ok
+test truncated_wins_over_rcode_for_a_correlated_response ... ok
+test unreachable_and_cyclic_chains_are_rejected ... ok
+test uses_injected_query_ids_deterministically ... ok
+test wrong_question_precedence_is_preserved_for_truncated_packets ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/upstream_header.rs (target/debug/deps/upstream_header-c58e5631b4883bab)
+
+running 1 test
+test response_header_inspection_is_minimal_and_typed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mosdns_matcher_core-7b7e3556dc846c67)
+
+running 51 tests
+test full::tests::case_insensitive ... ok
+test full::tests::exact_match ... ok
+test full::tests::replace_value ... ok
+test ipnet::tests::containment_boundaries ... ok
+test ipnet::tests::disjoint_prefixes_kept ... ok
+test ipnet::tests::empty_never_matches ... ok
+test ipnet::tests::overlap_collapse_nested ... ok
+test ipnet::tests::overlap_same_address_keeps_smaller_bits ... ok
+test ipnet::tests::v4_host_exact ... ok
+test ipnet::tests::v4_inside_prefix ... ok
+test ipnet::tests::v4_mapped_matches_v4_prefix ... ok
+test ipnet::tests::v6_host_exact ... ok
+test ipnet::tests::v6_inside_prefix ... ok
+test keyword::tests::case_insensitive ... ok
+test keyword::tests::replace_value ... ok
+test keyword::tests::empty_keyword_matches_everything ... ok
+test keyword::tests::substring_match ... ok
+test mix::tests::bad_regexp_returns_error ... ok
+test mix::tests::default_domain_adds_suffix ... ok
+test mix::tests::default_full_adds_exact ... ok
+test mix::tests::duplicate_full_replaces_value ... ok
+test mix::tests::keyword_empty_matches_everything ... ok
+test mix::tests::keyword_substring_not_boundary ... ok
+test mix::tests::longer_domain_shadows_shorter ... ok
+test mix::tests::missing_default_returns_error_for_bare_rule ... ok
+test mix::tests::non_ascii_domain_rules_are_rejected_before_snapshot_build ... ok
+test mix::tests::precedence_full_over_domain ... ok
+test mix::tests::domain_wins_over_regex_and_keyword ... ok
+test mix::tests::regex_before_keyword ... ok
+test mix::tests::root_rule_matches_everything ... ok
+test mix::tests::typed_rule_works_without_default ... ok
+test mix::tests::unsupported_type_returns_error ... ok
+test normalize::tests::matches_go_golden ... ok
+test regex::tests::empty_matcher_never_matches ... ok
+test regex::tests::basic_matching ... ok
+test regex::tests::invalid_pattern_rejected ... ok
+test trie::tests::basic_suffix_matching ... ok
+test trie::tests::case_insensitive ... ok
+test regex::tests::go_compatibility_grammar_is_explicit_and_stateful ... ok
+test trie::tests::empty_never_matched ... ok
+test trie::tests::root_match_any ... ok
+test valued::tests::duplicate_payloads_are_merged_and_pooled ... ok
+test valued::tests::empty_snapshot_is_valid_and_has_no_match ... ok
+test valued::tests::generated_payloads_preserve_merge_invariants ... ok
+test valued::tests::inheritance_and_overlap_order_are_deterministic ... ok
+test valued::tests::concurrent_reads_share_one_immutable_snapshot ... ok
+test valued::tests::merges_overlapping_rule_types_and_inherits_domain_results ... ok
+test valued::tests::rejects_invalid_rule_types_and_regexps ... ok
+test valued::tests::rejects_non_ascii_rules_and_unsafe_regexps_before_build ... ok
+test valued::tests::versioned_encodings_round_trip_and_reject_malformed_lengths ... ok
+test valued::tests::large_result_payload_is_sorted_and_deduplicated ... ok
+
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/mosdns_native_host-f83801a841d1322a)
+
+running 47 tests
+test assembly::tests::audit_retention_defaults_to_the_frozen_hundred_thousand_record_limit ... ok
+test assembly::tests::catalog_closes_all_distinct_forward_owners_and_rejects_duplicates ... ok
+test cli::tests::accepts_both_config_spellings ... ok
+test cli::tests::rejects_other_commands_and_extra_arguments ... ok
+test config::tests::compiles_the_frozen_udp_and_tcp_shapes_without_rewriting_them ... ok
+test assembly::tests::valid_graph_is_pre_io_and_invalid_graph_never_reaches_assembly ... ok
+test config::tests::declaration_order_and_references_are_compiled_after_collection ... ok
+test config::tests::rejects_duplicates_and_missing_required_roles ... ok
+test config::tests::independently_proves_the_remaining_fail_closed_categories ... ok
+test config::tests::rejects_every_unsupported_shape_before_assembly ... ok
+test execution::tests::audit_disabled_execution_keeps_metric_facts_without_audit_details ... ok
+test execution::tests::cache_hit_skips_the_exact_forward_dispatch_and_miss_publishes_at_completion ... ok
+test execution::tests::canonical_machine_resumes_two_external_legs_with_one_deadline ... ok
+test execution::tests::dropped_w2_execution_retains_cache_miss_and_interrupted_forward_attempt ... ok
+test execution::tests::dropped_w3_execution_does_not_publish_intermediate_response_as_final ... ok
+test execution::tests::execution_observation_reports_actual_w3_final_route_and_ordered_legs ... ok
+test execution::tests::failed_first_multi_forward_leg_stops_before_the_next_external ... ok
+test execution::tests::execution_observation_tracks_w1_w2_and_servfail_provenance ... ok
+test execution::tests::failed_second_multi_forward_leg_does_not_republish_first_answer ... ok
+test execution::tests::interleaved_request_cancellation_does_not_cross_request_state ... ok
+test execution::tests::malformed_address_rdata_is_terminal_for_multi_forward_w3 ... ok
+test execution::tests::mismatched_question_is_terminal_and_never_reaches_the_next_external ... ok
+test execution::tests::publication_deadline_drops_the_pending_token_without_changing_w1_output ... ok
+test execution::tests::unknown_executable_id_fails_closed_without_selecting_the_only_forward ... ok
+test matchers::tests::qname_is_exact_case_insensitive_and_requires_plain_wire_labels ... ok
+test matchers::tests::response_ip_matches_only_a_raw_answer_without_mutating_state ... ok
+test observer::tests::audit_admission_renders_escaped_question_in_exact_sized_buffer ... ok
+test observer::tests::audit_ring_reserves_a_bounded_initial_capacity_only_when_enabled ... ok
+test observer::tests::disabled_audit_keeps_basic_metrics_without_building_query_details ... ok
+test observer::tests::dropped_send_preserves_completed_facts_from_boxed_observation ... ok
+test observer::tests::duration_histogram_uses_inclusive_frozen_bounds_and_positive_infinity ... ok
+test execution::tests::upstream_servfail_is_cacheable_but_local_servfail_is_not ... ok
+test observer::tests::enabled_audit_retains_the_newest_records_and_counts_evictions ... ok
+test observer::tests::failure_provenance_has_typed_upstream_and_local_cases ... ok
+test observer::tests::observer_is_send_and_sync_for_a_future_multicore_host ... ok
+test observer::tests::terminal_counters_partition_completion_and_keep_metric_dimensions_bounded ... ok
+test observer::tests::unfinished_admission_is_finalized_once_using_its_cancellation_scope ... ok
+test observer::tests::unfinished_execution_preserves_known_facts_and_marks_unresolved_facts ... ok
+test observer::tests::upstream_attempt_list_keeps_one_attempt_inline_and_promotes_in_order ... ok
+test tcp::tests::tcp_connection_records_multiple_queries_and_excludes_partial_input ... ok
+test tcp::tests::tcp_write_failure_and_pending_write_cancellation_are_distinct ... ok
+test udp::tests::a_completed_sequence_without_response_maps_to_refused ... ok
+test udp::tests::completed_tasks_are_reaped_and_failures_do_not_skip_remaining_tasks ... ok
+test udp::tests::task_failure_still_closes_upstream_after_full_drain ... ok
+test udp::tests::udp_listener_records_one_terminal_audit_for_the_actual_request ... ok
+test udp::tests::udp_send_failure_and_pending_send_cancellation_are_distinct ... ok
+test udp::tests::cancellation_wins_at_the_pre_send_commit_gate ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/main.rs (target/debug/deps/mosdns-1fdb9d7578bdbbf5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/observability.rs (target/debug/deps/observability-fb9b6d7e9bbf2209)
+
+running 2 tests
+test host_exposes_stable_empty_metrics_and_disabled_audit_snapshots ... ok
+test audit_enabled_yaml_assembles_and_test_capacity_is_explicit ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice1_cache.rs (target/debug/deps/slice1_cache-3c7a931ff47df95e)
+
+running 8 tests
+test compressed_query_name_reuses_the_decoded_key ... ok
+test cache_key_separates_security_bits_type_class_and_non_in_queries ... ok
+test compressed_response_question_is_eligible_after_decoding ... ok
+test edns_queries_bypass_lookup_and_publication ... ok
+test malformed_tc_opt_and_mismatched_questions_never_publish ... ok
+test native_adapter_ages_owned_hits_without_mutating_the_entry ... ok
+test ordinary_authority_and_additional_ttls_set_the_minimum_retention ... ok
+test retention_is_separate_from_answer_ttl_and_expires_at_exact_boundaries ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice2_config.rs (target/debug/deps/slice2_config-cc5529512b9fe56b)
+
+running 10 tests
+test a_second_listener_with_a_mixed_audit_flag_is_rejected_before_assembly ... ok
+test assembly_owns_one_upstream_and_no_listener_socket ... ok
+test frozen_w2_cache_configuration_compiles_to_udp_graph ... ok
+test audit_enabled_is_accepted_for_every_supported_single_listener_graph ... ok
+test frozen_w3_graph_compiles_to_three_owned_udp_routes_and_four_rules ... ok
+test invalid_configuration_is_rejected_before_pre_io_assembly ... ok
+test w1_graph_remains_accepted_and_cache_is_not_implicit ... ok
+test w3_names_order_and_data_are_not_fixture_constants ... ok
+test w2_cache_allowlist_and_graph_shape_are_strict ... ok
+test w3_negative_grammar_and_graph_matrix_fails_closed ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/w1_tcp.rs (target/debug/deps/w1_tcp-77644f12d3a1c80f)
+
+running 5 tests
+test client_disconnect_isolated_and_shutdown_releases_connection_tasks ... ok
+test partial_frame_eof_closes_only_that_connection_and_listener_stays_available ... ok
+test stalled_upstream_maps_to_servfail_and_disconnect_shutdown_allows_rebind ... ok
+test tcp_answers_fragmented_positive_nxdomain_sequential_and_concurrent_requests ... ok
+test idle_timeout_closes_inactive_connection ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+
+     Running tests/w1_udp.rs (target/debug/deps/w1_udp-18f5fe0fedab7f08)
+
+running 4 tests
+test malformed_datagram_is_dropped_and_listener_stays_available ... ok
+test stalled_upstream_maps_to_servfail_and_shutdown_allows_rebind ... ok
+test udp_answers_positive_nxdomain_and_concurrent_distinct_queries ... ok
+test cancellation_stops_pending_request_without_a_late_response ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+     Running tests/w2_cache.rs (target/debug/deps/w2_cache-27583f4bbf677d2a)
+
+running 6 tests
+test edns_and_non_in_queries_bypass_lookup_and_publication ... ok
+test expiry_and_invalid_or_opt_responses_never_publish ... ok
+test cold_concurrent_misses_are_independent_and_warm_concurrency_is_free ... ok
+test frozen_w2_hot_cases_have_independent_cold_and_warm_lifecycles ... ok
+test warm_hits_skip_upstream_and_isolate_ids_and_buffers ... ok
+test shutdown_cancels_w2_request_without_publication_and_allows_rebind ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/w3_routing.rs (target/debug/deps/w3_routing-9cba77b47d0a043e)
+
+running 6 tests
+test tampered_route_evidence_fails_even_with_the_expected_final_answers ... ok
+test frozen_w3_corpus_routes_over_real_udp_and_preserves_order ... ok
+test valid_negative_b_answer_falls_through_to_c_without_a ... ok
+test w3_malformed_mismatch_and_leg_failures_stop_without_stale_or_extra_routes ... ok
+test w3_shutdown_after_b_is_observed_prevents_late_response_and_rebinds ... ok
+test w3_shutdown_cancels_a_and_c_in_flight_without_late_responses ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running unittests src/lib.rs (target/debug/deps/mosdns_runtime-93c956fbc3a47a83)
+
+running 2 tests
+test query::tests::panic_boundary_maps_panics_to_status ... ok
+test query::tests::close_waits_for_an_in_flight_registry_read ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/abi_contract.rs (target/debug/deps/abi_contract-b456bc1db36888b8)
+
+running 20 tests
+test checked_in_header_matches_abi_constants_and_entrypoints ... ok
+test closed_cache_store_preserves_invalid_argument_precedence ... ok
+test concurrent_cache_classifies_fresh_lazy_and_expired_entries ... ok
+test invalid_arguments_return_status_instead_of_panicking ... ok
+test lifecycle_is_versioned_and_idempotent ... ok
+test lookup_into_reports_sizes_then_writes_caller_owned_buffers ... ok
+test malformed_dns_wire_is_rejected_at_store_boundary ... ok
+test matcher_capability_is_exposed ... ok
+test matcher_domain_create_match_close_roundtrip ... ok
+test matcher_domain_invalid_arguments ... ok
+test matcher_domain_invalid_mixed_batch_publishes_no_partial_handle ... ok
+test matcher_domain_mixed_regexp_and_keyword_rules_are_compiled_once ... ok
+test matcher_domain_rejects_non_ascii_query_without_match_result ... ok
+test matcher_empty_batches_create_zero_length_handles ... ok
+test matcher_ip_create_match_close_roundtrip ... ok
+test matcher_ip_invalid_arguments ... ok
+test matcher_namespaces_reject_cache_handles ... ok
+test owned_buffer_can_take_vec_without_a_second_payload_copy ... ok
+test owned_buffer_uses_length_only_release_contract ... ok
+test concurrent_stores_respect_capacity_without_a_global_cache_lock ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/query_abi.rs (target/debug/deps/query_abi-5f580b014ca3bfa0)
+
+running 11 tests
+test closed_handle_inspect_reports_closed_without_touching_output ... ok
+test compressed_additional_owner_uses_full_packet_offsets ... ok
+test inspect_reports_edns_do_and_fixed_width_ecs ... ok
+test inspect_reports_normalized_fields_and_caller_owned_wire_copy ... ok
+test invalid_snapshot_input_publishes_no_handle ... ok
+test query_abi_records_are_fixed_width ... ok
+test query_abi_version_and_capability_are_exposed ... ok
+test query_abi_rejects_null_and_overflow_descriptors ... ok
+test short_inspect_buffer_reports_required_length_without_writing ... ok
+test valid_snapshot_can_be_created_and_closed_exactly_once ... ok
+test query_handles_use_a_disjoint_namespace_and_are_not_reused ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/valued_abi.rs (target/debug/deps/valued_abi-7572956d3183055f)
+
+running 6 tests
+test valued_matcher_rejects_malformed_batches_and_keeps_typed_handles ... ok
+test valued_matcher_handles_empty_miss_invalid_output_and_wrong_namespace ... ok
+test valued_matcher_rejects_non_ascii_query_without_match_result ... ok
+test valued_matcher_reports_required_size_then_writes_result ... ok
+test valued_result_abi_layout_is_fixed_width ... ok
+test valued_matcher_supports_concurrent_reads_during_lifecycle ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mosdns_sequence_core-7deeb3c023e515c9)
+
+running 22 tests
+test slice1_state_tests::raw_response_is_owned_and_inspection_is_non_consuming ... ok
+test slice1_state_tests::malformed_raw_response_is_retained_as_typed_error ... ok
+test slice1_state_tests::state_is_typed_and_snapshot_marks_are_sorted ... ok
+test slice1_state_tests::synthesized_response_accepts_extended_configured_rcodes ... ok
+test slice2_dispatch_tests::false_matcher_skips_later_matchers_and_executable ... ok
+test slice2_dispatch_tests::jump_and_goto_use_explicit_continuations ... ok
+test slice2_dispatch_tests::matcher_mutations_are_ordered_and_errors_short_circuit_execution ... ok
+test slice2_dispatch_tests::positive_metadata_is_write_once_and_reverse_never_claims_label ... ok
+test slice2_dispatch_tests::qtype_dispatch_metadata_uses_typed_question_values ... ok
+test slice2_dispatch_tests::try_catches_only_exit_and_continues_the_parent ... ok
+test slice2_program_tests::normalizes_empty_and_multi_exec_forms_to_explicit_inline_scope ... ok
+test slice2_program_tests::rejects_ambiguous_or_unresolved_program_definitions_before_execution ... ok
+test slice3_control_tests::inline_exit_propagates_but_nested_try_catches_exit_and_continues ... ok
+test slice3_control_tests::inline_scope_resumes_outer_rules_after_return_accept_or_goto ... ok
+test slice3_control_tests::terminal_builtins_have_typed_scope_results_and_reject_state ... ok
+test slice3_control_tests::top_level_return_completes_and_jump_at_end_falls_back_to_parent_end ... ok
+test slice3_control_tests::try_catches_exit_from_a_fixture_target ... ok
+test slice3_control_tests::try_propagates_ordinary_fixture_errors ... ok
+test slice4_safety_tests::budget_is_checked_before_fixture_error_or_exit ... ok
+test slice4_safety_tests::cancellation_has_priority_at_the_next_dispatch_boundary ... ok
+test slice4_safety_tests::cyclic_goto_is_bounded_by_shared_fuel ... ok
+test slice4_safety_tests::invalid_entry_is_an_error_without_state_transfer ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice1_state.rs (target/debug/deps/slice1_state-6cf2314cbd7404b4)
+
+running 6 tests
+test malformed_raw_inspection_returns_typed_error_and_retains_wire_until_clear ... ok
+test non_raw_inspection_does_not_change_none_or_synthesized_state ... ok
+test raw_inspection_is_ttl_only_non_consuming_and_preserves_complete_wire ... ok
+test response_setters_replace_and_clear_each_response_form ... ok
+test state_snapshot_is_typed_owned_and_deterministic ... ok
+test synthesized_rcode_boundaries_are_validated_without_partial_transition ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice2_program_dispatch.rs (target/debug/deps/slice2_program_dispatch-0fc4abf88f60be0a)
+
+running 5 tests
+test matcher_dispatch_applies_ordered_mutations_before_reverse_and_metadata ... ok
+test caller_owned_state_remains_observable_for_all_execution_outcomes ... ok
+test reverse_keeps_matcher_mutation_but_skips_positive_metadata_and_executable ... ok
+test normalization_assigns_stable_ids_and_resolves_typed_targets ... ok
+test validation_rejects_missing_typed_targets_wrong_namespaces_and_malformed_inputs ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice3_control.rs (target/debug/deps/slice3_control-f1616f9f0d3d295b)
+
+running 10 tests
+test goto_replaces_root_continuation_and_jump_resumes_it ... ok
+test executor_return_from_a_jumped_target_resumes_the_caller ... ok
+test inline_accept_and_reject_end_only_the_inline_scope ... ok
+test inline_try_normal_and_exit_continue_to_the_next_inline_item_and_outer_rule ... ok
+test inline_try_propagates_an_ordinary_error_without_running_following_items ... ok
+test inline_jump_preserves_local_continuation_and_outer_next_rule ... ok
+test jump_target_fall_through_resumes_the_caller ... ok
+test try_propagates_an_ordinary_matcher_error ... ok
+test try_runs_normal_targets_and_propagates_matcher_and_executor_errors ... ok
+test terminal_builtins_preserve_typed_results_and_stop_the_current_scope ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice4_safety.rs (target/debug/deps/slice4_safety-4a6e683b3de3e530)
+
+running 14 tests
+test cyclic_goto_and_jump_are_bounded_by_shared_fuel ... ok
+test execution_priority_is_cancelled_then_budget_then_ordinary_error_then_exit ... ok
+test inline_try_propagates_child_budget_exhaustion ... ok
+test inline_try_propagates_child_cancellation ... ok
+test nested_try_observes_the_same_cancellation_token ... ok
+test nested_try_reuses_root_fuel_without_resetting ... ok
+test one_fuel_unit_is_consumed_per_matcher_and_executable_dispatch ... ok
+test one_fuel_unit_runs_one_fixture_executable_dispatch ... ok
+test canonical_contract_snapshot_is_typed_and_deterministic ... ok
+test phase3b_reviewed_contract_snapshot_is_complete_and_deterministic ... ok
+test shared_cancellation_token_is_observed_at_the_next_dispatch_boundary ... ok
+test try_fixture_boundary_preserves_budget_error_and_exit_priority ... ok
+test try_fixture_has_an_exact_child_dispatch_charge ... ok
+test try_fixture_cancellation_is_checked_at_the_child_boundary ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice5_resumable.rs (target/debug/deps/slice5_resumable-d79eb79c6a4e80d7)
+
+running 8 tests
+test fuel_and_cancellation_are_checked_after_a_pending_dispatch ... ok
+test external_dispatch_preserves_state_and_resumes_the_same_frames ... ok
+test machine_preserves_fuel_and_cancellation_boundaries ... ok
+test owned_external_resume_matches_sync_adapter_outcome_and_state_parity ... ok
+test owned_machine_and_sync_adapter_match_nested_try_and_error_outcomes ... ok
+test owned_machine_rejects_a_missing_entry_before_execution ... ok
+test sync_execute_remains_an_adapter_over_the_same_machine ... ok
+test wrong_duplicate_and_post_terminal_resumes_are_typed_and_deterministic ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/mosdns_upstream_core-fd2604689027bf9c)
+
+running 104 tests
+test quic_reuse::close_protocol_tests::close_protocol_is_begin_close_then_linearize_close ... ok
+test quic_reuse::close_protocol_tests::inverse_order_publication_fails_without_a_public_stage_two ... ok
+test quic_reuse::close_protocol_tests::terminal_classification_refuses_after_owner_close ... ok
+test resolver::bootstrap::tests::stepping_id_source_advances ... ok
+test resolver::owner::tests::a_failed_generation_still_serves_its_waiter_and_still_allows_retry ... ok
+test resolver::owner::tests::a_late_caller_cannot_steal_a_completed_result_from_a_registered_waiter ... ok
+test resolver::owner::tests::admission_serves_an_unclaimed_result_instead_of_requerying ... ok
+test resolver::owner::tests::admission_binds_a_waiter_to_the_generation_it_observed ... ok
+test resolver::owner::tests::completion_never_exposes_a_generation_without_a_result ... ok
+test resolver::owner::tests::bootstrap_and_target_families_are_independent ... ok
+test resolver::owner::tests::config_version_family_is_reused_by_the_resolver_model ... ok
+test resolver::owner::tests::dot_composition_keeps_the_service_identity ... ok
+test resolver::owner::tests::doh_composition_keeps_the_service_url_authority ... ok
+test resolver::owner::tests::numeric_target_composes_without_dns ... ok
+test resolver::owner::tests::the_default_construction_uses_unpredictable_ids ... ok
+test resolver::tests::a_carried_forward_candidate_keeps_its_familys_new_diagnostic ... ok
+test resolver::tests::a_failed_refresh_never_replaces_a_published_value ... ok
+test resolver::tests::a_generation_succeeds_through_the_merged_snapshot ... ok
+test resolver::tests::a_fresh_sibling_does_not_mask_an_expired_preferred_family ... ok
+test resolver::tests::a_later_generation_can_refresh_a_and_still_serve_the_fresh_aaaa ... ok
+test resolver::tests::an_expired_prior_candidate_is_never_resurrected_by_a_failed_refresh ... ok
+test resolver::tests::default_policy_clamps_both_ends ... ok
+test resolver::tests::literal_publication_never_expires ... ok
+test resolver::tests::publication_assigns_monotonic_generation_metadata ... ok
+test resolver::tests::resolver_state_never_serves_an_expired_value_as_success ... ok
+test resolver::tests::resolver_state_starts_empty_and_never_serves_a_stale_value ... ok
+test resolver::tests::system_clock_is_monotonic_enough_to_order_calls ... ok
+test resolver::tests::zero_and_four_both_select_ipv4 ... ok
+test reuse::tests::a_doh_secure_key_discriminates_authority_and_policy ... ok
+test reuse::tests::a_closed_owner_discards_returned_connections ... ok
+test reuse::tests::a_pooled_doh_response_loses_the_commit_gate_to_owner_close ... ok
+test reuse::tests::a_pooled_dot_response_loses_the_commit_gate_to_caller_cancellation ... ok
+test reuse::tests::a_pooled_dot_response_loses_the_commit_gate_to_owner_close ... ok
+test reuse::tests::a_pooled_h2_close_waits_for_tracked_children_to_drain ... ok
+test reuse::tests::a_scope_less_new_attempt_still_drains_a_stale_handle ... ok
+test reuse::tests::a_stale_entry_past_the_idle_timeout_is_not_handed_out ... ok
+test reuse::tests::aborting_during_the_stale_handle_recovery_keeps_the_waiter ... ok
+test reuse::tests::aborting_the_close_leader_lets_a_later_close_take_over ... ok
+test reuse::tests::an_aborted_pooled_h2_exchange_still_drains_before_close_completes ... ok
+test reuse::tests::concurrent_pooled_h2_closes_share_one_teardown ... ok
+test reuse::tests::reusing_one_session_does_not_grow_the_scope_registry ... ok
+test reuse::tests::the_global_idle_bound_evicts_the_oldest_entry_across_keys ... ok
+test reuse::tests::the_per_key_bound_keeps_exactly_one_entry ... ok
+test reuse::tests::the_policy_agnostic_key_stays_compatible_and_distinct ... ok
+test reuse::tests::two_separately_constructed_verified_policies_do_not_share_a_key ... ok
+test reuse::tests::a_new_attempt_drains_the_stale_attempt_handle_before_replacing_it ... ok
+test secure::doh::tests::a_terminal_protocol_failure_never_sends_a_second_request ... ok
+test secure::doh::tests::alpn_dispatch_accepts_only_the_two_driven_protocols ... ok
+test secure::doh::tests::a_successful_exchange_sends_exactly_one_get_on_one_connection ... ok
+test secure::doh::tests::control_matrix_at_after_request_sent ... ok
+test secure::doh::tests::control_matrix_at_before_body ... ok
+test secure::doh::tests::control_matrix_at_before_connect ... ok
+test secure::doh::tests::control_matrix_at_before_commit ... ok
+test secure::doh::tests::control_matrix_at_before_handshake ... ok
+test secure::doh::tests::h2_executor_seals_admission_and_drains_registered_children ... ok
+test secure::doh::tests::h2_teardown_barrier_preserves_liveness_until_scope_release ... ok
+test secure::doh::tests::h2_validated_response_cannot_commit_until_teardown_releases ... ok
+test secure::doh::tests::the_control_matrix_covers_every_pre_result_phase_exactly_once ... ok
+test secure::dot::tests::a_certificate_for_a_different_identity_is_rejected_at_handshake ... ok
+test secure::dot::tests::control_matrix_at_before_commit ... ok
+test secure::dot::tests::control_matrix_at_before_connect ... ok
+test secure::dot::tests::control_matrix_at_before_flush ... ok
+test secure::doh::tests::control_matrix_at_before_request ... ok
+test secure::dot::tests::control_matrix_at_before_handshake ... ok
+test secure::dot::tests::control_matrix_at_before_read ... ok
+test secure::dot::tests::frozen_quic_result_shapes_are_constructible_with_restored_ids ... ok
+test secure::dot::tests::owner_close_immediately_after_a_winning_commit_still_returns_the_response ... ok
+test secure::dot::tests::pre_commit_phase_close_loses_the_gate_with_closed_sent ... ok
+test secure::dot::tests::the_control_matrix_covers_every_pre_result_phase_exactly_once ... ok
+test secure::dot::tests::the_first_bytes_a_peer_receives_are_tls_handshake_never_a_plaintext_query ... ok
+test secure::dot::tests::the_handshake_authenticates_the_service_identity_not_the_dial_address ... ok
+test secure::dot::tests::control_matrix_at_before_write ... ok
+test tcp::tests::caller_cancellation_at_the_final_commit_gate_is_cancelled_with_sent ... ok
+test tcp::tests::encode_frame_accepts_max_u16_payload ... ok
+test tcp::tests::encode_frame_prefixes_payload_length_big_endian ... ok
+test tcp::tests::encode_frame_rejects_empty_payload_as_invalid_request ... ok
+test tcp::tests::encode_frame_rejects_payload_over_u16_max ... ok
+test tcp::tests::owner_close_at_the_final_commit_gate_is_closed_with_sent ... ok
+test tcp::tests::race_io_caller_cancellation_wins_over_the_deadline ... ok
+test tcp::tests::race_io_owner_cancellation_wins_when_every_control_is_ready ... ok
+test tcp::tests::race_io_returns_the_io_result_unchanged_when_no_control_is_ready ... ok
+test tcp::tests::race_io_uses_the_passed_absolute_deadline_without_resetting_it ... ok
+test tcp::tests::read_frame_eof_before_a_full_prefix_is_truncated ... ok
+test tcp::tests::read_frame_eof_during_the_body_is_truncated ... ok
+test tcp::tests::read_frame_maps_non_eof_read_failure_to_receive_with_sent_state ... ok
+test tcp::tests::read_frame_reassembles_fragmented_reads_and_consumes_only_the_body ... ok
+test tcp::tests::read_frame_rejects_zero_length_prefix_as_malformed_before_body_read ... ok
+test tcp::tests::read_frame_returns_two_sequential_frames_as_separate_messages ... ok
+test tcp::tests::response_commit_at_the_final_gate_before_owner_close_is_not_reversed ... ok
+test tcp::tests::write_frame_emits_complete_frame_despite_short_writes ... ok
+test tcp::tests::write_frame_rejects_empty_payload_before_writing_anything ... ok
+test tcp::tests::write_frame_rejects_oversize_before_writing_anything ... ok
+test tcp::tests::write_frame_reports_partial_write_as_send_with_uncertain_state ... ok
+test tcp::tests::write_frame_reports_zero_byte_write_as_send_with_not_sent_state ... ok
+test tcp::tests::write_frame_reports_zero_progress_as_send_with_not_sent_state ... ok
+test tests::commit_gate_orders_close_before_response_commit ... ok
+test tests::commit_gate_orders_response_commit_before_close ... ok
+test tests::final_commit_priority_is_owner_then_cancellation_then_deadline_then_success ... ok
+test tests::final_commit_success_is_not_reversed_by_a_later_close ... ok
+test udp::tests::local_bind_failure_maps_to_connect_without_side_effects ... ok
+test udp::tests::owner_close_wins_the_commit_gate_for_a_truncated_response ... ok
+test udp::tests::owner_close_wins_when_it_reaches_the_commit_gate_first ... ok
+test udp::tests::response_commit_before_owner_close_is_not_reversed ... ok
+test tcp::tests::absolute_deadline_at_the_final_commit_gate_is_deadline_exceeded_with_sent ... ok
+
+test result: ok. 104 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.96s
+
+     Running tests/quic_reuse_doh3.rs (target/debug/deps/quic_reuse_doh3-37196f52bf355228)
+
+running 8 tests
+test doh3_bounded_concurrent_stress_keeps_one_generation ... ok
+test doh3_canceled_response_body_keeps_connection_reusable ... ok
+test doh3_goaway_send_error_deactivates_exact_generation ... ok
+test doh3_owner_close_waits_for_held_connection_handle_before_removal ... ok
+test doh3_peer_advertised_stream_limit_serializes_without_replacement ... ok
+test doh3_peer_stream_limit_honors_pending_open_cancellation_without_replacement ... ok
+test doh3_reuse_multiplexes_two_streams_on_one_connection ... ok
+test doh3_stream_failures_keep_generation_active_for_next_request ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/quic_reuse_doq.rs (target/debug/deps/quic_reuse_doq-40300298023b503c)
+
+running 10 tests
+test doq_connection_failure_replaces_only_after_terminal_removal ... ok
+test doq_initialization_failure_returns_connect_and_removes_failed_generation ... ok
+test doq_malformed_response_is_stream_local_on_a_healthy_connection ... ok
+test doq_owner_close_waits_for_outstanding_stream_drain ... ok
+test doq_bounded_concurrent_stress_keeps_one_generation ... ok
+test doq_peer_stream_limit_honors_pending_open_cancellation_without_replacement ... ok
+test doq_peer_advertised_stream_limit_serializes_without_replacement ... ok
+test doq_reuse_multiplexes_concurrent_queries_on_one_connection ... ok
+test doq_stream_reset_is_stream_local_on_a_healthy_connection ... ok
+test doq_stream_cancellation_does_not_kill_healthy_connection ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.65s
+
+     Running tests/quic_reuse_model.rs (target/debug/deps/quic_reuse_model-b16284c3ddc698aa)
+
+running 21 tests
+test aborted_at_barrier_with_no_surviving_caller_reaches_terminal ... ok
+test begin_close_without_stage_two_already_fails_publication ... ok
+test idle_expiry_marks_closing_without_removal ... ok
+test concurrent_distinct_key_admissions_never_exceed_the_owner_cap ... ok
+test init_vs_owner_close_hands_the_late_resource_to_teardown ... ok
+test owner_close_cancels_streams_and_waits_for_exchange_registrations ... ok
+test initializing_and_closing_entries_hold_their_slot_until_terminal ... ok
+test post_close_admission_race_leaves_no_residue ... ok
+test r0a_four_phase_decision_model_never_selects_the_pinned_recv_stop ... ok
+test r0a_stream_local_failure_leaves_the_shared_entry_healthy_and_leasable ... ok
+test r0b_connection_level_and_stream_level_classification ... ok
+test r0b_entry_terminal_deactivates_exactly_one_generation ... ok
+test r0b_h3_observation_model_distinguishes_stream_and_connection_evidence ... ok
+test r0b_side_effect_states_are_recorded_independently_of_the_class ... ok
+test r0b_table_covers_the_pinned_vocabulary ... ok
+test quic_reuse_key_isolates_every_dimension ... ok
+test same_key_closing_lookup_is_closed_not_sent_without_a_drain_wait ... ok
+test stage_two_only_gate_rejects_a_registered_but_unadmitted_exchange ... ok
+test same_key_concurrent_admissions_install_exactly_one_generation ... ok
+test stale_generation_callbacks_never_touch_a_newer_generation ... ok
+test stream_slot_backpressure_and_permit_release ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resolver_dual_stack.rs (target/debug/deps/resolver_dual_stack-3c8ef8c46b45a457)
+
+running 27 tests
+test a_cancelled_dual_lookup_publishes_nothing ... ok
+test a_dual_a_selection_composes_a_doq_endpoint_without_rewriting_identity ... ok
+test a_dual_aaaa_selection_composes_a_doq_endpoint_without_rewriting_identity ... ok
+test a_dual_aaaa_selection_still_keeps_the_secure_identity ... ok
+test a_dual_selection_composes_numerically_and_keeps_secure_identity ... ok
+test a_fresh_aaaa_survives_an_expired_a_after_the_boundary ... ok
+test a_numeric_target_still_bypasses_dns_in_every_mode ... ok
+test a_failed_family_refresh_preserves_a_still_fresh_sibling_same_state ... ok
+test a_single_family_mode_cannot_disagree_with_the_target_family ... ok
+test a_truncated_leg_is_typed_per_family_without_cross_family_retry ... ok
+test an_expired_candidate_is_never_served_as_success ... ok
+test a_refresh_that_fails_a_keeps_serving_the_fresh_aaaa_and_retains_the_diagnostic ... ok
+test an_expired_deadline_in_dual_mode_reaches_no_peer ... ok
+test dual_close_is_idempotent_and_drains ... ok
+test dual_mode_is_independent_of_the_target_declared_family ... ok
+test dual_mode_queries_both_families_and_prefers_a ... ok
+test dual_mode_reports_an_aggregate_failure_when_neither_family_answers ... ok
+test dual_mode_uses_a_when_aaaa_fails ... ok
+test dual_mode_uses_aaaa_when_no_usable_a_exists ... ok
+test each_family_keeps_its_own_ttl_and_expiry ... ok
+test explicit_zero_is_dual_and_distinguishable_from_omission ... ok
+test omitted_default_and_four_are_a_only_and_six_is_aaaa_only ... ok
+test owner_close_in_dual_mode_publishes_nothing ... ok
+test single_family_modes_issue_exactly_one_query ... ok
+test the_quic_composition_boundary_is_a_numeric_selection_plus_caller_identity ... ok
+test unknown_versions_are_still_typed_rejections ... ok
+test concurrent_dual_callers_share_one_generation ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running tests/resolver_remediation.rs (target/debug/deps/resolver_remediation-1040d1fe634ef4d5)
+
+running 24 tests
+test a_custom_policy_ceiling_reaches_the_wire_parse ... ok
+test a_destination_cannot_disagree_with_its_family ... ok
+test a_failing_id_source_is_a_typed_error_not_a_guessed_id ... ok
+test a_hostname_target_still_fails_closed_with_an_undrawable_id_source ... ok
+test a_numeric_target_accepts_a_different_family_bootstrap ... ok
+test a_numeric_target_resolves_with_an_id_source_that_would_fail ... ok
+test a_policy_bound_that_cannot_be_expressed_is_rejected_at_construction ... ok
+test a_terminal_rcode_from_the_expected_peer_is_typed ... ok
+test a_truncated_bootstrap_reply_is_typed_truncated ... ok
+test a_custom_policy_bound_reaches_the_wire_parse ... ok
+test a_wrong_id_datagram_is_ignored_and_the_real_answer_still_wins ... ok
+test an_injected_deterministic_source_is_explicit_and_test_only ... ok
+test an_ipv4_bootstrap_answers_an_aaaa_query ... ok
+test a_waiter_never_attaches_to_a_later_generation ... ok
+test config_version_and_identity_contracts_still_hold ... ok
+test external_state_access_cannot_publish_after_close ... ok
+test numeric_bypass_honors_an_expired_deadline ... ok
+test numeric_bypass_honors_caller_cancellation ... ok
+test numeric_bypass_honors_owner_close ... ok
+test numeric_construction_does_not_depend_on_entropy_availability ... ok
+test concurrent_waiters_observe_only_their_own_generation ... ok
+test the_production_default_id_source_is_not_deterministic ... ok
+test the_same_query_is_retransmitted_unchanged ... ok
+test owner_close_wins_over_publication ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.05s
+
+     Running tests/resolver_slice1.rs (target/debug/deps/resolver_slice1-bfa3102ee222f7b9)
+
+running 14 tests
+test bootstrap_endpoint_carries_the_numeric_udp_peer ... ok
+test address_family_exposes_the_dns_wire_type ... ok
+test config_version_maps_to_the_approved_single_family_semantics ... ok
+test numeric_dial_addresses_bypass_resolution ... ok
+test numeric_dial_rejects_a_zero_port ... ok
+test publishing_a_target_preserves_the_service_identity ... ok
+test resolution_policy_uses_the_reviewed_defaults_and_bounds ... ok
+test resolution_target_accepts_a_numeric_host_without_a_dns_name ... ok
+test resolution_target_normalizes_the_hostname ... ok
+test resolution_target_rejects_invalid_inputs ... ok
+test resolved_destination_derives_the_numeric_endpoint_without_identity ... ok
+test resolved_destination_reports_deterministic_expiry ... ok
+test resolver_reuses_the_transport_cancellation_vocabulary ... ok
+test zero_ttl_and_port_zero_are_rejected_before_publication ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resolver_slice2.rs (target/debug/deps/resolver_slice2-56cf2a17fc66cda7)
+
+running 7 tests
+test a_non_numeric_bootstrap_cannot_be_constructed ... ok
+test a_numeric_target_resolves_without_any_bootstrap_traffic ... ok
+test caller_cancellation_is_reported_as_cancelled ... ok
+test an_expired_deadline_never_reaches_the_network ... ok
+test close_shutdown_is_observable_and_idempotent ... ok
+test clamps_an_out_of_range_ttl_to_the_policy ... ok
+test resolves_one_address_from_a_loopback_bootstrap ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resolver_slice3.rs (target/debug/deps/resolver_slice3-3ac942345dab350b)
+
+running 10 tests
+test a_caller_deadline_shorter_than_the_refresh_is_honored ... ok
+test a_closed_owner_sends_no_datagram_at_all ... ok
+test a_fresh_publication_is_served_without_a_second_query ... ok
+test an_abandoned_leader_lets_a_later_caller_retry ... ok
+test a_failed_refresh_preserves_the_previous_value_and_is_not_served_stale ... ok
+test an_expired_publication_is_refreshed_by_a_new_query ... ok
+test an_expired_deadline_sends_no_datagram_at_all ... ok
+test close_is_idempotent_and_rejects_later_work ... ok
+test concurrent_callers_share_one_leader_generation ... ok
+test an_in_flight_leader_recovers_after_its_future_is_aborted ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running tests/resolver_slice4.rs (target/debug/deps/resolver_slice4-a343cb6a384fb8ca)
+
+running 7 tests
+test a_numeric_dial_address_bypasses_the_resolver_entirely ... ok
+test a_numeric_target_resolver_never_opens_a_bootstrap_socket ... ok
+test a_zero_port_publication_cannot_compose ... ok
+test a_resolved_address_composes_into_the_udp_boundary ... ok
+test doh_composition_keeps_the_original_url_authority_and_path ... ok
+test dot_composition_keeps_the_original_sni_identity ... ok
+test resolution_and_handoff_share_one_original_deadline ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resolver_slice5.rs (target/debug/deps/resolver_slice5-fd82e6c31f579c3b)
+
+running 6 tests
+test a_terminal_dns_rcode_publishes_nothing ... ok
+test close_drains_and_the_owner_stays_usable_only_until_closing ... ok
+test identity_separation_survives_the_full_composition ... ok
+test resolved_address_drives_a_real_udp_exchange_on_one_deadline ... ok
+test the_full_error_matrix_is_typed_and_never_a_dial_attempt ... ok
+test a_malformed_bootstrap_reply_is_typed_not_a_dial ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+
+     Running tests/reuse_doh.rs (target/debug/deps/reuse_doh-0b1de258f13f5843)
+
+running 9 tests
+test a_cancelled_first_caller_token_does_not_kill_the_retained_http2_session ... ok
+test a_second_doh_exchange_reuses_one_authenticated_session ... ok
+test a_second_doh_exchange_reuses_one_http2_session ... ok
+test an_idle_half_closed_h1_session_is_replaced_before_reuse ... ok
+test an_idle_half_closed_h2_session_is_replaced_before_reuse ... ok
+test doh_reuse_close_is_idempotent_and_drops_the_session ... ok
+test doh_reuse_honors_an_expired_deadline_without_dialing ... ok
+test doh_reuse_keeps_numeric_dial_separate_from_authority_and_path ... ok
+test a_different_service_authority_does_not_reuse_the_retained_session ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.01s
+
+     Running tests/reuse_secure.rs (target/debug/deps/reuse_secure-f0beeee1158243a8)
+
+running 7 tests
+test a_different_dial_address_opens_its_own_dot_session ... ok
+test a_doh_endpoint_keeps_numeric_dial_separate_from_the_service_authority ... ok
+test a_doh_reuse_key_separates_protocol_and_authority ... ok
+test a_second_dot_exchange_for_the_same_identity_reuses_one_tls_session ... ok
+test dot_reuse_close_is_idempotent_and_refuses_later_exchanges ... ok
+test dot_reuse_honors_an_expired_deadline_without_dialing ... ok
+test a_different_service_identity_never_reuses_an_authenticated_dot_session ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.01s
+
+     Running tests/reuse_slice0_key.rs (target/debug/deps/reuse_slice0_key-120055e569d9678f)
+
+running 26 tests
+test a_different_doh_authority_is_a_different_key ... ok
+test a_different_negotiated_protocol_is_a_different_key ... ok
+test a_different_numeric_dial_is_a_different_key ... ok
+test a_closed_owner_discards_a_connection_returned_after_closing ... ok
+test a_different_tls_policy_discriminant_is_a_different_key ... ok
+test a_doh_key_requires_an_authority_and_a_dot_key_rejects_one ... ok
+test a_different_numeric_dial_opens_a_new_connection ... ok
+test a_hostname_never_appears_in_a_reuse_key ... ok
+test a_plain_tcp_key_is_not_secure_and_a_secure_key_is_dot_or_doh ... ok
+test a_quic_endpoint_is_rejected_by_the_plain_tcp_pool ... ok
+test a_dropped_owner_discards_its_idle_connection ... ok
+test a_resolver_snapshot_feeds_the_numeric_dial_without_entering_the_key ... ok
+test a_resolver_refresh_does_not_disturb_an_established_connection ... ok
+test a_second_concurrent_exchange_for_a_busy_key_is_refused_not_queued ... ok
+test a_second_exchange_for_the_same_key_reuses_one_connection ... ok
+test a_tcp_endpoint_still_enters_the_pool ... ok
+test a_udp_endpoint_has_no_reusable_key ... ok
+test an_expired_deadline_is_refused_before_any_connection ... ok
+test a_second_exchange_on_one_owner_uses_one_connection_across_callers ... ok
+test an_invalid_secure_identity_is_a_typed_error_before_any_io ... ok
+test caller_cancellation_is_reported_and_opens_no_connection ... ok
+test close_is_idempotent_and_refuses_later_exchanges ... ok
+test different_service_identities_never_share_a_key ... ok
+test identical_numeric_dial_and_transport_produce_equal_keys ... ok
+test an_idle_connection_past_the_timeout_is_not_reused ... ok
+test the_total_idle_bound_evicts_the_oldest_entry_across_keys ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/slice0_contract.rs (target/debug/deps/slice0_contract-8a5fd23127a17e50)
+
+running 12 tests
+test cancellation_wins_when_deadline_is_ready_at_the_same_time ... ok
+test cancellation_children_observe_parent_without_requiring_sequence_core ... ok
+test close_completion_cannot_skip_the_closing_state ... ok
+test error_side_effects_preserve_the_last_tracked_state ... ok
+test deadline_is_a_distinct_typed_error_when_not_cancelled ... ok
+test header_helper_exposes_only_header_metadata ... ok
+test lifecycle_is_open_closing_closed_and_close_is_idempotent ... ok
+test prepared_exchange_distinguishes_owner_close_from_caller_cancellation ... ok
+test invalid_queries_fail_before_the_socket_boundary ... ok
+test request_borrows_read_only_query_and_stably_exposes_original_id ... ok
+test returned_response_wire_is_owned_by_the_response ... ok
+test side_effect_state_is_closed_and_connect_is_not_sent ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice0_quic.rs (target/debug/deps/slice0_quic-f39d94c6b81799a5)
+
+running 10 tests
+test alpn_singletons_are_exact_and_disjoint ... ok
+test doq_endpoint_accepts_ip_identity_and_ipv6_dial ... ok
+test doh3_reuses_doh_endpoint_unchanged ... ok
+test doq_endpoint_keeps_numeric_dial_separate_from_service_identity ... ok
+test doq_endpoint_rejects_empty_and_malformed_identity ... ok
+test doq_outbound_copy_zeroes_wire_id_without_touching_caller_bytes ... ok
+test doq_endpoint_rejects_zero_port ... ok
+test doq_zero_helper_is_a_noop_on_short_buffers ... ok
+test preexisting_transport_arms_keep_exact_meaning ... ok
+test result_vocabulary_has_frozen_quic_arms ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slice0_secure.rs (target/debug/deps/slice0_secure-9d88afd587c60570)
+
+running 27 tests
+test doh_endpoint_does_not_resolve_the_service_host ... ok
+test doh_endpoint_keeps_ip_url_hosts_successful_after_identity_reuse ... ok
+test doh_endpoint_normalizes_an_empty_path_to_root ... ok
+test doh_endpoint_preserves_service_authority_path_and_query_for_ipv4_dial ... ok
+test doh_endpoint_rejects_non_https_and_malformed_urls ... ok
+test doh_endpoint_rejects_raw_cr_and_lf_before_url_parsing ... ok
+test doh_endpoint_rejects_userinfo_and_fragments_without_leaking_them ... ok
+test doh_endpoint_rejects_zero_dial_port ... ok
+test doh_endpoint_reuses_shared_identity_validation_for_url_hosts ... ok
+test doh_endpoint_supports_ipv6_service_and_dial ... ok
+test doh_get_request_target_errors_expose_no_url_or_query_material ... ok
+test doh_get_request_target_borrows_the_query_and_replaces_only_dns ... ok
+test doh_get_request_target_keeps_ipv6_path_and_dial_semantics ... ok
+test doh_get_request_target_preserves_escaped_path_and_ignores_dial ... ok
+test doh_get_request_target_rejects_an_oversized_dns_query_before_encoding ... ok
+test doh_get_request_target_uses_url_safe_unpadded_base64 ... ok
+test dot_endpoint_accepts_ip_identity_for_both_families ... ok
+test dot_endpoint_keeps_numeric_dial_separate_from_service_identity ... ok
+test dot_endpoint_rejects_zero_dial_port_for_both_families ... ok
+test secure_construction_errors_are_typed_pre_io_failures ... ok
+test server_identity_normalizes_valid_names_without_resolving ... ok
+test server_identity_rejects_empty_and_malformed_names ... ok
+test tls_policy_errors_and_debug_expose_no_sensitive_material ... ok
+test doh_get_request_target_rejects_a_target_over_96_kib ... ok
+test tls_policy_insecure_skip_verify_is_explicit_opt_in_only ... ok
+test tls_policy_verified_preserves_caller_supplied_roots ... ok
+test tls_policy_verified_rejects_empty_root_store_before_io ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/slice1_doq.rs (target/debug/deps/slice1_doq-bd428ba710b6ef49)
+
+running 7 tests
+test doq_caller_cancellation_during_outbound_write_stops_the_receive_side ... ok
+test doq_caller_cancellation_stops_the_receive_side_with_request_cancelled ... ok
+test doq_connection_lost_with_partial_frame_payload_is_rejected_as_missing_fin ... ok
+test doq_connection_lost_with_full_frame_payload_is_rejected_as_missing_fin ... ok
+test doq_one_shot_exchange_succeeds_over_loopback ... ok
+test doq_response_without_normal_fin_is_rejected_without_commit ... ok
+test doq_trailing_second_response_is_rejected_without_commit ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 61.03s
+
+     Running tests/slice1_dot.rs (target/debug/deps/slice1_dot-7bce5d2dc39b5c9b)
+
+running 27 tests
+test a_bad_handshake_signature_fails_even_under_the_insecure_policy ... ok
+test a_bad_handshake_signature_also_fails_under_the_verified_policy ... ok
+test a_complete_frame_with_invalid_dns_wire_is_a_malformed_response ... ok
+test a_complete_truncated_response_is_returned_without_plaintext_fallback ... ok
+test a_dropped_exchange_future_releases_its_registration ... ok
+test a_verified_policy_never_retries_after_a_rejection ... ok
+test a_response_with_a_different_transaction_id_is_a_mismatch ... ok
+test a_zero_length_inbound_prefix_is_a_malformed_response ... ok
+test an_oversized_outbound_query_is_rejected_before_any_connection ... ok
+test caller_cancellation_while_waiting_for_the_response_is_cancelled_with_sent ... ok
+test cancellation_after_the_tcp_connect_sends_no_query ... ok
+test certificate_for_a_different_name_is_rejected_before_any_query ... ok
+test certificate_from_an_untrusted_issuer_is_rejected_before_any_query ... ok
+test concurrent_exchanges_use_separate_connections_and_owned_responses ... ok
+test eof_before_a_complete_prefix_is_a_truncated_frame ... ok
+test eof_during_the_declared_body_is_a_truncated_frame ... ok
+test exchanges_after_close_are_rejected_without_opening_a_connection ... ok
+test expired_certificate_is_rejected_before_any_query ... ok
+test fragmented_response_frame_is_reassembled_across_tls_records ... ok
+test insecure_policy_accepts_an_untrusted_certificate_only_when_explicitly_chosen ... ok
+test owner_close_after_the_tcp_connect_sends_no_query ... ok
+test owner_close_drains_a_concurrent_exchange_before_reporting_closed ... ok
+test owner_close_while_waiting_for_the_response_is_closed_with_sent ... ok
+test sequential_exchanges_open_a_fresh_authenticated_connection_each_time ... ok
+test the_same_untrusted_certificate_verifies_under_its_own_root ... ok
+test trusted_certificate_for_the_service_identity_completes_the_exchange ... ok
+test absolute_deadline_while_waiting_for_the_response_is_deadline_exceeded_with_sent ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+
+     Running tests/slice1_udp.rs (target/debug/deps/slice1_udp-d75ced6159ef69bf)
+
+running 35 tests
+test async_close_drains_an_in_flight_udp_exchange_before_closed ... ok
+test aborting_an_in_flight_exchange_releases_its_registration ... ok
+test async_close_is_idempotent_on_an_open_upstream ... ok
+test borrowed_query_bytes_and_original_id_are_unchanged ... ok
+test caller_cancelled_exchange_releases_its_registration ... ok
+test caller_cancellation_after_wrong_id_retains_diagnostics ... ok
+test cancellation_before_send_is_cancelled_without_side_effects ... ok
+test cancellation_after_send_is_cancelled_with_sent_side_effect ... ok
+test closed_upstream_rejects_exchange_without_socket_work ... ok
+test committed_udp_response_survives_a_later_owner_close ... ok
+test completed_and_failed_exchanges_release_their_registration ... ok
+test concurrent_async_close_calls_converge_without_deadlock ... ok
+test concurrent_exchanges_are_isolated ... ok
+test exchange_after_async_close_is_rejected_without_registration ... ok
+test exchange_after_begin_close_is_rejected_without_registration ... ok
+test exchange_sends_exactly_one_datagram ... ok
+test expired_deadline_before_send_is_deadline_exceeded_without_side_effects ... ok
+test late_datagram_cannot_complete_a_later_exchange ... ok
+test legal_udp_wire_above_the_old_4095_buffer_is_not_truncated ... ok
+test malformed_expected_peer_datagram_is_malformed ... ok
+test numeric_ipv4_loopback_exchange_returns_matching_response ... ok
+test numeric_ipv6_loopback_exchange_returns_matching_response ... ok
+test owner_close_after_wrong_peer_retains_diagnostics ... ok
+test owner_close_during_receive_is_closed_with_sent_side_effect ... ok
+test qr_clear_expected_peer_datagram_is_malformed ... ok
+test tcp_connect_failure_releases_its_registration ... ok
+test truncated_udp_response_is_returned_as_a_committed_observation ... ok
+test udp_wire_up_to_legal_datagram_capacity_is_not_truncated ... ok
+test undersized_expected_peer_datagram_is_malformed ... ok
+test wrong_id_datagram_is_ignored_until_a_matching_id_arrives ... ok
+test deadline_after_send_is_deadline_exceeded_with_sent_side_effect ... ok
+test wrong_id_then_deadline_retains_mismatch_with_deadline_cause ... ok
+test wrong_peer_datagram_is_ignored ... ok
+test wrong_peer_and_wrong_id_are_both_retained_before_deadline ... ok
+test wrong_peer_then_deadline_retains_unexpected_peer_with_deadline_cause ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.08s
+
+     Running tests/slice2_doh.rs (target/debug/deps/slice2_doh-fa0ed54cdefd19c5)
+
+running 39 tests
+test a_body_larger_than_the_dns_maximum_is_rejected ... ok
+test a_body_of_exactly_the_dns_maximum_is_accepted ... ok
+test a_body_shorter_than_a_dns_header_is_rejected ... ok
+test a_body_of_one_byte_over_the_dns_maximum_is_rejected ... ok
+test a_chunked_body_is_reassembled_and_validated ... ok
+test a_body_truncated_mid_header_is_an_incomplete_body ... ok
+test a_chunked_body_over_the_dns_maximum_is_rejected_by_the_incremental_gate ... ok
+test a_close_delimited_body_over_the_dns_maximum_is_rejected_by_the_incremental_gate ... ok
+test a_complete_body_with_invalid_dns_wire_is_rejected ... ok
+test a_declared_content_length_over_the_dns_maximum_fails_at_the_head ... ok
+test a_dropped_exchange_future_releases_its_registration ... ok
+test a_negotiated_http11_alpn_is_accepted ... ok
+test a_missing_or_wrong_media_type_is_rejected ... ok
+test a_non_200_status_is_a_typed_protocol_error ... ok
+test a_non_identity_content_encoding_is_rejected ... ok
+test a_peer_offering_only_h2_is_not_reinterpreted_as_http11 ... ok
+test a_ra_clear_response_keeps_ra_clear_and_only_rewrites_the_id ... ok
+test a_redirect_is_not_followed ... ok
+test a_response_head_just_under_the_byte_bound_is_accepted ... ok
+test a_response_head_over_the_byte_bound_is_rejected ... ok
+test a_server_that_closes_without_responding_is_a_typed_failure ... ok
+test a_server_without_alpn_still_serves_http11_on_the_same_tls_stream ... ok
+test a_successful_exchange_sends_a_get_with_no_body_and_no_user_agent ... ok
+test a_truncated_chunked_body_is_an_incomplete_body ... ok
+test an_absent_response_head_is_never_reported_as_sent ... ok
+test an_early_eof_with_a_larger_declared_length_is_an_incomplete_body ... ok
+test an_over_long_non_canonical_reason_phrase_is_rejected_on_the_raw_wire ... ok
+test an_oversized_outbound_query_is_rejected_before_any_connection ... ok
+test an_ra_set_response_keeps_ra_set ... ok
+test caller_cancellation_before_the_response_is_cancelled_with_a_typed_state ... ok
+test exchanges_after_close_are_rejected_without_opening_a_connection ... ok
+test owner_close_before_the_response_is_closed_with_maybe_sent ... ok
+test the_authority_is_the_service_host_not_the_numeric_dial_address ... ok
+test the_media_type_is_matched_case_insensitively_with_parameters ... ok
+test the_outbound_query_id_is_zeroed_while_the_caller_id_is_restored ... ok
+test the_side_effect_classification_of_each_doh_defect_is_explicit ... ok
+test tls_verification_still_applies_to_the_doh_service_identity ... ok
+test unrelated_query_parameters_are_preserved_and_existing_dns_is_replaced ... ok
+test a_shared_absolute_deadline_terminates_the_exchange ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/slice2_doh3.rs (target/debug/deps/slice2_doh3-df9a31df0dbe8ec3)
+
+running 22 tests
+test doh3_alpn_mismatch_is_not_sent_and_does_not_fall_back ... ok
+test doh3_authority_is_the_service_host_not_the_numeric_dial_address ... ok
+test doh3_caller_cancellation_during_a_held_exchange_leaves_no_residue ... ok
+test doh3_close_after_the_request_fin_before_any_response_head_is_sent ... ok
+test doh3_dropped_exchange_future_leaves_no_residue ... ok
+test doh3_each_exchange_opens_a_fresh_connection_with_one_request ... ok
+test doh3_exchanges_after_close_are_rejected_without_opening_a_connection ... ok
+test doh3_identity_mismatch_is_not_sent ... ok
+test doh3_declared_length_over_the_dns_maximum_is_rejected_at_the_head ... ok
+test doh3_media_type_is_matched_case_insensitively_with_parameters ... ok
+test doh3_incomplete_body_is_a_typed_protocol_error ... ok
+test doh3_non_200_status_is_a_typed_protocol_error ... ok
+test doh3_missing_or_wrong_media_type_is_rejected ... ok
+test doh3_one_shot_get_succeeds_over_loopback ... ok
+test doh3_outbound_query_id_is_zeroed_and_the_caller_id_is_restored ... ok
+test doh3_non_identity_content_encoding_is_rejected ... ok
+test doh3_owner_close_during_a_held_exchange_leaves_no_residue ... ok
+test doh3_oversized_body_is_rejected_by_the_incremental_gate ... ok
+test doh3_response_trailers_after_a_complete_body_are_not_a_success ... ok
+test doh3_trailers_without_a_stream_fin_do_not_complete_the_body ... ok
+test doh3_untrusted_certificate_is_not_sent ... ok
+test doh3_too_many_response_headers_is_rejected ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 52.09s
+
+     Running tests/slice2_tcp.rs (target/debug/deps/slice2_tcp-1a0b58e6ef962943)
+
+running 14 tests
+test caller_cancellation_while_waiting_for_the_response_is_cancelled_with_sent ... ok
+test complete_invalid_dns_wire_is_malformed_response_with_sent ... ok
+test absolute_deadline_while_waiting_for_the_response_is_deadline_exceeded_with_sent ... ok
+test complete_qr_clear_response_is_malformed_response_with_sent ... ok
+test concurrent_exchanges_use_separate_streams_and_owned_responses ... ok
+test complete_wrong_transaction_id_response_is_response_mismatch_with_sent ... ok
+test eof_during_the_declared_body_is_truncated_frame_with_sent ... ok
+test fresh_numeric_tcp_exchange_returns_matching_framed_response ... ok
+test outbound_query_over_u16_max_is_frame_too_large_before_any_connection ... ok
+test eof_during_the_prefix_is_truncated_frame_with_sent ... ok
+test refused_connect_is_connect_with_not_sent_and_releases_registration ... ok
+test sequential_exchanges_open_a_fresh_connection_each_time ... ok
+test owner_close_while_waiting_for_the_response_is_closed_with_sent ... ok
+test zero_length_inbound_prefix_is_malformed_response_with_sent ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s
+
+     Running tests/slice3_doh.rs (target/debug/deps/slice3_doh-538fc3889c6996eb)
+
+running 6 tests
+test aborting_after_h2_handoff_drains_children_before_close_returns ... ok
+test caller_cancellation_after_h2_handoff_is_maybe_sent_and_drains_children ... ok
+test independent_h2_owners_use_independent_fresh_connections ... ok
+test negotiated_h2_serves_one_doh_get_with_service_authority_and_path ... ok
+test owner_close_after_h2_handoff_is_maybe_sent_and_drains_children ... ok
+test h2_reset_goaway_and_eof_are_terminal_maybe_sent_failures ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+     Running tests/slice3_policy.rs (target/debug/deps/slice3_policy-65c0b631e59f9d37)
+
+running 10 tests
+test close_cancels_in_flight_udp_exchange_with_closed_sent ... ok
+test close_drains_in_flight_tcp_fallback_with_nested_closed_sent ... ok
+test complete_udp_response_does_not_open_a_tcp_connection ... ok
+test composite_close_is_idempotent_on_an_unused_policy ... ok
+test cancellation_before_the_udp_tc_observation_prevents_any_tcp_fallback ... ok
+test tc_udp_response_triggers_exactly_one_tcp_fallback_with_original_query ... ok
+test exchange_after_composite_close_is_rejected_without_udp_send ... ok
+test tcp_fallback_failure_preserves_prior_truncated_udp_context ... ok
+test tcp_fallback_honors_the_remaining_original_absolute_deadline ... ok
+test undersized_tc_bit_datagram_is_terminal_malformed_without_tcp_fallback ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running tests/slice3_quic.rs (target/debug/deps/slice3_quic-5b07a1adbedba563)
+
+running 23 tests
+test doh3_caller_cancellation_after_a_complete_body_is_not_a_late_success ... ok
+test doh3_control_precedence_is_owner_then_caller_then_deadline ... ok
+test doh3_connect_and_handshake_deadline_is_not_sent ... ok
+test doh3_missing_response_fin_after_a_complete_body_never_commits ... ok
+test doh3_owner_close_beats_caller_cancellation_in_flight ... ok
+test doh3_owner_close_drains_refuses_new_exchanges_and_converges ... ok
+test doh3_peer_stream_termination_after_the_head_is_typed_and_never_commits ... ok
+test doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized has been running for over 60 seconds
+test doh3_peer_stream_termination_codes_are_typed_and_never_commit ... ok
+test doh3_request_stream_blocked_deadline_is_terminal_before_any_response ... ok
+test doh3_response_head_connection_loss_after_request_fin_is_sent_and_never_commits ... ok
+test doh3_response_wait_deadline_is_sent_and_never_commits ... ok
+test doh3_trailing_extra_field_section_is_not_a_success ... ok
+test doq_alpn_mismatch_during_the_handshake_is_not_sent ... ok
+test doq_complete_frame_without_peer_fin_deadline_is_sent_and_never_commits ... ok
+test doq_connect_and_handshake_deadline_is_not_sent ... ok
+test doq_control_precedence_is_owner_then_caller_then_deadline ... ok
+test doq_nonzero_peer_response_id_is_a_terminal_protocol_error ... ok
+test doq_owner_close_beats_caller_cancellation_in_flight ... ok
+test doq_owner_close_drains_refuses_new_exchanges_and_converges ... ok
+test doq_peer_reset_codes_are_terminal_missing_fin_without_commit ... ok
+test doq_response_wait_deadline_is_sent_and_never_commits ... ok
+test doq_stream_open_deadline_is_not_sent ... ok
+test doh3_non_h3_and_unclassified_peer_stream_codes_are_not_miscategorized ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 225.00s
+
+   Doc-tests mosdns_cache_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mosdns_dns_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mosdns_matcher_core
+
+running 1 test
+test matcher-core/src/normalize.rs - normalize::normalize (line 18) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.29s; merged doctests compilation took 0.29s
+   Doc-tests mosdns_native_host
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mosdns_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mosdns_sequence_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mosdns_upstream_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

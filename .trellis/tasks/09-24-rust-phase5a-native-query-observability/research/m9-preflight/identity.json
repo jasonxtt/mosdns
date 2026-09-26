@@ -1,0 +1,30 @@
+{
+  "local_tools": {
+    "run-m9-remaining.py": "3d39775bee1b30766dc08973d38ef935a7aa99ff053db507fa3f22a6db94ecce",
+    "m9-server-control.py": "7a2a9c888327f41741bffe621a667aa1a412fc7c9b4d2c3e63f3e0db05d032e9",
+    "run-m6-w1.py": "7c170f4bc0d8f8dc725aeb5d0ab5b147892edf4c04d23a64ab764ba088bbdc21",
+    "m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0",
+    "measurement-revision-v9.md": "59f89b56a15cb85d13cc69dd1fb3b8a022d6d7ca033da6260ae250ef57da8f30"
+  },
+  "server_inputs": {
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/phase5a-baseline-helper-v11": "1fceab7d2f26dbd40dab8b06e56026482fd42168ac7b8d13f792c3e6076ee2f3",
+    "/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust": "370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/target/release/mosdns": "13785b388787fe87f370f608f0f69392288ec0631ba8210e410aa317441130ce",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/m9-server-control.py": "7a2a9c888327f41741bffe621a667aa1a412fc7c9b4d2c3e63f3e0db05d032e9",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/w2-off.yaml": "bc01440c8e19c71e225918429d4a654b7255d4e44035f902825cbb021e70e463",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/w2-on.yaml": "9d87b29cbdfa777c14dec1d6c1e3241189c298a9f5026bcd876f651bac332356",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/configs/cache.yaml": "7f521ae011c28b4e102ff75437ebb943ba11f4bdc09aa656c41290ccde4b61c7",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/workloads/cache.jsonl": "7680cd55ccf477972cd700c05e72c83c52ab1a55643b9a98bb610629035214ed",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/w3-off.yaml": "4262d63b065a7b4e3c13bc91917d2b2b1a208e54fd722e8c928b45cbcef5f39e",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/w3-on.yaml": "d3b64e038d7fe6367c8976be4666753ff0dffe26557e700467cbcb0107327f7a",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/configs/routing.yaml": "66f358dbe2315df2aab1ad81668cec980b2f11aa68f863acad522c8e0c9fc651",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/tests/phase5a-baseline/workloads/routing.jsonl": "dbb582dc9d623af54e501639b7a52538b1e1d9e493fa0f0f6a4f4714ea0176c1"
+  },
+  "client_inputs": {
+    "/root/mosdns-phase5a-m9-client/tools/phase5a-baseline-helper-v11": "1fceab7d2f26dbd40dab8b06e56026482fd42168ac7b8d13f792c3e6076ee2f3",
+    "/root/mosdns-phase5a-m9-client/tools/m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0",
+    "/root/mosdns-phase5a-m9-client/tools/cache.jsonl": "7680cd55ccf477972cd700c05e72c83c52ab1a55643b9a98bb610629035214ed",
+    "/root/mosdns-phase5a-m9-client/tools/routing.jsonl": "dbb582dc9d623af54e501639b7a52538b1e1d9e493fa0f0f6a4f4714ea0176c1"
+  }
+}

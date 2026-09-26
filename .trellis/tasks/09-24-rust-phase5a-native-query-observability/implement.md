@@ -91,6 +91,39 @@ terminate as local SERVFAIL under the existing sequence contract; the added
 fallback case is an upstream B SERVFAIL response followed by the existing C
 route, with only C marked final.
 
+## Authorized final bounded acceptance (M9, 2026-09-26)
+
+User authorized one sequence: unify remaining acceptance, one Linux regression,
+W2/W3 supplement, one final A1–A6 review. Executor inline; selected reviewer
+002reviewer unchanged. Preparation unit freezes the R7 clarification, harness,
+identities and Linux evidence and receives prospective review before traffic.
+After PASS consume exactly18 sessions once (W2 nine, W3 nine); consolidate
+all A1–A6 evidence and coverage/handover for one final review. Scoped findings
+are repaired and re-reviewed only within the submitted unit. Preserve M8 W1
+PASS and prior failures; no repeated W1, resampling, tuning, production,
+archive, task closure or next task. Task stays in_progress.
+
+W2 cold is two correctness/cache-publication queries per fresh session,
+followed by2500 warm queries over25s within unchanged30s fixture TTL. Cold
+two-query latency is diagnostic only, not statistical tail acceptance. W3 is
+3000 queries over30s. Both use100QPS, old/off/on balanced three repetitions,
+zero errors/shortfall and paired-median p95/p99 ratios<=1.10 for off/old and
+on/off. CPU/RSS auxiliary; no capacity or full Phase5A claim. Protocol in
+research/measurement-revision-v9.md is the frozen execution gate.
+
+M9 preparation evidence: missing driver initially made the two new plan/gate
+tests RED; driver/controller now pass four focused tests, including lost SSH
+launch-reply cleanup and occupied UDP bind rejection. All51 measurement
+regressions pass locally (one Linux-only skip). Inline trellis-check confirms
+fixed18 plan, existing sampler/merge/oracles reuse, cache ledger continuity,
+offline ledger transfer, exact binary/config/corpus checks and owned cleanup.
+Linux workspace has869 passed/zero failed including doc tests; strict Clippy
+and rustfmt pass. Latest helper Linux race test and vet pass. Both initial
+packaging failures (Rust YAML and Go runner script) are retained separately;
+same-commit dependencies restored without source changes. Source120 files
+match local pinned HEAD, no-query dual-host preflight rows[] passes. One-off
+test protocol stays task-local; no product spec change was introduced.
+
 ## Slice 3 — concurrency, lifecycle, Linux evidence, review
 
 - [x] Run mixed requests with distinct IDs/routes and shutdown barriers. Verify exact audit-to-request correlation, counters, no late send or extra upstream leg, in-flight zero after drain, owner close, and rebind. Keep W1/W2/W3 correctness oracles and cache publication tests intact.

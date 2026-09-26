@@ -40,3 +40,12 @@ Detailed audit is enabled by the sole listener's existing enable_audit flag. For
 An in-memory snapshot avoids a premature management API and keeps the query path free of disk/network I/O. It is not a user-facing audit UI; Phase 5C owns that contract. A ring retains the most recent events rather than promising unbounded history, with visible eviction accounting. Its lock or synchronization cost must be measured with audit on and off; if the current-thread collector becomes a bottleneck, optimize from profiling evidence without replacing the behavioral contract.
 
 Before implementation, freeze the old Rust source/binary, W1/W2/W3 fixtures, runner hash, offered rates, duration/repetition, affinity/VM topology, validity gates, and latency/throughput/CPU/RSS regression budgets in `research/performance-manifest.md`. Pin the new commit/binary before official Linux candidate runs. Compare old versus new with audit off; compare new audit on versus new audit off, since the old host rejects audit on. The prior report's sender shortfalls and absent overload trigger prohibit using an invalid high-rate stage to excuse or prove overhead. Use only valid low/moderate offered load for this task; a later dedicated profiling/measurement task owns overload discovery and multi-core analysis. Preserve rejected attempts and limitations in the result report. Never test on production `mos`.
+# M9 final bounded validation clarification
+
+User authorized the remaining Linux regression, W2/W3 supplement and final
+A1–A6 review in one sequence. See PRD final R7 interpretation and
+research/measurement-revision-v9.md. Runtime/metrics/audit contracts remain
+unchanged. Fresh UDP readiness uses owned listener PID from ss, never a DNS
+warm-up query. W2 cold/warm share SUT, fixture and request ledger. W3 uses
+three independently owned upstreams and one existing routing-event journal;
+resource sampling covers SUT and first fixture only and is auxiliary.
