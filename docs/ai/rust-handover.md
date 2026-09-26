@@ -57,10 +57,9 @@ authorized M10 nine-session W3 batch completed 27000 correct queries and 45000
 ordered routing events; unchanged paired median gates pass. Original driver
 FAIL (shared-clock route oracle and one exited-process cleanup race) is retained.
 A separate unique-ID offline proof and complete process-exit receipts pass;
-final A5/A6 acceptance awaits explicit review of that repair. See the task's
-research/m10-w3-assessment.md. No release or task closure is authorized. Inspect
-live
-Trellis task state before resuming, because archive moves and task pointers
+M10-FINAL-001 explicitly approved the repair and bounded A5/A6 acceptance.
+See the task's research/m10-w3-assessment.md. No release or task closure is
+authorized. Inspect live Trellis task state before resuming, because archive moves and task pointers
 may change independently of this concise handover.
 
 Completed milestones (all archived; each archive holds its own evidence):
@@ -118,7 +117,7 @@ measurements justify the performance benefit.
 The strict W1 UDP/TCP and W2/W3 native host now accepts its sole listener's
 `enable_audit` flag and exposes read-only basic metrics/terminal audit snapshots.
 Linux functional tests cover bounded provenance, retention and lifecycle;
-M10 W3 evidence and offline validation repair await scoped final review. Full C08 audit/API parity remains Phase5C. Later
+M10 W3 evidence and offline validation repair passed scoped final review. Full C08 audit/API parity remains Phase5C. Later
 measurement/profiling must separately examine higher-load offered-load validity
 and multi-core scaling; current100QPS screens do not establish capacity.
 Full cache behavior, remaining
@@ -139,8 +138,8 @@ multi-core performance.
   `docs/rust/performance-validation.md`.
 
 The current task stays in progress. M10 supplied the separately authorized W3
-correction batch; retain M9's invalid verdict and submit M10's raw and derived
-proofs for final A5/A6 review. No further traffic is authorized by this report.
+correction batch. Retain M9's invalid verdict and M10's raw and derived proofs
+with M10-FINAL-001 bounded A5/A6 PASS. This report authorizes no further traffic.
 Deployment and lifecycle closure remain gated.
 
 ## Non-negotiable constraints

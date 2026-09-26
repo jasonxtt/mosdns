@@ -1,6 +1,6 @@
 # Rust Phase 5A native query observability
 
-Status: in progress. Planning review passed and the user authorized Slices 0–3 on 2026-09-25. Base branch: `rust`.
+Status: in progress; bounded A1–A6 acceptance passed M10-FINAL-001 on 2026-09-26. Lifecycle closure remains separately gated. Planning review passed and the user authorized Slices 0–3 on 2026-09-25. Base branch: `rust`.
 
 ## Goal and value
 
@@ -44,12 +44,12 @@ A1–A6 review complete this bounded gate; no capacity/production/Phase5 closure
 
 ## Acceptance criteria
 
-- [ ] A1 (R1/R5): unchanged supported YAML with audit disabled still compiles; audit enabled compiles for W1 UDP/TCP, W2, and W3; the compiler still rejects a second listener, unknown fields, and unsupported graphs before I/O. With the sole listener's audit flag disabled, snapshots retain no query/client data.
-- [ ] A2 (R2/R3): deterministic tests prove exactly one lifecycle outcome and count for successful send, failed send, cancellation, and no-response paths. Malformed input creates no terminal query event. W1/W2/W3 entries match the actual response source/code, cache status, and ordered upstream attempts, including W3 A/B→A/B→C and distinct upstream versus local SERVFAIL and timeout provenance.
-- [ ] A3 (R4/R5): metric counts reconcile with sent/received fixtures and audit records; mutually exclusive terminal counts sum to completed and admitted equals completed plus in-flight; every inclusive histogram boundary and +infinity bucket follows the frozen cumulative contract, histogram counts are nondecreasing, and histogram count equals completed. Snapshots are stable and bounded; a small test capacity demonstrates eviction with an exact `evicted_total` and no unexplained missing event. No sensitive value becomes a metric label.
-- [ ] A4 (R6): mixed concurrent queries, deadline expiry, shutdown while an upstream is pending, and rebind preserve DNS and upstream-count oracles; in-flight returns to zero and all owners close. W1/W2/W3 audit-off regression suites remain green.
-- [ ] A5 (R7): focused Rust/workspace checks and Linux amd64 E2E pass on a pinned commit. The frozen probe and report disclose offered-load validity, on/off overhead, CPU/RSS, and uncertainty. Any repeatable regression beyond the predeclared budget blocks review or receives an explicit corrective task; no unsupported capacity claim appears.
-- [ ] A6: reviewer checks PRD/design/implementation scope, event semantics, retention behavior, performance evidence, and exact changed paths. Coverage/handover is updated only for the proven bounded 5A observability subset; task finishes and archives only after a final PASS.
+- [x] A1 (R1/R5): unchanged supported YAML with audit disabled still compiles; audit enabled compiles for W1 UDP/TCP, W2, and W3; the compiler still rejects a second listener, unknown fields, and unsupported graphs before I/O. With the sole listener's audit flag disabled, snapshots retain no query/client data.
+- [x] A2 (R2/R3): deterministic tests prove exactly one lifecycle outcome and count for successful send, failed send, cancellation, and no-response paths. Malformed input creates no terminal query event. W1/W2/W3 entries match the actual response source/code, cache status, and ordered upstream attempts, including W3 A/B→A/B→C and distinct upstream versus local SERVFAIL and timeout provenance.
+- [x] A3 (R4/R5): metric counts reconcile with sent/received fixtures and audit records; mutually exclusive terminal counts sum to completed and admitted equals completed plus in-flight; every inclusive histogram boundary and +infinity bucket follows the frozen cumulative contract, histogram counts are nondecreasing, and histogram count equals completed. Snapshots are stable and bounded; a small test capacity demonstrates eviction with an exact `evicted_total` and no unexplained missing event. No sensitive value becomes a metric label.
+- [x] A4 (R6): mixed concurrent queries, deadline expiry, shutdown while an upstream is pending, and rebind preserve DNS and upstream-count oracles; in-flight returns to zero and all owners close. W1/W2/W3 audit-off regression suites remain green.
+- [x] A5 (R7): focused Rust/workspace checks and Linux amd64 E2E pass on a pinned commit. The frozen probe and report disclose offered-load validity, on/off overhead, CPU/RSS, and uncertainty. Any repeatable regression beyond the predeclared budget blocks review or receives an explicit corrective task; no unsupported capacity claim appears.
+- [x] A6: reviewer checks PRD/design/implementation scope, event semantics, retention behavior, performance evidence, and exact changed paths. Coverage/handover is updated only for the proven bounded 5A observability subset; task finishes and archives only after a final PASS.
 
 ## Out of scope and deferred gates
 

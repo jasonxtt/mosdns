@@ -1,4 +1,4 @@
-# M10 W3 evidence remediation: numeric/route gates met, review pending
+# M10 W3 evidence remediation: bounded final acceptance PASS
 
 User explicitly authorized corrected W3 nine sessions once and scoped A5/A6
 re-review. M10 preparation002reviewer PASS13:36:08UTC on2026-09-26 pinned
@@ -19,8 +19,8 @@ ESRCH during post-stage owned cleanup. Neither diagnostic has been erased.
 
 The separate offline-route-review result meets the unchanged DNS, route and
 numeric latency contracts. It does not overwrite original rows, timestamps,
-latencies, or the raw FAIL verdict. Final acceptance requires explicit reviewer
-approval of this validation repair as well as the measured evidence.
+latencies, or the raw FAIL verdict. Final reviewer approval of this validation repair and measured evidence is
+recorded below; the original driver verdict remains FAIL.
 
 ## Complete routing proof without shared time
 
@@ -118,9 +118,24 @@ loads retain their verdicts.70 measurement regressions pass(oneLinux-onlyskip),
 source/doc whitespace checks pass, immutable raw inventory spaces retained.
 
 Original M9 final review supports A1–A4. This evidence supplies the missing
-A5 W3 DNS/routes and unchanged numeric screen, subject to review of the offline
-repair. A6 coverage/handover now describes only this bounded basic-observability
-subset with final verdict pending. Full5A, C08 audit/API/Prometheus/WebUI/
+A5 W3 DNS/routes and unchanged numeric screen, with explicit final approval of the offline
+repair. A6 coverage/handover describes only this bounded basic-observability
+subset. Full5A, C08 audit/API/Prometheus/WebUI/
 persistence, high-load/multicore capacity, deployment/cutover and lifecycle
-closure remain outside scope. Submit one scoped A5/A6 remediation re-review;
+closure remain outside scope. Scoped A5/A6 remediation review passed;
 no additional traffic, task archive, lifecycle completion or next task.
+
+## Final bounded acceptance
+
+002reviewer returned **FINAL: PASS — M10-FINAL-001** at 2026-09-26 14:03:57 UTC,
+turn01a0de01-65a0-7132-8c7f-2a395d7e7cd5, exact reviewed parent
+daeff167f16b4b4e816329de3e12c706cd03ccf5..head
+909bb3fd56812045206b75e46482a01f9e6ee649. Reviewer independently
+verified all9 unique-ID/question/ordered-path proofs,27000 requests/45000
+events, all36 matching exited-owner receipts,349 bundle entries and341 raw
+manifest entries. The separate proof and exit receipt support bounded A5/A6;
+original driver FAIL and all9 runner_exit=1 remain unchanged. A1–A4 and
+M8 W1/M9 W2/latest Linux evidence remain as previously reviewed. No reviewer
+tests/traffic. All six criteria for this basic-observability subset are now
+accepted; full Phase5A/C08/capacity/production are outside this verdict.
+Task status remains in_progress; no archive, deployment or new task authorized.

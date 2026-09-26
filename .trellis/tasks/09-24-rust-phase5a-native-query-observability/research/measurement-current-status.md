@@ -1,6 +1,6 @@
 # Measurement state, 2026-09-26
 
-## Current step: M10 evidence complete; scoped final review pending
+## Current step: M10 final bounded acceptance PASS
 
 Separately authorized nine W3 sessions completed once:27000 correct queries,
 45000 ordered route events verified offline, zero DNS errors/shortfall. Four
@@ -8,8 +8,8 @@ unchanged paired median p95/p99 gates pass. Original driver FAIL is preserved:
 its route oracle assumes shared clocks/barriers; one cleanup logged ESRCH.
 Independent unique-ID route proof and all36 owned-process exit receipts pass.
 Offline oracle/controller repairs have70 local regressions passing(oneLinux
-skip). Linux/W1/W2 evidence reused without traffic. A5/A6 await explicit review
-of this validation repair; no lifecycle/production/extra traffic authorization.
+skip). Linux/W1/W2 evidence reused without traffic. M10-FINAL-001 explicitly approved
+this validation repair and bounded A5/A6; no lifecycle/production/extra traffic authorization.
 See m10-w3-assessment.md and m10-review-ledger.md.
 
 ## M9 historical state
@@ -135,3 +135,18 @@ Inventory and pin any new host/tools/plan before a separately reviewed fresh
 calibration. Only complete qualified controls allow a separately reviewed
 V12 acceptance supplement with audit-on and contemporaneous controls.
 No archive, deployment or A5 approval. Trellis status stays in_progress.
+
+## Final bounded acceptance
+
+002reviewer returned **FINAL: PASS — M10-FINAL-001** at 2026-09-26 14:03:57 UTC,
+turn01a0de01-65a0-7132-8c7f-2a395d7e7cd5, exact reviewed parent
+daeff167f16b4b4e816329de3e12c706cd03ccf5..head
+909bb3fd56812045206b75e46482a01f9e6ee649. Reviewer independently
+verified all9 unique-ID/question/ordered-path proofs,27000 requests/45000
+events, all36 matching exited-owner receipts,349 bundle entries and341 raw
+manifest entries. The separate proof and exit receipt support bounded A5/A6;
+original driver FAIL and all9 runner_exit=1 remain unchanged. A1–A4 and
+M8 W1/M9 W2/latest Linux evidence remain as previously reviewed. No reviewer
+tests/traffic. All six criteria for this basic-observability subset are now
+accepted; full Phase5A/C08/capacity/production are outside this verdict.
+Task status remains in_progress; no archive, deployment or new task authorized.

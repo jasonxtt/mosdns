@@ -194,8 +194,8 @@ in_progress. No archive,production,additional tests/traffic or next task.
 
 - [x] Run mixed requests with distinct IDs/routes and shutdown barriers. Verify exact audit-to-request correlation, counters, no late send or extra upstream leg, in-flight zero after drain, owner close, and rebind. Keep W1/W2/W3 correctness oracles and cache publication tests intact.
 - [x] From `rust/`, run `cargo fmt --all -- --check`, focused native-host tests, `cargo test --workspace --locked`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and applicable existing Go/cgo regression checks from the repo root. Record exact commands, commit, failures and fixes.
-- [ ] Build the pinned native binary for Linux amd64 and run W1/W2/W3 audit-on/off E2E on `ssh mosdns-rust`; do not use production `mos`. Run only the frozen valid low/moderate Rust-before/Rust-after probe. Report p50/p95/p99, correct-on-time throughput, CPU, RSS, audit-on overhead, raw hashes, and invalid stages. Treat unrepeatable or sender-limited runs as inconclusive.
-- [ ] Ask the designated reviewer for a scoped A1–A6 review and fix findings. Update coverage/handover with bounded evidence, perform `trellis-check`/`trellis-update-spec` only where a lasting rule emerged, audit exact changed paths, and commit/push only task-owned changes. After final PASS, follow the normal finish/archive lifecycle; do not deploy or start the next task automatically.
+- [x] Build the pinned native binary for Linux amd64 and run W1/W2/W3 audit-on/off E2E on `ssh mosdns-rust`; do not use production `mos`. Run only the frozen valid low/moderate Rust-before/Rust-after probe. Report p50/p95/p99, correct-on-time throughput, CPU, RSS, audit-on overhead, raw hashes, and invalid stages. Treat unrepeatable or sender-limited runs as inconclusive.
+- [x] Ask the designated reviewer for a scoped A1–A6 review and fix findings. Update coverage/handover with bounded evidence, perform `trellis-check`/`trellis-update-spec` only where a lasting rule emerged, audit exact changed paths, and commit/push only task-owned changes. Final PASS records bounded acceptance; finish/archive lifecycle remains separately gated. Do not deploy or start the next task automatically.
 
 Slice 3 local evidence (2026-09-25): W3's concurrent frozen-corpus test now
 matches each distinct DNS ID and qname to its audit route, final response,
@@ -714,3 +714,18 @@ and the prospective-revision rationale are in
 `research/m2-calibration-assessment.md`. No resampling or threshold waiver.
 
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.
+
+## Final bounded acceptance
+
+002reviewer returned **FINAL: PASS — M10-FINAL-001** at 2026-09-26 14:03:57 UTC,
+turn01a0de01-65a0-7132-8c7f-2a395d7e7cd5, exact reviewed parent
+daeff167f16b4b4e816329de3e12c706cd03ccf5..head
+909bb3fd56812045206b75e46482a01f9e6ee649. Reviewer independently
+verified all9 unique-ID/question/ordered-path proofs,27000 requests/45000
+events, all36 matching exited-owner receipts,349 bundle entries and341 raw
+manifest entries. The separate proof and exit receipt support bounded A5/A6;
+original driver FAIL and all9 runner_exit=1 remain unchanged. A1–A4 and
+M8 W1/M9 W2/latest Linux evidence remain as previously reviewed. No reviewer
+tests/traffic. All six criteria for this basic-observability subset are now
+accepted; full Phase5A/C08/capacity/production are outside this verdict.
+Task status remains in_progress; no archive, deployment or new task authorized.
