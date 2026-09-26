@@ -476,6 +476,8 @@ tests pass. Native-host88tests,clippy(alltargets,-Dwarnings),workspacefmtcheck
 pass; Go helper fullrace tests,focused ledger race and vet pass. trellis-check
 performed inline against frozen event/DNS/evidence contracts; spec updated.
 See research/post-m7-remediation.md. No new benchmark results or speedup claim.
+POST-M7-CODE-001 received FINAL: PASS09:37:53UTC on35b22f86, zero findings.
+Code unit complete; no new measured traffic/fullA5/deployment authorized.
 
 User explicitly approved the proposed simplification and instructed execution.
 Unit1 fixes the scope/protocol and reuses existing transport/owned cleanup/
