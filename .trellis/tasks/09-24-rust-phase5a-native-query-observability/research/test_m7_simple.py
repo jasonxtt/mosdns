@@ -1,5 +1,8 @@
 import importlib.util
 import unittest
+import subprocess
+import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -10,6 +13,21 @@ def load():
 
 
 class SimplifiedTests(unittest.TestCase):
+    def test_transport_error_after_launch_still_stops_owned_session(self):
+        m=load();calls=[]
+        def remote(args,client,command,**kwargs):
+            calls.append(command)
+            if 'm7-server-control.py start' in command:
+                raise subprocess.TimeoutExpired('ssh',15)
+            if 'hash-tree' in command:
+                raise ValueError('no synthetic evidence')
+            return subprocess.CompletedProcess([],0,stdout='',stderr='')
+        with tempfile.TemporaryDirectory() as directory,patch.object(m.t,'remote',side_effect=remote):
+            result=m.run_one(None,m.plan()[0],Path(directory)/'slot')
+            self.assertEqual(result['runner_exit'],1)
+            self.assertTrue((Path(directory)/'slot/error.txt').exists())
+        self.assertTrue(any('m7-server-control.py stop' in command for command in calls))
+
     def test_exact_nine_balanced_actual_variants(self):
         m=load();p=m.plan()
         self.assertEqual(len(p),9)

@@ -76,7 +76,10 @@ def run_one(args,slot,root):
     try:
         t.remote(args,True,t.quoted(['mkdir',client]))
         t.remote(args,True,t.quoted(['touch',client+'/session']))
-        t.remote(args,False,t.quoted(['python3',t.SERVER_INPUT+'/m7-server-control.py','start','--variant',slot['variant'],'--result',server]));started=True
+        # A lost SSH reply can follow successful detached launches. Cleanup
+        # must use this fresh session's ownership records even then.
+        started=True
+        t.remote(args,False,t.quoted(['python3',t.SERVER_INPUT+'/m7-server-control.py','start','--variant',slot['variant'],'--result',server]))
         owned=json.loads(t.remote(args,False,t.quoted(['cat',server+'/owned.json'])).stdout)
         sample=server+'/samples'
         cmd=['nohup','taskset','-c','1','python3',t.SERVER_INPUT+'/m5-remote-tools.py','sample-server','--sut-pid',owned['sut']['pid'],'--fixture-pid',owned['fixture']['pid'],'--sut-start',owned['sut']['start_identity'],'--fixture-start',owned['fixture']['start_identity'],'--run-id',rid,'--stage','normal-reference','--result',sample,'--max-seconds','40']

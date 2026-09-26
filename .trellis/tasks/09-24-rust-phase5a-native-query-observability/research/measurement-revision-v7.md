@@ -46,6 +46,8 @@ configs, records their identities, and checks inputs before/after the batch.
 M7 roots are measurement-v7/results-m7-server under existing server benchmark
 BASE, /root/mosdns-phase5a-m7-client/{tools,results} on client, run IDs m7-rN-variant.
 Owned PID/start/pidfd cleanup and TIME_WAIT-safe availability probe are reused.
+An attempted server start triggers owned cleanup even if SSH loses its reply;
+missing ownership records or failed cleanup remain failure evidence.
 Unchanged m5-remote-tools preserves two-host sampling and exact source hash
 trees; run-m6-w1 supplies transport/inventory/hash verification only.
 
