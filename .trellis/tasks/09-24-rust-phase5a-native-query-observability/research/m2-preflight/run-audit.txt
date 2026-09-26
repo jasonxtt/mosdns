@@ -1,0 +1,12 @@
+mode=identical-baseline calibration; all slot labels use audit off
+GOMAXPROCS=1
+source_commit=27cfc20d3bd27ba90ec67454ab343978d0cb7fed
+start_utc=2026-09-26T02:11:56Z
+ba864a787b639aa293a8e4a9981be03ca80d7a874f6cc182ed1a5889d77ad021  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v2/repo/scripts/run-phase5a-baseline.sh
+254500ec00527850f0f137bcc7e9ac26ff4953d6600bfc00eb7a7fbc2afc436d  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v2/phase5a-baseline-helper-v9
+370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa  /root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust
+7cf2084fd6ad9ec5aea94dd0a4b1595e506d3e7d7a1a9418ca620ef803cf6db4  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-preflight/run-m2-calibration.sh
+67ba8bea79bfee6a2835f03108bea7a5268862975ede91adbfb8294ca96ef361  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-preflight/measurement-revision-v2.md
+d89d943c79645bc4e9763e62ed3633a7aae398550002d86a6f653530469f9323  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-preflight/batch1/attempt-order-plan.tsv
+d6997cfbb3d0f9165fe2cdd6837af4dfeb9b98ebb522124edf67a5343d679fb4  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-preflight/batch2/attempt-order-plan.tsv
+preflight_only=1
