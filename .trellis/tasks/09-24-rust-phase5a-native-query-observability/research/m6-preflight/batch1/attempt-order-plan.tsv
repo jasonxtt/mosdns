@@ -1,0 +1,9 @@
+w1-tcp	1	before_off	1	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r1-before_off
+w1-tcp	1	after_off	2	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r1-after_off
+w1-tcp	1	after_on	2	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r1-after_on
+w1-tcp	2	after_off	2	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r2-after_off
+w1-tcp	2	after_on	2	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r2-after_on
+w1-tcp	2	before_off	1	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r2-before_off
+w1-tcp	3	after_on	2	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r3-after_on
+w1-tcp	3	before_off	1	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r3-before_off
+w1-tcp	3	after_off	2	/private/tmp/mosdns-phase5a-m6-preflight-20260926/batch1/w1-tcp-r3-after_off

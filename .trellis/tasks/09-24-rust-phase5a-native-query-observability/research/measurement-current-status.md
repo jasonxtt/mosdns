@@ -14,6 +14,12 @@ Evidence and stop review M5-REPORT-001 passed at07:26:03UTC; it does not
 qualify controls or authorize a further run. Startup-check correction and a
 separately frozen/reviewed next protocol are still required.
 
+User authorized the next step; M6 startup correction and disjoint generation
+are prepared. Five Linux M6 tests and local49-test measurement suite pass
+(Linux-only TIME_WAIT case is skipped on macOS and passes on Linux). Fresh
+two-host read-only preflight passes with zero attempt ledgers. M6 prospective
+review is required before its one fixed18-attempt W1 run. No M6 traffic yet.
+
 | Revision | Fixed attempts | Valid primary | Correct on time | Qualified latency intervals | Control result |
 |---|---:|---:|---:|---:|---|
 | M2: v9 no sampler subprocess, pinned scheduler |54|126|108000|1/28|Unqualified|

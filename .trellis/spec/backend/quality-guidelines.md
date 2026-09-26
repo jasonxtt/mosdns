@@ -55,6 +55,50 @@ and wrong profile fail; PID ownership change refuses signal; exit race is benign
 Wrong: server PID passed to remote client sampling. Correct: client samples
 itself; server samples its own processes; merge enriches separate namespaces.
 
+## Scenario: repeated TCP session availability (M6)
+
+### 1. Scope / Trigger
+
+Repeated performance sessions can leave TIME_WAIT after successful shutdown.
+Fix the probe before another prospective fixed control run; retain old evidence.
+
+### 2. Signatures
+
+`m6-server-control.py probe_available(address)` sets SO_REUSEADDR before bind.
+`start(root)` creates a fresh owned evidence directory before input/port checks.
+`run-m6-w1.py` uses disjoint M6 input/result roots and run IDs.
+
+### 3. Contracts
+
+No SO_REUSEPORT, listen, kernel tuning or service change in the probe. Empty
+owned.json and startup-error.txt preserve prelaunch failures; client session.txt
+preserves an empty query session. Error evidence includes captured remote
+stdout/stderr. No credentials/full process environment. Reuse M5 sampling,
+oracles, source manifests and unchanged numerical qualification rules.
+
+### 4. Validation & Error Matrix
+
+TIME_WAIT alone permits bind; active listener refuses bind. Wrong input/host
+leaves failure evidence and sends no query. Existing result directory refuses
+reuse. Remote failure remains invalid; missing windows are never fabricated.
+
+### 5. Good/Base/Bad Cases
+
+Good: fresh M6 roots, ordinary address reuse and owned cleanup. Base: both
+stage windows stay within the same newly started server session. Bad: disable
+port checks, enable SO_REUSEPORT, alter OS TIME_WAIT behavior, or overwrite M5.
+
+### 6. Tests Required
+
+Real Linux TCP active-close reproduces plain-bind errno98, then three reuse
+probes succeed. An active listener still rejects; early startup failure retains
+owned/error files; remote stderr survives;18 M6 IDs are disjoint from M5.
+
+### 7. Wrong vs Correct
+
+Wrong: ordinary bind treats closed TIME_WAIT sockets as occupied listeners.
+Correct: SO_REUSEADDR allows closed sessions while active listeners still fail.
+
 - Make the minimum change that satisfies the active task. Do not refactor adjacent code or reformat unrelated files.
 - Every changed line must trace to a requirement in the task. Remove only imports or code made unused by that change.
 - Preserve unrelated dirty worktree changes. Trellis auto-commit is disabled for this repository.
