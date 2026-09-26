@@ -1,0 +1,20 @@
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch2-w1-tcp-r3-before_off.jsonl --stage normal-reference
+stage normal-reference is not fully correct-on-time: {Scheduled:4996 Sent:4996 Received:4996 CorrectOnTime:4996 CorrectLate:0 ExpectedNegativeOnTime:1665 WrongResponse:0 ProtocolError:0 TransportError:0 Timeout:0 SenderShortfall:4}
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch2-w1-tcp-r3-before_off.jsonl --stage normal-reference
+stage normal-reference dropped 4 open-loop schedule slot(s), max_lag_us=28562
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-samples --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch2-w1-tcp-r3-before_off.jsonl --stage normal-reference --expected-fixtures 1
+resource sampling verified: stage=normal-reference samples=map[fixture-1:27 load-generator:26 sut:27]
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch2-w1-tcp-r3-before_off.jsonl --stage overload
+stage overload is not fully correct-on-time: {Scheduled:9985 Sent:9985 Received:9985 CorrectOnTime:9985 CorrectLate:0 ExpectedNegativeOnTime:3328 WrongResponse:0 ProtocolError:0 TransportError:0 Timeout:0 SenderShortfall:15}
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch2-w1-tcp-r3-before_off.jsonl --stage overload
+stage overload dropped 15 open-loop schedule slot(s), max_lag_us=39376
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-samples --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch2-w1-tcp-r3-before_off.jsonl --stage overload --expected-fixtures 1
+resource sampling verified: stage=overload samples=map[fixture-1:27 load-generator:26 sut:27]
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-session-counters --scenario w1 --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/repo/tests/phase5a-baseline/workloads/forward.jsonl --counter /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m6-server/m6-batch2-w1-tcp-r3-before_off/fixture-forward.json --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch2-w1-tcp-r3-before_off.jsonl --run-id m6-batch2-w1-tcp-r3-before_off
+exit=0

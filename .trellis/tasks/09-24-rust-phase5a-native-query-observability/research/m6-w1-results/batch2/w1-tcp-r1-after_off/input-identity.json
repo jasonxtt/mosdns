@@ -1,0 +1,32 @@
+{
+  "helper_sha256": "28d5faf5f5129aa990aac51efd8752eba655b852f0bcb27619b216e572c0450e",
+  "baseline_sha256": "370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa",
+  "local_tools": {
+    "run-m6-w1.py": "7c170f4bc0d8f8dc725aeb5d0ab5b147892edf4c04d23a64ab764ba088bbdc21",
+    "m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0",
+    "m6-server-control.py": "a6cf5762886c46f20e2a5441f5f63349a9b0f95fbf26695efd750731509eac1a",
+    "qualify-m6-w1.py": "a3735bde06f4636302cef6b5f76956de4e0508070c2a758aace7992581dd89fe",
+    "qualify-m2-controls.py": "7038aca782ea5bc92c2dd9cf1a7cb389e0a06d094be06a59b2d954805bc43980",
+    "summarize-slice3-pilot-v2.py": "3b3b4559b62d10088e45e41aa59b46bfa43b8897a8805e57edf08abbee622dc6",
+    "measurement-revision-v6.md": "ab7a753d72d9e3661677d23a747b42f46bb991595223a9df5300d26cea79f857"
+  },
+  "helper_source": {
+    "tests/phase5a-baseline/cmd/phase5a-baseline/main.go": "b6880b4c1b87601eb5fd98b14e9645e78578cf79479887128fc69435db1c897b",
+    "tests/phase5a-baseline/cmd/phase5a-baseline/main_test.go": "ff0eb3a6fed2aa588f1866fe2d82ccedb7d54ce1053d9cb2df9140b2d24fdee0"
+  },
+  "server_inputs": {
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/m6-server-control.py": "a6cf5762886c46f20e2a5441f5f63349a9b0f95fbf26695efd750731509eac1a",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10": "28d5faf5f5129aa990aac51efd8752eba655b852f0bcb27619b216e572c0450e",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/repo/tests/phase5a-baseline/workloads/forward.jsonl": "32ae1a43cae5f4e85b0a058d389d2071a8d7cf844aad98b31137f95b57715aa2",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/forward-tcp-lan.yaml": "bfd243afbbf26cf8d890fc99bbf24a6d5ba2087c728ed7d4692aced0aca0cb7e",
+    "/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust": "370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/repo/tests/phase5a-baseline/cmd/phase5a-baseline/main.go": "b6880b4c1b87601eb5fd98b14e9645e78578cf79479887128fc69435db1c897b",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/repo/tests/phase5a-baseline/cmd/phase5a-baseline/main_test.go": "ff0eb3a6fed2aa588f1866fe2d82ccedb7d54ce1053d9cb2df9140b2d24fdee0"
+  },
+  "client_inputs": {
+    "/root/mosdns-phase5a-m6-client/tools/phase5a-baseline-helper-v10": "28d5faf5f5129aa990aac51efd8752eba655b852f0bcb27619b216e572c0450e",
+    "/root/mosdns-phase5a-m6-client/tools/forward.jsonl": "32ae1a43cae5f4e85b0a058d389d2071a8d7cf844aad98b31137f95b57715aa2",
+    "/root/mosdns-phase5a-m6-client/tools/m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0"
+  }
+}

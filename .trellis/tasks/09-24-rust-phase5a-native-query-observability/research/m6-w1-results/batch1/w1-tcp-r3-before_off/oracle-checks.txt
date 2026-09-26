@@ -1,0 +1,19 @@
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch1-w1-tcp-r3-before_off.jsonl --stage normal-reference
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch1-w1-tcp-r3-before_off.jsonl --stage normal-reference
+sender schedule verified: stage=normal-reference scheduled=5000 sent=5000
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-samples --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch1-w1-tcp-r3-before_off.jsonl --stage normal-reference --expected-fixtures 1
+resource sampling verified: stage=normal-reference samples=map[fixture-1:27 load-generator:26 sut:27]
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch1-w1-tcp-r3-before_off.jsonl --stage overload
+stage overload is not fully correct-on-time: {Scheduled:9999 Sent:9999 Received:9999 CorrectOnTime:9999 CorrectLate:0 ExpectedNegativeOnTime:3333 WrongResponse:0 ProtocolError:0 TransportError:0 Timeout:0 SenderShortfall:1}
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch1-w1-tcp-r3-before_off.jsonl --stage overload
+stage overload dropped 1 open-loop schedule slot(s), max_lag_us=5030
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-samples --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch1-w1-tcp-r3-before_off.jsonl --stage overload --expected-fixtures 1
+resource sampling verified: stage=overload samples=map[fixture-1:27 load-generator:26 sut:27]
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/phase5a-baseline-helper-v10 verify-session-counters --scenario w1 --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/repo/tests/phase5a-baseline/workloads/forward.jsonl --counter /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m6-server/m6-batch1-w1-tcp-r3-before_off/fixture-forward.json --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v6/derived/m6-batch1-w1-tcp-r3-before_off.jsonl --run-id m6-batch1-w1-tcp-r3-before_off
+exit=0

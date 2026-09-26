@@ -1,0 +1,10 @@
+{
+  "fixture": {
+    "pid": 317789,
+    "start_identity": "22645130"
+  },
+  "sut": {
+    "pid": 317795,
+    "start_identity": "22645135"
+  }
+}

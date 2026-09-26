@@ -1,0 +1,19 @@
+primary rows: 18
+paired assessments: 16
+valid primary rows: 6/18
+w1-tcp main 200 after_off_vs_before_off p95_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_off_vs_before_off p99_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_off_vs_before_off cpu_us_per_correct_query n=0 deltas=[] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_off_vs_before_off rss_peak_kib_sampled n=0 deltas=[] guard=32768 KiB above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off p95_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off p99_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off cpu_us_per_correct_query n=0 deltas=[] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off rss_peak_kib_sampled n=0 deltas=[] guard=32768 KiB above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off p95_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off p99_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off cpu_us_per_correct_query n=0 deltas=[] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off rss_peak_kib_sampled n=0 deltas=[] guard=32768 KiB above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off p95_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off p99_us n=0 deltas=[] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off cpu_us_per_correct_query n=0 deltas=[] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off rss_peak_kib_sampled n=0 deltas=[] guard=32768 KiB above=0 inconclusive: fewer than 3 valid pairs

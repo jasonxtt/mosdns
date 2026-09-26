@@ -1,0 +1,19 @@
+primary rows: 18
+paired assessments: 16
+valid primary rows: 10/18
+w1-tcp main 200 after_off_vs_before_off p95_us n=1 deltas=[-6.2612] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_off_vs_before_off p99_us n=1 deltas=[-7.8162] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_off_vs_before_off cpu_us_per_correct_query n=1 deltas=[4.8193] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_off_vs_before_off rss_peak_kib_sampled n=1 deltas=[1.1719] guard=8192 KiB above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off p95_us n=2 deltas=[28.3417,35.6870] guard=10.00% above=2 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off p99_us n=2 deltas=[33.0691,34.5324] guard=10.00% above=2 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off cpu_us_per_correct_query n=2 deltas=[11.9048,4.5977] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 200 after_on_vs_after_off rss_peak_kib_sampled n=2 deltas=[4.6729,0.2574] guard=32768 KiB above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off p95_us n=1 deltas=[-8.6957] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off p99_us n=1 deltas=[-5.7524] guard=10.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off cpu_us_per_correct_query n=1 deltas=[-6.8966] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_off_vs_before_off rss_peak_kib_sampled n=1 deltas=[1.0390] guard=8192 KiB above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off p95_us n=2 deltas=[32.3733,-0.5537] guard=10.00% above=1 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off p99_us n=2 deltas=[26.5823,2.0708] guard=10.00% above=1 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off cpu_us_per_correct_query n=2 deltas=[19.5312,0.7407] guard=25.00% above=0 inconclusive: fewer than 3 valid pairs
+w1-tcp main 400 after_on_vs_after_off rss_peak_kib_sampled n=2 deltas=[4.6605,0.1285] guard=32768 KiB above=0 inconclusive: fewer than 3 valid pairs

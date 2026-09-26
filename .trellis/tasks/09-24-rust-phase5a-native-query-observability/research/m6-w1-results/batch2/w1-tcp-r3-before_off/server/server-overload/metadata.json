@@ -1,0 +1,25 @@
+{
+  "valid": true,
+  "host": "mosdns-rust",
+  "run_id": "m6-batch2-w1-tcp-r3-before_off",
+  "stage": "overload",
+  "proc_root": "/proc",
+  "counts": {
+    "sut": 27,
+    "fixture-1": 27
+  },
+  "processes": {
+    "sut": {
+      "pid": 322688,
+      "start_identity": "22723425",
+      "cpus": "0"
+    },
+    "fixture-1": {
+      "pid": 322682,
+      "start_identity": "22723420",
+      "cpus": "1"
+    }
+  },
+  "clock_ticks_per_second": 100,
+  "bracket_seconds": 25.98375893299817
+}

@@ -20,12 +20,20 @@ are prepared. Five Linux M6 tests and local49-test measurement suite pass
 two-host read-only preflight passes with zero attempt ledgers. M6 prospective
 review is required before its one fixed18-attempt W1 run. No M6 traffic yet.
 
+M6 subsequently received prospective PASS and completed its one fixed18-slot
+run07:54:50UTC: all sessions start correctly, but8/18 attempts pass and16/36
+windows are valid.269960 actual queries are correct on time;40 planned slots
+are dropped by the sender. Controls remain UNQUALIFIED; the mechanically
+computed8 intervals include invalid load and are diagnostic only (0/8 inside
+margin). See m6-calibration-assessment.md; acceptance stays closed.
+
 | Revision | Fixed attempts | Valid primary | Correct on time | Qualified latency intervals | Control result |
 |---|---:|---:|---:|---:|---|
 | M2: v9 no sampler subprocess, pinned scheduler |54|126|108000|1/28|Unqualified|
 | M3:25-second primary windows, TTL-checked warm points |18|36|270000|1/8|Unqualified; W1 stop|
 | M4:bounded helper GC-off experiment |18|36|270000|1/8|Unqualified; W1 stop|
 | M5:separate client/server |18 slots|2|15000|None: incomplete matrix|Invalid; W1 stop|
+| M6:TCP startup correction |18|16/36|269960|No accepted six-valid-pair estimates|Unqualified; sender shortfall|
 
 Each protocol received designated002reviewer PASS **before** fresh traffic.
 Each ran once in a separate root; all attempts and unexecuted plans remain.
