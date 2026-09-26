@@ -453,6 +453,27 @@ control run then started in the separate `results-m2-calibration` root.
 
 ## Review and rollback points
 
+### M6 authorized range (user: continue next step)
+
+The user on2026-09-26 explicitly authorized continuing the next corrective
+step after M5's reported startup defect. Executor=current inline;
+reviewer=002reviewer01a0d43d-d0aa-7401-af0f-2ca3a45ba519, native transport
+verified. Unit1: correct TCP availability probe, retain early startup and
+remote stderr evidence, freeze fresh M6 generation roots and the unchanged
+W1 control matrix. Red/green/check/spec/commit/push/prospective review precede
+traffic. Unit2 after explicit unit1 PASS: exactly one fresh18-attempt W1
+control run, all original budgets/oracles, report all results. M5 remains an
+invalid completed matrix and is never overwritten or mixed with M6. W2/W3,
+candidate acceptance, runtime changes, resource allocation, deployment and
+task closure remain outside this range. A failing M6 gate stops before them.
+
+M6 unit1 red/green: early failure evidence/active-listener tests initially
+failed; real Linux TIME_WAIT test then reproduced errno98 with the plain probe.
+After SO_REUSEADDR fix all5 Linux M6 tests pass; local49-test suite passes with
+one Linux-specific skip (covered on Linux). Remote stderr and disjoint18 IDs
+are covered. Fresh read-only dual-host preflight passes; both ledgers are
+header-only. Go/Rust/helper binary/immutable M5 sampler/analyzer unchanged.
+
 ### Frozen M5 authorization (2026-09-26)
 
 User authorized using the only available hardware: 10.0.0.50 generates

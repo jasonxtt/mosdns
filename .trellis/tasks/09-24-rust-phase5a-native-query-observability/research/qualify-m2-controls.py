@@ -55,7 +55,7 @@ def qualify(root, groups=GROUPS, profile='m2'):
                     evidence = dict(line.split('=', 1) for line in (attempt / 'environment.txt').read_text().splitlines() if '=' in line)
                     if evidence.get('measurement_profile') != profile or evidence.get('gomaxprocs_environment') != '1':
                         failures.append(f'{batch}: missing/wrong runtime profile in {attempt.name}')
-                    if profile in ('m3', 'm4', 'm5'):
+                    if profile in ('m3', 'm4', 'm5', 'm6'):
                         metadata = dict(line.split('=', 1) for line in (attempt / 'run-metadata.txt').read_text().splitlines() if '=' in line)
                         settings = {'stage_duration_ms': '25000', 'normal_reference_qps': '200', 'overload_qps': '400', 'request_deadline_ms': '500', 'late_drain_ms': '100'}
                         if scenario == 'w2':
@@ -79,7 +79,7 @@ def qualify(root, groups=GROUPS, profile='m2'):
                     binary = json.loads((attempt / 'sut.json').read_text())
                     if binary.get('sha256') != '370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa':
                         failures.append(f'{batch}: wrong identical-baseline binary in {attempt.name}')
-        if profile in ('m3', 'm4', 'm5'):
+        if profile in ('m3', 'm4', 'm5', 'm6'):
             for key, row in indexed.items():
                 if int(row['scheduled']) != key[2] * 25:
                     failures.append(f'{batch}: wrong M3 request count {key}')
