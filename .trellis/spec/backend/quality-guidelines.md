@@ -486,3 +486,18 @@ exchange's registration drop immediately when the caller aborts.
 Correct: supply a sealed `TrackedH2Executor`, retain a shared lifecycle hold in
 its state/children, abort and drain every registered child before releasing the
 exchange's owner liveness.
+
+## Bounded low-load real-host regression (M7)
+
+When a user explicitly approves simplified measurement, freeze the new scope
+and numeric rule before candidate traffic. A100QPS W1 comparison is limited
+regression evidence, not capacity/fullA5 or retroactive qualification of old
+failed controls. Run actual pinned old/new-off/new-on binaries/configs on the
+same server, with three balanced repetitions,3000 correct scheduled/sent/
+received per run and zero errors/shortfall. Freeze paired median p95/p99<=1.10
+before execution; CPU/RSS remain auxiliary. Preserve failed attempts, input
+hashes, response/sender/session-counter oracles and owned process cleanup.
+Incomplete evidence must fail closed. Unit tests cover exact ordering,
+shortfall and repeated latency regression; one prospective and one result
+review suffice for the authorized nine-run batch. Never silently reinterpret
+this as high-load equivalence or rerun until a desirable result appears.

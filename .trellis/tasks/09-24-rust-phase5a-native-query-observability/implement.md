@@ -453,6 +453,20 @@ control run then started in the separate `results-m2-calibration` root.
 
 ## Review and rollback points
 
+### M7 user-authorized simplified real-host regression
+
+User explicitly approved the proposed simplification and instructed execution.
+Unit1 fixes the scope/protocol and reuses existing transport/owned cleanup/
+sampling/DNS oracles for9 balanced runs: baseline off,candidate off,candidate
+on,3 repetitions,100QPS30s each. One prospective002reviewer review precedes
+traffic. Unit2 after PASS executes those9 once, retains all outcomes and
+requests one consolidated result review. No prior self-control calibration
+or CI-equivalence requirement for this bounded user-approved lower-load W1
+TCP regression. Correctness remains3000 scheduled/sent/received/correct per
+run,zero shortfall/errors. Paired median p95/p99 ratios >1.10 flag regression;
+CPU/RSS auxiliary. This is limited100QPS W1 evidence, never capacity/fullA5
+or retroactive waiver of V12/M2–M6. W2/W3,production,archive outside scope.
+
 ### M6 authorized range (user: continue next step)
 
 The user on2026-09-26 explicitly authorized continuing the next corrective
