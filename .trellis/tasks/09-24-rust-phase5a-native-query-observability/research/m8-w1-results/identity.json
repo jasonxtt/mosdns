@@ -1,0 +1,24 @@
+{
+  "local_tools": {
+    "run-m8-simple.py": "70c99933eccd6129a80080d42f0e6e71d5d88b98d961f15df3742acaa14679b6",
+    "m8-server-control.py": "6bb179b5c4c2e2efa21342271d43666a63790ce18f01d62a6f0401f8fc6664a4",
+    "run-m6-w1.py": "7c170f4bc0d8f8dc725aeb5d0ab5b147892edf4c04d23a64ab764ba088bbdc21",
+    "m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0",
+    "measurement-revision-v8.md": "596c6ce46d3133bf34d1647ead8f51999354b601355e6607fae5ec7e196ff654"
+  },
+  "server_inputs": {
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v8/phase5a-baseline-helper-v11": "1fceab7d2f26dbd40dab8b06e56026482fd42168ac7b8d13f792c3e6076ee2f3",
+    "/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust": "370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/target/release/mosdns": "13785b388787fe87f370f608f0f69392288ec0631ba8210e410aa317441130ce",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v8/m8-server-control.py": "6bb179b5c4c2e2efa21342271d43666a63790ce18f01d62a6f0401f8fc6664a4",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v8/m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v8/forward-off.yaml": "bfd243afbbf26cf8d890fc99bbf24a6d5ba2087c728ed7d4692aced0aca0cb7e",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v8/forward-on.yaml": "bf87412b52b807905ed986c910f83d456e8b19fb4dca586bf37cc8a8c5099fcc",
+    "/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v8/repo/tests/phase5a-baseline/workloads/forward.jsonl": "32ae1a43cae5f4e85b0a058d389d2071a8d7cf844aad98b31137f95b57715aa2"
+  },
+  "client_inputs": {
+    "/root/mosdns-phase5a-m8-client/tools/phase5a-baseline-helper-v11": "1fceab7d2f26dbd40dab8b06e56026482fd42168ac7b8d13f792c3e6076ee2f3",
+    "/root/mosdns-phase5a-m8-client/tools/forward.jsonl": "32ae1a43cae5f4e85b0a058d389d2071a8d7cf844aad98b31137f95b57715aa2",
+    "/root/mosdns-phase5a-m8-client/tools/m5-remote-tools.py": "6c9b57ac83e80b6950b9ac0aeac259cbf5ffe82e3906bc1901bc27b86dca7ac0"
+  }
+}

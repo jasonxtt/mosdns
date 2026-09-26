@@ -1,0 +1,15 @@
+{
+  "repetition": 1,
+  "variant": "after_on",
+  "run_id": "m8-r1-after_on",
+  "qps": 100,
+  "duration_ms": 30000,
+  "runner_exit": 0,
+  "correct": 3000,
+  "shortfall": 0,
+  "errors": 0,
+  "p95_us": 1207,
+  "p99_us": 2192,
+  "rss_peak_kib": 4616,
+  "cpu_seconds_bracket": 0.65
+}
