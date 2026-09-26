@@ -28,6 +28,21 @@ LATE_DRAIN_MS="${LATE_DRAIN_MS:-100}"
 RECOVERY_MINIMUM_SAMPLES="${RECOVERY_MINIMUM_SAMPLES:-}"
 RECOVERY_P95_CEILING_US="${RECOVERY_P95_CEILING_US:-}"
 RECOVERY_P99_CEILING_US="${RECOVERY_P99_CEILING_US:-}"
+MEASUREMENT_PROFILE="${PHASE5A_MEASUREMENT_PROFILE:-legacy}"
+case "${MEASUREMENT_PROFILE}" in
+  legacy) ;;
+  m2)
+    if [[ "${GOMAXPROCS:-}" != 1 ]]; then
+      echo "m2 measurement requires GOMAXPROCS=1" >&2
+      exit 2
+    fi
+    if [[ "${CANDIDATE}" != rust || "${RUN_MODE}" != pilot ]]; then
+      echo "m2 measurement supports only isolated Rust pilot runs" >&2
+      exit 2
+    fi
+    ;;
+  *) echo "unsupported measurement profile: ${MEASUREMENT_PROFILE}" >&2; exit 2 ;;
+esac
 
 if [[ -n "${HARNESS_CPU_SET}" && "${PHASE5A_HARNESS_PINNED:-0}" != "1" ]]; then
   command -v taskset >/dev/null 2>&1 || { echo "HARNESS_CPU_SET requires taskset" >&2; exit 2; }
@@ -143,6 +158,10 @@ if [[ "${RUN_MODE}" != "smoke" ]]; then
   helper_version="$("${HELPER_BINARY}" version)"
   if [[ "${helper_version}" != "phase5a-baseline-helper/v8" && "${helper_version}" != "phase5a-baseline-helper/v9" ]]; then
     echo "unsupported helper version: ${helper_version}" >&2
+    exit 2
+  fi
+  if [[ "${MEASUREMENT_PROFILE}" == m2 && "${helper_version}" != "phase5a-baseline-helper/v9" ]]; then
+    echo "m2 measurement requires helper v9" >&2
     exit 2
   fi
 fi
@@ -677,6 +696,7 @@ printf '%s\n' "stage_duration_ms=${STAGE_DURATION_MS}" "normal_reference_qps=${N
 printf '%s\n' "request_deadline_ms=${REQUEST_DEADLINE_MS}" "late_drain_ms=${LATE_DRAIN_MS}" "sut_cpu_set=${SUT_CPU_SET}" "harness_cpu_set=${HARNESS_CPU_SET}" "sut_startup_margin=${SUT_STARTUP_MARGIN}" >> "${RESULT_DIR}/run-metadata.txt"
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   {
+    printf 'measurement_profile=%s\ngomaxprocs_environment=%s\n' "${MEASUREMENT_PROFILE}" "${GOMAXPROCS:-unset}"
     printf 'ssh_host_alias=%s\n' "${TEST_HOST_ALIAS}"
     printf 'hostname=%s\n' "$(hostname -f)"
     printf 'kernel=%s\n' "$(uname -a)"

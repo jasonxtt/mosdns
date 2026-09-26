@@ -29,8 +29,9 @@ silently assuming 100. All sampled roles use that resolved frequency without
 forking a process. Query traffic, sockets, correctness, resource interval,
 counter and event oracles, ledger writes, and latency definition are unchanged.
 The runner accepts v8 for archived protocols and v9 for this explicitly pinned
-protocol. M2 sets `GOMAXPROCS=1` for its Go helpers/fixtures; it never changes
-the Rust SUT. Capture that setting in every result's protocol/audit.
+protocol. M2 sets `PHASE5A_MEASUREMENT_PROFILE=m2` and `GOMAXPROCS=1` for its
+Go helpers/fixtures; the runner rejects missing/wrong GOMAXPROCS and records
+both keys in each `environment.txt`. It never changes the Rust SUT.
 
 ## Fixed calibration experiment
 
@@ -51,7 +52,8 @@ and original input hashes in the run supplement. The helper was built with
 
 Each batch must pass the original 63/63 primary correctness/validity gates.
 Report all original paired guard outputs, not just aggregate summaries. To
-qualify M2, neither batch may contain a repeated p95/p99 guard crossing.
+qualify M2, no individual p95/p99 pair in either batch may exceed its original
+guard (`pairs_above_guard` must be zero for every latency assessment).
 Additionally, for every primary scenario/load and both slot comparisons,
 the six paired log latency ratios must have a two-sided 90% Student-t interval
 wholly within [-log(1.10), +log(1.10)]. Use t(5)=2.01504837333302, sample
@@ -61,7 +63,7 @@ This is an equivalence check at the 10% practical margin, not an overhead
 claim. It is subject to independence/approximately normal log-ratio assumptions;
 report per-pair values and drift rather than implying a general VM guarantee.
 
-If a primary attempt is invalid, any original latency guard repeats, or any
+If a primary attempt is invalid, any individual original latency guard crosses, or any
 equivalence interval is too wide/outside the margin, M2 is unqualified.
 Archive the result and revise/review the next protocol; do not resample M2
 until it passes. Longer observation windows or a stronger block design would

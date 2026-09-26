@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -89,6 +90,47 @@ func TestResourceClockRejectsInvalidOrMissingHostConstant(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if _, err := resourceClockTicksPerSecond(); err == nil {
 		t.Fatal("missing getconf must fail before measurement")
+	}
+}
+
+func TestM2RunnerRequiresAndRecordsFixedRuntimeProfile(t *testing.T) {
+	runner := os.Getenv("PHASE5A_RUNNER_UNDER_TEST")
+	if runner == "" {
+		var err error
+		runner, err = filepath.Abs("../../../../scripts/run-phase5a-baseline.sh")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []string{"", "2", "1"} {
+		t.Run("gomaxprocs-"+value, func(t *testing.T) {
+			cmd := exec.Command("bash", runner)
+			for _, item := range os.Environ() {
+				key := strings.SplitN(item, "=", 2)[0]
+				if key != "GOMAXPROCS" && key != "PHASE5A_MEASUREMENT_PROFILE" && key != "RUN_MODE" && key != "CANDIDATE" && key != "HARNESS_CPU_SET" && key != "MOSDNS_BINARY" && key != "SCENARIO" {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "PHASE5A_MEASUREMENT_PROFILE=m2", "RUN_MODE=pilot", "CANDIDATE=rust", "GOMAXPROCS="+value)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatal("test must stop before any SUT launch")
+			}
+			want := "m2 measurement requires GOMAXPROCS=1"
+			if value == "1" {
+				want = "MOSDNS_BINARY and SCENARIO are required"
+			}
+			if !strings.Contains(string(out), want) {
+				t.Fatalf("expected %q, got %s", want, out)
+			}
+		})
+	}
+	content, err := os.ReadFile(runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "gomaxprocs_environment=%s") || !strings.Contains(string(content), "measurement_profile=%s") {
+		t.Fatal("standard environment evidence omits the measurement runtime profile")
 	}
 }
 
