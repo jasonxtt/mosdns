@@ -1,0 +1,13 @@
+--- FAIL: TestM2RunnerRequiresAndRecordsFixedRuntimeProfile (0.00s)
+    --- FAIL: TestM2RunnerRequiresAndRecordsFixedRuntimeProfile/gomaxprocs- (0.00s)
+        main_test.go:261: expected "m2 measurement requires GOMAXPROCS=1", got bash: /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/scripts/run-phase5a-baseline.sh: No such file or directory
+    --- FAIL: TestM2RunnerRequiresAndRecordsFixedRuntimeProfile/gomaxprocs-2 (0.00s)
+        main_test.go:261: expected "m2 measurement requires GOMAXPROCS=1", got bash: /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/scripts/run-phase5a-baseline.sh: No such file or directory
+    --- FAIL: TestM2RunnerRequiresAndRecordsFixedRuntimeProfile/gomaxprocs-1 (0.00s)
+        main_test.go:261: expected "MOSDNS_BINARY and SCENARIO are required", got bash: /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/scripts/run-phase5a-baseline.sh: No such file or directory
+    main_test.go:267: open /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v9/repo/scripts/run-phase5a-baseline.sh: no such file or directory
+resource sampling verified: stage=normal-reference samples=map[fixture-1:2 load-generator:2 sut:2]
+W2 warm TTL verified for 1 stage(s) with ttl=30s safety_margin=1s
+FAIL
+FAIL	github.com/IrineSistiana/mosdns/v5/tests/phase5a-baseline/cmd/phase5a-baseline	1.033s
+FAIL

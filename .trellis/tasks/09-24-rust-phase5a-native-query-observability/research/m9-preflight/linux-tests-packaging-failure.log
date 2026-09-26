@@ -1,0 +1,181 @@
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling bytes v1.12.1
+   Compiling once_cell v1.21.4
+   Compiling rand_core v0.10.1
+   Compiling proc-macro2 v1.0.107
+   Compiling smallvec v1.15.2
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling getrandom v0.4.3
+   Compiling equivalent v1.0.2
+   Compiling memchr v2.8.3
+   Compiling syn v3.0.5
+   Compiling mosdns-dns-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/dns-core)
+   Compiling pin-project-lite v0.2.17
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling cc v1.4.6
+   Compiling futures-core v0.3.34
+   Compiling slab v0.4.12
+   Compiling ring v0.17.14
+   Compiling socket2 v0.6.5
+   Compiling futures-sink v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling futures-channel v0.3.34
+   Compiling futures-macro v0.3.34
+   Compiling tokio-macros v2.7.2
+   Compiling mio v1.2.2
+   Compiling itoa v1.0.18
+   Compiling futures-task v0.3.34
+   Compiling futures-util v0.3.34
+   Compiling tokio v1.53.1
+   Compiling getrandom v0.2.17
+   Compiling tracing-core v0.1.36
+   Compiling untrusted v0.9.0
+   Compiling zeroize v1.9.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling tracing v0.1.44
+   Compiling http v1.5.0
+   Compiling cfg_aliases v0.2.2
+   Compiling tinyvec v1.13.3
+   Compiling unicode-joining-type v1.0.0
+   Compiling rustls v0.23.45
+   Compiling rustls-webpki v0.103.15
+   Compiling cpufeatures v0.3.1
+   Compiling subtle v2.6.1
+   Compiling hashbrown v0.17.1
+   Compiling thiserror v2.0.20
+   Compiling indexmap v2.14.2
+   Compiling chacha20 v0.10.2
+   Compiling quinn-udp v0.5.15
+   Compiling tokio-util v0.7.19
+   Compiling thiserror-impl v2.0.20
+   Compiling httparse v1.10.1
+   Compiling idna_mapping v1.1.0
+   Compiling rand v0.10.2
+   Compiling http-body v1.1.0
+   Compiling unicode-normalization v0.1.25
+   Compiling quinn v0.11.7
+   Compiling rand_pcg v0.10.2
+   Compiling unicode-bidi v0.3.18
+   Compiling rustc-hash v2.1.3
+   Compiling lru-slab v0.1.3
+   Compiling atomic-waker v1.1.2
+   Compiling try-lock v0.2.5
+   Compiling fnv v1.0.7
+   Compiling h2 v0.4.19
+   Compiling want v0.3.1
+   Compiling quinn-proto v0.11.18
+   Compiling idna_adapter v1.1.0
+   Compiling futures-executor v0.3.34
+   Compiling socket2 v0.5.10
+   Compiling utf8_iter v1.0.4
+   Compiling fastrand v2.5.0
+   Compiling percent-encoding v2.3.2
+   Compiling form_urlencoded v1.2.2
+   Compiling h3 v0.0.8
+   Compiling idna v1.1.0
+   Compiling futures v0.3.34
+   Compiling hyper v1.11.0
+   Compiling hyper-util v0.1.20
+   Compiling h3-quinn v0.0.10
+   Compiling url v2.5.8
+   Compiling http-body-util v0.1.3
+   Compiling tokio-rustls v0.26.4
+   Compiling base64 v0.22.1
+   Compiling mosdns-upstream-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/upstream-core)
+   Compiling crossbeam-utils v0.8.22
+   Compiling parking_lot_core v0.9.12
+   Compiling scopeguard v1.2.0
+   Compiling powerfmt v0.2.0
+   Compiling deranged v0.5.8
+   Compiling lock_api v0.4.14
+   Compiling crossbeam-epoch v0.9.20
+   Compiling portable-atomic v1.15.0
+   Compiling num-conv v0.1.0
+   Compiling time-core v0.1.7
+   Compiling time v0.3.45
+   Compiling yasna v0.5.2
+   Compiling parking_lot v0.12.5
+   Compiling crossbeam-channel v0.5.16
+   Compiling uuid v1.24.0
+   Compiling tagptr v0.2.0
+   Compiling hashbrown v0.14.5
+   Compiling moka v0.12.12
+   Compiling dashmap v6.1.0
+   Compiling rcgen v0.14.7
+   Compiling mosdns-cache-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/cache-core)
+   Compiling aho-corasick v1.1.5
+   Compiling regex-syntax v0.8.11
+   Compiling mosdns-sequence-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/sequence-core)
+   Compiling regex-automata v0.4.18
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling regex v1.11.1
+   Compiling mosdns-matcher-core v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/matcher-core)
+   Compiling serde_derive v1.0.229
+   Compiling libyaml-rs v0.3.0
+   Compiling ryu v1.0.23
+   Compiling mosdns-runtime v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/runtime)
+   Compiling yaml_serde v0.10.7
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-phase5a-native-query-observability-545ba29/candidate-m8/rust/native-host)
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+   --> native-host/src/assembly.rs:432:23
+    |
+432 |     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/config.rs:1221:23
+     |
+1221 |     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-tcp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/config.rs:1222:23
+     |
+1222 |     const TCP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/execution.rs:1064:35
+     |
+1064 |           let config = compile_yaml(include_str!(
+     |  ___________________________________^
+1065 | |             "../../../tests/phase5a-baseline/configs/forward-udp.yaml"
+1066 | |         ))
+     | |_________^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/execution.rs:1137:31
+     |
+1137 |           let w1 = compile_yaml(include_str!(
+     |  _______________________________^
+1138 | |             "../../../tests/phase5a-baseline/configs/forward-udp.yaml"
+1139 | |         ))
+     | |_________^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/routing.yaml`: No such file or directory (os error 2)
+    --> native-host/src/execution.rs:1417:35
+     |
+1417 |           let config = compile_yaml(include_str!(
+     |  ___________________________________^
+1418 | |             "../../../tests/phase5a-baseline/configs/routing.yaml"
+1419 | |         ))
+     | |_________^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-tcp.yaml`: No such file or directory (os error 2)
+   --> native-host/src/tcp.rs:402:9
+    |
+402 |         include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+   --> native-host/src/udp.rs:366:9
+    |
+366 |         include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: could not compile `mosdns-native-host` (lib test) due to 8 previous errors
+warning: build failed, waiting for other jobs to finish...
