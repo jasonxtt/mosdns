@@ -1,0 +1,31 @@
+mode=identical-baseline calibration; all slot labels use audit off
+GOMAXPROCS=1
+source_commit=see-reviewed-protocol-identity
+start_utc=2026-09-26T02:49:47Z
+70f9b8bbe10e1de5433431630270902012f9c3fe8f3cad11f282d669ba916bc0  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v3/repo/scripts/run-phase5a-baseline.sh
+254500ec00527850f0f137bcc7e9ac26ff4953d6600bfc00eb7a7fbc2afc436d  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v3/phase5a-baseline-helper-v9
+370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa  /root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust
+427c39fc1b6f6276b82d2092a59fd2bccfd1c49c97f1352f512b577e0cf0a4b0  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m3-calibration/run-m3-calibration.sh
+d4ec32218dd2c51c6d67ffa905ac6cb16705db136456be9704d7e4edba8212e2  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m3-calibration/measurement-revision-v3.md
+45baaf73934b30cd75f85ac6d3376a18f389b28d6656ea4b8c60503bc6fe3e6d  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m3-calibration/batch1/attempt-order-plan.tsv
+f83efbb032feebe1a43a7d609b54120df38d8d2758f091520f9456596058fa84  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m3-calibration/batch2/attempt-order-plan.tsv
+attempt_utc=2026-09-26T02:50:39Z batch=batch1 scenario=w1-tcp repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:51:30Z batch=batch1 scenario=w1-tcp repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:52:22Z batch=batch1 scenario=w1-tcp repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:53:13Z batch=batch1 scenario=w1-tcp repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:54:05Z batch=batch1 scenario=w1-tcp repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:54:57Z batch=batch1 scenario=w1-tcp repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:55:48Z batch=batch1 scenario=w1-tcp repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:56:40Z batch=batch1 scenario=w1-tcp repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:57:31Z batch=batch1 scenario=w1-tcp repetition=3 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:58:23Z batch=batch2 scenario=w1-tcp repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:59:14Z batch=batch2 scenario=w1-tcp repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T03:00:06Z batch=batch2 scenario=w1-tcp repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T03:00:57Z batch=batch2 scenario=w1-tcp repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T03:01:49Z batch=batch2 scenario=w1-tcp repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T03:02:40Z batch=batch2 scenario=w1-tcp repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T03:03:32Z batch=batch2 scenario=w1-tcp repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T03:04:24Z batch=batch2 scenario=w1-tcp repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T03:05:15Z batch=batch2 scenario=w1-tcp repetition=3 slot=after_off runner_exit=0
+stopped_at=W1 control qualification; no W2/W3 attempts
+finished_utc=2026-09-26T03:05:15Z
