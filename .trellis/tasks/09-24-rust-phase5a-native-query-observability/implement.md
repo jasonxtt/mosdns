@@ -453,4 +453,11 @@ control run then started in the separate `results-m2-calibration` root.
 
 ## Review and rollback points
 
+M2 fixed calibration completed 2026-09-26 02:32:54 UTC: 54/54 runner exits
+zero, 126/126 primary rows valid, 108,000 correct-on-time requests. Each batch
+had six repeated latency guards; only 1/28 equivalence intervals qualified.
+M2 is unqualified and candidate acceptance remains closed. Complete evidence
+and the prospective-revision rationale are in
+`research/m2-calibration-assessment.md`. No resampling or threshold waiver.
+
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.

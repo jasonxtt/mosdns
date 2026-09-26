@@ -1,0 +1,567 @@
+{
+  "qualified": false,
+  "scope": "identical-baseline M2 calibration only",
+  "failures": [
+    "batch1: individual original latency guard crosses: w1-tcp main 200 after_off_vs_before_off p95_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 200 after_off_vs_before_off p99_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p95_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p99_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 400 after_on_vs_after_off p95_us",
+    "batch1: individual original latency guard crosses: w2 cold 200 after_off_vs_before_off p99_us",
+    "batch1: individual original latency guard crosses: w2 cold 200 after_on_vs_after_off p95_us",
+    "batch1: individual original latency guard crosses: w2 cold 200 after_on_vs_after_off p99_us",
+    "batch1: individual original latency guard crosses: w2 warm 200 after_on_vs_after_off p95_us",
+    "batch1: individual original latency guard crosses: w2 warm 200 after_on_vs_after_off p99_us",
+    "batch1: individual original latency guard crosses: w2 warm 400 after_off_vs_before_off p99_us",
+    "batch1: individual original latency guard crosses: w2 warm 400 after_on_vs_after_off p99_us",
+    "batch1: individual original latency guard crosses: w3 main 200 after_off_vs_before_off p95_us",
+    "batch1: individual original latency guard crosses: w3 main 200 after_off_vs_before_off p99_us",
+    "batch1: individual original latency guard crosses: w3 main 400 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 200 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 200 after_on_vs_after_off p95_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w2 cold 200 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w2 cold 200 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w2 warm 200 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w2 warm 200 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w2 warm 400 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w3 main 200 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w3 main 200 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w3 main 400 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w3 main 400 after_off_vs_before_off p99_us",
+    "w1-tcp main 200 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w1-tcp main 200 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w1-tcp main 200 after_on_vs_after_off p95_us: equivalence interval outside margin",
+    "w1-tcp main 200 after_on_vs_after_off p99_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_on_vs_after_off p95_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_on_vs_after_off p99_us: equivalence interval outside margin",
+    "w2 cold 200 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w2 cold 200 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w2 cold 200 after_on_vs_after_off p99_us: equivalence interval outside margin",
+    "w2 warm 200 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w2 warm 200 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w2 warm 200 after_on_vs_after_off p95_us: equivalence interval outside margin",
+    "w2 warm 200 after_on_vs_after_off p99_us: equivalence interval outside margin",
+    "w2 warm 400 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w2 warm 400 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w2 warm 400 after_on_vs_after_off p95_us: equivalence interval outside margin",
+    "w2 warm 400 after_on_vs_after_off p99_us: equivalence interval outside margin",
+    "w3 main 200 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w3 main 200 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w3 main 200 after_on_vs_after_off p95_us: equivalence interval outside margin",
+    "w3 main 200 after_on_vs_after_off p99_us: equivalence interval outside margin",
+    "w3 main 400 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w3 main 400 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w3 main 400 after_on_vs_after_off p95_us: equivalence interval outside margin",
+    "w3 main 400 after_on_vs_after_off p99_us: equivalence interval outside margin"
+  ],
+  "intervals": [
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.012270092591814401,
+        0.10816556658543487,
+        0.3754127630417626,
+        0.017614546700982305,
+        -0.1696974035655582,
+        -0.024142305321599635
+      ],
+      "ci90_low_pct": -9.187441088173966,
+      "ci90_high_pct": 22.496672776059174,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.41042789745029334,
+        -0.04278727520520898,
+        0.40521576263872633,
+        0.19654867808408621,
+        -0.19857381903856644,
+        0.08961215868968714
+      ],
+      "ci90_low_pct": -5.5546348918132615,
+      "ci90_high_pct": 41.052663297799505,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        -0.08164096446126706,
+        -0.04820210181787775,
+        -0.27087495413539975,
+        -0.18041860664786846,
+        0.303682413798222,
+        -0.12604072089536505
+      ],
+      "ci90_low_pct": -20.5527397575137,
+      "ci90_high_pct": 10.029515469267206,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.4433006424508681,
+        0.03753791931906524,
+        -0.625185597109971,
+        -0.43565608038731013,
+        0.22957444164450017,
+        -0.2231435513142097
+      ],
+      "ci90_low_pct": -39.95715988702294,
+      "ci90_high_pct": 2.366300239452485,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.029972273535791717,
+        0.1233232160319989,
+        0.1037687922815717,
+        0.25895855662050826,
+        -0.4867027970033679,
+        0.7321213149917208
+      ],
+      "ci90_low_pct": -17.795393511392113,
+      "ci90_high_pct": 56.795564041256384,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.001154068218106624,
+        0.5871524489303295,
+        -0.0021231430480778664,
+        0.24004341895242812,
+        -0.783618641246047,
+        0.8641557259569007
+      ],
+      "ci90_low_pct": -27.240972872340613,
+      "ci90_high_pct": 85.94334216894235,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.011741817876683195,
+        -0.2640230981351339,
+        0.16636457212119626,
+        0.11279549414534429,
+        0.08679546421755065,
+        -0.6772447047658865
+      ],
+      "ci90_low_pct": -30.240344768411408,
+      "ci90_high_pct": 18.798373578162415,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.07764430545788038,
+        -0.7051138171774664,
+        0.11719247283286513,
+        0.196808002976407,
+        0.11837283219368114,
+        -0.780703071584265
+      ],
+      "ci90_low_pct": -41.39086842275075,
+      "ci90_high_pct": 23.246132543083966,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "cold",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        -0.19183411366165315,
+        0.08980389486130327,
+        -0.15968807127325085,
+        0.271373334409857,
+        0.04013916759034426,
+        0.07924937165414048
+      ],
+      "ci90_low_pct": -11.357788867963166,
+      "ci90_high_pct": 17.77155012408297,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "cold",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.07673379423138944,
+        0.1993329026204913,
+        -0.14041717882974722,
+        0.31557559537426405,
+        0.10088122485378029,
+        0.3265711656385014
+      ],
+      "ci90_low_pct": -4.037594324620438,
+      "ci90_high_pct": 32.70392292103596,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "cold",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.16180182656277808,
+        -0.053556104468962216,
+        0.031306904625044124,
+        -0.12650934015080284,
+        0.02269141120207067,
+        -0.032260862218221435
+      ],
+      "ci90_low_pct": -7.65836051922299,
+      "ci90_high_pct": 8.418977775432639,
+      "qualified": true
+    },
+    {
+      "scenario": "w2",
+      "phase": "cold",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.13792314320550164,
+        0.28918696363120117,
+        -0.13712722533757857,
+        0.20551331993793906,
+        0.26469255422708216,
+        -0.4776613993126536
+      ],
+      "ci90_low_pct": -22.035932723970138,
+      "ci90_high_pct": 28.550182152945126,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        -0.2567745349887043,
+        -0.02994235661507834,
+        -0.0134591533740048,
+        0.2855611808826433,
+        -0.04130380614123575,
+        -0.061939299440290585
+      ],
+      "ci90_low_pct": -15.038585268718368,
+      "ci90_high_pct": 13.166159077370102,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -1.111794657257549,
+        0.028830825717709084,
+        -0.6663837633611288,
+        0.4359146537104483,
+        0.13184331194606214,
+        -0.5026552923558788
+      ],
+      "ci90_low_pct": -53.04064149849468,
+      "ci90_high_pct": 21.46703185617808,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.1353413478697621,
+        0.6916262677192386,
+        -0.033060862260888065,
+        -0.21996389839683,
+        0.09476238466600287,
+        0.07090796942305097
+      ],
+      "ci90_low_pct": -12.073891102346405,
+      "ci90_high_pct": 45.529864257261394,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.29679646088897516,
+        0.7374444791205863,
+        0.07297554045044403,
+        -0.6940848271359088,
+        0.16887189974665204,
+        0.3932566979487723
+      ],
+      "ci90_low_pct": -20.617175370514712,
+      "ci90_high_pct": 74.36400415052987,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.06136894637629202,
+        0.017316450011460958,
+        0.04269942567382968,
+        0.26063416022970837,
+        -0.11778303565638351,
+        0.10536051565782635
+      ],
+      "ci90_low_pct": -3.9056753089727163,
+      "ci90_high_pct": 17.708229933707102,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.16901337559145957,
+        0.17118381238349878,
+        0.22957444164450017,
+        0.2540528055876929,
+        -0.46832436772601554,
+        0.3495771223423035
+      ],
+      "ci90_low_pct": -11.732145877752858,
+      "ci90_high_pct": 43.30713346989102,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.07637297878457396,
+        0.0,
+        -0.20640342345171392,
+        -0.533446070202038,
+        0.14677057252963582,
+        0.0033277900926747457
+      ],
+      "ci90_low_pct": -25.218943862093283,
+      "ci90_high_pct": 12.691019009197941,
+      "qualified": false
+    },
+    {
+      "scenario": "w2",
+      "phase": "warm",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.3240924361476212,
+        -0.08338160893905101,
+        -0.431440594511425,
+        -1.1297189958003646,
+        0.10401733211135875,
+        -0.08374298941639238
+      ],
+      "ci90_low_pct": -47.15724800663188,
+      "ci90_high_pct": 22.68601138533214,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.226708617478706,
+        0.47386042953251917,
+        -0.2918526946108623,
+        0.19225667863730497,
+        0.11540167715731695,
+        0.032451225098034935
+      ],
+      "ci90_low_pct": -7.96322254703271,
+      "ci90_high_pct": 39.457621184467634,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.3471152250458877,
+        0.906150472006385,
+        -0.2960503221222975,
+        0.5225597870876395,
+        -0.01254721605208864,
+        0.14910780479339641
+      ],
+      "ci90_low_pct": -7.461217169803125,
+      "ci90_high_pct": 85.21014976830278,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        -0.13845792938733992,
+        -0.5550238366397258,
+        0.25603141815904495,
+        0.1148213241620552,
+        -0.09272496848628717,
+        0.046783867879167634
+      ],
+      "ci90_low_pct": -25.35188541372194,
+      "ci90_high_pct": 18.474576934375598,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.39479264821739257,
+        -0.8181504641898159,
+        0.40266005718055575,
+        -0.2129879066831244,
+        -0.33126695243091114,
+        0.23660162327335624
+      ],
+      "ci90_low_pct": -42.44346209652024,
+      "ci90_high_pct": 19.69265022165112,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        -0.08378488895527077,
+        0.039282348334662404,
+        -0.17977555379847884,
+        0.3563282634013721,
+        0.046259123381912945,
+        -0.21005296989948025
+      ],
+      "ci90_low_pct": -16.092766283948517,
+      "ci90_high_pct": 17.92482180320309,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.011204599012863132,
+        0.3475324007723111,
+        -0.33437775133144065,
+        0.47175443214408835,
+        -0.057296831723760155,
+        -0.15043320342712585
+      ],
+      "ci90_low_pct": -18.756815382168025,
+      "ci90_high_pct": 34.49830342901692,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.055569851154810786,
+        -0.09870576880546307,
+        -0.19713250240094343,
+        -0.34598334355897936,
+        -0.16817551023704896,
+        -0.05602187396454656
+      ],
+      "ci90_low_pct": -21.923176276317484,
+      "ci90_high_pct": -2.2417695273310603,
+      "qualified": false
+    },
+    {
+      "scenario": "w3",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.13554549199622393,
+        -0.41090201470490034,
+        -0.360518190968255,
+        -0.5781539089343338,
+        -0.22960123441581207,
+        0.17798315519535643
+      ],
+      "ci90_low_pct": -37.58406911705291,
+      "ci90_high_pct": -4.007128711523766,
+      "qualified": false
+    }
+  ]
+}
