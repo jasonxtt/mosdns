@@ -30,3 +30,18 @@ retrieval limitation, not a missing verdict or permission to retry transport.
 
 No control data were collected before re-review. Findings may close only
 after the explicit reviewer result. Existing V12 verdict remains unchanged.
+
+## Attempt 2 — scoped remediation round 1
+
+Range: `27cfc20d3bd27ba90ec67454ab343978d0cb7fed` →
+`9932a76aa0c5b3a55bdda71780b97f5d77e84866` (pushed).
+Same target. Native final for turn `01a0db75-9c65-70d1-8540-7b4b7d1dd1d1`
+completed at 2026-09-26 02:10:30 UTC with **FINAL: PASS**.
+
+- **P1-1 [closed]:** both batches require zero individual p95/p99 guard
+  crossings; reviewer verified the exact-zero-interval/single-crossing test.
+- **P2-1 [closed]:** reviewer verified profile enforcement before traffic,
+  standard per-run environment recording, and per-attempt qualifier validation.
+
+Only unit 2 fixed M2 calibration may advance. Candidate/A5 acceptance remains
+gated on qualified controls and a separately reviewed prospective supplement.

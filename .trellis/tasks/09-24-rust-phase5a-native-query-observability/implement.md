@@ -442,6 +442,10 @@ the exact submitted parent; green helper tests and eight qualification tests
 cover the fixes. See `research/m2-review-ledger.md`. No calibration attempt
 has run; re-review remains required before unit 2.
 
+The scoped remediation re-review of `9932a76` returned FINAL: PASS on
+2026-09-26 02:10:30 UTC, closing P1-1/P2-1. Unit 2 fixed M2 calibration is now
+authorized under the user's frozen range; this is not A5 or runtime PASS.
+
 ## Review and rollback points
 
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.
