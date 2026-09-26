@@ -24,6 +24,7 @@ class ServerSamplerTests(unittest.TestCase):
                 (directory / 'status').write_text(f'VmRSS:\t512 kB\nCpus_allowed_list:\t{cpu}\n')
             output = root / 'samples'
             command = ['python3', str(TOOLS), 'sample-server', '--sut-pid', '10', '--fixture-pid', '11',
+                       '--sut-start', '999', '--fixture-start', '999',
                        '--run-id', 'run1', '--stage', 'normal-reference', '--result', str(output),
                        '--proc-root', str(proc), '--max-seconds', '5']
             child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -42,6 +43,13 @@ class ServerSamplerTests(unittest.TestCase):
                 self.assertEqual({s['host'] for s in samples}, {metadata['host']})
                 self.assertEqual({s['role'] for s in samples}, {'sut', 'fixture-1'})
                 self.assertTrue(all(s['run_id'] == 'run1' and s['stage_id'] == 'normal-reference' for s in samples))
+                reused = command.copy()
+                reused[reused.index('--sut-start') + 1] = 'old-start'
+                reused[reused.index('--result') + 1] = str(root / 'reused')
+                failed = subprocess.run(reused, capture_output=True, text=True)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertFalse((root / 'reused/ready').exists())
+                self.assertIn('owned', json.loads((root / 'reused/metadata.json').read_text())['error'])
             finally:
                 if child.poll() is None:
                     child.kill()
@@ -84,6 +92,23 @@ class MergeStageTests(unittest.TestCase):
             (server / 'metadata.json').write_text(json.dumps(metadata))
             rejected = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(rejected.returncode, 0)
+
+
+class RemoteManifestTests(unittest.TestCase):
+    def test_manifest_matches_source_and_tampered_copy_is_rejected(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('driver_manifest', TOOLS.with_name('run-m5-w1.py'))
+        driver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(driver)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'raw.jsonl').write_text('raw\n')
+            done = subprocess.run(['python3', str(TOOLS), 'hash-tree', '--result', str(root)], capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            driver.verify_transfer(root)
+            (root / 'raw.jsonl').write_text('tampered\n')
+            with self.assertRaisesRegex(ValueError, 'manifest'):
+                driver.verify_transfer(root)
 
 
 if __name__ == '__main__':

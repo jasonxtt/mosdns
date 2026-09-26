@@ -35,7 +35,8 @@ def input_identity(args):
                    SERVER_INPUT + '/repo/tests/phase5a-baseline/workloads/forward.jsonl': WORKLOAD_SHA,
                    SERVER_INPUT + '/forward-tcp-lan.yaml': 'bfd243afbbf26cf8d890fc99bbf24a6d5ba2087c728ed7d4692aced0aca0cb7e',
                    '/root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust': BASELINE_SHA})
-    client = {CLIENT_INPUT + '/phase5a-baseline-helper-v10': HELPER_SHA, CLIENT_INPUT + '/forward.jsonl': WORKLOAD_SHA}
+    client = {CLIENT_INPUT + '/phase5a-baseline-helper-v10': HELPER_SHA, CLIENT_INPUT + '/forward.jsonl': WORKLOAD_SHA,
+              CLIENT_INPUT + '/m5-remote-tools.py': hashes['m5-remote-tools.py']}
     source = {str(path.relative_to(REPO)): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in (REPO / 'tests/phase5a-baseline/cmd/phase5a-baseline').glob('*.go')}
     server.update({SERVER_INPUT + '/repo/' + path: sha for path, sha in source.items()})
@@ -79,6 +80,16 @@ def transfer(args, client, source, destination, upload=False, recursive=False):
 
 def quoted(parts):
     return shlex.join([str(part) for part in parts])
+
+
+def verify_transfer(root, expected_host=None):
+    source = json.loads((root / 'source-manifest.json').read_text())
+    if expected_host and source['host'] != expected_host:
+        raise ValueError('source manifest host differs')
+    actual = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in root.rglob('*') if path.is_file() and path != root / 'source-manifest.json'}
+    if source['files'] != actual:
+        raise ValueError('transferred raw differs from remote source manifest')
 
 
 def inventory(args, client):
@@ -125,6 +136,7 @@ def attempt(args, row):
             sampler_root = server + '/server-' + stage
             sampler = ['nohup', 'taskset', '-c', '1', 'python3', SERVER_INPUT + '/m5-remote-tools.py', 'sample-server',
                        '--sut-pid', owned['sut']['pid'], '--fixture-pid', owned['fixture']['pid'],
+                       '--sut-start', owned['sut']['start_identity'], '--fixture-start', owned['fixture']['start_identity'],
                        '--run-id', run_id, '--stage', stage, '--result', sampler_root]
             launch = quoted(sampler) + ' </dev/null >' + shlex.quote(server + '/sampler-' + stage + '.stdout') + ' 2>' + shlex.quote(server + '/sampler-' + stage + '.stderr') + ' &'
             # stdin/output detached; sampler has its own 35-second termination bound.
@@ -155,19 +167,26 @@ def attempt(args, row):
                 code = 1
                 (root / 'cleanup-error.txt').write_text(str(error) + '\n')
     try:
+        for is_client, raw_root, tool_root in ((True, client, CLIENT_INPUT), (False, server, SERVER_INPUT)):
+            remote(args, is_client, quoted(['python3', tool_root + '/m5-remote-tools.py', 'hash-tree', '--result', raw_root]))
         transfer(args, True, client, str(root / 'client'), recursive=True)
         transfer(args, False, server, str(root / 'server'), recursive=True)
+        verify_transfer(root / 'client', 'Debian')
+        verify_transfer(root / 'server', 'mosdns-rust')
         for stage in ('normal-reference', 'overload'):
             subprocess.run(['python3', str(HERE / 'm5-remote-tools.py'), 'merge-stage', '--client', str(root / 'client' / stage),
                             '--server', str(root / 'server' / ('server-' + stage)), '--result', str(root), '--client-host', 'Debian'], check=True, capture_output=True)
-        transfer(args, False, str(root / 'stages.jsonl'), server + '/stages.merged.jsonl', upload=True)
+        derived = SERVER_INPUT + '/derived'
+        remote(args, False, quoted(['mkdir', '-p', derived]))
+        merged_path = derived + '/' + run_id + '.jsonl'
+        transfer(args, False, str(root / 'stages.jsonl'), merged_path, upload=True)
         checks = []
         for stage in ('normal-reference', 'overload'):
-            checks += [[helper, command, '--stage-result', server + '/stages.merged.jsonl', '--stage', stage]
+            checks += [[helper, command, '--stage-result', merged_path, '--stage', stage]
                        for command in ('verify-stage', 'verify-sender')]
-            checks += [[helper, 'verify-samples', '--stage-result', server + '/stages.merged.jsonl', '--stage', stage, '--expected-fixtures', '1']]
+            checks += [[helper, 'verify-samples', '--stage-result', merged_path, '--stage', stage, '--expected-fixtures', '1']]
         checks += [[helper, 'verify-session-counters', '--scenario', 'w1', '--workload', SERVER_INPUT + '/repo/tests/phase5a-baseline/workloads/forward.jsonl',
-                    '--counter', server + '/fixture-forward.json', '--stage-result', server + '/stages.merged.jsonl', '--run-id', run_id]]
+                    '--counter', server + '/fixture-forward.json', '--stage-result', merged_path, '--run-id', run_id]]
         for command in checks:
             response = remote(args, False, quoted(command), check=False)
             with (root / 'oracle-checks.txt').open('a') as stream:

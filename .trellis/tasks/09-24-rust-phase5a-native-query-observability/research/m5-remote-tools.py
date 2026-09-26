@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Host-local resource brackets for the prospective distributed W1 probe."""
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -38,6 +39,9 @@ def sample_server(args):
     began = time.monotonic()
     try:
         targets = [('sut', args.sut_pid, args.sut_cpu)] + [(f'fixture-{i}', pid, args.fixture_cpu) for i, pid in enumerate(args.fixture_pid, 1)]
+        expected_starts = {'sut': args.sut_start, 'fixture-1': args.fixture_start}
+        if len(args.fixture_pid) != 1:
+            raise ValueError('exactly one owned W1 fixture required')
         if args.max_seconds <= 0 or args.max_seconds > 60 or any(pid <= 0 for _, pid, _ in targets) or len({pid for _, pid, _ in targets}) != len(targets):
             raise ValueError('invalid bounded sampler settings or duplicate process')
         hz = int(subprocess.check_output(['getconf', 'CLK_TCK'], text=True).strip())
@@ -49,6 +53,8 @@ def sample_server(args):
             def sample_all():
                 for role, pid, expected_cpu in targets:
                     sample, start, cpus = read_process(Path(args.proc_root), pid, hz, role, args.run_id, args.stage, host)
+                    if start != expected_starts[role]:
+                        raise ValueError('sampled PID differs from owned start identity')
                     if cpus != expected_cpu or (role in identities and identities[role] != start):
                         raise ValueError('process affinity or start identity changed')
                     identities[role] = start
@@ -127,11 +133,34 @@ def merge_stage(args):
     return 0
 
 
+def hash_tree(args):
+    root = Path(args.result)
+    manifest = root / 'source-manifest.json'
+    if manifest.exists():
+        raise ValueError('source manifest already exists')
+    files = {}
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():
+            raise ValueError('raw evidence symlink forbidden')
+        if path.is_file():
+            before = path.stat()
+            files[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+            after = path.stat()
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError('raw evidence changed during hashing')
+    if not files:
+        raise ValueError('empty raw evidence')
+    manifest.write_text(json.dumps(dict(host=socket.gethostname(), files=files), indent=2) + '\n')
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest='command', required=True)
     sampler = commands.add_parser('sample-server')
     sampler.add_argument('--sut-pid', type=int, required=True)
+    sampler.add_argument('--sut-start', required=True)
+    sampler.add_argument('--fixture-start', required=True)
     sampler.add_argument('--fixture-pid', type=int, action='append', default=[])
     sampler.add_argument('--sut-cpu', default='0')
     sampler.add_argument('--fixture-cpu', default='1')
@@ -143,8 +172,10 @@ def main():
     merge = commands.add_parser('merge-stage')
     for name in ('client', 'server', 'result', 'client-host'):
         merge.add_argument('--' + name, required=True)
+    manifest = commands.add_parser('hash-tree')
+    manifest.add_argument('--result', required=True)
     args = parser.parse_args()
-    return sample_server(args) if args.command == 'sample-server' else merge_stage(args)
+    return {'sample-server': sample_server, 'merge-stage': merge_stage, 'hash-tree': hash_tree}[args.command](args)
 
 
 if __name__ == '__main__':
