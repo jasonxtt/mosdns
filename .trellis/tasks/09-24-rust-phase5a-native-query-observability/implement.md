@@ -460,6 +460,9 @@ p99 guard. It stopped before W2/W3. Controls remain unqualified; no candidate
 acceptance resumes. See `research/measurement-current-status.md` and
 `research/m4-calibration-assessment.md`. A reachable exclusive Linux host or
 host-interference isolation is the next prerequisite; user input requested.
+The final evidence/stop review returned FINAL: PASS — M4-REPORT-002 at
+03:34:33 UTC, confirming the report and closed acceptance only, not control
+qualification or A5. All120 selected M4 files were independently verified.
 
 M3 completed its fixed18 W1 attempts:36 valid primary rows,270000 correct on
 time, both batches repeatedTCP200 p99 guard, only1/8 equivalent intervals.
