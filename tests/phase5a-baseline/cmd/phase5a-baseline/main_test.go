@@ -19,6 +19,45 @@ import (
 	"github.com/miekg/dns"
 )
 
+func TestClientSelfSamplingRejectsServerPIDs(t *testing.T) {
+	err := runStage([]string{"--sample-self", "--sut-pid", "123", "--workload", "unused", "--addr", "127.0.0.1:1", "--result", t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "sample-self cannot be combined with server PIDs") {
+		t.Fatalf("client must reject a server PID in its local namespace: %v", err)
+	}
+}
+
+func TestRemoteClientRecordsOnlyOwnResourcesAndCorrectDNS(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("client resource evidence requires /proc")
+	}
+	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &dns.Server{PacketConn: listener, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, query *dns.Msg) {
+		response := new(dns.Msg)
+		response.SetReply(query)
+		response.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: query.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30}, A: net.ParseIP("192.0.2.1")}}
+		_ = w.WriteMsg(response)
+	})}
+	go func() { _ = server.ActivateAndServe() }()
+	defer server.Shutdown()
+	dir := t.TempDir()
+	workload := filepath.Join(dir, "workload.jsonl")
+	writeJSONLines(t, workload, []workloadCase{{CaseID: "client-only", Scenario: "w1", Transport: "udp", QName: "remote.test.", QType: "A", ExpectedRCode: 0, ExpectedAnswer: "192.0.2.1", ExpectedAnswerClass: "A", RequestDeadlineMS: 500, Weight: 1}})
+	err = runStage([]string{"--sample-self", "--workload", workload, "--addr", listener.LocalAddr().String(), "--transport", "udp", "--scenario", "w1", "--one-pass", "--fail-on-error", "--result", dir, "--stage", "client-stage"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, err := readStageResult(filepath.Join(dir, "stages.jsonl"), "client-stage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stage.SUTPID != 0 || stage.SUTStartIdentity != "" || stage.ResourceSampleCounts["sut"] != 0 || stage.ResourceSampleCounts["load-generator"] == 0 || stage.Counters.CorrectOnTime != 1 {
+		t.Fatalf("incorrect remote client resource or DNS evidence: %+v", stage)
+	}
+}
+
 func TestSampleProcessGroupRecordsRSSAndFDCountsByStageAndRole(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("/proc resource samples are Linux-specific")

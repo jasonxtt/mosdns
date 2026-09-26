@@ -65,38 +65,40 @@ type stageCounters struct {
 }
 
 type stageResult struct {
-	Stage                string           `json:"stage"`
-	RunID                string           `json:"run_id"`
-	FixtureSessionID     string           `json:"fixture_session_id"`
-	Scenario             string           `json:"scenario"`
-	Transport            string           `json:"transport"`
-	TargetQPS            float64          `json:"target_qps"`
-	DurationMS           int64            `json:"duration_ms"`
-	RequestDeadlineMS    int              `json:"request_deadline_ms"`
-	LateDrainMS          int              `json:"late_drain_ms"`
-	Counters             stageCounters    `json:"counters"`
-	CaseScheduled        map[string]int64 `json:"case_scheduled,omitempty"`
-	LatencySamplesUS     []int64          `json:"latency_samples_us"`
-	P50US                int64            `json:"p50_us"`
-	P95US                int64            `json:"p95_us"`
-	P99US                int64            `json:"p99_us"`
-	EffectiveThroughput  float64          `json:"effective_throughput_qps"`
-	SenderLagMaxUS       int64            `json:"sender_lag_max_us"`
-	StartedAt            time.Time        `json:"started_at"`
-	FinishedAt           time.Time        `json:"finished_at"`
-	ResourceSampleCount  int              `json:"resource_sample_count"`
-	ResourceSampleCounts map[string]int   `json:"resource_sample_counts"`
-	SUTPID               int              `json:"sut_pid"`
-	SUTStartIdentity     string           `json:"sut_start_identity"`
-	SUTCPUSet            string           `json:"sut_cpu_set"`
-	HarnessPID           int              `json:"harness_pid"`
-	HarnessCPUSet        string           `json:"harness_cpu_set"`
-	RequestLedgerPath    string           `json:"request_ledger_path"`
-	EventJournalPath     string           `json:"event_journal_path,omitempty"`
-	FixtureSeqStart      uint64           `json:"fixture_seq_start"`
-	FixtureSeqEnd        uint64           `json:"fixture_seq_end"`
-	RequestSeqStart      uint64           `json:"request_seq_start"`
-	RequestSeqEnd        uint64           `json:"request_seq_end"`
+	Stage                string            `json:"stage"`
+	RunID                string            `json:"run_id"`
+	FixtureSessionID     string            `json:"fixture_session_id"`
+	Scenario             string            `json:"scenario"`
+	Transport            string            `json:"transport"`
+	TargetQPS            float64           `json:"target_qps"`
+	DurationMS           int64             `json:"duration_ms"`
+	RequestDeadlineMS    int               `json:"request_deadline_ms"`
+	LateDrainMS          int               `json:"late_drain_ms"`
+	Counters             stageCounters     `json:"counters"`
+	CaseScheduled        map[string]int64  `json:"case_scheduled,omitempty"`
+	LatencySamplesUS     []int64           `json:"latency_samples_us"`
+	P50US                int64             `json:"p50_us"`
+	P95US                int64             `json:"p95_us"`
+	P99US                int64             `json:"p99_us"`
+	EffectiveThroughput  float64           `json:"effective_throughput_qps"`
+	SenderLagMaxUS       int64             `json:"sender_lag_max_us"`
+	StartedAt            time.Time         `json:"started_at"`
+	FinishedAt           time.Time         `json:"finished_at"`
+	ResourceSampleCount  int               `json:"resource_sample_count"`
+	ResourceSampleCounts map[string]int    `json:"resource_sample_counts"`
+	SUTPID               int               `json:"sut_pid"`
+	SUTStartIdentity     string            `json:"sut_start_identity"`
+	SUTCPUSet            string            `json:"sut_cpu_set"`
+	HarnessPID           int               `json:"harness_pid"`
+	HarnessCPUSet        string            `json:"harness_cpu_set"`
+	HarnessHost          string            `json:"harness_host,omitempty"`
+	HarnessGoProfile     map[string]string `json:"harness_go_profile,omitempty"`
+	RequestLedgerPath    string            `json:"request_ledger_path"`
+	EventJournalPath     string            `json:"event_journal_path,omitempty"`
+	FixtureSeqStart      uint64            `json:"fixture_seq_start"`
+	FixtureSeqEnd        uint64            `json:"fixture_seq_end"`
+	RequestSeqStart      uint64            `json:"request_seq_start"`
+	RequestSeqEnd        uint64            `json:"request_seq_end"`
 }
 
 type resourceSample struct {
@@ -183,7 +185,7 @@ func usage() {
 }
 
 const (
-	helperVersion          = "phase5a-baseline-helper/v9"
+	helperVersion          = "phase5a-baseline-helper/v10"
 	fixtureEventSchema     = "fixture-event-v3-occurrence-time"
 	recoveryAssessmentMode = "indeterminate-no-overload-evidence"
 )
@@ -2021,6 +2023,7 @@ func runStage(args []string) error {
 	lateDrain := fs.Duration("late-drain", defaultLateDrain, "bounded late response drain")
 	resultDir := fs.String("result", "", "result directory")
 	sutPID := fs.Int("sut-pid", 0, "SUT PID for Linux resource sampling")
+	sampleSelf := fs.Bool("sample-self", false, "sample only this client's resources; server resources are collected on the server")
 	runID := fs.String("run-id", "", "shared identity for stages in one SUT session")
 	fixtureSessionID := fs.String("fixture-session-id", "", "shared identity for fixture processes in one run")
 	ledgerPath := fs.String("request-ledger", "", "JSONL path for per-request observations")
@@ -2031,6 +2034,12 @@ func runStage(args []string) error {
 	onePass := fs.Bool("one-pass", false, "send exactly one deterministic pass over the filtered workload")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *sampleSelf && (*sutPID != 0 || len(fixturePIDArgs) != 0) {
+		return errors.New("sample-self cannot be combined with server PIDs")
+	}
+	if *sampleSelf && runtime.GOOS != "linux" {
+		return errors.New("sample-self requires Linux process sampling")
 	}
 	if *workloadPath == "" || *addr == "" || *resultDir == "" {
 		return errors.New("run requires --workload, --addr, and --result")
@@ -2085,6 +2094,7 @@ func runStage(args []string) error {
 		lateDrain:        *lateDrain,
 		resultDir:        *resultDir,
 		sutPID:           *sutPID,
+		sampleSelf:       *sampleSelf,
 		runID:            *runID,
 		fixtureSessionID: *fixtureSessionID,
 		ledgerPath:       *ledgerPath,
@@ -2890,6 +2900,7 @@ type stageOptions struct {
 	lateDrain        time.Duration
 	resultDir        string
 	sutPID           int
+	sampleSelf       bool
 	runID            string
 	fixtureSessionID string
 	ledgerPath       string
@@ -3019,6 +3030,14 @@ func executeStage(opts stageOptions) error {
 		}
 	}
 	harnessPID := os.Getpid()
+	harnessHost, err := os.Hostname()
+	if err != nil || harnessHost == "" {
+		return errors.New("could not capture helper host identity")
+	}
+	harnessGoProfile := make(map[string]string)
+	for _, key := range []string{"GOMAXPROCS", "GOGC", "GODEBUG", "GOMEMLIMIT"} {
+		harnessGoProfile[key] = os.Getenv(key)
+	}
 	harnessCPUSet := processCPUSetOrEmpty(harnessPID)
 	if runtime.GOOS == "linux" && harnessCPUSet == "" {
 		return errors.New("could not capture helper process CPU affinity")
@@ -3026,7 +3045,7 @@ func executeStage(opts stageOptions) error {
 	// Resolve the host constant before any measured-stage work. Sampling must
 	// never fork a clock query alongside the load generator and fixtures.
 	clockTicks := int64(100)
-	if opts.sutPID > 0 && runtime.GOOS == "linux" {
+	if (opts.sutPID > 0 || opts.sampleSelf) && runtime.GOOS == "linux" {
 		clockTicks, err = resourceClockTicksPerSecond()
 		if err != nil {
 			return fmt.Errorf("resolve resource clock before stage: %w", err)
@@ -3051,14 +3070,20 @@ func executeStage(opts stageOptions) error {
 	resourceCounts := make(map[string]int)
 	stopSamples := make(chan struct{})
 	var sampleWG sync.WaitGroup
-	if opts.sutPID > 0 {
+	if opts.sutPID > 0 || opts.sampleSelf {
 		sampleWG.Add(1)
 		go func() {
 			defer sampleWG.Done()
-			targets := []resourceTarget{{Role: "sut", PID: opts.sutPID}, {Role: "load-generator", PID: os.Getpid()}}
+			targets := []resourceTarget{{Role: "load-generator", PID: os.Getpid()}}
+			if !opts.sampleSelf {
+				targets = append([]resourceTarget{{Role: "sut", PID: opts.sutPID}}, targets...)
+			}
 			targets = append(targets, opts.fixtureTargets...)
 			resourceCounts = sampleProcessGroup(targets, opts.runID, opts.stage, resourcePath, stopSamples, clockTicks)
 			resourceCount = resourceCounts["sut"]
+			if opts.sampleSelf {
+				resourceCount = resourceCounts["load-generator"]
+			}
 		}()
 	}
 
@@ -3144,7 +3169,7 @@ func executeStage(opts stageOptions) error {
 		ResourceSampleCount: resourceCount, ResourceSampleCounts: resourceCounts,
 		SUTPID: opts.sutPID, SUTStartIdentity: sutStartIdentity,
 		SUTCPUSet: sutCPUSet, HarnessPID: harnessPID,
-		HarnessCPUSet: harnessCPUSet, RequestLedgerPath: opts.ledgerPath,
+		HarnessCPUSet: harnessCPUSet, HarnessHost: harnessHost, HarnessGoProfile: harnessGoProfile, RequestLedgerPath: opts.ledgerPath,
 		EventJournalPath: opts.eventJournalPath, FixtureSeqStart: fixtureSeqStart, FixtureSeqEnd: fixtureSeqEnd,
 		RequestSeqStart: lastRequestSeq + 1, RequestSeqEnd: requestSeq,
 	}
