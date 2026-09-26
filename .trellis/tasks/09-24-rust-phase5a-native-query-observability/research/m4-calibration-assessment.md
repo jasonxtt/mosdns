@@ -1,7 +1,7 @@
 # M4 fixed W1 controls: unqualified; acceptance remains closed
 
 Approved head `2a56052cd9ef868eb4873964c3c38ad97f84173e` ran once,
-2026-09-26 03:15:38–03:31:06 UTC (exact run audit retained).
+2026-09-26 03:15:37–03:31:06 UTC (exact run audit retained).
 All18 runner exits zero, all36 primary measurements valid, all270000
 scheduled/sent/received/correct-on-time requests reconciled, all late/wrong/
 protocol/transport/timeout/shortfall counters zero. All18 GC evidence gates
