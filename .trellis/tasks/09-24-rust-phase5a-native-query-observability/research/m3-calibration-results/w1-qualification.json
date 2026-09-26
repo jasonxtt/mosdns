@@ -1,0 +1,171 @@
+{
+  "qualified": false,
+  "scope": "identical-baseline M3 calibration only",
+  "failures": [
+    "batch1: individual original latency guard crosses: w1-tcp main 200 after_off_vs_before_off p95_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 200 after_off_vs_before_off p99_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p95_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p99_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 400 after_on_vs_after_off p95_us",
+    "batch1: individual original latency guard crosses: w1-tcp main 400 after_on_vs_after_off p99_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 200 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 200 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 200 after_on_vs_after_off p99_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p95_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 400 after_off_vs_before_off p99_us",
+    "batch2: individual original latency guard crosses: w1-tcp main 400 after_on_vs_after_off p99_us",
+    "w1-tcp main 200 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w1-tcp main 200 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w1-tcp main 200 after_on_vs_after_off p99_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_off_vs_before_off p95_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_off_vs_before_off p99_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_on_vs_after_off p95_us: equivalence interval outside margin",
+    "w1-tcp main 400 after_on_vs_after_off p99_us: equivalence interval outside margin"
+  ],
+  "intervals": [
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        -0.1273394223766015,
+        0.12977904300597207,
+        0.07492087017978909,
+        0.13072573631122128,
+        0.05502719062497977,
+        0.0750351859429141
+      ],
+      "ci90_low_pct": -2.175675300027173,
+      "ci90_high_pct": 14.420848935041786,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.3233698018948528,
+        0.27403323336592444,
+        0.24878259283804321,
+        0.3043469883104055,
+        0.08936368061659854,
+        0.1742518591483456
+      ],
+      "ci90_low_pct": -6.275150377041781,
+      "ci90_high_pct": 37.79676256763994,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.054902294387697274,
+        -0.12045931105716987,
+        -0.028573372444056,
+        0.07151113018367487,
+        -0.020943173845243135,
+        -0.01212136053234485
+      ],
+      "ci90_low_pct": -6.359432634652104,
+      "ci90_high_pct": 4.827422834902011,
+      "qualified": true
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 200,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.13266596634809372,
+        -0.1710715573155955,
+        -0.12788081996900513,
+        0.13733802074608537,
+        -0.09372098598555428,
+        0.004255325570138491
+      ],
+      "ci90_low_pct": -12.120979448869186,
+      "ci90_high_pct": 9.388735621587442,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        -0.13802790948947913,
+        0.0987710561678116,
+        -0.004158010148663677,
+        0.28043941275247797,
+        -0.11122563511022437,
+        -0.010604553248797112
+      ],
+      "ci90_low_pct": -10.150989106209334,
+      "ci90_high_pct": 15.654568132661826,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_off_vs_before_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        -0.22229573439187017,
+        0.17243272466470733,
+        -0.03844242728852605,
+        0.5212209790727786,
+        -0.20269945682390533,
+        -0.05356032383373677
+      ],
+      "ci90_low_pct": -18.177501468166113,
+      "ci90_high_pct": 29.62859199203738,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p95_us",
+      "paired_log_ratios": [
+        0.38307850004605964,
+        -0.09877105616781148,
+        -0.04910271300773197,
+        -0.2341068561114793,
+        0.0021762794225954484,
+        0.008492620045653597
+      ],
+      "ci90_low_pct": -15.47634676493034,
+      "ci90_high_pct": 18.775031813229532,
+      "qualified": false
+    },
+    {
+      "scenario": "w1-tcp",
+      "phase": "main",
+      "qps": 400,
+      "comparison": "after_on_vs_after_off",
+      "metric": "p99_us",
+      "paired_log_ratios": [
+        0.3592140904574087,
+        -0.20493558579511476,
+        -0.09127282887482761,
+        -0.3756121449584833,
+        0.014351192163090288,
+        0.10067279164544701
+      ],
+      "ci90_low_pct": -21.528276799775274,
+      "ci90_high_pct": 19.31191491085775,
+      "qualified": false
+    }
+  ]
+}
