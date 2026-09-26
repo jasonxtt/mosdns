@@ -26,6 +26,104 @@ func TestClientSelfSamplingRejectsServerPIDs(t *testing.T) {
 	}
 }
 
+func TestRequestLedgerBuffersAndFlushesAllConcurrentRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "requests.jsonl")
+	w, err := openRequestLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := w.write(requestRecord{RunID: "buffer-check"}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("small ledger must stay buffered, file size=%d", info.Size())
+	}
+	if err := w.close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.write(requestRecord{}); err == nil {
+		t.Fatal("closed ledger must reject further writes")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 20 {
+		t.Fatalf("lost records: %d", len(lines))
+	}
+	for _, line := range lines {
+		var record requestRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatal(err)
+		}
+		if record.RunID != "buffer-check" {
+			t.Fatalf("corrupt record: %+v", record)
+		}
+	}
+}
+
+func TestRequestLedgerFlushFailureIsReported(t *testing.T) {
+	w, err := openRequestLedger(filepath.Join(t.TempDir(), "requests.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.write(requestRecord{RunID: "flush-error"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.close(); err == nil || !strings.Contains(err.Error(), "flush request ledger") {
+		t.Fatalf("flush failure must invalidate the stage: %v", err)
+	}
+}
+
+func TestRequestLedgerFlushesFullBufferWithoutLosingRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "requests.jsonl")
+	w, err := openRequestLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.buffer.Size() != 64*1024 {
+		t.Fatal("ledger buffer must stay bounded")
+	}
+	for i := 0; i < 400; i++ {
+		if err := w.write(requestRecord{RunID: "full-buffer"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("full buffer must flush during the run")
+	}
+	if err := w.close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(string(data), "\n"); lines != 400 {
+		t.Fatalf("lost records: %d", lines)
+	}
+}
+
 func TestRemoteClientRecordsOnlyOwnResourcesAndCorrectDNS(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("client resource evidence requires /proc")
