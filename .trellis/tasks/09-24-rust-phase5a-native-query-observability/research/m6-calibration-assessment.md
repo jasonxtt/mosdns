@@ -76,3 +76,8 @@ contribution to latency variance using these same machines. No change to
 zero-shortfall/latency budgets, capacity claims, OS settings or production is
 authorized by this report. CPU remains a bracket including SSH handoff gaps,
 with100Hz quantization; cross-host timestamps were never subtracted.
+
+002reviewer M6-REPORT-002 returned FINAL: PASS at08:03:31UTC for report and
+stop only, closing the count-label finding. Its preceding full evidence review
+independently verified all764 durable entries,748 selected files and36 source
+manifests. M6 remains unqualified; this verdict authorizes no further run.
