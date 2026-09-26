@@ -36,3 +36,26 @@ confirms all5 working/committed/preflight tool hashes, early run-mode gate,
 remote identity equality and final recheck; plan/fixture bindings unchanged.
 PASS authorizes one9W3 batch only. M9missingW3 finding stays open until results
 receive scoped A5/A6 review. No reviewer tests/traffic.
+
+M10-FINAL-001 exact parent daeff167f16b4b4e816329de3e12c706cd03ccf5,
+head 909bb3fd56812045206b75e46482a01f9e6ee649; selected002reviewer
+01a0d43d-d0aa-7401-af0f-2ca3a45ba519 unchanged. Scoped A5/A6 missing-W3
+remediation review of all345 changed paths, independent offline oracle and
+ESRCH repair, preserved raw FAIL and full349-entry durable evidence.70 local
+measurement tests pass(oneLinux-onlyskip). No additional traffic/Linux/W1/W2
+rerun. Await explicit verdict; task remains in_progress and acceptance closed.
+
+## Final bounded acceptance
+
+002reviewer returned **FINAL: PASS — M10-FINAL-001** at 2026-09-26 14:03:57 UTC,
+turn01a0de01-65a0-7132-8c7f-2a395d7e7cd5, exact reviewed parent
+daeff167f16b4b4e816329de3e12c706cd03ccf5..head
+909bb3fd56812045206b75e46482a01f9e6ee649. Reviewer independently
+verified all9 unique-ID/question/ordered-path proofs,27000 requests/45000
+events, all36 matching exited-owner receipts,349 bundle entries and341 raw
+manifest entries. The separate proof and exit receipt support bounded A5/A6;
+original driver FAIL and all9 runner_exit=1 remain unchanged. A1–A4 and
+M8 W1/M9 W2/latest Linux evidence remain as previously reviewed. No reviewer
+tests/traffic. All six criteria for this basic-observability subset are now
+accepted; full Phase5A/C08/capacity/production are outside this verdict.
+Task status remains in_progress; no archive, deployment or new task authorized.
