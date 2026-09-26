@@ -1,0 +1,1 @@
+Command '['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'mosdns-rust', 'python3 /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v5/m5-server-control.py start --result /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m5-server/m5-batch1-w1-tcp-r3-after_off']' returned non-zero exit status 1.

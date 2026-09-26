@@ -1,0 +1,3 @@
+primary rows: 0
+paired assessments: 0
+valid primary rows: 0/0

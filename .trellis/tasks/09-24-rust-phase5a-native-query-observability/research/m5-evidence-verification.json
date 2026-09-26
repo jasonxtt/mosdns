@@ -1,0 +1,17 @@
+{
+  "remote": {
+    "mosdns-rust": {
+      "host": "mosdns-rust",
+      "entries": 21,
+      "verified": true
+    },
+    "root@10.0.0.50": {
+      "host": "Debian",
+      "entries": 9,
+      "verified": true
+    }
+  },
+  "full_local_entries_verified": 175,
+  "selected_files": 176,
+  "manifest_sha256": "b5946c4f2cbae0d375d4e7745a0f3818a575d7077e1a238280de0ebebed90f90"
+}

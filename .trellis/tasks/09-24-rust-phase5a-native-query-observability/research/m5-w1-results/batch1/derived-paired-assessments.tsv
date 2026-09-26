@@ -1,0 +1,17 @@
+scenario	phase	qps	comparison	metric	valid_pairs	control_values	candidate_values	paired_delta_pct	control_relative_mad	guard	pairs_above_guard	tick_resolution_limited_pairs	verdict
+w1-tcp	main	200	after_off_vs_before_off	p95_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	200	after_off_vs_before_off	p99_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	200	after_off_vs_before_off	cpu_us_per_correct_query	0				0.0000	25.00%	0	0	inconclusive: fewer than 3 valid pairs
+w1-tcp	main	200	after_off_vs_before_off	rss_peak_kib_sampled	0				0.0000	32768 KiB	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	200	after_on_vs_after_off	p95_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	200	after_on_vs_after_off	p99_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	200	after_on_vs_after_off	cpu_us_per_correct_query	0				0.0000	25.00%	0	0	inconclusive: fewer than 3 valid pairs
+w1-tcp	main	200	after_on_vs_after_off	rss_peak_kib_sampled	0				0.0000	32768 KiB	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_off_vs_before_off	p95_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_off_vs_before_off	p99_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_off_vs_before_off	cpu_us_per_correct_query	0				0.0000	25.00%	0	0	inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_off_vs_before_off	rss_peak_kib_sampled	0				0.0000	32768 KiB	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_on_vs_after_off	p95_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_on_vs_after_off	p99_us	0				0.0000	10.00%	0		inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_on_vs_after_off	cpu_us_per_correct_query	0				0.0000	25.00%	0	0	inconclusive: fewer than 3 valid pairs
+w1-tcp	main	400	after_on_vs_after_off	rss_peak_kib_sampled	0				0.0000	32768 KiB	0		inconclusive: fewer than 3 valid pairs
