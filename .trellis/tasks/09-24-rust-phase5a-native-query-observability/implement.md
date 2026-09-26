@@ -479,6 +479,15 @@ attempt ledgers header-only: zero measured SUT attempts. See
 research/measurement-revision-v5.md. M2–M4 and V12 verdicts stay unchanged.
 Review PASS is required before M5 traffic.
 
+M5 unit1 remediation49ac145 received FINAL: PASS — M5-UNIT1-002 before
+traffic. Unit2 consumed its single fixed18-slot run:1 successful attempt,
+2 valid windows/15000 correct-on-time queries;17 pre-start failures. The plain
+availability bind mistook fixture-port TIME_WAIT for an occupied listener.
+Matrix invalid; W2/W3/candidate acceptance remain closed. Complete retained
+evidence/report07d9359 received FINAL: PASS — M5-REPORT-001 at07:26:03UTC,
+covering evidence and stop only. The next corrective protocol is not yet
+reviewed or authorized in this frozen unit range; no rerun. Task stays active.
+
 Latest measurement state: M4's fixed18 W1 attempts completed03:31:06 UTC,
 36 valid primary rows/270000 correct on time. Zero GC traces, max Go-role
 sampledRSS50548KiB; only1/8 intervals qualified and batch1 repeatedTCP400

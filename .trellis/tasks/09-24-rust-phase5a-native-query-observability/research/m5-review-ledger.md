@@ -1,5 +1,12 @@
 # M5 prospective review ledger
 
+Report review parent `49ac145ca1345860a92f60682b46c3a127cf7273`,
+head `07d93598cd44dfd4bd3412dbd455a7e2cb501b0c`, same002reviewer.
+Scope evidence/report/stop only; no readiness or next-run authorization.
+FINAL: PASS — M5-REPORT-001 at2026-09-26T07:26:03Z. Reviewer independently
+verified full175-entry durable manifest,176 selected files, source manifests,
+18-slot accounting and qualified TIME_WAIT diagnosis. No further run.
+
 Attempt2 parent `b93822b8532a4c0392f64a7ad6c804aab7aabb7b`,
 head `49ac145ca1345860a92f60682b46c3a127cf7273`, reviewer same002reviewer.
 Scoped F1/F2 remediation only;44 local Python tests/7 Linux M5 tests and

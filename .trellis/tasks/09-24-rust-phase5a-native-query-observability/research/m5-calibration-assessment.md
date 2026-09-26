@@ -10,8 +10,9 @@ and sent no queries. No replacements, reruns, exclusions or candidate data.
 
 W1 controls are **UNQUALIFIED / INVALID MATRIX**, not a latency stability
 failure: no complete pairs or equivalence intervals exist. The fail-closed
-qualification returned false on the first missing sut.json. Both original
-analysis outputs retain all18 slots, including invalid rows. It stopped
+qualification returned false on the first missing sut.json. Attempt ledgers
+retain all18 slots; derived primary measurements retain2 observed rows in
+batch1 and none in batch2, without fabricating missing windows. It stopped
 before W2/W3 and before any candidate acceptance. M2–M4/V12/A5 unchanged.
 
 ## Diagnosed harness defect
@@ -34,6 +35,11 @@ probe, capture remote startup stderr, preserve failed empty sessions, and use
 fresh generation IDs/roots before another fixed control run can be considered.
 This report authorizes no additional measured run. Do not reuse these results
 as a partial control matrix or mix them with later data.
+
+002reviewer returned FINAL: PASS — M5-REPORT-001 at07:26:03UTC for evidence,
+diagnosis limitations and stop decision only. It independently verified the
+175-entry durable manifest,176 selected files and first-session remote source
+manifests. No further measured run is authorized by that verdict.
 
 ## Evidence retention and limits
 

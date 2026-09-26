@@ -10,6 +10,9 @@ PASS. Its one fixed18-slot run ended with1 successful attempt/2 valid windows/
 mistook fixture-port TIME_WAIT for an occupied listener. The matrix is invalid,
 not qualified; no latency stability conclusion. See m5-calibration-assessment.md.
 No extra hardware/resource allocation, resampling, W2/W3 or candidate traffic.
+Evidence and stop review M5-REPORT-001 passed at07:26:03UTC; it does not
+qualify controls or authorize a further run. Startup-check correction and a
+separately frozen/reviewed next protocol are still required.
 
 | Revision | Fixed attempts | Valid primary | Correct on time | Qualified latency intervals | Control result |
 |---|---:|---:|---:|---:|---|
