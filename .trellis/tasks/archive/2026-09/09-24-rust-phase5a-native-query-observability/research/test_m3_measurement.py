@@ -4,6 +4,7 @@ import subprocess
 import unittest
 from pathlib import Path
 from test_qualify_m2_controls import CompleteControlGateTests, qualify
+from repo_paths import repo_root
 
 
 class M3Controls(CompleteControlGateTests):
@@ -67,7 +68,7 @@ class M3Controls(CompleteControlGateTests):
 
 class RunnerPlan(unittest.TestCase):
     def run_plan(self, profile, **extra):
-        runner = Path(__file__).resolve().parents[4] / 'scripts/run-phase5a-baseline.sh'
+        runner = repo_root(Path(__file__)) / 'scripts/run-phase5a-baseline.sh'
         env = dict(os.environ, PHASE5A_PLAN_ONLY='1', PHASE5A_MEASUREMENT_PROFILE=profile,
                    GOMAXPROCS='1', RUN_MODE='pilot', CANDIDATE='rust', SCENARIO='w2',
                    STAGE_DURATION_MS='25000', NORMAL_REFERENCE_QPS='200', COMMON_LOAD_QPS='300',

@@ -72,12 +72,14 @@ def derive(raw_root,result_root,workload,cleanup_proof,postbatch_identity):
     head=(raw/'source-head.txt').read_text().strip()
     # Analyze the committed executed version, allowing a later offline cleanup
     # repair without pretending that repair was used for these measurements.
-    preflight=(Path(__file__).parent/'m10-preflight/identity.json').relative_to(driver.t.REPO)
-    committed=json.loads(driver.subprocess.check_output(['git','show',head+':'+str(preflight)],cwd=driver.t.REPO))
+    # The task directory moves when the task is archived, so the measuring
+    # commit's own research path is resolved from that commit; the files loaded
+    # from here stay the repaired offline analysis, never the measured tools.
+    measured=driver.committed_research_root(head)
+    committed=json.loads(driver.committed_bytes(head,measured/'m10-preflight/identity.json'))
     if committed!=identity or json.loads(Path(postbatch_identity).read_text())!=identity or (raw/'identity-error.txt').exists():raise ValueError('reviewed/postbatch execution identity differs')
     for file,digest in identity['local_tools'].items():
-        relative=(Path(__file__).parent/file).relative_to(driver.t.REPO)
-        body=driver.subprocess.check_output(['git','show',head+':'+str(relative)],cwd=driver.t.REPO)
+        body=driver.committed_bytes(head,measured/file)
         if hashlib.sha256(body).hexdigest()!=digest:raise ValueError('executed tool differs from reviewed preflight')
     cleanup=json.loads(Path(cleanup_proof).read_text());receipts={(r['run_id'],r['role']):r for r in cleanup}
     expected_owned={}
