@@ -28,6 +28,25 @@ Release/deployment binaries must contain freshly built Vue assets; use repositor
 - No undocumented KixDNS source copy; pin and attribute extracted code.
 - If p99, CPU, or RSS regresses beyond the task's accepted threshold, keep Rust experimental rather than making it default.
 
+## Performance measurement self-control
+
+When a frozen short probe repeatedly reports changing latency regressions
+without a confirmed source cause, pin a bounded identical-binary diagnostic
+before making another speculative correction. Preserve binary/config hashes,
+slot order, every attempt, and the unchanged analyzer. Diagnostic pairing
+labels must explicitly disclose when all slots use the same executable and
+audit flag. The Phase 5A example command is
+`bash run-slice3-self-control-w1.sh`; its `attempt-order.tsv`, `sut.json`,
+`input-hashes.sha256`, and raw manifest provide the assertion boundaries.
+
+If identical inputs cross the frozen guard, record a measurement limitation
+and stop acceptance advancement under the major-issue rule. This neither
+waives the candidate regression nor proves the candidate's overhead is zero.
+Do not change old thresholds or select attempts until a PASS appears. A new
+measurement protocol needs explicit authorization and review before acceptance
+restarts. Source evidence: the active query-observability task's
+`research/slice3-self-control-assessment.md` (W1 TCP 400 p95/p99 false crossings).
+
 ## External ChatGPT planning and root-review loop
 
 ### 1. Scope / Trigger

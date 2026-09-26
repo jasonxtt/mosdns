@@ -402,6 +402,23 @@ budget (+192 KiB maximum audit-off versus Rust-before; +1,884 KiB maximum
 audit-on versus audit-off). V12 remains blocked from review; see
 `research/slice3-v12-pilot-assessment.md`.
 
+## Measurement diagnostic and major evidence stop (2026-09-26)
+
+The diagnostic protocol pinned in `dec901e` ran nine W1 TCP slots using only
+the exact Rust-before binary and audit-disabled configuration. All binary
+identities and complete input-hash manifests were identical, all nine runner
+exits were zero, and all 18/18 primary rows and 16,200 requests were valid and
+correct on time. Nevertheless, the frozen analyzer reported repeated p95 and
+p99 regressions at 400 QPS (two of three pairs exceeded the guards).
+
+See `research/slice3-self-control-assessment.md` and adjacent evidence. This
+confirms a measurement limitation without proving V12 free of real overhead.
+A5 remains unmet and the V12 verdict is unchanged. The workflow's major-issue
+stop applies: further speculative implementation or acceptance retries stop
+pending an explicitly authorized measurement correction and reviewed frozen
+protocol. No acceptance review, finish/archive, new task, or deployment is
+authorized by this diagnostic.
+
 ## Review and rollback points
 
 The most sensitive files are `rust/native-host/src/execution.rs`, `udp.rs`, `tcp.rs`, `assembly.rs`, and `config.rs`. Keep the observer isolated enough that an audit change can be reverted without altering DNS response construction or cache/route logic. A regression in response bytes, upstream counts, cancellation, or unaccounted audit loss blocks the slice. A repeatable p95/p99 or correct-on-time regression beyond the predeclared budget blocks final PASS until repaired or explicitly scoped into a separate corrective task.

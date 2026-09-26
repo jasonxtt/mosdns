@@ -1,0 +1,19 @@
+primary rows: 18
+paired assessments: 16
+valid primary rows: 18/18
+w1-tcp main 200 after_off_vs_before_off p95_us n=3 deltas=[-25.4261,20.3704,-35.9580] guard=16.48% above=1 no repeatable regression under frozen guard
+w1-tcp main 200 after_off_vs_before_off p99_us n=3 deltas=[-29.6068,39.3365,-43.3420] guard=25.76% above=1 no repeatable regression under frozen guard
+w1-tcp main 200 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[-22.2222,16.6667,-12.5000] guard=25.00% above=0 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w1-tcp main 200 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[0.6418,1.1553,-2.0619] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w1-tcp main 200 after_on_vs_after_off p95_us n=3 deltas=[5.9048,14.0171,6.7623] guard=14.10% above=0 no repeatable regression under frozen guard
+w1-tcp main 200 after_on_vs_after_off p99_us n=3 deltas=[-20.9200,32.1995,7.5269] guard=10.00% above=1 no repeatable regression under frozen guard
+w1-tcp main 200 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[0.0000,0.0000,0.0000] guard=25.00% above=0 inconclusive: 100-Hz ticks differ by <2 in one or more pairs
+w1-tcp main 200 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[-0.8929,0.2538,3.0263] guard=32768 KiB above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_off_vs_before_off p95_us n=3 deltas=[27.2931,-21.2237,14.6691] guard=13.77% above=2 repeatable regression
+w1-tcp main 400 after_off_vs_before_off p99_us n=3 deltas=[26.3556,-30.0959,30.5115] guard=10.00% above=2 repeatable regression
+w1-tcp main 400 after_off_vs_before_off cpu_us_per_correct_query n=3 deltas=[25.0000,-23.0769,23.0769] guard=25.00% above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_off_vs_before_off rss_peak_kib_sampled n=3 deltas=[0.7702,1.1538,-2.0592] guard=8192 KiB above=0 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off p95_us n=3 deltas=[-14.2355,58.4951,-33.0733] guard=25.31% above=1 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off p99_us n=3 deltas=[-27.8443,122.6415,-55.8784] guard=83.63% above=1 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off cpu_us_per_correct_query n=3 deltas=[-26.6667,40.0000,-25.0000] guard=25.00% above=1 no repeatable regression under frozen guard
+w1-tcp main 400 after_on_vs_after_off rss_peak_kib_sampled n=3 deltas=[-1.0191,0.2535,3.0223] guard=32768 KiB above=0 no repeatable regression under frozen guard
