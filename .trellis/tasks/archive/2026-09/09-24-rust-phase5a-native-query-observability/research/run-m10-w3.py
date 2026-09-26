@@ -10,7 +10,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import repo_paths
+
 HERE=Path(__file__).resolve().parent
+# The archived task directory is not the repository; locating it from explicit
+# markers keeps history reads fail-closed instead of the frozen drivers'
+# silent `HERE/'repo'` fallback.
+REPO=repo_paths.repo_root(HERE)
 TASK_DIR=HERE.parent.name
 TASK_PREFIX='.trellis/tasks/'
 
@@ -80,12 +86,12 @@ def identity(args):
     files.update({t.SERVER_INPUT+'/'+f:hashes[f] for f in ('m10-server-control.py','m5-remote-tools.py')})
     client={t.CLIENT_INPUT+'/phase5a-baseline-helper-v11':t.HELPER_SHA,t.CLIENT_INPUT+'/m5-remote-tools.py':hashes['m5-remote-tools.py']}
     for scenario,name,port in (('w3','routing',15356),):
-        original=(t.REPO/f'tests/phase5a-baseline/configs/{name}.yaml').read_bytes()
+        original=(REPO/f'tests/phase5a-baseline/configs/{name}.yaml').read_bytes()
         off=original.replace(f'127.0.0.1:{port}'.encode(),f'10.0.0.92:{port}'.encode())
         files[t.SERVER_INPUT+'/'+scenario+'-off.yaml']=hashlib.sha256(off).hexdigest()
         files[t.SERVER_INPUT+'/'+scenario+'-on.yaml']=hashlib.sha256(off.replace(b'enable_audit: false',b'enable_audit: true')).hexdigest()
         files[t.SERVER_INPUT+f'/repo/tests/phase5a-baseline/configs/{name}.yaml']=hashlib.sha256(original).hexdigest()
-        corpus=hashlib.sha256((t.REPO/f'tests/phase5a-baseline/workloads/{name}.jsonl').read_bytes()).hexdigest()
+        corpus=hashlib.sha256((REPO/f'tests/phase5a-baseline/workloads/{name}.jsonl').read_bytes()).hexdigest()
         files[t.SERVER_INPUT+f'/repo/tests/phase5a-baseline/workloads/{name}.jsonl']=corpus
         client[t.CLIENT_INPUT+'/'+name+'.jsonl']=corpus
     for is_client,expected in ((False,files),(True,client)):
@@ -158,7 +164,7 @@ def committed_research_root(head):
     the current path is not the path that commit recorded. Read that commit's
     tree and fail unless exactly one task research directory is recorded there.
     """
-    try:listing=subprocess.check_output(['git','ls-tree','-r','--name-only','-z',head],cwd=t.REPO,text=True)
+    try:listing=subprocess.check_output(['git','ls-tree','-r','--name-only','-z',head],cwd=REPO,text=True)
     except subprocess.CalledProcessError as error:raise ValueError(head+' has exactly one '+TASK_DIR+' research directory: unresolvable ('+str(error)+')') from error
     marker=f'/{TASK_DIR}/research/';required={'m10-preflight/identity.json',*TOOLS};found={}
     for name in listing.split('\0'):
@@ -173,7 +179,7 @@ def committed_research_root(head):
 
 
 def committed_bytes(head,path):
-    try:return subprocess.check_output(['git','show',head+':'+str(path)],cwd=t.REPO)
+    try:return subprocess.check_output(['git','show',head+':'+str(path)],cwd=REPO)
     except subprocess.CalledProcessError as error:raise ValueError(str(path)+' is missing in '+head) from error
 
 
@@ -191,7 +197,7 @@ def verify_reviewed_tools(head):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--mode',choices=('preflight','run'),required=True);parser.add_argument('--result-root',type=Path,required=True);parser.add_argument('--client-control',required=True);parser.add_argument('--reviewed-head');args=parser.parse_args()
-    head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=t.REPO,text=True).strip()
+    head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=REPO,text=True).strip()
     if args.mode=='run' and args.reviewed_head!=head:raise ValueError('exact reviewed HEAD required')
     reviewed=verify_reviewed_tools(head) if args.mode=='run' else None
     root=args.result_root.resolve();root.mkdir(parents=True,exist_ok=False)
