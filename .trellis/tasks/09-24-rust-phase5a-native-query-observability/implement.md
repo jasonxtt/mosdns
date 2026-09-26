@@ -453,6 +453,11 @@ control run then started in the separate `results-m2-calibration` root.
 
 ## Review and rollback points
 
+M3 prospective revision is in `research/measurement-revision-v3.md`: longer
+25-second primary windows, TTL-checked independent warm points, fixed W1-first
+conditional calibration and unchanged latency margin/individual guards. No
+M3 traffic is permitted until the scoped reviewer approves this unit.
+
 M2 fixed calibration completed 2026-09-26 02:32:54 UTC: 54/54 runner exits
 zero, 126/126 primary rows valid, 108,000 correct-on-time requests. Each batch
 had six repeated latency guards; only 1/28 equivalence intervals qualified.
