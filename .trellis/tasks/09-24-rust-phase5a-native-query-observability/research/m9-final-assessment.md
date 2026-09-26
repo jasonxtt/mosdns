@@ -86,7 +86,9 @@ route-a/b/c. Regression extracts the helper's actual fixtureAnswer case IDs
 and checks controller specs: RED on underscore IDs, GREEN on hyphen IDs.
 Five focused tests now pass, including owned cleanup/UDP occupied-bind tests.
 Inline trellis-check passes52 measurement regressions (one Linux-only skip)
-and exact-path whitespace checks. Durable inputs and repaired current scripts
+and source/doc whitespace checks. Four trailing spaces in immutable raw client/
+server ip-route inventory lines are preserved with their original hashes;
+range-wide diff-check reports those evidence-only lines. Durable inputs and repaired current scripts
 are deliberately distinguished; no report or script claims final A5 PASS.
 No Rust source or helper behavior changed; repaired scripts are not measured.
 Only a separately authorized, pinned W3 batch can close this evidence gap.
