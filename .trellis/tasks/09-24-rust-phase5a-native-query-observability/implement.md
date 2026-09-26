@@ -453,7 +453,15 @@ control run then started in the separate `results-m2-calibration` root.
 
 ## Review and rollback points
 
-### M7 user-authorized simplified real-host regression
+### M8 user-authorized post-remediation validation
+
+User said “好 继续” to rebuilding and the same simplified9run comparison.
+Executor inline/selected002reviewer unchanged. Unit1 pins new Rust/helper
+source18d71c8c,binaries/inputs,M8 roots and scripts; prospective review before
+traffic. Unit2 after PASS consumes exactly9balanced100QPS30s old/new-off/
+new-on runs once and submits all results. M7 numeric/error/oracle rules remain,
+no threshold change/resampling/tuning or new workloads. No fullA5/capacity/
+production/taskclosure. See research/measurement-revision-v8.md.
 
 ### Post-M7 user-authorized bounded remediation
 
@@ -478,6 +486,8 @@ performed inline against frozen event/DNS/evidence contracts; spec updated.
 See research/post-m7-remediation.md. No new benchmark results or speedup claim.
 POST-M7-CODE-001 received FINAL: PASS09:37:53UTC on35b22f86, zero findings.
 Code unit complete; no new measured traffic/fullA5/deployment authorized.
+
+### M7 user-authorized simplified real-host regression
 
 User explicitly approved the proposed simplification and instructed execution.
 Unit1 fixes the scope/protocol and reuses existing transport/owned cleanup/
