@@ -4,16 +4,19 @@ The user authorized correction/review, qualified stable controls, then
 resumption of acceptance. M2–M4 corrections and prospective reviews are complete;
 stable controls have **not** been established. Acceptance must stay closed.
 
-M5 is being prepared with10.0.0.50 as client and mosdns-rust as server.
-Read-only preflight passed; zero measured attempts. Unit1 prospective review
-must pass before the fixed18-attempt W1 control run. No extra hardware or
-resource allocation is required; thresholds and old verdicts remain unchanged.
+M5 used10.0.0.50 as client and mosdns-rust as server after prospective review
+PASS. Its one fixed18-slot run ended with1 successful attempt/2 valid windows/
+15000 correct queries;17 slots failed before startup. The availability probe
+mistook fixture-port TIME_WAIT for an occupied listener. The matrix is invalid,
+not qualified; no latency stability conclusion. See m5-calibration-assessment.md.
+No extra hardware/resource allocation, resampling, W2/W3 or candidate traffic.
 
 | Revision | Fixed attempts | Valid primary | Correct on time | Qualified latency intervals | Control result |
 |---|---:|---:|---:|---:|---|
 | M2: v9 no sampler subprocess, pinned scheduler |54|126|108000|1/28|Unqualified|
 | M3:25-second primary windows, TTL-checked warm points |18|36|270000|1/8|Unqualified; W1 stop|
 | M4:bounded helper GC-off experiment |18|36|270000|1/8|Unqualified; W1 stop|
+| M5:separate client/server |18 slots|2|15000|None: incomplete matrix|Invalid; W1 stop|
 
 Each protocol received designated002reviewer PASS **before** fresh traffic.
 Each ran once in a separate root; all attempts and unexecuted plans remain.

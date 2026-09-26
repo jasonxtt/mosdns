@@ -1,0 +1,1 @@
+scenario	phase	qps	comparison	metric	valid_pairs	control_values	candidate_values	paired_delta_pct	control_relative_mad	guard	pairs_above_guard	tick_resolution_limited_pairs	verdict

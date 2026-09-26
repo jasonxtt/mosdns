@@ -1,0 +1,1 @@
+scenario	phase	repetition	variant	pair_position	runner_exit	stage	qps	valid	scheduled	sent	received	correct_on_time	correct_late	wrong_response	protocol_error	transport_error	timeout	sender_shortfall	p50_us	p95_us	p99_us	effective_throughput_qps	cpu_ticks	cpu_us_per_correct_query	rss_peak_kib_sampled	host_load_start	host_load_end

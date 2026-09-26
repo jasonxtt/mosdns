@@ -1,0 +1,7 @@
+measurement_profile=m5
+gomaxprocs_environment=1
+client_host=Debian
+server_host=mosdns-rust
+gogc_environment=off
+godebug_environment=gctrace=1
+gomemlimit_environment=unset

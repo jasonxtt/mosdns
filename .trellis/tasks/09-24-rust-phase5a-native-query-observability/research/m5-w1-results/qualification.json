@@ -1,0 +1,7 @@
+{
+  "qualified": false,
+  "failures": [
+    "[Errno 2] No such file or directory: '/private/tmp/mosdns-phase5a-m5-w1-49ac145-20260926/batch1/w1-tcp-r1-after_off/sut.json'"
+  ],
+  "intervals": []
+}

@@ -1,0 +1,1 @@
+Command '['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-S', '/tmp/mosdns-phase5a-client.6MkByM/control', 'root@10.0.0.50', 'python3 /root/mosdns-phase5a-m5-client/tools/m5-remote-tools.py hash-tree --result /root/mosdns-phase5a-m5-client/results/m5-batch1-w1-tcp-r3-after_on']' returned non-zero exit status 1.

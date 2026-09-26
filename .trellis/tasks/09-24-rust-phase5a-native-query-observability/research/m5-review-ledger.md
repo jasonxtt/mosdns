@@ -1,5 +1,18 @@
 # M5 prospective review ledger
 
+Attempt2 parent `b93822b8532a4c0392f64a7ad6c804aab7aabb7b`,
+head `49ac145ca1345860a92f60682b46c3a127cf7273`, reviewer same002reviewer.
+Scoped F1/F2 remediation only;44 local Python tests/7 Linux M5 tests and
+fresh zero-attempt preflight PASS. Submitted for explicit final re-review.
+FINAL: PASS — M5-UNIT1-002 at2026-09-26T07:20:18Z; F1/F2 closed.
+Only the single fixed M5 W1 calibration is authorized. W2/W3, candidate/A5
+acceptance remain closed. Unit2 uses reviewedHEAD49ac145 and retains all data.
+
+Unit2 finished18 slots once:1 success,17 startup failures,2 valid windows,
+15000 correct on time. Invalid matrix; no control stability verdict. Complete
+175-entry local manifest verified against durable copy;176 selected files
+retained. No W2/W3/candidate or rerun. See m5-calibration-assessment.md.
+
 Executor=current inline. Reviewer=Codex002reviewer,
 01a0d43d-d0aa-7401-af0f-2ca3a45ba519. Unit1 only, initial finding count0.
 

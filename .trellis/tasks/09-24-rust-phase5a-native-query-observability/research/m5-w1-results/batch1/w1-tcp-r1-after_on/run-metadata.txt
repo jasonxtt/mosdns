@@ -1,0 +1,5 @@
+stage_duration_ms=25000
+normal_reference_qps=200
+overload_qps=400
+request_deadline_ms=500
+late_drain_ms=100
