@@ -1,0 +1,66 @@
+mode=identical-baseline calibration; all slot labels use audit off
+GOMAXPROCS=1
+source_commit=27cfc20d3bd27ba90ec67454ab343978d0cb7fed
+start_utc=2026-09-26T02:12:09Z
+ba864a787b639aa293a8e4a9981be03ca80d7a874f6cc182ed1a5889d77ad021  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v2/repo/scripts/run-phase5a-baseline.sh
+254500ec00527850f0f137bcc7e9ac26ff4953d6600bfc00eb7a7fbc2afc436d  /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v2/phase5a-baseline-helper-v9
+370573c8fd366f0e88733c743af1e7c6561784f3990cac104220f4e2fe457baa  /root/mosdns-rust-phase5a-first-native-performance-605c305/bin/official-v1/mosdns-rust
+7cf2084fd6ad9ec5aea94dd0a4b1595e506d3e7d7a1a9418ca620ef803cf6db4  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-calibration/run-m2-calibration.sh
+67ba8bea79bfee6a2835f03108bea7a5268862975ede91adbfb8294ca96ef361  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-calibration/measurement-revision-v2.md
+a0435359b1712fba56469fefe185f272c46b581ca324f1d61ef713db35eeb258  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-calibration/batch1/attempt-order-plan.tsv
+1a92ab7b422ab8c1f26492da86e302b9a0a2e41c63277922d988ef69c602b494  /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m2-calibration/batch2/attempt-order-plan.tsv
+attempt_utc=2026-09-26T02:12:28Z batch=batch1 scenario=w1-tcp repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:12:46Z batch=batch1 scenario=w1-tcp repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:13:05Z batch=batch1 scenario=w1-tcp repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:13:23Z batch=batch1 scenario=w1-tcp repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:13:42Z batch=batch1 scenario=w1-tcp repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:14:00Z batch=batch1 scenario=w1-tcp repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:14:19Z batch=batch1 scenario=w1-tcp repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:14:37Z batch=batch1 scenario=w1-tcp repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:14:56Z batch=batch1 scenario=w1-tcp repetition=3 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:15:25Z batch=batch1 scenario=w2 repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:15:54Z batch=batch1 scenario=w2 repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:16:23Z batch=batch1 scenario=w2 repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:16:52Z batch=batch1 scenario=w2 repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:17:21Z batch=batch1 scenario=w2 repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:17:49Z batch=batch1 scenario=w2 repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:18:18Z batch=batch1 scenario=w2 repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:18:47Z batch=batch1 scenario=w2 repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:19:16Z batch=batch1 scenario=w2 repetition=3 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:19:38Z batch=batch1 scenario=w3 repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:19:59Z batch=batch1 scenario=w3 repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:20:21Z batch=batch1 scenario=w3 repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:20:43Z batch=batch1 scenario=w3 repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:21:05Z batch=batch1 scenario=w3 repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:21:26Z batch=batch1 scenario=w3 repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:21:48Z batch=batch1 scenario=w3 repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:22:10Z batch=batch1 scenario=w3 repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:22:31Z batch=batch1 scenario=w3 repetition=3 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:22:50Z batch=batch2 scenario=w1-tcp repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:23:08Z batch=batch2 scenario=w1-tcp repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:23:27Z batch=batch2 scenario=w1-tcp repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:23:45Z batch=batch2 scenario=w1-tcp repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:24:04Z batch=batch2 scenario=w1-tcp repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:24:23Z batch=batch2 scenario=w1-tcp repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:24:41Z batch=batch2 scenario=w1-tcp repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:25:00Z batch=batch2 scenario=w1-tcp repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:25:18Z batch=batch2 scenario=w1-tcp repetition=3 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:25:47Z batch=batch2 scenario=w2 repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:26:16Z batch=batch2 scenario=w2 repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:26:45Z batch=batch2 scenario=w2 repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:27:14Z batch=batch2 scenario=w2 repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:27:43Z batch=batch2 scenario=w2 repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:28:12Z batch=batch2 scenario=w2 repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:28:41Z batch=batch2 scenario=w2 repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:29:09Z batch=batch2 scenario=w2 repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:29:38Z batch=batch2 scenario=w2 repetition=3 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:30:00Z batch=batch2 scenario=w3 repetition=1 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:30:22Z batch=batch2 scenario=w3 repetition=1 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:30:43Z batch=batch2 scenario=w3 repetition=1 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:31:05Z batch=batch2 scenario=w3 repetition=2 slot=after_off runner_exit=0
+attempt_utc=2026-09-26T02:31:27Z batch=batch2 scenario=w3 repetition=2 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:31:48Z batch=batch2 scenario=w3 repetition=2 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:32:10Z batch=batch2 scenario=w3 repetition=3 slot=after_on runner_exit=0
+attempt_utc=2026-09-26T02:32:32Z batch=batch2 scenario=w3 repetition=3 slot=before_off runner_exit=0
+attempt_utc=2026-09-26T02:32:53Z batch=batch2 scenario=w3 repetition=3 slot=after_off runner_exit=0
+finished_utc=2026-09-26T02:32:54Z
