@@ -1,0 +1,83 @@
+[
+  {
+    "scenario": "w3",
+    "repetition": 1,
+    "variant": "before_off",
+    "run_id": "m10-w3-r1-before_off",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 1,
+    "variant": "after_off",
+    "run_id": "m10-w3-r1-after_off",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 1,
+    "variant": "after_on",
+    "run_id": "m10-w3-r1-after_on",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 2,
+    "variant": "after_off",
+    "run_id": "m10-w3-r2-after_off",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 2,
+    "variant": "after_on",
+    "run_id": "m10-w3-r2-after_on",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 2,
+    "variant": "before_off",
+    "run_id": "m10-w3-r2-before_off",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 3,
+    "variant": "after_on",
+    "run_id": "m10-w3-r3-after_on",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 3,
+    "variant": "before_off",
+    "run_id": "m10-w3-r3-before_off",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  },
+  {
+    "scenario": "w3",
+    "repetition": 3,
+    "variant": "after_off",
+    "run_id": "m10-w3-r3-after_off",
+    "qps": 100,
+    "duration_ms": 30000,
+    "planned": 3000
+  }
+]

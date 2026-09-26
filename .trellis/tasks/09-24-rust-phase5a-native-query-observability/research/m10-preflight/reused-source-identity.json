@@ -1,0 +1,9 @@
+{
+  "pinned_source": "18d71c8c06d98a405d889b1bee54021d899616b8",
+  "source_files_verified": 120,
+  "rust_tree": "029d171b54348236ef285ef02f9621b89499db21",
+  "linux_evidence_reused": "m9-preflight/linux-tests.log",
+  "source_manifest_sha256": "3b8138173c730fb818719e48ba1e5a52ef1d65e140c39d3770ece459869b92cb",
+  "ports_check": "W3 UDP ports available; no DNS probes",
+  "new_queries": 0
+}
