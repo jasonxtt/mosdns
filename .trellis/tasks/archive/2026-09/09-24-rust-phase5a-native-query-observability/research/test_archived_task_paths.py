@@ -22,7 +22,9 @@ class ArchivedTaskRootTests(unittest.TestCase):
         self.assertEqual(root, repo_paths.repo_root(HERE))
         self.assertEqual(root, repo_paths.repo_root(HERE / 'test_archived_task_paths.py'))
         self.assertNotEqual(root, HERE)
-        self.assertEqual(root, Path(__file__).resolve().parents[6])
+        # No fixed depth: the markers are what identify the repository, so this
+        # holds wherever the task directory sits.
+        self.assertIn(str(root), str(HERE))
         for marker in MARKERS:
             self.assertTrue((root / marker).exists(), marker)
 
@@ -50,6 +52,35 @@ class ArchivedTaskRootTests(unittest.TestCase):
             with self.subTest(driver=name):
                 self.assertEqual(driver.REPO, root)
                 self.assertTrue((driver.REPO / 'go.mod').exists())
+
+    def test_history_reads_use_the_marker_search_not_the_frozen_driver_fallback(self):
+        """The M10 history helper must not inherit the frozen drivers' fallback.
+
+        ``run-m5-w1.py`` and ``run-m6-w1.py`` fall back to ``HERE/'repo'``,
+        which does not exist here, so using their ``REPO`` would fail or
+        silently address a tree that has none of the repository markers. The
+        module-level assertion pins the source; the sandboxed one is asserted
+        against a copy of the repository moved off the marker path.
+        """
+        source = (HERE / 'run-m10-w3.py').read_text()
+        self.assertIn('REPO=repo_paths.repo_root(HERE)', source)
+        self.assertNotIn('t.REPO', source.split('def committed_research_root')[1].split('def verify_reviewed_tools')[0])
+        driver = load('run-m10-w3.py')
+        self.assertEqual(driver.REPO, repo_paths.repo_root())
+        with tempfile.TemporaryDirectory() as temporary:
+            relocated = Path(temporary) / 'moved-repository'
+            for marker in MARKERS:
+                (relocated / marker).parent.mkdir(parents=True, exist_ok=True)
+                (relocated / marker).mkdir(exist_ok=True)
+            fallback = next((parent for parent in
+                             (relocated / '.trellis/tasks' / driver.TASK_DIR / 'research').parents
+                             if (parent / 'go.mod').exists()), relocated / 'repo')
+            self.assertEqual(fallback, relocated)
+            self.assertTrue(all((fallback / marker).exists() for marker in MARKERS))
+            elsewhere = Path(temporary) / 'plain-checkout'
+            elsewhere.mkdir()
+            with self.assertRaisesRegex(ValueError, 'repository root'):
+                repo_paths.repo_root(elsewhere)
 
     def test_paths_used_by_the_suites_resolve_from_the_archived_directory(self):
         root = repo_paths.repo_root()

@@ -260,7 +260,7 @@ class ArchivedDeriveTests(unittest.TestCase):
         self.driver = load('run-m10-w3.py', 'm10_driver')
         self.oracle = load('m10-route-oracle.py', 'm10_oracle')
 
-    def prepare(self, omit=(), duplicate=False):
+    def prepare(self, omit=(), duplicate=False, corrupt_tool=None):
         workload = workload_text()
         identity = identity_for(self.driver, workload)
         research = build_repository(self.root, omit=omit, preflight=identity)
@@ -270,6 +270,12 @@ class ArchivedDeriveTests(unittest.TestCase):
                     write(self.root / f'.trellis/tasks/archive/2026-08/{TASK_DIR}/research' /
                           path.relative_to(research), path.read_text())
         measured = commit(self.root)
+        if corrupt_tool is not None:
+            # Only the committed blob changes: the frozen preflight identity and
+            # both raw identity copies keep the digest of the measured bytes, so
+            # this can only be caught by hashing the historical Git object.
+            write(research / corrupt_tool, '#tampered in the measuring commit\n')
+            measured = commit(self.root)
         archived = archive_task(self.root)
         raw = self.root / 'raw'
         workload_path = self.root / 'routing.jsonl'
@@ -327,6 +333,22 @@ class ArchivedDeriveTests(unittest.TestCase):
                     write(prepared['raw'] / 'postbatch-proof/identity.json', json.dumps(identity, indent=2) + '\n')
                 self.assertTrue((self.root / prepared['archived']).is_dir())
                 with self.assertRaises(ValueError):
+                    self.derive(prepared)
+
+    def test_derive_rejects_a_tampered_historical_tool_object(self):
+        for tool in ('m10-server-control.py', 'm5-remote-tools.py'):
+            with self.subTest(tool=tool), tempfile.TemporaryDirectory() as temporary:
+                self.root = Path(temporary) / 'repo'
+                prepared = self.prepare(corrupt_tool=tool)
+                # The identity chain still agrees with itself, so the only thing
+                # left to reject the run is the historical object's own hash.
+                self.assertIn(tool, prepared['identity']['local_tools'])
+                self.assertNotEqual(hashlib.sha256(
+                    (self.root / prepared['archived'] / tool).read_bytes()).hexdigest(),
+                    prepared['identity']['local_tools'][tool])
+                for name in ('identity.json', 'postbatch-proof/identity.json'):
+                    self.assertEqual(json.loads((prepared['raw'] / name).read_text()), prepared['identity'])
+                with self.assertRaisesRegex(ValueError, 'executed tool differs from reviewed preflight'):
                     self.derive(prepared)
 
     def test_current_copy_repair_does_not_replace_or_shadow_measured_history(self):
