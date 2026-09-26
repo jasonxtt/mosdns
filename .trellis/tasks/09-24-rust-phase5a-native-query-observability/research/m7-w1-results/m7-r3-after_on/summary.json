@@ -1,0 +1,15 @@
+{
+  "repetition": 3,
+  "variant": "after_on",
+  "run_id": "m7-r3-after_on",
+  "qps": 100,
+  "duration_ms": 30000,
+  "runner_exit": 1,
+  "correct": 2999,
+  "shortfall": 1,
+  "errors": 0,
+  "p95_us": 1110,
+  "p99_us": 2002,
+  "rss_peak_kib": 4736,
+  "cpu_seconds_bracket": 0.63
+}

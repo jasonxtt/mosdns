@@ -467,6 +467,14 @@ run,zero shortfall/errors. Paired median p95/p99 ratios >1.10 flag regression;
 CPU/RSS auxiliary. This is limited100QPS W1 evidence, never capacity/fullA5
 or retroactive waiver of V12/M2–M6. W2/W3,production,archive outside scope.
 
+M7 unit1 remedied ambiguous SSH startup cleanup(red/green regression), then
+M7-UNIT1-002 received FINAL: PASS08:28:41UTC on ba0f4a89. Unit2 consumed
+its single9run batch:7valid/2sender-shortfall failures,26997actual queries
+correct on time,3missed planned slots,zero responseerrors/timeouts. Paired
+median audit-on p99 diagnosticratio1.1101 exceeds1.10. M7 NOT PASSED;
+251manifest entries/18remote source trees verified;244selected files retained.
+Consolidated report review pending, no rerun or expanded acceptance.
+
 ### M6 authorized range (user: continue next step)
 
 The user on2026-09-26 explicitly authorized continuing the next corrective

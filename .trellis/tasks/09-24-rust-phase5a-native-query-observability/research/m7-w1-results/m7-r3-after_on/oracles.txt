@@ -1,0 +1,8 @@
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/phase5a-baseline-helper-v10 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/derived/m7-r3-after_on.jsonl --stage normal-reference
+stage normal-reference is not fully correct-on-time: {Scheduled:2999 Sent:2999 Received:2999 CorrectOnTime:2999 CorrectLate:0 ExpectedNegativeOnTime:999 WrongResponse:0 ProtocolError:0 TransportError:0 Timeout:0 SenderShortfall:1}
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/phase5a-baseline-helper-v10 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/derived/m7-r3-after_on.jsonl --stage normal-reference
+stage normal-reference dropped 1 open-loop schedule slot(s), max_lag_us=24813
+exit=1
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/phase5a-baseline-helper-v10 verify-session-counters --scenario w1 --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/repo/tests/phase5a-baseline/workloads/forward.jsonl --counter /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m7-server/m7-r3-after_on/fixture-forward.json --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/derived/m7-r3-after_on.jsonl --run-id m7-r3-after_on
+exit=0

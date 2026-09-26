@@ -1,0 +1,7 @@
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/phase5a-baseline-helper-v10 verify-stage --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/derived/m7-r2-after_off.jsonl --stage normal-reference
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/phase5a-baseline-helper-v10 verify-sender --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/derived/m7-r2-after_off.jsonl --stage normal-reference
+sender schedule verified: stage=normal-reference scheduled=3000 sent=3000
+exit=0
+/root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/phase5a-baseline-helper-v10 verify-session-counters --scenario w1 --workload /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/repo/tests/phase5a-baseline/workloads/forward.jsonl --counter /root/mosdns-rust-phase5a-native-query-observability-545ba29/results-m7-server/m7-r2-after_off/fixture-forward.json --stage-result /root/mosdns-rust-phase5a-native-query-observability-545ba29/measurement-v7/derived/m7-r2-after_off.jsonl --run-id m7-r2-after_off
+exit=0
