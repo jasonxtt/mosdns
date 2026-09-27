@@ -23,6 +23,14 @@ executable:
   still pass only when the declared dispatch health view is within the band,
   and that missing dispatch metadata fails.
 
+A controlled remote W1-TCP smoke after synchronization is archived under
+`c2c-health-basis-smoke/` (raw-file-hashes sidecar:
+`02d05a4c5ad964cf737beafc378dd5414e5c53620256f73c6f51fe73186c1267`). Its
+stage projection contains primary p95/p99 `2164/2164` µs and independently
+declared dispatch health p95/p99 `1004/1004` µs. This is schema/transport
+evidence only: it is a smoke run, not an official candidate result or a
+threshold decision.
+
 This changes no frozen p95/p99 ceiling and does not reinterpret the failed
 official-r2 attempt. It authorizes no rerun, profiling, or capacity conclusion;
 those remain gated on a fresh C2C `FINAL: PASS` for the committed remediation.
