@@ -1609,6 +1609,19 @@ func validContinuousStages() []stageResult {
 	return stages
 }
 
+func reviewedManifestExecutionContract() manifestExecutionContract {
+	return manifestExecutionContract{
+		Scope:       []string{"w1-tcp", "w2"},
+		W1Transport: "fresh TCP connection per request",
+		W2Lifecycle: "each measured point owns an independent SUT and prefill session; no same-process recovery claim",
+		Audit:       "disabled", OfficialPairsPerScenario: 3, OfficialCommonPointsPerScenario: 4, OfficialRetryMax: 1,
+		PilotNotInPairedAggregate: true, OfficialResultRootsAreNewAttemptsKept: true,
+		ResourceCaps: manifestResourceCaps{TaskFDCeiling: 512, FreshTCPInFlightCeiling: 256, RoleRSSCeilingMiB: 256, CombinedHarnessFixtureRSSMiB: 768, MinimumFreeDiskGiB: 1, MaxAttemptRawDerivedMiB: 512, RecordBytes: 32768},
+		Profiling:    manifestProfilingContract{OfficialLatencyRunsDoNotEnableProfiler: true, ProfileRunsAreSeparate: true, Event: "cpu-clock", HardwarePMULimitation: "controlled check limitation"},
+		Recovery:     recoveryAssessmentMode,
+	}
+}
+
 func validManifestFixture(t *testing.T, root string) (officialManifest, manifestValidationOptions) {
 	t.Helper()
 	for _, rel := range fixedCorpusInputPaths {
@@ -1655,6 +1668,10 @@ func validManifestFixture(t *testing.T, root string) (officialManifest, manifest
 	if err != nil {
 		t.Fatal(err)
 	}
+	helperSourceTreeHash, err := hashHelperSourceTree(root, helperSourceRel)
+	if err != nil {
+		t.Fatal(err)
+	}
 	helperHash, err := sha256File(helperPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1670,7 +1687,7 @@ func validManifestFixture(t *testing.T, root string) (officialManifest, manifest
 	manifest := officialManifest{
 		SchemaVersion: 1, OfficialFrozen: true, RecoveryAssessmentMode: recoveryAssessmentMode, Inputs: inputs,
 		Runner: manifestArtifact{Path: runnerRel, SHA256: runnerHash},
-		Helper: manifestHelper{SourcePath: helperSourceRel, SourceSHA256: helperSourceHash, BinaryPath: helperPath, BinarySHA256: helperHash, Version: helperVersion},
+		Helper: manifestHelper{SourcePath: helperSourceRel, SourceSHA256: helperSourceHash, SourceTreeSHA256: helperSourceTreeHash, BinaryPath: helperPath, BinarySHA256: helperHash, Version: helperVersion},
 		Candidates: map[string]manifestCandidate{
 			"go":   {SourceCommit: "go-source-sha", BinaryPath: goPath, BinarySHA256: goHash},
 			"rust": {SourceCommit: "rust-source-sha", BinaryPath: rustPath, BinarySHA256: rustHash},
@@ -1689,7 +1706,8 @@ func validManifestFixture(t *testing.T, root string) (officialManifest, manifest
 			HarnessCPUSet: "0", SUTCPUSet: "1",
 			RecoveryMinimumSamples: 5, RecoveryP95CeilingUS: 1200, RecoveryP99CeilingUS: 1500,
 		}},
-		Environment: manifestEnvironment{HostAlias: "test-vm", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, OnlineCPUs: currentOnlineCPUCount(), KernelRelease: currentKernelRelease(), GoToolchain: runtime.Version(), RustToolchain: "rustc test-version"},
+		Environment:       manifestEnvironment{HostAlias: "test-vm", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, OnlineCPUs: currentOnlineCPUCount(), KernelRelease: currentKernelRelease(), GoToolchain: runtime.Version(), RustToolchain: "rustc test-version"},
+		ExecutionContract: reviewedManifestExecutionContract(),
 	}
 	opts := manifestValidationOptions{
 		RepoRoot: root, HelperPath: helperPath, RunnerPath: filepath.Join(root, runnerRel), SUTPath: goPath,

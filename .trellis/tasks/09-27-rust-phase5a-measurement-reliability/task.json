@@ -1,0 +1,36 @@
+{
+  "id": "rust-phase5a-measurement-reliability",
+  "name": "rust-phase5a-measurement-reliability",
+  "title": "Rust Phase 5A measurement reliability and hotspot analysis",
+  "description": "Execution: bounded W1 TCP/W2 warm measurement reliability, objective overload/recovery, Linux profiling and archive-safe offline evidence; product/runtime implementation remains out of scope.",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": "phase5a-measurement",
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-27",
+  "completedAt": null,
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "docs/rust/next-stage-plan.md",
+    "docs/rust/performance-validation.md",
+    "tests/phase5a-baseline/cmd/phase5a-baseline/main.go"
+  ],
+  "notes": "User authorized execution on 2026-09-27. Slice 1/G1 is complete within its frozen scope. G0 profiler remediation is installed and accepted by 002reviewer via software-event fallback; future profiles must disclose zero hardware PMU counters. Continue only within the frozen Slice 2+ range and do not claim hotspots/capacity without their evidence.",
+  "meta": {
+    "planning_source_head": "5478015f7998be5335a7019915af558da5c74b4b",
+    "implementation_authorized": true,
+    "execution_mode": "inline",
+    "reviewer": "https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ab7f1f2-e4c4-83e8-af85-d0ff49e8cd73",
+    "planning_review": "{\"reviewer_url\":\"https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ab7f1f2-e4c4-83e8-af85-d0ff49e8cd73\",\"input_revision\":3,\"verdict\":\"PASS\",\"open_findings\":0,\"scope\":\"planning_only\"}"
+  }
+}

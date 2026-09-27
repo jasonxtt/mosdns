@@ -1,0 +1,16 @@
+{
+  "revision": 3,
+  "task_status": "planning",
+  "implementation_authorized": false,
+  "scope": "Current uncommitted planning files, not committed range",
+  "reviewer_url": "https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ab7f1f2-e4c4-83e8-af85-d0ff49e8cd73",
+  "c2c_task_id": "c2c_8c43",
+  "files": {
+    "prd.md": "47f8a5af1547c70a36aa2a82806184c9ec92e43b3bc18e93110b224906acf5fd",
+    "design.md": "acf9e5acf3822d705bc00372d5236680abec9ab0f6ca9b540a9c23507156ec1a",
+    "implement.md": "632fcac39c4558b3a38c956bdd07d93da15fcc56c91ab30a2c3e40f36c8419b0",
+    "research/source-audit.md": "88530d15d469e26fdf734846327b614719b92dcea88599c5d6a3f4e210434f55",
+    "implement.jsonl": "d64833545b0e7ca9779e466117c35103543b7dbc1364f2bd7ce1eedb7a7ff05e",
+    "check.jsonl": "16e67c77fa13f5b8c499eebecd298af4273f02f6b48780c269feed543c65438a"
+  }
+}

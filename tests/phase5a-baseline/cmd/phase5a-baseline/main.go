@@ -162,12 +162,18 @@ func main() {
 		err = verifyEventJournalCommand(os.Args[2:])
 	case "verify-samples":
 		err = verifySamplesCommand(os.Args[2:])
+	case "verify-resource-budgets":
+		err = verifyResourceBudgetsCommand(os.Args[2:])
 	case "verify-sender":
 		err = verifySenderCommand(os.Args[2:])
 	case "aggregate-pairs":
 		err = aggregatePairedStagesCommand(os.Args[2:])
 	case "validate-binary":
 		err = validateBinary(os.Args[2:])
+	case "reliability-run":
+		err = runReliabilityCommand(os.Args[2:])
+	case "reliability-assess":
+		err = assessReliabilityCommand(os.Args[2:])
 	case "version":
 		fmt.Println(helperVersion)
 	default:
@@ -181,7 +187,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: phase5a-baseline-helper {fixture|run|verify-counters|verify-routing-events|verify-warm-ttl|verify-manifest|verify-affinity|verify-cpu-sets|verify-continuous|verify-stage|verify-session-counters|verify-event-journal|verify-samples|verify-sender|aggregate-pairs|validate-binary|version}")
+	fmt.Fprintln(os.Stderr, "usage: phase5a-baseline-helper {fixture|run|reliability-run|reliability-assess|verify-counters|verify-routing-events|verify-warm-ttl|verify-manifest|verify-affinity|verify-cpu-sets|verify-continuous|verify-stage|verify-session-counters|verify-event-journal|verify-samples|verify-resource-budgets|verify-sender|aggregate-pairs|validate-binary|version}")
 }
 
 const (
@@ -215,11 +221,44 @@ type manifestArtifact struct {
 }
 
 type manifestHelper struct {
-	SourcePath   string `json:"source_path"`
-	SourceSHA256 string `json:"source_sha256"`
-	BinaryPath   string `json:"binary_path"`
-	BinarySHA256 string `json:"binary_sha256"`
-	Version      string `json:"version"`
+	SourcePath       string `json:"source_path"`
+	SourceSHA256     string `json:"source_sha256"`
+	SourceTreeSHA256 string `json:"source_tree_sha256"`
+	BinaryPath       string `json:"binary_path"`
+	BinarySHA256     string `json:"binary_sha256"`
+	Version          string `json:"version"`
+}
+
+type manifestResourceCaps struct {
+	TaskFDCeiling                int `json:"task_fd_ceiling"`
+	FreshTCPInFlightCeiling      int `json:"fresh_tcp_inflight_ceiling"`
+	RoleRSSCeilingMiB            int `json:"role_rss_ceiling_mib"`
+	CombinedHarnessFixtureRSSMiB int `json:"combined_harness_fixture_rss_ceiling_mib"`
+	MinimumFreeDiskGiB           int `json:"minimum_free_disk_gib"`
+	MaxAttemptRawDerivedMiB      int `json:"max_attempt_raw_derived_mib"`
+	RecordBytes                  int `json:"record_bytes"`
+}
+
+type manifestProfilingContract struct {
+	OfficialLatencyRunsDoNotEnableProfiler bool   `json:"official_latency_runs_do_not_enable_profiler"`
+	ProfileRunsAreSeparate                 bool   `json:"profile_runs_are_separate"`
+	Event                                  string `json:"event"`
+	HardwarePMULimitation                  string `json:"hardware_pmu_limitation"`
+}
+
+type manifestExecutionContract struct {
+	Scope                                 []string                  `json:"scope"`
+	W1Transport                           string                    `json:"w1_transport"`
+	W2Lifecycle                           string                    `json:"w2_lifecycle"`
+	Audit                                 string                    `json:"audit"`
+	OfficialPairsPerScenario              int                       `json:"official_pairs_per_scenario"`
+	OfficialCommonPointsPerScenario       int                       `json:"official_common_points_per_scenario"`
+	OfficialRetryMax                      int                       `json:"official_retry_max"`
+	PilotNotInPairedAggregate             bool                      `json:"pilot_not_in_paired_aggregate"`
+	OfficialResultRootsAreNewAttemptsKept bool                      `json:"official_result_roots_are_new_and_attempts_are_retained"`
+	ResourceCaps                          manifestResourceCaps      `json:"resource_caps"`
+	Profiling                             manifestProfilingContract `json:"profiling"`
+	Recovery                              string                    `json:"recovery"`
 }
 
 type manifestCandidate struct {
@@ -338,6 +377,7 @@ type officialManifest struct {
 	PairSchedule           []manifestPair               `json:"pair_schedule"`
 	Scenarios              map[string]manifestScenario  `json:"scenarios"`
 	Environment            manifestEnvironment          `json:"environment"`
+	ExecutionContract      manifestExecutionContract    `json:"execution_contract"`
 }
 
 type manifestValidationOptions struct {
@@ -691,6 +731,9 @@ func verifyOfficialManifest(opts manifestValidationOptions) error {
 	if manifest.RecoveryAssessmentMode != recoveryAssessmentMode {
 		return fmt.Errorf("official recovery assessment mode must be %q, got %q", recoveryAssessmentMode, manifest.RecoveryAssessmentMode)
 	}
+	if err := validateManifestExecutionContract(manifest.ExecutionContract); err != nil {
+		return fmt.Errorf("invalid official execution contract: %w", err)
+	}
 	if manifest.Environment.HostAlias != opts.HostAlias || manifest.Environment.GOOS != runtime.GOOS || manifest.Environment.GOARCH != runtime.GOARCH || manifest.Environment.OnlineCPUs != currentOnlineCPUCount() || manifest.Environment.KernelRelease != currentKernelRelease() || manifest.Environment.GoToolchain != runtime.Version() || manifest.Environment.RustToolchain != opts.RustToolchain {
 		return fmt.Errorf("official environment differs from manifest: host=%s go=%s/%s online_cpus=%d kernel=%s go_toolchain=%s rust_toolchain=%s", opts.HostAlias, runtime.GOOS, runtime.GOARCH, currentOnlineCPUCount(), currentKernelRelease(), runtime.Version(), opts.RustToolchain)
 	}
@@ -734,6 +777,16 @@ func verifyOfficialManifest(opts manifestValidationOptions) error {
 	helperSource := manifestArtifact{Path: manifest.Helper.SourcePath, SHA256: manifest.Helper.SourceSHA256}
 	if err := verifyManifestArtifact(root, helperSource, filepath.Join(root, "tests/phase5a-baseline/cmd/phase5a-baseline/main.go"), "helper source"); err != nil {
 		return err
+	}
+	if !validSHA256(manifest.Helper.SourceTreeSHA256) {
+		return errors.New("manifest has incomplete helper source tree hash")
+	}
+	actualSourceTree, err := hashHelperSourceTree(root, manifest.Helper.SourcePath)
+	if err != nil {
+		return fmt.Errorf("hash helper source tree: %w", err)
+	}
+	if actualSourceTree != manifest.Helper.SourceTreeSHA256 {
+		return fmt.Errorf("helper source tree SHA-256 mismatch: expected=%s actual=%s", manifest.Helper.SourceTreeSHA256, actualSourceTree)
 	}
 	if manifest.Helper.Version != helperVersion {
 		return fmt.Errorf("helper version mismatch: manifest=%q current=%q", manifest.Helper.Version, helperVersion)
@@ -903,6 +956,63 @@ func validateManifestScenario(s manifestScenario) error {
 		return errors.New("recovery sample minimum or p95/p99 ceilings are invalid")
 	}
 	return nil
+}
+
+func validateManifestExecutionContract(contract manifestExecutionContract) error {
+	if !equalStrings(contract.Scope, []string{"w1-tcp", "w2"}) {
+		return fmt.Errorf("scope must be [w1-tcp w2], got %v", contract.Scope)
+	}
+	if contract.W1Transport != "fresh TCP connection per request" || contract.W2Lifecycle != "each measured point owns an independent SUT and prefill session; no same-process recovery claim" || contract.Audit != "disabled" {
+		return errors.New("transport, W2 lifecycle, or audit contract differs from the reviewed freeze")
+	}
+	if contract.OfficialPairsPerScenario != 3 || contract.OfficialCommonPointsPerScenario != 4 || contract.OfficialRetryMax != 1 {
+		return errors.New("official pair/count/retry contract differs from the reviewed freeze")
+	}
+	if !contract.PilotNotInPairedAggregate || !contract.OfficialResultRootsAreNewAttemptsKept {
+		return errors.New("pilot/attempt retention contract is not enabled")
+	}
+	caps := contract.ResourceCaps
+	if caps.TaskFDCeiling != 512 || caps.FreshTCPInFlightCeiling != 256 || caps.RoleRSSCeilingMiB != 256 || caps.CombinedHarnessFixtureRSSMiB != 768 || caps.MinimumFreeDiskGiB != 1 || caps.MaxAttemptRawDerivedMiB != 512 || caps.RecordBytes != 32768 {
+		return fmt.Errorf("resource caps differ from executable freeze: %+v", caps)
+	}
+	profiling := contract.Profiling
+	if !profiling.OfficialLatencyRunsDoNotEnableProfiler || !profiling.ProfileRunsAreSeparate || profiling.Event != "cpu-clock" || profiling.HardwarePMULimitation == "" {
+		return errors.New("profiling separation contract is incomplete")
+	}
+	if contract.Recovery != recoveryAssessmentMode && (!strings.HasPrefix(contract.Recovery, recoveryAssessmentMode) || !strings.Contains(contract.Recovery, "no capacity conclusion")) {
+		return fmt.Errorf("recovery contract must preserve %q and the no-capacity-conclusion clause, got %q", recoveryAssessmentMode, contract.Recovery)
+	}
+	return nil
+}
+
+func hashHelperSourceTree(root, sourcePath string) (string, error) {
+	directory := filepath.Dir(sourcePath)
+	if directory == "." || filepath.IsAbs(sourcePath) || strings.Contains(sourcePath, "..") {
+		return "", fmt.Errorf("helper source path is not a package-relative directory: %q", sourcePath)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, directory))
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	for _, name := range names {
+		rel := filepath.ToSlash(filepath.Join(directory, name))
+		fileHash, err := sha256File(filepath.Join(root, rel))
+		if err != nil {
+			return "", err
+		}
+		if _, err := fmt.Fprintf(h, "%s  %s\n", fileHash, rel); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func verifyManifestPairSchedule(schedule []manifestPair, repetition, position int, candidate string) error {
