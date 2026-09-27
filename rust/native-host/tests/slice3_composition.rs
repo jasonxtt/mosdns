@@ -143,13 +143,16 @@ plugins:
 
 /// Writes the representative chain with a directory-relative rule file.
 fn write_chain(fixture: &Fixture) {
-    let rules = fixture.write(
-        "rules/local.txt",
+    fixture.write(
+        "sub_config/rules/local.txt",
         "domain:local.test\nfull:local.only.test\n",
     );
+    // If an included definition loses its declaring directory, this invalid
+    // root-relative decoy makes the regression fail visibly.
+    fixture.write("rules/local.txt", "not-a-valid-rule\n");
     fixture.write(
         "sub_config/routes.yaml",
-        &ROUTES_CONFIG.replace("RULES_PATH", &rules.display().to_string()),
+        &ROUTES_CONFIG.replace("RULES_PATH", "rules/local.txt"),
     );
     fixture.write("config.yaml", ROOT_CONFIG);
 }
@@ -226,12 +229,41 @@ fn a_missing_include_or_rule_file_fails_before_assembly_with_its_path() {
 
     let fixture = Fixture::new("missing-rules");
     write_chain(&fixture);
-    fs::remove_file(fixture.root.join("rules/local.txt")).expect("remove rules");
+    fs::remove_file(fixture.root.join("sub_config/rules/local.txt")).expect("remove rules");
     let error = expect_config_error(
         mosdns_native_host::load_and_compile(&fixture.config()),
         "a missing rule file must fail",
     );
     assert!(error.reason.contains("local.txt"), "{error}");
+}
+
+#[test]
+fn included_definitions_keep_their_relative_path_and_source_context() {
+    let fixture = Fixture::new("included-relative-rules");
+    write_chain(&fixture);
+    let config = mosdns_native_host::load_and_compile(&fixture.config())
+        .expect("included rule files resolve from the included YAML directory");
+    assert_eq!(config.forwards.len(), 2);
+
+    fs::write(
+        fixture.root.join("sub_config/rules/local.txt"),
+        "regexp:[\n",
+    )
+    .expect("invalid included rule");
+    let error = expect_config_error(
+        mosdns_native_host::load_and_compile(&fixture.config()),
+        "invalid rules must retain their included-file source context",
+    );
+    assert!(
+        error
+            .path
+            .contains("sub_config/routes.yaml.plugins[7].args.files"),
+        "included YAML source path was lost: {error}"
+    );
+    assert!(
+        error.reason.contains("sub_config/rules/local.txt"),
+        "rule-file path was lost: {error}"
+    );
 }
 
 #[test]
@@ -325,7 +357,10 @@ plugins:
 "#;
     let config = compile_yaml(reordered).expect("a reordered graph must compile");
     assert_eq!(config.forwards.len(), 2);
-    assert_eq!(config.forward.tag, "local_forward");
+    assert_eq!(
+        config.forward.as_ref().expect("primary forward").tag,
+        "local_forward"
+    );
     assert!(
         config
             .program
@@ -493,19 +528,92 @@ fn client_request(listener: SocketAddr, request: &[u8], timeout: Duration) -> Ve
 
 /// Builds the representative chain with both peers pointed at live fixtures.
 fn chain_assembly(fixture: &Fixture, local: SocketAddr, default: SocketAddr) -> HostAssembly {
-    let rules = fixture.write(
-        "rules/local.txt",
+    fixture.write(
+        "sub_config/rules/local.txt",
         "domain:local.test\nfull:local.only.test\n",
     );
+    fixture.write("rules/local.txt", "not-a-valid-rule\n");
     fixture.write(
         "sub_config/routes.yaml",
         &ROUTES_CONFIG
-            .replace("RULES_PATH", &rules.display().to_string())
+            .replace("RULES_PATH", "rules/local.txt")
             .replace("udp://127.0.0.1:26361", &format!("udp://{local}"))
             .replace("tcp://127.0.0.1:26362", &format!("udp://{default}")),
     );
     fixture.write("config.yaml", ROOT_CONFIG);
     HostAssembly::from_config_file(&fixture.config()).expect("chain assembly")
+}
+
+#[test]
+fn goto_and_try_only_forward_paths_compile_and_execute() {
+    for control in ["goto", "try"] {
+        let peer = Peer::start([192, 0, 2, 31]);
+        let yaml = format!(
+            r#"
+log: {{ level: error }}
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: {control} $child
+  - tag: child
+    type: sequence
+    args:
+      - exec: $forward
+  - tag: forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://{}"
+  - tag: listener
+    type: udp_server
+    args:
+      entry: entry
+      listen: "127.0.0.1:26353"
+      enable_audit: false
+"#,
+            peer.address
+        );
+        let assembly = HostAssembly::from_yaml(&yaml)
+            .unwrap_or_else(|error| panic!("{control} composition must compile: {error}"));
+        assert_eq!(
+            assembly
+                .config()
+                .forward
+                .as_ref()
+                .expect("legacy forward view")
+                .tag,
+            "forward"
+        );
+        let server = assembly
+            .block_on(UdpServer::bind(
+                &assembly,
+                "127.0.0.1:0".parse().expect("bind"),
+            ))
+            .expect("listener bind");
+        let listener = server.local_addr().expect("listener address");
+        let shutdown = TransportCancellation::new();
+        let response = assembly.block_on(async {
+            let task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+            let request = query(0x4101, "control.test.", 1);
+            let response = tokio::task::spawn_blocking(move || {
+                client_request(listener, &request, Duration::from_secs(2))
+            })
+            .await
+            .expect("client");
+            shutdown.cancel();
+            task.await.expect("server").expect("shutdown");
+            response
+        });
+        validate_response(&response).expect("valid response");
+        assert_eq!(rcode(&response), 0);
+        assert_eq!(
+            answer_addresses(&response),
+            vec![std::net::IpAddr::V4([192, 0, 2, 31].into())]
+        );
+        assert_eq!(peer.requests(), 1, "{control} must reach the forward");
+        peer.stop();
+    }
 }
 
 #[test]
@@ -621,14 +729,15 @@ fn the_representative_chain_also_serves_tcp_with_audit_off() {
     let fixture = Fixture::new("tcp");
     let local = Peer::start(LOCAL_ANSWER);
     let default = Peer::start(DEFAULT_ANSWER);
-    let rules = fixture.write(
-        "rules/local.txt",
+    fixture.write(
+        "sub_config/rules/local.txt",
         "domain:local.test\nfull:local.only.test\n",
     );
+    fixture.write("rules/local.txt", "not-a-valid-rule\n");
     fixture.write(
         "sub_config/routes.yaml",
         &ROUTES_CONFIG
-            .replace("RULES_PATH", &rules.display().to_string())
+            .replace("RULES_PATH", "rules/local.txt")
             .replace("udp://127.0.0.1:26361", &format!("udp://{}", local.address))
             .replace(
                 "tcp://127.0.0.1:26362",

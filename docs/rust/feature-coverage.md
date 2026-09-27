@@ -29,13 +29,13 @@
 | P12 `has_resp` | 已接入（无参） | 整项参数冻结 |
 | P20 `resp_ip` | 仅单一 IPv4 字面量，保留旧 W3 语法 | CIDR/多值/IPv6、规则管理 |
 | P26 `cache` | 单个 host-owned cache；`size` 为可配置正整数，`lazy_cache_ttl` 必须为 0；可在 entry 或子 sequence 包裹其后继，hit 结束后继链后父继续，miss 在 cache 所在后继自然完成点保存；重复动态访问受控失败 | 多实例、lazy/dump/exclude/ECS、`mosdns_cache_v2` 持久化、API/metrics |
-| P34 `forward` | 多实例，各一 numeric UDP/TCP upstream，兼容旧 tag 形式；单/多 forward 统一合法响应校验与终态策略 | 上游组、bootstrap、TLS/HTTPS/H3/DoQ、并发选择、超时重试/fallback |
+| P34 `forward` | 多实例，各一 numeric UDP/TCP upstream，兼容旧 tag 形式；单/多 forward 统一合法响应校验与终态策略；effective upstream identity 在默认 tag 与显式 tag 间保持唯一 | 上游组、bootstrap、TLS/HTTPS/H3/DoQ、并发选择、超时重试/fallback |
 | P44 `sequence` | 任意数量具名 sequence；direct `$sequence` 为独立 child scope（自然结束/accept/reject 返回父，exit 越过父遇 try 才捕获）；`jump`/`goto`/`return`/`try`/`accept`/`reject`/`exit`；exec scalar 与 list（multi-exec 为 synthetic inline scope） | 完整插件/quick setup、flow_setter、fallback/sleep、动态注册 |
 | L01 | `accept`/`reject`/`return`/`goto`/`jump`/`exit`/`try` 经 YAML → 异步请求 → 最终响应集成；`reject` 默认 REFUSED，`0..=15` 实际渲染，`>15` 在加载期报 unsupported（不截断） | 完整 12-bit reject/EDNS 渲染（顺序：5B 后续），以及序列内其它插件解析 |
 | L02 | `_true`/`_false`、单次 `!` 取反、`$tag` 命名引用、`matches` 单值或列表 | 完整 quick setup 集合、`&file` 引用 |
-| C01 | 顶层 `include` 按声明文件目录解析、有序加载 plugins-only 子文件、嵌套 include 明确拒绝；定义先收集再解析（重排/前后引用不改变有效分支）；重复 key/tag、缺失或跨类型引用、未知字段、未支持参数、坏规则文件均在 bind/查询前失败并带文件与字段/规则路径 | 递归 include、热更新、完整配置包加载、`api`/其它顶层段、preset 插件 |
+| C01 | 顶层 `include` 按声明文件目录解析、有序加载 plugins-only 子文件、嵌套 include 明确拒绝；每个 included definition 保留其 YAML source path/base directory（含相对规则文件解析和错误定位）；定义先收集再解析（重排/前后引用不改变有效分支）；重复 key/tag、缺失或跨类型引用、未知字段、未支持参数、坏规则文件均在 bind/查询前失败并带文件与字段/规则路径 | 递归 include、热更新、完整配置包加载、`api`/其它顶层段、preset 插件 |
 
-本地证据入口：`rust/native-host/tests/slice3_composition.rs`（loader/include/规则路径/负例/重排和真实 listener 场景）与 `rust/native-host/src/execution.rs` 的 `the_representative_chain_blocks_rejects_and_routes_without_a_listener`（block/qtype-0/local miss/default 分支/child 后父继续/cache 后继不被父改写/entry cache/重复访问/取消）。本地完整 workspace 回归为 891 passed / 0 failed。
+本地证据入口：`rust/native-host/tests/slice3_composition.rs`（loader/include/规则路径/负例/重排和真实 listener 场景）与 `rust/native-host/src/execution.rs` 的 `the_representative_chain_blocks_rejects_and_routes_without_a_listener`（block/qtype-0/local miss/default 分支/child 后父继续/cache 后继不被父改写/entry cache/重复访问/取消）。首轮完整 workspace 回归为 891 passed；复审修复后的全量回归为 896 passed / 0 failed。
 
 2026-09-28 在 `mosdns-rust`（Linux x86_64）用临时 Rust workspace 构建并运行代表链集成测试：UDP listener / audit on 与 TCP listener / audit off 均通过；另用 `mosdns start -c` 运行 TCP/audit-off CLI 代表链，并用既有 `dnsperf` 工具做 50 请求短诊断。请求、peer 计数、审计、构建/配置哈希、失败尝试、自有 PID 与端口释放证据见该任务 `implement.md` 的 A6 记录。短诊断经过 SSH 转发，结果不用于性能验收，没有性能 PASS。未在远端运行完整 workspace、故障/取消/关闭变体、`local.only.test` exact 分支或旧 W1/W2/W3 suites。完整 A1–A6 独立审查仍待执行，因此本表仍是“待验收”。
 

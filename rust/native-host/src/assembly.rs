@@ -191,10 +191,9 @@ impl HostAssembly {
     }
 
     #[must_use]
-    pub fn forward(&self) -> &ForwardAdapter {
-        self.forwards
-            .forward(self.config.forward.executable)
-            .expect("compiled primary forward must exist in the owner catalog")
+    pub fn forward(&self) -> Option<&ForwardAdapter> {
+        let executable = self.config.forward.as_ref()?.executable;
+        self.forwards.forward(executable)
     }
 
     #[must_use]
@@ -235,8 +234,8 @@ impl HostAssembly {
     /// The configured upstream endpoint, exposed without exposing the owner
     /// internals or creating a second transport adapter.
     #[must_use]
-    pub fn endpoint(&self) -> Endpoint {
-        self.forward().endpoint()
+    pub fn endpoint(&self) -> Option<Endpoint> {
+        self.forward().map(ForwardAdapter::endpoint)
     }
 
     pub(crate) fn config_handle(&self) -> Rc<CompiledConfig> {
@@ -445,9 +444,15 @@ mod tests {
     fn valid_graph_is_pre_io_and_invalid_graph_never_reaches_assembly() {
         let host = HostAssembly::from_yaml(UDP).expect("valid graph must assemble");
         assert_eq!(host.config().listener.listen.port(), 15353);
-        assert_eq!(host.endpoint().address().port(), 15453);
         assert_eq!(
-            host.forward().upstream().lifecycle_state(),
+            host.endpoint().expect("primary endpoint").address().port(),
+            15453
+        );
+        assert_eq!(
+            host.forward()
+                .expect("primary forward")
+                .upstream()
+                .lifecycle_state(),
             LifecycleState::Open
         );
 
@@ -456,11 +461,13 @@ mod tests {
         assert_eq!(options.request_deadline, Duration::from_millis(1));
         assert!(options.cancellation.is_some());
 
-        let error = host.runtime().block_on(host.forward().exchange(
-            &[],
-            Instant::now() + Duration::from_secs(1),
-            TransportCancellation::new(),
-        ));
+        let error = host
+            .runtime()
+            .block_on(host.forward().expect("primary forward").exchange(
+                &[],
+                Instant::now() + Duration::from_secs(1),
+                TransportCancellation::new(),
+            ));
         assert!(matches!(error, Err(UpstreamError::InvalidRequest(_))));
 
         let invalid = UDP.replace("level: error", "level: info");

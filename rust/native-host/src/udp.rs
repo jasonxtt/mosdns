@@ -443,7 +443,10 @@ mod tests {
             assert!(matches!(result, Err(super::UdpServerError::Task(_))));
             assert!(tasks.is_empty());
             assert_eq!(
-                host.forward().upstream().lifecycle_state(),
+                host.forward()
+                    .expect("primary forward")
+                    .upstream()
+                    .lifecycle_state(),
                 LifecycleState::Closed
             );
         });

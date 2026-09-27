@@ -267,9 +267,10 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         }
     };
 
-    // One request-owned cache publication token. A second dynamic cache
-    // access inside the same query is an explicit controlled failure rather
-    // than a silent overwrite of the first token.
+    // One request-owned cache access and publication token. A second dynamic
+    // dispatch fails closed even if the first access hit or its miss was
+    // already published at a child-scope boundary.
+    let mut cache_accessed = false;
     let mut pending_store: Option<PendingStore> = None;
     let mut upstream_response = false;
     let mut attempted = false;
@@ -320,6 +321,15 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     .as_ref()
                     .is_some_and(|cache_config| cache_config.executable == dispatch.executable())
                 {
+                    if cache_accessed {
+                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                            LocalFailureKind::InternalExecution,
+                        ));
+                        set_servfail(&mut machine);
+                        facts.set_response_source(ResponseSource::Local);
+                        return result_from_state(&machine, &header, &question, facts);
+                    }
+                    cache_accessed = true;
                     let lookup = cache.lookup(raw).ok().flatten();
                     if let Some(wire) = lookup {
                         facts.cache_status = CacheStatus::Hit;
@@ -342,17 +352,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         continue;
                     }
                     facts.cache_status = CacheStatus::Miss;
-                    if pending_store.is_some() {
-                        // A second dynamic cache access cannot own a second
-                        // publication token; fail closed instead of
-                        // overwriting the first.
-                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
-                            LocalFailureKind::InternalExecution,
-                        ));
-                        set_servfail(&mut machine);
-                        facts.set_response_source(ResponseSource::Local);
-                        return result_from_state(&machine, &header, &question, facts);
-                    }
                     pending_store = cache.begin_store(raw).ok().flatten();
                     // The miss is published when the cache's own successor
                     // chain completes, not by the query's final state.
@@ -1676,12 +1675,12 @@ mod tests {
             .expect("endpoint");
         CompiledConfig {
             log_level: LogLevel::Error,
-            forward: ForwardConfig {
+            forward: Some(ForwardConfig {
                 tag: forward,
                 upstream_tag: None,
                 endpoint,
                 executable: forward_id,
-            },
+            }),
             forwards: vec![ForwardConfig {
                 tag: "forward".to_owned(),
                 upstream_tag: None,
@@ -1696,7 +1695,7 @@ mod tests {
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
-                forward_executable: forward_id,
+                forward_executable: Some(forward_id),
             },
             listener: ListenerConfig {
                 tag: "listener".to_owned(),
@@ -1761,12 +1760,12 @@ mod tests {
         (
             CompiledConfig {
                 log_level: LogLevel::Error,
-                forward: ForwardConfig {
+                forward: Some(ForwardConfig {
                     tag: a,
                     upstream_tag: None,
                     endpoint,
                     executable: a_id,
-                },
+                }),
                 forwards: vec![
                     ForwardConfig {
                         tag: "a".to_owned(),
@@ -1785,7 +1784,7 @@ mod tests {
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
-                    forward_executable: a_id,
+                    forward_executable: Some(a_id),
                 },
                 listener: ListenerConfig {
                     tag: "listener".to_owned(),
@@ -2277,12 +2276,12 @@ mod tests {
         (
             CompiledConfig {
                 log_level: LogLevel::Error,
-                forward: ForwardConfig {
+                forward: Some(ForwardConfig {
                     tag: child_forward.clone(),
                     upstream_tag: None,
                     endpoint,
                     executable: child_id,
-                },
+                }),
                 forwards: vec![
                     ForwardConfig {
                         tag: child_forward.clone(),
@@ -2305,7 +2304,7 @@ mod tests {
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
-                    forward_executable: child_id,
+                    forward_executable: Some(child_id),
                 },
                 listener: ListenerConfig {
                     tag: "listener".to_owned(),
@@ -2782,12 +2781,12 @@ plugins:
             .expect("endpoint");
         let config = CompiledConfig {
             log_level: LogLevel::Error,
-            forward: ForwardConfig {
+            forward: Some(ForwardConfig {
                 tag: forward.clone(),
                 upstream_tag: None,
                 endpoint,
                 executable: forward_id,
-            },
+            }),
             forwards: vec![ForwardConfig {
                 tag: forward,
                 upstream_tag: None,
@@ -2802,7 +2801,7 @@ plugins:
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
-                forward_executable: forward_id,
+                forward_executable: Some(forward_id),
             },
             listener: ListenerConfig {
                 tag: "listener".to_owned(),
@@ -2835,6 +2834,94 @@ plugins:
         );
         assert_eq!(calls.get(), 1, "the first miss still reaches its forward");
         assert!(cache.is_empty(), "no token may publish after the failure");
+    }
+
+    #[test]
+    fn a_second_cache_access_after_a_hit_fails_closed() {
+        let clock = CacheTestClock::new(100);
+        let cache = NativeCacheAdapter::for_test(clock).expect("cache");
+        let (prime_config, _child_id, _parent_id) = cache_child_then_parent_config(Vec::new());
+        let (repeat_config, _child_id, _parent_id) =
+            cache_child_then_parent_config(vec![ExecutableSpec::Call {
+                target: SequenceRef::new("child"),
+            }]);
+        let request = query(27);
+        let prime_calls = Rc::new(Cell::new(0));
+        let prime_exchange = MockExchange {
+            calls: Rc::clone(&prime_calls),
+            response: response(&request),
+            fail: false,
+        };
+        let primed = execute_observed(
+            &prime_config,
+            &cache,
+            &HostOptions::default(),
+            &request,
+            &prime_exchange,
+        );
+        assert_eq!(primed.cache_status, CacheStatus::Miss);
+        assert_eq!(prime_calls.get(), 1);
+        assert!(cache.lookup(&request).expect("lookup").is_some());
+
+        let calls = Rc::new(Cell::new(0));
+        let exchange = MockExchange {
+            calls: Rc::clone(&calls),
+            response: response(&request),
+            fail: false,
+        };
+        let repeated = execute_observed(
+            &repeat_config,
+            &cache,
+            &HostOptions::default(),
+            &request,
+            &exchange,
+        );
+        assert_eq!(repeated.response_wire[3] & 0x0f, super::SERVFAIL);
+        assert_eq!(repeated.cache_status, CacheStatus::Hit);
+        assert_eq!(
+            repeated.failure_provenance,
+            Some(FailureProvenance::LocalFailure(
+                LocalFailureKind::InternalExecution
+            ))
+        );
+        assert_eq!(calls.get(), 0, "a hit and repeat must skip the forward");
+    }
+
+    #[test]
+    fn a_second_cache_access_after_miss_publication_fails_closed() {
+        let clock = CacheTestClock::new(100);
+        let cache = NativeCacheAdapter::for_test(clock).expect("cache");
+        let (config, _child_id, _parent_id) =
+            cache_child_then_parent_config(vec![ExecutableSpec::Call {
+                target: SequenceRef::new("child"),
+            }]);
+        let request = query(28);
+        let calls = Rc::new(Cell::new(0));
+        let exchange = MockExchange {
+            calls: Rc::clone(&calls),
+            response: response(&request),
+            fail: false,
+        };
+        let repeated = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &request,
+            &exchange,
+        );
+        assert_eq!(repeated.response_wire[3] & 0x0f, super::SERVFAIL);
+        assert_eq!(repeated.cache_status, CacheStatus::Miss);
+        assert_eq!(
+            repeated.failure_provenance,
+            Some(FailureProvenance::LocalFailure(
+                LocalFailureKind::InternalExecution
+            ))
+        );
+        assert_eq!(calls.get(), 1, "only the first miss reaches its forward");
+        assert!(
+            cache.lookup(&request).expect("lookup").is_some(),
+            "the first successor had already published before the repeated dispatch"
+        );
     }
 
     #[test]
