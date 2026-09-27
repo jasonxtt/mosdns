@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-27",
+  "scope": "local_documentation_and_archive_closeout_only",
+  "source_head": "b4c0edb64b17a6648e4e951254326c6a7f3fffa3",
+  "archive_original_tracked_files": 717,
+  "unchanged_original_nonmetadata_files": 716,
+  "missing_original_files": 0,
+  "r3_sidecar_sha256": "c8460f6e80e55fe65995a24709fce3ad4539299f225dec98b6f20c1da44e90a4",
+  "r3_files_verified": 216,
+  "r3_bytes_verified": 38741339,
+  "task_context_validation": "PASS with existing large-spec injection warnings",
+  "staged_scope": "task archive, closeout docs and session23 only",
+  "full_acceptance": "NOT PASS",
+  "full_cli_fresh_derivation": "not performed in this closeout",
+  "new_remote_cleanup_verification": "not performed",
+  "implementation_or_traffic": "none"
+}

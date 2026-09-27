@@ -343,3 +343,35 @@ Completed and reviewed Rust Phase 4 QUIC/HTTP3 Slice 4: added read-only DoQ reso
 ### Status
 
 [OK] **Completed**
+
+
+## Session 23: Phase 5A official matrix stopped at control failure
+
+**Date**: 2026-09-27
+**Task**: Phase 5A official matrix stopped at control failure
+**Branch**: `rust`
+
+### Summary
+
+Executed G0 profiler remediation, Slice 1/2 reliability work, health-latency-basis remediation, and C2C review through Workspace confirmation. Official-r3 W1-TCP produced two valid pairs; Go r3 recovery crossed the frozen dispatch health band, so the exact attempt was preserved invalid, no paired Rust r3 or W2 was started, and C2C approved stop-and-report of the incomplete matrix. No profiling, capacity, or production changes were made.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6c69c0aa` | (see git log) |
+| `182abe64` | (see git log) |
+| `06df01f5` | (see git log) |
+| `629e9286` | (see git log) |
+| `b4c0edb6` | (see git log) |
+
+### Status
+
+[CLOSED] **Incomplete matrix — lifecycle closed, original acceptance not all passed**
+
+### Closeout verification (2026-09-27)
+
+- Archived copy preserves all 717 original tracked files; official-r3 sidecar and 216 raw/index files match.
+- Recorded A1/A2 tool-scope acceptance, A3/A6 partial, A4/A5 incomplete; no full matrix, profiling, capacity or service-recovery claim.
+- Updated handover/stage plan and docs/rust/phase5a-measurement-reliability.md; 5B may enter bounded configuration/sequence planning, with no new task or implementation this turn.
+- User authorized committing/pushing this task closeout; unrelated archive/journal work remains preserved.
