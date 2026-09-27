@@ -1,0 +1,3 @@
+status=indeterminate
+mode=indeterminate-no-overload-evidence
+reason=terminal health check failed; service recovery remains indeterminate: stage normal-reference exceeds frozen recovery latency band: p95=1695/1200 p99=2267/2500
