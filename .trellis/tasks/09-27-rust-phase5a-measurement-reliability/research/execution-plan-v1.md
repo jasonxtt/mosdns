@@ -71,6 +71,10 @@ TIME_WAIT/reuse behavior, errno and cooling—not only a peak-rate point.
    dispatch-to-finish, and write-start-to-finish. Each records its start offset,
    sample count and failure denominator; requests that never reach dispatch or
    write never get invented samples.
+6. The primary stage summary remains planned-slot-to-finish, while the
+   same-process terminal health gate uses the manifest-frozen dispatch-to-finish
+   view. The runner records and verifies both views explicitly so sender
+   scheduling lag cannot be silently added to a pilot-derived health band.
 
 ## G0 evidence package and review boundary
 

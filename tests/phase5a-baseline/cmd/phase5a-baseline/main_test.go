@@ -997,6 +997,26 @@ func TestVerifyContinuousStagesRequiresOneOrderedSessionAndFrozenRecoveryBand(t 
 	}
 }
 
+func TestVerifyContinuousStagesUsesExplicitDispatchHealthView(t *testing.T) {
+	stages := validContinuousStages()
+	planned := []int64{4000, 4100, 4200, 4300, 4400, 4500, 4600, 4700, 4800, 5000}
+	for _, index := range []int{0, 4} {
+		stage := &stages[index]
+		stage.LatencySamplesUS = append([]int64(nil), planned...)
+		stage.P95US = 5000
+		stage.P99US = 5000
+	}
+	criteria := recoveryCriteria{MinimumSamples: 5, P95CeilingUS: 1200, P99CeilingUS: 1500, LatencyView: latencyViewDispatchToFinish}
+	if err := verifyContinuousStages(stages, criteria); err != nil {
+		t.Fatalf("dispatch-to-finish health samples should be used independently of the primary latency view: %v", err)
+	}
+
+	stages[4].HealthLatencyView = ""
+	if err := verifyContinuousStages(stages, criteria); err == nil {
+		t.Fatal("dispatch-to-finish health gate must fail closed when its declared view is missing")
+	}
+}
+
 func TestAllHealthyContinuousSequenceDoesNotClaimServiceRecovery(t *testing.T) {
 	assessment, err := assessServiceRecovery(validContinuousStages(), recoveryCriteria{
 		MinimumSamples: 5, P95CeilingUS: 1200, P99CeilingUS: 1500,
@@ -1604,6 +1624,7 @@ func validContinuousStages() []stageResult {
 			FixtureSeqStart: uint64(i * 10), FixtureSeqEnd: uint64((i + 1) * 10),
 			Counters:         stageCounters{Scheduled: 10, Sent: 10, Received: 10, CorrectOnTime: 10},
 			LatencySamplesUS: []int64{800, 850, 900, 950, 1000, 1050, 1080, 1100, 1150, 1200}, P95US: 1200, P99US: 1200,
+			HealthLatencyView: latencyViewDispatchToFinish, HealthLatencySamplesUS: []int64{700, 750, 800, 850, 900, 950, 980, 1000, 1050, 1100}, HealthP95US: 1100, HealthP99US: 1100,
 		}
 	}
 	return stages
@@ -1618,7 +1639,7 @@ func reviewedManifestExecutionContract() manifestExecutionContract {
 		PilotNotInPairedAggregate: true, OfficialResultRootsAreNewAttemptsKept: true,
 		ResourceCaps: manifestResourceCaps{TaskFDCeiling: 512, FreshTCPInFlightCeiling: 256, RoleRSSCeilingMiB: 256, CombinedHarnessFixtureRSSMiB: 768, MinimumFreeDiskGiB: 1, MaxAttemptRawDerivedMiB: 512, RecordBytes: 32768},
 		Profiling:    manifestProfilingContract{OfficialLatencyRunsDoNotEnableProfiler: true, ProfileRunsAreSeparate: true, Event: "cpu-clock", HardwarePMULimitation: "controlled check limitation"},
-		Recovery:     recoveryAssessmentMode,
+		Recovery:     recoveryAssessmentMode, RecoveryLatencyView: latencyViewDispatchToFinish,
 	}
 }
 

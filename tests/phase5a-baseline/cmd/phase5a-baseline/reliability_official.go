@@ -177,6 +177,7 @@ func (o *reliabilityStageOptions) writeArtifacts(raw reliabilityRawBundle, workl
 	converted := make([]requestRecord, 0, len(records))
 	counters := stageCounters{}
 	latencies := make([]int64, 0, len(records))
+	healthLatencies := make([]int64, 0, len(records))
 	for index, record := range records {
 		requestSeq := lastRequestSeq + uint64(index) + 1
 		if record.CaseID != "" {
@@ -241,6 +242,11 @@ func (o *reliabilityStageOptions) writeArtifacts(raw reliabilityRawBundle, workl
 			if value := *record.FinishOffsetUS - record.PlannedOffsetUS; value >= 0 {
 				latencies = append(latencies, value)
 			}
+			if record.DispatchOffsetUS != nil {
+				if value := *record.FinishOffsetUS - *record.DispatchOffsetUS; value >= 0 {
+					healthLatencies = append(healthLatencies, value)
+				}
+			}
 		}
 	}
 	if err := ledger.close(); err != nil {
@@ -248,6 +254,7 @@ func (o *reliabilityStageOptions) writeArtifacts(raw reliabilityRawBundle, workl
 	}
 	ledgerClosed = true
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+	sort.Slice(healthLatencies, func(i, j int) bool { return healthLatencies[i] < healthLatencies[j] })
 	durationMS := o.stageDurationMS
 	if durationMS <= 0 {
 		durationMS = raw.FinishedAt.Sub(raw.StartedAt).Milliseconds()
@@ -259,6 +266,8 @@ func (o *reliabilityStageOptions) writeArtifacts(raw reliabilityRawBundle, workl
 		LateDrainMS: int(raw.Config.LateDrain / time.Millisecond), Counters: counters,
 		CaseScheduled: caseScheduled, LatencySamplesUS: latencies,
 		P50US: percentile(latencies, .50), P95US: percentile(latencies, .95), P99US: percentile(latencies, .99),
+		HealthLatencyView: latencyViewDispatchToFinish, HealthLatencySamplesUS: healthLatencies,
+		HealthP50US: percentile(healthLatencies, .50), HealthP95US: percentile(healthLatencies, .95), HealthP99US: percentile(healthLatencies, .99),
 		EffectiveThroughput: effectiveReliabilityThroughput(counters.CorrectOnTime, durationMS),
 		SenderLagMaxUS:      reliabilitySenderLag(records, raw.Config), StartedAt: raw.StartedAt, FinishedAt: raw.FinishedAt,
 		ResourceSampleCount: resourceCounts["sut"], ResourceSampleCounts: resourceCounts,

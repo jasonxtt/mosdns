@@ -34,14 +34,14 @@
   ],
   "runner": {
     "path": "scripts/run-phase5a-baseline.sh",
-    "sha256": "c884a0912496406381aaf7d7d173b375d82baf7ff2a680e386e4f8d3345b6f3b"
+    "sha256": "7e9ded3f2c68f8289e69b1c4863f5e5ce00d9d1868bf7e13e945c6e911bd6703"
   },
   "helper": {
     "source_path": "tests/phase5a-baseline/cmd/phase5a-baseline/main.go",
-    "source_sha256": "93c9cbcbea0429ec0040e0c2b6497e7746a5f78d3d9180b910aa004669cee95c",
-    "source_tree_sha256": "7bf55ed7435cf1dbece1d328e4bc21e6ee8a9125d3caf519bf6682e53f4b6c1c",
+    "source_sha256": "03e0c4096d143a0bf768a31313a8e46ecdfbe66819b0fb73d70f6ddf7d073c41",
+    "source_tree_sha256": "765302c991c2e5fee2571b8c0bcd314a10a99dc78f8f2d981f6b99446f5caefe",
     "binary_path": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/bin/phase5a-baseline-helper",
-    "binary_sha256": "b5bba12ab6407c93371359ecc711a58ece54cb4557619d44574d93174ab179f2",
+    "binary_sha256": "9a0ddb7d5cb52690c55bc915540c639b656b17bf8ff0d786066edffa6e1fc836",
     "version": "phase5a-baseline-helper/v10"
   },
   "candidates": {
@@ -230,6 +230,7 @@
       "event": "cpu-clock",
       "hardware_pmu_limitation": "cycles/instructions returned zero in the controlled check; software-event call-chain profiles must disclose this"
     },
-    "recovery": "indeterminate-no-overload-evidence; no capacity conclusion follows from the official matrix alone"
+    "recovery": "indeterminate-no-overload-evidence; no capacity conclusion follows from the official matrix alone",
+    "recovery_latency_view": "dispatch-to-finish"
   }
 }
