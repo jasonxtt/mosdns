@@ -26,7 +26,15 @@ fn invalid_configuration_is_rejected_before_pre_io_assembly() {
 fn assembly_owns_one_upstream_and_no_listener_socket() {
     let assembly = HostAssembly::from_yaml(UDP).expect("frozen graph must assemble");
     assert_eq!(assembly.config().listener.listen.port(), 15353);
-    assert_eq!(assembly.forward().endpoint().address().port(), 15453);
+    assert_eq!(
+        assembly
+            .forward()
+            .expect("primary forward")
+            .endpoint()
+            .address()
+            .port(),
+        15453
+    );
 }
 
 #[test]
@@ -35,7 +43,16 @@ fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
     assert!(config.cache.is_some());
     assert_eq!(config.listener.kind, ListenerKind::Udp);
     assert_eq!(config.listener.entry, "phase5a_entry");
-    assert_eq!(config.forward.endpoint.address().port(), 15455);
+    assert_eq!(
+        config
+            .forward
+            .as_ref()
+            .expect("primary forward")
+            .endpoint
+            .address()
+            .port(),
+        15455
+    );
     assert_eq!(config.listener.listen.port(), 15355);
     let cache = config.cache.as_ref().expect("compiled cache identity");
     let mut machine = config
@@ -77,7 +94,10 @@ fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
         }
         MachineStep::Complete(_) => panic!("W2 forward must dispatch second"),
     };
-    assert_eq!(second.executable(), config.forward.executable);
+    assert_eq!(
+        second.executable(),
+        config.forward.as_ref().expect("primary forward").executable
+    );
 }
 
 #[test]
@@ -236,14 +256,58 @@ fn a_second_listener_with_a_mixed_audit_flag_is_rejected_before_assembly() {
 }
 
 #[test]
+fn effective_upstream_identities_must_be_unique_across_explicit_and_default_tags() {
+    let yaml = r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args: [ { exec: $implicit_owner } ]
+  - tag: implicit_owner
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:16554" } ] }
+  - tag: explicit_owner
+    type: forward
+    args: { upstreams: [ { tag: implicit_owner, addr: "udp://127.0.0.1:16555" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:16553", enable_audit: false }
+"#;
+    let Err(error) = compile_yaml(yaml) else {
+        panic!("distinct owners must not collapse to one observer identity");
+    };
+    assert!(
+        error
+            .reason
+            .contains("duplicate effective upstream identity"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        error.path.ends_with("$.plugins[2].args.upstreams[0].tag"),
+        "the error should identify the conflicting declaration: {error}"
+    );
+}
+
+#[test]
 fn frozen_w3_graph_compiles_to_three_owned_udp_routes_and_four_rules() {
     let config = compile_yaml(ROUTING).expect("frozen W3 graph must compile");
     assert!(config.cache.is_none());
     assert_eq!(config.listener.kind, ListenerKind::Udp);
     assert_eq!(config.listener.entry, "phase5a_entry");
     assert_eq!(config.forwards.len(), 3);
-    assert_eq!(config.forward.tag, "phase5a_route_a");
-    assert_eq!(config.forward.upstream_tag.as_deref(), Some("route_a"));
+    assert_eq!(
+        config.forward.as_ref().expect("primary forward").tag,
+        "phase5a_route_a"
+    );
+    assert_eq!(
+        config
+            .forward
+            .as_ref()
+            .expect("primary forward")
+            .upstream_tag
+            .as_deref(),
+        Some("route_a")
+    );
     assert_eq!(
         config
             .forwards
@@ -291,10 +355,27 @@ fn w3_names_order_and_data_are_not_fixture_constants() {
         .replace("15457", "16457")
         .replace("15458", "16458");
     let config = compile_yaml(&renamed).expect("renamed W3 graph must compile");
-    assert_eq!(config.forward.tag, "alpha_forward");
-    assert_eq!(config.forward.endpoint.address().port(), 16456);
     assert_eq!(
-        config.forward.upstream_tag.as_deref(),
+        config.forward.as_ref().expect("primary forward").tag,
+        "alpha_forward"
+    );
+    assert_eq!(
+        config
+            .forward
+            .as_ref()
+            .expect("primary forward")
+            .endpoint
+            .address()
+            .port(),
+        16456
+    );
+    assert_eq!(
+        config
+            .forward
+            .as_ref()
+            .expect("primary forward")
+            .upstream_tag
+            .as_deref(),
         Some("alpha_upstream")
     );
     assert_eq!(config.forwards.len(), 3);
@@ -329,7 +410,14 @@ plugins:
     args: { upstreams: [ { tag: beta-upstream, addr: "udp://127.0.0.1:16557" } ] }
 "#;
     let reordered_config = compile_yaml(reordered).expect("declaration order must not matter");
-    assert_eq!(reordered_config.forward.tag, "alpha");
+    assert_eq!(
+        reordered_config
+            .forward
+            .as_ref()
+            .expect("primary forward")
+            .tag,
+        "alpha"
+    );
     assert_eq!(reordered_config.forwards.len(), 3);
 }
 

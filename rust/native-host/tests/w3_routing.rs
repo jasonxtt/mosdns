@@ -399,7 +399,11 @@ fn assert_w3_shutdown_observations(assembly: &HostAssembly, events: &[RouteEvent
     assert_eq!(attempts["route_b"].responses_total, 2);
     assert_eq!(attempts["route_c"].canceled_total, 1);
     assert_eq!(
-        assembly.forward().upstream().lifecycle_state(),
+        assembly
+            .forward()
+            .expect("primary forward")
+            .upstream()
+            .lifecycle_state(),
         LifecycleState::Closed
     );
 }
@@ -754,7 +758,11 @@ fn w3_shutdown_after_b_is_observed_prevents_late_response_and_rebinds() {
     assert_eq!(metrics.canceled_total, 1);
     assert_eq!(metrics.in_flight, 0);
     assert_eq!(
-        assembly.forward().upstream().lifecycle_state(),
+        assembly
+            .forward()
+            .expect("primary forward")
+            .upstream()
+            .lifecycle_state(),
         LifecycleState::Closed
     );
     let rebound = assembly

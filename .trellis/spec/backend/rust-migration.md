@@ -84,14 +84,26 @@ canonical and prevents a later parent rule from changing a cached child result.
 - A named call pushes an independent child scope. Natural completion,
   `accept`, and `reject` return to the caller; `exit` propagates through normal
   calls until a surrounding `try` catches it; ordinary errors remain errors.
+- Definition collection retains each plugin's source file, source path, and
+  declaring directory. Included plugin `files` paths resolve against the
+  included YAML directory, and later compile errors still identify that file.
+- The legacy primary-forward convenience view is optional and non-semantic:
+  it cannot decide whether a validated graph is accepted or select runtime
+  dispatch behavior. If a reachable forward exists, the view must traverse all
+  supported sequence-control edges, including `goto` and sequence `try`.
 - A cache hit supplies the cached response and completes the cache's successor
   path, after which the parent may continue. A miss publishes only when that
   successor naturally completes, before the caller's next rule runs.
-- Each request may arm one cache publication token. Cancellation, deadline,
+- A request may dispatch the configured cache at most once, whether the first
+  access hits, misses, cannot arm a token, or has already published. Any second
+  dynamic dispatch fails closed. Cancellation, deadline,
   failed execution, synthesized responses, malformed responses, and responses
   rejected by cache eligibility drop the token without publication. A later
   parent response rewrite cannot alter bytes already captured at the child
   completion boundary.
+- Every forward's effective observation identity is its explicit upstream tag
+  or, when absent, its forward tag. These effective identities must be unique
+  across all configured forwards.
 - Audit provenance records the actual named sequence that ran; a synthetic
   inline scope is not reported as a named origin.
 
@@ -105,6 +117,8 @@ canonical and prevents a later parent rule from changing a cached child result.
 | Cache miss successor completes with an eligible raw response | Publish once at the successor boundary, before parent continuation |
 | Cache successor errors, response is malformed/ineligible, request cancels, or deadline expires | No cache publication |
 | Request reaches the same cache dispatch dynamically a second time | Fail closed; do not replace an outstanding token |
+| Included plugin uses a relative rule file | Resolve from the included YAML directory and retain the included file in compile errors |
+| Different forwards resolve to the same effective upstream identity | Reject before assembly so metrics/audit preserve owner identity |
 
 ### 5. Good/Base/Bad Cases
 

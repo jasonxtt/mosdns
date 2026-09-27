@@ -17,7 +17,7 @@
 - [x] 证明 child cache 不被父覆盖污染，entry cache 包裹下游正确；重复访问失败；取消无 publication。
 - [x] 共用 deadline、fuel=64；deadline 门改由“是否已有前序 attempt”决定，不再按 forward 数选择。
 - [x] 最小 named origin 接缝：`last_origin` 来自真实执行的具名 sequence，synthetic inline 不冒充；不再固定回填 entry。
-- [x] 旧 W1/W2/W3 回归、完整 workspace 回归：`cargo test --workspace` 891 passed / 0 failed。
+- [x] 旧 W1/W2/W3 回归和第一次完整 workspace 回归：`cargo test --workspace` 891 passed / 0 failed（review remediation 前）。
 
 ## 3. Linux 交付及最终审查（A6）
 
@@ -28,7 +28,7 @@
 - [ ] 远端故障/取消/关闭变体、`local.only.test` exact 分支、完整 workspace 及旧 W1/W2/W3 suites 未执行；这些仍是明确未测项，不影响所选远端 E2E 子项记录。
 - [x] 做过轻量短诊断；没有性能验收、性能 PASS 或持续资源结论。
 - [x] 覆盖表记录 P02/P26/P34/P44/P15/P12、L01/L02/C01 的实际子项和延期。
-- [ ] 一次独立最终 full-scope review 覆盖 A1–A6；仅在精确范围已提交并推送后发送，记录明确 PASS/FAIL 后再更新本项。
+- [ ] 一次独立最终 full-scope review 覆盖 A1–A6；仅在精确范围已提交且可由当前 workspace connector 比较后发送，记录明确 PASS/FAIL 后再更新本项。
 - [ ] 本轮不执行 finish/archive/journal；review PASS 本身不改变 Trellis 生命周期。
 
 ## Local verification (2026-09-27–28)
@@ -39,7 +39,7 @@ cargo clippy --manifest-path rust/Cargo.toml -p mosdns-sequence-core -p mosdns-n
 cargo test --manifest-path rust/Cargo.toml --workspace --no-fail-fast                           exit 0; all workspace tests/doctests passed
 ~~~
 
-The previous full-workspace run recorded 891 passed / 0 failed. The 2026-09-28 rerun also exited 0; its streamed output was truncated before a final aggregate count could be retained. `cargo fmt` and Clippy were rerun on 2026-09-28 and exited 0.
+The pre-review full-workspace run recorded 891 passed / 0 failed. After the four review fixes, `cargo test --manifest-path rust/Cargo.toml --workspace --no-fail-fast` exited 0 with 896 passed / 0 failed; `cargo test --manifest-path rust/Cargo.toml --workspace -- --list` independently counted 896 tests. `cargo fmt` and Clippy (`-D warnings`) also exited 0 on this candidate.
 
 用户确认 `tests/slice3_composition.rs` 的代表链用例在本机真实 UDP/TCP listener 和 loopback peers 通过（9 cases）：
 
@@ -53,6 +53,38 @@ The previous full-workspace run recorded 891 passed / 0 failed. The 2026-09-28 r
   listener, identical wire and peer counts, and no retained audit record.
 
 W1 UDP/TCP、W2 cache、W3 routing 与完整 Rust workspace 回归均按上一会话结果通过；这不是本轮远端完整回归。
+
+## Independent review attempt 1 (2026-09-28)
+
+The reviewer compared `11bd56c40d255d6ae93b0a2eba1c85214300b149` to
+`b0c3a29876b917abfc503dbad2f5706488ee1c91` and returned `FINAL: FAIL`. It
+reported four root causes; retain these IDs in the re-review:
+
+- `P1-1`: included plugin definitions had lost their declaring YAML path and
+  base directory. `RawPlugin` now keeps both, definition compilers use that
+  source path, and included `domain_set.files` resolve from the included YAML
+  directory. `included_definitions_keep_their_relative_path_and_source_context`
+  checks a real relative file and errors naming the included YAML and rule file.
+- `P1-2`: the legacy primary-forward view wrongly rejected a valid graph when
+  its only forward was reachable through `goto` or `try`. The view is now
+  optional and non-semantic, and traversal includes both edges.
+  `goto_and_try_only_forward_paths_compile_and_execute` exercises each path
+  over a real UDP listener and counted loopback peer.
+- `P1-3`: a request could access the same cache again after a first hit or
+  after a miss had published. A request-local access guard now rejects every
+  second dispatch before lookup. Unit tests
+  `a_second_cache_access_after_a_hit_fails_closed` and
+  `a_second_cache_access_after_miss_publication_fails_closed` cover both paths.
+- `P2-1`: a forward's effective observer identity could collide between a
+  default tag and another forward's explicit upstream tag. Compilation now
+  checks the final identity across all forwards;
+  `effective_upstream_identities_must_be_unique_across_explicit_and_default_tags`
+  covers that mixed case.
+
+Focused local `slice2_config` (12 passed), `slice3_composition` (11 passed),
+the two cache-access unit tests, formatting, Clippy, and the full workspace
+(896 passed) pass on this candidate. The Linux retest against its committed
+source is pending; no second review has been requested yet.
 
 ## Remote Linux E2E record (2026-09-28, A6 selected subitems)
 

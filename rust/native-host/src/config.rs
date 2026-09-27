@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use mosdns_matcher_core::MixMatcher;
 use mosdns_sequence_core::{
-    ExecutableId, ExecutableSpec, ExecutableTargetSpec, ExecutionControl, ExecutionError,
-    ExecutionMachine, ExecutionState, ExternalRef, ExternalSpec, MatcherSpecInput, ProgramSpec,
-    RuleSpec, SequenceId, SequenceRef, SequenceSpec, ValidatedExecutable, ValidatedProgram,
+    ExecutableId, ExecutableSpec, ExecutableTarget, ExecutableTargetSpec, ExecutionControl,
+    ExecutionError, ExecutionMachine, ExecutionState, ExternalRef, ExternalSpec, MatcherSpecInput,
+    ProgramSpec, RuleSpec, SequenceId, SequenceRef, SequenceSpec, ValidatedExecutable,
+    ValidatedProgram,
 };
 use mosdns_upstream_core::{Endpoint, Transport};
 use serde::de::{self, Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
@@ -48,9 +49,9 @@ pub struct ForwardConfig {
 pub struct SequenceConfig {
     pub tag: String,
     pub sequence: SequenceId,
-    /// The first forward the entry sequence can dispatch, retained for the
-    /// host's primary-forward accessor.
-    pub forward_executable: ExecutableId,
+    /// Legacy convenience view only; runtime dispatch uses `program`.
+    /// Some valid entry graphs have no reachable forward.
+    pub forward_executable: Option<ExecutableId>,
 }
 
 /// The one native cache dispatch accepted by this host.
@@ -76,9 +77,9 @@ pub struct ListenerConfig {
 /// The typed, validated graph consumed by pre-I/O host assembly.
 pub struct CompiledConfig {
     pub log_level: LogLevel,
-    /// The first forward the entry sequence can dispatch. Present because every
-    /// accepted graph dispatches at least one forward, or only rejects.
-    pub forward: ForwardConfig,
+    /// Legacy convenience view of one reachable forward. This value does not
+    /// determine configuration validity or runtime dispatch behavior.
+    pub forward: Option<ForwardConfig>,
     /// Every validated upstream owner keyed by the executable that can
     /// dispatch it.
     pub forwards: Vec<ForwardConfig>,
@@ -184,10 +185,14 @@ fn compile_raw(raw: &RawValue, base_dir: &Path) -> Result<CompiledConfig, Config
     }
     let plugins = expect_sequence(root.required("plugins", "$")?, "$.plugins")?;
     for (index, plugin) in plugins.iter().enumerate() {
-        definitions.push(decode_plugin(plugin, &format!("$.plugins[{index}]"))?);
+        definitions.push(decode_plugin(
+            plugin,
+            &format!("$.plugins[{index}]"),
+            base_dir,
+        )?);
     }
 
-    compile_definitions(log, definitions, base_dir)
+    compile_definitions(log, definitions)
 }
 
 /// Loads one plugins-only included file and appends its definitions in file
@@ -217,10 +222,12 @@ fn collect_included(
         root.required("plugins", &display)?,
         &format!("{display}.plugins"),
     )?;
+    let included_base_dir = path.parent().unwrap_or_else(|| Path::new(""));
     for (index, plugin) in plugins.iter().enumerate() {
         definitions.push(decode_plugin(
             plugin,
             &format!("{display}.plugins[{index}]"),
+            included_base_dir,
         )?);
     }
     Ok(())
@@ -273,7 +280,6 @@ impl PluginCatalog<'_> {
 fn compile_definitions(
     log: LogLevel,
     definitions: Vec<RawPlugin>,
-    base_dir: &Path,
 ) -> Result<CompiledConfig, ConfigError> {
     let mut kinds: Vec<(String, PluginKind, usize)> = Vec::with_capacity(definitions.len());
     for (index, plugin) in definitions.iter().enumerate() {
@@ -285,7 +291,7 @@ fn compile_definitions(
             "udp_server" | "tcp_server" => PluginKind::Listener,
             other => {
                 return Err(ConfigError::new(
-                    format!("$.plugins[{index}].type"),
+                    format!("{}.type", plugin.source_path),
                     format!("unsupported plugin type `{other}`"),
                 ));
             }
@@ -295,7 +301,7 @@ fn compile_definitions(
             .find(|(tag, _, _)| tag.as_str() == plugin.tag.as_str())
         {
             return Err(ConfigError::new(
-                format!("$.plugins[{index}].tag"),
+                format!("{}.tag", plugin.source_path),
                 format!("duplicate plugin tag `{existing}`"),
             ));
         }
@@ -306,49 +312,60 @@ fn compile_definitions(
     let mut domain_sets: Vec<(String, Rc<MixMatcher<()>>)> = Vec::new();
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::DomainSet {
-            domain_sets.push((plugin.tag.clone(), compile_domain_set(plugin, base_dir)?));
+            domain_sets.push((plugin.tag.clone(), compile_domain_set(plugin)?));
         }
     }
     let mut forwards = Vec::new();
-    let mut upstream_tags: BTreeSet<String> = BTreeSet::new();
+    let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut cache = None;
     let mut listener = None;
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
             PluginKind::DomainSet | PluginKind::Sequence => {}
             PluginKind::Forward => {
-                let forward = compile_forward(plugin, index)?;
-                if let Some(tag) = &forward.upstream_tag {
-                    if !upstream_tags.insert(tag.clone()) {
-                        return Err(ConfigError::new(
-                            format!("$.plugins[{index}].args.upstreams[0].tag"),
-                            format!("duplicate upstream tag `{tag}`"),
-                        ));
-                    }
+                let forward = compile_forward(plugin)?;
+                let identity = forward
+                    .upstream_tag
+                    .as_deref()
+                    .unwrap_or(&forward.tag)
+                    .to_owned();
+                if let Some(existing) = upstream_identities.get(&identity) {
+                    let field = if forward.upstream_tag.is_some() {
+                        "args.upstreams[0].tag"
+                    } else {
+                        "tag"
+                    };
+                    return Err(ConfigError::new(
+                        format!("{}.{}", plugin.source_path, field),
+                        format!(
+                            "duplicate effective upstream identity `{identity}` (already used by `{existing}`)"
+                        ),
+                    ));
                 }
+                upstream_identities.insert(identity, forward.tag.clone());
                 forwards.push(forward);
             }
             PluginKind::Cache => {
                 if cache.is_some() {
                     return Err(ConfigError::new(
-                        format!("$.plugins[{index}].tag"),
+                        format!("{}.tag", plugin.source_path),
                         "exactly one cache plugin is supported",
                     ));
                 }
                 cache = Some((
                     plugin.tag.clone(),
-                    compile_cache(plugin, index)?,
-                    format!("$.plugins[{index}]"),
+                    compile_cache(plugin)?,
+                    plugin.source_path.clone(),
                 ));
             }
             PluginKind::Listener => {
                 if listener.is_some() {
                     return Err(ConfigError::new(
-                        format!("$.plugins[{index}].tag"),
+                        format!("{}.tag", plugin.source_path),
                         "exactly one listener plugin is supported",
                     ));
                 }
-                listener = Some(compile_listener(plugin, index)?);
+                listener = Some((compile_listener(plugin)?, plugin.source_path.clone()));
             }
         }
     }
@@ -359,21 +376,21 @@ fn compile_definitions(
     let mut sequences = Vec::new();
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::Sequence {
-            sequences.push(compile_sequence(plugin, index, &catalog)?);
+            sequences.push(compile_sequence(plugin, &catalog)?);
         }
     }
 
     if sequences.is_empty() {
         return Err(ConfigError::new("$.plugins", "missing sequence plugin"));
     }
-    let listener =
+    let (listener, listener_source_path) =
         listener.ok_or_else(|| ConfigError::new("$.plugins", "missing listener plugin"))?;
     if !kinds
         .iter()
         .any(|(tag, kind, _)| *kind == PluginKind::Sequence && tag.as_str() == listener.entry)
     {
         return Err(ConfigError::new(
-            "$.plugins[listener].args.entry",
+            format!("{listener_source_path}.args.entry"),
             format!("unknown sequence reference `{}`", listener.entry),
         ));
     }
@@ -438,16 +455,13 @@ fn compile_definitions(
         })
         .transpose()?;
 
-    let entry_sequence = program
-        .sequence_id(&listener.entry)
-        .ok_or_else(|| ConfigError::new("$.plugins[listener].args.entry", "entry is missing"))?;
-    let primary =
-        primary_forward(&program, entry_sequence, &compiled_forwards).ok_or_else(|| {
-            ConfigError::new(
-                "$.plugins[sequence].args",
-                "the entry sequence cannot dispatch any configured forward",
-            )
-        })?;
+    let entry_sequence = program.sequence_id(&listener.entry).ok_or_else(|| {
+        ConfigError::new(
+            format!("{listener_source_path}.args.entry"),
+            "entry is missing",
+        )
+    })?;
+    let primary = primary_forward(&program, entry_sequence, &compiled_forwards);
 
     Ok(CompiledConfig {
         log_level: log,
@@ -457,16 +471,15 @@ fn compile_definitions(
         sequence: SequenceConfig {
             tag: listener.entry.clone(),
             sequence: entry_sequence,
-            forward_executable: primary.executable,
+            forward_executable: primary.as_ref().map(|forward| forward.executable),
         },
         listener,
         program,
     })
 }
 
-/// The first forward the entry sequence can dispatch, following rules and
-/// direct child calls in declaration order. Definition order and plugin count
-/// never select it.
+/// Finds one reachable forward for legacy convenience accessors. This scan is
+/// not used to validate configuration or drive runtime dispatch.
 fn primary_forward(
     program: &ValidatedProgram,
     entry: SequenceId,
@@ -499,7 +512,16 @@ fn find_forward(
                     return Some(forward.clone());
                 }
             }
-            ValidatedExecutable::Call { target } | ValidatedExecutable::Jump { target } => {
+            ValidatedExecutable::Call { target }
+            | ValidatedExecutable::Goto { target }
+            | ValidatedExecutable::Jump { target } => {
+                if let Some(forward) = find_forward(program, *target, forwards, visited) {
+                    return Some(forward);
+                }
+            }
+            ValidatedExecutable::Try {
+                target: ExecutableTarget::Sequence(target),
+            } => {
                 if let Some(forward) = find_forward(program, *target, forwards, visited) {
                     return Some(forward);
                 }
@@ -530,7 +552,7 @@ fn compile_log(value: &RawValue) -> Result<LogLevel, ConfigError> {
     Ok(LogLevel::Error)
 }
 
-fn decode_plugin(value: &RawValue, path: &str) -> Result<RawPlugin, ConfigError> {
+fn decode_plugin(value: &RawValue, path: &str, base_dir: &Path) -> Result<RawPlugin, ConfigError> {
     let map = expect_map(value, path, "plugin must be a mapping")?;
     map.reject_unknown(&["tag", "type", "args"], path)?;
     let tag = expect_string(map.required("tag", path)?, &format!("{path}.tag"))?;
@@ -548,11 +570,17 @@ fn decode_plugin(value: &RawValue, path: &str) -> Result<RawPlugin, ConfigError>
             "args must be a mapping or sequence",
         ));
     }
-    Ok(RawPlugin { tag, kind, args })
+    Ok(RawPlugin {
+        tag,
+        kind,
+        args,
+        source_path: path.to_owned(),
+        base_dir: base_dir.to_path_buf(),
+    })
 }
 
-fn compile_forward(plugin: &RawPlugin, index: usize) -> Result<ForwardConfig, ConfigError> {
-    let path = format!("$.plugins[{index}].args");
+fn compile_forward(plugin: &RawPlugin) -> Result<ForwardConfig, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "forward args must be a mapping")?;
     args.reject_unknown(&["upstreams"], &path)?;
     let upstreams_path = format!("{path}.upstreams");
@@ -589,33 +617,26 @@ fn compile_forward(plugin: &RawPlugin, index: usize) -> Result<ForwardConfig, Co
     })
 }
 
-fn compile_domain_set(
-    plugin: &RawPlugin,
-    base_dir: &Path,
-) -> Result<Rc<MixMatcher<()>>, ConfigError> {
-    let path = "$.plugins.domain_set.args";
-    let args = expect_map(&plugin.args, path, "domain_set args must be a mapping")?;
-    args.reject_unknown(&["exps", "files"], path)?;
+fn compile_domain_set(plugin: &RawPlugin) -> Result<Rc<MixMatcher<()>>, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "domain_set args must be a mapping")?;
+    args.reject_unknown(&["exps", "files"], &path)?;
     let expressions = string_list(args.get("exps"), &format!("{path}.exps"))?;
     let files = string_list(args.get("files"), &format!("{path}.files"))?;
     if expressions.is_empty() && files.is_empty() {
         return Err(ConfigError::new(
-            path,
+            &path,
             "a domain_set requires at least one expression or file",
         ));
     }
-    build_domain_set(&expressions, &files, base_dir).map_err(|error| match error {
-        DomainSetError::Expression { index, .. } => ConfigError::new(
-            format!("$.plugins.domain_set.args.exps[{index}]"),
-            error.to_string(),
-        ),
-        DomainSetError::File { index, .. } => ConfigError::new(
-            format!("$.plugins.domain_set.args.files[{index}]"),
-            error.to_string(),
-        ),
-        DomainSetError::Rule { .. } => {
-            ConfigError::new("$.plugins.domain_set.args.files", error.to_string())
+    build_domain_set(&expressions, &files, &plugin.base_dir).map_err(|error| match error {
+        DomainSetError::Expression { index, .. } => {
+            ConfigError::new(format!("{path}.exps[{index}]"), error.to_string())
         }
+        DomainSetError::File { index, .. } => {
+            ConfigError::new(format!("{path}.files[{index}]"), error.to_string())
+        }
+        DomainSetError::Rule { .. } => ConfigError::new(format!("{path}.files"), error.to_string()),
     })
 }
 
@@ -631,8 +652,8 @@ fn string_list(value: Option<&RawValue>, path: &str) -> Result<Vec<String>, Conf
         .collect()
 }
 
-fn compile_cache(plugin: &RawPlugin, index: usize) -> Result<u64, ConfigError> {
-    let path = format!("$.plugins[{index}].args");
+fn compile_cache(plugin: &RawPlugin) -> Result<u64, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "cache args must be a mapping")?;
     args.reject_unknown(&["size", "lazy_cache_ttl"], &path)?;
     let size = expect_positive_integer(args.required("size", &path)?, &format!("{path}.size"))?;
@@ -651,10 +672,9 @@ fn compile_cache(plugin: &RawPlugin, index: usize) -> Result<u64, ConfigError> {
 
 fn compile_sequence(
     plugin: &RawPlugin,
-    index: usize,
     catalog: &PluginCatalog<'_>,
 ) -> Result<SequenceSpec, ConfigError> {
-    let path = format!("$.plugins[{index}].args");
+    let path = format!("{}.args", plugin.source_path);
     let args = expect_sequence(&plugin.args, &path)?;
     let mut rules = Vec::with_capacity(args.len());
     for (rule_index, value) in args.iter().enumerate() {
@@ -978,9 +998,9 @@ fn named_sequence_target(
     }
 }
 
-fn compile_listener(plugin: &RawPlugin, index: usize) -> Result<ListenerConfig, ConfigError> {
+fn compile_listener(plugin: &RawPlugin) -> Result<ListenerConfig, ConfigError> {
     let is_tcp = plugin.kind == "tcp_server";
-    let path = format!("$.plugins[{index}].args");
+    let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "listener args must be a mapping")?;
     let allowed = if is_tcp {
         &["entry", "listen", "enable_audit", "idle_timeout"][..]
@@ -1119,6 +1139,8 @@ struct RawPlugin {
     tag: String,
     kind: String,
     args: RawValue,
+    source_path: String,
+    base_dir: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -1313,17 +1335,22 @@ mod tests {
         assert_eq!(udp.log_level, LogLevel::Error);
         assert_eq!(udp.listener.kind, ListenerKind::Udp);
         assert_eq!(udp.listener.listen.port(), 15353);
-        assert_eq!(udp.forward.endpoint.transport(), Transport::Udp);
-        assert_eq!(udp.forward.endpoint.address().port(), 15453);
+        let udp_forward = udp.forward.as_ref().expect("legacy forward view");
+        assert_eq!(udp_forward.endpoint.transport(), Transport::Udp);
+        assert_eq!(udp_forward.endpoint.address().port(), 15453);
         assert_eq!(udp.listener.idle_timeout, None);
         assert_eq!(udp.sequence.tag, "phase5a_entry");
-        assert_eq!(udp.sequence.forward_executable, udp.forward.executable);
+        assert_eq!(
+            udp.sequence.forward_executable,
+            Some(udp_forward.executable)
+        );
 
         let tcp = compile_yaml(TCP).expect("frozen TCP config must compile");
         assert_eq!(tcp.listener.kind, ListenerKind::Tcp);
         assert_eq!(tcp.listener.listen.port(), 15354);
-        assert_eq!(tcp.forward.endpoint.transport(), Transport::Tcp);
-        assert_eq!(tcp.forward.endpoint.address().port(), 15454);
+        let tcp_forward = tcp.forward.as_ref().expect("legacy forward view");
+        assert_eq!(tcp_forward.endpoint.transport(), Transport::Tcp);
+        assert_eq!(tcp_forward.endpoint.address().port(), 15454);
         assert_eq!(tcp.listener.idle_timeout, Some(Duration::from_secs(2)));
     }
 
@@ -1344,7 +1371,10 @@ plugins:
 "#;
         let config = compile_yaml(yaml).expect("order-independent graph");
         assert_eq!(config.sequence.tag, "entry");
-        assert_eq!(config.forward.tag, "forward");
+        assert_eq!(
+            config.forward.as_ref().expect("primary forward").tag,
+            "forward"
+        );
 
         let state = ExecutionState::new(
             mosdns_dns_core::QueryHeader {
@@ -1369,7 +1399,8 @@ plugins:
         assert!(matches!(
             step,
             mosdns_sequence_core::MachineStep::Dispatch(dispatch)
-                if dispatch.executable() == config.forward.executable
+                if dispatch.executable()
+                    == config.forward.as_ref().expect("primary forward").executable
         ));
     }
 
