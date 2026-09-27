@@ -28,3 +28,9 @@ This is an invalid/incomplete official attempt, not a Rust result and not a
 threshold adjustment. Formal continuation is gated on a fresh C2C review of
 this control failure; no W2 run, profile, or capacity conclusion is implied
 by the failed control.
+
+The subsequent C2C review returned `FINAL: PASS` for evidence handling, but
+closed the next-scope question as stop-and-report: official-r2 already consumed
+the one reviewed retry represented by official-r3, and the r3 Go control failure
+does not permit another retry or continuation into W2. The first four W1
+attempts are two valid pairs, not a complete three-pair official matrix.
