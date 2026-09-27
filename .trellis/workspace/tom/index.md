@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
-- **Last Active**: 2026-09-20
+- **Total Sessions**: 14
+- **Last Active**: 2026-09-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~345 | Active |
+| `journal-1.md` | ~377 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-09-27 | Phase 5A official matrix stopped at control failure | `6c69c0aa`, `182abe64`, `06df01f5`, `629e9286`, `b4c0edb6` | `rust` |
 | 13 | 2026-09-20 | Complete Rust Phase 4 QUIC Slice 4 | `6b9cf868`, `4966aaa` | `rust` |
 | 12 | 2026-09-19 | Codex host-aware automation routing | `65fa0c3` | `rust` |
 | 11 | 2026-09-18 | Rust Phase 4 upstream connection reuse | `9971459`, `b5c6259`, `6fcc5c3`, `8a6c995`, `c91c32c`, `4eeab2d` | `rust` |

@@ -1,6 +1,6 @@
 # Rust migration handover
 
-Last verified: `2026-09-26`
+Last verified: `2026-09-27`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
@@ -61,6 +61,8 @@ M10-FINAL-001 explicitly approved the repair and bounded A5/A6 acceptance.
 See the task's research/m10-w3-assessment.md. User authorized lifecycle closure and GitHub push; production remains gated.
 Inspect live Trellis task state before resuming, because archive moves and task pointers
 may change independently of this concise handover.
+
+Latest measurement task: [Phase 5A measurement reliability](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5a-measurement-reliability/prd.md) is archived as **closed — incomplete matrix**, not full acceptance. W1 official-r3 supplied two valid Go/Rust pairs; Go r3 crossed only the frozen terminal health p95 band, so its paired Rust, W2 and independent profiling were not started. C2C accepted stop-and-report after the retry budget was exhausted. Capacity, objective overload/service recovery and hotspot conclusions remain unavailable; see the [closeout report](../rust/phase5a-measurement-reliability.md). The archive lifecycle field `completed` does not turn A4/A5 into PASS. Next frontier is bounded 5B configuration/sequence composition on the same native host; its task is not created or authorized by this closeout. No evidence currently justifies a runtime/Send refactor; production remains gated.
 
 Completed milestones (all archived; each archive holds its own evidence):
 
