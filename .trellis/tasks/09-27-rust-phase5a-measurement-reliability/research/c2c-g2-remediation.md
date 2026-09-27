@@ -35,11 +35,11 @@ near-saturation stage could run. No Rust candidate or profile was started.
   runner, helper, binaries, environment, and manifest. This command only
   hashes and validates artifacts; it does not start a candidate.
 - Current manifest SHA-256:
-  `de0836c1618ec3acd016e7f7702f2b762a2ea3dccfd3fd616e9856d92bdb2618`.
+  `2396817f92449825046cd6280a7d9da2f3709c8ba5790bfd31461411638fd63b`.
 - Current runner SHA-256:
-  `c884a0912496406381aaf7d7d173b375d82baf7ff2a680e386e4f8d3345b6f3b`.
+  `7e9ded3f2c68f8289e69b1c4863f5e5ce00d9d1868bf7e13e945c6e911bd6703`.
 - Current Linux helper SHA-256 (record-budget revision):
-  `b5bba12ab6407c93371359ecc711a58ece54cb4557619d44574d93174ab179f2`.
+  `9a0ddb7d5cb52690c55bc915540c639b656b17bf8ff0d786066edffa6e1fc836`.
 - The preserved `slice3-official/official-r1-20260927-w1-tcp-go` attempt used
   the pre-record-budget identities: manifest
   `5878de4fcf33b5e737719974e36450fba7eba48f25f9d20058b57fd119084b0a`,
@@ -66,3 +66,11 @@ official matrix remains gated on `FINAL: PASS`; the preserved r1 attempt is
 not a valid matrix result. The official runner now fixes
 `record_bytes=32768` and the manifest validator checks that value, preventing
 the 350/400-QPS stages from exceeding the helper's 64-MiB control budget.
+
+The first official-r2 review then found that its terminal health gate compared
+pilot dispatch-to-finish ceilings with the primary planned-slot-to-finish
+summary. That attempt remains preserved and invalid. The follow-up remediation
+pins `recovery_latency_view=dispatch-to-finish`, stores the health samples
+separately, and makes the runner/helper fail closed on a missing or mismatched
+view. The primary planned latency summary and the frozen ceilings are unchanged;
+see `c2c-health-basis-remediation.md`.

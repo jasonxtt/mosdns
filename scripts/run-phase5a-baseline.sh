@@ -28,6 +28,7 @@ LATE_DRAIN_MS="${LATE_DRAIN_MS:-100}"
 RECOVERY_MINIMUM_SAMPLES="${RECOVERY_MINIMUM_SAMPLES:-}"
 RECOVERY_P95_CEILING_US="${RECOVERY_P95_CEILING_US:-}"
 RECOVERY_P99_CEILING_US="${RECOVERY_P99_CEILING_US:-}"
+RECOVERY_LATENCY_VIEW="${RECOVERY_LATENCY_VIEW:-planned-slot-to-finish}"
 MEASUREMENT_PROFILE="${PHASE5A_MEASUREMENT_PROFILE:-legacy}"
 RELIABILITY_WORKERS="${RELIABILITY_WORKERS:-256}"
 RELIABILITY_IN_FLIGHT="${RELIABILITY_IN_FLIGHT:-256}"
@@ -330,6 +331,7 @@ if [[ "${RUN_MODE}" == "official" ]]; then
   RELIABILITY_EVIDENCE_QUEUE=512
   RELIABILITY_RECORD_BYTES=32768
   RELIABILITY_CLEANUP_TIMEOUT_MS=1000
+  RECOVERY_LATENCY_VIEW=dispatch-to-finish
 fi
 
 "${HELPER_BINARY}" validate-binary --path "${MOSDNS_BINARY}" > "${RESULT_DIR}/sut.json"
@@ -662,6 +664,7 @@ run_continuous_sequence() {
   fi
   if ! "${HELPER_BINARY}" verify-continuous --stage-result "${stage_dir}/stages.jsonl" --run-id "${SESSION_RUN_ID}" \
     --minimum-samples "${RECOVERY_MINIMUM_SAMPLES}" --p95-ceiling-us "${RECOVERY_P95_CEILING_US}" --p99-ceiling-us "${RECOVERY_P99_CEILING_US}" \
+    --latency-view "${RECOVERY_LATENCY_VIEW}" \
     > "${RESULT_DIR}/service-recovery-assessment.txt"; then
     record_invalid "recovery" "same-process recovery criteria failed"
   fi
@@ -878,7 +881,7 @@ printf '%s\n' "scenario=${SCENARIO}" "run_mode=${RUN_MODE}" "config=${SCENARIO_C
 printf '%s\n' "run_id=${RUN_ID}" "fixture_session_id=${FIXTURE_SESSION_ID}" "candidate=${CANDIDATE}" "repetition=${REPETITION}" "pair_position=${PAIR_POSITION}" >> "${RESULT_DIR}/run-metadata.txt"
 printf '%s\n' "stage_duration_ms=${STAGE_DURATION_MS}" "normal_reference_qps=${NORMAL_REFERENCE_QPS}" "common_load_qps=${COMMON_LOAD_QPS}" "near_saturation_qps=${NEAR_SATURATION_QPS}" "overload_qps=${OVERLOAD_QPS}" >> "${RESULT_DIR}/run-metadata.txt"
 printf '%s\n' "request_deadline_ms=${REQUEST_DEADLINE_MS}" "late_drain_ms=${LATE_DRAIN_MS}" "sut_cpu_set=${SUT_CPU_SET}" "harness_cpu_set=${HARNESS_CPU_SET}" "sut_startup_margin=${SUT_STARTUP_MARGIN}" >> "${RESULT_DIR}/run-metadata.txt"
-printf '%s\n' "reliability_protocol=phase5a-reliability-v1" "reliability_workers=${RELIABILITY_WORKERS}" "reliability_in_flight=${RELIABILITY_IN_FLIGHT}" "reliability_dispatch_queue=${RELIABILITY_DISPATCH_QUEUE}" "reliability_evidence_queue=${RELIABILITY_EVIDENCE_QUEUE}" "reliability_record_bytes=${RELIABILITY_RECORD_BYTES}" >> "${RESULT_DIR}/run-metadata.txt"
+printf '%s\n' "reliability_protocol=phase5a-reliability-v1" "reliability_workers=${RELIABILITY_WORKERS}" "reliability_in_flight=${RELIABILITY_IN_FLIGHT}" "reliability_dispatch_queue=${RELIABILITY_DISPATCH_QUEUE}" "reliability_evidence_queue=${RELIABILITY_EVIDENCE_QUEUE}" "reliability_record_bytes=${RELIABILITY_RECORD_BYTES}" "recovery_latency_view=${RECOVERY_LATENCY_VIEW}" >> "${RESULT_DIR}/run-metadata.txt"
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   {
     printf 'measurement_profile=%s\ngomaxprocs_environment=%s\n' "${MEASUREMENT_PROFILE}" "${GOMAXPROCS:-unset}"

@@ -11,9 +11,9 @@ result is included here.
 - OS/kernel: Debian 13, Linux `7.0.9-x64v3-xanmod1`, amd64, 2 online CPUs
 - Harness CPU: `0`; candidate/fixture CPU: `1`
 - Helper: `phase5a-baseline-helper/v10`, SHA-256
-  `b5bba12ab6407c93371359ecc711a58ece54cb4557619d44574d93174ab179f2`
+  `9a0ddb7d5cb52690c55bc915540c639b656b17bf8ff0d786066edffa6e1fc836`
 - Runner SHA-256:
-  `c884a0912496406381aaf7d7d173b375d82baf7ff2a680e386e4f8d3345b6f3b`
+  `7e9ded3f2c68f8289e69b1c4863f5e5ce00d9d1868bf7e13e945c6e911bd6703`
 - Go candidate source: `5b1eca69e0668ad1ddb6db88c0f39202557d5b98`, binary SHA-256
   `fece7ece823a1493eb1a495a472016cfa94df4470d48064fcef301668efdb137`
 - Rust candidate source: `5478015f7998be5335a7019915af558da5c74b4b`, release binary
@@ -84,8 +84,9 @@ lifecycle, thresholds, calibration envelope, resource ceilings, profiler
 separation, and alternating `go/rust`, `rust/go`, `go/rust` pair order. The
 manifest has `official_frozen=true` because the current helper validator
 requires that value; operationally it is not authorized for a candidate run
-until the G2 re-review accepts this exact content and SHA-256
-`de0836c1618ec3acd016e7f7702f2b762a2ea3dccfd3fd616e9856d92bdb2618`.
+until the health-basis remediation is accepted by C2C for this exact content
+and SHA-256
+`2396817f92449825046cd6280a7d9da2f3709c8ba5790bfd31461411638fd63b`.
 
 The manifest validator was run on the remote host against the current runner,
 helper, Go binary, Rust binary, and both scenario plans without starting either
@@ -100,3 +101,8 @@ failures stop the sequence before warm or subsequent points. Official results
 must use a new result root and retain every attempt. The official reliability
 record budget is frozen at 32768 bytes so every 3-second 200/300/350/400 stage
 fits the helper's 64 MiB control budget.
+
+The terminal same-process health gate is now explicitly pinned to
+`dispatch-to-finish`, matching the pilot-derived W1 health band. The primary
+`planned-slot-to-finish` summary remains available for measurement and is not
+silently reused as the health gate; see `c2c-health-basis-remediation.md`.

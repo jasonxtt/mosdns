@@ -87,6 +87,17 @@ and prevents later stages from running. Official runs freeze 32 KiB raw-record
 capacity so the complete 3-second ladder remains inside the helper's 64 MiB
 control budget.
 
+The official same-process terminal health gate is explicitly evaluated with the
+`dispatch-to-finish` latency view. The primary `stages.jsonl` latency summary
+remains `planned-slot-to-finish`; its sender scheduling lag is intentionally
+not mixed into the dispatch-based health band. Each official stage therefore
+records both the primary samples and a separately declared
+`health_latency_view`, `health_latency_samples_us`, and health percentiles.
+The runner passes the manifest-frozen view to `verify-continuous` and fails
+closed if that view is missing or mismatched. This separates a like-for-like
+pilot-derived health check from the primary measurement metric without
+loosening the frozen p95/p99 ceilings.
+
 This Slice 1 runner is an offline/loopback test helper only. It does not start
 MosDNS, use SSH, run pilot/official traffic, profile a process, or make
 hotspot/capacity claims.

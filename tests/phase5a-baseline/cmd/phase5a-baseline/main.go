@@ -34,6 +34,9 @@ import (
 const (
 	defaultLateDrain = 100 * time.Millisecond
 	defaultDeadline  = 500 * time.Millisecond
+
+	latencyViewPlannedSlotToFinish = "planned-slot-to-finish"
+	latencyViewDispatchToFinish    = "dispatch-to-finish"
 )
 
 type workloadCase struct {
@@ -65,40 +68,45 @@ type stageCounters struct {
 }
 
 type stageResult struct {
-	Stage                string            `json:"stage"`
-	RunID                string            `json:"run_id"`
-	FixtureSessionID     string            `json:"fixture_session_id"`
-	Scenario             string            `json:"scenario"`
-	Transport            string            `json:"transport"`
-	TargetQPS            float64           `json:"target_qps"`
-	DurationMS           int64             `json:"duration_ms"`
-	RequestDeadlineMS    int               `json:"request_deadline_ms"`
-	LateDrainMS          int               `json:"late_drain_ms"`
-	Counters             stageCounters     `json:"counters"`
-	CaseScheduled        map[string]int64  `json:"case_scheduled,omitempty"`
-	LatencySamplesUS     []int64           `json:"latency_samples_us"`
-	P50US                int64             `json:"p50_us"`
-	P95US                int64             `json:"p95_us"`
-	P99US                int64             `json:"p99_us"`
-	EffectiveThroughput  float64           `json:"effective_throughput_qps"`
-	SenderLagMaxUS       int64             `json:"sender_lag_max_us"`
-	StartedAt            time.Time         `json:"started_at"`
-	FinishedAt           time.Time         `json:"finished_at"`
-	ResourceSampleCount  int               `json:"resource_sample_count"`
-	ResourceSampleCounts map[string]int    `json:"resource_sample_counts"`
-	SUTPID               int               `json:"sut_pid"`
-	SUTStartIdentity     string            `json:"sut_start_identity"`
-	SUTCPUSet            string            `json:"sut_cpu_set"`
-	HarnessPID           int               `json:"harness_pid"`
-	HarnessCPUSet        string            `json:"harness_cpu_set"`
-	HarnessHost          string            `json:"harness_host,omitempty"`
-	HarnessGoProfile     map[string]string `json:"harness_go_profile,omitempty"`
-	RequestLedgerPath    string            `json:"request_ledger_path"`
-	EventJournalPath     string            `json:"event_journal_path,omitempty"`
-	FixtureSeqStart      uint64            `json:"fixture_seq_start"`
-	FixtureSeqEnd        uint64            `json:"fixture_seq_end"`
-	RequestSeqStart      uint64            `json:"request_seq_start"`
-	RequestSeqEnd        uint64            `json:"request_seq_end"`
+	Stage                  string            `json:"stage"`
+	RunID                  string            `json:"run_id"`
+	FixtureSessionID       string            `json:"fixture_session_id"`
+	Scenario               string            `json:"scenario"`
+	Transport              string            `json:"transport"`
+	TargetQPS              float64           `json:"target_qps"`
+	DurationMS             int64             `json:"duration_ms"`
+	RequestDeadlineMS      int               `json:"request_deadline_ms"`
+	LateDrainMS            int               `json:"late_drain_ms"`
+	Counters               stageCounters     `json:"counters"`
+	CaseScheduled          map[string]int64  `json:"case_scheduled,omitempty"`
+	LatencySamplesUS       []int64           `json:"latency_samples_us"`
+	P50US                  int64             `json:"p50_us"`
+	P95US                  int64             `json:"p95_us"`
+	P99US                  int64             `json:"p99_us"`
+	HealthLatencyView      string            `json:"health_latency_view,omitempty"`
+	HealthLatencySamplesUS []int64           `json:"health_latency_samples_us,omitempty"`
+	HealthP50US            int64             `json:"health_p50_us,omitempty"`
+	HealthP95US            int64             `json:"health_p95_us,omitempty"`
+	HealthP99US            int64             `json:"health_p99_us,omitempty"`
+	EffectiveThroughput    float64           `json:"effective_throughput_qps"`
+	SenderLagMaxUS         int64             `json:"sender_lag_max_us"`
+	StartedAt              time.Time         `json:"started_at"`
+	FinishedAt             time.Time         `json:"finished_at"`
+	ResourceSampleCount    int               `json:"resource_sample_count"`
+	ResourceSampleCounts   map[string]int    `json:"resource_sample_counts"`
+	SUTPID                 int               `json:"sut_pid"`
+	SUTStartIdentity       string            `json:"sut_start_identity"`
+	SUTCPUSet              string            `json:"sut_cpu_set"`
+	HarnessPID             int               `json:"harness_pid"`
+	HarnessCPUSet          string            `json:"harness_cpu_set"`
+	HarnessHost            string            `json:"harness_host,omitempty"`
+	HarnessGoProfile       map[string]string `json:"harness_go_profile,omitempty"`
+	RequestLedgerPath      string            `json:"request_ledger_path"`
+	EventJournalPath       string            `json:"event_journal_path,omitempty"`
+	FixtureSeqStart        uint64            `json:"fixture_seq_start"`
+	FixtureSeqEnd          uint64            `json:"fixture_seq_end"`
+	RequestSeqStart        uint64            `json:"request_seq_start"`
+	RequestSeqEnd          uint64            `json:"request_seq_end"`
 }
 
 type resourceSample struct {
@@ -259,6 +267,7 @@ type manifestExecutionContract struct {
 	ResourceCaps                          manifestResourceCaps      `json:"resource_caps"`
 	Profiling                             manifestProfilingContract `json:"profiling"`
 	Recovery                              string                    `json:"recovery"`
+	RecoveryLatencyView                   string                    `json:"recovery_latency_view"`
 }
 
 type manifestCandidate struct {
@@ -419,6 +428,7 @@ type recoveryCriteria struct {
 	MinimumSamples int
 	P95CeilingUS   int64
 	P99CeilingUS   int64
+	LatencyView    string
 }
 
 func validateBinary(args []string) error {
@@ -981,6 +991,9 @@ func validateManifestExecutionContract(contract manifestExecutionContract) error
 	}
 	if contract.Recovery != recoveryAssessmentMode && (!strings.HasPrefix(contract.Recovery, recoveryAssessmentMode) || !strings.Contains(contract.Recovery, "no capacity conclusion")) {
 		return fmt.Errorf("recovery contract must preserve %q and the no-capacity-conclusion clause, got %q", recoveryAssessmentMode, contract.Recovery)
+	}
+	if contract.RecoveryLatencyView != latencyViewDispatchToFinish {
+		return fmt.Errorf("recovery latency view must be %q, got %q", latencyViewDispatchToFinish, contract.RecoveryLatencyView)
 	}
 	return nil
 }
@@ -2452,17 +2465,18 @@ func verifyContinuousCommand(args []string) error {
 	minimumSamples := fs.Int("minimum-samples", 0, "minimum correct latency samples in reference and recovery")
 	p95Ceiling := fs.Int64("p95-ceiling-us", 0, "frozen recovery p95 ceiling")
 	p99Ceiling := fs.Int64("p99-ceiling-us", 0, "frozen recovery p99 ceiling")
+	latencyView := fs.String("latency-view", latencyViewPlannedSlotToFinish, "latency view used by the terminal health gate")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *stagePath == "" || *runID == "" || *minimumSamples <= 0 || *p95Ceiling <= 0 || *p99Ceiling < *p95Ceiling {
+	if *stagePath == "" || *runID == "" || *minimumSamples <= 0 || *p95Ceiling <= 0 || *p99Ceiling < *p95Ceiling || !validRecoveryLatencyView(*latencyView) {
 		return errors.New("verify-continuous requires stage-result, run-id, minimum-samples, and valid p95/p99 ceilings")
 	}
 	stages, err := readStageResults(*stagePath, *runID)
 	if err != nil {
 		return err
 	}
-	criteria := recoveryCriteria{MinimumSamples: *minimumSamples, P95CeilingUS: *p95Ceiling, P99CeilingUS: *p99Ceiling}
+	criteria := recoveryCriteria{MinimumSamples: *minimumSamples, P95CeilingUS: *p95Ceiling, P99CeilingUS: *p99Ceiling, LatencyView: *latencyView}
 	assessment, err := assessServiceRecovery(stages, criteria)
 	fmt.Fprintf(os.Stdout, "status=%s\nmode=%s\nreason=%s\n", assessment.Status, assessment.Mode, assessment.Reason)
 	return err
@@ -2517,6 +2531,13 @@ func verifyContinuousStages(stages []stageResult, criteria recoveryCriteria) err
 	if criteria.MinimumSamples <= 0 || criteria.P95CeilingUS <= 0 || criteria.P99CeilingUS < criteria.P95CeilingUS {
 		return errors.New("recovery criteria are invalid")
 	}
+	latencyView := criteria.LatencyView
+	if latencyView == "" {
+		latencyView = latencyViewPlannedSlotToFinish
+	}
+	if !validRecoveryLatencyView(latencyView) {
+		return fmt.Errorf("recovery latency view is invalid: %q", latencyView)
+	}
 	first := stages[0]
 	if first.RunID == "" || first.FixtureSessionID == "" || first.SUTPID <= 0 || first.SUTStartIdentity == "" || first.SUTCPUSet == "" || first.HarnessPID <= 0 || first.HarnessCPUSet == "" {
 		return errors.New("continuous session lacks run, fixture, process-start, or observed CPU-affinity identity")
@@ -2567,20 +2588,38 @@ func verifyContinuousStages(stages []stageResult, criteria recoveryCriteria) err
 		if hasStageFailure(stage.Counters) || stage.Counters.CorrectOnTime != stage.Counters.Scheduled || stage.Counters.CorrectOnTime != stage.Counters.Sent || stage.Counters.CorrectOnTime != stage.Counters.Received {
 			return fmt.Errorf("stage %s is not fully correct-on-time: %+v", stage.Stage, stage.Counters)
 		}
-		if len(stage.LatencySamplesUS) < criteria.MinimumSamples {
-			return fmt.Errorf("stage %s has %d latency samples, minimum is %d", stage.Stage, len(stage.LatencySamplesUS), criteria.MinimumSamples)
+		samples, reportedP95, reportedP99, err := recoveryLatencySummary(stage, latencyView)
+		if err != nil {
+			return err
 		}
-		samples := append([]int64(nil), stage.LatencySamplesUS...)
+		if len(samples) < criteria.MinimumSamples {
+			return fmt.Errorf("stage %s has %d %s latency samples, minimum is %d", stage.Stage, len(samples), latencyView, criteria.MinimumSamples)
+		}
+		samples = append([]int64(nil), samples...)
 		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 		p95, p99 := percentile(samples, .95), percentile(samples, .99)
-		if stage.P95US != p95 || stage.P99US != p99 {
-			return fmt.Errorf("stage %s percentile summaries do not match latency samples", stage.Stage)
+		if reportedP95 != p95 || reportedP99 != p99 {
+			return fmt.Errorf("stage %s %s percentile summaries do not match latency samples", stage.Stage, latencyView)
 		}
 		if p95 > criteria.P95CeilingUS || p99 > criteria.P99CeilingUS {
-			return fmt.Errorf("stage %s exceeds frozen recovery latency band: p95=%d/%d p99=%d/%d", stage.Stage, p95, criteria.P95CeilingUS, p99, criteria.P99CeilingUS)
+			return fmt.Errorf("stage %s exceeds frozen recovery latency band (%s): p95=%d/%d p99=%d/%d", stage.Stage, latencyView, p95, criteria.P95CeilingUS, p99, criteria.P99CeilingUS)
 		}
 	}
 	return nil
+}
+
+func validRecoveryLatencyView(view string) bool {
+	return view == latencyViewPlannedSlotToFinish || view == latencyViewDispatchToFinish
+}
+
+func recoveryLatencySummary(stage stageResult, view string) ([]int64, int64, int64, error) {
+	if view == latencyViewPlannedSlotToFinish {
+		return stage.LatencySamplesUS, stage.P95US, stage.P99US, nil
+	}
+	if stage.HealthLatencyView != view {
+		return nil, 0, 0, fmt.Errorf("stage %s lacks the required %s health latency view", stage.Stage, view)
+	}
+	return stage.HealthLatencySamplesUS, stage.HealthP95US, stage.HealthP99US, nil
 }
 
 func verifyStageCommand(args []string) error {
