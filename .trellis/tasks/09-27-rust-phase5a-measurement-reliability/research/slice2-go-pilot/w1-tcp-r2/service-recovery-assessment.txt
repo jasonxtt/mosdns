@@ -1,0 +1,3 @@
+status=indeterminate
+mode=indeterminate-no-overload-evidence
+reason=the frozen ladder has no objective overload-evidence criterion; the final same-rate stage is a post-sequence health check, not proof of recovery

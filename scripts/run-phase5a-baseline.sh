@@ -29,6 +29,17 @@ RECOVERY_MINIMUM_SAMPLES="${RECOVERY_MINIMUM_SAMPLES:-}"
 RECOVERY_P95_CEILING_US="${RECOVERY_P95_CEILING_US:-}"
 RECOVERY_P99_CEILING_US="${RECOVERY_P99_CEILING_US:-}"
 MEASUREMENT_PROFILE="${PHASE5A_MEASUREMENT_PROFILE:-legacy}"
+RELIABILITY_WORKERS="${RELIABILITY_WORKERS:-256}"
+RELIABILITY_IN_FLIGHT="${RELIABILITY_IN_FLIGHT:-256}"
+RELIABILITY_DISPATCH_QUEUE="${RELIABILITY_DISPATCH_QUEUE:-512}"
+RELIABILITY_EVIDENCE_QUEUE="${RELIABILITY_EVIDENCE_QUEUE:-512}"
+RELIABILITY_RECORD_BYTES="${RELIABILITY_RECORD_BYTES:-65536}"
+RELIABILITY_CLEANUP_TIMEOUT_MS="${RELIABILITY_CLEANUP_TIMEOUT_MS:-1000}"
+OFFICIAL_TASK_FD_CEILING=512
+OFFICIAL_ROLE_RSS_CEILING_KIB=$((256 * 1024))
+OFFICIAL_COMBINED_HARNESS_FIXTURE_RSS_CEILING_KIB=$((768 * 1024))
+OFFICIAL_MIN_FREE_DISK_KIB=$((1024 * 1024))
+OFFICIAL_MAX_ATTEMPT_SIZE_KIB=$((512 * 1024))
 case "${MEASUREMENT_PROFILE}" in
   legacy) ;;
   m2|m3|m4)
@@ -137,6 +148,10 @@ if [[ "${RUN_MODE}" != "smoke" ]]; then
     tmpfs|ramfs|"") echo "pilot/official RESULT_DIR must use a disk-backed filesystem (found ${result_fs:-unknown})" >&2; exit 2 ;;
   esac
 fi
+if [[ "${RUN_MODE}" == "official" && -n "$(find "${RESULT_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  echo "official RESULT_DIR must be a new empty attempt root: ${RESULT_DIR}" >&2
+  exit 2
+fi
 TMP_DIR="$(mktemp -d "${RESULT_DIR}/.run.XXXXXX")"
 CONFIG_DIR="${ROOT_DIR}/tests/phase5a-baseline/configs"
 WORKLOAD_DIR="${ROOT_DIR}/tests/phase5a-baseline/workloads"
@@ -185,12 +200,12 @@ fi
 HELPER_BINARY="$(cd "$(dirname "${HELPER_BINARY}")" && pwd)/$(basename "${HELPER_BINARY}")"
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   helper_version="$("${HELPER_BINARY}" version)"
-  if [[ "${helper_version}" != "phase5a-baseline-helper/v8" && "${helper_version}" != "phase5a-baseline-helper/v9" ]]; then
+  if [[ "${helper_version}" != "phase5a-baseline-helper/v8" && "${helper_version}" != "phase5a-baseline-helper/v9" && "${helper_version}" != "phase5a-baseline-helper/v10" ]]; then
     echo "unsupported helper version: ${helper_version}" >&2
     exit 2
   fi
-  if [[ "${MEASUREMENT_PROFILE}" != legacy && "${helper_version}" != "phase5a-baseline-helper/v9" ]]; then
-    echo "${MEASUREMENT_PROFILE} measurement requires helper v9" >&2
+  if [[ "${MEASUREMENT_PROFILE}" != legacy && "${helper_version}" != "phase5a-baseline-helper/v10" ]]; then
+    echo "${MEASUREMENT_PROFILE} measurement requires helper v10" >&2
     exit 2
   fi
 fi
@@ -299,6 +314,22 @@ if [[ "${RUN_MODE}" == "official" ]]; then
   manifest_args=(verify-manifest --manifest "${MANIFEST}" --sha256 "${MANIFEST_SHA256}" --repo-root "${ROOT_DIR}" --helper "${HELPER_BINARY}" --runner "${ROOT_DIR}/scripts/run-phase5a-baseline.sh" --sut "${MOSDNS_BINARY}" --candidate "${CANDIDATE}" --scenario "${SCENARIO}" --repetition "${REPETITION}" --position "${PAIR_POSITION}" --stage-duration-ms "${STAGE_DURATION_MS}" --normal-reference-qps "${NORMAL_REFERENCE_QPS}" --common-load-qps "${COMMON_LOAD_QPS}" --near-saturation-qps "${NEAR_SATURATION_QPS}" --overload-qps "${OVERLOAD_QPS}" --deadline-ms "${REQUEST_DEADLINE_MS}" --late-drain-ms "${LATE_DRAIN_MS}" --w2-cache-ttl-ms "${W2_CACHE_TTL_MS}" --w2-ttl-safety-margin-ms "${W2_TTL_SAFETY_MARGIN_MS}" --recovery-minimum-samples "${RECOVERY_MINIMUM_SAMPLES}" --recovery-p95-ceiling-us "${RECOVERY_P95_CEILING_US}" --recovery-p99-ceiling-us "${RECOVERY_P99_CEILING_US}" --w2-warm-lifecycle "${W2_WARM_LIFECYCLE}" --harness-cpu-set "${HARNESS_CPU_SET}" --sut-cpu-set "${SUT_CPU_SET}" --host-alias "${TEST_HOST_ALIAS}" --rust-toolchain "${RUST_TOOLCHAIN_VERSION}")
   "${HELPER_BINARY}" "${manifest_args[@]}"
   printf '%s  %s\n' "${actual_manifest_sha256}" "${MANIFEST}" > "${RESULT_DIR}/manifest.sha256"
+  if ! ulimit -n "${OFFICIAL_TASK_FD_CEILING}"; then
+    echo "could not enforce official task FD ceiling" >&2
+    exit 2
+  fi
+  if [[ "$(ulimit -n)" -gt "${OFFICIAL_TASK_FD_CEILING}" ]]; then
+    echo "official task FD ceiling is not active: $(ulimit -n)" >&2
+    exit 2
+  fi
+  # These are frozen execution-contract values; an environment override must
+  # never silently change the official sender/evidence envelope.
+  RELIABILITY_WORKERS=256
+  RELIABILITY_IN_FLIGHT=256
+  RELIABILITY_DISPATCH_QUEUE=512
+  RELIABILITY_EVIDENCE_QUEUE=512
+  RELIABILITY_RECORD_BYTES=32768
+  RELIABILITY_CLEANUP_TIMEOUT_MS=1000
 fi
 
 "${HELPER_BINARY}" validate-binary --path "${MOSDNS_BINARY}" > "${RESULT_DIR}/sut.json"
@@ -448,6 +479,52 @@ verify_sender_schedule() {
   "${HELPER_BINARY}" verify-sender --stage-result "${stage_dir}/stages.jsonl" --stage "${stage_name}"
 }
 
+workload_case_count() {
+  awk -v wanted_scenario="${workload_scenario}" -v wanted_transport="${TRANSPORT}" '
+    index($0, "\"scenario\":\"" wanted_scenario "\"") && index($0, "\"transport\":\"" wanted_transport "\"") {
+      if (match($0, /"weight":[0-9]+/)) {
+        count += substr($0, RSTART + 9, RLENGTH - 9)
+      }
+    }
+    END { print count + 0 }
+  ' "${WORKLOAD}"
+}
+
+stage_slot_count() {
+  awk -v qps="$1" -v duration_ms="${STAGE_DURATION_MS}" 'BEGIN { slots = int((qps * duration_ms + 999.999999) / 1000); if (slots < 1) slots = 1; print slots }'
+}
+
+verify_reliability_assessment() {
+  local raw_path="$1" output_dir="$2"
+  "${HELPER_BINARY}" reliability-assess --raw "${raw_path}" --output "${output_dir}" \
+    --require-evidence-valid --require-load-valid --require-correctness-valid
+}
+
+verify_resource_budget() {
+  local raw_dir="$1"
+  "${HELPER_BINARY}" verify-resource-budgets --samples "${raw_dir}/resource-samples.jsonl" \
+    --max-role-rss-kib "${OFFICIAL_ROLE_RSS_CEILING_KIB}" \
+    --max-combined-harness-fixture-rss-kib "${OFFICIAL_COMBINED_HARNESS_FIXTURE_RSS_CEILING_KIB}" \
+    --max-fds "${OFFICIAL_TASK_FD_CEILING}"
+}
+
+verify_official_budgets() {
+  if [[ "${RUN_MODE}" != "official" ]]; then
+    return 0
+  fi
+  local free_kib attempt_kib
+  free_kib="$(df -Pk "${RESULT_DIR}" | awk 'NR == 2 { print $4 }')"
+  if [[ -z "${free_kib}" || "${free_kib}" -lt "${OFFICIAL_MIN_FREE_DISK_KIB}" ]]; then
+    echo "official minimum free disk budget violated: ${free_kib:-unknown} KiB" >&2
+    return 1
+  fi
+  attempt_kib="$(du -sk "${RESULT_DIR}" | awk '{ print $1 }')"
+  if [[ -z "${attempt_kib}" || "${attempt_kib}" -gt "${OFFICIAL_MAX_ATTEMPT_SIZE_KIB}" ]]; then
+    echo "official attempt size budget violated: ${attempt_kib:-unknown} KiB" >&2
+    return 1
+  fi
+}
+
 workload_scenario="w3"
 if [[ "${SCENARIO}" == w1-* ]]; then
   workload_scenario="w1"
@@ -485,35 +562,56 @@ record_invalid() {
 
 run_one_stage() {
   local stage_name="$1" stage_qps="$2" stage_dir="$3" ledger_path="$4" one_pass="$5" stage_mode="$6"
-  local baseline="" counter="" upstream="" spec
+  local baseline="" counter="" upstream="" spec stage_valid=1 raw_stage_dir slots
   mkdir -p "${stage_dir}"
   if [[ "${SCENARIO}" != "w3" ]]; then
     IFS='|' read -r _ _ upstream counter <<<"${FIXTURE_SPECS[0]}"
     baseline="${TMP_DIR}/counter-before-${stage_name}.json"
     cp "${counter}" "${baseline}"
   fi
-  local run_args=(run --workload "${WORKLOAD}" --scenario "${workload_scenario}" --transport "${TRANSPORT}" --addr "${SUT_ADDR}" --stage "${stage_name}" --qps "${stage_qps}" --duration "${STAGE_DURATION_MS}ms" --deadline "${REQUEST_DEADLINE_MS}ms" --late-drain "${LATE_DRAIN_MS}ms" --run-id "${SESSION_RUN_ID}" --fixture-session-id "${SESSION_FIXTURE_ID}" --result "${stage_dir}" --sut-pid "${SUT_PID}" --request-ledger "${ledger_path}")
+  raw_stage_dir="${stage_dir}/reliability/${stage_name}"
+  if [[ "${one_pass}" == "true" ]]; then
+    slots="$(workload_case_count)"
+  else
+    slots="$(stage_slot_count "${stage_qps}")"
+  fi
+  local run_args=(reliability-run --workload "${WORKLOAD}" --scenario "${workload_scenario}" --transport "${TRANSPORT}" --addr "${SUT_ADDR}" --stage "${stage_name}" --stage-duration-ms "${STAGE_DURATION_MS}" --stage-output "${stage_dir}" --target-qps "${stage_qps}" --slots "${slots}" --request-deadline-ms "${REQUEST_DEADLINE_MS}" --late-drain-ms "${LATE_DRAIN_MS}" --run-id "${SESSION_RUN_ID}" --fixture-session-id "${SESSION_FIXTURE_ID}" --result "${raw_stage_dir}" --sut-pid "${SUT_PID}" --request-ledger "${ledger_path}" --workers "${RELIABILITY_WORKERS}" --in-flight "${RELIABILITY_IN_FLIGHT}" --dispatch-queue "${RELIABILITY_DISPATCH_QUEUE}" --evidence-queue "${RELIABILITY_EVIDENCE_QUEUE}" --record-bytes "${RELIABILITY_RECORD_BYTES}" --cleanup-timeout-ms "${RELIABILITY_CLEANUP_TIMEOUT_MS}")
   if [[ -n "${FIXTURE_EVENT_JOURNAL}" ]]; then
     run_args+=(--event-journal "${FIXTURE_EVENT_JOURNAL}")
   fi
-  if [[ "${one_pass}" == "true" ]]; then
-    run_args+=(--one-pass --fail-on-error)
-  fi
+  # Reliability slot count above is the complete one-pass/continuous contract.
   for fixture_pid in "${FIXTURE_PIDS[@]}"; do
     run_args+=(--fixture-pid "${fixture_pid}")
   done
   if ! "${HELPER_BINARY}" "${run_args[@]}"; then
     record_invalid "${stage_name}" "load helper failed"
-    return 0
+    stop_sut
+    stop_fixtures
+    return 1
+  fi
+  if ! verify_reliability_assessment "${raw_stage_dir}/reliability-raw.json" "${stage_dir}/reliability-assessment-${stage_name}"; then
+    record_invalid "${stage_name}" "reliability evidence/load/correctness assessment failed"
+    stage_valid=0
+  fi
+  if ! verify_resource_budget "${raw_stage_dir}"; then
+    record_invalid "${stage_name}" "resource budget exceeded or resource evidence missing"
+    stage_valid=0
+  fi
+  if ! verify_official_budgets; then
+    record_invalid "${stage_name}" "official disk/attempt budget exceeded"
+    stage_valid=0
   fi
   if ! verify_sample_coverage "${stage_dir}" "${stage_name}"; then
     record_invalid "${stage_name}" "missing SUT/load-generator/fixture resource samples"
+    stage_valid=0
   fi
   if ! verify_sender_schedule "${stage_dir}" "${stage_name}"; then
     record_invalid "${stage_name}" "sender shortfall or scheduled query not sent"
+    stage_valid=0
   fi
   if [[ "${stage_mode}" == "cold" ]] && ! "${HELPER_BINARY}" verify-stage --stage-result "${stage_dir}/stages.jsonl" --stage "${stage_name}"; then
     record_invalid "${stage_name}" "cold stage correctness gate failed"
+    stage_valid=0
   fi
   if [[ -n "${counter}" ]]; then
     local expected_delta="true"
@@ -526,6 +624,7 @@ run_one_stage() {
         printf '%s\t%s\n' "${stage_name}" "fixture counter delta mismatch" >> "${RESULT_DIR}/w2-continuous-warm-issues.tsv"
       else
         record_invalid "${stage_name}" "fixture counter delta mismatch"
+        stage_valid=0
       fi
     fi
   fi
@@ -533,10 +632,17 @@ run_one_stage() {
     if ! "${HELPER_BINARY}" verify-routing-events --workload "${WORKLOAD}" --request-ledger "${ledger_path}" \
       --event-journal "${FIXTURE_EVENT_JOURNAL}" --stage-result "${stage_dir}/stages.jsonl" --stage "${stage_name}"; then
       record_invalid "${stage_name}" "per-request route event verification failed"
+      stage_valid=0
     fi
   fi
   if ! kill -0 "${SUT_PID}" 2>/dev/null; then
     record_invalid "${stage_name}" "SUT process exited during stage"
+    stage_valid=0
+  fi
+  if [[ "${stage_valid}" -eq 0 && "${RUN_MODE}" != "smoke" ]]; then
+    stop_sut
+    stop_fixtures
+    return 1
   fi
 }
 
@@ -545,7 +651,9 @@ run_continuous_sequence() {
   local stage_spec stage stage_qps
   while IFS= read -r stage_spec; do
     stage="${stage_spec%%:*}"; stage_qps="${stage_spec#*:}"
-    run_one_stage "${stage}" "${stage_qps}" "${stage_dir}" "${ledger_path}" "${use_one_pass}" warm
+    if ! run_one_stage "${stage}" "${stage_qps}" "${stage_dir}" "${ledger_path}" "${use_one_pass}" warm; then
+      return 1
+    fi
     use_one_pass=false
   done < <(measurement_stage_specs)
   if primary_only_profile; then
@@ -578,29 +686,48 @@ run_w2_independent_points() {
     IFS='|' read -r _ _ _ CACHE_COUNTER <<<"${FIXTURE_SPECS[0]}"
     prefill_before="${TMP_DIR}/w2-independent-${stage}-before.json"
     cp "${CACHE_COUNTER}" "${prefill_before}"
-    local prefill_args=(run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" --stage warm-prefill --qps "${NORMAL_REFERENCE_QPS}" --duration "${STAGE_DURATION_MS}ms" --deadline "${REQUEST_DEADLINE_MS}ms" --late-drain "${LATE_DRAIN_MS}ms" --run-id "${SESSION_RUN_ID}" --fixture-session-id "${SESSION_FIXTURE_ID}" --one-pass --fail-on-error --result "${prefill_dir}" --sut-pid "${SUT_PID}" --request-ledger "${ledger_path}")
+    local prefill_raw_dir="${prefill_dir}/reliability/warm-prefill" prefill_valid=1
+    local prefill_args=(reliability-run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" --stage warm-prefill --stage-duration-ms "${STAGE_DURATION_MS}" --stage-output "${prefill_dir}" --target-qps "${NORMAL_REFERENCE_QPS}" --slots "$(workload_case_count)" --request-deadline-ms "${REQUEST_DEADLINE_MS}" --late-drain-ms "${LATE_DRAIN_MS}" --run-id "${SESSION_RUN_ID}" --fixture-session-id "${SESSION_FIXTURE_ID}" --result "${prefill_raw_dir}" --sut-pid "${SUT_PID}" --request-ledger "${ledger_path}" --workers "${RELIABILITY_WORKERS}" --in-flight "${RELIABILITY_IN_FLIGHT}" --dispatch-queue "${RELIABILITY_DISPATCH_QUEUE}" --evidence-queue "${RELIABILITY_EVIDENCE_QUEUE}" --record-bytes "${RELIABILITY_RECORD_BYTES}" --cleanup-timeout-ms "${RELIABILITY_CLEANUP_TIMEOUT_MS}")
     for fixture_pid in "${FIXTURE_PIDS[@]}"; do
       prefill_args+=(--fixture-pid "${fixture_pid}")
     done
     if ! "${HELPER_BINARY}" "${prefill_args[@]}"; then
       record_invalid "${stage}-prefill" "independent warm prefill failed"
+      prefill_valid=0
+    elif ! verify_reliability_assessment "${prefill_raw_dir}/reliability-raw.json" "${prefill_dir}/reliability-assessment-warm-prefill"; then
+      record_invalid "${stage}-prefill" "independent warm prefill reliability assessment failed"
+      prefill_valid=0
+    elif ! verify_resource_budget "${prefill_raw_dir}"; then
+      record_invalid "${stage}-prefill" "independent warm prefill resource budget failed"
+      prefill_valid=0
     elif ! verify_sample_coverage "${prefill_dir}" warm-prefill; then
       record_invalid "${stage}-prefill" "missing SUT/load-generator/fixture resource samples"
+      prefill_valid=0
     elif ! verify_counter_delta "${CACHE_COUNTER}" "${prefill_before}" w2 "${prefill_dir}" warm-prefill true; then
       record_invalid "${stage}-prefill" "independent warm prefill counter delta mismatch"
+      prefill_valid=0
+    fi
+    if [[ "${prefill_valid}" -eq 0 ]]; then
+      stop_sut
+      stop_fixtures
+      return 1
     fi
     prefill_after="${TMP_DIR}/w2-independent-${stage}-prefilled.json"
     cp "${CACHE_COUNTER}" "${prefill_after}"
-    run_one_stage "${stage}" "${stage_qps}" "${stage_dir}" "${ledger_path}" false independent
+    if ! run_one_stage "${stage}" "${stage_qps}" "${stage_dir}" "${ledger_path}" false independent; then
+      return 1
+    fi
     stop_sut
     stop_fixtures
     copy_fixture_counters "${stage_dir}"
     if ! "${HELPER_BINARY}" verify-counters --scenario w2 --workload "${WORKLOAD}" --counter "${stage_dir}/fixture-cache.json" --baseline "${prefill_after}"; then
       record_invalid "${stage}" "final independent warm counter delta mismatch"
+      return 1
     fi
     if ! "${HELPER_BINARY}" verify-warm-ttl --workload "${WORKLOAD}" --request-ledger "${ledger_path}" \
       --prefill-stage warm-prefill --warm-stage "${stage}" --ttl "${W2_CACHE_TTL}" --safety-margin "${W2_TTL_SAFETY_MARGIN}"; then
       record_invalid "${stage}" "independent W2 warm point exceeded per-key TTL or correctness gate"
+      return 1
     fi
   done < <(measurement_stage_specs)
 }
@@ -616,17 +743,22 @@ if [[ "${SCENARIO}" == "w2" ]]; then
   SESSION_FIXTURE_ID="${FIXTURE_SESSION_ID}-cold"
   start_sut
   if [[ "${RUN_MODE}" == "smoke" ]]; then COLD_ONE_PASS=true; else COLD_ONE_PASS=false; fi
-  run_one_stage "${RUN_MODE}-w2-cold" "${NORMAL_REFERENCE_QPS}" "${COLD_DIR}" "${COLD_DIR}/requests.jsonl" "${COLD_ONE_PASS}" cold
+  if ! run_one_stage "${RUN_MODE}-w2-cold" "${NORMAL_REFERENCE_QPS}" "${COLD_DIR}" "${COLD_DIR}/requests.jsonl" "${COLD_ONE_PASS}" cold; then
+    exit 1
+  fi
   stop_sut
   stop_fixtures
   copy_fixture_counters "${COLD_DIR}"
   if ! "${HELPER_BINARY}" verify-session-counters --scenario w2 --workload "${WORKLOAD}" --counter "${COLD_DIR}/fixture-cache.json" \
     --stage-result "${COLD_DIR}/stages.jsonl" --run-id "${SESSION_RUN_ID}"; then
     record_invalid w2-cold "final cold session counters mismatch"
+    exit 1
   fi
 
 if [[ "${RUN_MODE}" != "smoke" && "${W2_WARM_LIFECYCLE}" == "independent-prefilled" ]]; then
-    run_w2_independent_points
+    if ! run_w2_independent_points; then
+      exit 1
+    fi
   else
     start_fixtures
     SESSION_RUN_ID="${RUN_ID}-w2-warm"
@@ -635,26 +767,47 @@ if [[ "${RUN_MODE}" != "smoke" && "${W2_WARM_LIFECYCLE}" == "independent-prefill
     PREFILL_DIR="${WARM_DIR}/prefill"
     mkdir -p "${PREFILL_DIR}"
     cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-before-counter.json"
-    PREFILL_ARGS=(run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" --stage warm-prefill --qps "${NORMAL_REFERENCE_QPS}" --duration "${STAGE_DURATION_MS}ms" --deadline "${REQUEST_DEADLINE_MS}ms" --late-drain "${LATE_DRAIN_MS}ms" --run-id "${SESSION_RUN_ID}" --fixture-session-id "${SESSION_FIXTURE_ID}" --one-pass --fail-on-error --result "${PREFILL_DIR}" --sut-pid "${SUT_PID}" --request-ledger "${WARM_DIR}/requests.jsonl")
+    PREFILL_RAW_DIR="${PREFILL_DIR}/reliability/warm-prefill"
+    PREFILL_ARGS=(reliability-run --workload "${WORKLOAD}" --scenario w2 --transport udp --addr "${SUT_ADDR}" --stage warm-prefill --stage-duration-ms "${STAGE_DURATION_MS}" --stage-output "${PREFILL_DIR}" --target-qps "${NORMAL_REFERENCE_QPS}" --slots "$(workload_case_count)" --request-deadline-ms "${REQUEST_DEADLINE_MS}" --late-drain-ms "${LATE_DRAIN_MS}" --run-id "${SESSION_RUN_ID}" --fixture-session-id "${SESSION_FIXTURE_ID}" --result "${PREFILL_RAW_DIR}" --sut-pid "${SUT_PID}" --request-ledger "${WARM_DIR}/requests.jsonl" --workers "${RELIABILITY_WORKERS}" --in-flight "${RELIABILITY_IN_FLIGHT}" --dispatch-queue "${RELIABILITY_DISPATCH_QUEUE}" --evidence-queue "${RELIABILITY_EVIDENCE_QUEUE}" --record-bytes "${RELIABILITY_RECORD_BYTES}" --cleanup-timeout-ms "${RELIABILITY_CLEANUP_TIMEOUT_MS}")
     for fixture_pid in "${FIXTURE_PIDS[@]}"; do
       PREFILL_ARGS+=(--fixture-pid "${fixture_pid}")
     done
+    PREFILL_VALID=1
     if ! "${HELPER_BINARY}" "${PREFILL_ARGS[@]}"; then
       record_invalid warm-prefill "prefill helper failed"
+      PREFILL_VALID=0
+    elif ! verify_reliability_assessment "${PREFILL_RAW_DIR}/reliability-raw.json" "${PREFILL_DIR}/reliability-assessment-warm-prefill"; then
+      record_invalid warm-prefill "prefill reliability evidence/load/correctness assessment failed"
+      PREFILL_VALID=0
+    elif ! verify_resource_budget "${PREFILL_RAW_DIR}"; then
+      record_invalid warm-prefill "prefill resource budget exceeded or evidence missing"
+      PREFILL_VALID=0
     elif ! verify_sample_coverage "${PREFILL_DIR}" warm-prefill; then
       record_invalid warm-prefill "missing SUT/load-generator/fixture resource samples"
+      PREFILL_VALID=0
     elif ! "${HELPER_BINARY}" verify-stage --stage-result "${PREFILL_DIR}/stages.jsonl" --stage warm-prefill; then
       record_invalid warm-prefill "prefill correctness gate failed"
+      PREFILL_VALID=0
     elif ! verify_counter_delta "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-before-counter.json" w2 "${PREFILL_DIR}" warm-prefill true; then
       record_invalid warm-prefill "prefill upstream delta mismatch"
+      PREFILL_VALID=0
+    fi
+    if [[ "${PREFILL_VALID}" -eq 0 ]]; then
+      stop_sut
+      stop_fixtures
+      exit 1
     fi
     cp "${CACHE_COUNTER}" "${TMP_DIR}/w2-prefill-counter.json"
 
     SESSION_RUN_ID="${RUN_ID}-w2-warm"
     if [[ "${RUN_MODE}" == "smoke" ]]; then
-      run_one_stage "${RUN_MODE}-w2-warm" "${NORMAL_REFERENCE_QPS}" "${WARM_DIR}" "${WARM_DIR}/requests.jsonl" true warm
+      if ! run_one_stage "${RUN_MODE}-w2-warm" "${NORMAL_REFERENCE_QPS}" "${WARM_DIR}" "${WARM_DIR}/requests.jsonl" true warm; then
+        exit 1
+      fi
     else
-      run_continuous_sequence "${WARM_DIR}" "${WARM_DIR}/requests.jsonl" false
+      if ! run_continuous_sequence "${WARM_DIR}" "${WARM_DIR}/requests.jsonl" false; then
+        exit 1
+      fi
     fi
     stop_sut
     stop_fixtures
@@ -689,9 +842,13 @@ else
   start_sut
   LEDGER_PATH="${RESULT_DIR}/requests.jsonl"
   if [[ "${RUN_MODE}" == "smoke" ]]; then
-    run_one_stage "${RUN_MODE}-${SCENARIO}" "${NORMAL_REFERENCE_QPS}" "${RESULT_DIR}" "${LEDGER_PATH}" true measured
+    if ! run_one_stage "${RUN_MODE}-${SCENARIO}" "${NORMAL_REFERENCE_QPS}" "${RESULT_DIR}" "${LEDGER_PATH}" true measured; then
+      exit 1
+    fi
   else
-    run_continuous_sequence "${RESULT_DIR}" "${LEDGER_PATH}" false
+    if ! run_continuous_sequence "${RESULT_DIR}" "${LEDGER_PATH}" false; then
+      exit 1
+    fi
   fi
   stop_sut
 fi
@@ -721,6 +878,7 @@ printf '%s\n' "scenario=${SCENARIO}" "run_mode=${RUN_MODE}" "config=${SCENARIO_C
 printf '%s\n' "run_id=${RUN_ID}" "fixture_session_id=${FIXTURE_SESSION_ID}" "candidate=${CANDIDATE}" "repetition=${REPETITION}" "pair_position=${PAIR_POSITION}" >> "${RESULT_DIR}/run-metadata.txt"
 printf '%s\n' "stage_duration_ms=${STAGE_DURATION_MS}" "normal_reference_qps=${NORMAL_REFERENCE_QPS}" "common_load_qps=${COMMON_LOAD_QPS}" "near_saturation_qps=${NEAR_SATURATION_QPS}" "overload_qps=${OVERLOAD_QPS}" >> "${RESULT_DIR}/run-metadata.txt"
 printf '%s\n' "request_deadline_ms=${REQUEST_DEADLINE_MS}" "late_drain_ms=${LATE_DRAIN_MS}" "sut_cpu_set=${SUT_CPU_SET}" "harness_cpu_set=${HARNESS_CPU_SET}" "sut_startup_margin=${SUT_STARTUP_MARGIN}" >> "${RESULT_DIR}/run-metadata.txt"
+printf '%s\n' "reliability_protocol=phase5a-reliability-v1" "reliability_workers=${RELIABILITY_WORKERS}" "reliability_in_flight=${RELIABILITY_IN_FLIGHT}" "reliability_dispatch_queue=${RELIABILITY_DISPATCH_QUEUE}" "reliability_evidence_queue=${RELIABILITY_EVIDENCE_QUEUE}" "reliability_record_bytes=${RELIABILITY_RECORD_BYTES}" >> "${RESULT_DIR}/run-metadata.txt"
 if [[ "${RUN_MODE}" != "smoke" ]]; then
   {
     printf 'measurement_profile=%s\ngomaxprocs_environment=%s\n' "${MEASUREMENT_PROFILE}" "${GOMAXPROCS:-unset}"

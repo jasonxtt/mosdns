@@ -1,0 +1,10 @@
+kernel=Linux mosdns-rust 7.0.9-x64v3-xanmod1 #0~20260517.ga456799 SMP PREEMPT_DYNAMIC Sun May 17 20:10:49 UTC x86_64 GNU/Linux
+hostname=mosdns-rust
+online_cpus=2
+open_file_limit=1024
+ephemeral_port_range=32768	60999
+tcp_tw_reuse=2
+tcp_fin_timeout=60
+go_version=go version go1.24.4 linux/amd64
+gomaxprocs=1
+fixture_pid_anchor=363210

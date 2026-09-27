@@ -1,0 +1,18 @@
+2026-09-27T00:14:47.723Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-27T00:14:47.724Z	INFO	main config base directory set	{"path": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs"}
+2026-09-27T00:14:47.724Z	INFO	main config loaded	{"file": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs/cache.yaml"}
+2026-09-27T00:14:52.404Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-27T00:14:52.404Z	INFO	main config base directory set	{"path": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs"}
+2026-09-27T00:14:52.404Z	INFO	main config loaded	{"file": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs/cache.yaml"}
+2026-09-27T00:14:57.751Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-27T00:14:57.752Z	INFO	main config base directory set	{"path": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs"}
+2026-09-27T00:14:57.752Z	INFO	main config loaded	{"file": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs/cache.yaml"}
+2026-09-27T00:15:03.108Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-27T00:15:03.108Z	INFO	main config base directory set	{"path": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs"}
+2026-09-27T00:15:03.108Z	INFO	main config loaded	{"file": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs/cache.yaml"}
+2026-09-27T00:15:08.474Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-27T00:15:08.475Z	INFO	main config base directory set	{"path": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs"}
+2026-09-27T00:15:08.475Z	INFO	main config loaded	{"file": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs/cache.yaml"}
+2026-09-27T00:15:13.820Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-09-27T00:15:13.820Z	INFO	main config base directory set	{"path": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs"}
+2026-09-27T00:15:13.820Z	INFO	main config loaded	{"file": "/root/mosdns-rust-phase5a-measurement-reliability-20260927/runner/tests/phase5a-baseline/configs/cache.yaml"}
