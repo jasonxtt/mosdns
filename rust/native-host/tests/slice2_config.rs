@@ -61,6 +61,9 @@ fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
         .expect("compiled W2 machine");
     let first = match machine.step().expect("cache dispatch") {
         MachineStep::Dispatch(dispatch) => dispatch,
+        MachineStep::ScopeComplete(completion) => {
+            panic!("unwatched machine yielded {completion:?}")
+        }
         MachineStep::Complete(_) => panic!("W2 cache must dispatch first"),
     };
     assert_eq!(first.executable(), cache.executable);
@@ -69,48 +72,107 @@ fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
         .expect("forward dispatch")
     {
         MachineStep::Dispatch(dispatch) => dispatch,
+        MachineStep::ScopeComplete(completion) => {
+            panic!("unwatched machine yielded {completion:?}")
+        }
         MachineStep::Complete(_) => panic!("W2 forward must dispatch second"),
     };
     assert_eq!(second.executable(), config.forward.executable);
 }
 
 #[test]
-fn w2_cache_allowlist_and_graph_shape_are_strict() {
+fn cache_parameters_and_composition_are_configurable_where_the_contract_allows_it() {
+    // The entry capacity is a configured positive integer, not one frozen
+    // value, and the cache's position in the graph is a composition choice.
+    let accepts = [
+        ("a smaller capacity", CACHE.replace("size: 64", "size: 63")),
+        ("a larger capacity", CACHE.replace("size: 64", "size: 65")),
+        (
+            "a TCP listener over the same cache",
+            CACHE
+                .replace("  - tag: phase5a_udp", "  - tag: phase5a_tcp")
+                .replace("type: udp_server", "type: tcp_server")
+                .replace(
+                    "      enable_audit: false",
+                    "      idle_timeout: 2\n      enable_audit: false",
+                ),
+        ),
+        (
+            "a TCP upstream under the same cache",
+            CACHE.replace("udp://127.0.0.1:15455", "tcp://127.0.0.1:15455"),
+        ),
+        (
+            "the cache after the forward",
+            CACHE.replace(
+                "- exec: $phase5a_cache\n      - exec: $phase5a_forward",
+                "- exec: $phase5a_forward\n      - exec: $phase5a_cache",
+            ),
+        ),
+        (
+            "the same forward dispatched twice",
+            CACHE.replace(
+                "      - exec: $phase5a_forward\n",
+                "      - exec: $phase5a_forward\n      - exec: $phase5a_forward\n",
+            ),
+        ),
+    ];
+    for (name, yaml) in accepts {
+        compile_yaml(&yaml).unwrap_or_else(|error| panic!("{name} must compile: {error}"));
+    }
+
     let rejects = [
-        CACHE.replace("size: 64", "size: 63"),
-        CACHE.replace("size: 64", "size: 65"),
-        CACHE.replace("size: 64", "size: \"64\""),
-        CACHE.replace("      size: 64\n", ""),
-        CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 1\n"),
-        CACHE.replace("lazy_cache_ttl: 0", "lazy_cache_ttl: \"0\""),
-        CACHE.replace("      lazy_cache_ttl: 0\n", ""),
-        CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      extra: true\n"),
-        CACHE.replace("- tag: phase5a_forward", "- tag: phase5a_cache_2\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n\n  - tag: phase5a_forward"),
-        CACHE.replace(
-            "  - tag: phase5a_cache\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n\n",
-            "",
+        ("a quoted capacity", CACHE.replace("size: 64", "size: \"64\"")),
+        (
+            "a missing capacity",
+            CACHE.replace("      size: 64\n", ""),
         ),
-        CACHE.replace("  - tag: phase5a_udp", "  - tag: phase5a_tcp").replace("type: udp_server", "type: tcp_server"),
-        CACHE.replace("udp://127.0.0.1:15455", "tcp://127.0.0.1:15455"),
-        CACHE.replace("enable_audit: false", "enable_audit: \"true\""),
-        CACHE.replace(
-            "- exec: $phase5a_cache\n      - exec: $phase5a_forward",
-            "- exec: $phase5a_forward\n      - exec: $phase5a_cache",
+        (
+            "a nonzero lazy TTL",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 1\n"),
         ),
-        CACHE.replace(
-            "      - exec: $phase5a_forward\n",
-            "      - exec: $phase5a_forward\n      - exec: $phase5a_forward\n",
+        (
+            "a quoted lazy TTL",
+            CACHE.replace("lazy_cache_ttl: 0", "lazy_cache_ttl: \"0\""),
         ),
-        CACHE.replace("$phase5a_cache", "$missing_cache"),
-        CACHE.replace("entry: phase5a_entry", "entry: missing_entry"),
-        CACHE.replace("args:\n      size: 64", "args: []\n    # size removed\n      size: 64"),
+        (
+            "a missing lazy TTL",
+            CACHE.replace("      lazy_cache_ttl: 0\n", ""),
+        ),
+        (
+            "an unknown cache field",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      extra: true\n"),
+        ),
+        (
+            "a second cache instance",
+            CACHE.replace("- tag: phase5a_forward", "- tag: phase5a_cache_2\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n\n  - tag: phase5a_forward"),
+        ),
+        (
+            "a removed but still referenced cache",
+            CACHE.replace(
+                "  - tag: phase5a_cache\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n\n",
+                "",
+            ),
+        ),
+        (
+            "a wrong audit flag type",
+            CACHE.replace("enable_audit: false", "enable_audit: \"true\""),
+        ),
+        (
+            "an unknown cache reference",
+            CACHE.replace("$phase5a_cache", "$missing_cache"),
+        ),
+        (
+            "an unknown listener entry",
+            CACHE.replace("entry: phase5a_entry", "entry: missing_entry"),
+        ),
+        (
+            "cache args that are not a mapping",
+            CACHE.replace("args:\n      size: 64", "args: []\n    # size removed\n      size: 64"),
+        ),
     ];
 
-    for (index, yaml) in rejects.iter().enumerate() {
-        assert!(
-            compile_yaml(yaml).is_err(),
-            "reject case {index} unexpectedly compiled"
-        );
+    for (name, yaml) in rejects {
+        assert!(compile_yaml(&yaml).is_err(), "{name} must reject");
     }
 }
 
@@ -278,13 +340,6 @@ fn w3_negative_cases() -> Vec<(&'static str, String)> {
             ROUTING.replace("full:domain-hit.test", "suffix:domain-hit.test"),
         ),
         (
-            "domain expression list",
-            ROUTING.replace(
-                "        - \"full:domain-hit.test\"",
-                "        - \"full:domain-hit.test\"\n        - \"full:other.test\"",
-            ),
-        ),
-        (
             "unknown domain field",
             ROUTING.replace("      exps:", "      extra: true\n      exps:"),
         ),
@@ -295,6 +350,53 @@ fn w3_negative_cases() -> Vec<(&'static str, String)> {
         (
             "IPv6 response matcher",
             ROUTING.replace("resp_ip 192.0.2.10", "resp_ip ::1"),
+        ),
+        (
+            "duplicate upstream identity",
+            ROUTING.replace(
+                "tag: route_b\n          addr:",
+                "tag: route_a\n          addr:",
+            ),
+        ),
+        (
+            "missing upstream identity",
+            ROUTING.replace("tag: route_a", "tag: \"\""),
+        ),
+        (
+            "hostname W3 upstream",
+            ROUTING.replace("udp://127.0.0.1:15456", "udp://dns.example:53"),
+        ),
+        (
+            "zero W3 upstream port",
+            ROUTING.replace("udp://127.0.0.1:15456", "udp://127.0.0.1:0"),
+        ),
+        (
+            "zero W3 listener port",
+            ROUTING.replace("127.0.0.1:15356", "127.0.0.1:0"),
+        ),
+        (
+            "unknown W3 forward field",
+            ROUTING.replace(
+                "    args:\n      upstreams:",
+                "    args:\n      unsupported: true\n      upstreams:",
+            ),
+        ),
+    ]
+}
+
+/// Shapes the frozen W3 rejection matrix used to forbid but the composed
+/// grammar now supports: several domain rules, more than one matcher in a
+/// rule, a lone or reordered exec list, a TCP listener or upstream, and a
+/// cache beside routing. They are accepted here so the relaxation is visible
+/// rather than silently dropping the old negative expectations.
+fn newly_composed_w3_shapes() -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "domain expression list",
+            ROUTING.replace(
+                "        - \"full:domain-hit.test\"",
+                "        - \"full:domain-hit.test\"\n        - \"full:other.test\"",
+            ),
         ),
         (
             "wrong exec order",
@@ -318,17 +420,6 @@ fn w3_negative_cases() -> Vec<(&'static str, String)> {
             ),
         ),
         (
-            "duplicate upstream identity",
-            ROUTING.replace(
-                "tag: route_b\n          addr:",
-                "tag: route_a\n          addr:",
-            ),
-        ),
-        (
-            "missing upstream identity",
-            ROUTING.replace("tag: route_a", "tag: \"\""),
-        ),
-        (
             "TCP W3 listener",
             ROUTING
                 .replace("type: udp_server", "type: tcp_server")
@@ -342,32 +433,13 @@ fn w3_negative_cases() -> Vec<(&'static str, String)> {
             ROUTING.replace("udp://127.0.0.1:15456", "tcp://127.0.0.1:15456"),
         ),
         (
-            "hostname W3 upstream",
-            ROUTING.replace("udp://127.0.0.1:15456", "udp://dns.example:53"),
-        ),
-        (
-            "zero W3 upstream port",
-            ROUTING.replace("udp://127.0.0.1:15456", "udp://127.0.0.1:0"),
-        ),
-        (
-            "zero W3 listener port",
-            ROUTING.replace("127.0.0.1:15356", "127.0.0.1:0"),
-        ),
-        (
-            "unknown W3 forward field",
-            ROUTING.replace(
-                "    args:\n      upstreams:",
-                "    args:\n      unsupported: true\n      upstreams:",
-            ),
-        ),
-        (
-            "cache plus W3",
+            "cache beside routing",
             format!(
-                "{ROUTING}  - tag: forbidden_cache\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n"
+                "{ROUTING}  - tag: composed_cache\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n"
             ),
         ),
         (
-            "same A and C route",
+            "the same forward on two branches",
             ROUTING.replace("$phase5a_route_c", "$phase5a_route_a"),
         ),
     ]
@@ -377,5 +449,12 @@ fn w3_negative_cases() -> Vec<(&'static str, String)> {
 fn w3_negative_grammar_and_graph_matrix_fails_closed() {
     for (name, yaml) in w3_negative_cases() {
         assert!(compile_yaml(&yaml).is_err(), "W3 case {name} must reject");
+    }
+}
+
+#[test]
+fn the_composed_grammar_accepts_the_bounded_w3_shapes_it_used_to_forbid() {
+    for (name, yaml) in newly_composed_w3_shapes() {
+        compile_yaml(&yaml).unwrap_or_else(|error| panic!("{name} must now compile: {error}"));
     }
 }

@@ -1,18 +1,25 @@
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
 
+use mosdns_matcher_core::MixMatcher;
 use mosdns_sequence_core::{
-    DispatchMetadata, ExecutableId, ExecutableSpec, ExecutionControl, ExecutionError,
+    ExecutableId, ExecutableSpec, ExecutableTargetSpec, ExecutionControl, ExecutionError,
     ExecutionMachine, ExecutionState, ExternalRef, ExternalSpec, MatcherSpecInput, ProgramSpec,
-    RuleSpec, SequenceId, SequenceSpec, ValidatedProgram,
+    RuleSpec, SequenceId, SequenceRef, SequenceSpec, ValidatedExecutable, ValidatedProgram,
 };
 use mosdns_upstream_core::{Endpoint, Transport};
 use serde::de::{self, Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
 
-/// The only accepted log level in the Phase 5A host subset.
+use crate::matchers::{
+    DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher, ResponseIpMatcher, TrueMatcher,
+    build_domain_set,
+};
+
+/// The only accepted log level in the native host subset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogLevel {
     Error,
@@ -29,29 +36,30 @@ pub enum ListenerKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ForwardConfig {
     pub tag: String,
-    /// The upstream entry's explicit identity, present for the W3 graph.
+    /// The upstream entry's explicit identity, present when the upstream
+    /// declares a `tag`.
     pub upstream_tag: Option<String>,
     pub endpoint: Endpoint,
     pub executable: ExecutableId,
 }
 
-/// A compiled sequence containing the bounded external dispatches accepted by
-/// the native host (forward for W1, cache then forward for W2, or the strict
-/// four-rule routing graph for W3).
+/// The compiled entry sequence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SequenceConfig {
     pub tag: String,
     pub sequence: SequenceId,
+    /// The first forward the entry sequence can dispatch, retained for the
+    /// host's primary-forward accessor.
     pub forward_executable: ExecutableId,
 }
 
-/// The bounded native cache dispatch identity used by the reviewed W2 graph.
-/// W1 configurations leave this field absent until Slice 2's strict compiler
-/// accepts the cache plugin shape.
+/// The one native cache dispatch accepted by this host.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CachePluginConfig {
     pub tag: String,
     pub executable: ExecutableId,
+    /// The configured entry capacity, passed to the bounded cache store.
+    pub capacity: u64,
 }
 
 /// A compiled UDP or TCP listener declaration. No socket is owned here.
@@ -68,9 +76,11 @@ pub struct ListenerConfig {
 /// The typed, validated graph consumed by pre-I/O host assembly.
 pub struct CompiledConfig {
     pub log_level: LogLevel,
+    /// The first forward the entry sequence can dispatch. Present because every
+    /// accepted graph dispatches at least one forward, or only rejects.
     pub forward: ForwardConfig,
     /// Every validated upstream owner keyed by the executable that can
-    /// dispatch it. W1/W2 contain only the primary forward.
+    /// dispatch it.
     pub forwards: Vec<ForwardConfig>,
     pub cache: Option<CachePluginConfig>,
     pub sequence: SequenceConfig,
@@ -126,187 +136,385 @@ pub fn load_yaml(path: &Path) -> Result<String, ConfigError> {
     })
 }
 
-/// Strictly decodes and compiles the supported Phase 5A YAML subset.
-pub fn compile_yaml(yaml: &str) -> Result<CompiledConfig, ConfigError> {
-    let raw: RawValue = yaml_serde::from_str(yaml)
-        .map_err(|error| ConfigError::new("$", format!("invalid YAML: {error}")))?;
-    compile_raw(&raw)
+/// Reads and compiles one configuration file. Relative `include` paths and
+/// relative rule-file paths resolve against the declaring file's directory,
+/// never against the process working directory.
+pub fn load_and_compile(path: &Path) -> Result<CompiledConfig, ConfigError> {
+    let yaml = load_yaml(path)?;
+    let base_dir = path.parent().unwrap_or_else(|| Path::new(""));
+    compile_yaml_with_base(&yaml, base_dir)
 }
 
-fn compile_raw(raw: &RawValue) -> Result<CompiledConfig, ConfigError> {
+/// Strictly decodes and compiles an in-memory configuration that resolves
+/// relative paths against the process working directory. Prefer
+/// [`load_and_compile`] for file-backed configurations so that include and
+/// rule-file paths are never guessed from an unrelated working directory.
+pub fn compile_yaml(yaml: &str) -> Result<CompiledConfig, ConfigError> {
+    compile_yaml_with_base(yaml, Path::new(""))
+}
+
+/// Strictly decodes and compiles the supported YAML subset with an explicit
+/// base directory for relative include and rule-file paths.
+pub fn compile_yaml_with_base(yaml: &str, base_dir: &Path) -> Result<CompiledConfig, ConfigError> {
+    let raw = parse_yaml(yaml)?;
+    compile_raw(&raw, base_dir)
+}
+
+fn parse_yaml(yaml: &str) -> Result<RawValue, ConfigError> {
+    yaml_serde::from_str(yaml)
+        .map_err(|error| ConfigError::new("$", format!("invalid YAML: {error}")))
+}
+
+fn compile_raw(raw: &RawValue, base_dir: &Path) -> Result<CompiledConfig, ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
-    root.reject_unknown(&["log", "plugins"], "$")?;
+    root.reject_unknown(&["log", "include", "plugins"], "$")?;
     let log = compile_log(root.required("log", "$")?)?;
-    let plugins = expect_sequence(root.required("plugins", "$")?, "$.plugins")?;
-    if plugins.len() != 3 && plugins.len() != 4 && plugins.len() != 6 {
-        return Err(ConfigError::new(
-            "$.plugins",
-            "exactly one W1 forward, sequence, and listener; one W2 cache, forward, sequence, and UDP listener; or one W3 domain_set, three forwards, sequence, and UDP listener are required",
-        ));
-    }
 
-    let mut decoded = Vec::with_capacity(plugins.len());
-    for (index, plugin) in plugins.iter().enumerate() {
-        decoded.push(decode_plugin(plugin, &format!("$.plugins[{index}]"))?);
-    }
-
-    let mut forward = None;
-    let mut forward_plugins = Vec::new();
-    let mut cache = None;
-    let mut domain_set = None;
-    let mut sequence = None;
-    let mut listener = None;
-    let mut tags: Vec<String> = Vec::with_capacity(decoded.len());
-    for plugin in decoded {
-        if let Some(existing) = tags.iter().find(|existing| existing.as_str() == plugin.tag) {
-            return Err(ConfigError::new(
-                "$.plugins",
-                format!("duplicate plugin tag `{existing}`"),
-            ));
+    // Definition collection: included plugin-only files load in declaration
+    // order, then this file's plugins. No definition is resolved until the
+    // whole ordered catalog exists, so a reference may name a later
+    // definition without changing the effective order.
+    let mut definitions = Vec::new();
+    if let Some(includes) = root.get("include") {
+        let includes = expect_sequence(includes, "$.include")?;
+        for (index, include) in includes.iter().enumerate() {
+            let expression = expect_string(include, &format!("$.include[{index}]"))?;
+            collect_included(&expression, base_dir, &mut definitions)?;
         }
-        tags.push(plugin.tag.clone());
-        match plugin.kind.as_str() {
-            "forward" => {
-                if forward.is_none() {
-                    forward = Some(plugin.clone());
-                }
-                forward_plugins.push(plugin);
-            }
-            "cache" => assign_unique(&mut cache, plugin, "cache")?,
-            "domain_set" => assign_unique(&mut domain_set, plugin, "domain_set")?,
-            "sequence" => assign_unique(&mut sequence, plugin, "sequence")?,
-            "udp_server" | "tcp_server" => {
-                if listener.is_some() {
-                    return Err(ConfigError::new(
-                        "$.plugins",
-                        "exactly one listener plugin is supported",
-                    ));
-                }
-                listener = Some(plugin);
-            }
+    }
+    let plugins = expect_sequence(root.required("plugins", "$")?, "$.plugins")?;
+    for (index, plugin) in plugins.iter().enumerate() {
+        definitions.push(decode_plugin(plugin, &format!("$.plugins[{index}]"))?);
+    }
+
+    compile_definitions(log, definitions, base_dir)
+}
+
+/// Loads one plugins-only included file and appends its definitions in file
+/// order. Nested includes are rejected rather than silently flattened.
+fn collect_included(
+    expression: &str,
+    base_dir: &Path,
+    definitions: &mut Vec<RawPlugin>,
+) -> Result<(), ConfigError> {
+    let path = resolve_relative(expression, base_dir);
+    let display = path.display().to_string();
+    let yaml = load_yaml(&path).map_err(|error| {
+        ConfigError::new(
+            "$.include",
+            format!("cannot read included file `{expression}`: {}", error.reason),
+        )
+    })?;
+    let raw = parse_yaml(&yaml).map_err(|error| {
+        ConfigError::new(
+            format!("{display}:{}", error.path),
+            format!("included file is not valid YAML: {}", error.reason),
+        )
+    })?;
+    let root = expect_map(&raw, &display, "included file must be a mapping")?;
+    root.reject_unknown(&["plugins"], &display)?;
+    let plugins = expect_sequence(
+        root.required("plugins", &display)?,
+        &format!("{display}.plugins"),
+    )?;
+    for (index, plugin) in plugins.iter().enumerate() {
+        definitions.push(decode_plugin(
+            plugin,
+            &format!("{display}.plugins[{index}]"),
+        )?);
+    }
+    Ok(())
+}
+
+fn resolve_relative(value: &str, base_dir: &Path) -> PathBuf {
+    let path = Path::new(value);
+    if path.is_absolute() || base_dir.as_os_str().is_empty() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    }
+}
+
+/// The declared kind of one plugin definition. Domain sets and sequences are
+/// compiled into the program; forwards and caches become host-fulfilled
+/// external executables; listeners are collected separately.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PluginKind {
+    Forward,
+    Cache,
+    Sequence,
+    DomainSet,
+    Listener,
+}
+
+/// The collected definition catalog used to resolve named references. It is
+/// built before any definition is compiled, so a reference order-independent.
+struct PluginCatalog<'a> {
+    kinds: &'a [(String, PluginKind, usize)],
+    domain_sets: &'a [(String, Rc<MixMatcher<()>>)],
+}
+
+impl PluginCatalog<'_> {
+    fn kind_of(&self, tag: &str) -> Option<PluginKind> {
+        self.kinds
+            .iter()
+            .find(|(name, _, _)| name.as_str() == tag)
+            .map(|(_, kind, _)| *kind)
+    }
+
+    fn domain_set(&self, tag: &str) -> Option<Rc<MixMatcher<()>>> {
+        self.domain_sets
+            .iter()
+            .find(|(name, _)| name.as_str() == tag)
+            .map(|(_, set)| Rc::clone(set))
+    }
+}
+
+fn compile_definitions(
+    log: LogLevel,
+    definitions: Vec<RawPlugin>,
+    base_dir: &Path,
+) -> Result<CompiledConfig, ConfigError> {
+    let mut kinds: Vec<(String, PluginKind, usize)> = Vec::with_capacity(definitions.len());
+    for (index, plugin) in definitions.iter().enumerate() {
+        let kind = match plugin.kind.as_str() {
+            "forward" => PluginKind::Forward,
+            "cache" => PluginKind::Cache,
+            "sequence" => PluginKind::Sequence,
+            "domain_set" => PluginKind::DomainSet,
+            "udp_server" | "tcp_server" => PluginKind::Listener,
             other => {
                 return Err(ConfigError::new(
-                    "$.plugins",
+                    format!("$.plugins[{index}].type"),
                     format!("unsupported plugin type `{other}`"),
                 ));
             }
+        };
+        if let Some((existing, _, _)) = kinds
+            .iter()
+            .find(|(tag, _, _)| tag.as_str() == plugin.tag.as_str())
+        {
+            return Err(ConfigError::new(
+                format!("$.plugins[{index}].tag"),
+                format!("duplicate plugin tag `{existing}`"),
+            ));
+        }
+        kinds.push((plugin.tag.clone(), kind, index));
+    }
+    // Domain sets and forwards are fully built before any sequence compiles,
+    // so definition order never decides whether a reference resolves.
+    let mut domain_sets: Vec<(String, Rc<MixMatcher<()>>)> = Vec::new();
+    for (index, plugin) in definitions.iter().enumerate() {
+        if kinds[index].1 == PluginKind::DomainSet {
+            domain_sets.push((plugin.tag.clone(), compile_domain_set(plugin, base_dir)?));
+        }
+    }
+    let mut forwards = Vec::new();
+    let mut upstream_tags: BTreeSet<String> = BTreeSet::new();
+    let mut cache = None;
+    let mut listener = None;
+    for (index, plugin) in definitions.iter().enumerate() {
+        match kinds[index].1 {
+            PluginKind::DomainSet | PluginKind::Sequence => {}
+            PluginKind::Forward => {
+                let forward = compile_forward(plugin, index)?;
+                if let Some(tag) = &forward.upstream_tag {
+                    if !upstream_tags.insert(tag.clone()) {
+                        return Err(ConfigError::new(
+                            format!("$.plugins[{index}].args.upstreams[0].tag"),
+                            format!("duplicate upstream tag `{tag}`"),
+                        ));
+                    }
+                }
+                forwards.push(forward);
+            }
+            PluginKind::Cache => {
+                if cache.is_some() {
+                    return Err(ConfigError::new(
+                        format!("$.plugins[{index}].tag"),
+                        "exactly one cache plugin is supported",
+                    ));
+                }
+                cache = Some((
+                    plugin.tag.clone(),
+                    compile_cache(plugin, index)?,
+                    format!("$.plugins[{index}]"),
+                ));
+            }
+            PluginKind::Listener => {
+                if listener.is_some() {
+                    return Err(ConfigError::new(
+                        format!("$.plugins[{index}].tag"),
+                        "exactly one listener plugin is supported",
+                    ));
+                }
+                listener = Some(compile_listener(plugin, index)?);
+            }
+        }
+    }
+    let catalog = PluginCatalog {
+        kinds: &kinds,
+        domain_sets: &domain_sets,
+    };
+    let mut sequences = Vec::new();
+    for (index, plugin) in definitions.iter().enumerate() {
+        if kinds[index].1 == PluginKind::Sequence {
+            sequences.push(compile_sequence(plugin, index, &catalog)?);
         }
     }
 
-    let sequence =
-        sequence.ok_or_else(|| ConfigError::new("$.plugins", "missing sequence plugin"))?;
+    if sequences.is_empty() {
+        return Err(ConfigError::new("$.plugins", "missing sequence plugin"));
+    }
     let listener =
         listener.ok_or_else(|| ConfigError::new("$.plugins", "missing listener plugin"))?;
-
-    if plugins.len() == 6 || domain_set.is_some() || forward_plugins.len() > 1 {
-        return compile_w3(log, forward_plugins, domain_set, cache, sequence, listener);
-    }
-
-    let forward = forward.ok_or_else(|| ConfigError::new("$.plugins", "missing forward plugin"))?;
-
-    let (forward_tag, endpoint) = compile_forward(&forward)?;
-    if let Some(cache) = cache.as_ref() {
-        compile_cache(cache)?;
-    }
-    let cache_tag = cache.as_ref().map(|plugin| plugin.tag.clone());
-    let (sequence_tag, sequence_refs) = compile_sequence(&sequence)?;
-    let expected_refs = if let Some(cache_tag) = &cache_tag {
-        if !matches!(endpoint.transport(), Transport::Udp) {
-            return Err(ConfigError::new(
-                "$.plugins.forward.args.upstreams[0].addr",
-                "W2 cache configuration requires a UDP upstream",
-            ));
-        }
-        if listener.kind == "tcp_server" {
-            return Err(ConfigError::new(
-                "$.plugins.listener.type",
-                "cache-enabled TCP listeners are outside the supported W2 subset",
-            ));
-        }
-        vec![cache_tag.clone(), forward_tag.clone()]
-    } else {
-        vec![forward_tag.clone()]
-    };
-    if sequence_refs != expected_refs {
-        return Err(ConfigError::new(
-            "$.plugins[sequence].args",
-            format!("sequence must contain exactly {:?} in order", expected_refs),
-        ));
-    }
-    let listener = compile_listener(&listener, &sequence_tag)?;
-    if listener.entry != sequence_tag {
+    if !kinds
+        .iter()
+        .any(|(tag, kind, _)| *kind == PluginKind::Sequence && tag.as_str() == listener.entry)
+    {
         return Err(ConfigError::new(
             "$.plugins[listener].args.entry",
             format!("unknown sequence reference `{}`", listener.entry),
         ));
     }
+    if forwards.is_empty() {
+        return Err(ConfigError::new(
+            "$.plugins",
+            "at least one forward plugin is required",
+        ));
+    }
 
-    let executables = sequence_refs
+    // Build the program. Every sequence becomes a named sequence, every
+    // forward and cache becomes a host-fulfilled external, and a direct
+    // `$sequence` reference becomes a named child call rather than a jump.
+    let externals: Vec<ExternalSpec> = forwards
         .iter()
-        .cloned()
-        .map(|target| ExecutableSpec::External {
-            target: ExternalRef::new(target),
-        })
+        .map(|forward| ExternalSpec::new(forward.tag.clone()))
+        .chain(
+            cache
+                .as_ref()
+                .map(|(tag, _, _)| ExternalSpec::new(tag.clone())),
+        )
         .collect();
-    let program = ProgramSpec::new(
-        vec![SequenceSpec::new(
-            sequence_tag.clone(),
-            vec![RuleSpec::unconditional(Some(executables))],
-        )],
-        Vec::new(),
-    )
-    .with_externals(
-        expected_refs
-            .iter()
-            .cloned()
-            .map(ExternalSpec::new)
-            .collect(),
-    )
-    .validate()
-    .map_err(|error| {
-        ConfigError::new("$.plugins", format!("sequence compile failed: {error:?}"))
-    })?;
+    let program = ProgramSpec::new(sequences, Vec::new())
+        .with_externals(externals)
+        .validate()
+        .map_err(|error| {
+            ConfigError::new(
+                "$.plugins[sequence].args",
+                format!("sequence compile failed: {error:?}"),
+            )
+        })?;
 
-    let forward_executable = program
-        .externals
-        .iter()
-        .find_map(|(id, external)| (external.name == forward_tag).then_some(*id))
-        .ok_or_else(|| ConfigError::new("$.plugins.forward", "compiled forward is missing"))?;
-    let sequence_id = program
-        .sequence_id(&sequence_tag)
-        .ok_or_else(|| ConfigError::new("$.plugins.sequence", "compiled sequence is missing"))?;
-    let cache = cache_tag
-        .map(|tag| {
+    let mut compiled_forwards = Vec::with_capacity(forwards.len());
+    for forward in forwards {
+        let executable = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == forward.tag).then_some(*id))
+            .ok_or_else(|| {
+                ConfigError::new(
+                    "$.plugins.forward",
+                    format!("compiled forward `{}` is missing", forward.tag),
+                )
+            })?;
+        compiled_forwards.push(ForwardConfig {
+            executable,
+            ..forward
+        });
+    }
+    let compiled_cache = cache
+        .map(|(tag, capacity, path)| {
             let executable = program
                 .externals
                 .iter()
                 .find_map(|(id, external)| (external.name == tag).then_some(*id))
-                .ok_or_else(|| {
-                    ConfigError::new("$.plugins.cache", "compiled cache external is missing")
-                })?;
-            Ok(CachePluginConfig { tag, executable })
+                .ok_or_else(|| ConfigError::new(path, "compiled cache external is missing"))?;
+            Ok(CachePluginConfig {
+                tag,
+                executable,
+                capacity,
+            })
         })
         .transpose()?;
 
-    let forward_config = ForwardConfig {
-        tag: forward_tag,
-        upstream_tag: None,
-        endpoint,
-        executable: forward_executable,
-    };
+    let entry_sequence = program
+        .sequence_id(&listener.entry)
+        .ok_or_else(|| ConfigError::new("$.plugins[listener].args.entry", "entry is missing"))?;
+    let primary =
+        primary_forward(&program, entry_sequence, &compiled_forwards).ok_or_else(|| {
+            ConfigError::new(
+                "$.plugins[sequence].args",
+                "the entry sequence cannot dispatch any configured forward",
+            )
+        })?;
+
     Ok(CompiledConfig {
         log_level: log,
-        forwards: vec![forward_config.clone()],
-        forward: forward_config,
-        cache,
+        forward: primary.clone(),
+        forwards: compiled_forwards,
+        cache: compiled_cache,
         sequence: SequenceConfig {
-            tag: sequence_tag,
-            sequence: sequence_id,
-            forward_executable,
+            tag: listener.entry.clone(),
+            sequence: entry_sequence,
+            forward_executable: primary.executable,
         },
         listener,
         program,
     })
+}
+
+/// The first forward the entry sequence can dispatch, following rules and
+/// direct child calls in declaration order. Definition order and plugin count
+/// never select it.
+fn primary_forward(
+    program: &ValidatedProgram,
+    entry: SequenceId,
+    forwards: &[ForwardConfig],
+) -> Option<ForwardConfig> {
+    let mut visited = BTreeSet::new();
+    find_forward(program, entry, forwards, &mut visited)
+}
+
+fn find_forward(
+    program: &ValidatedProgram,
+    sequence: SequenceId,
+    forwards: &[ForwardConfig],
+    visited: &mut BTreeSet<SequenceId>,
+) -> Option<ForwardConfig> {
+    if !visited.insert(sequence) {
+        return None;
+    }
+    let sequence = program.sequence(sequence)?;
+    for rule in &sequence.rules {
+        let Some(executable) = &rule.executable else {
+            continue;
+        };
+        match executable {
+            ValidatedExecutable::External { target } => {
+                if let Some(forward) = forwards
+                    .iter()
+                    .find(|forward| forward.executable == *target)
+                {
+                    return Some(forward.clone());
+                }
+            }
+            ValidatedExecutable::Call { target } | ValidatedExecutable::Jump { target } => {
+                if let Some(forward) = find_forward(program, *target, forwards, visited) {
+                    return Some(forward);
+                }
+            }
+            ValidatedExecutable::Inline { target } => {
+                // A multi-exec list runs its items in order; the first item
+                // that reaches a forward owns the primary identity.
+                if let Some(forward) = find_forward(program, *target, forwards, visited) {
+                    return Some(forward);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn compile_log(value: &RawValue) -> Result<LogLevel, ConfigError> {
@@ -343,255 +551,26 @@ fn decode_plugin(value: &RawValue, path: &str) -> Result<RawPlugin, ConfigError>
     Ok(RawPlugin { tag, kind, args })
 }
 
-fn compile_forward(plugin: &RawPlugin) -> Result<(String, Endpoint), ConfigError> {
-    let path = "$.plugins.forward.args";
-    let args = expect_map(&plugin.args, path, "forward args must be a mapping")?;
-    args.reject_unknown(&["upstreams"], path)?;
-    let upstreams = expect_sequence(
-        args.required("upstreams", path)?,
-        "$.plugins.forward.args.upstreams",
-    )?;
-    if upstreams.len() != 1 {
-        return Err(ConfigError::new(
-            "$.plugins.forward.args.upstreams",
-            "exactly one upstream is supported",
-        ));
-    }
-    let upstream_path = "$.plugins.forward.args.upstreams[0]";
-    let upstream = expect_map(&upstreams[0], upstream_path, "upstream must be a mapping")?;
-    upstream.reject_unknown(&["addr"], upstream_path)?;
-    let address = expect_string(
-        upstream.required("addr", upstream_path)?,
-        "$.plugins.forward.args.upstreams[0].addr",
-    )?;
-    let endpoint = parse_endpoint(&address, "$.plugins.forward.args.upstreams[0].addr")?;
-    Ok((plugin.tag.clone(), endpoint))
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum W3MatcherSpec {
-    Qname { domain_set: String },
-    ResponseIp(Ipv4Addr),
-    True,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum W3ExecSpec {
-    External(String),
-    ExternalExit(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct W3RuleSpec {
-    matcher: Option<W3MatcherSpec>,
-    executable: W3ExecSpec,
-}
-
-fn compile_w3(
-    log: LogLevel,
-    forwards: Vec<RawPlugin>,
-    domain_set: Option<RawPlugin>,
-    cache: Option<RawPlugin>,
-    sequence: RawPlugin,
-    listener: RawPlugin,
-) -> Result<CompiledConfig, ConfigError> {
-    if forwards.len() != 3 {
-        return Err(ConfigError::new(
-            "$.plugins",
-            "W3 requires exactly three forward plugins",
-        ));
-    }
-    if cache.is_some() {
-        return Err(ConfigError::new(
-            "$.plugins",
-            "W3 routing cannot be combined with cache",
-        ));
-    }
-    let domain_set = domain_set.ok_or_else(|| {
-        ConfigError::new("$.plugins", "W3 requires exactly one domain_set plugin")
-    })?;
-    let (domain_tag, domain) = compile_domain_set(&domain_set)?;
-
-    let listener = compile_listener(&listener, &sequence.tag)?;
-    if listener.kind != ListenerKind::Udp {
-        return Err(ConfigError::new(
-            "$.plugins.listener.type",
-            "W3 routing supports only a UDP listener",
-        ));
-    }
-    if listener.entry != sequence.tag {
-        return Err(ConfigError::new(
-            "$.plugins.listener.args.entry",
-            format!("unknown sequence reference `{}`", listener.entry),
-        ));
-    }
-
-    let mut forward_specs = Vec::with_capacity(forwards.len());
-    let mut upstream_tags = BTreeSet::new();
-    for (index, forward) in forwards.iter().enumerate() {
-        let (plugin_tag, upstream_tag, endpoint) = compile_w3_forward(forward, index)?;
-        if !upstream_tags.insert(upstream_tag.clone()) {
-            return Err(ConfigError::new(
-                "$.plugins",
-                format!("duplicate W3 upstream tag `{upstream_tag}`"),
-            ));
-        }
-        forward_specs.push((plugin_tag, upstream_tag, endpoint));
-    }
-
-    let rules = parse_w3_sequence(&sequence, &domain_tag)?;
-    let (a_tag, b_tag, c_tag, response_ip) = validate_w3_topology(&rules, &forward_specs)?;
-    let a_matcher = crate::matchers::FullQnameMatcher::new(&domain).map_err(|error| {
-        ConfigError::new(
-            "$.plugins[domain_set].args.exps[0]",
-            format!("invalid full-domain matcher: {error:?}"),
-        )
-    })?;
-    let response_matcher = crate::matchers::ResponseIpMatcher::ipv4(response_ip);
-    let external = |tag: &str| ExecutableSpec::External {
-        target: ExternalRef::new(tag),
-    };
-    let sequence_rules = vec![
-        RuleSpec::new(
-            vec![MatcherSpecInput::new(
-                Box::new(a_matcher),
-                false,
-                DispatchMetadata::None,
-            )],
-            Some(vec![external(&a_tag), ExecutableSpec::Exit]),
-        ),
-        RuleSpec::unconditional(Some(vec![external(&b_tag)])),
-        RuleSpec::new(
-            vec![MatcherSpecInput::new(
-                Box::new(response_matcher),
-                false,
-                DispatchMetadata::None,
-            )],
-            Some(vec![external(&a_tag), ExecutableSpec::Exit]),
-        ),
-        RuleSpec::new(
-            vec![MatcherSpecInput::new(
-                Box::new(crate::matchers::TrueMatcher),
-                false,
-                DispatchMetadata::None,
-            )],
-            Some(vec![external(&c_tag), ExecutableSpec::Exit]),
-        ),
-    ];
-    let program = ProgramSpec::new(
-        vec![SequenceSpec::new(sequence.tag.clone(), sequence_rules)],
-        Vec::new(),
-    )
-    .with_externals(
-        forward_specs
-            .iter()
-            .map(|(tag, _, _)| ExternalSpec::new(tag.clone()))
-            .collect(),
-    )
-    .validate()
-    .map_err(|error| {
-        ConfigError::new(
-            "$.plugins.sequence",
-            format!("sequence compile failed: {error:?}"),
-        )
-    })?;
-
-    let mut compiled_forwards = Vec::with_capacity(forward_specs.len());
-    for (tag, upstream_tag, endpoint) in forward_specs {
-        let executable = program
-            .externals
-            .iter()
-            .find_map(|(id, external)| (external.name == tag).then_some(*id))
-            .ok_or_else(|| {
-                ConfigError::new(
-                    "$.plugins.sequence",
-                    format!("compiled forward `{tag}` is missing"),
-                )
-            })?;
-        compiled_forwards.push(ForwardConfig {
-            tag,
-            upstream_tag: Some(upstream_tag),
-            endpoint,
-            executable,
-        });
-    }
-    let forward = compiled_forwards
-        .iter()
-        .find(|forward| forward.tag == a_tag)
-        .cloned()
-        .ok_or_else(|| ConfigError::new("$.plugins.sequence", "route A forward is missing"))?;
-    let sequence_id = program
-        .sequence_id(&sequence.tag)
-        .ok_or_else(|| ConfigError::new("$.plugins.sequence", "compiled sequence is missing"))?;
-
-    Ok(CompiledConfig {
-        log_level: log,
-        forward: forward.clone(),
-        forwards: compiled_forwards,
-        cache: None,
-        sequence: SequenceConfig {
-            tag: sequence.tag,
-            sequence: sequence_id,
-            forward_executable: forward.executable,
-        },
-        listener,
-        program,
-    })
-}
-
-fn compile_domain_set(plugin: &RawPlugin) -> Result<(String, String), ConfigError> {
-    let path = "$.plugins.domain_set.args";
-    let args = expect_map(&plugin.args, path, "domain_set args must be a mapping")?;
-    args.reject_unknown(&["exps"], path)?;
-    let expressions = expect_sequence(
-        args.required("exps", path)?,
-        "$.plugins.domain_set.args.exps",
-    )?;
-    if expressions.len() != 1 {
-        return Err(ConfigError::new(
-            "$.plugins.domain_set.args.exps",
-            "exactly one full-domain expression is supported",
-        ));
-    }
-    let expression = expect_string(&expressions[0], "$.plugins.domain_set.args.exps[0]")?;
-    let domain = expression.strip_prefix("full:").ok_or_else(|| {
-        ConfigError::new(
-            "$.plugins.domain_set.args.exps[0]",
-            "only full:<ASCII-domain> expressions are supported",
-        )
-    })?;
-    if domain.is_empty() {
-        return Err(ConfigError::new(
-            "$.plugins.domain_set.args.exps[0]",
-            "full-domain expression must not be empty",
-        ));
-    }
-    Ok((plugin.tag.clone(), domain.to_owned()))
-}
-
-fn compile_w3_forward(
-    plugin: &RawPlugin,
-    index: usize,
-) -> Result<(String, String, Endpoint), ConfigError> {
-    let path = format!("$.plugins.forward[{index}].args");
+fn compile_forward(plugin: &RawPlugin, index: usize) -> Result<ForwardConfig, ConfigError> {
+    let path = format!("$.plugins[{index}].args");
     let args = expect_map(&plugin.args, &path, "forward args must be a mapping")?;
     args.reject_unknown(&["upstreams"], &path)?;
-    let upstream_path = format!("{path}.upstreams");
-    let upstreams = expect_sequence(args.required("upstreams", &path)?, &upstream_path)?;
+    let upstreams_path = format!("{path}.upstreams");
+    let upstreams = expect_sequence(args.required("upstreams", &path)?, &upstreams_path)?;
     if upstreams.len() != 1 {
         return Err(ConfigError::new(
-            upstream_path,
-            "exactly one upstream is supported",
+            &upstreams_path,
+            "exactly one numeric upstream is supported",
         ));
     }
-    let item_path = format!("{path}.upstreams[0]");
+    let item_path = format!("{upstreams_path}[0]");
     let upstream = expect_map(&upstreams[0], &item_path, "upstream must be a mapping")?;
     upstream.reject_unknown(&["tag", "addr"], &item_path)?;
-    let upstream_tag = expect_string(
-        upstream.required("tag", &item_path)?,
-        &format!("{item_path}.tag"),
-    )?;
-    if upstream_tag.is_empty() {
+    let upstream_tag = upstream
+        .get("tag")
+        .map(|value| expect_string(value, &format!("{item_path}.tag")))
+        .transpose()?;
+    if upstream_tag.as_ref().is_some_and(|tag| tag.is_empty()) {
         return Err(ConfigError::new(
             format!("{item_path}.tag"),
             "upstream tag must not be empty",
@@ -602,237 +581,63 @@ fn compile_w3_forward(
         &format!("{item_path}.addr"),
     )?;
     let endpoint = parse_endpoint(&address, &format!("{item_path}.addr"))?;
-    if endpoint.transport() != Transport::Udp {
-        return Err(ConfigError::new(
-            format!("{item_path}.addr"),
-            "W3 forwards require UDP upstreams",
-        ));
-    }
-    Ok((plugin.tag.clone(), upstream_tag, endpoint))
+    Ok(ForwardConfig {
+        tag: plugin.tag.clone(),
+        upstream_tag,
+        endpoint,
+        executable: ExecutableId(usize::MAX),
+    })
 }
 
-fn parse_w3_sequence(plugin: &RawPlugin, domain_tag: &str) -> Result<Vec<W3RuleSpec>, ConfigError> {
-    let path = "$.plugins.sequence.args";
-    let args = expect_sequence(&plugin.args, path)?;
-    if args.len() != 4 {
+fn compile_domain_set(
+    plugin: &RawPlugin,
+    base_dir: &Path,
+) -> Result<Rc<MixMatcher<()>>, ConfigError> {
+    let path = "$.plugins.domain_set.args";
+    let args = expect_map(&plugin.args, path, "domain_set args must be a mapping")?;
+    args.reject_unknown(&["exps", "files"], path)?;
+    let expressions = string_list(args.get("exps"), &format!("{path}.exps"))?;
+    let files = string_list(args.get("files"), &format!("{path}.files"))?;
+    if expressions.is_empty() && files.is_empty() {
         return Err(ConfigError::new(
             path,
-            "W3 sequence must contain exactly four rules",
+            "a domain_set requires at least one expression or file",
         ));
     }
-    args.iter()
+    build_domain_set(&expressions, &files, base_dir).map_err(|error| match error {
+        DomainSetError::Expression { index, .. } => ConfigError::new(
+            format!("$.plugins.domain_set.args.exps[{index}]"),
+            error.to_string(),
+        ),
+        DomainSetError::File { index, .. } => ConfigError::new(
+            format!("$.plugins.domain_set.args.files[{index}]"),
+            error.to_string(),
+        ),
+        DomainSetError::Rule { .. } => {
+            ConfigError::new("$.plugins.domain_set.args.files", error.to_string())
+        }
+    })
+}
+
+fn string_list(value: Option<&RawValue>, path: &str) -> Result<Vec<String>, ConfigError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = expect_sequence(value, path)?;
+    values
+        .iter()
         .enumerate()
-        .map(|(index, value)| {
-            let item_path = format!("{path}[{index}]");
-            let item = expect_map(value, &item_path, "sequence rule must be a mapping")?;
-            item.reject_unknown(&["matches", "exec"], &item_path)?;
-            let matcher = item
-                .get("matches")
-                .map(|value| {
-                    let matcher_path = format!("{item_path}.matches");
-                    let matchers = expect_sequence(value, &matcher_path)?;
-                    if matchers.len() != 1 {
-                        return Err(ConfigError::new(
-                            matcher_path,
-                            "each conditional W3 rule must contain exactly one matcher",
-                        ));
-                    }
-                    let expression =
-                        expect_string(&matchers[0], &format!("{item_path}.matches[0]"))?;
-                    parse_w3_matcher(&expression, domain_tag, &format!("{item_path}.matches[0]"))
-                })
-                .transpose()?;
-            let executable = parse_w3_exec(
-                item.required("exec", &item_path)?,
-                &format!("{item_path}.exec"),
-            )?;
-            Ok(W3RuleSpec {
-                matcher,
-                executable,
-            })
-        })
+        .map(|(index, value)| expect_string(value, &format!("{path}[{index}]")))
         .collect()
 }
 
-fn parse_w3_matcher(
-    expression: &str,
-    domain_tag: &str,
-    path: &str,
-) -> Result<W3MatcherSpec, ConfigError> {
-    if let Some(target) = expression.strip_prefix("qname $") {
-        if target == domain_tag {
-            return Ok(W3MatcherSpec::Qname {
-                domain_set: target.to_owned(),
-            });
-        }
-        return Err(ConfigError::new(
-            path,
-            format!("qname matcher must reference domain_set `${domain_tag}`"),
-        ));
-    }
-    if let Some(address) = expression.strip_prefix("resp_ip ") {
-        let address = address
-            .parse::<Ipv4Addr>()
-            .map_err(|_| ConfigError::new(path, "resp_ip matcher requires one IPv4 literal"))?;
-        return Ok(W3MatcherSpec::ResponseIp(address));
-    }
-    if expression == "_true" {
-        return Ok(W3MatcherSpec::True);
-    }
-    Err(ConfigError::new(
-        path,
-        "supported matchers are qname $<domain_set>, resp_ip <IPv4>, and _true",
-    ))
-}
-
-fn parse_w3_exec(value: &RawValue, path: &str) -> Result<W3ExecSpec, ConfigError> {
-    match value {
-        RawValue::String(value) => Ok(W3ExecSpec::External(parse_w3_ref(value, path)?)),
-        RawValue::Sequence(values) => {
-            if values.len() != 2 {
-                return Err(ConfigError::new(
-                    path,
-                    "a W3 exec list must be [\"$forward\", \"exit\"]",
-                ));
-            }
-            let target = expect_string(&values[0], &format!("{path}[0]"))?;
-            let terminal = expect_string(&values[1], &format!("{path}[1]"))?;
-            if terminal != "exit" {
-                return Err(ConfigError::new(
-                    format!("{path}[1]"),
-                    "W3 exec lists must terminate with exit",
-                ));
-            }
-            Ok(W3ExecSpec::ExternalExit(parse_w3_ref(
-                &target,
-                &format!("{path}[0]"),
-            )?))
-        }
-        _ => Err(ConfigError::new(
-            path,
-            "exec must be a $forward reference or [$forward, exit]",
-        )),
-    }
-}
-
-fn parse_w3_ref(value: &str, path: &str) -> Result<String, ConfigError> {
-    let Some(target) = value.strip_prefix('$') else {
-        return Err(ConfigError::new(
-            path,
-            "W3 exec references must start with `$`",
-        ));
-    };
-    if target.is_empty() || target.chars().any(char::is_whitespace) {
-        return Err(ConfigError::new(
-            path,
-            "W3 exec reference must name one forward",
-        ));
-    }
-    Ok(target.to_owned())
-}
-
-fn validate_w3_topology(
-    rules: &[W3RuleSpec],
-    forwards: &[(String, String, Endpoint)],
-) -> Result<(String, String, String, Ipv4Addr), ConfigError> {
-    let Some(first) = rules.first() else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args",
-            "W3 sequence is empty",
-        ));
-    };
-    let (Some(W3MatcherSpec::Qname { .. }), W3ExecSpec::ExternalExit(a_tag)) =
-        (&first.matcher, &first.executable)
-    else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args[0]",
-            "first W3 rule must be qname with [forward, exit]",
-        ));
-    };
-    let Some(second) = rules.get(1) else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args",
-            "W3 sequence is missing its intermediate forward",
-        ));
-    };
-    let (None, W3ExecSpec::External(b_tag)) = (&second.matcher, &second.executable) else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args[1]",
-            "second W3 rule must be an unconditional forward",
-        ));
-    };
-    let Some(third) = rules.get(2) else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args",
-            "W3 sequence is missing its response-IP branch",
-        ));
-    };
-    let (Some(W3MatcherSpec::ResponseIp(response_ip)), W3ExecSpec::ExternalExit(hit_tag)) =
-        (&third.matcher, &third.executable)
-    else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args[2]",
-            "third W3 rule must be resp_ip with [same forward, exit]",
-        ));
-    };
-    if a_tag != hit_tag {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args[2].exec",
-            "response-IP hit must select the same forward as the qname hit",
-        ));
-    }
-    let Some(fourth) = rules.get(3) else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args",
-            "W3 sequence is missing its final branch",
-        ));
-    };
-    let (Some(W3MatcherSpec::True), W3ExecSpec::ExternalExit(c_tag)) =
-        (&fourth.matcher, &fourth.executable)
-    else {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args[3]",
-            "fourth W3 rule must be _true with [forward, exit]",
-        ));
-    };
-    if a_tag == b_tag || a_tag == c_tag || b_tag == c_tag {
-        return Err(ConfigError::new(
-            "$.plugins.sequence.args",
-            "W3 route A, B, and C must be distinct forwards",
-        ));
-    }
-    let known = forwards
-        .iter()
-        .map(|(tag, _, _)| tag.as_str())
-        .collect::<BTreeSet<_>>();
-    for (path, tag) in [
-        ("$.plugins.sequence.args[0].exec", a_tag),
-        ("$.plugins.sequence.args[1].exec", b_tag),
-        ("$.plugins.sequence.args[3].exec", c_tag),
-    ] {
-        if !known.contains(tag.as_str()) {
-            return Err(ConfigError::new(
-                path,
-                format!("unknown forward reference `${tag}`"),
-            ));
-        }
-    }
-    Ok((a_tag.clone(), b_tag.clone(), c_tag.clone(), *response_ip))
-}
-
-fn compile_cache(plugin: &RawPlugin) -> Result<(), ConfigError> {
-    let path = "$.plugins.cache.args";
-    let args = expect_map(&plugin.args, path, "cache args must be a mapping")?;
-    args.reject_unknown(&["size", "lazy_cache_ttl"], path)?;
-    let size = expect_nonnegative_integer(args.required("size", path)?, &format!("{path}.size"))?;
-    if size != 64 {
-        return Err(ConfigError::new(
-            format!("{path}.size"),
-            "only cache size 64 is supported",
-        ));
-    }
+fn compile_cache(plugin: &RawPlugin, index: usize) -> Result<u64, ConfigError> {
+    let path = format!("$.plugins[{index}].args");
+    let args = expect_map(&plugin.args, &path, "cache args must be a mapping")?;
+    args.reject_unknown(&["size", "lazy_cache_ttl"], &path)?;
+    let size = expect_positive_integer(args.required("size", &path)?, &format!("{path}.size"))?;
     let lazy_cache_ttl = expect_nonnegative_integer(
-        args.required("lazy_cache_ttl", path)?,
+        args.required("lazy_cache_ttl", &path)?,
         &format!("{path}.lazy_cache_ttl"),
     )?;
     if lazy_cache_ttl != 0 {
@@ -841,72 +646,364 @@ fn compile_cache(plugin: &RawPlugin) -> Result<(), ConfigError> {
             "lazy_cache_ttl must be exactly 0",
         ));
     }
-    Ok(())
+    Ok(size)
 }
 
-fn compile_sequence(plugin: &RawPlugin) -> Result<(String, Vec<String>), ConfigError> {
-    let path = "$.plugins.sequence.args";
-    let args = expect_sequence(&plugin.args, path)?;
-    if args.is_empty() || args.len() > 2 {
+fn compile_sequence(
+    plugin: &RawPlugin,
+    index: usize,
+    catalog: &PluginCatalog<'_>,
+) -> Result<SequenceSpec, ConfigError> {
+    let path = format!("$.plugins[{index}].args");
+    let args = expect_sequence(&plugin.args, &path)?;
+    let mut rules = Vec::with_capacity(args.len());
+    for (rule_index, value) in args.iter().enumerate() {
+        let item_path = format!("{path}[{rule_index}]");
+        let item = expect_map(value, &item_path, "sequence rule must be a mapping")?;
+        item.reject_unknown(&["matches", "exec"], &item_path)?;
+        let mut matchers = Vec::new();
+        if let Some(matches) = item.get("matches") {
+            let matches_path = format!("{item_path}.matches");
+            for (match_index, expression) in match_expressions(matches, &matches_path)?
+                .into_iter()
+                .enumerate()
+            {
+                matchers.push(compile_matcher(
+                    &expression,
+                    &format!("{matches_path}[{match_index}]"),
+                    catalog,
+                )?);
+            }
+        }
+        let executable = item
+            .get("exec")
+            .map(|value| compile_exec(value, &format!("{item_path}.exec"), catalog))
+            .transpose()?;
+        if matchers.is_empty() && executable.is_none() {
+            return Err(ConfigError::new(
+                &item_path,
+                "a sequence rule requires at least one matcher or executable",
+            ));
+        }
+        rules.push(RuleSpec::new(matchers, executable));
+    }
+    Ok(SequenceSpec::new(plugin.tag.clone(), rules))
+}
+
+/// A rule's `matches` accepts one expression or an ordered list.
+fn match_expressions(value: &RawValue, path: &str) -> Result<Vec<String>, ConfigError> {
+    match value {
+        RawValue::String(expression) => Ok(vec![expression.clone()]),
+        RawValue::Sequence(values) => values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| expect_string(value, &format!("{path}[{index}]")))
+            .collect(),
+        _ => Err(ConfigError::new(
+            path,
+            "matches must be a string or a sequence of strings",
+        )),
+    }
+}
+
+fn compile_matcher(
+    expression: &str,
+    path: &str,
+    catalog: &PluginCatalog<'_>,
+) -> Result<MatcherSpecInput, ConfigError> {
+    let (expression, reverse) = match expression.strip_prefix('!') {
+        Some(rest) => (rest.trim(), true),
+        None => (expression.trim(), false),
+    };
+    if expression.is_empty() {
         return Err(ConfigError::new(
             path,
-            "one W1 or two W2 unconditional executables are supported",
+            "matcher expression must not be empty",
         ));
     }
-    let mut refs = Vec::with_capacity(args.len());
-    for (index, value) in args.iter().enumerate() {
-        let item_path = format!("$.plugins.sequence.args[{index}]");
-        let item = expect_map(value, &item_path, "sequence item must be a mapping")?;
-        item.reject_unknown(&["exec"], &item_path)?;
-        let exec_path = format!("{item_path}.exec");
-        let exec = expect_string(item.required("exec", &item_path)?, &exec_path)?;
-        let Some(target) = exec.strip_prefix('$') else {
-            return Err(ConfigError::new(
-                exec_path,
-                "only named $ references are supported",
-            ));
-        };
-        if target.is_empty() {
-            return Err(ConfigError::new(exec_path, "reference must not be empty"));
+    let (name, args) = match expression.split_once(char::is_whitespace) {
+        Some((name, args)) => (name, args.trim()),
+        None => (expression, ""),
+    };
+    let matcher: Box<dyn mosdns_sequence_core::Matcher> = match name {
+        "qname" => Box::new(compile_qname(args, path, catalog)?),
+        "qtype" => {
+            let mut types = Vec::new();
+            for field in args.split_whitespace() {
+                let value = field.parse::<u16>().map_err(|_| {
+                    ConfigError::new(
+                        path,
+                        format!("qtype requires a numeric type, got `{field}`"),
+                    )
+                })?;
+                types.push(value);
+            }
+            if types.is_empty() {
+                return Err(ConfigError::new(path, "qtype requires at least one type"));
+            }
+            Box::new(QtypeMatcher::new(types))
         }
-        refs.push(target.to_owned());
-    }
-    Ok((plugin.tag.clone(), refs))
+        "has_resp" => {
+            if !args.is_empty() {
+                return Err(ConfigError::new(path, "has_resp takes no arguments"));
+            }
+            Box::new(HasResponseMatcher)
+        }
+        "resp_ip" => {
+            let address = args
+                .parse::<Ipv4Addr>()
+                .map_err(|_| ConfigError::new(path, "resp_ip requires one IPv4 literal"))?;
+            Box::new(ResponseIpMatcher::ipv4(address))
+        }
+        "_true" => {
+            if !args.is_empty() {
+                return Err(ConfigError::new(path, "_true takes no arguments"));
+            }
+            Box::new(TrueMatcher)
+        }
+        "_false" => {
+            if !args.is_empty() {
+                return Err(ConfigError::new(path, "_false takes no arguments"));
+            }
+            Box::new(FalseMatcher)
+        }
+        other => {
+            return Err(ConfigError::new(
+                path,
+                format!("unsupported matcher `{other}`"),
+            ));
+        }
+    };
+    // `!` composes with every matcher, `_true`/`_false` included.
+    Ok(MatcherSpecInput::new(
+        matcher,
+        reverse,
+        mosdns_sequence_core::DispatchMetadata::None,
+    ))
 }
 
-fn compile_listener(
-    plugin: &RawPlugin,
-    _sequence_tag: &str,
-) -> Result<ListenerConfig, ConfigError> {
-    let is_tcp = plugin.kind == "tcp_server";
-    let path = if is_tcp {
-        "$.plugins.tcp_server.args"
-    } else {
-        "$.plugins.udp_server.args"
+/// A matcher that always misses, so `!_false` matches everything.
+pub(crate) struct FalseMatcher;
+
+impl mosdns_sequence_core::Matcher for FalseMatcher {
+    fn evaluate(
+        &self,
+        _state: &ExecutionState,
+    ) -> Result<mosdns_sequence_core::MatchOutcome, mosdns_sequence_core::MatcherError> {
+        Ok(mosdns_sequence_core::MatchOutcome::new(false, None))
+    }
+}
+
+/// Builds the qname matcher for `qname $provider`, inline expressions, and
+/// `&file` references. Referenced domain sets keep their declaration order and
+/// the anonymous inline set is appended last, matching the provider contract.
+fn compile_qname(
+    args: &str,
+    path: &str,
+    catalog: &PluginCatalog<'_>,
+) -> Result<QnameMatcher, ConfigError> {
+    let mut groups: Vec<Rc<MixMatcher<()>>> = Vec::new();
+    let mut inline = MixMatcher::new();
+    inline.set_default("domain");
+    let mut has_inline = false;
+    for field in args.split_whitespace() {
+        if let Some(tag) = field.strip_prefix('$') {
+            let set = catalog.domain_set(tag).ok_or_else(|| {
+                ConfigError::new(path, format!("unknown domain_set reference `${tag}`"))
+            })?;
+            groups.push(set);
+        } else if field.starts_with('&') {
+            return Err(ConfigError::new(
+                path,
+                "qname file references use a domain_set plugin `files` entry",
+            ));
+        } else {
+            inline.add(field, ()).map_err(|error| {
+                ConfigError::new(path, format!("invalid qname rule `{field}`: {error}"))
+            })?;
+            has_inline = true;
+        }
+    }
+    if groups.is_empty() && !has_inline {
+        return Err(ConfigError::new(
+            path,
+            "qname requires a domain_set reference or an inline rule",
+        ));
+    }
+    if has_inline {
+        groups.push(Rc::new(inline));
+    }
+    Ok(QnameMatcher::new(groups))
+}
+
+fn compile_exec(
+    value: &RawValue,
+    path: &str,
+    catalog: &PluginCatalog<'_>,
+) -> Result<Vec<ExecutableSpec>, ConfigError> {
+    match value {
+        RawValue::String(expression) => Ok(vec![compile_exec_item(expression, path, catalog)?]),
+        RawValue::Sequence(values) => values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let item_path = format!("{path}[{index}]");
+                let expression = expect_string(value, &item_path)?;
+                compile_exec_item(&expression, &item_path, catalog)
+            })
+            .collect(),
+        _ => Err(ConfigError::new(
+            path,
+            "exec must be a string or a sequence of strings",
+        )),
+    }
+}
+
+fn compile_exec_item(
+    expression: &str,
+    path: &str,
+    catalog: &PluginCatalog<'_>,
+) -> Result<ExecutableSpec, ConfigError> {
+    let expression = expression.trim();
+    if expression.is_empty() {
+        return Err(ConfigError::new(path, "exec expression must not be empty"));
+    }
+    let (name, args) = match expression.split_once(char::is_whitespace) {
+        Some((name, args)) => (name, args.trim()),
+        None => (expression, ""),
     };
-    let args = expect_map(&plugin.args, path, "listener args must be a mapping")?;
+    match name {
+        "accept" | "return" | "exit" => {
+            if !args.is_empty() {
+                return Err(ConfigError::new(path, format!("{name} takes no arguments")));
+            }
+            Ok(match name {
+                "accept" => ExecutableSpec::Accept,
+                "return" => ExecutableSpec::Return,
+                _ => ExecutableSpec::Exit,
+            })
+        }
+        "reject" => {
+            let rcode = if args.is_empty() {
+                DEFAULT_REJECT_RCODE
+            } else {
+                args.parse::<u16>().map_err(|_| {
+                    ConfigError::new(
+                        path,
+                        format!("reject requires a numeric rcode, got `{args}`"),
+                    )
+                })?
+            };
+            if rcode > MAX_SUPPORTED_REJECT_RCODE {
+                return Err(ConfigError::new(
+                    path,
+                    format!(
+                        "reject rcode {rcode} is unsupported; the native host currently supports 0..={MAX_SUPPORTED_REJECT_RCODE}"
+                    ),
+                ));
+            }
+            Ok(ExecutableSpec::Reject { rcode })
+        }
+        "goto" | "jump" => {
+            let target = named_sequence_target(args, path, catalog, name)?;
+            Ok(if name == "goto" {
+                ExecutableSpec::Goto { target }
+            } else {
+                ExecutableSpec::Jump { target }
+            })
+        }
+        "try" => Ok(ExecutableSpec::Try {
+            target: ExecutableTargetSpec::Sequence(named_sequence_target(
+                args, path, catalog, name,
+            )?),
+        }),
+        _ => {
+            let Some(tag) = name.strip_prefix('$') else {
+                return Err(ConfigError::new(
+                    path,
+                    format!("unsupported executable `{name}`"),
+                ));
+            };
+            if !args.is_empty() {
+                return Err(ConfigError::new(
+                    path,
+                    format!("`{name}` does not accept arguments in the native host subset"),
+                ));
+            }
+            match catalog.kind_of(tag) {
+                Some(PluginKind::Sequence) => Ok(ExecutableSpec::Call {
+                    target: SequenceRef::new(tag),
+                }),
+                Some(PluginKind::Forward | PluginKind::Cache) => Ok(ExecutableSpec::External {
+                    target: ExternalRef::new(tag),
+                }),
+                Some(PluginKind::DomainSet | PluginKind::Listener) => Err(ConfigError::new(
+                    path,
+                    format!("`{name}` is not executable"),
+                )),
+                None => Err(ConfigError::new(
+                    path,
+                    format!("unknown executable reference `{name}`"),
+                )),
+            }
+        }
+    }
+}
+
+fn named_sequence_target(
+    args: &str,
+    path: &str,
+    catalog: &PluginCatalog<'_>,
+    name: &str,
+) -> Result<SequenceRef, ConfigError> {
+    let tag = args
+        .strip_prefix('$')
+        .ok_or_else(|| ConfigError::new(path, format!("{name} requires a `$sequence` target")))?;
+    if tag.is_empty() || tag.contains(char::is_whitespace) {
+        return Err(ConfigError::new(
+            path,
+            format!("{name} requires exactly one `$sequence` target"),
+        ));
+    }
+    match catalog.kind_of(tag) {
+        Some(PluginKind::Sequence) => Ok(SequenceRef::new(tag)),
+        Some(_) => Err(ConfigError::new(
+            path,
+            format!("`{name} ${tag}` does not reference a sequence"),
+        )),
+        None => Err(ConfigError::new(
+            path,
+            format!("unknown sequence reference `${tag}`"),
+        )),
+    }
+}
+
+fn compile_listener(plugin: &RawPlugin, index: usize) -> Result<ListenerConfig, ConfigError> {
+    let is_tcp = plugin.kind == "tcp_server";
+    let path = format!("$.plugins[{index}].args");
+    let args = expect_map(&plugin.args, &path, "listener args must be a mapping")?;
     let allowed = if is_tcp {
         &["entry", "listen", "enable_audit", "idle_timeout"][..]
     } else {
         &["entry", "listen", "enable_audit"][..]
     };
-    args.reject_unknown(allowed, path)?;
-    let entry = expect_string(args.required("entry", path)?, &format!("{path}.entry"))?;
+    args.reject_unknown(allowed, &path)?;
+    let entry = expect_string(args.required("entry", &path)?, &format!("{path}.entry"))?;
     if entry.is_empty() {
         return Err(ConfigError::new(
             format!("{path}.entry"),
             "entry must not be empty",
         ));
     }
-    let listen = expect_string(args.required("listen", path)?, &format!("{path}.listen"))?;
+    let listen = expect_string(args.required("listen", &path)?, &format!("{path}.listen"))?;
     let listen = parse_socket_addr(&listen, &format!("{path}.listen"))?;
     let enable_audit = expect_bool(
-        args.required("enable_audit", path)?,
+        args.required("enable_audit", &path)?,
         &format!("{path}.enable_audit"),
     )?;
     let idle_timeout = if is_tcp {
         let timeout = expect_positive_integer(
-            args.required("idle_timeout", path)?,
+            args.required("idle_timeout", &path)?,
             &format!("{path}.idle_timeout"),
         )?;
         Some(Duration::from_secs(timeout))
@@ -962,23 +1059,12 @@ fn parse_socket_addr(value: &str, path: &str) -> Result<SocketAddr, ConfigError>
     Ok(socket)
 }
 
-fn assign_unique(
-    slot: &mut Option<RawPlugin>,
-    plugin: RawPlugin,
-    role: &str,
-) -> Result<(), ConfigError> {
-    if let Some(existing) = slot {
-        return Err(ConfigError::new(
-            "$.plugins",
-            format!(
-                "duplicate {role} plugin tags `{}` and `{}`",
-                existing.tag, plugin.tag
-            ),
-        ));
-    }
-    *slot = Some(plugin);
-    Ok(())
-}
+/// The default configured `reject` response, matching the product default.
+pub(crate) const DEFAULT_REJECT_RCODE: u16 = 5;
+/// The largest `reject` rcode this host renders on the wire today. The full
+/// 12-bit range stays supported by the sequence core and is planned for a
+/// later batch with the complete EDNS work.
+pub(crate) const MAX_SUPPORTED_REJECT_RCODE: u16 = 15;
 
 fn expect_map<'a>(
     value: &'a RawValue,
@@ -1378,13 +1464,113 @@ plugins:
 "#;
         assert!(compile_yaml(duplicate_tag).is_err());
 
-        let duplicate_role = r#"
+        let duplicate_listener = r#"
 log: { level: error }
 plugins:
-  - { tag: f1, type: forward, args: { upstreams: [ { addr: udp://127.0.0.1:53 } ] } }
-  - { tag: f2, type: forward, args: { upstreams: [ { addr: udp://127.0.0.1:54 } ] } }
-  - { tag: s, type: sequence, args: [ { exec: "$f1" } ] }
+  - { tag: f, type: forward, args: { upstreams: [ { addr: udp://127.0.0.1:53 } ] } }
+  - { tag: s, type: sequence, args: [ { exec: "$f" } ] }
+  - { tag: l1, type: udp_server, args: { entry: s, listen: "127.0.0.1:53", enable_audit: false } }
+  - { tag: l2, type: udp_server, args: { entry: s, listen: "127.0.0.1:54", enable_audit: false } }
 "#;
-        assert!(compile_yaml(duplicate_role).is_err());
+        assert!(compile_yaml(duplicate_listener).is_err());
+    }
+
+    /// A one-rule program whose rule matches `expression`, so the compiled
+    /// matcher's decision can be observed through a real machine.
+    fn matcher_expression(expression: &str) -> Result<bool, super::ConfigError> {
+        let yaml = format!(
+            r#"
+log: {{ level: error }}
+plugins:
+  - tag: rules
+    type: domain_set
+    args: {{ exps: ["full:blocked.test"] }}
+  - tag: entry
+    type: sequence
+    args:
+      - matches: "{expression}"
+        exec: reject 3
+      - exec: $f
+  - tag: f
+    type: forward
+    args: {{ upstreams: [ {{ addr: udp://127.0.0.1:53 }} ] }}
+  - tag: l
+    type: udp_server
+    args: {{ entry: entry, listen: "127.0.0.1:53", enable_audit: false }}
+"#
+        );
+        let config = super::compile_yaml(&yaml)?;
+        let state = ExecutionState::new(
+            mosdns_dns_core::QueryHeader {
+                id: 1,
+                qr: false,
+                opcode: 0,
+                qdcount: 1,
+                ancount: 0,
+                nscount: 0,
+                arcount: 0,
+            },
+            mosdns_dns_core::QuestionInfo {
+                qname_wire: vec![
+                    7, b'b', b'l', b'o', b'c', b'k', b'e', b'd', 4, b't', b'e', b's', b't', 0,
+                ],
+                qtype: 1,
+                qclass: 1,
+            },
+        );
+        let mut machine = config
+            .new_machine(state, ExecutionControl::with_fuel(8))
+            .expect("machine");
+        let step = machine.step().expect("step");
+        // A matched rule rejects locally; an unmatched rule falls through to
+        // the unconditional forward and dispatches it instead.
+        Ok(matches!(
+            step,
+            mosdns_sequence_core::MachineStep::Dispatch(_)
+        ))
+    }
+
+    #[test]
+    fn matcher_expressions_follow_the_documented_grammar_and_negation() {
+        // A matching rule rejects locally, so no dispatch is observed; a
+        // missing rule falls through to the forward instead.
+        // `_true` and `!_false` both match, so the reject runs.
+        assert!(!matcher_expression("_true").expect("_true compiles"));
+        assert!(!matcher_expression("!_false").expect("!_false compiles"));
+        // `_false` and `!_true` both miss, so the forward is reached.
+        assert!(matcher_expression("_false").expect("_false compiles"));
+        assert!(matcher_expression("!_true").expect("!_true compiles"));
+        // A named domain set matches the blocked name; its negation misses.
+        assert!(!matcher_expression("qname $rules").expect("named qname"));
+        assert!(matcher_expression("!qname $rules").expect("negated qname"));
+        assert!(!matcher_expression("qname full:blocked.test").expect("inline qname"));
+        assert!(!matcher_expression("qtype 1").expect("qtype"));
+        assert!(matcher_expression("qtype 65").expect("qtype miss"));
+        // Nothing has formed a response at this rule yet, so `has_resp`
+        // misses, while its negation matches.
+        assert!(matcher_expression("has_resp").expect("has_resp compiles"));
+        assert!(!matcher_expression("!has_resp").expect("negated has_resp"));
+        // No answer has been observed either, so `resp_ip` misses.
+        assert!(matcher_expression("resp_ip 192.0.2.1").expect("resp_ip compiles"));
+    }
+
+    #[test]
+    fn unsupported_or_malformed_matchers_are_rejected_at_load_time() {
+        for expression in [
+            "unknown_matcher",
+            "qtype",
+            "qtype notanumber",
+            "has_resp extra",
+            "resp_ip ::1",
+            "resp_ip 192.0.2.1/24",
+            "qname $missing_set",
+            "qname &file.txt",
+            "_true extra",
+        ] {
+            assert!(
+                matcher_expression(expression).is_err(),
+                "`{expression}` must be rejected at load time"
+            );
+        }
     }
 }

@@ -1,18 +1,40 @@
-# Rust-native 下一阶段任务顺序（2026-09-27）
+# Rust-native 下一阶段安排（2026-09-27）
 
-本页是截至 `rust` 分支当前已审查证据的执行顺序，不修改总路线图的 Phase 5A–5D/6 关口。目标仍是 Linux amd64 上纯 Rust-native 完整 MosDNS；优先 DNS 正确性、p95/p99 响应、有效吞吐、多并发和稳定性，内存作为第二指标。每一阶段只按真实证据升级状态，不把 W1/W2/W3 子集称为完整版。
+目标仍是 Linux amd64 上纯 Rust-native 完整 MosDNS，优先正确性、稳定运行、p95/p99、有效吞吐和并发，内存其次。本次按用户“避免过度设计”的要求调整推进方式，不删除功能或降低最终发布标准。
 
-## 当前事实与顺序
+## 当前事实
 
-W1 UDP/TCP 转发、W2 简单缓存、W3 受限域名/IP 分流和首轮原生进程 Go/Rust 对照已有归档证据。首轮对照只有 12/21 组形成三次有效配对，未找到客观过载点；服务恢复和多核容量不能据此判定。详见 [首轮结果](phase5a-native-comparison.md)。基础观测任务已验收归档：严格 W1/W2/W3 接受 `enable_audit: true`，提供最终查询审计与基础指标；当前运行时为单线程 local task set，这也是后续多核目标必须单独验证的架构限制。
+W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。首轮对照覆盖有限；后续测量任务已关闭为 [incomplete matrix](phase5a-measurement-reliability.md)，不补跑、不调阈值，不补称容量/恢复/热点已证明。单线程 LocalSet 的多核能力尚未验证；暂不凭猜测改 Send/runtime。
 
-| 顺序 | 独立交付及结束条件 | 依赖和下一步判定 |
+当前功能瓶颈是原生配置还受固定 W1/W2/W3 图限制，已有模块未充分接入实际查询链。下一批以新增可运行配置为成果，正式测量缺口在适当链路上补，不挡住功能规划。
+
+## 后续顺序
+
+| 次序 | 阶段与交付 | 结束条件 |
 | --- | --- | --- |
-| 1：5A 基础观测 | 执行 [native query observability 任务](../../.trellis/tasks/archive/2026-09/09-24-rust-phase5a-native-query-observability/prd.md)：W1/W2/W3 每个已受理查询的最终结局、实际路由、缓存状态、基础指标及有界审计；Linux 正确性和观测开销有证据。 | 先让后续性能/功能工作可诊断。完整审计 API/UI 仍在 5C。此任务已获 M10-FINAL-001 PASS，并于 2026-09-26 经授权完成归档；仅关闭基础观测子集。 |
-| 2：5A 测量可信度与热点分析 | [measurement reliability 任务](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5a-measurement-reliability/prd.md) 已终止归档，结果为 **incomplete matrix**：工具与校准已交付，W1 仅两个有效 pair；Go r3 健康门槛失败后停止，W2/profiling 未执行。见 [收口报告](phase5a-measurement-reliability.md)。 | 重跑预算耗尽，不补跑、不改阈值；原定 A4/A5 未通过，不形成容量、恢复或热点结论。保留性能证据缺口，进入 5B 功能规划；没有依据先做 runtime/`Send` 改造。 |
-| 3：5B 查询功能分批闭环 | 先冻结真实代表配置与 [功能覆盖表](feature-coverage.md) 的缺项，再按依赖切成配置/sequence/provider 与匹配器、上游策略和余下协议/listener、跨插件组合等可独立验收的任务。每批必须有实际 YAML → 最终 DNS/路由的 E2E、故障与性能趋势。 | 不以单插件单测替代组合契约；原生实现不延伸 Go/cgo bridge。某一批若依赖 Phase 4 传输能力，先补该依赖再继续。 |
-| 4：5C 管理与状态闭环 | 按 API/文件/运行时/WebUI 数据流交付完整审计与 `/metrics`、`special_groups`、规则下载保存/reload、dump、配置生成及重启恢复，逐项封闭覆盖表。 | 5A 观测的 typed 数据模型在此接入正式接口；保留现有 Vue UI，验证管理动作不阻塞查询。 |
-| 5：5D 完整配置整机验收 | 在 5B/5C 全部条目关闭后冻结 SLA/资源预算，做整机负载扫描、长稳、故障注入、热更新与性能剖析优化。 | p95/p99、正确且按时响应吞吐、恢复、CPU/RSS 和长稳均有 Linux amd64 证据，阻塞未决项为零。 |
-| 6：Phase 6 迁移脚手架退役 | 先证明原生路径等价，再删 Go/cgo adapter、selector、mirror/fallback 等过渡层，重跑完整 E2E 和发布 gate。 | 只有此后才能考虑默认/生产替换；部署仍遵守测试机与用户确认流程。 |
+| 1 | 5B 首批：一条现有配置派生的规则→direct child→cache→upstream 链，包含常用 reject、顶层 include 和规则文件 | 实际 YAML 经 UDP/TCP 得到正确响应、命中/未命中与路由；基本审计、故障和停止正确 |
+| 2 | 5B 按功能家族补齐，同时穿插一条 5C 管理闭环 | 常用 matcher/provider、响应处理、上游策略/协议按依赖成批交付；尽早验证改规则→保存/reload→下一查询生效 |
+| 3 | 补齐所有剩余 5B/5C 功能 | [覆盖表](feature-coverage.md) 的配置/插件/API/持久化/管理条目都有相应证据；复用现有 Vue UI |
+| 4 | 5D 完整整机验收与有依据的优化 | 完整配置下正式 Go/Rust 对照、容量/恢复/并发、管理干扰、长稳和资源预算通过，阻塞项为零 |
+| 5 | Phase 6 hybrid 退役和发布验证 | 去除过渡 Go/cgo/selector/mirror/fallback，必要完整回归、纯 Rust 构建/运行通过；随后才考虑生产确认 |
 
-顺序 1 已验收归档。顺序 2 按 C2C 裁决与用户确认关闭实验，并提交归档收口；生命周期关闭不代表原验收全部 PASS。顺序 3 可以开始规划，首批建议为可组合 YAML/sequence 原生接入：解除固定 W1/W2/W3 配置图限制，复用已有模块，冻结引用、顺序、所选控制流、错误与取消/关闭契约，并用真实 YAML → 最终 DNS/路由验收。具体范围依覆盖表 P44、L01/L02、C01 子集确定，不打包完整 5B；本轮不创建任务或开始实现。容量、恢复、热点和长稳仍须后续验证，5D/Phase 6/生产门禁不变。
+阶段编号表示最终责任，不要求所有 5B 条目完成才开始任何 5C 集成。剩余 Phase 4 能力按真实链路依赖接入，不先补齐全部协议再开始主程序。所有最终功能仍保留；switch/provider 等共享机制可成批实现，不能把每个覆盖行变成独立微型项目。
+
+## 当前 5B 任务和第一小目标
+
+沿用 [09-27 config/sequence 任务](../../.trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md)，revision 2。实现已获单独授权并完成；本地 workspace 验证及指定 Linux 上 UDP/audit-on 集成 E2E、TCP/audit-off CLI E2E 已通过。短诊断已记录但不作性能 PASS。独立完整 review 尚未返回 PASS，未部署，任务仍 `in_progress`；详细实测与未测项见 `implement.md`。
+
+本批支持 direct $sequence、一个 cache 在 entry/child 后继上的组合、reject 0..15（含常用 0/3）、顶层 include、provider 多规则/files，以及 qtype/has_resp。代表配置从本地 config_lite_all 裁剪，公网 aliapi 用已有受控 forward 替代；未支持部分有明确延期，不能声称原配置整体兼容。
+
+第一小目标：本地实际运行 block、路由 cache miss/hit、默认分支和 child 后父继续。三步状态：跑通链路与兼容/故障收敛已完成；Linux 功能 E2E 的指定子项已完成，剩余远端完整回归和独立 review 在任务记录中明确列出。取消原六 slice/四门禁安排；真实命名观测和 cache 后继接缝随必要功能完成，不独立扩框架。
+
+## 简化工作方式
+
+- 复杂任务保留简明 PRD/design/implement，需求只写一处；research 记录真正的语义疑点和来源，不重复全部规划。
+- 一次规划审查、一次最终完整审查为主；中间仅重大契约/范围变化或高风险问题追加审查，不逐步骤等待新 PASS。保留现有 reviewer 授权规则。
+- 变更时跑相关测试，交付前一次完整回归和 Linux 功能 E2E；新修改/失败才重复。修复后的合理重验不套正式实验的有限重跑规则。
+- 日常正确性检查不要求 benchmark；热路径有实质改变或代表链形成时做已有工具的轻量诊断；正式矩阵用于性能结论和最终验收。明显退步及时调查，不强制为每批重建工具/profile。
+- 保存必要 source/config/命令、结果/失败和自有资源退出记录，不每次规划编辑建 hash 清单，不把归档校验扩成单独项目。
+- 进度记录“新增哪些配置/链路和行为”，并更新覆盖子项；不以 slice/PASS/归档数量替代产品进展。
+
+基础 DNS/cache 语义、取消/资源回收、TLS、持久化与最终独立审查保留。已冻结的旧实验和最终 5D/Phase 6/生产门禁不改。2026-09-27 的规划修订本身未启动实现；用户随后授权该 5B 任务，当前实作及交付状态以其任务记录为准。

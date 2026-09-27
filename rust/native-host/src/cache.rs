@@ -119,8 +119,18 @@ impl NativeCacheAdapter {
     /// Creates a cache with an injected clock. The clock is private to this
     /// cache instance, so stored and lookup timestamps cannot mix epochs.
     pub fn with_clock(clock: Rc<dyn CacheClock>) -> Result<Self, CacheAdapterError> {
+        Self::with_capacity_and_clock(CACHE_CAPACITY, clock)
+    }
+
+    /// Creates a cache with the configured positive size. Only the entry
+    /// capacity is configurable here; the lazy TTL and eligibility model stay
+    /// the reviewed W2 contract.
+    pub fn with_capacity_and_clock(
+        capacity: u64,
+        clock: Rc<dyn CacheClock>,
+    ) -> Result<Self, CacheAdapterError> {
         let cache = NativeCache::new(CacheConfig {
-            capacity: CACHE_CAPACITY,
+            capacity,
             lazy_cache_ttl_secs: CACHE_LAZY_TTL_SECS,
             flags: 0,
         })?;

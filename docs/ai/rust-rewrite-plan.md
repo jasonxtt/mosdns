@@ -1,6 +1,6 @@
 # MosDNS Rust 渐进重写方案
 
-最后更新：`2026-09-20`（用户确认性能优先的目标及提前集成方向）
+最后更新：`2026-09-27`（用户确认真实链路优先、避免过度设计；完整功能及发布关口保留）
 
 ## 1. 目标与边界
 
@@ -129,7 +129,7 @@ rust/
   sequence-core/
   upstream-core/
   runtime/                 # 现有 hybrid staticlib；不是最终 host
-  <native-host>/           # Phase 5A 设计确定名称，当前尚未交付
+  native-host/             # Existing Phase 5A host; later features compose here
 scripts/
   build-rust-*.sh
 plugin/.../rust_bridge_*.go
@@ -326,7 +326,7 @@ Phase 4 的能力范围（包含已完成基础与仍待实现项，不是完成
 
 ### 阶段 5：提前集成、逐批补全 Rust-native host
 
-保留历史 Phase 编号，新增 5A–5D 交付关口；**编号不再意味着 Phase 4 全部结束后才能开始 5A**。每个关口仍由单独 Trellis 任务细化契约和验收，不因本规划更新自动授权代码实现。
+保留历史 Phase 编号及 5A–5D 最终责任；**编号不表示必须完成全部底层模块或所有 5B 条目才能开始下一类集成**。沿同一主程序按真实配置需要推进，以可运行链路为任务交付；任务保留必要契约和验收，不因本规划更新自动授权实现。
 
 | 关口 | 交付范围 | 完成条件 |
 | --- | --- | --- |
@@ -335,7 +335,9 @@ Phase 4 的能力范围（包含已完成基础与仍待实现项，不是完成
 | 5C 完整管理功能 | HTTP API、现有 Vue/兼容 UI、special_groups、规则下载/保存/reload、配置生成、审计/指标、运行时 JSON、dump、更新及服务管理 | 页面/API 操作 -> 文件与配置 -> 运行时 -> 最终 DNS/审计形成闭环；失败回滚、重启恢复和 managed-file 边界通过验证。 |
 | 5D 整机验收与优化 | 在 5B/5C 完整配置下回放、负载扫描、故障注入、热更新、长期运行；按 profiling 优化 | 产品条目全部有验收证据，Linux amd64 上达到预先冻结的延迟/有效吞吐/可靠性和资源预算；形成候选报告及未决项清单，未决阻塞项为零。 |
 
-5B/5C 的接口、持久化及 API 契约须在 5A 设计时纳入边界分析，不能等到 5C 才发现数据模型不兼容；实现按依赖拆分。性能测量从 5A 开始并贯穿后续任务，5D 是完整功能下的最终验证，不能成为第一次 profiling。
+5B/5C 的接口、持久化及 API 契约须提前考虑，但不为未接入功能预建通用框架。5B 先跑通从现有配置裁剪的真实查询链，再按 matcher/provider、响应处理、上游策略等共享机制成批补全；尽早穿插“改规则→保存/reload→查询生效”的 5C 闭环，保留现有 Vue UI。
+
+性能工作分三层：日常相关正确性/故障测试；热路径有实质改变或代表链形成后的轻量趋势/定向 profiling；完整链路和 5D 的正式对照、容量/恢复/长稳验收。不要求每批跑完整矩阵或先具备 profiler 才能实现功能，明显退步仍及时调查。性能结论必须有适用证据，诊断不足不能写 PASS。
 
 Vue 源码无需因后端语言变化而重写。5A 是隔离实验产物；5B/5C 的部分通过也不能宣称完整版。最终发布仍等待 5D 和 Phase 6。
 
@@ -361,7 +363,7 @@ retirement 必须先证明对应 Rust-native 路径已有等价产品契约测�
 | Phase 0–3A 历史 hybrid | 已归档的 Go/Rust characterization、ABI 和 isolated host 证据 | native 整机性能、全部功能完成 |
 | Phase 3B/4 foundation | Rust 契约/并发/协议/故障测试，必要的 isolated Linux integration | 已接入主程序、最终吞吐或稳定性达标 |
 | Phase 5A | 独立 Rust 进程的真实查询 E2E、可复现负载与 Go 基线对比 | 子集配置通过等于完整版 |
-| Phase 5B/5C | 功能逐项及组合 E2E，完整配置下的性能趋势，管理操作对查询的影响 | 未接入条目或未验证恢复流程已完成 |
+| Phase 5B/5C | 实际配置链路和功能家族的相关/组合 E2E；热路径改变时适当诊断，代表链的性能证据及管理并发验证 | 未接入条目已完成、诊断等于容量结论、工具缺失等于性能 PASS |
 | Phase 5D | 完整功能、Linux amd64、负载/故障/长期运行，预冻结验收阈值 | 可以跳过 retirement 或生产确认 |
 | Phase 6 | 清理后重跑完整 E2E、性能与稳定性，构建/运行不依赖 Go | 仅删文件或通过库测试等于发布通过 |
 
@@ -376,22 +378,19 @@ Linux amd64 是首要构建、基准和发布验收平台。arm64、OpenWrt、li
 - `rust` 是长期迁移分支，基线为 `main` v0.7.1（`3896a4a`）；
 - `main` 的业务修复继续正常推进，定期 merge 到 `rust`；
 - Rust 未达到单个里程碑验收门槛前，不反向合回 `main`；
-- 每个迁移模块独立提交：契约测试、Rust core、必要集成、构建/CI、文档分开；Phase 3B+ 不以新增 Go bridge 作为默认交付物；
+- 按可审阅的功能增量提交，允许关联实现、测试和必要文档同批交付，不为每个小步骤强制拆提交；Phase 3B+ 不以新增 Go bridge 为默认交付物；
 - 不从 `/Users/tom/github/mosdns-rust-cache` 整仓 merge，也不覆盖当前 workflow 或前端产物；
 - 不从 KixDNS 整仓 merge；按固定 commit、模块和许可证记录抽取，后续同步逐次审查；
 - 旧仓库保留只读，直到 cache 移植完成并核对所有未提交差异。
 
 ## 9. 执行状态与下一步
 
-本规划只维护架构、阶段和验收要求；实时执行以 `task.py current`、`task.py list` 和相应任务的三份规划文件为准，已完成证据见归档，简要交接见 [rust-handover.md](rust-handover.md)。没有 current 指针不等于不存在 in-progress 任务；不要用旧文档中的任务名称覆盖实际状态。
+实时状态以 task.py current/list 和任务规划为准，证据在归档，交接见 [rust-handover.md](rust-handover.md)。
 
-截至本次文档核对（2026-09-20），cache、matcher、query/wire、sequence 及多个 upstream foundation 已有归档证据；QUIC reuse/multiplexing 任务元数据为 `in_progress`，仓库已有 Slice 0 实现。该信息不代表整个任务或任何尚未取得证据的 review gate 已关闭。
+截至 2026-09-27，原生 W1/W2/W3 与基础观测已交付；最新测量任务以 incomplete matrix 关闭，容量/恢复/热点仍未知。不恢复该实验，不由其结果推断 runtime 改造。
 
-后续顺序：
+当前 5B 工作项是修订后的 [代表查询链任务](../../.trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md)：代表链实现及选定 Linux E2E 子项已完成，完整 review 尚待明确结果。后续按共享机制补全查询功能，并尽早接入一个管理闭环；剩余 Phase 4 跟随真实依赖；完整功能的 5D、Phase 6 和生产确认保留。具体顺序见 [后续安排](../rust/next-stage-plan.md)。
 
-1. 当前 QUIC reuse 按原任务范围和门禁收尾；本次规划更新不扩展它的实现权限。
-2. 在创建后续实现任务时，先冻结功能条目的契约/任务映射和进程级基准，优先规划 Phase 5A 及其最小 listener/异步执行依赖。
-3. 通过最小原生链路后，以同一主程序承接剩余 Phase 4、5B 和 5C；每批同步覆盖表和基准，不再把所有主程序集成留到最后。
-4. 完整功能经 5D、Phase 6 验收后，才进入最终替换确认。
+常规任务以简明 PRD/design/清单、一次规划审查、一次最终完整审查为主；中间只为重大契约/范围变化或实际高风险问题追加审查。记录新增可运行配置行为，保留必要测试、失败和可复现命令，不按每次编辑生成规划 digest。
 
-本次更新是用户批准方向的文档落地，不创建/启动 Trellis 任务，不改变 Go 默认路径，不授权生产部署；后续实现仍遵守对应任务的规划和评审门禁。
+本规划修订时只更新了计划，未自动授权实现或部署；随后用户单独授权了上述 5B 任务。该授权不改变 5D、Phase 6 或生产门禁。

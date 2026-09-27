@@ -189,15 +189,36 @@ pub enum DispatchMetadata {
 /// An unvalidated sequence executable definition.
 pub enum ExecutableSpec {
     Accept,
-    Reject { rcode: u16 },
+    Reject {
+        rcode: u16,
+    },
     Return,
-    Goto { target: SequenceRef },
-    Jump { target: SequenceRef },
+    /// A direct call of a named sequence. The callee runs in its own child
+    /// scope: its natural completion, `accept`, or `reject` returns to the
+    /// caller, while `exit` propagates past the caller unless a `try` catches
+    /// it. It is deliberately not lowered to `jump`/`try`.
+    Call {
+        target: SequenceRef,
+    },
+    Goto {
+        target: SequenceRef,
+    },
+    Jump {
+        target: SequenceRef,
+    },
     Exit,
-    Try { target: ExecutableTargetSpec },
-    Fixture { target: FixtureRef },
-    External { target: ExternalRef },
-    Unknown { kind: String },
+    Try {
+        target: ExecutableTargetSpec,
+    },
+    Fixture {
+        target: FixtureRef,
+    },
+    External {
+        target: ExternalRef,
+    },
+    Unknown {
+        kind: String,
+    },
 }
 
 impl ExecutableSpec {
@@ -397,6 +418,7 @@ impl ProgramSpec {
             sequence_slots[index] = Some(ValidatedSequence {
                 id,
                 name: sequence.name,
+                synthetic: false,
                 rules,
             });
         }
@@ -429,6 +451,10 @@ pub struct ValidatedRule {
 pub struct ValidatedSequence {
     pub id: SequenceId,
     pub name: String,
+    /// Whether this sequence is a synthetic multi-exec lowering rather than a
+    /// configuration-named sequence. Only named sequences are real execution
+    /// origins, so a synthetic scope must never be reported as one.
+    pub synthetic: bool,
     pub rules: Vec<ValidatedRule>,
 }
 
@@ -451,6 +477,7 @@ pub enum ValidatedExecutable {
     Accept,
     Reject { rcode: u16 },
     Return,
+    Call { target: SequenceId },
     Goto { target: SequenceId },
     Jump { target: SequenceId },
     Exit,
@@ -600,6 +627,7 @@ fn normalize_executable_list(
     sequence_slots[target.index()] = Some(ValidatedSequence {
         id: target,
         name,
+        synthetic: true,
         rules,
     });
     Ok(Some(ValidatedExecutable::Inline { target }))
@@ -622,6 +650,9 @@ fn resolve_executable(
             target: resolve_sequence(target, sequence_ids)?,
         },
         ExecutableSpec::Jump { target } => ValidatedExecutable::Jump {
+            target: resolve_sequence(target, sequence_ids)?,
+        },
+        ExecutableSpec::Call { target } => ValidatedExecutable::Call {
             target: resolve_sequence(target, sequence_ids)?,
         },
         ExecutableSpec::Exit => ValidatedExecutable::Exit,

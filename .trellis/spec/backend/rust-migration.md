@@ -58,6 +58,85 @@ Do not begin a later migration module merely because its Rust implementation is 
 
 After a complete Rust-native host exists, run a dedicated hybrid-scaffolding retirement gate before final replacement/release. Remove the early `MOSDNS_*_BACKEND` selectors, Go mirrors/fallback, cgo adapters/FFI handles and bridge-only test/build paths that are no longer needed, but only after equivalent Rust-native product-contract coverage exists.
 
+## Scenario: native named sequence calls and cache successor boundaries
+
+### 1. Scope / Trigger
+
+Native-host work that compiles a direct `$sequence` call or places the host's
+single cache executable inside a sequence must preserve caller control flow and
+the cache's own continuation boundary. This keeps the native program model
+canonical and prevents a later parent rule from changing a cached child result.
+
+### 2. Signatures
+
+- Configuration compilation resolves `ExecutableSpec::Call { target:
+  SequenceRef }` to `ValidatedExecutable::Call { target: SequenceId }`.
+- The async owner may call
+  `ExecutionMachine::watch_enclosing_scope(executable: ExecutableId)` before
+  resuming a cache dispatch. The machine reports
+  `MachineStep::ScopeComplete(ScopeCompletion)` and the owner resumes with
+  `resume_scope_completion(executable: ExecutableId)`.
+- A cache miss owns one request-local `PendingStore`; successful publication is
+  `PendingStore::publish(response: &[u8]) -> Result<bool, CacheAdapterError>`.
+
+### 3. Contracts
+
+- A named call pushes an independent child scope. Natural completion,
+  `accept`, and `reject` return to the caller; `exit` propagates through normal
+  calls until a surrounding `try` catches it; ordinary errors remain errors.
+- A cache hit supplies the cached response and completes the cache's successor
+  path, after which the parent may continue. A miss publishes only when that
+  successor naturally completes, before the caller's next rule runs.
+- Each request may arm one cache publication token. Cancellation, deadline,
+  failed execution, synthesized responses, malformed responses, and responses
+  rejected by cache eligibility drop the token without publication. A later
+  parent response rewrite cannot alter bytes already captured at the child
+  completion boundary.
+- Audit provenance records the actual named sequence that ran; a synthetic
+  inline scope is not reported as a named origin.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Missing or wrong-type named sequence reference | Configuration compilation fails before listener bind with source path context |
+| Direct child completes, accepts, or rejects | Caller resumes after the call |
+| Direct child exits | Exit propagates until an enclosing `try` handles it |
+| Cache miss successor completes with an eligible raw response | Publish once at the successor boundary, before parent continuation |
+| Cache successor errors, response is malformed/ineligible, request cancels, or deadline expires | No cache publication |
+| Request reaches the same cache dispatch dynamically a second time | Fail closed; do not replace an outstanding token |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a local child cache miss stores its upstream response, then the parent
+  may finish; a repeat is served from cache without another peer request.
+- Base: a cache at the entry sequence stores the result of its own successor.
+- Bad: wait for the whole parent sequence to finish before storing, allowing a
+  later parent rule to overwrite the child response; lower a direct call into
+  `jump` or `try` and thereby change its return/exit semantics.
+
+### 6. Tests Required
+
+- Configuration tests cover declaration reordering, forward references,
+  missing/wrong-type references, and source-aware load errors.
+- Sequence-core tests assert child natural completion/accept/reject/exit/try
+  behavior and the exact watched-scope completion boundary.
+- Native-host tests use real UDP and TCP listeners plus counted loopback peers
+  to assert response wire, route counts, cache miss/hit, parent continuation,
+  audit on/off, and that a parent's later response does not pollute child
+  cache. Cancellation/error tests assert no cached result is published.
+- Run Rust formatting, Clippy with warnings denied, the full Rust workspace,
+  and one isolated Linux functional E2E before the task's final review.
+
+### 7. Wrong vs Correct
+
+Wrong: hold a miss token until the top-level `MachineStep::Complete`, then
+store whatever response the parent left in shared state.
+
+Correct: watch the cache dispatch's enclosing scope, publish its eligible raw
+response on `MachineStep::ScopeComplete`, then resume the caller so later
+parent rules cannot mutate the child cache value.
+
 ## Historical transitional scenarios
 
 The scenarios below remain authoritative for the **existing** Phase 1/2/3A hybrid code until its retirement. Do not extend them into Phase 3B sequence-core, Phase 4 transport/server foundations, or the final Rust host unless an explicit future task says otherwise.
