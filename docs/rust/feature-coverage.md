@@ -14,6 +14,31 @@
 - 每条参数、别名、quick setup、预置入口和插件自有 API 都属于盘点对象。注册包覆盖完成不等于参数/endpoint 级契约已全部冻结；后者是对应阶段任务的前置门槛。
 - 未支持功能在 5A 必须明确报错，不能静默忽略。5B/5C 交付前不得以“不常用”删除条目；排除需要用户明确决定。
 
+2026-09-27 执行方式调整：71 项是完整性台账，不是 71 个独立任务。按真实配置链和共享机制成批推进；先明确本批实际需要的语法/参数，未用条目在其拥有任务补全，不在每批重做全表契约冻结。交付记录新增可运行配置与参数子项、未完成部分和稳定测试入口；基础证据/局部接入不自动升级为整项产品验收。
+
+### 5B 代表链实现子项（本地通过；指定 Linux E2E 子项通过，完整验收待审）
+
+任务 [09-27-rust-phase5b-config-sequence-composition](../../.trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md) 把原生配置从固定 W1/W2/W3 图改为收集后解析的通用编译器，并让一条从本地配置包裁剪的代表链在 native host 上运行。以下只登记本批实际交付的子项与明确延期；整行仍是“待验收”。
+
+| 条目 | 本批实际交付 | 仍延期 |
+| --- | --- | --- |
+| P02 `domain_set` | `exps`（full/domain/regexp/keyword，复用 matcher-core MixMatcher）与 `files`（UTF-8 文本、跳过空行/`#` 注释、相对声明文件目录解析）；缺失规则文件在 bind 前报路径错误 | 管理端下载/修改/删除/热更新、SRS/geodata、`sets` 引用、provider API |
+| P15 `qclass` | 未纳入（本链不需要） | 整项 |
+| P16 `qname` | `qname $domain_set` 命名引用与内联规则；未知名在加载期报错 | `&file` 形式、`sets` 组合、其它 matcher 类别 |
+| P17 `qtype` | 多类型号匹配，非数字在加载期报错 | 整项参数冻结 |
+| P12 `has_resp` | 已接入（无参） | 整项参数冻结 |
+| P20 `resp_ip` | 仅单一 IPv4 字面量，保留旧 W3 语法 | CIDR/多值/IPv6、规则管理 |
+| P26 `cache` | 单个 host-owned cache；`size` 为可配置正整数，`lazy_cache_ttl` 必须为 0；可在 entry 或子 sequence 包裹其后继，hit 结束后继链后父继续，miss 在 cache 所在后继自然完成点保存；重复动态访问受控失败 | 多实例、lazy/dump/exclude/ECS、`mosdns_cache_v2` 持久化、API/metrics |
+| P34 `forward` | 多实例，各一 numeric UDP/TCP upstream，兼容旧 tag 形式；单/多 forward 统一合法响应校验与终态策略 | 上游组、bootstrap、TLS/HTTPS/H3/DoQ、并发选择、超时重试/fallback |
+| P44 `sequence` | 任意数量具名 sequence；direct `$sequence` 为独立 child scope（自然结束/accept/reject 返回父，exit 越过父遇 try 才捕获）；`jump`/`goto`/`return`/`try`/`accept`/`reject`/`exit`；exec scalar 与 list（multi-exec 为 synthetic inline scope） | 完整插件/quick setup、flow_setter、fallback/sleep、动态注册 |
+| L01 | `accept`/`reject`/`return`/`goto`/`jump`/`exit`/`try` 经 YAML → 异步请求 → 最终响应集成；`reject` 默认 REFUSED，`0..=15` 实际渲染，`>15` 在加载期报 unsupported（不截断） | 完整 12-bit reject/EDNS 渲染（顺序：5B 后续），以及序列内其它插件解析 |
+| L02 | `_true`/`_false`、单次 `!` 取反、`$tag` 命名引用、`matches` 单值或列表 | 完整 quick setup 集合、`&file` 引用 |
+| C01 | 顶层 `include` 按声明文件目录解析、有序加载 plugins-only 子文件、嵌套 include 明确拒绝；定义先收集再解析（重排/前后引用不改变有效分支）；重复 key/tag、缺失或跨类型引用、未知字段、未支持参数、坏规则文件均在 bind/查询前失败并带文件与字段/规则路径 | 递归 include、热更新、完整配置包加载、`api`/其它顶层段、preset 插件 |
+
+本地证据入口：`rust/native-host/tests/slice3_composition.rs`（loader/include/规则路径/负例/重排和真实 listener 场景）与 `rust/native-host/src/execution.rs` 的 `the_representative_chain_blocks_rejects_and_routes_without_a_listener`（block/qtype-0/local miss/default 分支/child 后父继续/cache 后继不被父改写/entry cache/重复访问/取消）。本地完整 workspace 回归为 891 passed / 0 failed。
+
+2026-09-28 在 `mosdns-rust`（Linux x86_64）用临时 Rust workspace 构建并运行代表链集成测试：UDP listener / audit on 与 TCP listener / audit off 均通过；另用 `mosdns start -c` 运行 TCP/audit-off CLI 代表链，并用既有 `dnsperf` 工具做 50 请求短诊断。请求、peer 计数、审计、构建/配置哈希、失败尝试、自有 PID 与端口释放证据见该任务 `implement.md` 的 A6 记录。短诊断经过 SSH 转发，结果不用于性能验收，没有性能 PASS。未在远端运行完整 workspace、故障/取消/关闭变体、`local.only.test` exact 分支或旧 W1/W2/W3 suites。完整 A1–A6 独立审查仍待执行，因此本表仍是“待验收”。
+
 ## 2. 启用插件注册包（71 项）
 
 来源：[plugin/enabled_plugins.go](../../plugin/enabled_plugins.go)，名称取各包的注册常量/quick setup，而非猜测目录名。每行均需通过所属类别的验收契约（第 4 节），状态为上一节定义的“待验收”。5A 只接入其最小链路必需子集，最终完整归属如下。

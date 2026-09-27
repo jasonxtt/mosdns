@@ -379,6 +379,9 @@ mod tests {
             .expect("compiled sequence");
         let dispatch = match machine.step().expect("forward dispatch") {
             MachineStep::Dispatch(dispatch) => dispatch,
+            MachineStep::ScopeComplete(completion) => {
+                panic!("unwatched machine yielded {completion:?}")
+            }
             MachineStep::Complete(_) => panic!("forward must dispatch"),
         };
         let completion = machine

@@ -18,7 +18,7 @@ pub use cache::{CacheAdapterError, CacheClock, CacheTestClock, NativeCacheAdapte
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
     CachePluginConfig, CompiledConfig, ConfigError, ForwardConfig, ListenerConfig, ListenerKind,
-    LogLevel, SequenceConfig, compile_yaml, load_yaml,
+    LogLevel, SequenceConfig, compile_yaml, compile_yaml_with_base, load_and_compile, load_yaml,
 };
 pub use observer::{
     AuditRecord, AuditSnapshot, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,
@@ -39,8 +39,7 @@ where
     let command = parse_args(args).map_err(HostError::Cli)?;
     match command {
         CliCommand::Start { config } => {
-            let yaml = load_yaml(&config).map_err(HostError::Config)?;
-            HostAssembly::from_yaml(&yaml).map_err(HostError::Assembly)
+            HostAssembly::from_config_file(&config).map_err(HostError::Assembly)
         }
     }
 }

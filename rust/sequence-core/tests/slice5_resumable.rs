@@ -121,6 +121,9 @@ fn run_owned_sync(
             .expect("owned machine creates");
     let result = machine.step().map(|step| match step {
         MachineStep::Complete(completion) => completion,
+        MachineStep::ScopeComplete(completion) => {
+            panic!("unwatched machine unexpectedly yielded {completion:?}")
+        }
         MachineStep::Dispatch(dispatch) => {
             panic!("sync fixture machine unexpectedly yielded {dispatch:?}")
         }
@@ -145,12 +148,18 @@ fn run_owned_external(
                 .resume(dispatch.executable(), outcome)
                 .map(|step| match step {
                     MachineStep::Complete(completion) => completion,
+                    MachineStep::ScopeComplete(completion) => {
+                        panic!("unwatched machine yielded {completion:?}")
+                    }
                     MachineStep::Dispatch(next) => {
                         panic!("single external program yielded {next:?}")
                     }
                 })
         }
         MachineStep::Complete(completion) => Ok(completion),
+        MachineStep::ScopeComplete(completion) => {
+            panic!("unwatched machine yielded {completion:?}")
+        }
     };
     (result, machine.state().snapshot())
 }

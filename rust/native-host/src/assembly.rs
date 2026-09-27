@@ -11,7 +11,7 @@ use mosdns_upstream_core::{
     UpstreamError,
 };
 
-use crate::config::{CompiledConfig, ConfigError, compile_yaml};
+use crate::config::{CompiledConfig, ConfigError, compile_yaml, load_and_compile};
 use crate::execution::{ExchangeError, ExchangeExecutor};
 use crate::observer::{AuditSnapshot, MetricsSnapshot, QueryObserver};
 use crate::tcp::{TcpServer, TcpServerError};
@@ -130,6 +130,13 @@ impl HostAssembly {
         Self::from_config(config)
     }
 
+    /// Reads and compiles one configuration file, resolving relative include
+    /// and rule-file paths against that file's directory.
+    pub fn from_config_file(path: &std::path::Path) -> Result<Self, AssemblyError> {
+        let config = load_and_compile(path).map_err(AssemblyError::Config)?;
+        Self::from_config(config)
+    }
+
     /// Constructs a pre-I/O graph from an already compiled configuration.
     pub fn from_config(config: CompiledConfig) -> Result<Self, AssemblyError> {
         Self::with_options(config, HostOptions::default())
@@ -146,8 +153,11 @@ impl HostAssembly {
             ForwardCatalog::from_configs(&config.forwards).map_err(AssemblyError::Catalog)?,
         );
         let cache = Rc::new(
-            NativeCacheAdapter::with_clock(options.cache_clock.clone())
-                .map_err(AssemblyError::Cache)?,
+            NativeCacheAdapter::with_capacity_and_clock(
+                config.cache.as_ref().map_or(1, |cache| cache.capacity),
+                options.cache_clock.clone(),
+            )
+            .map_err(AssemblyError::Cache)?,
         );
         let upstream_identities = config
             .forwards

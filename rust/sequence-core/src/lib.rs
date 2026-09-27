@@ -6,7 +6,7 @@ mod state;
 
 pub use engine::{
     CancellationState, CancellationToken, ExecutionCompletion, ExecutionControl, ExecutionError,
-    ExecutionMachine, ExternalDispatch, MachineStep, execute,
+    ExecutionMachine, ExternalDispatch, MachineStep, ScopeCompletion, execute,
 };
 pub use program::{
     DispatchMetadata, ExecutableId, ExecutableSpec, ExecutableTarget, ExecutableTargetSpec,
@@ -763,8 +763,9 @@ mod slice3_control_tests {
 
     use crate::{
         ExecutableSpec, ExecutableTargetSpec, ExecutionCompletion, ExecutionControl,
-        ExecutionError, ExecutionState, Executor, ExecutorError, ExecutorOutcome, FixtureRef,
-        FixtureSpec, ProgramSpec, RuleSpec, SequenceRef, SequenceSpec, execute,
+        ExecutionError, ExecutionMachine, ExecutionState, Executor, ExecutorError, ExecutorOutcome,
+        FixtureRef, FixtureSpec, MachineStep, ProgramSpec, RuleSpec, SequenceRef, SequenceSpec,
+        execute,
     };
 
     fn state() -> ExecutionState {
@@ -1205,6 +1206,307 @@ mod slice3_control_tests {
         execute(&program, entry(&program), &mut state, &mut control)
             .expect("fixture exit must be caught");
         assert_eq!(&*calls.borrow(), &["exit-fixture", "after"]);
+    }
+
+    #[test]
+    fn a_direct_named_call_returns_to_the_caller_for_every_natural_end() {
+        for (name, child_rules, expected) in [
+            (
+                "fall-through-work",
+                vec![RuleSpec::unconditional(Some(vec![fixture_exec("work")]))],
+                vec!["work", "after"],
+            ),
+            (
+                "accept",
+                vec![RuleSpec::unconditional(Some(vec![ExecutableSpec::Accept]))],
+                vec!["after"],
+            ),
+            (
+                "reject",
+                vec![RuleSpec::unconditional(Some(vec![
+                    ExecutableSpec::default_reject(),
+                ]))],
+                vec!["after"],
+            ),
+        ] {
+            let calls = Rc::new(RefCell::new(Vec::new()));
+            let program = ProgramSpec::new(
+                vec![
+                    SequenceSpec::new(
+                        "main",
+                        vec![
+                            RuleSpec::unconditional(Some(vec![ExecutableSpec::Call {
+                                target: SequenceRef::new("child"),
+                            }])),
+                            RuleSpec::unconditional(Some(vec![fixture_exec("after")])),
+                        ],
+                    ),
+                    SequenceSpec::new("child", child_rules),
+                ],
+                vec![
+                    fixture("after", "after", &calls, ExecutorOutcome::Continue),
+                    fixture("work", "work", &calls, ExecutorOutcome::Continue),
+                ],
+            )
+            .validate()
+            .expect("valid direct-call program");
+            let mut state = state();
+            let mut control = ExecutionControl::with_fuel(20);
+            execute(&program, entry(&program), &mut state, &mut control)
+                .unwrap_or_else(|error| panic!("{name} must return to the caller: {error:?}"));
+            assert_eq!(&*calls.borrow(), &expected[..], "{name}");
+        }
+    }
+
+    #[test]
+    fn a_direct_call_exit_propagates_past_the_caller_and_try_still_catches_it() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let spec = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![
+                        RuleSpec::unconditional(Some(vec![ExecutableSpec::Call {
+                            target: SequenceRef::new("child"),
+                        }])),
+                        RuleSpec::unconditional(Some(vec![fixture_exec("after")])),
+                    ],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    vec![RuleSpec::unconditional(Some(vec![ExecutableSpec::Exit]))],
+                ),
+            ],
+            vec![fixture("after", "after", &calls, ExecutorOutcome::Continue)],
+        );
+        let program = spec.validate().expect("valid exit program");
+        let mut state = state();
+        let mut control = ExecutionControl::with_fuel(20);
+        assert_eq!(
+            execute(&program, entry(&program), &mut state, &mut control),
+            Ok(ExecutionCompletion::Exited)
+        );
+        assert!(
+            calls.borrow().is_empty(),
+            "exit must skip the caller's next rule"
+        );
+
+        let caught_calls = Rc::new(RefCell::new(Vec::new()));
+        let caught = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![
+                        RuleSpec::unconditional(Some(vec![ExecutableSpec::Try {
+                            target: ExecutableTargetSpec::Sequence(SequenceRef::new("child")),
+                        }])),
+                        RuleSpec::unconditional(Some(vec![fixture_exec("after")])),
+                    ],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    vec![RuleSpec::unconditional(Some(vec![ExecutableSpec::Call {
+                        target: SequenceRef::new("grandchild"),
+                    }]))],
+                ),
+                SequenceSpec::new(
+                    "grandchild",
+                    vec![RuleSpec::unconditional(Some(vec![ExecutableSpec::Exit]))],
+                ),
+            ],
+            vec![fixture(
+                "after",
+                "after",
+                &caught_calls,
+                ExecutorOutcome::Continue,
+            )],
+        )
+        .validate()
+        .expect("valid caught-exit program");
+        let mut caught_state = self::state();
+        let mut caught_control = ExecutionControl::with_fuel(20);
+        execute(
+            &caught,
+            entry(&caught),
+            &mut caught_state,
+            &mut caught_control,
+        )
+        .expect("try must still catch a nested direct-call exit");
+        assert_eq!(&*caught_calls.borrow(), &["after"]);
+    }
+
+    #[test]
+    fn a_watch_reports_the_real_enclosing_scope_completion_and_the_named_origin() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let program = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![
+                        RuleSpec::unconditional(Some(vec![ExecutableSpec::Call {
+                            target: SequenceRef::new("child"),
+                        }])),
+                        RuleSpec::unconditional(Some(vec![fixture_exec("after")])),
+                    ],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: crate::ExternalRef::new("upstream"),
+                        },
+                    ]))],
+                ),
+            ],
+            vec![fixture("after", "after", &calls, ExecutorOutcome::Continue)],
+        )
+        .with_externals(vec![crate::ExternalSpec::new("upstream")])
+        .validate()
+        .expect("valid watched program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(20),
+        )
+        .expect("machine");
+        let MachineStep::Dispatch(dispatch) = machine.step().expect("external dispatch") else {
+            panic!("the child external must dispatch");
+        };
+        assert_eq!(
+            machine
+                .last_origin()
+                .and_then(|id| program.sequence(id))
+                .map(|sequence| sequence.name.as_str()),
+            Some("child"),
+            "the executing origin must be the real child sequence"
+        );
+        machine
+            .watch_enclosing_scope(dispatch.executable())
+            .expect("watch arms on the observed dispatch");
+        let step = machine
+            .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("external resume");
+        let MachineStep::ScopeComplete(completion) = step else {
+            panic!("the watched child scope must report its completion: {step:?}");
+        };
+        assert_eq!(completion.executable(), dispatch.executable());
+        assert!(
+            calls.borrow().is_empty(),
+            "the caller's next rule must not run before the owner resumes"
+        );
+        let step = machine
+            .resume_scope_completion(completion.executable())
+            .expect("scope resume");
+        assert!(matches!(step, MachineStep::Complete(_)));
+        assert_eq!(&*calls.borrow(), &["after"]);
+        assert_eq!(
+            machine
+                .last_origin()
+                .and_then(|id| program.sequence(id))
+                .map(|sequence| sequence.name.as_str()),
+            Some("main")
+        );
+    }
+
+    #[test]
+    fn a_watch_never_reports_a_synthetic_inline_scope_as_an_origin() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let program = ProgramSpec::new(
+            vec![SequenceSpec::new(
+                "main",
+                vec![RuleSpec::unconditional(Some(vec![
+                    ExecutableSpec::External {
+                        target: crate::ExternalRef::new("upstream"),
+                    },
+                ]))],
+            )],
+            vec![fixture("after", "after", &calls, ExecutorOutcome::Continue)],
+        )
+        .with_externals(vec![crate::ExternalSpec::new("upstream")])
+        .validate()
+        .expect("valid inline program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(20),
+        )
+        .expect("machine");
+        let MachineStep::Dispatch(dispatch) = machine.step().expect("external dispatch") else {
+            panic!("the external must dispatch");
+        };
+        assert_eq!(
+            machine
+                .last_origin()
+                .and_then(|id| program.sequence(id))
+                .map(|sequence| sequence.name.as_str()),
+            Some("main")
+        );
+        assert!(
+            !program.sequences.iter().any(|sequence| sequence.synthetic),
+            "the single named program has no synthetic scope"
+        );
+        assert!(
+            machine.watch_enclosing_scope(dispatch.executable()).is_ok(),
+            "a single watch may arm"
+        );
+        assert_eq!(
+            machine.watch_enclosing_scope(dispatch.executable()),
+            Err(ExecutionError::ScopeWatchConflict(dispatch.executable()))
+        );
+    }
+
+    #[test]
+    fn a_synthetic_inline_scope_keeps_the_enclosing_origin() {
+        let program = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::Call {
+                            target: SequenceRef::new("child"),
+                        },
+                        ExecutableSpec::External {
+                            target: crate::ExternalRef::new("upstream"),
+                        },
+                    ]))],
+                ),
+                SequenceSpec::new("child", Vec::new()),
+            ],
+            Vec::new(),
+        )
+        .with_externals(vec![crate::ExternalSpec::new("upstream")])
+        .validate()
+        .expect("valid inline program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(20),
+        )
+        .expect("machine");
+        let step = machine.step().expect("inline list dispatch");
+        let MachineStep::Dispatch(dispatch) = step else {
+            panic!("the inline external must dispatch: {step:?}");
+        };
+        assert!(
+            program.sequences.iter().any(|sequence| sequence.synthetic),
+            "the multi-exec lowering must be marked synthetic"
+        );
+        assert!(
+            program.sequence_id("<inline:0>").is_none(),
+            "a synthetic scope is not a public named target"
+        );
+        assert_eq!(
+            machine
+                .last_origin()
+                .and_then(|id| program.sequence(id))
+                .map(|sequence| sequence.name.as_str()),
+            Some("main"),
+            "a synthetic inline scope must not become the reported origin"
+        );
+        assert_eq!(dispatch.executable().index(), 0);
     }
 }
 

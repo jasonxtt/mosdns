@@ -1,27 +1,49 @@
 use std::net::{IpAddr, Ipv4Addr};
+use std::rc::Rc;
 
 use mosdns_dns_core::observe_answer_addresses;
-use mosdns_matcher_core::{FullMatcher, IpPrefixList};
+use mosdns_matcher_core::{IpPrefixList, MixMatcher};
 use mosdns_sequence_core::{ExecutionState, MatchOutcome, Matcher, MatcherError, ResponseState};
 
+/// One qname matcher plus every domain set it consults. A match is true when
+/// any consulted set matches, preserving the configured reference order. A
+/// referenced set is shared, so a large rule index is built and held once.
+pub(crate) struct QnameMatcher {
+    groups: Vec<Rc<MixMatcher<()>>>,
+}
+
+impl QnameMatcher {
+    pub(crate) fn new(groups: Vec<Rc<MixMatcher<()>>>) -> Self {
+        Self { groups }
+    }
+}
+
+impl Matcher for QnameMatcher {
+    fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
+        let matched = wire_name_to_ascii_domain(&state.query.question.qname_wire)
+            .is_some_and(|domain| self.groups.iter().any(|set| set.r#match(&domain).is_some()));
+        Ok(MatchOutcome::new(matched, None))
+    }
+}
+
 /// Exact qname matcher for the deliberately narrow native W3 grammar.
-#[allow(dead_code)] // Slice 0 compiles adapters before Slice 1 binds W3 rules.
+#[allow(dead_code)] // The W3 domain_set grammar still compiles through this helper.
 pub(crate) struct FullQnameMatcher {
-    domains: FullMatcher<()>,
+    domains: mosdns_matcher_core::FullMatcher<()>,
 }
 
 impl FullQnameMatcher {
     #[allow(dead_code)]
     pub(crate) fn new(domain: &str) -> Result<Self, MatcherBuildError> {
         let domain = normalize_ascii_domain(domain)?;
-        let mut domains = FullMatcher::new();
+        let mut domains = mosdns_matcher_core::FullMatcher::new();
         domains.add(&domain, ());
         Ok(Self { domains })
     }
 }
 
-/// Configuration-time rejection for a matcher expression outside W3's
-/// ASCII full-domain grammar.
+/// Configuration-time rejection for a matcher expression outside the accepted
+/// ASCII domain grammar.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MatcherBuildError {
     EmptyDomain,
@@ -33,6 +55,36 @@ impl Matcher for FullQnameMatcher {
         let matched = wire_name_to_ascii_domain(&state.query.question.qname_wire)
             .is_some_and(|domain| self.domains.r#match(&domain).is_some());
         Ok(MatchOutcome::new(matched, None))
+    }
+}
+
+/// Matches when the question type is one of the configured types.
+pub(crate) struct QtypeMatcher {
+    types: Vec<u16>,
+}
+
+impl QtypeMatcher {
+    pub(crate) fn new(types: Vec<u16>) -> Self {
+        Self { types }
+    }
+}
+
+impl Matcher for QtypeMatcher {
+    fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
+        let qtype = state.query.question.qtype;
+        Ok(MatchOutcome::new(self.types.contains(&qtype), None))
+    }
+}
+
+/// Matches when execution has already formed any response.
+pub(crate) struct HasResponseMatcher;
+
+impl Matcher for HasResponseMatcher {
+    fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
+        Ok(MatchOutcome::new(
+            !matches!(state.response, ResponseState::None),
+            None,
+        ))
     }
 }
 
@@ -104,6 +156,95 @@ fn wire_name_to_ascii_domain(wire: &[u8]) -> Option<String> {
         position = end;
     }
 }
+
+/// Builds one domain-set matcher from ordered rule expressions and rule files.
+///
+/// The set uses the shared [`MixMatcher`] grammar and normalization rather than
+/// a second matching engine. Rules loaded from a file are read as UTF-8 text;
+/// blank lines and `#` comments are skipped, matching the current provider
+/// loader. A missing rule file is a load error here, because the caller
+/// configured an explicit path.
+pub(crate) fn build_domain_set(
+    expressions: &[String],
+    files: &[String],
+    base_dir: &std::path::Path,
+) -> Result<Rc<MixMatcher<()>>, DomainSetError> {
+    let mut set = MixMatcher::new();
+    set.set_default("domain");
+    for (index, expression) in expressions.iter().enumerate() {
+        set.add(expression, ())
+            .map_err(|error| DomainSetError::Expression {
+                index,
+                expression: expression.clone(),
+                reason: error.to_string(),
+            })?;
+    }
+    for (index, file) in files.iter().enumerate() {
+        let path = if base_dir.as_os_str().is_empty() || std::path::Path::new(file).is_absolute() {
+            std::path::PathBuf::from(file)
+        } else {
+            base_dir.join(file)
+        };
+        let text = std::fs::read_to_string(&path).map_err(|error| DomainSetError::File {
+            index,
+            path: path.display().to_string(),
+            reason: error.to_string(),
+        })?;
+        for (line_index, line) in text.lines().enumerate() {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            if line.is_empty() {
+                continue;
+            }
+            set.add(line, ()).map_err(|error| DomainSetError::Rule {
+                path: path.display().to_string(),
+                line: line_index + 1,
+                reason: error.to_string(),
+            })?;
+        }
+    }
+    Ok(Rc::new(set))
+}
+
+/// A rule-level rejection from the domain-set loader, keeping the offending
+/// source path and line visible to the caller.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum DomainSetError {
+    Expression {
+        index: usize,
+        expression: String,
+        reason: String,
+    },
+    File {
+        index: usize,
+        path: String,
+        reason: String,
+    },
+    Rule {
+        path: String,
+        line: usize,
+        reason: String,
+    },
+}
+
+impl std::fmt::Display for DomainSetError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Expression {
+                index,
+                expression,
+                reason,
+            } => write!(formatter, "expression {index} `{expression}`: {reason}"),
+            Self::File {
+                index,
+                path,
+                reason,
+            } => write!(formatter, "file {index} {path}: {reason}"),
+            Self::Rule { path, line, reason } => write!(formatter, "{path} line {line}: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for DomainSetError {}
 
 fn normalize_ascii_domain(domain: &str) -> Result<String, MatcherBuildError> {
     let domain = domain.strip_suffix('.').unwrap_or(domain);

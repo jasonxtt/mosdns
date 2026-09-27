@@ -128,6 +128,8 @@ pub enum ExecutionError {
         received: ExecutableId,
     },
     ResumeNotPending(ExecutableId),
+    /// A second enclosing-scope watch was requested while one was armed.
+    ScopeWatchConflict(ExecutableId),
     Finished,
 }
 
@@ -148,10 +150,30 @@ impl ExternalDispatch {
     }
 }
 
+/// The completion of one watched enclosing scope.
+///
+/// The watched scope is the scope that contained the executable registered
+/// through [`ExecutionMachine::watch_enclosing_scope`]. It is reported at the
+/// exact boundary where that scope stops running, before the caller's next
+/// rule executes, so an owner can commit a result that the enclosure produced.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScopeCompletion {
+    executable: ExecutableId,
+}
+
+impl ScopeCompletion {
+    /// The executable whose enclosing scope completed.
+    #[must_use]
+    pub const fn executable(self) -> ExecutableId {
+        self.executable
+    }
+}
+
 /// The externally observable progress of one canonical sequence machine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MachineStep {
     Dispatch(ExternalDispatch),
+    ScopeComplete(ScopeCompletion),
     Complete(ExecutionCompletion),
 }
 
@@ -159,6 +181,7 @@ pub enum MachineStep {
 enum MachineStatus {
     Running,
     Waiting(ExecutableId),
+    ScopeCompleted(ExecutableId),
     Complete(ExecutionCompletion),
     Failed,
 }
@@ -205,17 +228,157 @@ impl ControlSlot<'_> {
     }
 }
 
+/// A stable identity for one live scope. Identities are never reused inside
+/// one machine, so a scope completion can be attributed to the exact scope
+/// that was running when a dispatch was observed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScopeId(usize);
+
+/// The machine's live scope stack plus the identity counter that makes
+/// per-scope observations unambiguous.
+#[derive(Default)]
+struct ScopeStack {
+    scopes: Vec<Scope>,
+    next_id: usize,
+    /// The named sequence whose rule most recently started executing, when
+    /// that rule started during this machine drive. `None` means no new rule
+    /// was entered, so the caller's previous origin still stands.
+    rule_origin: Option<SequenceId>,
+}
+
+impl ScopeStack {
+    fn push_sequence(&mut self, kind: ScopeKind, sequence: SequenceId) {
+        let id = self.allocate_id();
+        self.scopes.push(Scope::sequence(id, kind, sequence));
+    }
+
+    fn push_fixture(&mut self, kind: ScopeKind, fixture: ExecutableId) {
+        let id = self.allocate_id();
+        self.scopes.push(Scope::fixture(id, kind, fixture));
+    }
+
+    fn allocate_id(&mut self) -> ScopeId {
+        let id = ScopeId(self.next_id);
+        self.next_id = self.next_id.wrapping_add(1);
+        id
+    }
+
+    fn top(&self) -> Option<ScopeId> {
+        self.scopes.last().map(|scope| scope.id)
+    }
+
+    fn contains(&self, id: ScopeId) -> bool {
+        self.scopes.iter().any(|scope| scope.id == id)
+    }
+
+    fn last_mut(&mut self) -> Option<&mut Scope> {
+        self.scopes.last_mut()
+    }
+
+    fn pop(&mut self) -> Option<Scope> {
+        self.scopes.pop()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.scopes.is_empty()
+    }
+}
+
 /// The single resumable sequence interpreter used by both native hosts and
 /// the synchronous compatibility adapter.
 pub struct ExecutionMachine<'a> {
     program: &'a ValidatedProgram,
-    scopes: Vec<Scope>,
+    scopes: ScopeStack,
     state: StateSlot<'a>,
     control: ControlSlot<'a>,
     status: MachineStatus,
+    watch: Option<ScopeWatch>,
+    last_origin: Option<SequenceId>,
+    pending_dispatch_executable: Option<ExecutableId>,
+    pending_completion: Option<ExecutionCompletion>,
+}
+
+/// One armed enclosing-scope watch: the scope identity observed at dispatch
+/// time and the executable that asked for the notification.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScopeWatch {
+    scope: ScopeId,
+    executable: ExecutableId,
 }
 
 impl<'a> ExecutionMachine<'a> {
+    /// The named sequence that most recently executed a rule. Synthetic inline
+    /// scopes are never reported; the nearest enclosing configuration-named
+    /// sequence owns the position instead. This is the real executed position
+    /// for audit, never a fixed entry tag.
+    #[must_use]
+    pub fn last_origin(&self) -> Option<SequenceId> {
+        self.last_origin
+    }
+
+    /// Arms one watch on the scope that enclosed the most recently observed
+    /// dispatch. When that exact scope stops running, the machine yields
+    /// [`MachineStep::ScopeComplete`] before the caller's next rule executes.
+    ///
+    /// The watch is a boundary notification, not a re-run: the caller resumes
+    /// with [`ExecutionMachine::resume_scope_completion`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExecutionError::ScopeWatchConflict`] when another watch is
+    /// already armed, and [`ExecutionError::ResumeNotPending`] when
+    /// `executable` is not the executable of the most recent dispatch.
+    pub fn watch_enclosing_scope(
+        &mut self,
+        executable: ExecutableId,
+    ) -> Result<(), ExecutionError> {
+        if self.watch.is_some() {
+            return Err(ExecutionError::ScopeWatchConflict(executable));
+        }
+        if self.pending_dispatch_executable != Some(executable) {
+            return Err(ExecutionError::ResumeNotPending(executable));
+        }
+        let Some(scope) = self.scopes.top() else {
+            return Err(ExecutionError::ScopeWatchConflict(executable));
+        };
+        self.watch = Some(ScopeWatch { scope, executable });
+        Ok(())
+    }
+
+    /// Continues an execution that paused on a watched scope completion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExecutionError::InvalidResume`] when `executable` is not the
+    /// watched executable and [`ExecutionError::Finished`] when the machine is
+    /// already terminal.
+    pub fn resume_scope_completion(
+        &mut self,
+        executable: ExecutableId,
+    ) -> Result<MachineStep, ExecutionError> {
+        let expected = match self.status {
+            MachineStatus::ScopeCompleted(expected) => expected,
+            MachineStatus::Complete(_) | MachineStatus::Failed => {
+                return Err(ExecutionError::Finished);
+            }
+            MachineStatus::Running | MachineStatus::Waiting(_) => {
+                return Err(ExecutionError::ResumeNotPending(executable));
+            }
+        };
+        if expected != executable {
+            return Err(ExecutionError::InvalidResume {
+                expected,
+                received: executable,
+            });
+        }
+        self.status = MachineStatus::Running;
+        let result = self.drive(None);
+        if result.is_err() {
+            self.status = MachineStatus::Failed;
+        }
+        result
+    }
+
     /// Creates an async-capable machine that owns its execution state and
     /// control. The caller may hold it across an await between `step` and
     /// `resume` without retaining a borrow into a fixture or packet buffer.
@@ -233,12 +396,18 @@ impl<'a> ExecutionMachine<'a> {
         if program.sequence(entry).is_none() {
             return Err(ExecutionError::InvalidEntry(entry));
         }
+        let mut scopes = ScopeStack::default();
+        scopes.push_sequence(ScopeKind::Root, entry);
         Ok(Self {
             program,
-            scopes: vec![Scope::sequence(ScopeKind::Root, entry)],
+            scopes,
             state: StateSlot::Owned(Box::new(state)),
             control: ControlSlot::Owned(control),
             status: MachineStatus::Running,
+            watch: None,
+            last_origin: None,
+            pending_dispatch_executable: None,
+            pending_completion: None,
         })
     }
 
@@ -258,12 +427,18 @@ impl<'a> ExecutionMachine<'a> {
         if program.sequence(entry).is_none() {
             return Err(ExecutionError::InvalidEntry(entry));
         }
+        let mut scopes = ScopeStack::default();
+        scopes.push_sequence(ScopeKind::Root, entry);
         Ok(Self {
             program,
-            scopes: vec![Scope::sequence(ScopeKind::Root, entry)],
+            scopes,
             state: StateSlot::Borrowed(state),
             control: ControlSlot::Borrowed(control),
             status: MachineStatus::Running,
+            watch: None,
+            last_origin: None,
+            pending_dispatch_executable: None,
+            pending_completion: None,
         })
     }
 
@@ -303,7 +478,9 @@ impl<'a> ExecutionMachine<'a> {
     pub fn step(&mut self) -> Result<MachineStep, ExecutionError> {
         match self.status {
             MachineStatus::Running => {}
-            MachineStatus::Waiting(executable) => {
+            // Both pause states must be released by their owning resume call
+            // rather than by another `step`, so they report the same reason.
+            MachineStatus::Waiting(executable) | MachineStatus::ScopeCompleted(executable) => {
                 return Err(ExecutionError::WaitingForExternal(executable));
             }
             MachineStatus::Complete(_) | MachineStatus::Failed => {
@@ -332,7 +509,7 @@ impl<'a> ExecutionMachine<'a> {
     ) -> Result<MachineStep, ExecutionError> {
         let expected = match self.status {
             MachineStatus::Waiting(expected) => expected,
-            MachineStatus::Running => {
+            MachineStatus::Running | MachineStatus::ScopeCompleted(_) => {
                 return Err(ExecutionError::ResumeNotPending(executable));
             }
             MachineStatus::Complete(_) | MachineStatus::Failed => {
@@ -370,6 +547,11 @@ impl<'a> ExecutionMachine<'a> {
 
     fn drive(&mut self, mut ready: Option<Step>) -> Result<MachineStep, ExecutionError> {
         loop {
+            if let Some(completion) = self.pending_completion.take() {
+                self.pending_dispatch_executable = None;
+                self.status = MachineStatus::Complete(completion);
+                return Ok(MachineStep::Complete(completion));
+            }
             let step = if let Some(step) = ready.take() {
                 step
             } else {
@@ -377,14 +559,38 @@ impl<'a> ExecutionMachine<'a> {
                 let control = self.control.as_mut();
                 next_step(self.program, &mut self.scopes, state, control)?
             };
+            if let Some(origin) = self.scopes.rule_origin.take() {
+                self.last_origin = Some(origin);
+            }
             match step {
                 Step::Continue => {}
                 Step::Dispatch(executable) => {
+                    self.pending_dispatch_executable = Some(executable);
                     self.status = MachineStatus::Waiting(executable);
                     return Ok(MachineStep::Dispatch(ExternalDispatch { executable }));
                 }
                 Step::Complete(signal) => {
-                    if let Some(completion) = finish_scope(&mut self.scopes, signal) {
+                    let leaving_scope = self.scopes.top();
+                    let completion = finish_scope(&mut self.scopes, signal);
+                    if let (Some(watch), Some(leaving)) = (self.watch, leaving_scope) {
+                        if watch.scope == leaving && !self.scopes.contains(leaving) {
+                            // The watched enclosure stopped running. An `exit`
+                            // is reported here too so the owner never keeps a
+                            // token past its boundary, but only a natural
+                            // completion is a publishable successor result.
+                            self.watch = None;
+                            if matches!(signal, ScopeSignal::Completed) {
+                                self.pending_completion = completion;
+                                self.pending_dispatch_executable = None;
+                                self.status = MachineStatus::ScopeCompleted(watch.executable);
+                                return Ok(MachineStep::ScopeComplete(ScopeCompletion {
+                                    executable: watch.executable,
+                                }));
+                            }
+                        }
+                    }
+                    if let Some(completion) = completion {
+                        self.pending_dispatch_executable = None;
                         self.status = MachineStatus::Complete(completion);
                         return Ok(MachineStep::Complete(completion));
                     }
@@ -424,6 +630,11 @@ pub fn execute(
                     .map_err(ExecutionError::Executor)?;
                 machine.resume(dispatch.executable(), Ok(outcome))?;
             }
+            MachineStep::ScopeComplete(completion) => {
+                // The synchronous adapter never arms a watch, so this boundary
+                // is unreachable here; continue as the owner would.
+                machine.resume_scope_completion(completion.executable())?;
+            }
         }
     }
 }
@@ -431,6 +642,9 @@ pub fn execute(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ScopeKind {
     Root,
+    /// A direct named call. Its natural completion, `accept`, and `reject`
+    /// return to the caller; `exit` propagates past it.
+    CallChild,
     Inline,
     TryChild,
 }
@@ -442,6 +656,7 @@ struct Frame {
 }
 
 struct Scope {
+    id: ScopeId,
     kind: ScopeKind,
     frame: Option<Frame>,
     pending_fixture: Option<ExecutableId>,
@@ -449,8 +664,9 @@ struct Scope {
 }
 
 impl Scope {
-    fn sequence(kind: ScopeKind, sequence: SequenceId) -> Self {
+    fn sequence(id: ScopeId, kind: ScopeKind, sequence: SequenceId) -> Self {
         Self {
+            id,
             kind,
             frame: Some(Frame { sequence, pc: 0 }),
             pending_fixture: None,
@@ -458,8 +674,9 @@ impl Scope {
         }
     }
 
-    fn fixture(kind: ScopeKind, fixture: ExecutableId) -> Self {
+    fn fixture(id: ScopeId, kind: ScopeKind, fixture: ExecutableId) -> Self {
         Self {
+            id,
             kind,
             frame: None,
             pending_fixture: Some(fixture),
@@ -483,7 +700,7 @@ enum Step {
 
 fn next_step(
     program: &ValidatedProgram,
-    scopes: &mut Vec<Scope>,
+    scopes: &mut ScopeStack,
     state: &mut ExecutionState,
     control: &mut ExecutionControl,
 ) -> Result<Step, ExecutionError> {
@@ -513,13 +730,19 @@ fn next_step(
     let pc = frame.pc;
     frame.pc += 1;
     let rule = &sequence.rules[pc];
+    if !sequence.synthetic {
+        // Only a configuration-named sequence is a real executed origin. A
+        // synthetic inline scope keeps the enclosing named sequence as the
+        // reported origin instead of inventing an execution position.
+        scopes.rule_origin = Some(sequence_id);
+    }
     run_rule(program, rule, scopes, state, control)
 }
 
 fn run_rule(
     program: &ValidatedProgram,
     rule: &ValidatedRule,
-    scopes: &mut Vec<Scope>,
+    scopes: &mut ScopeStack,
     state: &mut ExecutionState,
     control: &mut ExecutionControl,
 ) -> Result<Step, ExecutionError> {
@@ -577,7 +800,7 @@ fn apply_dispatch_metadata(state: &mut ExecutionState, metadata: &DispatchMetada
 fn dispatch_executable(
     program: &ValidatedProgram,
     executable: &ValidatedExecutable,
-    scopes: &mut Vec<Scope>,
+    scopes: &mut ScopeStack,
     state: &mut ExecutionState,
 ) -> Result<Step, ExecutionError> {
     match executable {
@@ -590,6 +813,10 @@ fn dispatch_executable(
             Ok(Step::Complete(ScopeSignal::Completed))
         }
         ValidatedExecutable::Exit => Ok(Step::Complete(ScopeSignal::Exited)),
+        ValidatedExecutable::Call { target } => {
+            scopes.push_sequence(ScopeKind::CallChild, *target);
+            Ok(Step::Continue)
+        }
         ValidatedExecutable::Goto { target } => {
             let Some(scope) = scopes.last_mut() else {
                 return Ok(Step::Complete(ScopeSignal::Completed));
@@ -618,10 +845,10 @@ fn dispatch_executable(
         ValidatedExecutable::Try { target } => {
             match target {
                 ExecutableTarget::Sequence(sequence) => {
-                    scopes.push(Scope::sequence(ScopeKind::TryChild, *sequence));
+                    scopes.push_sequence(ScopeKind::TryChild, *sequence);
                 }
                 ExecutableTarget::Fixture(fixture) => {
-                    scopes.push(Scope::fixture(ScopeKind::TryChild, *fixture));
+                    scopes.push_fixture(ScopeKind::TryChild, *fixture);
                 }
             }
             Ok(Step::Continue)
@@ -631,7 +858,7 @@ fn dispatch_executable(
         }
         ValidatedExecutable::External { target } => dispatch_external(program, *target),
         ValidatedExecutable::Inline { target } => {
-            scopes.push(Scope::sequence(ScopeKind::Inline, *target));
+            scopes.push_sequence(ScopeKind::Inline, *target);
             Ok(Step::Continue)
         }
     }
@@ -650,7 +877,7 @@ fn dispatch_external(
 fn dispatch_fixture(
     program: &ValidatedProgram,
     fixture: ExecutableId,
-    scopes: &mut [Scope],
+    scopes: &mut ScopeStack,
     state: &mut ExecutionState,
 ) -> Result<Step, ExecutionError> {
     // The enclosing rule executable owns this dispatch unit. A fixture target
@@ -665,7 +892,7 @@ fn dispatch_fixture(
     executor_outcome_to_step(outcome, scopes, state)
 }
 
-fn return_from_current_scope(scopes: &mut [Scope]) -> Step {
+fn return_from_current_scope(scopes: &mut ScopeStack) -> Step {
     let Some(scope) = scopes.last_mut() else {
         return Step::Complete(ScopeSignal::Completed);
     };
@@ -679,7 +906,7 @@ fn return_from_current_scope(scopes: &mut [Scope]) -> Step {
 
 fn executor_outcome_to_step(
     outcome: ExecutorOutcome,
-    scopes: &mut [Scope],
+    scopes: &mut ScopeStack,
     state: &mut ExecutionState,
 ) -> Result<Step, ExecutionError> {
     match outcome {
@@ -707,7 +934,7 @@ fn consume_dispatch(control: &mut ExecutionControl) -> Result<(), ExecutionError
     Ok(())
 }
 
-fn finish_scope(scopes: &mut Vec<Scope>, signal: ScopeSignal) -> Option<ExecutionCompletion> {
+fn finish_scope(scopes: &mut ScopeStack, signal: ScopeSignal) -> Option<ExecutionCompletion> {
     let Some(scope) = scopes.pop() else {
         return Some(ExecutionCompletion::Completed);
     };
@@ -725,14 +952,14 @@ fn finish_scope(scopes: &mut Vec<Scope>, signal: ScopeSignal) -> Option<Executio
             }
             match scope.kind {
                 ScopeKind::TryChild => None,
-                ScopeKind::Inline => propagate_exit(scopes),
+                ScopeKind::Inline | ScopeKind::CallChild => propagate_exit(scopes),
                 ScopeKind::Root => Some(ExecutionCompletion::Exited),
             }
         }
     }
 }
 
-fn propagate_exit(scopes: &mut Vec<Scope>) -> Option<ExecutionCompletion> {
+fn propagate_exit(scopes: &mut ScopeStack) -> Option<ExecutionCompletion> {
     loop {
         let Some(scope) = scopes.pop() else {
             return Some(ExecutionCompletion::Exited);
@@ -742,7 +969,7 @@ fn propagate_exit(scopes: &mut Vec<Scope>) -> Option<ExecutionCompletion> {
         }
         match scope.kind {
             ScopeKind::TryChild => return None,
-            ScopeKind::Inline => {}
+            ScopeKind::Inline | ScopeKind::CallChild => {}
             ScopeKind::Root => return Some(ExecutionCompletion::Exited),
         }
     }

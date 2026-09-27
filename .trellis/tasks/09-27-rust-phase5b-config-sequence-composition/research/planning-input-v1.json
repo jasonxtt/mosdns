@@ -1,0 +1,19 @@
+{
+  "revision": 1,
+  "source_head": "11bd56c40d255d6ae93b0a2eba1c85214300b149",
+  "scope": "planning_only",
+  "task_status": "planning",
+  "implementation_authorized": false,
+  "independent_review": "not_requested_not_performed",
+  "files": {
+    "check.jsonl": "abab67d07962cb6841c3a690d9ebf0123fb753e91bd8f88efa635cda40d77ff5",
+    "design.md": "bc0ea42d32008022d5cb492dd19a3e19a275561da6a5ec6fbab93a54bcb9d675",
+    "implement.jsonl": "abab67d07962cb6841c3a690d9ebf0123fb753e91bd8f88efa635cda40d77ff5",
+    "implement.md": "2b7321913e89ac2e9748dd11996b2dbb6f02ab400722963fc4c7fe967d2a8b46",
+    "prd.md": "e737d68aabc311d994ebcda15c2efc382a1b57243479ee7afbe0daa4d577d23e",
+    "research/example-compositions.md": "8c752b0a5ac0125092caa6f2edc09666006ca4b297aa2ce6f3a2919d53b7f1b1",
+    "research/planning-review.md": "4cb1547b114f2a40a1072d053c55485387445ffd25814463d54c757fad75b802",
+    "research/source-audit.md": "9512af0468712921a59c1bd82b28f6fd4d5264037c0a282783d8cd9b3d220ccb",
+    "task.json": "0532031bd838157a96d058fbf361626d637efd68cf785211b32d26a231858c0d"
+  }
+}
