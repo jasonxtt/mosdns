@@ -9,7 +9,7 @@ use mosdns_dns_core::{
 };
 use mosdns_sequence_core::{
     ExecutableId, ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep,
-    ResponseState as MachineResponseState, SequenceId,
+    ResponseState as MachineResponseState, RoutingState, SequenceId,
 };
 use mosdns_upstream_core::{ExchangeResponse, TransportCancellation, UpstreamError};
 
@@ -64,6 +64,8 @@ pub(crate) struct ExecutionResult {
     pub response: ObservedResponseState,
     pub cache_status: CacheStatus,
     pub final_sequence: Option<String>,
+    pub matched_group: Option<String>,
+    pub final_upstream: Option<String>,
     pub upstream_attempts: UpstreamAttemptList,
     pub failure_provenance: Option<FailureProvenance>,
 }
@@ -77,6 +79,7 @@ struct ExecutionFacts<'a> {
     /// The real named-sequence execution position, materialized only when
     /// detailed audit capture is enabled.
     final_sequence: Option<String>,
+    routing: RoutingState,
     config: &'a CompiledConfig,
     checkpoint: &'a mut ExecutionCheckpoint,
     in_flight_executable: Option<ExecutableId>,
@@ -101,6 +104,10 @@ impl ExecutionFacts<'_> {
                 self.final_sequence = Some(sequence.name.clone());
             }
         }
+    }
+
+    fn note_routing(&mut self, state: &ExecutionState) {
+        self.routing = state.routing.clone();
     }
 
     fn set_failure_provenance(&mut self, provenance: FailureProvenance) {
@@ -162,6 +169,8 @@ impl Drop for ExecutionFacts<'_> {
                 response: ObservedResponseState::NoResponse,
                 cache_status: self.cache_status,
                 final_sequence: self.final_sequence.clone(),
+                matched_group: self.routing.matched_group.clone(),
+                final_upstream: self.routing.final_upstream.clone(),
                 upstream_attempts: self.upstream_attempts.clone(),
                 failure_provenance: self.failure_provenance.clone(),
                 elapsed: std::time::Duration::ZERO,
@@ -246,6 +255,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         // No entry-tag backfill: the field carries the real executing position
         // recorded during execution, or nothing when none was observed.
         final_sequence: None,
+        routing: RoutingState::default(),
         config,
         checkpoint,
         in_flight_executable: None,
@@ -288,6 +298,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
 
     loop {
         facts.note_origin(machine.last_origin());
+        facts.note_routing(machine.state());
         match step {
             MachineStep::Complete(_) => {
                 // Publication is owned by the cache's successor boundary, so a
@@ -602,6 +613,14 @@ fn result_from_state(
 }
 
 fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> ExecutionResult {
+    let routing = std::mem::take(&mut facts.routing);
+    let derived_final_upstream = facts.response_source.as_ref().and_then(|source| {
+        if let ResponseSource::Upstream(upstream) = source {
+            Some(upstream.clone())
+        } else {
+            None
+        }
+    });
     let response = observed_response(
         &response_wire,
         facts
@@ -614,7 +633,9 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
         response_wire,
         response,
         cache_status: facts.cache_status,
-        final_sequence: facts.final_sequence.take(),
+        final_sequence: routing.final_sequence.or(facts.final_sequence.take()),
+        matched_group: routing.matched_group,
+        final_upstream: routing.final_upstream.or(derived_final_upstream),
         upstream_attempts: std::mem::take(&mut facts.upstream_attempts),
         failure_provenance: facts.failure_provenance.take(),
     }
@@ -1184,6 +1205,8 @@ mod tests {
             response: result.response,
             cache_status: result.cache_status,
             final_sequence: result.final_sequence,
+            matched_group: result.matched_group,
+            final_upstream: result.final_upstream,
             upstream_attempts: result.upstream_attempts,
             failure_provenance: result.failure_provenance,
             elapsed: Duration::ZERO,

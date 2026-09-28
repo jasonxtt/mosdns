@@ -19,6 +19,7 @@ use crate::matchers::{
     DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher, ResponseIpMatcher, TrueMatcher,
     build_domain_set,
 };
+use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 
 /// The only accepted log level in the native host subset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -252,6 +253,8 @@ enum PluginKind {
     Sequence,
     DomainSet,
     Listener,
+    FastMark,
+    FlowSetter,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -259,6 +262,7 @@ enum PluginKind {
 struct PluginCatalog<'a> {
     kinds: &'a [(String, PluginKind, usize)],
     domain_sets: &'a [(String, Rc<MixMatcher<()>>)],
+    fast_marks: &'a [(String, FastMarkConfig)],
 }
 
 impl PluginCatalog<'_> {
@@ -275,6 +279,13 @@ impl PluginCatalog<'_> {
             .find(|(name, _)| name.as_str() == tag)
             .map(|(_, set)| Rc::clone(set))
     }
+
+    fn fast_mark(&self, tag: &str) -> Option<FastMarkConfig> {
+        self.fast_marks
+            .iter()
+            .find(|(name, _)| name == tag)
+            .map(|(_, config)| *config)
+    }
 }
 
 fn compile_definitions(
@@ -289,6 +300,8 @@ fn compile_definitions(
             "sequence" => PluginKind::Sequence,
             "domain_set" => PluginKind::DomainSet,
             "udp_server" | "tcp_server" => PluginKind::Listener,
+            "fast_mark" => PluginKind::FastMark,
+            "flow_setter" => PluginKind::FlowSetter,
             other => {
                 return Err(ConfigError::new(
                     format!("{}.type", plugin.source_path),
@@ -316,12 +329,22 @@ fn compile_definitions(
         }
     }
     let mut forwards = Vec::new();
+    let mut fast_marks = Vec::new();
+    let mut flow_setters = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut cache = None;
     let mut listener = None;
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
             PluginKind::DomainSet | PluginKind::Sequence => {}
+            PluginKind::FastMark => {
+                let config = compile_fast_mark(plugin)?;
+                fast_marks.push((plugin.tag.clone(), config));
+            }
+            PluginKind::FlowSetter => {
+                let config = compile_flow_setter(plugin)?;
+                flow_setters.push((plugin.tag.clone(), config));
+            }
             PluginKind::Forward => {
                 let forward = compile_forward(plugin)?;
                 let identity = forward
@@ -372,11 +395,25 @@ fn compile_definitions(
     let catalog = PluginCatalog {
         kinds: &kinds,
         domain_sets: &domain_sets,
+        fast_marks: &fast_marks,
     };
     let mut sequences = Vec::new();
+    let mut fixtures = Vec::new();
+    for (tag, config) in &fast_marks {
+        fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+            plugin_fixture_name(tag),
+            config.executor(),
+        ));
+    }
+    for (tag, config) in &flow_setters {
+        fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+            plugin_fixture_name(tag),
+            config.executor(),
+        ));
+    }
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::Sequence {
-            sequences.push(compile_sequence(plugin, &catalog)?);
+            sequences.push(compile_sequence(plugin, &catalog, &mut fixtures)?);
         }
     }
 
@@ -413,7 +450,7 @@ fn compile_definitions(
                 .map(|(tag, _, _)| ExternalSpec::new(tag.clone())),
         )
         .collect();
-    let program = ProgramSpec::new(sequences, Vec::new())
+    let program = ProgramSpec::new(sequences, fixtures)
         .with_externals(externals)
         .validate()
         .map_err(|error| {
@@ -617,6 +654,50 @@ fn compile_forward(plugin: &RawPlugin) -> Result<ForwardConfig, ConfigError> {
     })
 }
 
+fn compile_fast_mark(plugin: &RawPlugin) -> Result<FastMarkConfig, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_string(&plugin.args, &path)?;
+    FastMarkConfig::parse(&args).map_err(|reason| ConfigError::new(path, reason))
+}
+
+fn compile_flow_setter(plugin: &RawPlugin) -> Result<FlowSetterConfig, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "flow_setter args must be a mapping")?;
+    args.reject_unknown(
+        &["matched_group", "final_sequence", "final_upstream"],
+        &path,
+    )?;
+    let mut config = FlowSetterConfig::default();
+    for (key, slot) in [
+        ("matched_group", &mut config.matched_group),
+        ("final_sequence", &mut config.final_sequence),
+        ("final_upstream", &mut config.final_upstream),
+    ] {
+        if let Some(value) = args.get(key) {
+            let value = expect_string(value, &format!("{path}.{key}"))?;
+            if value.is_empty() {
+                return Err(ConfigError::new(
+                    format!("{path}.{key}"),
+                    "flow_setter values must not be empty",
+                ));
+            }
+            *slot = Some(value);
+        }
+    }
+    config
+        .ensure_nonempty()
+        .map_err(|reason| ConfigError::new(path, reason))?;
+    Ok(config)
+}
+
+fn plugin_fixture_name(tag: &str) -> String {
+    format!("__native_plugin_{tag}")
+}
+
+fn quick_fixture_name(path: &str) -> String {
+    format!("__native_quick_{path}")
+}
+
 fn compile_domain_set(plugin: &RawPlugin) -> Result<Rc<MixMatcher<()>>, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "domain_set args must be a mapping")?;
@@ -673,6 +754,7 @@ fn compile_cache(plugin: &RawPlugin) -> Result<u64, ConfigError> {
 fn compile_sequence(
     plugin: &RawPlugin,
     catalog: &PluginCatalog<'_>,
+    fixtures: &mut Vec<mosdns_sequence_core::FixtureSpec>,
 ) -> Result<SequenceSpec, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_sequence(&plugin.args, &path)?;
@@ -697,7 +779,7 @@ fn compile_sequence(
         }
         let executable = item
             .get("exec")
-            .map(|value| compile_exec(value, &format!("{item_path}.exec"), catalog))
+            .map(|value| compile_exec(value, &format!("{item_path}.exec"), catalog, fixtures))
             .transpose()?;
         if matchers.is_empty() && executable.is_none() {
             return Err(ConfigError::new(
@@ -746,6 +828,22 @@ fn compile_matcher(
         None => (expression, ""),
     };
     let matcher: Box<dyn mosdns_sequence_core::Matcher> = match name {
+        name if name.starts_with('$') => {
+            let tag = name.trim_start_matches('$');
+            if tag.is_empty() || !args.is_empty() {
+                return Err(ConfigError::new(
+                    path,
+                    "named matcher references require exactly `$tag` without arguments",
+                ));
+            }
+            let config = catalog.fast_mark(tag).ok_or_else(|| {
+                ConfigError::new(path, format!("unknown matcher reference `${tag}`"))
+            })?;
+            config.matcher()
+        }
+        "fast_mark" => FastMarkConfig::parse(args)
+            .map_err(|reason| ConfigError::new(path, reason))?
+            .matcher(),
         "qname" => Box::new(compile_qname(args, path, catalog)?),
         "qtype" => {
             let mut types = Vec::new();
@@ -860,16 +958,19 @@ fn compile_exec(
     value: &RawValue,
     path: &str,
     catalog: &PluginCatalog<'_>,
+    fixtures: &mut Vec<mosdns_sequence_core::FixtureSpec>,
 ) -> Result<Vec<ExecutableSpec>, ConfigError> {
     match value {
-        RawValue::String(expression) => Ok(vec![compile_exec_item(expression, path, catalog)?]),
+        RawValue::String(expression) => Ok(vec![compile_exec_item(
+            expression, path, catalog, fixtures,
+        )?]),
         RawValue::Sequence(values) => values
             .iter()
             .enumerate()
             .map(|(index, value)| {
                 let item_path = format!("{path}[{index}]");
                 let expression = expect_string(value, &item_path)?;
-                compile_exec_item(&expression, &item_path, catalog)
+                compile_exec_item(&expression, &item_path, catalog, fixtures)
             })
             .collect(),
         _ => Err(ConfigError::new(
@@ -883,6 +984,7 @@ fn compile_exec_item(
     expression: &str,
     path: &str,
     catalog: &PluginCatalog<'_>,
+    fixtures: &mut Vec<mosdns_sequence_core::FixtureSpec>,
 ) -> Result<ExecutableSpec, ConfigError> {
     let expression = expression.trim();
     if expression.is_empty() {
@@ -893,6 +995,30 @@ fn compile_exec_item(
         None => (expression, ""),
     };
     match name {
+        "fast_mark" => {
+            let config =
+                FastMarkConfig::parse(args).map_err(|reason| ConfigError::new(path, reason))?;
+            let fixture_name = quick_fixture_name(path);
+            fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+                fixture_name.clone(),
+                config.executor(),
+            ));
+            Ok(ExecutableSpec::Fixture {
+                target: mosdns_sequence_core::FixtureRef::new(fixture_name),
+            })
+        }
+        "flow_setter" => {
+            let config = FlowSetterConfig::from_quick_args(args)
+                .map_err(|reason| ConfigError::new(path, reason))?;
+            let fixture_name = quick_fixture_name(path);
+            fixtures.push(mosdns_sequence_core::FixtureSpec::new(
+                fixture_name.clone(),
+                config.executor(),
+            ));
+            Ok(ExecutableSpec::Fixture {
+                target: mosdns_sequence_core::FixtureRef::new(fixture_name),
+            })
+        }
         "accept" | "return" | "exit" => {
             if !args.is_empty() {
                 return Err(ConfigError::new(path, format!("{name} takes no arguments")));
@@ -957,6 +1083,11 @@ fn compile_exec_item(
                 Some(PluginKind::Forward | PluginKind::Cache) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),
+                Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
+                    Ok(ExecutableSpec::Fixture {
+                        target: mosdns_sequence_core::FixtureRef::new(plugin_fixture_name(tag)),
+                    })
+                }
                 Some(PluginKind::DomainSet | PluginKind::Listener) => Err(ConfigError::new(
                     path,
                     format!("`{name}` is not executable"),
@@ -1603,5 +1734,151 @@ plugins:
                 "`{expression}` must be rejected at load time"
             );
         }
+    }
+
+    fn native_plugin_yaml(sequence: &str, definitions: &str) -> String {
+        format!(
+            r#"
+log: {{ level: error }}
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+{sequence}
+{definitions}
+  - tag: forward
+    type: forward
+    args: {{ upstreams: [ {{ addr: udp://127.0.0.1:15353 }} ] }}
+  - tag: listener
+    type: udp_server
+    args: {{ entry: entry, listen: "127.0.0.1:15352", enable_audit: false }}
+"#
+        )
+    }
+
+    #[test]
+    fn fast_mark_and_flow_setter_support_quick_and_named_forms() {
+        let quick = native_plugin_yaml(
+            "      - exec: fast_mark 1 2\n      - matches: fast_mark 2 7\n        exec: flow_setter group=quick sequence=quick_seq upstream=quick_up\n      - exec: $forward\n",
+            "",
+        );
+        let config = compile_yaml(&quick).expect("quick native plugins compile");
+        let mut machine = config
+            .new_machine(
+                ExecutionState::new(
+                    mosdns_dns_core::QueryHeader {
+                        id: 1,
+                        qr: false,
+                        opcode: 0,
+                        qdcount: 1,
+                        ancount: 0,
+                        nscount: 0,
+                        arcount: 0,
+                    },
+                    mosdns_dns_core::QuestionInfo {
+                        qname_wire: vec![0],
+                        qtype: 1,
+                        qclass: 1,
+                    },
+                ),
+                ExecutionControl::with_fuel(16),
+            )
+            .expect("quick machine");
+        let step = machine.step().expect("quick machine step");
+        assert!(matches!(
+            step,
+            mosdns_sequence_core::MachineStep::Dispatch(_)
+        ));
+        assert_eq!(machine.state().fast_flags, (1 << 1) | (1 << 2));
+        assert_eq!(
+            machine.state().routing.matched_group.as_deref(),
+            Some("quick")
+        );
+        assert_eq!(
+            machine.state().routing.final_sequence.as_deref(),
+            Some("quick_seq")
+        );
+        assert_eq!(
+            machine.state().routing.final_upstream.as_deref(),
+            Some("quick_up")
+        );
+
+        let named = native_plugin_yaml(
+            "      - exec: $mark\n      - matches: $mark\n        exec: $setter\n      - exec: $forward\n",
+            "  - tag: mark\n    type: fast_mark\n    args: \"3 4\"\n  - tag: setter\n    type: flow_setter\n    args: { matched_group: named, final_sequence: named_seq, final_upstream: named_up }\n",
+        );
+        let config = compile_yaml(&named).expect("named native plugins compile");
+        let mut machine = config
+            .new_machine(
+                ExecutionState::new(
+                    mosdns_dns_core::QueryHeader {
+                        id: 2,
+                        qr: false,
+                        opcode: 0,
+                        qdcount: 1,
+                        ancount: 0,
+                        nscount: 0,
+                        arcount: 0,
+                    },
+                    mosdns_dns_core::QuestionInfo {
+                        qname_wire: vec![0],
+                        qtype: 1,
+                        qclass: 1,
+                    },
+                ),
+                ExecutionControl::with_fuel(16),
+            )
+            .expect("named machine");
+        let step = machine.step().expect("named machine step");
+        assert!(matches!(
+            step,
+            mosdns_sequence_core::MachineStep::Dispatch(_)
+        ));
+        assert_eq!(machine.state().fast_flags, (1 << 3) | (1 << 4));
+        assert_eq!(
+            machine.state().routing.matched_group.as_deref(),
+            Some("named")
+        );
+    }
+
+    #[test]
+    fn native_plugin_compilation_rejects_bad_values_with_paths() {
+        let cases = [
+            ("fast_mark 64", "$.plugins[0].args[0].exec"),
+            ("fast_mark nope", "$.plugins[0].args[0].exec"),
+            ("flow_setter unknown=x", "$.plugins[0].args[0].exec"),
+            ("flow_setter group=", "$.plugins[0].args[0].exec"),
+        ];
+        for (expression, expected_path) in cases {
+            let yaml = native_plugin_yaml(
+                &format!("      - exec: {expression}\n      - exec: $forward\n"),
+                "",
+            );
+            let error = match compile_yaml(&yaml) {
+                Ok(_) => panic!("invalid quick setup must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.path, expected_path, "{expression}: {error}");
+        }
+
+        let normal = native_plugin_yaml(
+            "      - exec: $setter\n      - exec: $forward\n",
+            "  - tag: setter\n    type: flow_setter\n    args: { unknown: value }\n",
+        );
+        let error = match compile_yaml(&normal) {
+            Ok(_) => panic!("unknown normal key must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.path, "$.plugins[1].args.unknown");
+
+        let cross_type = native_plugin_yaml(
+            "      - matches: $setter\n        exec: $forward\n",
+            "  - tag: setter\n    type: flow_setter\n    args: { matched_group: named }\n",
+        );
+        let error = match compile_yaml(&cross_type) {
+            Ok(_) => panic!("flow setter is not a matcher"),
+            Err(error) => error,
+        };
+        assert_eq!(error.path, "$.plugins[0].args[0].matches[0]");
     }
 }

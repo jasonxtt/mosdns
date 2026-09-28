@@ -30,12 +30,14 @@
 | P20 `resp_ip` | 仅单一 IPv4 字面量，保留旧 W3 语法 | CIDR/多值/IPv6、规则管理 |
 | P26 `cache` | 单个 host-owned cache；`size` 为可配置正整数，`lazy_cache_ttl` 必须为 0；可在 entry 或子 sequence 包裹其后继，hit 结束后继链后父继续，miss 在 cache 所在后继自然完成点保存；重复动态访问受控失败 | 多实例、lazy/dump/exclude/ECS、`mosdns_cache_v2` 持久化、API/metrics |
 | P34 `forward` | 多实例，各一 numeric UDP/TCP upstream，兼容旧 tag 形式；单/多 forward 统一合法响应校验与终态策略；effective upstream identity 在默认 tag 与显式 tag 间保持唯一 | 上游组、bootstrap、TLS/HTTPS/H3/DoQ、并发选择、超时重试/fallback |
-| P44 `sequence` | 任意数量具名 sequence；direct `$sequence` 为独立 child scope（自然结束/accept/reject 返回父，exit 越过父遇 try 才捕获）；`jump`/`goto`/`return`/`try`/`accept`/`reject`/`exit`；exec scalar 与 list（multi-exec 为 synthetic inline scope） | 完整插件/quick setup、flow_setter、fallback/sleep、动态注册 |
+| P44 `sequence` | 任意数量具名 sequence；direct `$sequence` 为独立 child scope（自然结束/accept/reject 返回父，exit 越过父遇 try 才捕获）；`jump`/`goto`/`return`/`try`/`accept`/`reject`/`exit`；exec scalar 与 list（multi-exec 为 synthetic inline scope）；5B 代表子集接入 `fast_mark`/`flow_setter` quick 与命名 executable | 完整插件/quick setup、fallback/sleep、动态注册 |
 | L01 | `accept`/`reject`/`return`/`goto`/`jump`/`exit`/`try` 经 YAML → 异步请求 → 最终响应集成；`reject` 默认 REFUSED，`0..=15` 实际渲染，`>15` 在加载期报 unsupported（不截断） | 完整 12-bit reject/EDNS 渲染（顺序：5B 后续），以及序列内其它插件解析 |
 | L02 | `_true`/`_false`、单次 `!` 取反、`$tag` 命名引用、`matches` 单值或列表 | 完整 quick setup 集合、`&file` 引用 |
 | C01 | 顶层 `include` 按声明文件目录解析、有序加载 plugins-only 子文件、嵌套 include 明确拒绝；每个 included definition 保留其 YAML source path/base directory（含相对规则文件解析和错误定位）；定义先收集再解析（重排/前后引用不改变有效分支）；重复 key/tag、缺失或跨类型引用、未知字段、未支持参数、坏规则文件均在 bind/查询前失败并带文件与字段/规则路径 | 递归 include、热更新、完整配置包加载、`api`/其它顶层段、preset 插件 |
 
 本地证据入口：`rust/native-host/tests/slice3_composition.rs`（loader/include/规则路径/负例/重排和真实 listener 场景）与 `rust/native-host/src/execution.rs` 的 `the_representative_chain_blocks_rejects_and_routes_without_a_listener`（block/qtype-0/local miss/default 分支/child 后父继续/cache 后继不被父改写/entry cache/重复访问/取消）。首轮完整 workspace 回归为 891 passed；复审修复后的全量回归为 896 passed / 0 failed。
+
+2026-09-28 5B `fast_mark`/`flow_setter` 子项证据：`rust/native-host/src/config.rs` 通过真实 YAML 覆盖 quick setup、normal named reference、边界/错误路径和 cross-type rejection；`rust/native-host/tests/slice4_fast_mark_flow_setter.rs` 通过真实 UDP listener 覆盖 matcher OR、set 保留无关 bit、跨请求隔离、分支结果，以及延迟 loopback forward 后 `matched_group`/`final_sequence`/`final_upstream` 的配置值优先观察结果；`rust/native-host/src/plugins.rs` 覆盖纯状态 bit 行为。此记录只关闭上述 bounded 子项，不升级 P11/P33/P44 整项、switch 或 5B 总行。
 
 2026-09-28 在 `mosdns-rust`（Linux x86_64）用临时 Rust workspace 构建并运行代表链集成测试：初始源包漏掉 compile-time 配置样本，构建 exit 101；补入 Rust 测试所需的四个 YAML 后，复审修复提交 `abeeb3e3bfb4458588430b83bfbd9280b359d37d` 的 `slice2_config` 12/12、`slice3_composition` 11/11 通过。UDP listener / audit on 与 TCP listener / audit off 均通过；包含 block/qtype-65 peer 计数、local miss/cache hit、父继续/default peer、included 相对路径/source context 和 goto/try-only forward 路径。早先还用 11bd 源码 `mosdns start -c` 做过 TCP/audit-off CLI 验证与既有 `dnsperf` 50 请求短诊断；短诊断经过 SSH 转发，不用于性能验收，没有性能 PASS。请求、peer 计数、审计、构建/配置哈希、失败尝试、自有 PID 与端口释放证据见该任务 `implement.md` 的 A6 记录。C2C 于 2026-09-28 对精确范围 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` 返回 `FINAL: PASS`；在该次 C2C review 的时间点，远端完整 workspace、故障/取消/关闭变体和旧 W1/W2/W3 suites 尚未执行；当时本表其余完整验收状态为“待验收”，后续补测见下文。
 
@@ -59,7 +61,7 @@
 | P08 | `client_ip` | [plugin/matcher/client_ip](../../plugin/matcher/client_ip/) | 需将具体 matcher 接到 sequence；通用状态/索引不等于该插件完成 | 5B |
 | P09 | `cname` | [plugin/matcher/cname](../../plugin/matcher/cname/) | 需将具体 matcher 接到 sequence；通用状态/索引不等于该插件完成 | 5B |
 | P10 | `env` | [plugin/matcher/env](../../plugin/matcher/env/) | 需将具体 matcher 接到 sequence；通用状态/索引不等于该插件完成 | 5B |
-| P11 | `fast_mark` | [plugin/matcher/fast_mark](../../plugin/matcher/fast_mark/) | 需将具体 matcher 接到 sequence；通用状态/索引不等于该插件完成 | 5B |
+| P11 | `fast_mark` | [plugin/matcher/fast_mark](../../plugin/matcher/fast_mark/) | 5B bounded native evidence: quick matcher/executable and named `fast_mark` reference; IDs 0–63, matcher OR, executable bit-set retention, fresh-query isolation, real UDP branch | 仍需完整插件参数/组合验收 |
 | P12 | `has_resp` | [plugin/matcher/has_resp](../../plugin/matcher/has_resp/) | 需将具体 matcher 接到 sequence；通用状态/索引不等于该插件完成 | 5B |
 | P13 | `has_wanted_ans` | [plugin/matcher/has_wanted_ans](../../plugin/matcher/has_wanted_ans/) | 需将具体 matcher 接到 sequence；通用状态/索引不等于该插件完成 | 5B |
 | P14 | `ptr_ip` | [plugin/matcher/ptr_ip](../../plugin/matcher/ptr_ip/) | 需将具体 matcher 接到 sequence；通用状态/索引不等于该插件完成 | 5B |
@@ -81,7 +83,7 @@
 | P30 | `drop_resp` | [plugin/executable/drop_resp](../../plugin/executable/drop_resp/) | 无逐插件 native 验收证据 | 5B |
 | P31 | `prefer_ipv4`, `prefer_ipv6` | [plugin/executable/dual_selector](../../plugin/executable/dual_selector/) | 无逐插件 native 验收证据 | 5B |
 | P32 | `ecs_handler` | [plugin/executable/ecs_handler](../../plugin/executable/ecs_handler/) | 无逐插件 native 验收证据 | 5B |
-| P33 | `flow_setter` | [plugin/executable/flow_setter](../../plugin/executable/flow_setter/) | 无逐插件 native 验收证据 | 5B 查询 + 5C API/状态/观测 |
+| P33 | `flow_setter` | [plugin/executable/flow_setter](../../plugin/executable/flow_setter/) | 5B bounded native evidence: quick keys `group`/`sequence`/`upstream`, normal mapping/reference, async delayed-forward retention, configured-over-host observer precedence | 5C API/状态/完整观测与其余参数 |
 | P34 | `forward` | [plugin/executable/forward](../../plugin/executable/forward/) | upstream-core/Phase 4，非完整 forward 插件 | 5A 子集 -> Phase 4/5B 完整 |
 | P35 | `forward_edns0opt` | [plugin/executable/forward_edns0opt](../../plugin/executable/forward_edns0opt/) | 无逐插件 native 验收证据 | 5B |
 | P36 | `hosts` | [plugin/executable/hosts](../../plugin/executable/hosts/) | 无逐插件 native 验收证据 | 5B |

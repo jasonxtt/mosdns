@@ -85,6 +85,23 @@ state plus the actual terminal host outcome, not from a separate plugin-local
 copy. Extend only the in-process native observer record needed for this
 behavior; leave full API/query audit management for later.
 
+### Frozen precedence table (Slice 0 evidence)
+
+| Field | Go evidence | Native host fallback | Final observer value |
+| --- | --- | --- | --- |
+| `matched_group` | `plugin/executable/flow_setter/flow_setter.go` stores `KeyMatchedGroup`; `coremain/audit.go` reads it at terminal audit construction | None | Configured value, if present |
+| `final_sequence` | `flow_setter` stores `KeyFinalSequence`; the audit reads the stored value without replacing it | `ExecutionFacts::note_origin` records the real named sequence | Configured value wins; host execution position is used only when unset |
+| `final_upstream` | `flow_setter` stores `KeyFinalUpstream`; the audit reads the stored value without replacing it | `ResponseSource::Upstream` records the actual response supplier | Configured value wins; actual response supplier is used only when unset |
+
+The Go context is a per-query mutable map (`StoreValue` overwrites an existing
+key), so a later `flow_setter` assignment replaces an earlier one. The native
+executor therefore keeps the same per-query `RoutingState` across the await;
+each later setter overwrites its field, and the observer resolves each field as
+`configured.or(host_derived)`. The focused listener test in
+`rust/native-host/tests/slice4_fast_mark_flow_setter.rs` verifies the three
+configured values after a delayed forward, while the existing execution and
+observer tests retain the host-derived fallback behavior.
+
 ## Test design and mock boundary
 
 - Unit/compiler tests call the real YAML compiler and inspect typed compiled

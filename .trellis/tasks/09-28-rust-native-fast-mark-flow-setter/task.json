@@ -3,7 +3,7 @@
   "name": "rust-native-fast-mark-flow-setter",
   "title": "Rust-native fast_mark and flow_setter sequence integration",
   "description": "Add bounded native fast_mark and flow_setter YAML, sequence, per-query flag, routing metadata, and observer behavior after roadmap and canary gates.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
