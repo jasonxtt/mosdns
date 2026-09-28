@@ -1,23 +1,27 @@
 # Implementation plan — native W3 routing
 
-Status: reviewed planning (PLANNING: PASS at `7d684c5dee67afeb1eea298813c25b632a6f8438`).
-See `research/planning-review.md`. Numeric units below are a proposed execution plan;
-there is no user-authorized W3 run. Do not start or send implementation work.
+Status: completed bounded W3 implementation and evidence; designated reviewer
+returned `FINAL: PASS (A1–A7)` for tested source
+`33e826ccd89a5db039bfc4d92aaf0593907dd95b` and evidence head
+`93e21c6c6439dfb8266d9bf838a8ab4866ceb775`. The user authorized Slices 0–3.
+This closes only the bounded W3 subset, not Phase 5A as a whole. The planning
+review at `7d684c5dee67afeb1eea298813c25b632a6f8438` remains in
+`research/planning-review.md` as historical planning evidence.
 
 ## Pre-start gates
 
-- [ ] User approves this final plan for implementation; reviewer then/first
-  supplies explicit planning PASS on its exact pushed SHA. A planning review
-  alone does not authorize task.py start.
-- [ ] Read AGENTS, project-context/config-notes, handover/rewrite plan, current
+- [x] User approved execution of Slices 0–3; the plan had already received
+  `PLANNING: PASS` for exact pushed SHA
+  `7d684c5dee67afeb1eea298813c25b632a6f8438`.
+- [x] Read AGENTS, project-context/config-notes, handover/rewrite plan, current
   workflow, trellis-before-dev and affected specs (load long rust-migration
   sections directly to avoid truncation).
-- [ ] If approved, reuse executor `01a0c7fa-e0ea-7f52-adb0-f3789e7a7bdb` and
+- [x] Reuse executor `01a0c7fa-e0ea-7f52-adb0-f3789e7a7bdb` and
   reviewer `01a0c7fe-fd97-7ce1-aed2-d389bbefa3e3` unless user changes them;
   bind actual thread transport and snapshot only Slice 0–3 before start/activate.
-- [ ] Preserve existing unrelated workflow/quality/journal/.DS_Store changes;
+- [x] Preserve existing unrelated workflow/quality/journal/.DS_Store changes;
   exact staging only, session_auto_commit stays false.
-- [ ] Capture frozen corpus/baseline digests and initial Git state. Prior W1/W2
+- [x] Capture frozen corpus/baseline digests and initial Git state. Prior W1/W2
   archives and all tests/phase5a-baseline inputs stay read-only.
 
 For each slice: behavior-focused RED, minimum GREEN, focused checks, exact diff
@@ -37,51 +41,51 @@ Allowlist: `rust/native-host/**`, `rust/dns-core/**` narrow observer/tests,
 `rust/Cargo.lock` path edge only, task directory. matcher-core reused read-only;
 no new dependency/version/features, no accepted W3 YAML or live W3 service yet.
 
-- [ ] RED: FullMatcher-backed qname adapter exact/case/trailing-dot/miss and
+- [x] RED: FullMatcher-backed qname adapter exact/case/trailing-dot/miss and
   ambiguous/non-ASCII wire-label tests. Config-rule helper rejects unsupported
   values; no lossy string conversion.
-- [ ] RED/GREEN: narrow DNS observer for Answer A/AAAA; mixed section/multiple
+- [x] RED/GREEN: narrow DNS observer for Answer A/AAAA; mixed section/multiple
   records/compressed owners/CNAME/OPT, malformed RDATA and trailing truncation.
-- [ ] GREEN: native resp_ip + `_true` Matcher adapters, immutable state and
+- [x] GREEN: native resp_ip + `_true` Matcher adapters, immutable state and
   rebuilt matcher-core IpPrefixList. None/Synthesized/empty answers miss.
-- [ ] Native-host, dns-core, matcher-core tests; affected clippy, common checks;
+- [x] Native-host, dns-core, matcher-core tests; affected clippy, common checks;
   dependency tree proves matcher-core direct use, no runtime/cgo dependency.
-- [ ] `SLICE 0: PASS` required before Slice 1.
+- [x] `SLICE 0: PASS` received before Slice 1.
 
 ## Slice 1 — multiple forwards in the canonical request driver
 
 Allowlist: `rust/native-host/**`, task directory. No sequence-core production
 change, upstream transport rewrite, new DNS helper or YAML broadening here.
 
-- [ ] RED/GREEN: validated executable-ID -> upstream owner catalog; W1/W2 use
+- [x] RED/GREEN: validated executable-ID -> upstream owner catalog; W1/W2 use
   one entry. Exercise a test-built W3 ProgramSpec before parser acceptance.
-- [ ] Prove matcher -> external dispatch -> resume inside exec list -> Exit
+- [x] Prove matcher -> external dispatch -> resume inside exec list -> Exit
   follows the one machine; unknown executable IDs fail and never fall back.
-- [ ] One W3 deadline across both legs; record identical Instant in exchange
+- [x] One W3 deadline across both legs; record identical Instant in exchange
   seam; pre-next-leg cancellation/deadline check; transport/validation failure
   stops the chain and replaces stale B with SERVFAIL; valid empty B proceeds.
-- [ ] Request isolation with interleaved mocks; shutdown and error cleanup visit
+- [x] Request isolation with interleaved mocks; shutdown and error cleanup visit
   every catalog owner. Keep W1 TCP/UDP and W2 cache behavior unchanged.
-- [ ] Run all native-host and sequence-core tests, native-host clippy, common
+- [x] Run all native-host and sequence-core tests, native-host clippy, common
   checks; inspect shutdown/drain paths for UDP and TCP.
-- [ ] `SLICE 1: PASS` required before Slice 2.
+- [x] `SLICE 1: PASS` received before Slice 2.
 
 ## Slice 2 — strict W3 graph and real routing E2E
 
 Allowlist: `rust/native-host/**`, task directory. Baseline inputs immutable.
 Out-of-scope source defects return to the owning slice with reviewer review.
 
-- [ ] RED/GREEN: unchanged W1/W2/W3 YAML fixtures compile; negative matrix covers
+- [x] RED/GREEN: unchanged W1/W2/W3 YAML fixtures compile; negative matrix covers
   every grammar/graph/field/ref/order/count/transport rejection in PRD.
-- [ ] Alternate plugin/upstream names, declaration order, full domain, IP rule
+- [x] Alternate plugin/upstream names, declaration order, full domain, IP rule
   and numeric endpoints prove no fixture-value or role-name hardcoding.
-- [ ] Add `w3_routing.rs` with three controlled UDP upstreams and all frozen
+- [x] Add `w3_routing.rs` with three controlled UDP upstreams and all frozen
   corpus rows. Exact counts/forbidden legs/order plus final DNS assertions;
   deliberately tampered route evidence rejected even if answer is unchanged.
-- [ ] Mixed-route concurrency, first/second-leg stalls and failures, malformed/
+- [x] Mixed-route concurrency, first/second-leg stalls and failures, malformed/
   mismatched responses, valid negative B, cancellation after witnessed receipt
   on B and final A/C, no later send/leg, every-owner close and rebind.
-- [ ] Run all native-host targets and affected package checks/clippy, common
+- [x] Run all native-host targets and affected package checks/clippy, common
   checks. No Linux remote run before this slice's explicit PASS.
 - [x] `SLICE 2: PASS` returned by the designated reviewer for the exact
   remediation head `33e826ccd89a5db039bfc4d92aaf0593907dd95b` after the
@@ -108,13 +112,13 @@ No product fixes in evidence-only slice; failures return to their owning slice.
 - [x] Record route counters/order, concurrency/lifecycle results, complete
   commands, any failed attempt/retry and cleanup of task-owned remote artifacts.
 - [x] Update coverage/handover: bounded W3 only; 5A basic observability and
-  comparable native performance remain open. Keep final reviewer result pending
-  until an actual response is received.
-- [ ] Commit/push evidence, obtain `FINAL: PASS` for A1–A7, record that actual
-  response, report tested/evidence SHA, then stop before finish/archive,
-  performance, deployment, additional tasks or full-feature expansion.
+  comparable native performance remain open. Record the final reviewer result
+  after its actual receipt.
+- [x] Commit/push evidence, obtain `FINAL: PASS` for A1–A7, record that actual
+  response, and report tested/evidence SHA. Broader performance, deployment,
+  additional tasks and full-feature expansion remain outside this task.
 
-### Slice 3 execution evidence (review pending)
+### Slice 3 execution evidence
 
 - The exact reviewed source `33e826ccd89a5db039bfc4d92aaf0593907dd95b` was
   staged from `git archive` into the fresh remote artifact
@@ -159,7 +163,8 @@ No product fixes in evidence-only slice; failures return to their owning slice.
   `34678ca9acd6072ad2a01d429fd513d70e7dd48c899fbfc7cb7e4df160cc6b2d`.
   The task-owned remote checkout and target were removed after validation. No
   benchmark runner, VM, deployment, production/default cutover or UI build
-  was run; the final reviewer result remains pending.
+  was run. At evidence-capture time, the final reviewer response was pending;
+  the later `FINAL: PASS (A1–A7)` is recorded in the closeout below.
 
 #### Reproducible command ledger
 
@@ -229,3 +234,14 @@ for scope in ('.trellis/tasks/archive/2026-09/09-21-rust-phase5a-baseline', 'tes
 ```
 
 Both runs produced the digests recorded above.
+
+## Final review closeout
+
+The designated reviewer returned `FINAL: PASS (A1–A7)` for tested source
+`33e826ccd89a5db039bfc4d92aaf0593907dd95b` and evidence head
+`93e21c6c6439dfb8266d9bf838a8ab4866ceb775`. The result is limited to the
+bounded W3 routing subset and its evidence; it does not imply overall Phase
+5A completion or production readiness. The tagged Go data-provider failure
+above was a separate typed-nil adapter bug. It was fixed and reviewed in the
+separate task `09-23-matcher-adapter-typed-nil`; that later fix does not alter
+the source or historical test results recorded for this W3 evidence run.

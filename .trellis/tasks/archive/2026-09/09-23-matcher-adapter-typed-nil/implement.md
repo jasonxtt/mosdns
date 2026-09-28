@@ -29,9 +29,18 @@
   as `214796fb8292a7a35ac7b03a4bd6f01657569620`.
 - [x] Rerun the Linux tagged normal/race suite against an archive of that exact
   pushed commit.
-- [ ] Send one complete review request with the exact commit and test evidence
+- [x] Send one complete review request with the exact commit and test evidence
   to the frozen reviewer conversation; wait for an explicit PASS or scoped
-  FAIL.
+  FAIL. The user relayed `FINAL: PASS` on 2026-09-23 for this bugfix only.
+
+## Reviewer closeout
+
+The designated reviewer passed the exact pushed bugfix and evidence. The
+reviewed scope confirms true nil interfaces from all three failed-create
+paths, with successful paths, prechecks, FFI error mapping, and stub behavior
+unchanged and no W3 edits. The user relayed this result after the review
+thread's turn was not readable through the task API. This verdict does not
+extend beyond this bugfix.
 
 ## Validation commands
 

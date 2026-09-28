@@ -204,7 +204,7 @@ W3 YAML、真实 UDP A/B/C 路由、冻结 `routing.jsonl` 三行语料、W1/W2 
 关闭/取消/rebind 以及 sequence/runtime ABI tests 均通过。W3 事件 oracle
 验证了 `A`、`B -> A`、`B -> C` 的精确顺序和 forbidden-leg 计数；完整命令、
 远端环境、输入 digest 和实际限制见该任务的
-[implement.md](../../.trellis/tasks/09-22-rust-phase5a-native-routing/implement.md)。
+[implement.md](../../.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-routing/implement.md)。
 这只增加 P26/P27 与 C01/C02 的受限 5A native-routing evidence，不表示
 完整 matcher/plugin、观测、性能或生产就绪。Linux tagged cgo cache/query/
 matcher 组及 race 证据通过；未修改的 `matcher_adapter` typed-nil interface
