@@ -8,10 +8,12 @@ and prove that persistence and the next DNS query observe the complete new
 generation.
 
 This is a new child of `09-28-rust-next-step-roadmap`. The parent plan must
-receive same-chat C2C `FINAL: PASS`, and the prior 5B
-`fast_mark`/`flow_setter` child must receive its own same-chat review PASS before
-this child starts. It does not require a particular architecture from 5B, but
-the roadmap's execution order is retained for bounded reviews and integration.
+receive same-chat C2C `FINAL: PASS`, and the user's canary execute/defer decision
+must be recorded. The planned default is to run this after the 5B
+`fast_mark`/`flow_setter` child receives its same-chat review PASS. There is no
+architectural dependency between these children; if 5B is explicitly deferred
+or blocked, obtain the user's explicit decision to reorder before starting this
+child.
 
 ## Requirements
 
@@ -68,7 +70,11 @@ the roadmap's execution order is retained for bounded reviews and integration.
 
 ## Acceptance Criteria
 
-- [ ] Parent roadmap and prior 5B child each have same-chat C2C `FINAL: PASS`.
+- [ ] Parent roadmap has same-chat C2C `FINAL: PASS`, and the canary
+      execute/defer choice is recorded.
+- [ ] By default, prior 5B child has same-chat C2C `FINAL: PASS`. If 5B is
+      explicitly deferred or blocked, the user explicitly approves reordering
+      5C before this child starts.
 - [ ] The file-backed management eligibility and any unsupported composite
       config forms are frozen with source evidence before implementation.
 - [ ] Real native HTTP tests prove `/show`, `/save`, and `/post` status/body,

@@ -115,11 +115,12 @@ Proceed according to the answer; no remote operation before it.
 
 ## 7. Parent closeout
 
-- [ ] Verify every planned package is either completed with an explicit
-  same-chat `FINAL: PASS`, or explicitly deferred by the user and recorded.
+- [ ] Verify every executed package has an explicit same-chat `FINAL: PASS`;
+  every deferred package is explicitly recorded with its existing
+  planning/review status and remains unexecuted.
 - [ ] Preserve any failed review and corrective history in task artifacts.
 - [ ] Confirm no production/default cutover or hybrid-retirement claim was
   introduced by this sequence.
 - [ ] Report the reviewed task ranges, bounded results, deferred scope, and
-  remaining final gates to the user. Do not claim all planned work is complete
-  while a package, task, or review remains open.
+  remaining final gates to the user. Do not claim completion while any
+  authorized, non-deferred package or its review remains open.
