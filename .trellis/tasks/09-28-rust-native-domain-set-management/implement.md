@@ -3,8 +3,11 @@
 ## Start gates
 
 - [ ] Parent roadmap review is `FINAL: PASS` in the same C2C conversation.
-- [ ] 5B `fast_mark`/`flow_setter` child has its own same-chat `FINAL: PASS`.
-- [ ] Activate this child with `task.py start` only after both review gates.
+- [ ] The user's canary execute/defer decision is recorded.
+- [ ] Default order: 5B `fast_mark`/`flow_setter` child has its own same-chat
+  `FINAL: PASS`. If that child is explicitly deferred or blocked, obtain the
+  user's explicit decision to reorder 5C before activation.
+- [ ] Activate this child with `task.py start` only after the applicable gates.
 - [ ] Read repository instructions, `.trellis/workflow.md`, Rust host/API specs,
   and run `trellis-before-dev` for the actual native-host package boundary.
 

@@ -17,9 +17,10 @@ retirement only after the established Rust-native E2E and retirement gates.
 - The verified C2C planning conversation was opened from the saved
   `mosdns-rust` Project. `workspace_info` confirmed workspace `mosdns-rust`,
   branch `rust`, HEAD `9fd0bc0c`.
-- `docs/rust/next-stage-plan.md` says native config currently covers one
-  forward, one cache, sequence, `domain_set`, and a UDP/TCP listener; unsupported
-  shapes fail at load. The representative 5B composition has already passed
+- `docs/rust/next-stage-plan.md` and the native compiler describe configured
+  forward instances (each with one numeric UDP/TCP upstream), one cache,
+  sequence, `domain_set`, and a UDP/TCP listener; unsupported shapes fail at
+  load. The representative 5B composition has already passed
   its bounded reviews, while full package/config compatibility, management,
   persistence, advanced upstream behavior, capacity/recovery, and cutover remain
   unproven.
@@ -49,12 +50,15 @@ retirement only after the established Rust-native E2E and retirement gates.
 | --- | --- | --- | --- |
 | 1 | Existing `09-28-rust-mos-test-native-sidecar-canary` | Bounded UDP/audit-on and TCP/audit-off operational/functional check of the fixed native candidate on `mos-test`; no performance or full compatibility claim | This roadmap receives same-chat C2C `FINAL: PASS`; then the user resolves all four execution inputs and explicitly chooses execute. |
 | 2 | New child `09-28-rust-native-fast-mark-flow-setter` | Native YAML/sequence integration for `fast_mark` and `flow_setter`, with fresh-query flags, branching, routing metadata, and native observer evidence | Canary passes, or the user explicitly defers it and permits 5B to proceed without the remote canary result. The roadmap review must pass. |
-| 3 | New child `09-28-rust-native-domain-set-management` | First bounded `domain_set` management loop: show/save/post, durable update, atomic new-generation visibility in subsequent DNS queries, restart and shutdown behavior | 5B task has a same-chat C2C `FINAL: PASS`; roadmap review must pass. This is the planned order, not an architectural assertion that the API requires `fast_mark`. |
+| 3 | New child `09-28-rust-native-domain-set-management` | First bounded `domain_set` management loop: show/save/post, durable update, atomic new-generation visibility in subsequent DNS queries, restart and shutdown behavior | Default order is after the 5B task's same-chat C2C `FINAL: PASS`. There is no architectural dependency; if 5B is explicitly deferred or blocked, obtain the user's explicit decision to reorder before starting 5C. The roadmap review must pass and the canary execute/defer decision must be recorded. |
 
-Parent/child links are used only for the two new tasks. The existing canary
-remains a separate active task and is referenced here without retargeting or
-changing its metadata. Each child repeats its dependency and start gate because
-Trellis parent links do not enforce execution order.
+The 5B → 5C order is the default delivery sequence, not a technical dependency.
+The two tasks have independent observable acceptance criteria; if 5B cannot
+proceed or is deferred, do not infer approval to reorder 5C—ask the user for an
+explicit decision. Parent/child links are used only for the two new tasks. The
+existing canary remains a separate active task and is referenced here without
+retargeting or changing its metadata. Each child repeats its ordering and start
+gate because Trellis parent links do not enforce execution order.
 
 ## Frozen compatibility boundaries
 
@@ -133,6 +137,8 @@ stage complete from these slices.
    same conversation returns explicit `FINAL: PASS`.
 4. Only after plan PASS resolve the canary execution inputs with the user. The
    plan review alone does not authorize remote operations.
-5. Each downstream task ends with its own complete same-chat C2C review of the
-   committed task range. A PASS is limited to that task's acceptance criteria;
+5. Each executed downstream task ends with its own complete same-chat C2C
+   review of the committed task range. An explicitly deferred package remains
+   recorded with its existing planning/review status and is not executed just
+   to close the parent. A PASS is limited to that task's acceptance criteria;
    it does not close deferred rows or authorize production cutover.

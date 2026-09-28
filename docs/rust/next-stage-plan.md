@@ -14,7 +14,7 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 | --- | --- | --- |
 | 1 | 已完成的 5B 代表链之后，执行既有隔离 `mos-test` Rust-native sidecar canary | 计划已有精确范围 C2C PASS；本轮路线图审查 PASS 后，还须冻结四项执行输入并由用户明确选择执行。canary 是功能/运行隔离验证，不是完整兼容或性能门禁 |
 | 2 | 5B 第一批：native `fast_mark` matcher/executable + `flow_setter` 序列/观测集成 | YAML 编译错误、标志 OR/set/每查询隔离、真实分支和异步路由元数据有集成证据；canary 通过，或用户明确延期并允许在无远端结果时继续；本任务精确范围 review PASS |
-| 3 | 5C 第一条闭环：单个有界 file-backed `domain_set` 的 `/show`、`/save`、`/post` → 持久化 → 下一 DNS 查询 | HTTP/持久化/原子发布/并发读取/重启/关闭边界有真实 native 证据；5B 第一批精确范围 review PASS；本任务精确范围 review PASS |
+| 3 | 5C 第一条闭环：单个有界 file-backed `domain_set` 的 `/show`、`/save`、`/post` → 持久化 → 下一 DNS 查询 | 默认在 5B 第一批精确范围 review PASS 后执行；两者无架构依赖。若 5B 明确延期或阻塞，须先取得用户明确的重排决定。HTTP/持久化/原子发布/并发读取/重启/关闭边界有真实 native 证据，并通过本任务精确范围 review |
 | 4 | 补齐所有剩余 5B/5C 功能 | [覆盖表](feature-coverage.md) 的配置/插件/API/持久化/管理条目都有相应证据；复用现有 Vue UI |
 | 5 | 5D 完整整机验收与有依据的优化 | 完整配置下正式 Go/Rust 对照、容量/恢复/并发、管理干扰、长稳和资源预算通过，阻塞项为零 |
 | 6 | Phase 6 hybrid 退役和发布验证 | 去除过渡 Go/cgo/selector/mirror/fallback，必要完整回归、纯 Rust 构建/运行通过；随后才考虑生产确认 |
@@ -46,7 +46,7 @@ canary 的候选版本、范围或独立执行门槛。
 ### 已建但未启动的后续子任务
 
 - [09-28 Rust-native fast_mark and flow_setter sequence integration](../../.trellis/tasks/09-28-rust-native-fast-mark-flow-setter/prd.md)：第一批 5B 运行链。仅关闭实际交付的 `fast_mark` 与 `flow_setter` 子项，不声称整个 P11/P33/P44 或完整 5B。须保留 bit 48/49 约定、每查询标志隔离，并先冻结配置 metadata 与 host terminal metadata 的优先级。依赖 canary PASS；只有用户明确延期 canary 且允许忽略远端结果时才能提前。
-- [09-28 Rust-native domain_set management save and query closure](../../.trellis/tasks/09-28-rust-native-domain-set-management/prd.md)：第一条 5C 管理闭环，限一个规则文件语义明确的 file-backed `domain_set`，以真实 HTTP、文件、DNS query 验证 `/show`、`/save`、`/post`、失败回滚、整代发布、重启和 listener 回收。必须在 5B 任务获得同一 C2C 对话 `FINAL: PASS` 后启动；不声称全 P02/C04/C10/C11/C17 或完整 5C。
+- [09-28 Rust-native domain_set management save and query closure](../../.trellis/tasks/09-28-rust-native-domain-set-management/prd.md)：第一条 5C 管理闭环，限一个规则文件语义明确的 file-backed `domain_set`，以真实 HTTP、文件、DNS query 验证 `/show`、`/save`、`/post`、失败回滚、整代发布、重启和 listener 回收。默认在 5B 任务获得同一 C2C 对话 `FINAL: PASS` 后启动；若 5B 明确延期或阻塞，须另取得用户明确的重排决定。这里是计划顺序而非架构依赖；不声称全 P02/C04/C10/C11/C17 或完整 5C。
 
 这两个子任务均处于 `planning`，只允许在本路线图精确范围 review PASS 后依门槛启动。它们不触碰 Go/cgo scaffold，不更改 Vue UI，不扩充 feature-coverage 整行状态。
 

@@ -4,8 +4,10 @@
 
 Produce a repository-grounded plan for the next Rust migration work, have the
 same new C2C ChatGPT conversation review and approve the persisted plan, then
-execute its bounded work packages in order and return each committed result to
-that same conversation until every planned review passes.
+execute each non-deferred, user-authorized work package in order and return each
+committed result to that same conversation until every executed package passes
+review. Explicitly deferred packages remain recorded as deferred and are not
+executed merely to close this parent task.
 
 ## Background
 
@@ -46,8 +48,10 @@ that same conversation until every planned review passes.
   independently verifiable Trellis tasks, preserving existing gates and
   documenting ordering and review boundaries.
 - Have the same C2C conversation review the completed plan. Begin approved
-  tasks only after that plan review passes. Execute tasks in the planned order,
-  record each result, and return it to the same conversation for review.
+  tasks only after that plan review passes. Execute each non-deferred package
+  in the agreed order, record each result, and return each executed package to
+  the same conversation for review. Keep any explicitly deferred package
+  unexecuted with its planning and review history recorded.
 - The plan review does not resolve the four execution inputs recorded by the
   existing canary task: use a read-only config snapshot (never live
   `/cus/mosdns` state), make any Go comparator best-effort/non-gating without a
@@ -57,9 +61,10 @@ that same conversation until every planned review passes.
   if deferred, ask whether 5B may proceed without its remote result. Do not
   connect to `mos-test`, build, or launch anything before that gate is resolved.
 - Resolve review findings locally and repeat the same-conversation review loop
-  until every planned task receives an explicit pass. Preserve original
-  failure evidence and do not claim completion while any planned task or review
-  remains open.
+  until every executed package receives an explicit pass. Preserve original
+  failure evidence; explicitly deferred packages are reported with their
+  existing status and do not need an execution review. Do not claim completion
+  while an authorized, non-deferred package or its review remains open.
 - Preserve all MosDNS product contracts and Rust migration guardrails in
   `AGENTS.md` and `docs/ai/`; do not relax production cutover gates or extend
   transitional Go/cgo bridge patterns into new Rust phases.
@@ -86,12 +91,13 @@ that same conversation until every planned review passes.
 - [ ] The four canary execution inputs and the execute/defer decision are
       resolved with the user after the plan-review pass; no remote action occurs
       before then.
-- [ ] Every planned task is executed by Codex in dependency order; execution
-      records are available to the reviewer without pasting logs or diffs into
-      ChatGPT.
-- [ ] The same C2C conversation explicitly passes every task review, including
-      any corrective iterations; the final report lists the reviewed artifacts
-      and any work explicitly deferred by the approved plan.
+- [ ] Every non-deferred, user-authorized task is executed by Codex in the
+      agreed order; execution records are available to the reviewer without
+      pasting logs or diffs into ChatGPT. Any deferred package remains
+      unexecuted and is explicitly recorded with its existing status.
+- [ ] The same C2C conversation explicitly passes every executed task review,
+      including corrective iterations; the final report lists the reviewed
+      artifacts and any explicitly deferred work.
 
 ## Current State
 
