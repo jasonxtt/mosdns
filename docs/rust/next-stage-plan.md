@@ -32,7 +32,7 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 
 [09-28 Rust-native isolated mos-test sidecar canary](../../.trellis/tasks/09-28-rust-mos-test-native-sidecar-canary/prd.md) 是独立的纯验证规划任务，固定候选 SHA `016103f3c21ed2d659694ce10e64aaf24b5c2767`。计划覆盖由 `config_lite_all` 只读快照裁剪的 include/relative-rules/sequence/cache/route 链，在 `mos-test` 上顺序验证 UDP/audit-on 与 TCP/audit-off 两个 loopback 高端口 sidecar；controlled peers 作为功能、路由和 cache oracle，并要求每次都回收自有 PID/socket、保持原服务基线不变。
 
-该计划当前仍为 `planning`。首轮 C2C 规划 review 返回 `FINAL: FAIL`；修订补充了可复核的 exact-candidate lockfile provenance、included YAML 的精确相对路径布局、启动前 config/peer 自检、共享主机 PID 身份复核，并将 sibling config snapshot 标为本轮未独立验证的规划输入。第二轮 review 确认前述五项已关闭，但指出 port-53 基线条件冲突和一处残留路径措辞；两处已修正，等待再次固定范围 review。没有连接 `mos-test`、构建或启动 sidecar。任何 canary 执行都需要用户另行明确授权。它不要求外部读取 audit records，不包含 Go 构建，不覆盖完整 config package，不做性能 PASS，也不改变生产门禁。四项推荐执行默认值和实际配置快照身份需在启动前冻结；计划与未决输入见 task 的 `design.md`、`implement.md`、`research/canary-inputs.md`。
+该计划当前仍为 `planning`。首轮 C2C 规划 review 返回 `FINAL: FAIL`；修订补充了可复核的 exact-candidate lockfile provenance、included YAML 的精确相对路径布局、启动前 config/peer 自检、共享主机 PID 身份复核，并将 sibling config snapshot 标为本轮未独立验证的规划输入。第二轮 review 确认前述五项已关闭，但指出 port-53 基线条件冲突和一处残留路径措辞；两处已修正。第三轮又指出 peer/可选 Go server 缺少明确停止步骤；现已补齐成功及早停路径的进程清理，待再次固定范围 review。没有连接 `mos-test`、构建或启动 sidecar。任何 canary 执行都需要用户另行明确授权。它不要求外部读取 audit records，不包含 Go 构建，不覆盖完整 config package，不做性能 PASS，也不改变生产门禁。四项推荐执行默认值和实际配置快照身份需在启动前冻结；计划与未决输入见 task 的 `design.md`、`implement.md`、`research/canary-inputs.md`。
 
 ## 简化工作方式
 
