@@ -22,12 +22,12 @@ same C2C conversation that supplied the plan.
 
 ### Planning validation
 
-- Run `python3 ./.trellis/scripts/task.py validate <task-dir>` for the parent
+- [x] Run `python3 ./.trellis/scripts/task.py validate <task-dir>` for the parent
   and both new children.
-- Run `git diff --check` and inspect `git status --short` plus the exact diff.
+- [x] Run `git diff --check` and inspect `git status --short` plus the exact diff.
 - Do not run Cargo, frontend, network, remote-host, benchmark, or product tests
   for this documentation-only package.
-- Stage only the parent/child planning files, `docs/rust/next-stage-plan.md`,
+- [x] Stage only the parent/child planning files, `docs/rust/next-stage-plan.md`,
   and any task-parent metadata that belongs to this task. Commit a narrow
   planning range; do not push.
 
