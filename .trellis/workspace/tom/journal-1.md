@@ -730,3 +730,26 @@ Preserved canary evidence, enforced pre-start authorization, reviewed exact comm
 ### Next Steps
 
 - Keep 5B and 5C in their separately planned tasks; no deployment or production promotion.
+
+
+## Session 26: Complete Rust-native 5B fast_mark and flow_setter
+
+**Date**: 2026-09-29
+**Task**: Complete Rust-native 5B fast_mark and flow_setter
+**Branch**: `rust`
+
+### Summary
+
+Completed bounded native fast_mark and flow_setter YAML, sequence execution, per-query flag isolation, async routing metadata, observer precedence, cancellation/drop precedence, focused and workspace validation, and same-chat C2C review. Initial P1-1 was fixed in a narrow range and re-reviewed FINAL: PASS; 5B was archived. 5C was not started.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4eb4a565` | (see git log) |
+| `da2f7aed` | (see git log) |
+| `5a980f35` | (see git log) |
+
+### Status
+
+[OK] **Completed**
