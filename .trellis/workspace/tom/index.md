@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-09-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~694 | Active |
+| `journal-1.md` | ~732 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-09-28 | Repair canary review and Trellis authorization gate | `0c5622f7`, `242cbcbb`, `79ddded8`, `9beb22a0`, `5ff649f2` | `rust` |
 | 24 | 2026-09-28 | Archive Rust Phase 5B representative native query chain | - | `rust` |
 | 23 | 2026-09-27 | Phase 5A official matrix stopped at control failure | `6c69c0aa`, `182abe64`, `06df01f5`, `629e9286`, `b4c0edb6` | `rust` |
 | 22 | 2026-09-26 | Archive accepted native query observability | `909bb3fd`, `112c499e` | `rust` |
