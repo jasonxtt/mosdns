@@ -1,0 +1,30 @@
+{
+  "id": "rust-mosdns-rust-canary-review-restart",
+  "name": "rust-mosdns-rust-canary-review-restart",
+  "title": "Restart committed canary review",
+  "description": "Restart the canary acceptance review using the existing committed evidence. Do not rerun the VM canary; create the required pre-start authorization snapshot, then submit the exact committed range to the user-selected C2C reviewer.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "automation_required": "true",
+    "supersedes": "09-28-rust-mos-test-native-sidecar-canary",
+    "original_boundary": "879f53d283d2ef19cc87bcec59ba80d7f1e25cc2"
+  }
+}
