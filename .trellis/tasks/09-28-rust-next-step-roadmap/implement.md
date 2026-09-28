@@ -95,8 +95,9 @@ Proceed according to the answer; no remote operation before it.
 
 ## 6. Execute the new first-5C child
 
-- [ ] Activate `09-28-rust-native-domain-set-management` only after 5B has its
-  same-chat review PASS.
+- [ ] Default order: activate `09-28-rust-native-domain-set-management` only
+  after 5B has its same-chat review PASS. If 5B is explicitly deferred or
+  blocked, obtain the user's explicit decision to reorder before activation.
 - [ ] Re-read project instructions and run `trellis-before-dev` for the native
   host/API package before product-code changes.
 - [ ] For each behavior, write a failing HTTP or real-listener test first.
