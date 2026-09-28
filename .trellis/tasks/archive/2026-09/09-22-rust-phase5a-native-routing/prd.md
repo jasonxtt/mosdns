@@ -1,10 +1,11 @@
 # Rust Phase 5A native routing
 
-Status: planning; reviewer returned PLANNING: PASS for
-`7d684c5dee67afeb1eea298813c25b632a6f8438`. User requested the next
-task's plan after W2 closure; final implementation approval is pending.
-No W3 implementation, automation authorization, task start or dispatch is
-currently authorized. Source anchor: `0fb56189f04820c79d1cbb52fef6571aefdfe536`.
+Status: completed bounded W3 implementation and evidence; designated reviewer
+returned `FINAL: PASS` for A1–A7 on tested source
+`33e826ccd89a5db039bfc4d92aaf0593907dd95b` and evidence head
+`93e21c6c6439dfb8266d9bf838a8ab4866ceb775`. The user authorized execution of
+Slices 0–3. This closes only the bounded W3 subset, not Phase 5A as a whole.
+Source anchor: `0fb56189f04820c79d1cbb52fef6571aefdfe536`.
 
 ## Goal and value
 
@@ -79,24 +80,24 @@ multithread-runtime change, connection policy redesign or unbounded task pool.
 
 ## Acceptance criteria
 
-- [ ] A1 (R1/R4/R5): unchanged W1/W2/W3 YAML compile, alternate names/order/data
+- [x] A1 (R1/R4/R5): unchanged W1/W2/W3 YAML compile, alternate names/order/data
   prove generic binding, full negative-config matrix fails before I/O.
-- [ ] A2 (R2/R3/R4/R7): native matcher tests cover exact/case/trailing-dot domain
+- [x] A2 (R2/R3/R4/R7): native matcher tests cover exact/case/trailing-dot domain
   behavior; Answer-only IPv4/IPv6 extraction, compressed owner names, multiple
   answers/CNAME, empty/negative and malformed cases; no state mutation.
-- [ ] A3 (R2/R3): every frozen W3 row returns its exact expected DNS result and
+- [x] A3 (R2/R3): every frozen W3 row returns its exact expected DNS result and
   exactly the required upstream increments, zero forbidden increments, with
   per-request order B→A/B→C verified. A deliberately wrong/missing leg fails
   the test oracle even when the final answer happens to be correct.
-- [ ] A4 (R6): multi-leg deadline does not reset per forward; first/second-leg
+- [x] A4 (R6): multi-leg deadline does not reset per forward; first/second-leg
   failure, malformed/mismatched response and cancellation barriers exercise
   the precise stopping rules with no stale response or extra leg.
-- [ ] A5 (R8): mixed-route concurrent requests, distinct IDs, shutdown while B
+- [x] A5 (R8): mixed-route concurrent requests, distinct IDs, shutdown while B
   is outstanding and while A/C is outstanding, every-owner close and rebind pass.
-- [ ] A6: local Rust checks and Linux amd64 W1/W2/W3 correctness pass against
+- [x] A6: local Rust checks and Linux amd64 W1/W2/W3 correctness pass against
   an exact commit. Historical baseline/corpus hashes remain unchanged; evidence
   records commands, failures/retries, counts, cleanup and actual limitations.
-- [ ] A7: designated reviewer gives each slice and final explicit PASS, and
+- [x] A7: designated reviewer gives each slice and final explicit PASS, and
   coverage/handover report only the bounded W3 subset. No implied Phase 5A or
   full-plugin completion, performance gain or production readiness.
 
@@ -107,7 +108,15 @@ language, special_groups, fallback/racing groups, new transports, API/WebUI,
 audit/metrics delivery, performance run, profiling campaign, Go baseline rerun,
 production/default change, or hybrid retirement. Basic observability and the
 first comparable native process performance gate remain later Phase 5A work;
-full query and management features stay in 5B/5C. No blocking product question
-remains for this bounded plan; user approval of the final plan is still required
-before implementation. Existing executor/reviewer selections may be reused
-only when that implementation is authorized.
+full query and management features stay in 5B/5C. The user authorized Slices
+0–3. Production/default cutover, deployment, performance work, and any broader
+Phase 5A/5B/5C scope remain out of scope and are not authorized by this task's
+completion.
+
+## Final review
+
+The designated reviewer returned `FINAL: PASS (A1–A7)` for tested source
+`33e826ccd89a5db039bfc4d92aaf0593907dd95b` and evidence head
+`93e21c6c6439dfb8266d9bf838a8ab4866ceb775`. This result applies only to the
+bounded W3 routing implementation and its evidence; it does not imply overall
+Phase 5A completion or production readiness.
