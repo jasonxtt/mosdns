@@ -85,7 +85,7 @@ executed merely to close this parent task.
 - [x] The same conversation returns detailed, source-grounded next-step
       recommendations with rationale, ordered work, dependencies, concrete
       files/artifacts, validation, acceptance criteria, and deferred items.
-- [ ] The roadmap document and Trellis task map match those recommendations,
+- [x] The roadmap document and Trellis task map match those recommendations,
       preserve project guardrails, avoid duplicate active work, and receive an
       explicit C2C planning-review pass before execution begins.
 - [ ] The four canary execution inputs and the execute/defer decision are
@@ -103,7 +103,9 @@ executed merely to close this parent task.
 
 The new C2C chat was created inside the saved `mosdns-rust` Project and bound
 through the exact `Codex with ChatGPT · mosdns-rust` connector. Its workspace
-check confirmed branch `rust` and HEAD `9fd0bc0c`. The conversation returned
-the detailed plan. The durable roadmap and Trellis artifacts are being prepared
-for an exact committed-range review in that same chat; no downstream task has
-started and no remote canary action has occurred.
+check confirmed branch `rust` and HEAD `9fd0bc0c`; the same conversation returned
+the detailed plan and passed the cumulative planning range
+`9fd0bc0c061fb440c88781949f5088652aca70b9..3887af32d6ef17624f8b1d198e0dcb0bed4a28d7`
+on review iteration 3. Canary execution inputs and the execute/defer choice are
+now awaiting the user. No downstream task has started and no remote canary
+action has occurred.

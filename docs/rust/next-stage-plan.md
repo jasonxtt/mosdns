@@ -23,10 +23,10 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 
 2026-09-28，同一 C2C 对话已在已验证的 `mosdns-rust` Project/workspace
 （分支 `rust`，规划输入 HEAD `9fd0bc0c`）返回
-`PLAN_STATUS: READY_WITH_EXPLICIT_EXECUTION_GATE`。本路线图和两个新的
-Trellis 子任务正在落地，尚待同一对话对精确提交范围返回 `FINAL: PASS`。
-计划审查通过前不启动下游任务；审查通过后，既有 canary 的四项输入和
-执行/延期选择仍须先与用户明确冻结。此 C2C 路线图计划不会改变已有
+`PLAN_STATUS: READY_WITH_EXPLICIT_EXECUTION_GATE`，并在第 3 轮对累计提交范围
+`9fd0bc0c061fb440c88781949f5088652aca70b9..3887af32d6ef17624f8b1d198e0dcb0bed4a28d7`
+返回 `FINAL: PASS`。路线图和两个新 Trellis 子任务均已落地。执行既有
+canary 前仍须由用户冻结四项输入并选择执行或延期；本路线图不改变已有
 canary 的候选版本、范围或独立执行门槛。
 
 ## 当前 5B 任务和第一小目标
