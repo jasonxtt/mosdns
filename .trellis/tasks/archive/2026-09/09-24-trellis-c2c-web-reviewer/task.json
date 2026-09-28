@@ -1,0 +1,29 @@
+{
+  "id": "trellis-c2c-web-reviewer",
+  "name": "trellis-c2c-web-reviewer",
+  "title": "Integrate Codex with ChatGPT as the default Trellis reviewer",
+  "description": "Integrate codex-with-chatgpt as the default Trellis reviewer transport while preserving Trellis as the sole controller and explicit Codex reviewer overrides.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-24",
+  "completedAt": "2026-09-28",
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": "3a2d43028d47bd33c7b126060da7ffaa07710861",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-24-trellis-c2c-web-compare",
+    "09-24-trellis-c2c-reviewer-adapter"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Owner accepted and authorized archive on 2026-09-28 after reporting several days of normal use without known issues. This is owner acceptance, not a formal parent-level reviewer FINAL: PASS; see research/owner-acceptance-2026-09-28.md. Local adapter is on rust/origin/rust. External child f870ce7899eb87f01619e2c5cbf941db297241fc remains local because upstream push permission was denied.",
+  "meta": {}
+}
