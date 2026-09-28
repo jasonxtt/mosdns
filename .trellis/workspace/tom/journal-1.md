@@ -345,6 +345,296 @@ Completed and reviewed Rust Phase 4 QUIC/HTTP3 Slice 4: added read-only DoQ reso
 [OK] **Completed**
 
 
+## Session 14: Accept and archive rust-foundation lint / CI path filter
+
+**Date**: 2026-09-20
+**Task**: Accept and archive rust-foundation lint / CI path filter
+**Branch**: `rust`
+
+### Summary
+
+Validated the pooled DoT Box representation and documentation-only workflow filters: focused Rust test suite and -D warnings clippy passed, formatting/diff/task/workflow checks passed, and archived 09-19-ci-rust-foundation-lint-doc-path-filter.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b75bd7f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 15: Complete and archive Rust Phase 4 QUIC reuse
+
+**Date**: 2026-09-21
+**Task**: Complete and archive Rust Phase 4 QUIC reuse
+**Branch**: `rust`
+
+### Summary
+
+Closed all four QUIC reuse slices after scoped web PASS; verified Debian 13 with Rust 1.85.1 on mosdns-rust, including full locked workspace tests and Slice 3 stress; recorded pre-existing MSRV clippy baseline findings outside task scope; committed acceptance records and archived the task.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4e8972c` | (see git log) |
+| `e4535a6` | (see git log) |
+
+### Testing
+
+- [OK] rustup run 1.85.1 cargo test --workspace --locked: pass
+- [OK] Rust 1.95 workspace clippy -D warnings: pass
+- [OK] task.py validate and git diff --check: pass
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- No remaining work in this task; any Rust 1.85 clippy baseline cleanup belongs to a separate scoped task.
+
+
+## Session 16: Phase5A Go-only baseline closed
+
+**Date**: 2026-09-21
+**Task**: Phase5A Go-only baseline closed
+**Branch**: `rust`
+
+### Summary
+
+完成 Phase 5A Go-only Linux amd64 baseline：Slice 0/1/2 均通过唯一内部 reviewer，报告记录 36 个 frozen runs、45 个 measured stages、15 个 spread rows，最终 FINAL: PASS，任务已归档。
+
+### Main Changes
+
+- 冻结 W1 UDP/TCP、W2 cold/warm、W3 routing fixtures 与 official raw evidence
+- 新增 Go-only baseline report、PRD A1-A13 mapping 与可复现 rerun contract
+- 保留无效历史并明确不扩展 Rust host、transport、生产部署
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `481bb1ecee2aaf8572ee3c1a9f4c347303b77660` | (see git log) |
+| `e3338226be28ad99b5d621dfd5ccf972d13e32b2` | (see git log) |
+| `9f535de613e7fa50e80be95d0cb4599548dce786` | (see git log) |
+| `35e8f1409920b5f122166c10f9a504fbd69ae3e0` | (see git log) |
+| `33dd6f892b998542934080e0f775c4dfb940c560` | (see git log) |
+| `0533c477888055e5425421b1766b057045989946` | (see git log) |
+
+### Testing
+
+- [OK] task.py validate、Go test/vet、bash -n、JSON/JSONL、manifest/hash/evidence assertions、git diff --check
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 按 reviewer 授权停止；未来若新增执行只能使用 ssh mosdns-rust 并重新冻结环境
+
+
+## Session 17: Finish and archive Trellis automation simplification
+
+**Date**: 2026-09-22
+**Task**: Finish and archive Trellis automation simplification
+**Branch**: `rust`
+
+### Summary
+
+Authorized Trellis automation simplification scope completed after planning, Slice G, and Slices 0-4 passed independent external ChatGPT root review; final Slice 4 reviewed SHA 8907cce2eadd6febcc00a46a50b0c15adfbf35aa with FINAL: PASS. Final validation passed 42 Trellis tests, task validation, diff check, and both hook smoke checks; finish and archive were explicitly authorized and completed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e632a41da07d75bfc85180d9a7838ae5cee3e6cf` | (see git log) |
+| `7cc275d751a33f9b4a4914c53eab22226e8f4be7` | (see git log) |
+| `cb9ec92446eda7d5b56fae97e1bc5e65a0a26a50` | (see git log) |
+| `e807d84fff825352f28fc3d30df7ae234f6aadd8` | (see git log) |
+| `48bc4ef085a95f9d0cb1ca376756fdbc43f05728` | (see git log) |
+| `658cbb41f3160402e63372ad038fb1c13f03828b` | (see git log) |
+| `a6b1d0bbfc903e5a7169544657d62cda1f716892` | (see git log) |
+| `1218a555868e5321c71f893155146b8e74678055` | (see git log) |
+| `00ff9c51dce12893bfd0208a303012afa1f6e4a8` | (see git log) |
+| `ca261948dd2f30a0d72650b8056ea55f13b3255e` | (see git log) |
+| `6e1852ad7d827fa908599200750c903143c44241` | (see git log) |
+| `0e8708afa33f18f6282b4ba30ae75f324d736e60` | (see git log) |
+| `6976e3dc39ed91044c584f4cd7a6f171e9c8aeda` | (see git log) |
+| `8907cce2eadd6febcc00a46a50b0c15adfbf35aa` | (see git log) |
+
+### Testing
+
+- [OK] 42 Trellis tests; task.py validate; git diff --check; inject-workflow-state and session-start JSON smoke
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- No next task started; await explicit user instruction.
+
+
+## Session 18: Archive Rust Phase 5A native forwarding
+
+**Date**: 2026-09-22
+**Task**: Archive Rust Phase 5A native forwarding
+**Branch**: `rust`
+
+### Summary
+
+Completed the five approved rust-phase5a-native-forwarding slices, recorded the bounded final evidence remediation, verified the authoritative reviewer FINAL: PASS, updated the Rust migration handover, and archived the task with task.py. No implementation expansion, benchmark rerun, deployment, or follow-up task was performed.
+
+### Main Changes
+
+- Final reviewer PASS recorded for reviewer conversation 000; final review range bdfd016 -> 7af4dd3.
+- Closeout record committed as a8d7476; task.py archive completed and archive commit e4dcc71 was pushed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7af4dd3` | (see git log) |
+| `a8d7476` | (see git log) |
+
+### Testing
+
+- [OK] Existing committed workspace and Linux W1 correctness evidence reviewed; task.py validate and git diff --check passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- No next task authorized; stop after archive.
+
+
+## Session 19: W2 closure verification and archive
+
+**Date**: 2026-09-22
+**Task**: W2 closure verification and archive
+**Branch**: `rust`
+
+### Summary
+
+Verified final reviewer PASS, independently reran 220 Rust tests and focused lint, confirmed frozen inputs unchanged, archived bounded W2 after user authorization. Next step is W3 planning only.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b558d15` | (see git log) |
+| `c6b7f80` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 20: Archive reviewed W3 routing and typed-nil fix
+
+**Date**: 2026-09-23
+**Task**: Archive reviewed W3 routing and typed-nil fix
+**Branch**: `rust`
+
+### Summary
+
+完成 bounded W3 原生分流与 matcher typed-nil 小修复的任务收尾。两项任务均记录各自范围内的 reviewer FINAL: PASS 并归档；W3 的 Linux 历史证据和后续独立 typed-nil 修复保持分开记录。没有进行 Phase 5A 扩展、部署或生产切换。
+
+### Main Changes
+
+- 更新两份任务记录，保存 W3 tested-source/evidence SHA 和 reviewer 范围，并注明 Go typed-nil 问题在独立小修复任务中解决。
+- 使用 task.py --no-commit 归档 matcher bugfix 与 native W3 routing。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `33e826ccd89a5db039bfc4d92aaf0593907dd95b` | (see git log) |
+| `93e21c6c6439dfb8266d9bf838a8ab4866ceb775` | (see git log) |
+| `214796fb8292a7a35ac7b03a4bd6f01657569620` | (see git log) |
+| `4fd61910e1f71a170eb312a6876f0aae8f7cd2c2` | (see git log) |
+
+### Testing
+
+- [OK] 两份 task.py validate 均通过；归档后再验证仍通过。
+- [OK] git diff --check 通过；本轮只修改任务记录，无代码测试重跑。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无活动 Trellis 任务；等待用户指示，不扩展 Phase 5A 或部署。
+
+
+## Session 21: Integrate Codex with ChatGPT as Trellis Reviewer
+
+**Date**: 2026-09-25
+**Task**: Integrate Codex with ChatGPT as Trellis Reviewer
+**Branch**: `rust`
+
+### Summary
+
+Completed and archived the Trellis Codex with ChatGPT reviewer integration. Local Trellis adapter and exact-SHA REVIEW_ONLY contract passed 61 tests and validation; the external codex-with-chatgpt branch passed 194 tests, typecheck, and build. The dedicated web reviewer returned FINAL: PASS. Preserved unrelated dirty worktree changes and did not deploy.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dbb6a88` | (see git log) |
+| `6d857cf` | (see git log) |
+| `4af4332` | (see git log) |
+| `3a356e7` | (see git log) |
+| `b26a855` | (see git log) |
+| `3a2d430` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 22: Archive accepted native query observability
+
+**Date**: 2026-09-26
+**Task**: Archive accepted native query observability
+**Branch**: `rust`
+
+### Summary
+
+M10-FINAL-001 PASS accepted bounded A1–A6; user authorized lifecycle closure and GitHub push. Archived only this task via task.py, updated handover/coverage/stage-plan links, preserved raw failures and unrelated dirty work. No new tests, traffic, deployment or task.
+
+### Main Changes
+
+- Task completedAt 2026-09-26; current task pointer cleared; archive commit d7757ed1.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `909bb3fd` | (see git log) |
+| `112c499e` | (see git log) |
+
+### Testing
+
+- [OK] Existing 869 Linux and 70 local measurement checks reused; task context validation and staged whitespace checks pass.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Await separately authorized next task; full Phase5A and production remain gated.
+
+
 ## Session 23: Phase 5A official matrix stopped at control failure
 
 **Date**: 2026-09-27
@@ -375,3 +665,30 @@ Executed G0 profiler remediation, Slice 1/2 reliability work, health-latency-bas
 - Recorded A1/A2 tool-scope acceptance, A3/A6 partial, A4/A5 incomplete; no full matrix, profiling, capacity or service-recovery claim.
 - Updated handover/stage plan and docs/rust/phase5a-measurement-reliability.md; 5B may enter bounded configuration/sequence planning, with no new task or implementation this turn.
 - User authorized committing/pushing this task closeout; unrelated archive/journal work remains preserved.
+
+
+## Session 24: Archive Rust Phase 5B representative native query chain
+
+**Date**: 2026-09-28
+**Task**: Archive Rust Phase 5B representative native query chain
+**Branch**: `rust`
+
+### Summary
+
+用户授权归档已通过 C2C FINAL: PASS 的 Phase 5B 接受范围。同步记录 archived 状态，并保留专门远端 fault/cancel/close E2E 延期事实；依项目配置 session_auto_commit=false 写入 journal，不创建 Git commit。
+
+### Main Changes
+
+- 更新任务收尾状态及 Rust handover / feature coverage 中的生命周期标记；明确 deferred remote fault E2E 未通过也未纳入实测。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] task.py validate、task.json JSON parse、git diff --check 通过。
+
+### Status
+
+[OK] **Completed**
