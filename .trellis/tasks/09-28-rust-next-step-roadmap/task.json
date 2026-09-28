@@ -1,0 +1,29 @@
+{
+  "id": "rust-next-step-roadmap",
+  "name": "rust-next-step-roadmap",
+  "title": "Rust migration next-step roadmap",
+  "description": "Persist and same-chat review the ordered Rust migration roadmap, then coordinate bounded reviewed work packages without relaxing migration gates.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-28-rust-native-fast-mark-flow-setter",
+    "09-28-rust-native-domain-set-management"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
