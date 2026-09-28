@@ -82,6 +82,12 @@ front-end or Go builds.
   contents into ChatGPT.
 - [ ] Fix every finding in a narrow corrective range and re-review in that same
   conversation until explicit `FINAL: PASS`.
+- Review finding ledger: the initial exact-range C2C review returned
+  `FINAL: FAIL` with P1-1 because the cancellation/drop checkpoint used the
+  host-derived `final_sequence` even when `flow_setter` had configured one.
+  The narrow correction applies configured-over-host precedence in
+  `ExecutionFacts::Drop` and adds a cancellation regression covering all three
+  routing fields.
 - [ ] Record remaining unimplemented forms and explicit deferred work in the
   task and parent roadmap. Do not advance the 5C child until this C2C review
   passes.
