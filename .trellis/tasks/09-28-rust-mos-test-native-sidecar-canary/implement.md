@@ -51,9 +51,9 @@ This task is in `planning`. The checklist below is authorization-gated: do not r
 
 ## Planning validation and review
 
-- [ ] `python3 ./.trellis/scripts/task.py validate .trellis/tasks/09-28-rust-mos-test-native-sidecar-canary`
-- [ ] `git diff --check`
-- [ ] Request C2C reviewer-only review against one fixed committed range covering only this planning task and `docs/rust/next-stage-plan.md`.
-- [ ] After review, report the exact base/head SHA and any remaining user decision. Keep this task in planning until explicit execution authorization.
+- [x] `python3 ./.trellis/scripts/task.py validate .trellis/tasks/09-28-rust-mos-test-native-sidecar-canary` passed.
+- [x] `git diff --check` passed for the planning edits.
+- [x] C2C reviewer-only exact-range review returned `FINAL: PASS` for `016103f3c21ed2d659694ce10e64aaf24b5c2767..82953751bdde89fa3fc2244cea2a86be4f6a3d06`.
+- [x] Report the exact reviewed base/head and remaining execution gate: this task stays in `planning`; the canary requires separate explicit execution authorization.
 
 No canary, build, remote command, or product test has been run as part of writing this plan.
