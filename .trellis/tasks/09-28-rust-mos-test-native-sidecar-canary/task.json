@@ -1,0 +1,30 @@
+{
+  "id": "rust-mos-test-native-sidecar-canary",
+  "name": "rust-mos-test-native-sidecar-canary",
+  "title": "Rust-native isolated mos-test sidecar canary",
+  "description": "Plan a bounded, non-production mos-test canary for the exact reviewed Rust-native composition build; planning only until separately authorized.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": "phase5b-mos-test-canary",
+  "package": null,
+  "priority": "P1",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-28",
+  "completedAt": null,
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "plan_only": "true",
+    "candidate_sha": "016103f3c21ed2d659694ce10e64aaf24b5c2767",
+    "requires_explicit_execution_approval": "true"
+  }
+}
