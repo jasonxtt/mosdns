@@ -114,7 +114,36 @@ The Linux build completed in 39.56s. Artifact: `slice3_composition-2f26e2878285f
 
 ### Still unperformed
 
-Remote fault/cancellation/close variants, the `local.only.test` exact-rule request, full workspace and legacy W1/W2/W3 suites, and independent full-scope A1–A6 review remain unperformed. This integration-test run did not launch the main CLI; a separate CLI run and short diagnostic are recorded below. No performance PASS, commit, deployment or production change is claimed. The temporary integration-test workspace and generated fixture directories were removed; final `mosdns.service` state remained active with PID 425, and the final listener snapshot hash still matched the pre-run hash.
+That first remote integration run used the pre-review source. Remote fault/cancellation/close variants, the `local.only.test` exact-rule request, full workspace and legacy W1/W2/W3 suites, and independent full-scope A1–A6 review remain unperformed. This integration-test run did not launch the main CLI; a separate CLI run and short diagnostic are recorded below. No performance PASS or production change is claimed. Its temporary integration-test workspace and generated fixture directories were removed; `mosdns.service` remained active with PID 425, and the listener snapshot hash matched before and after.
+
+## Remote Linux A6 retest after review remediation (2026-09-28)
+
+### Exact source and configuration
+
+- Branch `rust`; candidate commit `abeeb3e3bfb4458588430b83bfbd9280b359d37d`, parent `b0c3a29876b917abfc503dbad2f5706488ee1c91` (the reviewed range still starts at `11bd56c40d255d6ae93b0a2eba1c85214300b149`). The source for this retest is committed; unrelated worktree changes were excluded.
+- This workstation is macOS arm64 without a Linux linker/target. There is no standalone build script for `mosdns-native-host`; `scripts/build-rust-experimental.sh` builds the transitional Go/cgo executable, so it was not used. The Rust workspace was built on `mosdns-rust` with Cargo only. No frontend or Go build ran.
+- The first source archive contained only `rust/` (SHA-256 `f8ec469d99198222d772fbd462bbdc9111b48efb6e6b2bdb33b444613a6b5eb0`). The initial remote `--no-run` command (same Cargo command shown below) failed with exit 101 because `slice2_config.rs` has compile-time `include_str!` references to `tests/phase5a-baseline/configs/{forward-udp,forward-tcp,cache,routing}.yaml`. No test executable ran and no test socket was opened in that attempt. The corrected archive included `rust/` and only those four config fixtures; local and remote SHA-256 both matched `07ca5b94df64eda2c8a551860b7d58e17f0d6123e2ea20230876828d973b00f3`.
+- Composition source/config: `rust/native-host/tests/slice3_composition.rs` (SHA-256 `f077b4347d5915ecb5ab02dca5897fb8e037dc4eee2b79274334464cf16c1fa1`), constants `ROOT_CONFIG` and `ROUTES_CONFIG`, and `chain_assembly`. The fixture wrote root `config.yaml`, included `sub_config/routes.yaml`, and `sub_config/rules/local.txt` containing `domain:local.test` and `full:local.only.test`; it also placed an invalid root-level `rules/local.txt` decoy. Runtime upstream peers and listener sockets bind loopback port `0` for kernel-assigned ephemeral ports.
+
+### Build and exact test commands
+
+~~~sh
+git archive --format=tar.gz HEAD rust tests/phase5a-baseline/configs > /tmp/mosdns-phase5b-candidate.dkVK8k/rust-plus-test-fixtures.tar.gz
+scp /tmp/mosdns-phase5b-candidate.dkVK8k/rust-plus-test-fixtures.tar.gz mosdns-rust:/tmp/mosdns-phase5b-a6.5Oi0hx/source.tar.gz
+ssh mosdns-rust 'tar -xzf /tmp/mosdns-phase5b-a6.5Oi0hx/source.tar.gz -C /tmp/mosdns-phase5b-a6.5Oi0hx/source'
+ssh mosdns-rust 'A6_REMOTE_ROOT=/tmp/mosdns-phase5b-a6.5Oi0hx CARGO_TARGET_DIR=/tmp/mosdns-phase5b-a6.5Oi0hx/target CARGO_BUILD_JOBS=2 cargo test --manifest-path /tmp/mosdns-phase5b-a6.5Oi0hx/source/rust/Cargo.toml -p mosdns-native-host --test slice2_config --test slice3_composition --no-run'
+ssh mosdns-rust 'set +e; BIN=/tmp/mosdns-phase5b-a6.5Oi0hx/target/debug/deps/slice2_config-cc5529512b9fe56b; A6_REMOTE_ROOT=/tmp/mosdns-phase5b-a6.5Oi0hx "$BIN" --nocapture & PID=$!; printf "OWNED_PID=%s\n" "$PID"; wait "$PID"; RC=$?; printf "EXIT=%s\n" "$RC"; printf "%s\n" "$RC" > /tmp/mosdns-phase5b-a6.5Oi0hx/slice2.exit; exit "$RC"'
+ssh mosdns-rust 'set +e; BIN=/tmp/mosdns-phase5b-a6.5Oi0hx/target/debug/deps/slice3_composition-2f26e2878285f663; A6_REMOTE_ROOT=/tmp/mosdns-phase5b-a6.5Oi0hx "$BIN" --nocapture & PID=$!; printf "OWNED_PID=%s\n" "$PID"; wait "$PID"; RC=$?; printf "EXIT=%s\n" "$RC"; printf "%s\n" "$RC" > /tmp/mosdns-phase5b-a6.5Oi0hx/slice3.exit; exit "$RC"'
+~~~
+
+The corrected Linux build exited 0 in 1.78s. Test executable SHA-256 values were `c77b1b629c76a2ee466e33928a3b0afa0424f2c258b2e4490c10376973f3f5a4` (`slice2_config`) and `9057c26ed07d8aa2e4e246e9f31bb5cc6d79a5ae8076aad9ebb4906ce3b9b89a` (`slice3_composition`). Results: `slice2_config` 12 passed / 0 failed; `slice3_composition` 11 passed / 0 failed. The latter exercised the included relative path/source-context correction, forward reachability only through `goto` and `try`, and both real-listener representative-chain variants.
+
+### Observed behavior and cleanup
+
+- UDP listener / audit on: `blocked.test A` and `another-blocked.test A` returned NXDOMAIN; `other.test HTTPS` (qtype 65) returned NOERROR; all three made zero peer calls. The first `a.local.test A` was a child-cache miss and reached the local peer once; `other.test A` continued from the parent to the default peer once; two repeats of `a.local.test A` were child-cache hits. Final counters were local `1`, default `1`. Audit retained all seven requests, marked the initial local request Miss and a repeat Hit, and reported the actual `sequence_main` position.
+- TCP listener / audit off: a real DNS-over-TCP request to a blocked name returned NXDOMAIN; local and unmatched names returned local/default answers with each peer at one request. Audit retained no per-query record. Both listeners and their counted loopback UDP peers bound port `0`; the test output does not log the assigned ephemeral numbers.
+- Added retest process PIDs `419216` (`slice2_config`) and `419242` (`slice3_composition`) both exited 0 and were absent afterward. `Fixture::drop` removed all test directories; zero `/tmp/phase5b-*-419242` directories remained. The before/after `ss -Hltnup` snapshots were byte-identical, SHA-256 `17a694daa8a6cfdeff606df95c3b89b5b4babb9a3373aca45d6b0e43ecb19d18`; no test listener remained. `mosdns.service` stayed active with PID 425.
+- The corrected test archive, target directory, executables and logs were removed from `/tmp/mosdns-phase5b-a6.5Oi0hx`; the local archive directory was removed. The only remote failure was the first incomplete source package described above; all functional tests passed. No production process/configuration was changed and no performance PASS is claimed.
 
 ## Delivered in this pass
 
