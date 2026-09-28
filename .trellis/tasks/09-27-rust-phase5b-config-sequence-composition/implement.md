@@ -25,10 +25,12 @@
 - [x] Linux x86_64 上运行代表链 UDP listener/audit on 与 TCP listener/audit off；确认 block、qtype 65、cache miss/hit、父继续/default 分支及 peer 计数（实测细节见下）。
 - [x] 保存自有测试 PID、退出码、观察到的临时 peer 端点与运行前后监听 socket 对照；测试进程已退出回收。
 - [x] Linux CLI TCP/audit-off 代表链复核及既有 `dnsperf` 短诊断完成；UDP/audit-on 由上方远端 listener 集成测试覆盖。短诊断包含 SSH 转发开销，只记录观测，不作为性能门槛或 PASS。
-- [ ] 远端故障/取消/关闭变体、`local.only.test` exact 分支、完整 workspace 及旧 W1/W2/W3 suites 未执行；这些仍是明确未测项，不影响所选远端 E2E 子项记录。
+- [x] 在 `mosdns-rust` Linux x86_64 临时工作区补测 file-backed `full:local.only.test` exact 正反分支；UDP/audit-on 与 TCP/audit-off 的 exact 名均到 local peer，子域名均落到 default peer，计数正确（详见下方补充记录）。
+- [x] 在 `mosdns-rust` 运行完整 Rust workspace：60 个测试目标、896 passed / 0 failed / 0 ignored；包括 `w1_tcp`、`w1_udp`、`w2_cache`、`w3_routing` 以及取消/关闭用例。实际命令、两次未运行的失败尝试和清理记录见下方。
 - [x] 做过轻量短诊断；没有性能验收、性能 PASS 或持续资源结论。
 - [x] 覆盖表记录 P02/P26/P34/P44/P15/P12、L01/L02/C01 的实际子项和延期。
-- [ ] 一次独立最终 full-scope review 覆盖 A1–A6；仅在精确范围已提交且可由当前 workspace connector 比较后发送，记录明确 PASS/FAIL 后再更新本项。
+- [x] 独立最终 full-scope review 精确比较 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767`；于 2026-09-28 返回 `FINAL: PASS`，详见下方 verdict 记录。
+- [ ] 本次 exact-rule 与 Linux full-workspace A6 补充证据/覆盖表更新尚待提交后的 scoped bootstrap reviewer 检查。
 - [ ] 本轮不执行 finish/archive/journal；review PASS 本身不改变 Trellis 生命周期。
 
 ## Local verification (2026-09-27–28)
@@ -40,6 +42,10 @@ cargo test --manifest-path rust/Cargo.toml --workspace --no-fail-fast           
 ~~~
 
 The pre-review full-workspace run recorded 891 passed / 0 failed. After the four review fixes, `cargo test --manifest-path rust/Cargo.toml --workspace --no-fail-fast` exited 0 with 896 passed / 0 failed; `cargo test --manifest-path rust/Cargo.toml --workspace -- --list` independently counted 896 tests. `cargo fmt` and Clippy (`-D warnings`) also exited 0 on this candidate.
+
+## Spec synchronization (2026-09-28, Phase 3.3)
+
+Reviewed `.trellis/spec/backend/rust-migration.md` and `quality-guidelines.md` with `trellis-update-spec`. No additional code-spec change is needed: the existing seven-section “native named sequence calls and cache successor boundaries” scenario already records the direct-call/cache-boundary signatures, include-relative source context, cancellation/publication failures, ownership identities, and required real-listener/regression tests. This pass adds Linux regression evidence, not a new implementation contract.
 
 用户确认 `tests/slice3_composition.rs` 的代表链用例在本机真实 UDP/TCP listener 和 loopback peers 通过（9 cases）：
 
@@ -83,8 +89,9 @@ reported four root causes; retain these IDs in the re-review:
 
 Focused local `slice2_config` (12 passed), `slice3_composition` (11 passed),
 the two cache-access unit tests, formatting, Clippy, and the full workspace
-(896 passed) pass on this candidate. The Linux retest against its committed
-source is pending; no second review has been requested yet.
+(896 passed) pass on this candidate. The committed Linux retest is recorded
+below. A final exact-range re-review returned `FINAL: PASS`; all four prior
+findings are closed and no actionable finding remains open.
 
 ## Remote Linux E2E record (2026-09-28, A6 selected subitems)
 
@@ -114,7 +121,7 @@ The Linux build completed in 39.56s. Artifact: `slice3_composition-2f26e2878285f
 
 ### Still unperformed
 
-That first remote integration run used the pre-review source. Remote fault/cancellation/close variants, the `local.only.test` exact-rule request, full workspace and legacy W1/W2/W3 suites, and independent full-scope A1–A6 review remain unperformed. This integration-test run did not launch the main CLI; a separate CLI run and short diagnostic are recorded below. No performance PASS or production change is claimed. Its temporary integration-test workspace and generated fixture directories were removed; `mosdns.service` remained active with PID 425, and the listener snapshot hash matched before and after.
+That first remote integration run used the pre-review source. Remote fault/cancellation/close variants, the `local.only.test` exact-rule request, and remote full workspace and legacy W1/W2/W3 suites remain unperformed. At the time, independent full-scope review was still pending; its later PASS is recorded below. This integration-test run did not launch the main CLI; a separate CLI run and short diagnostic are recorded below. No performance PASS or production change is claimed. Its temporary integration-test workspace and generated fixture directories were removed; `mosdns.service` remained active with PID 425, and the listener snapshot hash matched before and after.
 
 ## Remote Linux A6 retest after review remediation (2026-09-28)
 
@@ -144,6 +151,69 @@ The corrected Linux build exited 0 in 1.78s. Test executable SHA-256 values were
 - TCP listener / audit off: a real DNS-over-TCP request to a blocked name returned NXDOMAIN; local and unmatched names returned local/default answers with each peer at one request. Audit retained no per-query record. Both listeners and their counted loopback UDP peers bound port `0`; the test output does not log the assigned ephemeral numbers.
 - Added retest process PIDs `419216` (`slice2_config`) and `419242` (`slice3_composition`) both exited 0 and were absent afterward. `Fixture::drop` removed all test directories; zero `/tmp/phase5b-*-419242` directories remained. The before/after `ss -Hltnup` snapshots were byte-identical, SHA-256 `17a694daa8a6cfdeff606df95c3b89b5b4babb9a3373aca45d6b0e43ecb19d18`; no test listener remained. `mosdns.service` stayed active with PID 425.
 - The corrected test archive, target directory, executables and logs were removed from `/tmp/mosdns-phase5b-a6.5Oi0hx`; the local archive directory was removed. The only remote failure was the first incomplete source package described above; all functional tests passed. No production process/configuration was changed and no performance PASS is claimed.
+
+## Final independent review result (2026-09-28)
+
+- C2C reviewed the exact range `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` in the conversation **Rust MosDNS测试进度** and returned `FINAL: PASS`.
+- The first review's `P1-1`, `P1-2`, `P1-3`, and `P2-1` findings were closed by `abeeb3e3bfb4458588430b83bfbd9280b359d37d`; the final review also closed its evidence-alignment item (`P2-2`). No actionable finding remains open.
+- The reviewer confirmed the Rust code/spec in the remotely tested commit `abeeb3e3bfb4458588430b83bfbd9280b359d37d` are byte-identical to the reviewed HEAD `016103f3c21ed2d659694ce10e64aaf24b5c2767`; the latter adds documentation only. This ties the A6 retest above to the reviewed implementation.
+- At the time of that review, remote full workspace and legacy W1/W2/W3 suites, remote fault/cancel/close variants, and the `local.only.test` exact-rule request remained unrun. No performance PASS, production deployment, or Trellis lifecycle change is claimed.
+
+## Remote exact-rule A6 supplement (2026-09-28, `mosdns-rust`)
+
+### Source, fixture, and build
+
+- Target was reached only through `ssh mosdns-rust`: Linux x86_64, `rustc 1.95.0`, `cargo 1.95.0`. Baseline: `mosdns.service` active, MainPID `425`; pre-test `ss -lntup | sort` SHA-256 `44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39`. Existing port 53 remained owned by that process.
+- Candidate was reviewed commit `016103f3c21ed2d659694ce10e64aaf24b5c2767` (parent `abeeb3e3bfb4458588430b83bfbd9280b359d37d`); product sources were not edited. The Rust-only archive was SHA-256 `afbc5829a566afa7486ff0ee6eb60e96a7c13e8684ff92521325b04f61784b98` locally and remotely. `rust/Cargo.lock` was blob `7dc20cd5fbe4e90adc9a3c0ef3b15035c31dee5f`, SHA-256 `d78f204b017fc01f316e5af84e23bef30ef0597ea56952aa87c062fe8a51b6ca`, 38,673 bytes.
+- The release CLI was built on the remote host with Cargo only; no frontend or Go build ran. Build exited 0 in 1m15s. `mosdns` was ELF x86_64, 4,584,440 bytes, SHA-256 `cbcc7f3785330cf3bfd099e2c397f2f012f26858296f8cce16d1212fdfacab2f`. The CLI binary was not launched in this supplement.
+- To isolate the exact matcher from the broader `domain:local.test` rule, a temporary test was appended only in the extracted remote source tree. Its rule fixture contained only `full:local.only.test`, plus an invalid root-relative decoy; config was derived from the committed `ROOT_CONFIG`/`ROUTES_CONFIG` include chain. It sent `local.only.test A` and `sub.local.only.test A` through real UDP/audit-on and TCP/audit-off listeners. The exact request must reach the local peer (`192.0.2.21`); the non-exact suffix must reach the default peer (`192.0.2.22`). Both peer fixtures used counted loopback UDP sockets; this supplement does not claim TCP upstream coverage. Base test source hash was `f077b4347d5915ecb5ab02dca5897fb8e037dc4eee2b79274334464cf16c1fa1`; temporary augmented test source hash was `f8cf9bc766300186a6fa3eeee740948fd55efdbb68a7b06947f7fedc44409849`; the temporary process-owner runner hash was `3fd96e21c12a51fd2deac86f0833cc3f7094e04a5f69319df473610d29e52990`.
+
+### Commands and result
+
+~~~sh
+git archive --format=tar.gz 016103f3c21ed2d659694ce10e64aaf24b5c2767 rust > /tmp/mosdns-phase5b-a6-src.EiavCY/source.tar.gz
+ssh mosdns-rust 'mkdir -p /tmp/mosdns-phase5b-a6.XMycgT/source /tmp/mosdns-phase5b-a6.XMycgT/run'
+scp /tmp/mosdns-phase5b-a6-src.EiavCY/source.tar.gz mosdns-rust:/tmp/mosdns-phase5b-a6.XMycgT/source.tar.gz
+ssh mosdns-rust 'cd /tmp/mosdns-phase5b-a6.XMycgT && tar -xzf source.tar.gz -C source'
+ssh mosdns-rust 'cd /tmp/mosdns-phase5b-a6.XMycgT && sha256sum source.tar.gz source/rust/Cargo.lock'
+ssh mosdns-rust 'CARGO_TARGET_DIR=/tmp/mosdns-phase5b-a6.XMycgT/target CARGO_BUILD_JOBS=2 cargo build --manifest-path /tmp/mosdns-phase5b-a6.XMycgT/source/rust/Cargo.toml -p mosdns-native-host --release --locked'
+scp /tmp/mosdns-phase5b-a6-src.EiavCY/exact-rule-test.rs mosdns-rust:/tmp/mosdns-phase5b-a6.XMycgT/exact-rule-test.rs
+ssh mosdns-rust 'cat /tmp/mosdns-phase5b-a6.XMycgT/exact-rule-test.rs >> /tmp/mosdns-phase5b-a6.XMycgT/source/rust/native-host/tests/slice3_composition.rs'
+ssh mosdns-rust 'CARGO_TARGET_DIR=/tmp/mosdns-phase5b-a6.XMycgT/target CARGO_BUILD_JOBS=2 cargo test --manifest-path /tmp/mosdns-phase5b-a6.XMycgT/source/rust/Cargo.toml -p mosdns-native-host --test slice3_composition --no-run --locked'
+scp /tmp/mosdns-phase5b-a6-src.EiavCY/run-owned.py mosdns-rust:/tmp/mosdns-phase5b-a6.XMycgT/run/run-owned.py
+ssh mosdns-rust 'python3 /tmp/mosdns-phase5b-a6.XMycgT/run/run-owned.py /tmp/mosdns-phase5b-a6.XMycgT /tmp/mosdns-phase5b-a6.XMycgT/target/debug/deps/slice3_composition-2f26e2878285f663'
+~~~
+
+The temporary test binary was 96,458,904 bytes, SHA-256 `7741852ea28fce22b394dd59974fa0cde09c0ea47883cab0af59d0b790257c60`. The complete focused `slice3_composition` binary ran sequentially: **12 passed, 0 failed, 0 ignored**. Existing cases rechecked include the block/qtype-65 no-peer responses, local cache miss/hit and peer deltas, parent continuation/default route, UDP/audit-on records, TCP/audit-off no-record behavior, and config include/source-path checks.
+
+The added exact-rule case observed UDP listener `127.0.0.1:57111`, local peer `127.0.0.1:57110`, default peer `127.0.0.1:58273`; exact name → .21, suffix → .22, counters local/default `1/1`, audit records `2`. TCP listener `127.0.0.1:34329` used the same peers; the same two results increased cumulative counters to `2/2`, and audit records remained `0`.
+
+- Test executable PID `426290`, starttime ticks `37749070`, exe `/tmp/mosdns-phase5b-a6.XMycgT/target/debug/deps/slice3_composition-2f26e2878285f663`, PPID `426289`, process group `426289`; exit `0`, reaped and absent. No TERM/KILL was sent. Test fixture directories and listener/peer ports were absent after the run.
+- Post-run service remained active with MainPID `425`; listener snapshot SHA-256 remained exactly `44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39`. The verified remote temp root was removed. No production configuration or process was changed; no performance PASS is claimed.
+- Operational corrections: `rg` was absent on the remote host, so process inventory used `ps`, `systemctl`, and `ss`; a first cleanup assertion had a shell quoting error before deletion, then the corrected identity/port/baseline checks passed. Build/test failures in this supplement: none.
+
+## Full Rust workspace on Linux (2026-09-28, `mosdns-rust`)
+
+### Source, target and command
+
+- Candidate branch/head at run time: `rust`, `bcac20374312d5bf875164f87673224b9da2a796` (parent `82953751bdde89fa3fc2244cea2a86be4f6a3d06`). Rust sources are unchanged from the previously reviewed/tested `016103f3c21ed2d659694ce10e64aaf24b5c2767`; `git diff 016103..bcac203 -- rust` is empty. The workspace archive contained `rust/`, `tests/phase5a-baseline/configs/`, and `tests/phase5a-baseline/workloads/`. Corrected archive SHA-256: `ac16bccb2ddcb0b3d573a83d56bc760f0e2296d6e5226e0c0707f2285ad33a3a`; remote `Cargo.lock` SHA-256: `d78f204b017fc01f316e5af84e23bef30ef0597ea56952aa87c062fe8a51b6ca`; `slice3_composition.rs` SHA-256: `f077b4347d5915ecb5ab02dca5897fb8e037dc4eee2b79274334464cf16c1fa1`.
+- Target was reached only via `ssh mosdns-rust` (Linux x86_64, rustc/cargo 1.95.0). No frontend or Go build ran. The full-suite run used a unique temporary source/target root and loopback test fixtures. Existing production listeners remained owned by `mosdns.service`; the workspace tests use their own test fixtures and did not bind production ports.
+
+~~~sh
+git archive --format=tar.gz HEAD rust tests/phase5a-baseline/configs tests/phase5a-baseline/workloads > source-with-workloads.tar.gz
+scp source-with-workloads.tar.gz mosdns-rust:/tmp/mosdns-phase5b-workspace.1iYapG/source-with-workloads.tar.gz
+ssh mosdns-rust 'cd /tmp/mosdns-phase5b-workspace.1iYapG && tar -xzf source-with-workloads.tar.gz -C .'
+ssh mosdns-rust 'cd /tmp/mosdns-phase5b-workspace.1iYapG && CARGO_TARGET_DIR=/tmp/mosdns-phase5b-workspace.1iYapG/target CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 cargo test --manifest-path /tmp/mosdns-phase5b-workspace.1iYapG/rust/Cargo.toml --workspace --no-fail-fast --locked'
+~~~
+
+The successful run exited 0: **60 test targets, 896 passed, 0 failed, 0 ignored**. The focused targets in the complete run were `slice2_config` 12/12, `slice3_composition` 11/11, `w1_tcp` 5/5, `w1_udp` 4/4, `w2_cache` 6/6 and `w3_routing` 6/6. Workspace tests also exercised cancellation, close, shutdown, deadlines and rebind behavior; the 23-test `slice3_quic` target took 400.22 seconds in the serial run. This is Rust-workspace regression evidence, not a claim that every feature has a standalone remote E2E. Successful log SHA-256: `8ea273ebb7b0d12cdfb590960fff29db337bc6aab4b4dad9407b51c554eed495`.
+
+### Failed attempts, process ownership and cleanup
+
+- Initial reduced source archive SHA-256 `efb8290f11ff2cfa007860af333558100078f206be96e033a905299de4c9087a` omitted `tests/phase5a-baseline/workloads/routing.jsonl`. `cargo test --workspace --no-fail-fast --locked` exited 101 during compile; zero test targets ran and no listener was opened. Log SHA-256: `e897eb81a0c054a2e83b9a70e0a5c3b9644db6a9d3dd25475e642be0b5923dec`.
+- After adding the config and workload fixtures, the default debug build exhausted the remote `/tmp` 2 GiB tmpfs while linking (`No space left on device`, linker bus error); Cargo exited 101 before any test target ran. The target occupied 1.9 GiB and was removed before retry. Log SHA-256: `d00f6febf472b8c07a1302c2a9f5271aa0befb6ae2ef35a18ca25ea2264f5de2`. The remote root filesystem also reported 0 bytes available during preflight; the retry kept its target in `/tmp`, used test debug info off, disabled incremental compilation and limited Cargo to one build job.
+- Successful Cargo PID `431231` (started 2026-09-28 01:58:57 server local time) exited 0 and was absent afterward. Its long-running `slice3_quic` test process PID `435815` also ended and was absent. Final `mosdns.service` state stayed active with MainPID `425`; the sorted `ss -lntup` before/after SHA-256 stayed `44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39`. The test workspace/target and logs were removed from the remote temporary root; `/tmp` returned to 208 KiB used. No production configuration or process was changed; no performance PASS is claimed.
+- Setup/collection helper errors were corrected and separated from test results: the first local compound transfer command had unmatched quoting; a post-extract `du` checked for a nonexistent `source/` directory; the optional `awk` start-time print failed after Cargo had printed its PID; and the first log-copy `scp` used an invalid remote-source form. They did not change product sources or invalidate a test result. The two actual Cargo failures above are retained separately from the successful run.
 
 ## Delivered in this pass
 
@@ -202,7 +272,7 @@ CARGO_TARGET_DIR=/tmp/mosdns-phase5b-cli.KhdZLu/target CARGO_BUILD_JOBS=2 cargo 
 - Second attempt reused a stale peer-readiness JSON file, so config pointed to old peer ports and the local upstream timed out; the verifier exited 9 with counters `0/0`. Corrected run cleared readiness/counter files before launch. Held cleanup recorded CLI PID `410474` exit `143` after SIGTERM and peer PID `410468` exit `0`; all ephemeral ports were released and service PID `425` remained active.
 - Corrected functional/diagnostic run used CLI PID `410631`, fixture PID `410624`, and local SSH forwarding PID `527`. Cleanup recorded CLI exit `143` after SIGTERM, fixture exit `0`, tunnel exit `0`, and listener/local-peer/default-peer ports all released. `mosdns.service` remained active with PID `425`. Final listener inventory hash was `ec4730116588800fc184712866f51c9d5cc27be1ee994866abc8f001bde60286`; no test-owned socket remained. The remote temporary root and local archive/input files were removed.
 
-No production configuration/service was changed. This evidence covers a Linux CLI TCP/audit-off pass plus the previously recorded UDP/audit-on integration-test pass; remote fault/cancellation/close variants, exact `local.only.test`, remote full workspace and legacy W1/W2/W3 suites remain unrun. No performance PASS is claimed.
+No production configuration/service was changed. This evidence covers Linux CLI TCP/audit-off and real-listener UDP/audit-on checks, including the exact file-backed full-rule branch. The subsequent complete Linux Rust workspace run is recorded above. No performance PASS is claimed.
 
 ## Scope control
 

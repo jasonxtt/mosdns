@@ -2,7 +2,7 @@
   "id": "rust-phase5b-config-sequence-composition",
   "name": "rust-phase5b-config-sequence-composition",
   "title": "Rust Phase 5B representative native query chain",
-  "description": "Revision 2 representative native routing/direct-sequence/cache/upstream chain implemented and locally verified; selected Linux E2E and short diagnostic recorded; independent final review pending.",
+  "description": "Revision 2 representative native routing/direct-sequence/cache/upstream chain passed local and selected Linux E2E checks; later exact-rule supplement and full Linux Rust workspace also pass; scoped review of the latest A6 evidence update is pending.",
   "status": "in_progress",
   "dev_type": "backend",
   "scope": "phase5b-config-sequence",
@@ -33,21 +33,22 @@
     "rust/matcher-core/src/mix.rs",
     "docs/rust/performance-validation.md"
   ],
-  "notes": "Revision 2 implemented one real configuration-derived routing/direct-sequence/cache/upstream chain. Steps 1-2 were implemented inline on 2026-09-27. Local fmt, Clippy, and full-workspace tests passed; the previous aggregate was 891 passed / 0 failed, and a 2026-09-28 rerun also exited 0 (aggregate output was truncated). On 2026-09-28 the Linux x86_64 host mosdns-rust was reached via the SSH alias: the representative UDP/audit-on integration E2E passed, a temporary Linux mosdns-native-host CLI passed the TCP/audit-off representative chain, and an existing dnsperf tool ran a 50-request short diagnostic through SSH forwarding. The diagnostic is not performance acceptance and no performance PASS is claimed. Detailed source/config hashes, commands, outcomes, failed harness attempts, PIDs, cleanup and remaining unrun variants are in implement.md. Remote full-workspace/legacy suites, remote fault/cancel/close variants, exact local.only.test, and independent A1-A6 review remain outstanding. Task stays in_progress until review result; no production deployment or production configuration change was made.",
+  "notes": "Revision 2 implemented one real configuration-derived routing/direct-sequence/cache/upstream chain. Steps 1-2 are complete. Local fmt, Clippy and workspace checks pass (896 passed / 0 failed). On mosdns-rust, UDP/audit-on and TCP/audit-off representative E2E passed, file-backed full:local.only.test exact routing passed, and the full Linux Rust workspace passed 896 tests across 60 targets, including W1/W2/W3 and cancellation/close/shutdown cases. A first workspace archive omitted routing.jsonl; the second default-debug build exhausted the remote /tmp tmpfs before tests ran. The corrected fixture archive and reduced-debug, non-incremental isolated run passed. Detailed source/config hashes, commands, outcomes, failures, PIDs, port snapshots and cleanup are in implement.md. The short dnsperf diagnosis is not performance acceptance and no performance PASS is claimed. The original implementation range has a C2C FINAL: PASS; the latest A6 evidence/doc update awaits its scoped bootstrap review. Task remains in_progress; no production deployment/configuration change occurred.",
   "meta": {
     "implementation_authorized": true,
     "execution_mode": "inline",
     "planning_source_head": "11bd56c40d255d6ae93b0a2eba1c85214300b149",
-    "implementation_head": "based on 11bd56c40d255d6ae93b0a2eba1c85214300b149; exact review head will be supplied in the C2C request",
+    "implementation_head": "Rust implementation range was reviewed through 016103f3c21ed2d659694ce10e64aaf24b5c2767; Linux A6 evidence was rerun against bcac20374312d5bf875164f87673224b9da2a796, with no Rust source differences from 016103f3.",
     "reviewer": "ChatGPT conversation Rust MosDNS测试进度, explicitly named by the user for the A1-A6 review",
     "planning_revision": 2,
     "planning_input_v1_status": "historical_superseded_not_a_current_gate",
     "local_step_status": {
       "step1_representative_chain": "complete (local UDP+TCP listener E2E, 9 cases)",
       "step2_compatibility_fault": "complete (socket-free and listener tests)",
-      "step3_linux_delivery": "selected UDP/audit-on integration E2E and TCP/audit-off native CLI E2E complete; short diagnostic recorded, no performance PASS",
-      "step3_remaining": "remote full workspace/legacy suites, remote fault-cancel-close variants, exact local.only.test and external full-scope review remain unrun",
-      "local_regression": "previous cargo test --workspace: 891 passed / 0 failed; 2026-09-28 fmt/clippy/workspace reruns exited 0"
-    }
+      "step3_linux_delivery": "complete: UDP/audit-on and TCP/audit-off representative E2E, exact file-backed full rule, full Linux Rust workspace (896 passed / 0 failed across 60 targets), and short diagnostic recorded; no performance PASS",
+      "step3_remaining": "the sole pending 5B item is scoped independent review of this latest A6 evidence/documentation update; planned Linux workspace, W1/W2/W3, exact-rule, cancellation/close regressions are complete",
+      "local_regression": "cargo fmt and Clippy passed; full Rust workspace 896 passed / 0 failed (local and isolated mosdns-rust Linux run)"
+    },
+    "latest_evidence_review_target": "codex://threads/01a0d43d-d0aa-7401-af0f-2ca3a45ba519 (002reviewer bootstrap)"
   }
 }
