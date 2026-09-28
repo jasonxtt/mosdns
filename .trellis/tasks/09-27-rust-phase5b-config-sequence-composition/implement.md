@@ -33,7 +33,7 @@
 - [x] 覆盖表记录 P02/P26/P34/P44/P15/P12、L01/L02/C01 的实际子项和延期。
 - [x] 独立最终 full-scope review 精确比较 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767`；于 2026-09-28 返回 `FINAL: PASS`，详见下方 verdict 记录。
 - [x] Codex `002reviewer` 对 A6 补充证据范围 `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` 返回历史 verdict `FINAL: PASS`。
-- [ ] 用户指定的 C2C 对同一范围复审于 2026-09-28 返回 `FINAL: FAIL`，发现 P2-1（remaining scope 摘要漏记专门远端 fault 变体仍未运行）和 P2-2（exact-rule 临时测试/运行器源码未保存）。本次补齐 scope 描述、保存源码并重复实测；修复范围的 C2C re-review 待完成。
+- [ ] 用户指定的 C2C 首次 A6 复审于 2026-09-28 返回 `FINAL: FAIL`（P2-1 scope summary 漏记专门远端 fault E2E，P2-2 exact-rule 临时测试/运行器源码未保存）；随后复审 `4fc737aa0dffc8e92ed878577b9c8a4131568077..098b4c5e2bc3427f591456d6725a04a8cb8bcc23` 关闭两项，但发现 P2-3（可复现命令块漏记远端临时目录创建）。实际执行命令已从本地 Codex 执行记录核实并补入下方；下一次精确 C2C re-review 待完成。
 - [ ] 本轮不执行 finish/archive/journal；review PASS 本身不改变 Trellis 生命周期。
 
 ## Local verification (2026-09-27–28)
@@ -204,13 +204,21 @@ The added exact-rule case observed UDP listener `127.0.0.1:57111`, local peer `1
 - The identity/cleanup runner is preserved at [`research/a6-run-owned.py`](research/a6-run-owned.py), SHA-256 `383f43bd5ac7cb1600d6df1382490f8014618c52118be9430977361067451923`. It launches the test binary in its own process group, records PID/starttime/executable/PPID/group, only sends TERM/KILL after rechecking that identity on timeout, stores stdout and JSON, and checks all printed listener/peer ports plus fixture directories and before/after listener snapshot hashes.
 
 ~~~sh
+ssh -o BatchMode=yes mosdns-rust 'ss -lntup | sort | sha256sum' && mktemp -d /tmp/mosdns-phase5b-a6-repro-src.XXXXXX
+# Combined stdout: baseline 44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39; local temp dir /tmp/mosdns-phase5b-a6-repro-src.p7vyyA
 git archive --format=tar.gz 016103f3c21ed2d659694ce10e64aaf24b5c2767 rust > /tmp/mosdns-phase5b-a6-repro-src.p7vyyA/source.tar.gz
+ssh -o BatchMode=yes mosdns-rust 'mktemp -d /tmp/mosdns-phase5b-a6-repro.XXXXXX'
+# Observed stdout: /tmp/mosdns-phase5b-a6-repro.XIHMEh
+ssh -o BatchMode=yes mosdns-rust 'mkdir -p /tmp/mosdns-phase5b-a6-repro.XIHMEh/source /tmp/mosdns-phase5b-a6-repro.XIHMEh/logs'
 scp /tmp/mosdns-phase5b-a6-repro-src.p7vyyA/source.tar.gz .trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/a6-exact-rule-test.rs .trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/a6-run-owned.py mosdns-rust:/tmp/mosdns-phase5b-a6-repro.XIHMEh/
-ssh mosdns-rust 'tar -xzf /tmp/mosdns-phase5b-a6-repro.XIHMEh/source.tar.gz -C /tmp/mosdns-phase5b-a6-repro.XIHMEh/source'
+ssh -o BatchMode=yes mosdns-rust 'tar -xzf /tmp/mosdns-phase5b-a6-repro.XIHMEh/source.tar.gz -C /tmp/mosdns-phase5b-a6-repro.XIHMEh/source'
 ssh mosdns-rust 'cd /tmp/mosdns-phase5b-a6-repro.XIHMEh && sha256sum source.tar.gz source/rust/Cargo.lock source/rust/native-host/tests/slice3_composition.rs a6-exact-rule-test.rs a6-run-owned.py'
 ssh mosdns-rust 'cat /tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-exact-rule-test.rs >> /tmp/mosdns-phase5b-a6-repro.XIHMEh/source/rust/native-host/tests/slice3_composition.rs'
 ssh mosdns-rust 'CARGO_TARGET_DIR=/tmp/mosdns-phase5b-a6-repro.XIHMEh/target CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 cargo test --manifest-path /tmp/mosdns-phase5b-a6-repro.XIHMEh/source/rust/Cargo.toml -p mosdns-native-host --test slice3_composition --no-run --locked'
-ssh mosdns-rust 'python3 /tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-run-owned.py /tmp/mosdns-phase5b-a6-repro.XIHMEh /tmp/mosdns-phase5b-a6-repro.XIHMEh/target/debug/deps/slice3_composition-33af4ebe833654d9'
+# The first two wrapper attempts omitted --nocapture / needed a marker-parser correction. After correction, the final runner bytes were uploaded and checked:
+scp .trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/a6-run-owned.py mosdns-rust:/tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-run-owned.py
+ssh -o BatchMode=yes mosdns-rust 'chmod 755 /tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-run-owned.py && sha256sum /tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-run-owned.py'
+ssh -o BatchMode=yes mosdns-rust 'python3 /tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-run-owned.py /tmp/mosdns-phase5b-a6-repro.XIHMEh /tmp/mosdns-phase5b-a6-repro.XIHMEh/target/debug/deps/slice3_composition-33af4ebe833654d9'
 scp mosdns-rust:/tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-exact-rule-test.log mosdns-rust:/tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-exact-rule-run.json .trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/
 ssh mosdns-rust 'rm -rf /tmp/mosdns-phase5b-a6-repro.XIHMEh'
 ~~~
@@ -219,12 +227,11 @@ The first wrapper attempt omitted `--nocapture`, so the test passed 12/12 but it
 
 The final run used PID `439475`, starttime `38296003`, PPID `439473`, process group `439475`, and executable `/tmp/mosdns-phase5b-a6-repro.XIHMEh/target/debug/deps/slice3_composition-33af4ebe833654d9`; exit code was 0, final identity was absent, and no TERM/KILL was sent. UDP listener/local peer/default peer were `127.0.0.1:59688`, `127.0.0.1:41697`, `127.0.0.1:38815`; TCP listener was `127.0.0.1:40027` with the same peers. Runner found zero leaked ports and zero fixture directories. Its sorted `ss -Hlntup` snapshot hash stayed `17a694daa8a6cfdeff606df95c3b89b5b4babb9a3373aca45d6b0e43ecb19d18`; an independent `ss -lntup | sort` before/after hash stayed `44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39`. `mosdns.service` remained active at PID `425`. The remote temporary root was removed and `/tmp` returned to 208 KiB used. No production process/configuration changed; no performance PASS is claimed.
 
-### User-selected C2C review of the previous A6 evidence range (2026-09-28)
+### User-selected C2C reviews of the A6 evidence (2026-09-28)
 
-- In **Rust MosDNS测试进度**, C2C reviewed `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` and returned `FINAL: FAIL`.
-- `P2-1`: the `task.json` summary called scoped review the sole remaining item while omitting the dedicated remote fault E2E variant. Corrections above now explicitly defer that variant and distinguish it from workspace cancellation/close regressions.
-- `P2-2`: exact-rule source and runner were absent, leaving only hashes. The reproducible source, runner, test output, and run JSON are now preserved under `research/a6-exact-rule-*`, and the test has been rerun against the recorded product source.
-- The exact committed follow-up range review is pending; task status remains `in_progress`.
+- In **Rust MosDNS测试进度**, C2C reviewed `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` and returned `FINAL: FAIL` with P2-1 (the remaining-scope summary omitted the dedicated remote fault E2E) and P2-2 (the exact-rule test/runner source was not preserved). The committed follow-up preserves the explicit deferral and the source, runner, output and JSON artifacts; C2C subsequently marked both findings closed.
+- C2C then reviewed `4fc737aa0dffc8e92ed878577b9c8a4131568077..098b4c5e2bc3427f591456d6725a04a8cb8bcc23` and returned `FINAL: FAIL` with P2-3: the command block omitted the remote temporary-root and `source/`/`logs/` creation performed before `scp` and `tar`.
+- The exact executed local and remote setup commands and observed `mktemp` outputs are now recorded at the start of the rerun command block above; it also records the final corrected runner upload/hash check before the retained invocation. The setup and upload commands exited 0; the command record is cross-checked against the local Codex execution transcript for task `01a0e3ac-7def-7181-b5f0-0c109c7b1cbb`. The next exact committed-range C2C review is pending; task status remains `in_progress`.
 
 ## Full Rust workspace on Linux (2026-09-28, `mosdns-rust`)
 
@@ -252,7 +259,7 @@ The successful run exited 0: **60 test targets, 896 passed, 0 failed, 0 ignored*
 ### Prior Codex review result for the A6 evidence supplement
 
 - Codex thread `002reviewer` reviewed exactly `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` and returned `FINAL: PASS` on 2026-09-28.
-- This is a historical bootstrap-review result only. The user-selected C2C reviewer later reviewed that exact A6 range and returned `FINAL: FAIL` with P2-1/P2-2; that newer scoped verdict controls until a C2C re-review passes.
+- This is a historical bootstrap-review result only. The user-selected C2C reviewer later reviewed that A6 evidence and returned `FINAL: FAIL` with P2-1/P2-2; a follow-up closed both and found P2-3 for omitted directory-setup commands. The latest scoped verdict controls until another C2C re-review passes.
 - Trellis task status remains `in_progress`; no finish/archive/journal action was run.
 
 ## Delivered in this pass
