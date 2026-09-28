@@ -241,6 +241,13 @@ dedicated C2C web reviewer is reserved for later host-level acceptance.
 Automation runbook: before `task.py start`, resolve the reviewer, verify its
 platform-native transport, and snapshot the user-authorized unit range. The
 post-start run may be created only from that frozen snapshot. For each unit,
+Tasks using this runbook set `task.json.meta.automation_required` to `"true"`
+while planning. `task.py start` checks the genuine snapshot for the same task,
+session, reviewer, and verified transport before it changes status or the
+active-task pointer; a missing snapshot is a start failure. Do not backdate
+authorization for a task that was already started. After a reviewed replacement
+passes, `task.py supersede <old> <replacement> --reason <text>` records the old
+task as terminal `superseded` without calling it completed or archiving it.
 record the exact parent/head SHA and reviewer target before sending a request.
 Every review attempt is one atomic, self-contained message: compose the full
 scope, evidence, prohibitions, and PASS/FAIL request before sending it, then

@@ -556,6 +556,9 @@ def cmd_archive(args: argparse.Namespace) -> int:
     if task_json_path.is_file():
         data = read_json(task_json_path)
         if data:
+            if data.get("status") == "superseded":
+                print(colored("Error: superseded task is retained as an incomplete audit record", Colors.RED), file=sys.stderr)
+                return 1
             # Warn (don't block) when the recorded branch is stale — it was
             # likely already merged and deleted (#399 item 2).
             stored_branch = data.get("branch")

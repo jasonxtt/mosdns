@@ -652,7 +652,7 @@ def get_context_text(repo_root: Path | None = None) -> str:
     task_count = 0
 
     # Collect all task data for hierarchy display
-    all_tasks = {t.dir_name: t for t in iter_active_tasks(tasks_dir)}
+    all_tasks = {t.dir_name: t for t in iter_active_tasks(tasks_dir) if t.status != "superseded"}
     all_statuses = {name: t.status for name, t in all_tasks.items()}
 
     def _print_task_tree(name: str, indent: int = 0) -> None:
@@ -834,7 +834,7 @@ def get_context_text_record(repo_root: Path | None = None) -> str:
     all_statuses = get_all_statuses(tasks_dir)
 
     for t in iter_active_tasks(tasks_dir):
-        if t.assignee == developer:
+        if t.assignee == developer and t.status != "superseded":
             progress = children_progress(t.children, all_statuses)
             lines.append(f"- [{t.priority}] {t.title} ({t.status}){progress} — {t.dir_name}")
             my_task_count += 1
