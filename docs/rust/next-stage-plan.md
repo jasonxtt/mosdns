@@ -2,6 +2,8 @@
 
 目标仍是 Linux amd64 上纯 Rust-native 完整 MosDNS，优先正确性、稳定运行、p95/p99、有效吞吐和并发，内存其次。本次按用户“避免过度设计”的要求调整推进方式，不删除功能或降低最终发布标准。
 
+项目执行约定（2026-09-28）：用户指定所有本项目需要的构建与测试验证均使用 `mosdns-rust` SSH 别名对应的 VM；后续 Rust 构建、Cargo 测试、集成与 E2E 均连此别名执行。远端预检和传输也只用别名，不使用直连 IP 或其他 VM。
+
 ## 当前事实
 
 W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。首轮对照覆盖有限；后续测量任务已关闭为 [incomplete matrix](phase5a-measurement-reliability.md)，不补跑、不调阈值，不补称容量/恢复/热点已证明。单线程 LocalSet 的多核能力尚未验证；暂不凭猜测改 Send/runtime。
@@ -12,7 +14,7 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 
 | 次序 | 阶段与交付 | 结束条件 |
 | --- | --- | --- |
-| 1 | 已完成的 5B 代表链之后，执行既有隔离 `mos-test` Rust-native sidecar canary | 计划已有精确范围 C2C PASS；本轮路线图审查 PASS 后，还须冻结四项执行输入并由用户明确选择执行。canary 是功能/运行隔离验证，不是完整兼容或性能门禁 |
+| 1 | 已完成的 5B 代表链之后，执行隔离 `mosdns-rust` Rust-native sidecar canary | 原始功能范围已有精确范围 C2C PASS；当前 VM 目标变更须先通过计划变更 review，之后按用户已授权范围执行。canary 是功能/运行隔离验证，不是完整兼容或性能门禁 |
 | 2 | 5B 第一批：native `fast_mark` matcher/executable + `flow_setter` 序列/观测集成 | YAML 编译错误、标志 OR/set/每查询隔离、真实分支和异步路由元数据有集成证据；canary 通过，或用户明确延期并允许在无远端结果时继续；本任务精确范围 review PASS |
 | 3 | 5C 第一条闭环：单个有界 file-backed `domain_set` 的 `/show`、`/save`、`/post` → 持久化 → 下一 DNS 查询 | 默认在 5B 第一批精确范围 review PASS 后执行；两者无架构依赖。若 5B 明确延期或阻塞，须先取得用户明确的重排决定。HTTP/持久化/原子发布/并发读取/重启/关闭边界有真实 native 证据，并通过本任务精确范围 review |
 | 4 | 补齐所有剩余 5B/5C 功能 | [覆盖表](feature-coverage.md) 的配置/插件/API/持久化/管理条目都有相应证据；复用现有 Vue UI |
@@ -26,8 +28,9 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 `PLAN_STATUS: READY_WITH_EXPLICIT_EXECUTION_GATE`，并在第 3 轮对累计提交范围
 `9fd0bc0c061fb440c88781949f5088652aca70b9..3887af32d6ef17624f8b1d198e0dcb0bed4a28d7`
 返回 `FINAL: PASS`。路线图和两个新 Trellis 子任务均已落地。执行既有
-canary 前仍须由用户冻结四项输入并选择执行或延期；本路线图不改变已有
-canary 的候选版本、范围或独立执行门槛。
+canary 已获用户授权，四项默认输入已冻结。用户随后指定 `mosdns-rust` 作为
+项目测试 VM。该 VM 的只读预检和配置快照哈希复核已完成；在任何远端构建或
+测试前，先审核这个目标变更。本路线图不改变候选版本、功能范围或隔离边界。
 
 ## 当前 5B 任务和第一小目标
 
@@ -37,11 +40,11 @@ canary 的候选版本、范围或独立执行门槛。
 
 第一小目标：本地和选定 Linux 环境实际运行 block、路由 cache miss/hit、默认分支和 child 后父继续。相关实现与指定远端 E2E 已完成并通过精确范围 review；远端完整 workspace/legacy suites、fault/cancel/close 变体、`local.only.test` 精确规则和完整配置兼容仍未测，不作为本次已证明事实。取消原六 slice/四门禁安排；真实命名观测和 cache 后继接缝随必要功能完成，不独立扩框架。
 
-## 下一项已规划工作：isolated mos-test sidecar canary
+## 下一项已规划工作：isolated mosdns-rust sidecar canary
 
-[09-28 Rust-native isolated mos-test sidecar canary](../../.trellis/tasks/09-28-rust-mos-test-native-sidecar-canary/prd.md) 是独立的纯验证规划任务，固定候选 SHA `016103f3c21ed2d659694ce10e64aaf24b5c2767`。计划覆盖由 `config_lite_all` 只读快照裁剪的 include/relative-rules/sequence/cache/route 链，在 `mos-test` 上顺序验证 UDP/audit-on 与 TCP/audit-off 两个 loopback 高端口 sidecar；controlled peers 作为功能、路由和 cache oracle，并要求每次都回收自有 PID/socket、保持原服务基线不变。
+[09-28 Rust-native isolated mosdns-rust sidecar canary](../../.trellis/tasks/09-28-rust-mos-test-native-sidecar-canary/prd.md) 是独立的纯验证规划任务，固定候选 SHA `016103f3c21ed2d659694ce10e64aaf24b5c2767`。计划覆盖由 `config_lite_all` 只读快照裁剪的 include/relative-rules/sequence/cache/route 链，在 `mosdns-rust` 上顺序验证 UDP/audit-on 与 TCP/audit-off 两个 loopback 高端口 sidecar；controlled peers 作为功能、路由和 cache oracle，并要求每次都回收自有 PID/socket、保持原服务基线不变。
 
-该计划当前仍为 `planning`。经过三轮修订，C2C 对固定范围 `016103f3c21ed2d659694ce10e64aaf24b5c2767..82953751bdde89fa3fc2244cea2a86be4f6a3d06` 返回 `FINAL: PASS`，锁文件 provenance、相对路径、自检、PID/端口隔离和所有自有进程清理 finding 均已关闭。没有连接 `mos-test`、构建或启动 sidecar。任何 canary 执行都需要用户另行明确授权。它不要求外部读取 audit records，不包含 Go 构建，不覆盖完整 config package，不做性能 PASS，也不改变生产门禁。四项推荐执行默认值和实际配置快照身份需在启动前冻结；计划与未决输入见 task 的 `design.md`、`implement.md`、`research/canary-inputs.md`。
+原始 canary 计划经过三轮修订，C2C 对固定范围 `016103f3c21ed2d659694ce10e64aaf24b5c2767..82953751bdde89fa3fc2244cea2a86be4f6a3d06` 返回 `FINAL: PASS`。该审核覆盖原计划范围，不覆盖当前 `mosdns-rust` 目标变更。用户已授权 canary 并冻结四项默认值；配置源七个文件哈希与记录一致。`mosdns-rust` 只读预检已确认服务和工具链，但所有观察仍须在执行时刷新。目标变更已由 bootstrap reviewer 返回 `FINAL: PASS`（工作树补丁 SHA-256 `9ea51551398c804dbf76c1a7d4dd58ded1a5b9468244b4de52c0bdc78f1a88e6`）。第一次尝试在 Rust sidecar 启动前因过严的监听行比较器停止并安全清理。第二次尝试的 12 个逐条 DNS/peer oracle 全部通过，但 final aggregate assertion 写错；同一 C2C 对话第 8 轮审核认定为 `STOP / harness invalid` 并批准修正为 `local_udp=2, default_tcp=1`。第三次重跑在 `mosdns-rust` 上返回 `PASS`：UDP/audit-on 与 TCP/audit-off 各 6 个查询通过，peer、PID/socket 和服务基线均核验，临时目录在证据捕获后删除。Canary 不要求外部读取 audit records，不包含 Go 构建，不覆盖完整 config package，不做性能 PASS，也不改变生产门禁。相同 C2C 对话的 host-level 最终审核仍待完成；计划与门槛见 task 的 `design.md`、`implement.md`、`research/canary-inputs.md`。
 
 ### 已建但未启动的后续子任务
 
