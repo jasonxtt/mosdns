@@ -583,7 +583,7 @@ Verified final reviewer PASS, independently reran 220 Rust tests and focused lin
 
 ### Summary
 
-Completed and archived the Trellis Codex with ChatGPT reviewer integration. Local Trellis adapter and exact-SHA REVIEW_ONLY contract passed 61 tests and validation; the external codex-with-chatgpt branch passed 194 tests, typecheck, and build. The dedicated web reviewer returned FINAL: PASS. Preserved unrelated dirty worktree changes and did not deploy.
+Completed the local Trellis adapter and external `codex-with-chatgpt` implementation on 2026-09-25. The local adapter and exact-SHA REVIEW_ONLY contract passed the recorded validation; the external branch at `f870ce7899eb87f01619e2c5cbf941db297241fc` passed 194 tests, typecheck, and build, but remains unpublished because upstream push permission was denied. The 2026-09-25 parent source audit recorded no formal parent-level reviewer verdict; the earlier unscoped journal wording about a dedicated web reviewer PASS is withdrawn. On 2026-09-28, the owner reported several days of normal use without known issues and explicitly authorized archive on that basis. This is owner acceptance, not a formal reviewer `FINAL: PASS`. No MosDNS runtime change or deployment occurred.
 
 ### Git Commits
 
