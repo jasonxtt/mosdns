@@ -11,20 +11,20 @@ Obtain the missing exact-commit acceptance review for the already completed `mos
 - Bind to and verify the user's selected C2C Project conversation before creating a real pre-start authorization snapshot for `Slice 1`.
 - Send one atomic `[C2C] MODE: REVIEW_ONLY` request with the complete SHAs, paths, validation summary, acceptance criteria, and forbidden scope. Include no diff or file body. The reviewer must inspect the exact range through read-only `git_compare`.
 - Persist each submission's exact parent/head SHAs and reviewer identity before sending. Only an explicit final `FINAL: PASS` is acceptance; pending, partial, or malformed replies do not pass.
-- If a scoped documentation finding is returned, make only that correction and submit an exact-parent re-review. Stop and report findings that require product-code changes, rerunning the canary, deployment, or broader authorization.
+- If a finding falls within this review recovery and Trellis workflow repair, correct only that root cause and submit an exact-parent re-review. Stop and report findings that require product-code changes, rerunning the canary, deployment, or broader authorization.
 - Disclose the Codex reviewer used for the VM target-change preflight and the missing original pre-start snapshot. A later C2C PASS is not retroactive pre-execution approval.
 - After replacement review PASS, use the supported terminal supersession transition on the original task. Do not archive it or mark it completed.
 
 ## Acceptance Criteria
 
-- [ ] A genuine pre-start snapshot for only `Slice 1` records the verified reviewer and transport evidence before `task.py start`.
-- [ ] The user-selected C2C reviewer returns explicit `FINAL: PASS` for the exact submitted range, scoped paths, and durable evidence.
-- [ ] Submission and result are recorded in Trellis with the exact SHAs and target; any scoped findings are closed by an approved re-review.
-- [ ] The old task is terminal `superseded` only after review PASS, retaining its evidence and reason without being archived as complete.
-- [ ] No canary rerun, project test run, product-code edit, deployment, or production change occurs in this task.
+- [x] A genuine pre-start snapshot for only `Slice 1` records the verified reviewer and transport evidence before `task.py start`.
+- [x] The user-selected C2C reviewer returns explicit `FINAL: PASS` after exact-range review and scoped remediation.
+- [x] Submission and result are recorded in Trellis with the exact SHAs and target; `P1-1` is closed by exact-range re-review.
+- [x] The old task is terminal `superseded` only after review PASS, retaining its evidence and reason without being archived as complete.
+- [x] No canary rerun, project test run, product-code edit, deployment, or production change occurs in this task.
 
 ## Notes
 
 - Original task: `.trellis/tasks/09-28-rust-mos-test-native-sidecar-canary`.
-- Original task remains `in_progress` until the reviewed replacement task passes and the supersession transition runs.
+- Original task remained `in_progress` until the reviewed replacement task passed; it is now `superseded`.
 - Existing dirty worktree changes are unrelated and must remain untouched.

@@ -3,7 +3,7 @@
   "name": "rust-mosdns-rust-canary-review-restart",
   "title": "Restart committed canary review",
   "description": "Restart the canary acceptance review using the existing committed evidence. Do not rerun the VM canary; create the required pre-start authorization snapshot, then submit the exact committed range to the user-selected C2C reviewer.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
