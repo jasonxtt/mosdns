@@ -168,7 +168,11 @@ impl Drop for ExecutionFacts<'_> {
                 // must not publish an intermediate W3 answer here.
                 response: ObservedResponseState::NoResponse,
                 cache_status: self.cache_status,
-                final_sequence: self.final_sequence.clone(),
+                final_sequence: self
+                    .routing
+                    .final_sequence
+                    .clone()
+                    .or_else(|| self.final_sequence.clone()),
                 matched_group: self.routing.matched_group.clone(),
                 final_upstream: self.routing.final_upstream.clone(),
                 upstream_attempts: self.upstream_attempts.clone(),
@@ -1429,6 +1433,103 @@ mod tests {
             .expect("forward metrics");
         assert_eq!(forward.attempts_total, 1);
         assert_eq!(forward.interrupted_total, 1);
+    }
+
+    #[test]
+    fn dropped_flow_setter_execution_preserves_configured_metadata_precedence() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        let local = tokio::task::LocalSet::new();
+        let observer = std::sync::Arc::new(QueryObserver::new(
+            true,
+            ["forward".to_owned()],
+            std::num::NonZeroUsize::new(2).expect("audit capacity"),
+        ));
+        let entered = Rc::new(Cell::new(false));
+        let config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $setter
+      - exec: $forward
+  - tag: setter
+    type: flow_setter
+    args: { matched_group: configured_group, final_sequence: configured_sequence, final_upstream: configured_upstream }
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:1" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:53053", enable_audit: true }
+"#,
+        )
+        .expect("flow setter config");
+
+        local.block_on(&runtime, async {
+            let task_observer = std::sync::Arc::clone(&observer);
+            let task_entered = Rc::clone(&entered);
+            let runner = tokio::task::spawn_local(async move {
+                let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+                let options = HostOptions::default();
+                let raw = query_name(86, "dropped-flow-setter.test");
+                let (header, question) = parse_query(&raw).expect("query");
+                let cancellation = TransportCancellation::new();
+                let mut admitted = task_observer.admit(
+                    "192.0.2.86:53000".parse().expect("client address"),
+                    QueryTransport::Udp,
+                    &question,
+                    cancellation.clone(),
+                );
+                let _ = execute_request_with_observation(
+                    ExecutionRequest {
+                        config: &config,
+                        cache: &cache,
+                        options: &options,
+                        raw: &raw,
+                        header,
+                        question,
+                    },
+                    &PendingExchange {
+                        entered: task_entered,
+                    },
+                    cancellation,
+                    admitted.execution_checkpoint(),
+                )
+                .await;
+                panic!("pending flow setter exchange unexpectedly returned");
+            });
+
+            while !entered.get() {
+                tokio::task::yield_now().await;
+            }
+            runner.abort();
+            let _ = runner.await;
+        });
+
+        let audit = observer.audit_snapshot();
+        assert_eq!(audit.records.len(), 1);
+        let record = &audit.records[0];
+        assert_eq!(record.matched_group.as_deref(), Some("configured_group"));
+        assert_eq!(
+            record.final_sequence.as_deref(),
+            Some("configured_sequence")
+        );
+        assert_eq!(
+            record.final_upstream.as_deref(),
+            Some("configured_upstream")
+        );
+        assert_eq!(record.response, ResponseState::NoResponse);
+        assert_eq!(record.upstream_attempts.len(), 1);
+        assert_eq!(record.upstream_attempts[0].upstream, "forward");
+        assert_eq!(
+            record.upstream_attempts[0].outcome,
+            super::UpstreamAttemptOutcome::Interrupted
+        );
     }
 
     #[test]
