@@ -37,7 +37,7 @@
 
 本地证据入口：`rust/native-host/tests/slice3_composition.rs`（loader/include/规则路径/负例/重排和真实 listener 场景）与 `rust/native-host/src/execution.rs` 的 `the_representative_chain_blocks_rejects_and_routes_without_a_listener`（block/qtype-0/local miss/default 分支/child 后父继续/cache 后继不被父改写/entry cache/重复访问/取消）。首轮完整 workspace 回归为 891 passed；复审修复后的全量回归为 896 passed / 0 failed。
 
-2026-09-28 在 `mosdns-rust`（Linux x86_64）用临时 Rust workspace 构建并运行代表链集成测试：UDP listener / audit on 与 TCP listener / audit off 均通过；另用 `mosdns start -c` 运行 TCP/audit-off CLI 代表链，并用既有 `dnsperf` 工具做 50 请求短诊断。请求、peer 计数、审计、构建/配置哈希、失败尝试、自有 PID 与端口释放证据见该任务 `implement.md` 的 A6 记录。短诊断经过 SSH 转发，结果不用于性能验收，没有性能 PASS。未在远端运行完整 workspace、故障/取消/关闭变体、`local.only.test` exact 分支或旧 W1/W2/W3 suites。完整 A1–A6 独立审查仍待执行，因此本表仍是“待验收”。
+2026-09-28 在 `mosdns-rust`（Linux x86_64）用临时 Rust workspace 构建并运行代表链集成测试：初始源包漏掉 compile-time 配置样本，构建 exit 101；补入 Rust 测试所需的四个 YAML 后，复审修复提交 `abeeb3e3bfb4458588430b83bfbd9280b359d37d` 的 `slice2_config` 12/12、`slice3_composition` 11/11 通过。UDP listener / audit on 与 TCP listener / audit off 均通过；包含 block/qtype-65 peer 计数、local miss/cache hit、父继续/default peer、included 相对路径/source context 和 goto/try-only forward 路径。早先还用 11bd 源码 `mosdns start -c` 做过 TCP/audit-off CLI 验证与既有 `dnsperf` 50 请求短诊断；短诊断经过 SSH 转发，不用于性能验收，没有性能 PASS。请求、peer 计数、审计、构建/配置哈希、失败尝试、自有 PID 与端口释放证据见该任务 `implement.md` 的 A6 记录。远端完整 workspace、故障/取消/关闭变体、`local.only.test` exact 分支和旧 W1/W2/W3 suites 未执行；复审完成之前，本表仍是“待验收”。
 
 ## 2. 启用插件注册包（71 项）
 
