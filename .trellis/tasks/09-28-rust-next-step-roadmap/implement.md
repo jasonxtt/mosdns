@@ -6,18 +6,18 @@ same C2C conversation that supplied the plan.
 
 ## 1. Persist the reviewed plan (current step)
 
-- [ ] Replace the stale browser-blocker text in this task's PRD with the actual
-  C2C setup and planning result.
-- [ ] Keep this task's `base_branch` set to `rust`; the repository is the
+- [x] Replace the stale execution-gate text in this task's PRD with the actual
+  C2C setup, planning result, canary result, and replacement review result.
+- [x] Keep this task's `base_branch` set to `rust`; the repository is the
   dedicated `rust` worktree, and `main` is not the intended base.
-- [ ] Update `docs/rust/next-stage-plan.md` with the canary → bounded 5B → first
+- [x] Update `docs/rust/next-stage-plan.md` with the canary → bounded 5B → first
   5C sequence, exact start/review gates, current evidence, and explicit deferrals.
-- [ ] Complete this task's `design.md` and `implement.md` and both child tasks'
+- [x] Complete this task's `design.md` and `implement.md` and both child tasks'
   PRD/design/implement artifacts. Leave seed JSONL manifests in inline mode;
   do not dispatch sub-agents.
-- [ ] Keep the existing canary task's files and status unchanged. Record its
-  fixed candidate and user-decision gate by reference only.
-- [ ] Keep `docs/rust/feature-coverage.md` acceptance states unchanged during
+- [x] Keep the historical canary task's evidence and terminal superseded status
+  unchanged; record its fixed candidate and replacement review by reference.
+- [x] Keep `docs/rust/feature-coverage.md` acceptance states unchanged during
   planning.
 
 ### Planning validation
@@ -33,19 +33,20 @@ same C2C conversation that supplied the plan.
 
 ## 2. Same-chat plan review
 
-- [ ] Record exact full `BASE_SHA`, `HEAD_SHA`, task ID, scope, and paths.
-- [ ] Send a `MODE: REVIEW_ONLY`, `STATE: REVIEW`,
+- [x] Record exact full `BASE_SHA`, `HEAD_SHA`, task ID, scope, and paths.
+- [x] Send a `MODE: REVIEW_ONLY`, `STATE: REVIEW`,
   `CONTROLLER: TRELLIS` request to the same C2C conversation.
-- [ ] Wait for an explicit `FINAL: PASS`. If the reviewer finds a defect, fix
+- [x] Wait for an explicit `FINAL: PASS`. If the reviewer finds a defect, fix
   it locally, commit only the correction, and ask for another exact-range
   review in the same conversation. Preserve prior failure records.
+- [x] C2C returned `FINAL: PASS`; downstream work remained unstarted until the
+  current user explicitly approves the next child.
 - [ ] If C2C is unavailable or the result is not a pass, keep downstream work
   unstarted and report the exact blocker; do not treat silence as approval.
 
-## 3. Resolve canary execution inputs with the user
+## 3. Resolve canary execution inputs and result
 
-After plan review PASS, present one concise decision request with these
-recommended defaults:
+The canary inputs were resolved before execution with these frozen defaults:
 
 1. Use a read-only `config_lite_all` snapshot and record its exact source
    identity; never read or copy live `/cus/mosdns` state.
@@ -55,24 +56,25 @@ recommended defaults:
 4. Roll back with identity-checked TERM and prove every owned process/port is
    released; do not claim internal graceful shutdown.
 
-Ask whether the user authorizes running the existing canary or defers it. If
-deferred, explicitly ask whether 5B may proceed without the remote result.
-Proceed according to the answer; no remote operation before it.
+The corrected bounded run on `mosdns-rust` passed. No canary rerun or new
+remote operation is part of this parent task; the evidence and exact review
+history remain in the original superseded task and archived replacement task.
 
-## 4. Execute the existing canary, if authorized
+## 4. Execute the existing canary (completed separately)
 
-- [ ] Start only the existing canary task, using its already-reviewed
+- [x] Start only the existing canary task, using its already-reviewed
   `prd.md`, `design.md`, `implement.md`, candidate SHA, provenance gate,
   peer self-tests, service baseline, two listener modes, and owned-resource
   cleanup. Do not alter its scope or add product code.
-- [ ] Stop before listener startup if source/config/host/PID/port identity or
+- [x] Stop before listener startup if source/config/host/PID/port identity or
   isolation cannot be established; preserve the canary's STOP/FAIL distinction.
-- [ ] If a product defect appears, preserve evidence and create a separate
+- [x] If a product defect appears, preserve evidence and create a separate
   remediation scope. Do not silently include a repair in the canary.
-- [ ] After accepted evidence, commit the exact canary result and send that
+- [x] After accepted evidence, commit the exact canary result and send that
   range to the same C2C chat. Resolve findings and repeat until `FINAL: PASS`.
-- [ ] Start 5B only after canary PASS, unless the user explicitly allowed 5B
-  after deferring the canary.
+- [x] The canary result and its replacement exact-range `FINAL: PASS` are
+  recorded. The next action is the 5B child after the user approves its latest
+  planning summary.
 
 ## 5. Execute the new 5B child
 

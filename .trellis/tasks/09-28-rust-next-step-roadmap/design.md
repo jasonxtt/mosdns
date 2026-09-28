@@ -3,9 +3,10 @@
 ## Purpose and boundary
 
 This parent task turns the same-chat C2C plan into durable repository planning
-artifacts and coordinates three downstream work packages. It changes planning
-documents only. It does not implement product code, execute the existing
-`mos-test` canary, change feature-coverage acceptance states, or relax the Rust
+artifacts and coordinates the two remaining downstream work packages. It
+changes planning documents only. The separately scoped canary has already run
+on `mosdns-rust` and passed its replacement exact-range review; this parent does
+not rerun it, change feature-coverage acceptance states, or relax the Rust
 production/cutover gates.
 
 The final target remains a pure Rust-native MosDNS binary/runtime. Existing Go,
@@ -40,25 +41,27 @@ retirement only after the established Rust-native E2E and retirement gates.
 - Native `domain_set` already supports load-time matching. The first 5C slice
   is only its `/plugins/{tag}/show`, `/save`, and `/post` control-plane path,
   persistent update, generation publication, and next-query effect.
-- The separate active canary task targets fixed candidate
-  `016103f3c21ed2d659694ce10e64aaf24b5c2767`. Its own scope and planning review
-  remain untouched; no remote execution has begun.
+- The historical canary task targeted fixed candidate
+  `016103f3c21ed2d659694ce10e64aaf24b5c2767`. Its corrected bounded run
+  passed on `mosdns-rust`; the original task is terminal `superseded`, and
+  archived replacement task `09-28-rust-mosdns-rust-canary-review-restart`
+  records the exact committed-range C2C `FINAL: PASS`.
 
 ## Work package map and ordering
 
 | Order | Existing/new task | Deliverable | Start condition |
 | --- | --- | --- | --- |
-| 1 | Existing `09-28-rust-mos-test-native-sidecar-canary` | Bounded UDP/audit-on and TCP/audit-off operational/functional check of the fixed native candidate on `mos-test`; no performance or full compatibility claim | This roadmap receives same-chat C2C `FINAL: PASS`; then the user resolves all four execution inputs and explicitly chooses execute. |
-| 2 | New child `09-28-rust-native-fast-mark-flow-setter` | Native YAML/sequence integration for `fast_mark` and `flow_setter`, with fresh-query flags, branching, routing metadata, and native observer evidence | Canary passes, or the user explicitly defers it and permits 5B to proceed without the remote canary result. The roadmap review must pass. |
+| 1 | Completed canary evidence (`09-28-rust-mos-test-native-sidecar-canary`, terminal `superseded`) | Bounded UDP/audit-on and TCP/audit-off operational/functional check of the fixed native candidate on `mosdns-rust`; no performance or full compatibility claim | Roadmap review passed, the four inputs were frozen, the corrected run passed, and the replacement exact-range review returned C2C `FINAL: PASS`. |
+| 2 | New child `09-28-rust-native-fast-mark-flow-setter` | Native YAML/sequence integration for `fast_mark` and `flow_setter`, with fresh-query flags, branching, routing metadata, and native observer evidence | Completed canary is accepted and the roadmap review has passed. The child still needs its own explicit implementation approval and `task.py start`. |
 | 3 | New child `09-28-rust-native-domain-set-management` | First bounded `domain_set` management loop: show/save/post, durable update, atomic new-generation visibility in subsequent DNS queries, restart and shutdown behavior | Default order is after the 5B task's same-chat C2C `FINAL: PASS`. There is no architectural dependency; if 5B is explicitly deferred or blocked, obtain the user's explicit decision to reorder before starting 5C. The roadmap review must pass and the canary execute/defer decision must be recorded. |
 
 The 5B → 5C order is the default delivery sequence, not a technical dependency.
 The two tasks have independent observable acceptance criteria; if 5B cannot
 proceed or is deferred, do not infer approval to reorder 5C—ask the user for an
 explicit decision. Parent/child links are used only for the two new tasks. The
-existing canary remains a separate active task and is referenced here without
-retargeting or changing its metadata. Each child repeats its ordering and start
-gate because Trellis parent links do not enforce execution order.
+historical canary remains separately recorded without retargeting or rerunning
+it. Each child repeats its ordering and start gate because Trellis parent links
+do not enforce execution order.
 
 ## Frozen compatibility boundaries
 
@@ -135,8 +138,8 @@ stage complete from these slices.
    source, diffs, or command logs into ChatGPT.
 3. Address findings in a new narrow commit/range and repeat review until the
    same conversation returns explicit `FINAL: PASS`.
-4. Only after plan PASS resolve the canary execution inputs with the user. The
-   plan review alone does not authorize remote operations.
+4. The canary inputs and execution result are already recorded separately; no
+   remote operation is part of this parent planning review.
 5. Each executed downstream task ends with its own complete same-chat C2C
    review of the committed task range. An explicitly deferred package remains
    recorded with its existing planning/review status and is not executed just
