@@ -30,3 +30,6 @@ demo/
 /.playwright-mcp/
 /.spec-workflow/
 /mosdns
+
+# macOS metadata
+.DS_Store
