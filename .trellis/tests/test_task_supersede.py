@@ -66,6 +66,17 @@ class TaskSupersedeTest(unittest.TestCase):
         self.assertNotEqual(self.supersede(), 0)
         self.assertEqual(json.loads((self.old / "task.json").read_text())["status"], "in_progress")
 
+    def test_rejects_empty_review_unit_set_without_mutation(self):
+        malformed = AutomationRun(
+            context_key="codex_test", task=".trellis/tasks/new", authorized_units=[],
+            authorized_at="2026-09-28T00:00:00Z", current_unit=None,
+            status="authorized_scope_complete", units={},
+        )
+        with patch.object(task, "load_run", return_value=malformed):
+            self.assertNotEqual(self.supersede(), 0)
+        self.assertEqual(json.loads((self.old / "task.json").read_text())["status"], "in_progress")
+        self.assertEqual(resolve_active_task(self.root).task_path, ".trellis/tasks/old")
+
     def test_reviewed_replacement_supersedes_and_clears_pointer(self):
         unit = "Slice 1"
         save_run(self.root, AutomationRun(
