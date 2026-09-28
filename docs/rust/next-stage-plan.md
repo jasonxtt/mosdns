@@ -22,7 +22,7 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 
 ## 当前 5B 任务和第一小目标
 
-沿用 [09-27 config/sequence 任务](../../.trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md)，revision 2。实现已获单独授权并完成；本地 workspace 验证及指定 Linux 上 UDP/audit-on 集成 E2E、TCP/audit-off CLI E2E 已通过。C2C 对 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` 的精确范围 review 返回 `FINAL: PASS`；短诊断不作性能 PASS。当前工作树中的 5B `task.json` 仍标记 `review pending` / `in_progress`，与 implement 和覆盖表记载的 PASS 不一致；本规划不擅自修改或归档该任务，详细记录见其 `implement.md`。
+沿用 [09-27 config/sequence 任务](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5b-config-sequence-composition/prd.md)，revision 2。实现已获单独授权并完成；本地 workspace 验证及指定 Linux 上 UDP/audit-on 集成 E2E、TCP/audit-off CLI E2E 已通过。C2C 对 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` 的精确范围 review 返回 `FINAL: PASS`；短诊断不作性能 PASS。用户指定的 C2C 对 A6 更正范围 `098b4c5e2bc3427f591456d6725a04a8cb8bcc23..146849c042bfa90a5d61cc6fbe9712b78d562e94` 返回 `FINAL: PASS`；用户于 2026-09-28 授权归档已接受的 5B 任务范围。专门远端 fault/cancel/close E2E 仍延期，未声称通过；详细记录见归档任务的 `implement.md`。
 
 本批支持 direct $sequence、一个 cache 在 entry/child 后继上的组合、reject 0..15（含常用 0/3）、顶层 include、provider 多规则/files，以及 qtype/has_resp。代表配置从本地 config_lite_all 裁剪，公网 aliapi 用已有受控 forward 替代；未支持部分有明确延期，不能声称原配置整体兼容。
 
