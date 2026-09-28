@@ -85,6 +85,8 @@ Use a minimal temporary DNS probe that sends no EDNS, supports both UDP queries 
 
 Before starting either Rust sidecar, run an independent peer-only self-test: send one known request directly to the local UDP peer and one to the default TCP peer. Verify UDP/TCP framing, echoed transaction ID and question, expected `.21`/`.22` answer, and exactly one corresponding counter increment. Then reset both counters to zero and record the reset before Q1. If this self-test fails, classify the run as `STOP / harness invalid`; do not use its results to mark Rust `FAIL`.
 
+Keep the two peer processes alive only across the sequential UDP and TCP runs so counters can be reset between them. After the final TCP run and any optional Go comparison—or immediately on any failure/early-stop path—shut down every still-running canary-owned peer and comparator server using the same identity-revalidated TERM/wait/KILL procedure below. Do not remove the temporary root until those processes and sockets are confirmed gone.
+
 Run this ordered corpus against both sidecar configs. Reset counters before each run and record deltas after every request:
 
 | Case | Request | Expected wire result | Local peer delta | Default peer delta |
