@@ -207,13 +207,14 @@ def cmd_supersede(args: argparse.Namespace) -> int:
     run = load_run(repo_root, context_key) if context_key else None
     replacement_ref = replacement_dir.relative_to(repo_root).as_posix()
     if (run is None or run.task != replacement_ref or run.status != "authorized_scope_complete"
+            or not run.authorized_units or set(run.units) != set(run.authorized_units)
             or not all(state.get("phase") == "passed" and state.get("review_result_recorded") is True
                        and isinstance(state.get("result"), dict) and state["result"].get("status") == "pass"
                        and isinstance(state.get("submission"), dict)
                        and state["submission"].get("head_sha")
                        and isinstance(state["submission"].get("submitted_to"), dict)
                        and state["submission"]["submitted_to"].get("provider") == "c2c-web"
-                       for state in run.units.values())):
+                       for state in (run.units[unit] for unit in run.authorized_units))):
         print(colored("Error: replacement has no completed recorded reviewer PASS in this session", Colors.RED), file=sys.stderr)
         return 1
     metadata = old_data.get("meta") if isinstance(old_data.get("meta"), dict) else {}
