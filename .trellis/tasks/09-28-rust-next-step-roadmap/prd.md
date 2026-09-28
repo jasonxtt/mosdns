@@ -17,10 +17,12 @@ executed merely to close this parent task.
 - Current migration evidence, task history, and constraints are recorded in
   `docs/ai/rust-handover.md`, `docs/ai/rust-rewrite-plan.md`, and
   `docs/rust/`.
-- One separate Trellis task, `09-28-rust-mos-test-native-sidecar-canary`, is
-  already in planning and has its own fixed candidate and review history. Keep
-  it unchanged as the first, separately gated work package; do not duplicate,
-  retarget, or execute it before its pending user decisions are resolved.
+- The separately scoped canary task used fixed candidate
+  `016103f3c21ed2d659694ce10e64aaf24b5c2767`. Its execution inputs were frozen
+  and the corrected `mosdns-rust` run passed; the original task is retained as
+  terminal `superseded`, and the replacement review task is archived after an
+  exact committed-range C2C `FINAL: PASS`. Do not rerun or retarget that
+  canary from this parent task.
 - The same C2C conversation returned a `PLAN_STATUS:
   READY_WITH_EXPLICIT_EXECUTION_GATE` plan for the verified `mosdns-rust`
   workspace at `rust` HEAD `9fd0bc0c`. The plan recommends the existing canary,
@@ -52,14 +54,14 @@ executed merely to close this parent task.
   in the agreed order, record each result, and return each executed package to
   the same conversation for review. Keep any explicitly deferred package
   unexecuted with its planning and review history recorded.
-- The plan review does not resolve the four execution inputs recorded by the
-  existing canary task: use a read-only config snapshot (never live
-  `/cus/mosdns` state), make any Go comparator best-effort/non-gating without a
-  Go build, use controlled peers as the hard DNS oracle, and use identity-checked
-  TERM plus verified complete resource release without claiming graceful
-  shutdown. Obtain the user's explicit choice to execute or defer the canary;
-  if deferred, ask whether 5B may proceed without its remote result. Do not
-  connect to `mos-test`, build, or launch anything before that gate is resolved.
+- The canary execution inputs were resolved and must remain frozen as evidence:
+  use a read-only config snapshot (never live `/cus/mosdns` state), keep any Go
+  comparator best-effort/non-gating without a Go build, use controlled peers as
+  the hard DNS oracle, and use identity-checked TERM plus verified complete
+  resource release without claiming graceful shutdown. The run used only the
+  `mosdns-rust` SSH alias, passed its bounded UDP/audit-on and TCP/audit-off
+  checks, and did not change service or production state. No canary rerun is
+  authorized or required by this roadmap.
 - Resolve review findings locally and repeat the same-conversation review loop
   until every executed package receives an explicit pass. Preserve original
   failure evidence; explicitly deferred packages are reported with their
@@ -73,10 +75,11 @@ executed merely to close this parent task.
 
 - Production/default cutover before the documented Rust-native E2E and
   hybrid-scaffolding retirement gates pass.
-- Changes to product code before the C2C plan is approved and the planned task
-  artifacts are ready for execution.
-- Replacing, deleting, or silently merging unrelated dirty work or the existing
-  active mos-test canary task.
+- Changes to product code before the C2C plan is approved and the relevant
+  child task is explicitly activated.
+- Replacing, deleting, or silently merging unrelated dirty work or the
+  historical canary evidence/task; its terminal supersession and replacement
+  review record must remain intact.
 
 ## Acceptance Criteria
 
@@ -88,9 +91,9 @@ executed merely to close this parent task.
 - [x] The roadmap document and Trellis task map match those recommendations,
       preserve project guardrails, avoid duplicate active work, and receive an
       explicit C2C planning-review pass before execution begins.
-- [ ] The four canary execution inputs and the execute/defer decision are
-      resolved with the user after the plan-review pass; no remote action occurs
-      before then.
+- [x] The four canary execution inputs were resolved, the bounded run completed
+      on `mosdns-rust`, and the replacement exact-range review returned
+      `FINAL: PASS`; no further canary action is pending.
 - [ ] Every non-deferred, user-authorized task is executed by Codex in the
       agreed order; execution records are available to the reviewer without
       pasting logs or diffs into ChatGPT. Any deferred package remains
@@ -106,6 +109,14 @@ through the exact `Codex with ChatGPT · mosdns-rust` connector. Its workspace
 check confirmed branch `rust` and HEAD `9fd0bc0c`; the same conversation returned
 the detailed plan and passed the cumulative planning range
 `9fd0bc0c061fb440c88781949f5088652aca70b9..3887af32d6ef17624f8b1d198e0dcb0bed4a28d7`
-on review iteration 3. Canary execution inputs and the execute/defer choice are
-now awaiting the user. No downstream task has started and no remote canary
-action has occurred.
+on review iteration 3. The canary then used the frozen read-only snapshot,
+controlled peers, non-gating no-Go-comparator rule, and identity-checked
+cleanup on `mosdns-rust`; its corrected attempt passed all bounded UDP/TCP
+cases. The original canary task remains terminal `superseded`, while the
+replacement review task
+`09-28-rust-mosdns-rust-canary-review-restart` is archived as completed after
+the same C2C conversation returned `FINAL: PASS` for the exact correction
+range `242cbcbbc2d02c9ae77a81291a07c5c143ee6b57..79ddded8edea9f53b07d051ce20b3daf6b56e868`.
+No product code or production state changed. The next unstarted deliverable is
+the 5B `fast_mark`/`flow_setter` child; the 5C child remains ordered after its
+own review pass.
