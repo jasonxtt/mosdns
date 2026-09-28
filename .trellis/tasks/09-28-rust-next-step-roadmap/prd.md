@@ -118,5 +118,6 @@ replacement review task
 the same C2C conversation returned `FINAL: PASS` for the exact correction
 range `242cbcbbc2d02c9ae77a81291a07c5c143ee6b57..79ddded8edea9f53b07d051ce20b3daf6b56e868`.
 No product code or production state changed. The next unstarted deliverable is
-the 5B `fast_mark`/`flow_setter` child; the 5C child remains ordered after its
-own review pass.
+the 5B `fast_mark`/`flow_setter` child; the 5C child remains ordered after the
+5B child receives its own same-chat C2C `FINAL: PASS`. If 5B is explicitly
+deferred or blocked, reordering 5C still requires the user's explicit approval.
