@@ -19,9 +19,9 @@
 
 ## Step 4 — review and closeout
 
-- [ ] Create a genuine review-only snapshot while the existing replacement task is planning; start and activate it, then send an atomic exact-range request to the user's selected C2C conversation.
-- [ ] Record explicit `FINAL: PASS` or findings. Correct and re-review only in-scope documentation findings.
-- [ ] After PASS, supersede the original task and verify the non-success terminal state. Leave 5B/5C decisions in their own tasks.
+- [x] Create a genuine review-only snapshot while the existing replacement task is planning; start and activate it, then send an atomic exact-range request to the user's selected C2C conversation.
+- [x] Record the initial `FINAL: FAIL` finding `P1-1`, correct the in-scope Trellis supersession gate, and obtain explicit `FINAL: PASS` on its exact remediation range.
+- [x] After PASS, supersede the original task and verify the non-success terminal state. Leave 5B/5C decisions in their own tasks.
 
 ## Limits
 

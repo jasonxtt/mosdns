@@ -22,12 +22,12 @@ Make the completed `mosdns-rust` sidecar canary independently reviewable, resolv
 
 ## Acceptance Criteria
 
-- [ ] Durable sanitized evidence matches the raw attempt-3 record and has a documented source hash.
-- [ ] The historical authorization gap and reviewer deviation are explicit, with no retroactive approval claim.
-- [ ] The replacement task records a genuine pre-start review authorization and explicit C2C `FINAL: PASS` or actionable FAIL for the exact submitted ranges and evidence; pending output is never accepted.
-- [ ] After PASS, the old task is `superseded` with retained evidence, successor, and reason; it is not reported completed.
-- [ ] Missing or mismatched authorization leaves both status and active pointer unchanged; matching authorization succeeds; focused Trellis tests pass.
-- [ ] No VM canary rerun, unrelated overwrite, product runtime change, or production action occurs.
+- [x] Durable sanitized evidence matches the raw attempt-3 record and has a documented source hash.
+- [x] The historical authorization gap and reviewer deviation are explicit, with no retroactive approval claim.
+- [x] The replacement task records a genuine pre-start review authorization, an initial C2C `FINAL: FAIL`, and a scoped re-review `FINAL: PASS` for exact committed ranges.
+- [x] After PASS, the old task is `superseded` with retained evidence, successor, and reason; it is not reported completed.
+- [x] Missing or mismatched authorization leaves both status and active pointer unchanged; matching authorization succeeds; focused Trellis tests pass.
+- [x] No VM canary rerun, unrelated overwrite, product runtime change, or production action occurs.
 
 ## Scope
 
