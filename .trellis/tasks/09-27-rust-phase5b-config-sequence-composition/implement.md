@@ -26,11 +26,14 @@
 - [x] 保存自有测试 PID、退出码、观察到的临时 peer 端点与运行前后监听 socket 对照；测试进程已退出回收。
 - [x] Linux CLI TCP/audit-off 代表链复核及既有 `dnsperf` 短诊断完成；UDP/audit-on 由上方远端 listener 集成测试覆盖。短诊断包含 SSH 转发开销，只记录观测，不作为性能门槛或 PASS。
 - [x] 在 `mosdns-rust` Linux x86_64 临时工作区补测 file-backed `full:local.only.test` exact 正反分支；UDP/audit-on 与 TCP/audit-off 的 exact 名均到 local peer，子域名均落到 default peer，计数正确（详见下方补充记录）。
+- [x] 将 exact-rule 重跑使用的测试源码、身份校验运行器、原始输出与运行 JSON 保存在 `research/a6-exact-rule-*`；本次实测哈希见下方。旧的一次性补测仅留哈希，已由本次可复核重跑取代。
 - [x] 在 `mosdns-rust` 运行完整 Rust workspace：60 个测试目标、896 passed / 0 failed / 0 ignored；包括 `w1_tcp`、`w1_udp`、`w2_cache`、`w3_routing` 以及取消/关闭用例。实际命令、两次未运行的失败尝试和清理记录见下方。
+- [ ] 专门的远端 fault/cancel/close E2E 变体未运行，保留为 deferred；完整 workspace 中的 Linux cancellation/close/shutdown regressions 已运行，但不替代专门远端故障 E2E。
 - [x] 做过轻量短诊断；没有性能验收、性能 PASS 或持续资源结论。
 - [x] 覆盖表记录 P02/P26/P34/P44/P15/P12、L01/L02/C01 的实际子项和延期。
 - [x] 独立最终 full-scope review 精确比较 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767`；于 2026-09-28 返回 `FINAL: PASS`，详见下方 verdict 记录。
-- [ ] 本次 exact-rule 与 Linux full-workspace A6 补充证据/覆盖表更新尚待提交后的 scoped bootstrap reviewer 检查。
+- [x] Codex `002reviewer` 对 A6 补充证据范围 `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` 返回历史 verdict `FINAL: PASS`。
+- [ ] 用户指定的 C2C 对同一范围复审于 2026-09-28 返回 `FINAL: FAIL`，发现 P2-1（remaining scope 摘要漏记专门远端 fault 变体仍未运行）和 P2-2（exact-rule 临时测试/运行器源码未保存）。本次补齐 scope 描述、保存源码并重复实测；修复范围的 C2C re-review 待完成。
 - [ ] 本轮不执行 finish/archive/journal；review PASS 本身不改变 Trellis 生命周期。
 
 ## Local verification (2026-09-27–28)
@@ -168,6 +171,8 @@ The corrected Linux build exited 0 in 1.78s. Test executable SHA-256 values were
 - The release CLI was built on the remote host with Cargo only; no frontend or Go build ran. Build exited 0 in 1m15s. `mosdns` was ELF x86_64, 4,584,440 bytes, SHA-256 `cbcc7f3785330cf3bfd099e2c397f2f012f26858296f8cce16d1212fdfacab2f`. The CLI binary was not launched in this supplement.
 - To isolate the exact matcher from the broader `domain:local.test` rule, a temporary test was appended only in the extracted remote source tree. Its rule fixture contained only `full:local.only.test`, plus an invalid root-relative decoy; config was derived from the committed `ROOT_CONFIG`/`ROUTES_CONFIG` include chain. It sent `local.only.test A` and `sub.local.only.test A` through real UDP/audit-on and TCP/audit-off listeners. The exact request must reach the local peer (`192.0.2.21`); the non-exact suffix must reach the default peer (`192.0.2.22`). Both peer fixtures used counted loopback UDP sockets; this supplement does not claim TCP upstream coverage. Base test source hash was `f077b4347d5915ecb5ab02dca5897fb8e037dc4eee2b79274334464cf16c1fa1`; temporary augmented test source hash was `f8cf9bc766300186a6fa3eeee740948fd55efdbb68a7b06947f7fedc44409849`; the temporary process-owner runner hash was `3fd96e21c12a51fd2deac86f0833cc3f7094e04a5f69319df473610d29e52990`.
 
+The one-off test and runner above were removed during that run's cleanup. The exact-rule count/behavior was re-executed below with preserved source and output so the result is independently reviewable; use the reproducible rerun as the current evidence.
+
 ### Commands and result
 
 ~~~sh
@@ -192,6 +197,35 @@ The added exact-rule case observed UDP listener `127.0.0.1:57111`, local peer `1
 - Post-run service remained active with MainPID `425`; listener snapshot SHA-256 remained exactly `44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39`. The verified remote temp root was removed. No production configuration or process was changed; no performance PASS is claimed.
 - Operational corrections: `rg` was absent on the remote host, so process inventory used `ps`, `systemctl`, and `ss`; a first cleanup assertion had a shell quoting error before deletion, then the corrected identity/port/baseline checks passed. Build/test failures in this supplement: none.
 
+### Reproducible exact-rule rerun and owned-process record (2026-09-28)
+
+- Source is the previously reviewed/tested product commit `016103f3c21ed2d659694ce10e64aaf24b5c2767`; archive hash `afbc5829a566afa7486ff0ee6eb60e96a7c13e8684ff92521325b04f61784b98`, `Cargo.lock` hash `d78f204b017fc01f316e5af84e23bef30ef0597ea56952aa87c062fe8a51b6ca` (38,673 bytes), and unmodified `slice3_composition.rs` hash `f077b4347d5915ecb5ab02dca5897fb8e037dc4eee2b79274334464cf16c1fa1`.
+- The appended test is preserved at [`research/a6-exact-rule-test.rs`](research/a6-exact-rule-test.rs), SHA-256 `8b82fa7004bd55059b9f581049dfd842417a5dd280dbdb28d881a58ace341bd2`. It builds the file-backed include chain with only `full:local.only.test` in `config/sub_config/rules/local.txt` and an invalid root-relative decoy at `config/rules/local.txt`; `local.only.test A` must route to `.21`, and `sub.local.only.test A` to `.22`. It asserts one local and one default peer call after UDP/audit-on, cumulative two each after TCP/audit-off, two UDP audit records, and zero TCP records. The test uses the existing counted UDP loopback peers; this is not TCP-upstream coverage.
+- The identity/cleanup runner is preserved at [`research/a6-run-owned.py`](research/a6-run-owned.py), SHA-256 `383f43bd5ac7cb1600d6df1382490f8014618c52118be9430977361067451923`. It launches the test binary in its own process group, records PID/starttime/executable/PPID/group, only sends TERM/KILL after rechecking that identity on timeout, stores stdout and JSON, and checks all printed listener/peer ports plus fixture directories and before/after listener snapshot hashes.
+
+~~~sh
+git archive --format=tar.gz 016103f3c21ed2d659694ce10e64aaf24b5c2767 rust > /tmp/mosdns-phase5b-a6-repro-src.p7vyyA/source.tar.gz
+scp /tmp/mosdns-phase5b-a6-repro-src.p7vyyA/source.tar.gz .trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/a6-exact-rule-test.rs .trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/a6-run-owned.py mosdns-rust:/tmp/mosdns-phase5b-a6-repro.XIHMEh/
+ssh mosdns-rust 'tar -xzf /tmp/mosdns-phase5b-a6-repro.XIHMEh/source.tar.gz -C /tmp/mosdns-phase5b-a6-repro.XIHMEh/source'
+ssh mosdns-rust 'cd /tmp/mosdns-phase5b-a6-repro.XIHMEh && sha256sum source.tar.gz source/rust/Cargo.lock source/rust/native-host/tests/slice3_composition.rs a6-exact-rule-test.rs a6-run-owned.py'
+ssh mosdns-rust 'cat /tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-exact-rule-test.rs >> /tmp/mosdns-phase5b-a6-repro.XIHMEh/source/rust/native-host/tests/slice3_composition.rs'
+ssh mosdns-rust 'CARGO_TARGET_DIR=/tmp/mosdns-phase5b-a6-repro.XIHMEh/target CARGO_BUILD_JOBS=2 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 cargo test --manifest-path /tmp/mosdns-phase5b-a6-repro.XIHMEh/source/rust/Cargo.toml -p mosdns-native-host --test slice3_composition --no-run --locked'
+ssh mosdns-rust 'python3 /tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-run-owned.py /tmp/mosdns-phase5b-a6-repro.XIHMEh /tmp/mosdns-phase5b-a6-repro.XIHMEh/target/debug/deps/slice3_composition-33af4ebe833654d9'
+scp mosdns-rust:/tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-exact-rule-test.log mosdns-rust:/tmp/mosdns-phase5b-a6-repro.XIHMEh/a6-exact-rule-run.json .trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/
+ssh mosdns-rust 'rm -rf /tmp/mosdns-phase5b-a6-repro.XIHMEh'
+~~~
+
+The first wrapper attempt omitted `--nocapture`, so the test passed 12/12 but its wrapper could not parse the endpoint markers. After enabling capture, a second parser correction was needed because Rust's test progress prefix shares the UDP marker's line. The final captured run passed **12 passed, 0 failed, 0 ignored**. Compiled test binary: 12,694,392 bytes, SHA-256 `fca43645c333ad60428b0f9cc55f1a6d776c17bba50b1de1cb245702b7cebfc1`. Preserved output [`research/a6-exact-rule-test.log`](research/a6-exact-rule-test.log) has SHA-256 `9257b0bb2bd5a2c1c7ee8e03d039453a32eb98e18fd7ce762a785b4ca0a208b2`; [`research/a6-exact-rule-run.json`](research/a6-exact-rule-run.json) has SHA-256 `8423643d268684ac14225e6cbca0af249bbf398305770b465a78092020755cb4`.
+
+The final run used PID `439475`, starttime `38296003`, PPID `439473`, process group `439475`, and executable `/tmp/mosdns-phase5b-a6-repro.XIHMEh/target/debug/deps/slice3_composition-33af4ebe833654d9`; exit code was 0, final identity was absent, and no TERM/KILL was sent. UDP listener/local peer/default peer were `127.0.0.1:59688`, `127.0.0.1:41697`, `127.0.0.1:38815`; TCP listener was `127.0.0.1:40027` with the same peers. Runner found zero leaked ports and zero fixture directories. Its sorted `ss -Hlntup` snapshot hash stayed `17a694daa8a6cfdeff606df95c3b89b5b4babb9a3373aca45d6b0e43ecb19d18`; an independent `ss -lntup | sort` before/after hash stayed `44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39`. `mosdns.service` remained active at PID `425`. The remote temporary root was removed and `/tmp` returned to 208 KiB used. No production process/configuration changed; no performance PASS is claimed.
+
+### User-selected C2C review of the previous A6 evidence range (2026-09-28)
+
+- In **Rust MosDNS测试进度**, C2C reviewed `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` and returned `FINAL: FAIL`.
+- `P2-1`: the `task.json` summary called scoped review the sole remaining item while omitting the dedicated remote fault E2E variant. Corrections above now explicitly defer that variant and distinguish it from workspace cancellation/close regressions.
+- `P2-2`: exact-rule source and runner were absent, leaving only hashes. The reproducible source, runner, test output, and run JSON are now preserved under `research/a6-exact-rule-*`, and the test has been rerun against the recorded product source.
+- The exact committed follow-up range review is pending; task status remains `in_progress`.
+
 ## Full Rust workspace on Linux (2026-09-28, `mosdns-rust`)
 
 ### Source, target and command
@@ -214,6 +248,12 @@ The successful run exited 0: **60 test targets, 896 passed, 0 failed, 0 ignored*
 - After adding the config and workload fixtures, the default debug build exhausted the remote `/tmp` 2 GiB tmpfs while linking (`No space left on device`, linker bus error); Cargo exited 101 before any test target ran. The target occupied 1.9 GiB and was removed before retry. Log SHA-256: `d00f6febf472b8c07a1302c2a9f5271aa0befb6ae2ef35a18ca25ea2264f5de2`. The remote root filesystem also reported 0 bytes available during preflight; the retry kept its target in `/tmp`, used test debug info off, disabled incremental compilation and limited Cargo to one build job.
 - Successful Cargo PID `431231` (started 2026-09-28 01:58:57 server local time) exited 0 and was absent afterward. Its long-running `slice3_quic` test process PID `435815` also ended and was absent. Final `mosdns.service` state stayed active with MainPID `425`; the sorted `ss -lntup` before/after SHA-256 stayed `44d2aad2643cb5c0e27ed90ddbc7d14d1403b0239c0aae9baf8b3bc44f3d4a39`. The test workspace/target and logs were removed from the remote temporary root; `/tmp` returned to 208 KiB used. No production configuration or process was changed; no performance PASS is claimed.
 - Setup/collection helper errors were corrected and separated from test results: the first local compound transfer command had unmatched quoting; a post-extract `du` checked for a nonexistent `source/` directory; the optional `awk` start-time print failed after Cargo had printed its PID; and the first log-copy `scp` used an invalid remote-source form. They did not change product sources or invalidate a test result. The two actual Cargo failures above are retained separately from the successful run.
+
+### Prior Codex review result for the A6 evidence supplement
+
+- Codex thread `002reviewer` reviewed exactly `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` and returned `FINAL: PASS` on 2026-09-28.
+- This is a historical bootstrap-review result only. The user-selected C2C reviewer later reviewed that exact A6 range and returned `FINAL: FAIL` with P2-1/P2-2; that newer scoped verdict controls until a C2C re-review passes.
+- Trellis task status remains `in_progress`; no finish/archive/journal action was run.
 
 ## Delivered in this pass
 

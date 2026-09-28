@@ -16,7 +16,7 @@
 
 2026-09-27 执行方式调整：71 项是完整性台账，不是 71 个独立任务。按真实配置链和共享机制成批推进；先明确本批实际需要的语法/参数，未用条目在其拥有任务补全，不在每批重做全表契约冻结。交付记录新增可运行配置与参数子项、未完成部分和稳定测试入口；基础证据/局部接入不自动升级为整项产品验收。
 
-### 5B 代表链实现子项（本地通过；指定 Linux E2E 子项通过，完整验收待审）
+### 5B 代表链实现子项（本地与指定 Linux E2E 通过；最新用户指定 C2C review 需复审；Trellis 仍 in_progress）
 
 任务 [09-27-rust-phase5b-config-sequence-composition](../../.trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md) 把原生配置从固定 W1/W2/W3 图改为收集后解析的通用编译器，并让一条从本地配置包裁剪的代表链在 native host 上运行。以下只登记本批实际交付的子项与明确延期；整行仍是“待验收”。
 
@@ -39,9 +39,9 @@
 
 2026-09-28 在 `mosdns-rust`（Linux x86_64）用临时 Rust workspace 构建并运行代表链集成测试：初始源包漏掉 compile-time 配置样本，构建 exit 101；补入 Rust 测试所需的四个 YAML 后，复审修复提交 `abeeb3e3bfb4458588430b83bfbd9280b359d37d` 的 `slice2_config` 12/12、`slice3_composition` 11/11 通过。UDP listener / audit on 与 TCP listener / audit off 均通过；包含 block/qtype-65 peer 计数、local miss/cache hit、父继续/default peer、included 相对路径/source context 和 goto/try-only forward 路径。早先还用 11bd 源码 `mosdns start -c` 做过 TCP/audit-off CLI 验证与既有 `dnsperf` 50 请求短诊断；短诊断经过 SSH 转发，不用于性能验收，没有性能 PASS。请求、peer 计数、审计、构建/配置哈希、失败尝试、自有 PID 与端口释放证据见该任务 `implement.md` 的 A6 记录。C2C 于 2026-09-28 对精确范围 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` 返回 `FINAL: PASS`；在该次 C2C review 的时间点，远端完整 workspace、故障/取消/关闭变体和旧 W1/W2/W3 suites 尚未执行；当时本表其余完整验收状态为“待验收”，后续补测见下文。
 
-2026-09-28 A6 exact-rule 补充实测（在上述 C2C 精确范围 review 后）：以提交 016103f3c21ed2d659694ce10e64aaf24b5c2767 为产品源码，在 mosdns-rust 临时副本追加非持久化测试，只用 full:local.only.test 规则隔离 exact 语义。真实 UDP/audit-on 与 TCP/audit-off listener 上，exact 名均路由到 local peer (.21)，近似子域名路由到 default peer (.22)，计数依次为 1/1、累计 2/2，audit 记录为 2/0；focused slice3_composition 共 12/12 通过。临时测试没有写回仓库；该证据不扩展为 TCP upstream、远端完整 workspace/W1/W2/W3、故障/取消/关闭或性能验收。生产服务 PID 与 listener 快照不变，无性能 PASS。此补充尚未被上述既有 C2C review 覆盖。
+2026-09-28 A6 exact-rule 实测：以已审查产品源码 `016103f3c21ed2d659694ce10e64aaf24b5c2767` 构建临时测试副本，使用唯一 `full:local.only.test` 规则与无效根目录 decoy。可复核测试片段、身份校验 runner、12/12 原始输出和端口/PID JSON 保存在 5B task 的 `research/a6-exact-rule-*`，源码/runner/输出哈希及实际命令见 `implement.md`。在真实 UDP/audit-on 和 TCP/audit-off listener 上，exact 名都到 local peer (.21)，近似子域名到 default peer (.22)，计数 UDP 后 1/1、TCP 后累计 2/2，audit 记录 2/0；12 passed / 0 failed。此子项不扩展为 TCP upstream。
 
-2026-09-28 后续在 `mosdns-rust` 对候选 `bcac20374312d5bf875164f87673224b9da2a796` 运行完整 Rust workspace：60 个目标、896 passed / 0 failed / 0 ignored；`slice2_config` 12/12、`slice3_composition` 11/11、W1 TCP/UDP 5/5 与 4/4、W2 cache 6/6、W3 routing 6/6。取消/关闭/期限与 rebind 测试也随 workspace 运行。初始缺 workload 的归档与默认 debug 构建耗尽 2 GiB `/tmp` 的失败尝试均记录在 5B `implement.md`；关闭 test debug info、增量编译并限制 Cargo job 后完整回归通过。自有 Cargo 进程退出、临时 target/目录已清理，`mosdns.service` PID 425 和 listener snapshot 未变。该 workspace run 不是性能验收或性能 PASS；最新 A6 补充文档尚待独立 reviewer 检查。
+2026-09-28 后续在 `mosdns-rust` 对候选 `bcac20374312d5bf875164f87673224b9da2a796` 运行完整 Rust workspace：60 个目标、896 passed / 0 failed / 0 ignored；`slice2_config` 12/12、`slice3_composition` 11/11、W1 TCP/UDP 5/5 与 4/4、W2 cache 6/6、W3 routing 6/6。取消/关闭/期限与 rebind regressions 也随 workspace 运行，但不替代专门远端 fault/cancel/close E2E；这些 dedicated variants 仍未执行并明确延期。初始缺 workload 的归档与默认 debug 构建耗尽 2 GiB `/tmp` 的失败尝试均记录在 5B `implement.md`；关闭 test debug info、增量编译并限制 Cargo job 后完整回归通过。自有 Cargo 进程退出、临时 target/目录已清理，`mosdns.service` PID 425 和 listener snapshot 未变。该 workspace run 不是性能验收或性能 PASS。Codex `002reviewer` 对 A6 证据范围返回 `FINAL: PASS`，但用户指定的 C2C 对同一范围复审返回 `FINAL: FAIL`（P2-1 scope summary 漏项、P2-2 临时 exact-rule 源码缺失）。A6 摘要与重跑证据已补齐；精确跟进范围的 C2C review 待完成，Trellis 仍为 `in_progress`。
 
 ## 2. 启用插件注册包（71 项）
 

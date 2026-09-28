@@ -2,7 +2,7 @@
   "id": "rust-phase5b-config-sequence-composition",
   "name": "rust-phase5b-config-sequence-composition",
   "title": "Rust Phase 5B representative native query chain",
-  "description": "Revision 2 representative native routing/direct-sequence/cache/upstream chain passed local and selected Linux E2E checks; later exact-rule supplement and full Linux Rust workspace also pass; scoped review of the latest A6 evidence update is pending.",
+  "description": "Revision 2 representative native routing/direct-sequence/cache/upstream chain passed local and selected Linux E2E checks; the reproducible exact-rule supplement and full Linux Rust workspace passed. A dedicated remote fault E2E remains deferred. User-selected C2C re-review of the latest A6 evidence returned FAIL with two documentation/evidence findings; remediation and re-review are pending. Task remains in_progress.",
   "status": "in_progress",
   "dev_type": "backend",
   "scope": "phase5b-config-sequence",
@@ -33,7 +33,7 @@
     "rust/matcher-core/src/mix.rs",
     "docs/rust/performance-validation.md"
   ],
-  "notes": "Revision 2 implemented one real configuration-derived routing/direct-sequence/cache/upstream chain. Steps 1-2 are complete. Local fmt, Clippy and workspace checks pass (896 passed / 0 failed). On mosdns-rust, UDP/audit-on and TCP/audit-off representative E2E passed, file-backed full:local.only.test exact routing passed, and the full Linux Rust workspace passed 896 tests across 60 targets, including W1/W2/W3 and cancellation/close/shutdown cases. A first workspace archive omitted routing.jsonl; the second default-debug build exhausted the remote /tmp tmpfs before tests ran. The corrected fixture archive and reduced-debug, non-incremental isolated run passed. Detailed source/config hashes, commands, outcomes, failures, PIDs, port snapshots and cleanup are in implement.md. The short dnsperf diagnosis is not performance acceptance and no performance PASS is claimed. The original implementation range has a C2C FINAL: PASS; the latest A6 evidence/doc update awaits its scoped bootstrap review. Task remains in_progress; no production deployment/configuration change occurred.",
+  "notes": "Revision 2 implemented one real configuration-derived routing/direct-sequence/cache/upstream chain. Steps 1-2 are complete. Local fmt, Clippy and workspace checks pass (896 passed / 0 failed). On mosdns-rust, UDP/audit-on and TCP/audit-off representative E2E passed, a source-preserved file-backed full:local.only.test exact-rule retest passed, and the full Linux Rust workspace passed 896 tests across 60 targets, including W1/W2/W3 and cancellation/close/shutdown regressions. A dedicated remote fault E2E remains unrun/deferred; the workspace regressions do not claim to replace it. The first workspace archive omitted routing.jsonl; the second default-debug build exhausted remote /tmp before tests. The corrected fixture archive and reduced-debug, non-incremental isolated run passed. Source/test/runner/log/result hashes, commands, failures, PIDs, port snapshots and cleanup are in implement.md and research/a6-* artifacts. The short dnsperf diagnosis is not performance acceptance and no performance PASS is claimed. The original implementation range has C2C FINAL: PASS. Codex 002reviewer passed the prior evidence range, but the user-selected C2C re-review of bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077 returned FINAL: FAIL (P2-1, P2-2); fixes and another C2C review are pending. Task remains in_progress; no production deployment/configuration change occurred.",
   "meta": {
     "implementation_authorized": true,
     "execution_mode": "inline",
@@ -46,9 +46,10 @@
       "step1_representative_chain": "complete (local UDP+TCP listener E2E, 9 cases)",
       "step2_compatibility_fault": "complete (socket-free and listener tests)",
       "step3_linux_delivery": "complete: UDP/audit-on and TCP/audit-off representative E2E, exact file-backed full rule, full Linux Rust workspace (896 passed / 0 failed across 60 targets), and short diagnostic recorded; no performance PASS",
-      "step3_remaining": "the sole pending 5B item is scoped independent review of this latest A6 evidence/documentation update; planned Linux workspace, W1/W2/W3, exact-rule, cancellation/close regressions are complete",
+      "step3_remaining": "the selected A6 functional checks are complete; dedicated remote fault/cancel/close E2E variants remain unrun/deferred (workspace cancellation/close regressions did pass), and user-selected C2C re-review is pending after P2-1/P2-2 evidence-summary remediation",
       "local_regression": "cargo fmt and Clippy passed; full Rust workspace 896 passed / 0 failed (local and isolated mosdns-rust Linux run)"
     },
-    "latest_evidence_review_target": "codex://threads/01a0d43d-d0aa-7401-af0f-2ca3a45ba519 (002reviewer bootstrap)"
+    "latest_evidence_review_target": "ChatGPT conversation Rust MosDNS测试进度 (user-selected C2C reviewer)",
+    "latest_evidence_review_verdict": "FINAL: FAIL on bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077; findings P2-1 and P2-2; evidence remediation and re-review pending; lifecycle status remains in_progress"
   }
 }
