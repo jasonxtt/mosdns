@@ -1,11 +1,11 @@
 {
   "id": "rust-mos-test-native-sidecar-canary",
   "name": "rust-mos-test-native-sidecar-canary",
-  "title": "Rust-native isolated mos-test sidecar canary",
-  "description": "Plan a bounded, non-production mos-test canary for the exact reviewed Rust-native composition build; planning only until separately authorized.",
-  "status": "planning",
+  "title": "Rust-native isolated mosdns-rust sidecar canary",
+  "description": "Execute a bounded, non-production Rust-native canary on the user-selected mosdns-rust VM using the exact reviewed composition candidate.",
+  "status": "in_progress",
   "dev_type": null,
-  "scope": "phase5b-mos-test-canary",
+  "scope": "phase5b-mosdns-rust-canary",
   "package": null,
   "priority": "P1",
   "creator": "tom",
@@ -23,8 +23,8 @@
   "relatedFiles": [],
   "notes": "",
   "meta": {
-    "plan_only": "true",
+    "plan_only": "false",
     "candidate_sha": "016103f3c21ed2d659694ce10e64aaf24b5c2767",
-    "requires_explicit_execution_approval": "true"
+    "requires_explicit_execution_approval": "false"
   }
 }

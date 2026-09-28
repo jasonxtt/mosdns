@@ -3,14 +3,24 @@
 ## Boundaries and preconditions
 
 - Candidate source is the reviewed commit `016103f3c21ed2d659694ce10e64aaf24b5c2767`; do not build from the dirty checkout or a later `HEAD`.
-- The existing `rust/Cargo.lock` is tracked at that commit. Local Git verified blob `7dc20cd5fbe4e90adc9a3c0ef3b15035c31dee5f`, byte length `38673`, SHA-256 `d78f204b017fc01f316e5af84e23bef30ef0597ea56952aa87c062fe8a51b6ca`, and `git archive 016103f3c21ed2d659694ce10e64aaf24b5c2767 rust/Cargo.lock | tar -tf -` listed `rust/Cargo.lock`. Transfer a clean source archive through the `mos-test` SSH alias; verify archive hash at both ends, then verify this lockfile blob/hash after extraction before building the native host once with `--locked`. If any lockfile check differs, the remote toolchain is absent, or target identity is wrong, stop before starting any sidecar; do not install packages.
+- The existing `rust/Cargo.lock` is tracked at that commit. Local Git verified blob `7dc20cd5fbe4e90adc9a3c0ef3b15035c31dee5f`, byte length `38673`, SHA-256 `d78f204b017fc01f316e5af84e23bef30ef0597ea56952aa87c062fe8a51b6ca`, and `git archive 016103f3c21ed2d659694ce10e64aaf24b5c2767 rust/Cargo.lock | tar -tf -` listed `rust/Cargo.lock`. Transfer a clean source archive through the `mosdns-rust` SSH alias; verify archive hash at both ends, then verify this lockfile blob/hash after extraction before building the native host once with `--locked`. If any lockfile check differs, the remote toolchain is absent, or target identity is wrong, stop before starting any sidecar; do not install packages.
 - The read-only source snapshot identifiers in `research/canary-inputs.md` were captured from a sibling `file` repository at commit `28c64936a0a1889a02dec4617e258e01d5501866`. That repository and its bytes are outside the exact-range C2C review, so those identifiers are planning-captured inputs, not facts independently verified by that review. Recheck the package commit and exact file hashes from the accessible read-only snapshot at execution. If they changed or are inaccessible, stop and revise the plan rather than substituting live `/cus/mosdns` state or recreating the source from memory.
 - The four proposed execution defaults are: use a read-only config-package snapshot; use same-config Go only as a safe, non-gating optional comparison (no Go build); use deterministic owned peers as the hard oracle and skip public resolver dependence; treat TERM plus complete owned-resource release as rollback, without claiming graceful shutdown. The user must approve execution and may change these defaults before the canary starts.
+- User decision (2026-09-28): execute this canary with all four proposed defaults unchanged. The config source is a read-only snapshot; same-config Go comparison is optional and non-gating with no Go build; controlled owned peers are the hard oracle; TERM plus verified release of every owned process and port is the rollback criterion, with no graceful-shutdown claim.
+
+
+- User decision (2026-09-28): use the `mosdns-rust` SSH alias for this canary and all project build/test verification. This supersedes the original `mos-test` target after its SSH connection attempt timed out. Review this host change before any remote build or test; refresh the baseline immediately before creating the temp root or starting a canary-owned process. Do not use a direct IP or another VM.
+
+## Read-only target preflight (2026-09-28)
+
+The selected alias was reachable and identified itself as `mosdns-rust`, Linux `7.0.9-x64v3-xanmod1` x86_64, user `root`. The pre-review probe found `mosdns.service` active/running with MainPID `425`, process starttime `373`, executable `/usr/local/bin/mosdns`. Its observed UDP and TCP wildcard listeners were ports `53`, `2222`, `3077`, `3099`, `3111`, `3333`, `4444`, `7777`, and `8888`; TCP also included `9099`. Existing service port 53 remains baseline-only. The preinstalled toolchain reported rustc `1.95.0 (59807616e 2026-04-14)` and cargo `1.95.0 (f2d3ce0bd 2026-03-21)`; `python3`, `tar`, `sha256sum`, `ssh`, and `scp` were present. These are read-only planning/review observations, not execution-time guarantees. Recheck the host identity, service, complete listener baseline, toolchain, and helpers immediately before execution.
+
+For baseline comparison, identify listeners by protocol, state, local/peer endpoint, and owning PID/FD. Record the raw `ss` snapshot hash as supporting evidence, but do not compare transient Recv-Q/Send-Q counters as listener identity.
 
 ## Isolation topology
 
 ```text
-existing mos-test MosDNS service (baseline only; untouched)
+existing mosdns-rust MosDNS service (baseline only; untouched)
 
 canary-owned UDP/TCP DNS peers (127.0.0.1, high ports, counted requests)
                     ↑
@@ -29,7 +39,7 @@ All canary-owned files (source, binary, configs, relative rules, peer helper, lo
 ## Build and provenance
 
 1. Create a source archive from the exact commit, limited to the Rust workspace, and record its SHA-256.
-2. Transfer it using `scp` with the `mos-test` alias into the new remote temp root. Verify the remote SHA-256 before extraction.
+2. Transfer it using `scp` with the `mosdns-rust` alias into the new remote temp root. Verify the remote SHA-256 before extraction.
 3. Record `rustc --version` and `cargo --version`; build exactly once:
 
    ```sh
@@ -111,4 +121,5 @@ Before starting peers, record the relevant existing MosDNS service active state/
 - **PASS:** provenance and isolation are proven; both six-query runs match all wire and peer oracles; no unexpected error/crash; all canary resources are reclaimed; service baseline is unchanged; all unrun work and limitations are explicit; no performance claim is made.
 - **FAIL:** valid preflight followed by a Rust startup/wire/route/cache/counter/crash/cleanup failure, source-provenance mismatch, or any canary action affecting the existing service.
 - **STOP / environment invalid:** wrong host, unsafe/occupied isolation, unavailable source snapshot, absent preinstalled Rust toolchain, unrelated service instability, or unavailable harness/peer prerequisites before a sidecar starts. Do not label these as Rust product failures.
+- **STOP / harness invalid:** a fixture, peer helper, or controller assertion is shown to be invalid or internally inconsistent, including an aggregate counter check that contradicts the per-query records. Preserve the raw controller result, correct and review the harness, then repeat before claiming PASS; do not classify an invalid assertion alone as a Rust product failure.
 - **Separate remediation:** if a valid run exposes a product defect, capture evidence and stop. Do not change product code in this canary task.
