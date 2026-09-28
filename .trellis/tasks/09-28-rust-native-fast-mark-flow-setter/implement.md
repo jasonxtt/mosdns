@@ -77,10 +77,10 @@ front-end or Go builds.
       implemented forms and evidence. Keep P11/P33/P44 and 5B rows open.
 - [x] Run `git diff --check`, inspect the exact source/test/doc diff, and commit
       only this task's paths; preserve all unrelated changes.
-- [ ] Submit exact `BASE_SHA..HEAD_SHA`, task ID, and paths to the same C2C
+- [x] Submit exact `BASE_SHA..HEAD_SHA`, task ID, and paths to the same C2C
   conversation for a complete task-range review. Do not paste logs or diff
   contents into ChatGPT.
-- [ ] Fix every finding in a narrow corrective range and re-review in that same
+- [x] Fix every finding in a narrow corrective range and re-review in that same
   conversation until explicit `FINAL: PASS`.
 - Review finding ledger: the initial exact-range C2C review returned
   `FINAL: FAIL` with P1-1 because the cancellation/drop checkpoint used the
@@ -88,6 +88,12 @@ front-end or Go builds.
   The narrow correction applies configured-over-host precedence in
   `ExecutionFacts::Drop` and adds a cancellation regression covering all three
   routing fields.
-- [ ] Record remaining unimplemented forms and explicit deferred work in the
+- [x] Record remaining unimplemented forms and explicit deferred work in the
   task and parent roadmap. Do not advance the 5C child until this C2C review
   passes.
+
+Review evidence: the initial implementation range
+`1cd8b80759683840895bf1b054f7086ffd00d885..4eb4a565de2b977de52b1233b265eac2afba4891`
+received C2C `FINAL: FAIL` with P1-1. The narrow correction range
+`4eb4a565de2b977de52b1233b265eac2afba4891..da2f7aedbe9bd2e13b37286fd2b67e2e9627b111`
+received the same-chat C2C `FINAL: PASS`; P1-1 was closed.
