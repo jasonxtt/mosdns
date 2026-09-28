@@ -565,6 +565,26 @@ def _valid_reviewer_evidence(evidence: Any, target: dict[str, Any]) -> bool:
     )
 
 
+def require_start_authorization(repo_root: Path, task_dir: Path | str, *, context_key: str | None) -> AuthorizationSnapshot:
+    """Reject an automation task before task.py mutates status or session state."""
+
+    if not context_key:
+        raise ActivationError("automation task start requires a session identity")
+    _, task_relative = _task_path(repo_root, task_dir)
+    snapshot = load_authorization(repo_root, context_key)
+    if snapshot is None:
+        raise ActivationError("pre-start authorization snapshot is missing")
+    if snapshot.context_key != context_key:
+        raise ActivationError("authorization snapshot belongs to another session")
+    if snapshot.task != task_relative:
+        raise ActivationError("authorization snapshot belongs to another task")
+    if not _valid_reviewer_evidence(snapshot.reviewer_transport_evidence, snapshot.reviewer):
+        raise ActivationError("authorization snapshot has invalid reviewer transport evidence")
+    if load_context(repo_root, context_key).reviewer != snapshot.reviewer:
+        raise ActivationError("reviewer target changed after authorization")
+    return snapshot
+
+
 def activate(repo_root: Path, task_dir: Path | str, *, context_key: str) -> AutomationRun:
     """Create a run from the pre-start snapshot after task.py confirms start."""
 
@@ -574,14 +594,7 @@ def activate(repo_root: Path, task_dir: Path | str, *, context_key: str) -> Auto
     task_path, task_relative = _task_path(repo_root, task_dir)
     if _task_status(task_path) != "in_progress":
         raise ActivationError("task.py must confirm in_progress before run activation")
-    snapshot = load_authorization(repo_root, context_key)
-    if snapshot is None:
-        raise ActivationError("pre-start authorization snapshot is missing")
-    if snapshot.task != task_relative:
-        raise ActivationError("authorization snapshot belongs to another task")
-    current_reviewer = load_context(repo_root, context_key).reviewer
-    if current_reviewer != snapshot.reviewer:
-        raise ActivationError("reviewer target changed after authorization; explicit re-authorization is required")
+    snapshot = require_start_authorization(repo_root, task_dir, context_key=context_key)
     run = AutomationRun(
         context_key=context_key,
         task=snapshot.task,

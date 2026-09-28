@@ -40,12 +40,14 @@ from common.paths import (
 )
 from common.active_task import (
     clear_active_task,
+    clear_task_from_sessions,
     resolve_active_task,
     resolve_context_key,
     set_active_task,
 )
 from common.io import read_json, write_json
-from common.task_utils import resolve_task_dir, run_task_hooks
+from common.automation_run import ActivationError, load_run, require_start_authorization
+from common.task_utils import is_within_tasks_dir, resolve_task_dir, run_task_hooks
 from common.tasks import iter_active_tasks, children_progress
 
 # Import command handlers from split modules (also re-exports for plan.py compatibility)
@@ -94,6 +96,19 @@ def cmd_start(args: argparse.Namespace) -> int:
         task_dir = str(full_path)
 
     task_json_path = full_path / FILE_TASK_JSON
+
+    task_data = read_json(task_json_path) if task_json_path.is_file() else None
+    if task_data and task_data.get("status") in ("completed", "superseded"):
+        print(colored("Error: terminal task cannot be started", Colors.RED), file=sys.stderr)
+        return 1
+    metadata = task_data.get("meta") if isinstance(task_data, dict) else None
+    automation_required = isinstance(metadata, dict) and str(metadata.get("automation_required", "")).lower() == "true"
+    if automation_required:
+        try:
+            require_start_authorization(repo_root, full_path, context_key=resolve_context_key())
+        except ActivationError as exc:
+            print(colored(f"Error: {exc}", Colors.RED), file=sys.stderr)
+            return 1
 
     if not resolve_context_key():
         # Degraded mode: no session identity available.
@@ -161,6 +176,55 @@ def cmd_finish(args: argparse.Namespace) -> int:
 
     if task_json_path.is_file():
         run_task_hooks("after_finish", task_json_path, repo_root)
+    return 0
+
+
+def cmd_supersede(args: argparse.Namespace) -> int:
+    """Close an incomplete task only after its replacement review passed."""
+    repo_root = get_repo_root()
+    old_dir = resolve_task_dir(args.old, repo_root)
+    replacement_dir = resolve_task_dir(args.replacement, repo_root)
+    old_json = old_dir / FILE_TASK_JSON
+    replacement_json = replacement_dir / FILE_TASK_JSON
+    if (old_dir == replacement_dir or not is_within_tasks_dir(old_dir, repo_root)
+            or not is_within_tasks_dir(replacement_dir, repo_root)
+            or not old_json.is_file() or not replacement_json.is_file()):
+        print(colored("Error: distinct existing old and replacement tasks are required", Colors.RED), file=sys.stderr)
+        return 1
+    reason = args.reason.strip() if isinstance(args.reason, str) else ""
+    if not reason:
+        print(colored("Error: supersession reason is required", Colors.RED), file=sys.stderr)
+        return 1
+    old_data = read_json(old_json)
+    replacement_data = read_json(replacement_json)
+    if not old_data or old_data.get("status") != "in_progress":
+        print(colored("Error: old task must be in_progress", Colors.RED), file=sys.stderr)
+        return 1
+    if not replacement_data or replacement_data.get("status") != "in_progress":
+        print(colored("Error: replacement task must be in_progress", Colors.RED), file=sys.stderr)
+        return 1
+    context_key = resolve_context_key()
+    run = load_run(repo_root, context_key) if context_key else None
+    replacement_ref = replacement_dir.relative_to(repo_root).as_posix()
+    if (run is None or run.task != replacement_ref or run.status != "authorized_scope_complete"
+            or not all(state.get("phase") == "passed" and state.get("review_result_recorded") is True
+                       and isinstance(state.get("result"), dict) and state["result"].get("status") == "pass"
+                       and isinstance(state.get("submission"), dict)
+                       and state["submission"].get("head_sha")
+                       and isinstance(state["submission"].get("submitted_to"), dict)
+                       and state["submission"]["submitted_to"].get("provider") == "c2c-web"
+                       for state in run.units.values())):
+        print(colored("Error: replacement has no completed recorded reviewer PASS in this session", Colors.RED), file=sys.stderr)
+        return 1
+    metadata = old_data.get("meta") if isinstance(old_data.get("meta"), dict) else {}
+    metadata.update({"superseded_by": replacement_dir.name, "supersession_reason": reason})
+    old_data["meta"] = metadata
+    old_data["status"] = "superseded"
+    if not write_json(old_json, old_data):
+        print(colored("Error: could not record supersession", Colors.RED), file=sys.stderr)
+        return 1
+    clear_task_from_sessions(str(old_dir), repo_root)
+    print(colored(f"✓ Superseded {old_dir.name} by {replacement_dir.name}", Colors.GREEN))
     return 0
 
 
@@ -273,7 +337,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             return 1
         print(colored(f"My tasks (assignee: {developer}):", Colors.BLUE))
     else:
-        print(colored("All active tasks:", Colors.BLUE))
+        print(colored("All unarchived tasks:", Colors.BLUE))
     print()
 
     # Display tasks hierarchically
@@ -393,6 +457,7 @@ Usage:
   python3 task.py set-scope <dir> <scope>            Set scope for PR title
   python3 task.py set-meta <dir> <key> <value>       Set/overwrite a task metadata key
   python3 task.py archive <task-dir>                 Archive completed task
+  python3 task.py supersede <old> <replacement> --reason <text>  Close incomplete task after replacement PASS
   python3 task.py add-subtask <parent> <child>       Link child task to parent
   python3 task.py remove-subtask <parent> <child>    Unlink child from parent
   python3 task.py list [--mine] [--status <status>] [--json]  List tasks
@@ -546,6 +611,11 @@ def main() -> int:
     p_archive.add_argument("name", help="Task directory or name")
     p_archive.add_argument("--no-commit", action="store_true", help="Skip auto git commit after archive")
 
+    p_supersede = subparsers.add_parser("supersede", help="Mark incomplete task superseded after replacement review PASS")
+    p_supersede.add_argument("old", help="Original task directory")
+    p_supersede.add_argument("replacement", help="Reviewed replacement task directory")
+    p_supersede.add_argument("--reason", required=True, help="Why the old task is superseded")
+
     # list
     p_list = subparsers.add_parser("list", help="List tasks")
     p_list.add_argument("--mine", "-m", action="store_true", help="My tasks only")
@@ -585,6 +655,7 @@ def main() -> int:
         "set-scope": cmd_set_scope,
         "set-meta": cmd_set_meta,
         "archive": cmd_archive,
+        "supersede": cmd_supersede,
         "add-subtask": cmd_add_subtask,
         "remove-subtask": cmd_remove_subtask,
         "list": cmd_list,

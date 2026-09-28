@@ -367,7 +367,13 @@ target is not silently replaced.
 
 Task authorization snapshots the user-approved implementation units before
 `task.py start`; activation after the task is `in_progress` creates the run
-from that immutable snapshot. The automation run never writes task lifecycle
+from that immutable snapshot. Set `task.json.meta.automation_required` to `"true"`
+for tasks using this automation lifecycle. Their `task.py start` must refuse
+missing or mismatched snapshots before writing task status or session pointers.
+Historical missing authorization cannot be reconstructed by a later review;
+retain the gap and use a separately authorized review task. After its recorded
+review PASS, mark the old task `superseded` with successor and reason, never
+`completed` merely to clear the active list. The automation run never writes task lifecycle
 state. Review granularity comes from the authorized Slice range, not from the
 executor provider or host surface.
 
@@ -404,6 +410,42 @@ without restoring host-aware routing semantics.
 - Legacy migration preserves only explicit user choices and leaves the source
   file byte-for-byte unchanged.
 - A final reviewer PASS never archives or changes task lifecycle.
+
+## Scenario: automation start and supersession gate
+
+### 1. Scope / Trigger
+
+Use when a Trellis task relies on `automation.py authorize` and an external reviewer. Set `task.json.meta.automation_required` to `"true"` during planning. Historical tasks with no pre-start snapshot remain historical gaps.
+
+### 2. Signatures
+
+`automation.py authorize TASK --units "Slice 1" --reviewer-evidence JSON` freezes the range; `task.py start TASK` changes planning to in-progress; `automation.py activate TASK` consumes the snapshot. After an exact submitted review records `FINAL: PASS`, `task.py supersede OLD REPLACEMENT --reason TEXT` closes the old task as a non-success audit record.
+
+### 3. Contracts
+
+`task.py start` for an automation-required task needs the same session key, exact task path, valid frozen units, verified transport evidence, and reviewer equal to the persisted context. The check happens before status or session-pointer mutation. `supersede` requires a completed replacement automation run whose unit has a recorded C2C review PASS and submitted head SHA; it retains the old directory and clears pointers to it. A later PASS never changes the time or reviewer of an earlier execution.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| Missing/corrupt/wrong-task snapshot, reviewer drift, missing session key | `start` fails without mutation |
+| Matching snapshot | `start` may proceed; `activate` consumes the same snapshot |
+| Ordinary task without automation metadata | Existing start behavior |
+| Missing successor or unrecorded reviewer PASS | `supersede` fails without mutation |
+| Accepted replacement | Old status becomes `superseded`, not `completed`; archive refuses it |
+
+### 5. Good/Base/Bad Cases
+
+Good: a review-only replacement freezes its C2C reviewer while planning, starts, records exact submitted SHAs and PASS, then supersedes the incomplete original. Base: a normal documentation task starts without automation. Bad: start first and try to manufacture an older snapshot or archive the incomplete original as successful.
+
+### 6. Tests Required
+
+CLI regressions assert missing, wrong-task and reviewer-drift snapshots leave status and active pointer unchanged; valid and ordinary starts pass. Supersession regressions assert missing or unaccepted successors fail, recorded C2C PASS clears the old pointer and writes successor/reason, repeated supersession fails, and archive refuses the superseded task.
+
+### 7. Wrong vs Correct
+
+Wrong: treat a later reviewer PASS as evidence that approval existed before execution. Correct: preserve the actual chronology, prospectively authorize a review-only task, and retain the old task as `superseded` after acceptance.
 
 ## Scenario: native DoH HTTP/2 child ownership
 
