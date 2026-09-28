@@ -8,6 +8,7 @@ mod config;
 mod execution;
 mod matchers;
 mod observer;
+mod plugins;
 mod tcp;
 mod udp;
 

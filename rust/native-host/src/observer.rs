@@ -252,6 +252,8 @@ pub struct AuditRecord {
     pub cache_status: CacheStatus,
     /// Final executed sequence tag, if established.
     pub final_sequence: Option<String>,
+    /// Configured matched group, when the sequence set one.
+    pub matched_group: Option<String>,
     /// Upstream that supplied the final response, if any.
     pub final_upstream: Option<String>,
     /// Actual upstream attempts in execution order.
@@ -414,6 +416,8 @@ pub(crate) struct TerminalObservation {
     pub response: ResponseState,
     pub cache_status: CacheStatus,
     pub final_sequence: Option<String>,
+    pub matched_group: Option<String>,
+    pub final_upstream: Option<String>,
     pub upstream_attempts: UpstreamAttemptList,
     pub failure_provenance: Option<FailureProvenance>,
     pub elapsed: Duration,
@@ -425,6 +429,8 @@ pub(crate) struct ExecutionCheckpoint {
     response: ResponseState,
     cache_status: CacheStatus,
     final_sequence: Option<String>,
+    matched_group: Option<String>,
+    final_upstream: Option<String>,
     upstream_attempts: UpstreamAttemptList,
     failure_provenance: Option<FailureProvenance>,
     in_flight_upstream: Option<String>,
@@ -438,6 +444,8 @@ impl ExecutionCheckpoint {
             response: ResponseState::NoResponse,
             cache_status: CacheStatus::Undetermined,
             final_sequence: None,
+            matched_group: None,
+            final_upstream: None,
             upstream_attempts: UpstreamAttemptList::default(),
             failure_provenance: None,
             in_flight_upstream: None,
@@ -457,6 +465,8 @@ impl ExecutionCheckpoint {
         self.response = observation.response.clone();
         self.cache_status = observation.cache_status;
         self.final_sequence.clone_from(&observation.final_sequence);
+        self.matched_group.clone_from(&observation.matched_group);
+        self.final_upstream.clone_from(&observation.final_upstream);
         self.upstream_attempts
             .clone_from(&observation.upstream_attempts);
         self.failure_provenance
@@ -486,6 +496,8 @@ impl ExecutionCheckpoint {
             response: self.response.clone(),
             cache_status: self.cache_status,
             final_sequence: self.final_sequence.clone(),
+            matched_group: self.matched_group.clone(),
+            final_upstream: self.final_upstream.clone(),
             upstream_attempts,
             failure_provenance: self.failure_provenance.clone(),
             elapsed,
@@ -789,13 +801,14 @@ impl AdmittedQueryGuard {
         let audit_context = self.audit_context.take();
         self.observer.record_terminal(observation, |observation| {
             let context = audit_context.expect("audit context exists when capture is enabled");
-            let final_upstream = match &observation.response {
+            let derived_final_upstream = match &observation.response {
                 ResponseState::Dns {
                     source: ResponseSource::Upstream(upstream),
                     ..
                 } => Some(upstream.clone()),
                 ResponseState::Dns { .. } | ResponseState::NoResponse => None,
             };
+            let final_upstream = observation.final_upstream.or(derived_final_upstream);
             AuditRecord {
                 timestamp: context.timestamp,
                 client_addr: context.client_addr,
@@ -808,6 +821,7 @@ impl AdmittedQueryGuard {
                 response: observation.response,
                 cache_status: observation.cache_status,
                 final_sequence: observation.final_sequence,
+                matched_group: observation.matched_group,
                 final_upstream,
                 upstream_attempts: observation.upstream_attempts.into_vec(),
                 failure_provenance: observation.failure_provenance,
@@ -1010,6 +1024,8 @@ mod tests {
             },
             cache_status: CacheStatus::Miss,
             final_sequence: Some("w1".to_owned()),
+            matched_group: None,
+            final_upstream: None,
             upstream_attempts: UpstreamAttemptList::from(vec![UpstreamAttemptRecord {
                 upstream: "route-a".to_owned(),
                 outcome: UpstreamAttemptOutcome::Response,
@@ -1121,6 +1137,8 @@ mod tests {
                 response: ResponseState::NoResponse,
                 cache_status: CacheStatus::Miss,
                 final_sequence: Some("entry".to_owned()),
+                matched_group: None,
+                final_upstream: None,
                 upstream_attempts: UpstreamAttemptList::from(vec![UpstreamAttemptRecord {
                     upstream: "route-a".to_owned(),
                     outcome: UpstreamAttemptOutcome::Response,
@@ -1167,6 +1185,8 @@ mod tests {
                 response: ResponseState::NoResponse,
                 cache_status: CacheStatus::Undetermined,
                 final_sequence: Some("entry".to_owned()),
+                matched_group: None,
+                final_upstream: None,
                 upstream_attempts: UpstreamAttemptList::default(),
                 failure_provenance: None,
                 elapsed: Duration::ZERO,
@@ -1216,6 +1236,8 @@ mod tests {
             },
             cache_status: CacheStatus::Miss,
             final_sequence: Some("entry".to_owned()),
+            matched_group: None,
+            final_upstream: None,
             upstream_attempts: UpstreamAttemptList::from(vec![UpstreamAttemptRecord {
                 upstream: "route-a".to_owned(),
                 outcome: UpstreamAttemptOutcome::Response,
@@ -1240,6 +1262,7 @@ mod tests {
             response: observation.response,
             cache_status: observation.cache_status,
             final_sequence: Some("entry".to_owned()),
+            matched_group: None,
             final_upstream: Some("route-a".to_owned()),
             upstream_attempts: observation.upstream_attempts.into_vec(),
             failure_provenance: None,
@@ -1396,6 +1419,8 @@ mod tests {
                     response,
                     cache_status,
                     final_sequence: None,
+                    matched_group: None,
+                    final_upstream: None,
                     upstream_attempts: upstream_attempts.into(),
                     failure_provenance: None,
                     elapsed: Duration::from_micros(250),
