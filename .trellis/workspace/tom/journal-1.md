@@ -692,3 +692,41 @@ Executed G0 profiler remediation, Slice 1/2 reliability work, health-latency-bas
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: Repair canary review and Trellis authorization gate
+
+**Date**: 2026-09-28
+**Task**: Repair canary review and Trellis authorization gate
+**Branch**: `rust`
+
+### Summary
+
+Preserved canary evidence, enforced pre-start authorization, reviewed exact committed ranges through the selected C2C conversation, closed P1-1, and superseded the original task.
+
+### Main Changes
+
+- Sanitized and verified attempt-3 evidence; recorded historical authorization and reviewer chronology.
+- Added guarded automation starts and a recorded-PASS supersession transition.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0c5622f7` | (see git log) |
+| `242cbcbb` | (see git log) |
+| `79ddded8` | (see git log) |
+| `9beb22a0` | (see git log) |
+| `5ff649f2` | (see git log) |
+
+### Testing
+
+- [OK] 73 Trellis tests passed; three task validations and diff checks passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Keep 5B and 5C in their separately planned tasks; no deployment or production promotion.
