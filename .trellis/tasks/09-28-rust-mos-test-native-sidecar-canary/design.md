@@ -3,8 +3,8 @@
 ## Boundaries and preconditions
 
 - Candidate source is the reviewed commit `016103f3c21ed2d659694ce10e64aaf24b5c2767`; do not build from the dirty checkout or a later `HEAD`.
-- The existing `rust/Cargo.lock` is tracked at that commit (`git ls-tree` confirms it). Transfer a clean source archive through the `mos-test` SSH alias, verify its hash at both ends, and build the native host once on `mos-test` with that lockfile and `--locked`. If the remote toolchain is absent or the target identity is wrong, stop before starting any sidecar; do not install packages.
-- The read-only source snapshot is present in the sibling `file` repository at commit `28c64936a0a1889a02dec4617e258e01d5501866`; the relevant config hashes are recorded in `research/canary-inputs.md`. Recheck those exact files at execution. If they changed or are inaccessible, stop and revise the plan rather than substituting live `/cus/mosdns` state or recreating the source from memory.
+- The existing `rust/Cargo.lock` is tracked at that commit. Local Git verified blob `7dc20cd5fbe4e90adc9a3c0ef3b15035c31dee5f`, byte length `38673`, SHA-256 `d78f204b017fc01f316e5af84e23bef30ef0597ea56952aa87c062fe8a51b6ca`, and `git archive 016103f3c21ed2d659694ce10e64aaf24b5c2767 rust/Cargo.lock | tar -tf -` listed `rust/Cargo.lock`. Transfer a clean source archive through the `mos-test` SSH alias; verify archive hash at both ends, then verify this lockfile blob/hash after extraction before building the native host once with `--locked`. If any lockfile check differs, the remote toolchain is absent, or target identity is wrong, stop before starting any sidecar; do not install packages.
+- The read-only source snapshot identifiers in `research/canary-inputs.md` were captured from a sibling `file` repository at commit `28c64936a0a1889a02dec4617e258e01d5501866`. That repository and its bytes are outside the exact-range C2C review, so those identifiers are planning-captured inputs, not facts independently verified by that review. Recheck the package commit and exact file hashes from the accessible read-only snapshot at execution. If they changed or are inaccessible, stop and revise the plan rather than substituting live `/cus/mosdns` state or recreating the source from memory.
 - The four proposed execution defaults are: use a read-only config-package snapshot; use same-config Go only as a safe, non-gating optional comparison (no Go build); use deterministic owned peers as the hard oracle and skip public resolver dependence; treat TERM plus complete owned-resource release as rollback, without claiming graceful shutdown. The user must approve execution and may change these defaults before the canary starts.
 
 ## Isolation topology
@@ -44,7 +44,18 @@ This source-only Rust build is the intended path: the current host has no standa
 
 ## Configuration reduction
 
-At execution time, recheck the read-only config-package commit and source-file hashes frozen in `research/canary-inputs.md`. Keep raw/private config out of the repository. Derive two temporary YAMLs and rules under the canary root using this reduction. The derived root config keeps one top-level relative `include` to its sanitized `sub_config/routes.yaml`; it does not copy the package's full include list or claim that the full include graph is supported.
+At execution time, recheck the read-only config-package commit and source-file hashes frozen in `research/canary-inputs.md`. Keep raw/private config out of the repository. Derive two temporary YAMLs and rules under the canary root using this reduction. Freeze the layout and path literal exactly as:
+
+```text
+config/udp.yaml                 # include: sub_config/routes.yaml
+config/tcp.yaml                 # same graph, TCP listener/audit setting only
+config/sub_config/routes.yaml   # files: [rules/local.txt]
+config/sub_config/rules/local.txt
+```
+
+The included `routes.yaml` declaration resolves `rules/local.txt` relative to `config/sub_config/`, its own directory. The derived root config keeps one top-level relative `include` to its sanitized `sub_config/routes.yaml`; it does not copy the package's full include list or claim that the full include graph is supported.
+
+Before any listener starts, add a temporary integration-test harness under the extracted temp source tree (never the repository or candidate archive) that calls `HostAssembly::from_config_file` for both derived configs and drops each assembly without calling `run()`. `from_config_file` performs config compilation and constructs the pre-I/O graph; `run_udp` / `run_tcp` are the calls that bind listeners. Record the harness source hash and `cargo test --locked` result. This check must prove the include and relative `files` paths resolve before any sidecar listener is launched. A failure here is `STOP / fixture-or-harness invalid` until the sanitized paths are corrected; it is not a Rust runtime canary failure.
 
 | Source behavior | Canary treatment |
 | --- | --- |
@@ -72,6 +83,8 @@ Run two canary-owned deterministic upstreams with request logs/counters:
 
 Use a minimal temporary DNS probe that sends no EDNS, supports both UDP queries and length-prefixed TCP queries, selects known IDs, and records normalized response fields. This avoids dependence on public DNS and lets the cache-repeat assertion verify ID rewriting. Each peer logs the received question and increments a counter exactly once per request.
 
+Before starting either Rust sidecar, run an independent peer-only self-test: send one known request directly to the local UDP peer and one to the default TCP peer. Verify UDP/TCP framing, echoed transaction ID and question, expected `.21`/`.22` answer, and exactly one corresponding counter increment. Then reset both counters to zero and record the reset before Q1. If this self-test fails, classify the run as `STOP / harness invalid`; do not use its results to mark Rust `FAIL`.
+
 Run this ordered corpus against both sidecar configs. Reset counters before each run and record deltas after every request:
 
 | Case | Request | Expected wire result | Local peer delta | Default peer delta |
@@ -91,7 +104,7 @@ An already available Go binary may be used only if the same reduced config and c
 
 ## Rollback and result classification
 
-Before starting peers, record the relevant existing MosDNS service active state/MainPID and listener snapshot. Record each canary-owned PID and exact command/temp-root identity. After each run, send TERM only to those PIDs and allow up to 10 seconds for exit. If any owned process remains, send KILL only to that PID, record the run as FAIL, and continue cleanup. Verify owned PID absence, owned ports absent, no port 53 listener, and unchanged existing-service PID/state/listeners. Preserve only compact hashes, command/result tables, and sanitized failure excerpts in task evidence; then remove the temporary root.
+Before starting peers, record the relevant existing MosDNS service active state/MainPID and listener snapshot. Keep the owning shell alive while its child processes run. For every canary-owned process, record PID, `/proc/<pid>/stat` starttime (field 22), resolved `/proc/<pid>/exe`, PPID, process group, and exact command/temp-root identity at launch. Immediately before TERM or KILL, verify PID still exists and starttime, executable, PPID, and process group match the launch receipt. If the PID vanished, only wait/record it; never signal that number. If any identity field changed, do not signal it and stop for investigation. After each run, send TERM only to a process whose receipt still matches and allow up to 10 seconds for exit. If a matching owned process remains, send KILL only after repeating the full identity check, record the run as FAIL, and continue cleanup. Verify owned PID absence, owned ports absent, no port 53 listener, and unchanged existing-service PID/state/listeners. Preserve only compact hashes, command/result tables, and sanitized failure excerpts in task evidence; then remove the temporary root.
 
 - **PASS:** provenance and isolation are proven; both six-query runs match all wire and peer oracles; no unexpected error/crash; all canary resources are reclaimed; service baseline is unchanged; all unrun work and limitations are explicit; no performance claim is made.
 - **FAIL:** valid preflight followed by a Rust startup/wire/route/cache/counter/crash/cleanup failure, source-provenance mismatch, or any canary action affecting the existing service.
