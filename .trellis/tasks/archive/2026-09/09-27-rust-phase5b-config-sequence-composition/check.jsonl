@@ -1,6 +1,6 @@
 {"file": ".trellis/spec/backend/rust-migration.md", "reason": "Rust native contracts and observation hot path; read relevant sections in full"}
 {"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Public behavior testing, validation and precise staging"}
 {"file": ".trellis/spec/backend/config-compatibility.md", "reason": "YAML and control-plane compatibility boundaries"}
-{"file": ".trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/source-audit.md", "reason": "Source-backed direct-call/cache-continuation/include/provider integration; revision 2 scope"}
-{"file": ".trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/example-compositions.md", "reason": "Real configuration-derived query chain, deliberate reductions, independent wire/cache/peer expectations"}
+{"file": ".trellis/tasks/archive/2026-09/09-27-rust-phase5b-config-sequence-composition/research/source-audit.md", "reason": "Source-backed direct-call/cache-continuation/include/provider integration; revision 2 scope"}
+{"file": ".trellis/tasks/archive/2026-09/09-27-rust-phase5b-config-sequence-composition/research/example-compositions.md", "reason": "Real configuration-derived query chain, deliberate reductions, independent wire/cache/peer expectations"}
 {"file": "docs/rust/feature-coverage.md", "reason": "Subitem coverage mapping and deferred feature ownership"}

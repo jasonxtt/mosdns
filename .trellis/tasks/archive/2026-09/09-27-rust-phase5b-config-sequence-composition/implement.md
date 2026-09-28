@@ -33,8 +33,8 @@
 - [x] 覆盖表记录 P02/P26/P34/P44/P15/P12、L01/L02/C01 的实际子项和延期。
 - [x] 独立最终 full-scope review 精确比较 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767`；于 2026-09-28 返回 `FINAL: PASS`，详见下方 verdict 记录。
 - [x] Codex `002reviewer` 对 A6 补充证据范围 `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` 返回历史 verdict `FINAL: PASS`。
-- [ ] 用户指定的 C2C 首次 A6 复审于 2026-09-28 返回 `FINAL: FAIL`（P2-1 scope summary 漏记专门远端 fault E2E，P2-2 exact-rule 临时测试/运行器源码未保存）；随后复审 `4fc737aa0dffc8e92ed878577b9c8a4131568077..098b4c5e2bc3427f591456d6725a04a8cb8bcc23` 关闭两项，但发现 P2-3（可复现命令块漏记远端临时目录创建）。实际执行命令已从本地 Codex 执行记录核实并补入下方；下一次精确 C2C re-review 待完成。
-- [ ] 本轮不执行 finish/archive/journal；review PASS 本身不改变 Trellis 生命周期。
+- [x] 用户指定的 C2C 对 A6 证据先后发现 P2-1/P2-2、P2-3；在保存 exact-rule 源码并补齐 scope 和实际本地/远端目录命令后，精确复审 `098b4c5e2bc3427f591456d6725a04a8cb8bcc23..146849c042bfa90a5d61cc6fbe9712b78d562e94` 于 2026-09-28 返回 `FINAL: PASS`，确认三个 finding 均关闭、没有新 actionable finding。此 checklist 更新是 PASS 之后的状态记录，超出该复审 HEAD；未改动其验证的命令或运行证据。
+- [x] 2026-09-28 用户授权归档并记录本次会话；任务按已完成范围归档。专门远端 fault/cancel/close E2E 仍明确延期，不计作已实测或本任务通过项。
 
 ## Local verification (2026-09-27–28)
 
@@ -231,7 +231,8 @@ The final run used PID `439475`, starttime `38296003`, PPID `439473`, process gr
 
 - In **Rust MosDNS测试进度**, C2C reviewed `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` and returned `FINAL: FAIL` with P2-1 (the remaining-scope summary omitted the dedicated remote fault E2E) and P2-2 (the exact-rule test/runner source was not preserved). The committed follow-up preserves the explicit deferral and the source, runner, output and JSON artifacts; C2C subsequently marked both findings closed.
 - C2C then reviewed `4fc737aa0dffc8e92ed878577b9c8a4131568077..098b4c5e2bc3427f591456d6725a04a8cb8bcc23` and returned `FINAL: FAIL` with P2-3: the command block omitted the remote temporary-root and `source/`/`logs/` creation performed before `scp` and `tar`.
-- The exact executed local and remote setup commands and observed `mktemp` outputs are now recorded at the start of the rerun command block above; it also records the final corrected runner upload/hash check before the retained invocation. The setup and upload commands exited 0; the command record is cross-checked against the local Codex execution transcript for task `01a0e3ac-7def-7181-b5f0-0c109c7b1cbb`. The next exact committed-range C2C review is pending; task status remains `in_progress`.
+- The exact executed local and remote setup commands and observed `mktemp` outputs are recorded at the start of the rerun command block above; it also records the final corrected runner upload/hash check before the retained invocation. The setup and upload commands exited 0; the command record is cross-checked against the local Codex execution transcript for task `01a0e3ac-7def-7181-b5f0-0c109c7b1cbb`.
+- C2C reviewed `098b4c5e2bc3427f591456d6725a04a8cb8bcc23..146849c042bfa90a5d61cc6fbe9712b78d562e94` and returned `FINAL: PASS`: P2-1/P2-2 remained closed, P2-3 was closed by the actual setup-command record, and no new actionable issue was found. The current review-status annotation is a later docs-only working-tree change outside that reviewed range; it records the result without changing evidence. At review time, task status remained `in_progress`; the user later authorized archiving the accepted task scope. Dedicated remote fault/cancel/close E2E remains explicitly deferred.
 
 ## Full Rust workspace on Linux (2026-09-28, `mosdns-rust`)
 
@@ -259,8 +260,8 @@ The successful run exited 0: **60 test targets, 896 passed, 0 failed, 0 ignored*
 ### Prior Codex review result for the A6 evidence supplement
 
 - Codex thread `002reviewer` reviewed exactly `bcac20374312d5bf875164f87673224b9da2a796..4fc737aa0dffc8e92ed878577b9c8a4131568077` and returned `FINAL: PASS` on 2026-09-28.
-- This is a historical bootstrap-review result only. The user-selected C2C reviewer later reviewed that A6 evidence and returned `FINAL: FAIL` with P2-1/P2-2; a follow-up closed both and found P2-3 for omitted directory-setup commands. The latest scoped verdict controls until another C2C re-review passes.
-- Trellis task status remains `in_progress`; no finish/archive/journal action was run.
+- This is a historical bootstrap-review result only. User-selected C2C subsequently returned `FINAL: FAIL` on earlier A6 evidence ranges, then `FINAL: PASS` on the exact correction range `098b4c5e2bc3427f591456d6725a04a8cb8bcc23..146849c042bfa90a5d61cc6fbe9712b78d562e94`, closing P2-1/P2-2/P2-3. The result annotation above is a post-review docs-only update outside that reviewed range.
+- At the time of the Linux workspace run, the Trellis task was still `in_progress`; after C2C PASS, the user authorized archiving the accepted task scope. Dedicated remote fault/cancel/close E2E remains explicitly deferred.
 
 ## Delivered in this pass
 
