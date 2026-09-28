@@ -44,6 +44,18 @@ same C2C conversation that supplied the plan.
 - [ ] If C2C is unavailable or the result is not a pass, keep downstream work
   unstarted and report the exact blocker; do not treat silence as approval.
 
+### Review history
+
+- Initial new-chat review range
+  `f32a84a162a2f6f3dc7cb2ff4cd7fc3bfee218df..9c2169f21c38998efde5cfd92005f96d85f20015`
+  returned `FINAL: FAIL` with `P1-1`: the PRD's closing state did not name the
+  required 5B same-chat review gate before 5C.
+- Correction range
+  `9c2169f21c38998efde5cfd92005f96d85f20015..58e4f0bfb91d2a6c6b57f460ca8250baa9842eff`
+  named the 5B same-chat C2C `FINAL: PASS` gate and retained explicit user
+  approval for reordering when 5B is deferred or blocked. The same new C2C
+  conversation returned `P1-1 [closed]` and `FINAL: PASS`.
+
 ## 3. Resolve canary execution inputs and result
 
 The canary inputs were resolved before execution with these frozen defaults:
