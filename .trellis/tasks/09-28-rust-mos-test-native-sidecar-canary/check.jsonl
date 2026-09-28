@@ -1,0 +1,9 @@
+{"file":"AGENTS.md","reason":"Check scope stays isolated and production remains gated"}
+{"file":".trellis/spec/backend/index.md","reason":"Check adherence to backend verification guidance"}
+{"file":".trellis/spec/backend/config-compatibility.md","reason":"Check no managed config/state compatibility claim exceeds scope"}
+{"file":"docs/ai/rust-rewrite-plan.md","reason":"Check phase boundary, no performance/cutover implication"}
+{"file":"docs/ai/rust-handover.md","reason":"Check predecessor evidence and target-host distinction"}
+{"file":".trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md","reason":"Check predecessor dependency and avoid expanding the prior task"}
+{"file":".trellis/tasks/09-27-rust-phase5b-config-sequence-composition/research/example-compositions.md","reason":"Check request oracle and actual composition semantics"}
+{"file":"docs/rust/feature-coverage.md","reason":"Check coverage claims distinguish local and remote evidence"}
+{"file":".trellis/tasks/09-28-rust-mos-test-native-sidecar-canary/research/canary-inputs.md","reason":"Check exact-source, config snapshot, and future-measurement boundaries"}

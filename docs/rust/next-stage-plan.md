@@ -1,4 +1,4 @@
-# Rust-native 下一阶段安排（2026-09-27）
+# Rust-native 下一阶段安排（2026-09-28）
 
 目标仍是 Linux amd64 上纯 Rust-native 完整 MosDNS，优先正确性、稳定运行、p95/p99、有效吞吐和并发，内存其次。本次按用户“避免过度设计”的要求调整推进方式，不删除功能或降低最终发布标准。
 
@@ -12,7 +12,7 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 
 | 次序 | 阶段与交付 | 结束条件 |
 | --- | --- | --- |
-| 1 | 5B 首批：一条现有配置派生的规则→direct child→cache→upstream 链，包含常用 reject、顶层 include 和规则文件 | 实际 YAML 经 UDP/TCP 得到正确响应、命中/未命中与路由；基本审计、故障和停止正确 |
+| 1 | 5B 首批代表链已完成；后续先做隔离 `mos-test` Rust-native sidecar canary，再据真实配置 blocker 选择下一批 | 代表链的本地与选定 Linux E2E 及精确范围 review 有证据；sidecar 计划完成并经 review，执行须另行授权 |
 | 2 | 5B 按功能家族补齐，同时穿插一条 5C 管理闭环 | 常用 matcher/provider、响应处理、上游策略/协议按依赖成批交付；尽早验证改规则→保存/reload→下一查询生效 |
 | 3 | 补齐所有剩余 5B/5C 功能 | [覆盖表](feature-coverage.md) 的配置/插件/API/持久化/管理条目都有相应证据；复用现有 Vue UI |
 | 4 | 5D 完整整机验收与有依据的优化 | 完整配置下正式 Go/Rust 对照、容量/恢复/并发、管理干扰、长稳和资源预算通过，阻塞项为零 |
@@ -22,11 +22,17 @@ W1 UDP/TCP、W2 简单缓存、W3 受限分流和基础观测有归档证据。�
 
 ## 当前 5B 任务和第一小目标
 
-沿用 [09-27 config/sequence 任务](../../.trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md)，revision 2。实现已获单独授权并完成；本地 workspace 验证及指定 Linux 上 UDP/audit-on 集成 E2E、TCP/audit-off CLI E2E 已通过。短诊断已记录但不作性能 PASS。独立完整 review 尚未返回 PASS，未部署，任务仍 `in_progress`；详细实测与未测项见 `implement.md`。
+沿用 [09-27 config/sequence 任务](../../.trellis/tasks/09-27-rust-phase5b-config-sequence-composition/prd.md)，revision 2。实现已获单独授权并完成；本地 workspace 验证及指定 Linux 上 UDP/audit-on 集成 E2E、TCP/audit-off CLI E2E 已通过。C2C 对 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` 的精确范围 review 返回 `FINAL: PASS`；短诊断不作性能 PASS。当前工作树中的 5B `task.json` 仍标记 `review pending` / `in_progress`，与 implement 和覆盖表记载的 PASS 不一致；本规划不擅自修改或归档该任务，详细记录见其 `implement.md`。
 
 本批支持 direct $sequence、一个 cache 在 entry/child 后继上的组合、reject 0..15（含常用 0/3）、顶层 include、provider 多规则/files，以及 qtype/has_resp。代表配置从本地 config_lite_all 裁剪，公网 aliapi 用已有受控 forward 替代；未支持部分有明确延期，不能声称原配置整体兼容。
 
-第一小目标：本地实际运行 block、路由 cache miss/hit、默认分支和 child 后父继续。三步状态：跑通链路与兼容/故障收敛已完成；Linux 功能 E2E 的指定子项已完成，剩余远端完整回归和独立 review 在任务记录中明确列出。取消原六 slice/四门禁安排；真实命名观测和 cache 后继接缝随必要功能完成，不独立扩框架。
+第一小目标：本地和选定 Linux 环境实际运行 block、路由 cache miss/hit、默认分支和 child 后父继续。相关实现与指定远端 E2E 已完成并通过精确范围 review；远端完整 workspace/legacy suites、fault/cancel/close 变体、`local.only.test` 精确规则和完整配置兼容仍未测，不作为本次已证明事实。取消原六 slice/四门禁安排；真实命名观测和 cache 后继接缝随必要功能完成，不独立扩框架。
+
+## 下一项已规划工作：isolated mos-test sidecar canary
+
+[09-28 Rust-native isolated mos-test sidecar canary](../../.trellis/tasks/09-28-rust-mos-test-native-sidecar-canary/prd.md) 是独立的纯验证规划任务，固定候选 SHA `016103f3c21ed2d659694ce10e64aaf24b5c2767`。计划覆盖由 `config_lite_all` 只读快照裁剪的 include/relative-rules/sequence/cache/route 链，在 `mos-test` 上顺序验证 UDP/audit-on 与 TCP/audit-off 两个 loopback 高端口 sidecar；controlled peers 作为功能、路由和 cache oracle，并要求每次都回收自有 PID/socket、保持原服务基线不变。
+
+该计划当前仍为 `planning`，本次只写规划并提交给 C2C review；没有连接 `mos-test`、构建或启动 sidecar。任何 canary 执行都需要用户另行明确授权。它不要求外部读取 audit records，不包含 Go 构建，不覆盖完整 config package，不做性能 PASS，也不改变生产门禁。四项推荐执行默认值和实际配置快照身份需在启动前冻结；计划与未决输入见 task 的 `design.md`、`implement.md`、`research/canary-inputs.md`。
 
 ## 简化工作方式
 
