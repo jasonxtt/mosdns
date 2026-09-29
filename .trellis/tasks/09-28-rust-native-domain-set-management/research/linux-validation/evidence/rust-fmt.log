@@ -1,0 +1,2 @@
+=== cargo fmt --all -- --check ===
+fmt_exit=0
