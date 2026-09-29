@@ -15,6 +15,7 @@ use mosdns_sequence_core::{
 use mosdns_upstream_core::{Endpoint, Transport};
 use serde::de::{self, Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
 
+use crate::managed::{DomainSetHandle, ManagedDomainSet};
 use crate::matchers::{
     DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher, ResponseIpMatcher, TrueMatcher,
     build_domain_set, resolve_rule_path,
@@ -83,39 +84,27 @@ pub struct ApiConfig {
     pub http: SocketAddr,
 }
 
-/// One file-backed `domain_set` that the bounded management API may edit. A
-/// profile is managed only when it declares exactly one `.txt` file and no
-/// `exps`, so the writable source is unambiguous.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ManagedDomainSetConfig {
-    /// The rule file resolved against the declaring YAML file's directory.
-    pub file: PathBuf,
-    /// The accepted rule text in Go's provider order (`exps`, then files).
-    pub rules: Vec<String>,
-    /// The YAML source path retained for load and management diagnostics.
-    pub source_path: String,
-}
-
 /// One compiled `domain_set` plus its management eligibility. Query-only
 /// shapes (`exps`, several files, non-`.txt`) stay fully usable for matching
 /// but are not management targets.
 pub struct DomainSetConfig {
     pub tag: String,
-    pub managed: Option<ManagedDomainSetConfig>,
-    matcher: Rc<MixMatcher<()>>,
+    pub managed: Option<Rc<ManagedDomainSet>>,
+    handle: DomainSetHandle,
 }
 
 impl DomainSetConfig {
-    /// True when the compiled matcher accepts `domain`.
+    /// True when the current rule set accepts `domain`. A managed profile is
+    /// read through its published generation at every evaluation.
     #[must_use]
     pub fn matches(&self, domain: &str) -> bool {
-        self.matcher.r#match(domain).is_some()
+        self.handle.matches(domain)
     }
 
-    /// The number of accepted rules in this set.
+    /// The number of accepted rules in the current rule set.
     #[must_use]
     pub fn rule_count(&self) -> usize {
-        self.matcher.len()
+        self.handle.rule_count()
     }
 }
 
@@ -327,7 +316,7 @@ enum PluginKind {
 /// built before any definition is compiled, so a reference order-independent.
 struct PluginCatalog<'a> {
     kinds: &'a [(String, PluginKind, usize)],
-    domain_sets: &'a [(String, Rc<MixMatcher<()>>)],
+    domain_sets: &'a [(String, DomainSetHandle)],
     fast_marks: &'a [(String, FastMarkConfig)],
 }
 
@@ -339,11 +328,11 @@ impl PluginCatalog<'_> {
             .map(|(_, kind, _)| *kind)
     }
 
-    fn domain_set(&self, tag: &str) -> Option<Rc<MixMatcher<()>>> {
+    fn domain_set(&self, tag: &str) -> Option<DomainSetHandle> {
         self.domain_sets
             .iter()
             .find(|(name, _)| name.as_str() == tag)
-            .map(|(_, set)| Rc::clone(set))
+            .map(|(_, handle)| handle.clone())
     }
 
     fn fast_mark(&self, tag: &str) -> Option<FastMarkConfig> {
@@ -389,34 +378,30 @@ fn compile_definitions(
     }
     // Domain sets and forwards are fully built before any sequence compiles,
     // so definition order never decides whether a reference resolves.
-    let mut domain_sets: Vec<(String, Rc<MixMatcher<()>>)> = Vec::new();
+    let mut domain_sets: Vec<(String, DomainSetHandle)> = Vec::new();
     let mut domain_set_configs: Vec<DomainSetConfig> = Vec::new();
     let mut managed_files: BTreeMap<PathBuf, String> = BTreeMap::new();
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::DomainSet {
-            let compiled = compile_domain_set(plugin)?;
-            if let Some(managed) = &compiled.managed {
+            let (config, handle) = compile_domain_set(plugin)?;
+            if let Some(managed) = &config.managed {
                 // Two tags sharing one writable file would silently overwrite
                 // each other, so the ambiguity is rejected before bind.
-                let identity =
-                    std::fs::canonicalize(&managed.file).unwrap_or_else(|_| managed.file.clone());
+                let identity = std::fs::canonicalize(managed.file())
+                    .unwrap_or_else(|_| managed.file().to_path_buf());
                 if let Some(existing) = managed_files.get(&identity) {
                     return Err(ConfigError::new(
                         format!("{}.args.files[0]", plugin.source_path),
                         format!(
                             "managed rule file `{}` is already owned by `{existing}`",
-                            managed.file.display()
+                            managed.file().display()
                         ),
                     ));
                 }
                 managed_files.insert(identity, plugin.tag.clone());
             }
-            domain_sets.push((plugin.tag.clone(), Rc::clone(&compiled.matcher)));
-            domain_set_configs.push(DomainSetConfig {
-                tag: plugin.tag.clone(),
-                managed: compiled.managed,
-                matcher: compiled.matcher,
-            });
+            domain_sets.push((plugin.tag.clone(), handle));
+            domain_set_configs.push(config);
         }
     }
     let mut forwards = Vec::new();
@@ -791,13 +776,9 @@ fn quick_fixture_name(path: &str) -> String {
     format!("__native_quick_{path}")
 }
 
-/// One compiled `domain_set` before it is registered in the public catalog.
-struct CompiledDomainSet {
-    matcher: Rc<MixMatcher<()>>,
-    managed: Option<ManagedDomainSetConfig>,
-}
-
-fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigError> {
+fn compile_domain_set(
+    plugin: &RawPlugin,
+) -> Result<(DomainSetConfig, DomainSetHandle), ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "domain_set args must be a mapping")?;
     args.reject_unknown(&["exps", "files"], &path)?;
@@ -827,16 +808,29 @@ fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigErr
         && Path::new(&files[0])
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"));
-    let managed = if single_txt_file {
-        Some(ManagedDomainSetConfig {
-            file: resolve_rule_path(&files[0], &plugin.base_dir),
-            rules: accepted,
-            source_path: plugin.source_path.clone(),
-        })
+    let (managed, handle) = if single_txt_file {
+        let provider = Rc::new(ManagedDomainSet::new(
+            plugin.tag.clone(),
+            resolve_rule_path(&files[0], &plugin.base_dir),
+            plugin.source_path.clone(),
+            accepted,
+            matcher,
+        ));
+        (
+            Some(Rc::clone(&provider)),
+            DomainSetHandle::Managed(provider),
+        )
     } else {
-        None
+        (None, DomainSetHandle::Fixed(Rc::new(matcher)))
     };
-    Ok(CompiledDomainSet { matcher, managed })
+    Ok((
+        DomainSetConfig {
+            tag: plugin.tag.clone(),
+            managed,
+            handle: handle.clone(),
+        },
+        handle,
+    ))
 }
 
 fn string_list(value: Option<&RawValue>, path: &str) -> Result<Vec<String>, ConfigError> {
@@ -1038,7 +1032,7 @@ fn compile_qname(
     path: &str,
     catalog: &PluginCatalog<'_>,
 ) -> Result<QnameMatcher, ConfigError> {
-    let mut groups: Vec<Rc<MixMatcher<()>>> = Vec::new();
+    let mut groups: Vec<DomainSetHandle> = Vec::new();
     let mut inline = MixMatcher::new();
     inline.set_default("domain");
     let mut has_inline = false;
@@ -1067,7 +1061,7 @@ fn compile_qname(
         ));
     }
     if has_inline {
-        groups.push(Rc::new(inline));
+        groups.push(DomainSetHandle::Fixed(Rc::new(inline)));
     }
     Ok(QnameMatcher::new(groups))
 }

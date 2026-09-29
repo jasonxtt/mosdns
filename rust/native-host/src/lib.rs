@@ -1,27 +1,32 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::pedantic)]
 
+mod api;
 mod assembly;
 mod cache;
 mod cli;
 mod config;
 mod execution;
+mod managed;
 mod matchers;
 mod observer;
 mod plugins;
 mod tcp;
 mod udp;
 
+pub use api::{ApiServer, ApiServerError};
 pub use assembly::{
-    AssemblyError, ForwardAdapter, HostAssembly, HostOptions, HostRunError, HostRuntime,
+    AssemblyError, BoundHost, DnsServer, ForwardAdapter, HostAssembly, HostOptions, HostRunError,
+    HostRuntime,
 };
 pub use cache::{CacheAdapterError, CacheClock, CacheTestClock, NativeCacheAdapter, PendingStore};
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
     ApiConfig, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig, ForwardConfig,
-    ListenerConfig, ListenerKind, LogLevel, ManagedDomainSetConfig, SequenceConfig, compile_yaml,
-    compile_yaml_with_base, load_and_compile, load_yaml,
+    ListenerConfig, ListenerKind, LogLevel, SequenceConfig, compile_yaml, compile_yaml_with_base,
+    load_and_compile, load_yaml,
 };
+pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault};
 pub use observer::{
     AuditRecord, AuditSnapshot, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,
     FailureProvenance, LocalFailureKind, MetricsSnapshot, QueryTerminalOutcome, QueryTransport,

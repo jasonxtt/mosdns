@@ -1,19 +1,21 @@
 use std::net::{IpAddr, Ipv4Addr};
-use std::rc::Rc;
 
 use mosdns_dns_core::observe_answer_addresses;
 use mosdns_matcher_core::{IpPrefixList, MixMatcher};
 use mosdns_sequence_core::{ExecutionState, MatchOutcome, Matcher, MatcherError, ResponseState};
 
+use crate::managed::DomainSetHandle;
+
 /// One qname matcher plus every domain set it consults. A match is true when
 /// any consulted set matches, preserving the configured reference order. A
-/// referenced set is shared, so a large rule index is built and held once.
+/// managed set is read through its current published generation at every
+/// evaluation, so a POST is visible to the very next query.
 pub(crate) struct QnameMatcher {
-    groups: Vec<Rc<MixMatcher<()>>>,
+    groups: Vec<DomainSetHandle>,
 }
 
 impl QnameMatcher {
-    pub(crate) fn new(groups: Vec<Rc<MixMatcher<()>>>) -> Self {
+    pub(crate) fn new(groups: Vec<DomainSetHandle>) -> Self {
         Self { groups }
     }
 }
@@ -21,7 +23,7 @@ impl QnameMatcher {
 impl Matcher for QnameMatcher {
     fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
         let matched = wire_name_to_ascii_domain(&state.query.question.qname_wire)
-            .is_some_and(|domain| self.groups.iter().any(|set| set.r#match(&domain).is_some()));
+            .is_some_and(|domain| self.groups.iter().any(|set| set.matches(&domain)));
         Ok(MatchOutcome::new(matched, None))
     }
 }
@@ -171,7 +173,8 @@ pub(crate) fn resolve_rule_path(file: &str, base_dir: &std::path::Path) -> std::
 /// Builds one domain-set matcher from ordered rule expressions and rule files.
 ///
 /// The set uses the shared [`MixMatcher`] grammar and normalization rather than
-/// a second matching engine. The returned vector is the accepted rule text in
+/// a second matching engine. The returned matcher is owned by the caller and
+/// the vector is the accepted rule text in
 /// Go's provider order: every `exps` entry, then each file's accepted rules.
 ///
 /// File rules follow the Go text-file policy: trim outer whitespace, skip blank
@@ -183,7 +186,7 @@ pub(crate) fn build_domain_set(
     expressions: &[String],
     files: &[String],
     base_dir: &std::path::Path,
-) -> Result<(Rc<MixMatcher<()>>, Vec<String>), DomainSetError> {
+) -> Result<(MixMatcher<()>, Vec<String>), DomainSetError> {
     let mut set = MixMatcher::new();
     set.set_default("domain");
     let mut accepted: Vec<String> = Vec::with_capacity(expressions.len());
@@ -215,7 +218,7 @@ pub(crate) fn build_domain_set(
             }
         }
     }
-    Ok((Rc::new(set), accepted))
+    Ok((set, accepted))
 }
 
 /// A rule-level rejection from the domain-set loader, keeping the offending

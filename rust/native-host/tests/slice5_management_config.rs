@@ -130,7 +130,7 @@ fn text_file_rules_follow_go_acceptance_and_skip_invalid_lines() {
     // inline `#` as part of the candidate rule, and skips an invalid individual
     // rule without failing the load.
     assert_eq!(
-        managed.rules,
+        managed.rules(),
         vec![
             "valid-one.example".to_owned(),
             "spaced.example".to_owned(),
@@ -139,7 +139,7 @@ fn text_file_rules_follow_go_acceptance_and_skip_invalid_lines() {
         ],
         "accepted rules must match Go's text-file policy"
     );
-    assert!(managed.file.ends_with("rules/managed.txt"), "{managed:?}");
+    assert!(managed.file().ends_with("rules/managed.txt"), "{managed:?}");
     assert!(set.matches("valid-one.example"));
     assert!(set.matches("spaced.example"));
     assert!(
@@ -332,11 +332,11 @@ fn two_managed_tags_keep_independent_rules() {
     assert!(beta.matches("beta.example"));
     assert!(!beta.matches("alpha.example"));
     assert_eq!(
-        alpha.managed.as_ref().expect("managed alpha").rules,
+        alpha.managed.as_ref().expect("managed alpha").rules(),
         vec!["alpha.example".to_owned()]
     );
     assert_eq!(
-        beta.managed.as_ref().expect("managed beta").rules,
+        beta.managed.as_ref().expect("managed beta").rules(),
         vec!["beta.example".to_owned()]
     );
 }
@@ -357,9 +357,9 @@ fn a_managed_file_inside_an_include_resolves_from_the_included_directory() {
     );
     let set = config.domain_set("included_set").expect("included tag");
     let managed = set.managed.as_ref().expect("managed included profile");
-    assert_eq!(managed.rules, vec!["included.example".to_owned()]);
+    assert_eq!(managed.rules(), vec!["included.example".to_owned()]);
     assert!(
-        managed.file.ends_with("sub/rules/managed.txt"),
+        managed.file().ends_with("sub/rules/managed.txt"),
         "the managed file must resolve beside the included YAML: {managed:?}"
     );
 }
