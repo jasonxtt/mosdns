@@ -90,6 +90,9 @@ pub struct ApiConfig {
 pub struct DomainSetConfig {
     pub tag: String,
     pub managed: Option<Rc<ManagedDomainSet>>,
+    /// Why a query-only or conflicting shape is not a management target. The
+    /// bounded API reports this explicitly instead of guessing.
+    pub ineligible_reason: Option<String>,
     handle: DomainSetHandle,
 }
 
@@ -378,31 +381,65 @@ fn compile_definitions(
     }
     // Domain sets and forwards are fully built before any sequence compiles,
     // so definition order never decides whether a reference resolves.
-    let mut domain_sets: Vec<(String, DomainSetHandle)> = Vec::new();
-    let mut domain_set_configs: Vec<DomainSetConfig> = Vec::new();
-    let mut managed_files: BTreeMap<PathBuf, String> = BTreeMap::new();
+    //
+    // Management eligibility is decided once every candidate is known: two
+    // single-`.txt` tags that resolve to the same writable file keep loading and
+    // matching normally, but neither may be managed, so a shared file is never
+    // written through the management API.
+    let mut compiled_domain_sets: Vec<CompiledDomainSet> = Vec::new();
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::DomainSet {
-            let (config, handle) = compile_domain_set(plugin)?;
-            if let Some(managed) = &config.managed {
-                // Two tags sharing one writable file would silently overwrite
-                // each other, so the ambiguity is rejected before bind.
-                let identity = std::fs::canonicalize(managed.file())
-                    .unwrap_or_else(|_| managed.file().to_path_buf());
-                if let Some(existing) = managed_files.get(&identity) {
-                    return Err(ConfigError::new(
-                        format!("{}.args.files[0]", plugin.source_path),
-                        format!(
-                            "managed rule file `{}` is already owned by `{existing}`",
-                            managed.file().display()
-                        ),
-                    ));
-                }
-                managed_files.insert(identity, plugin.tag.clone());
-            }
-            domain_sets.push((plugin.tag.clone(), handle));
-            domain_set_configs.push(config);
+            compiled_domain_sets.push(compile_domain_set(plugin)?);
         }
+    }
+    let mut file_owners: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    for set in &compiled_domain_sets {
+        if let Some(candidate) = &set.candidate {
+            *file_owners.entry(candidate.identity.clone()).or_default() += 1;
+        }
+    }
+    let mut domain_sets: Vec<(String, DomainSetHandle)> = Vec::new();
+    let mut domain_set_configs: Vec<DomainSetConfig> = Vec::new();
+    for set in compiled_domain_sets {
+        let shared = set.candidate.as_ref().is_some_and(|candidate| {
+            file_owners
+                .get(&candidate.identity)
+                .copied()
+                .unwrap_or_default()
+                > 1
+        });
+        let (managed, ineligible_reason, handle) = match set.candidate {
+            Some(candidate) if !shared => {
+                let provider = Rc::new(ManagedDomainSet::new(
+                    set.tag.clone(),
+                    candidate.file,
+                    candidate.source_path,
+                    candidate.rules,
+                    set.matcher,
+                ));
+                (
+                    Some(Rc::clone(&provider)),
+                    None,
+                    DomainSetHandle::Managed(provider),
+                )
+            }
+            Some(candidate) => (
+                None,
+                Some(format!(
+                    "writable rule file `{}` is shared with another tag, so neither may be managed",
+                    candidate.file.display()
+                )),
+                DomainSetHandle::Fixed(Rc::new(set.matcher)),
+            ),
+            None => (None, None, DomainSetHandle::Fixed(Rc::new(set.matcher))),
+        };
+        domain_sets.push((set.tag.clone(), handle.clone()));
+        domain_set_configs.push(DomainSetConfig {
+            tag: set.tag,
+            managed,
+            ineligible_reason,
+            handle,
+        });
     }
     let mut forwards = Vec::new();
     let mut fast_marks = Vec::new();
@@ -776,9 +813,24 @@ fn quick_fixture_name(path: &str) -> String {
     format!("__native_quick_{path}")
 }
 
-fn compile_domain_set(
-    plugin: &RawPlugin,
-) -> Result<(DomainSetConfig, DomainSetHandle), ConfigError> {
+/// One compiled `domain_set` before management eligibility is decided.
+struct CompiledDomainSet {
+    tag: String,
+    matcher: MixMatcher<()>,
+    /// Present when the declared shape is a single-`.txt` management candidate.
+    candidate: Option<ManagedCandidate>,
+}
+
+/// A single-`.txt` profile that could be managed, pending the shared-file check.
+struct ManagedCandidate {
+    file: PathBuf,
+    /// Canonical identity used to detect two tags claiming one writable file.
+    identity: PathBuf,
+    rules: Vec<String>,
+    source_path: String,
+}
+
+fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "domain_set args must be a mapping")?;
     args.reject_unknown(&["exps", "files"], &path)?;
@@ -808,29 +860,23 @@ fn compile_domain_set(
         && Path::new(&files[0])
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"));
-    let (managed, handle) = if single_txt_file {
-        let provider = Rc::new(ManagedDomainSet::new(
-            plugin.tag.clone(),
-            resolve_rule_path(&files[0], &plugin.base_dir),
-            plugin.source_path.clone(),
-            accepted,
-            matcher,
-        ));
-        (
-            Some(Rc::clone(&provider)),
-            DomainSetHandle::Managed(provider),
-        )
+    let candidate = if single_txt_file {
+        let file = resolve_rule_path(&files[0], &plugin.base_dir);
+        let identity = std::fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
+        Some(ManagedCandidate {
+            file,
+            identity,
+            rules: accepted,
+            source_path: plugin.source_path.clone(),
+        })
     } else {
-        (None, DomainSetHandle::Fixed(Rc::new(matcher)))
+        None
     };
-    Ok((
-        DomainSetConfig {
-            tag: plugin.tag.clone(),
-            managed,
-            handle: handle.clone(),
-        },
-        handle,
-    ))
+    Ok(CompiledDomainSet {
+        tag: plugin.tag.clone(),
+        matcher,
+        candidate,
+    })
 }
 
 fn string_list(value: Option<&RawValue>, path: &str) -> Result<Vec<String>, ConfigError> {

@@ -16,14 +16,15 @@ Deliver one visible 5C workflow on the pure Rust-native host: in an isolated con
 
 ### R1. Managed profile and HTTP owner
 
-- Support one or more independently tagged, single-writable-file native `domain_set` instances. Each managed profile has exactly one UTF-8 `.txt` rule file resolved relative to its declaring YAML file. Existing native query-only `exps` and multiple-`files` shapes remain supported, but management rejects ambiguous sources visibly rather than discarding rules silently. Native `sets` remains unsupported and is outside this task; do not add it as part of management.
-- Align native `.txt` initial load and restart with Go: trim surrounding whitespace; skip empty lines and whole-line `#` comments; do not treat inline `#` as a comment; skip invalid individual file rules. POST validates each submitted value and skips invalid rules as Go does. For the Vue-shaped trimmed payload in this task, POST publication, persisted file and restart must produce the same effective accepted rule set. Keep `exps` invalid-rule errors strict. Update existing Rust tests that asserted the old `.txt` abort behavior, while retaining source-path diagnostics for file read and other real load errors. This is bounded text-rule compatibility, not full SRS/missing-file parity.
+- Support one or more independently tagged, single-writable-file native `domain_set` instances. Each managed profile has exactly one UTF-8 `.txt` rule file resolved relative to its declaring YAML file. Existing native query-only `exps` and multiple-`files` shapes remain supported, but management rejects ambiguous sources visibly rather than discarding rules silently. Per approved amendment A2, two tags that resolve to the same writable file still load and query, but both become management-ineligible with an explicit reason and no shared write ever happens. Native `sets` remains unsupported and is outside this task; do not add it as part of management.
+- Align native `.txt` initial load and restart with Go: trim surrounding whitespace; skip empty lines and whole-line `#` comments; do not treat inline `#` as a comment; skip invalid individual file rules. POST normalizes each submitted value the same way the file loader does (approved amendment A1: trim outer whitespace, skip empty and whole-line `#` values, then matcher validation) rather than handing `values` to the matcher verbatim as Go's `MixMatcher.Add` does. For the Vue-shaped trimmed payload in this task, POST publication, persisted file and restart must produce the same effective accepted rule set. Keep `exps` invalid-rule errors strict. Update existing Rust tests that asserted the old `.txt` abort behavior, while retaining source-path diagnostics for file read and other real load errors. This is bounded text-rule compatibility, not full SRS/missing-file parity.
 - Add one host-owned HTTP listener for this scoped management API. Its bind, failed startup cleanup, close, and port rebind are coordinated with DNS. Do not create a second runtime or matcher path.
 - Expose only eligible configured tags at `/plugins/{tag}/show`, `/save`, `/post`. Preserve Go-visible method, status, body and content type; unknown and ineligible tags fail explicitly.
 
 ### R2. Safe persistence and query publication
 
 - `/show` returns accepted live rules as UTF-8 plain text, one per line. GET `/save` persists the current generation. POST `/post` accepts the UI payload, preserves characterized per-rule acceptance, persists the complete candidate before publishing it, and reports the compatible replacement count.
+- Per approved amendment A1, a POST value is normalized like a rule-file line instead of being accepted verbatim; per approved amendment A2, a writable file claimed by two tags is never managed. Both are explicit intentional compatibility deviations and are pinned by tests.
 - Invalid JSON, ineligible configuration, candidate compilation error or persistence failure leaves old file bytes and matcher generation unchanged. Persistence failure includes the final replace/rename after a temporary file was created; clean that temporary file and do not publish. Use safe same-directory replacement with process-restart retention; this task does not claim crash/power-loss durability. Concurrent DNS queries observe a whole old or new immutable generation. Restart loads the committed generation. No file I/O under a DNS hot-path lock.
 
 ### R3. Maintained Vue page to actual DNS
@@ -53,6 +54,40 @@ Deliver one visible 5C workflow on the pure Rust-native host: in an isolated con
 ## Out of scope
 
 Native `domain_set sets` references; full `special_groups` mutations/routing; config package generation/update; other providers and downloads; other Vue tabs; `/log`; bundled UI serving from Rust; generated embedded Vue assets; full C04/C05/C10/C11/C17 or 5C; complete production config; SRS/geodata and missing-file compatibility; crash/power-loss durability; cache dump; full metrics/audit API; capacity/soak; dedicated remote fault/cancel/close E2E; 5D; Phase 6; production replacement. Do not write live `/cus/mosdns` state.
+
+## Approved product-decision amendments (2026-09-29)
+
+Both amendments below were put to the user after the first exact-range review flagged that they
+changed frozen PRD behavior without a product decision. The user approved them on 2026-09-29.
+
+### A1 (approved): POST value normalization is an intentional Rust-native deviation
+
+A POST value is normalized exactly like a rule-file line: outer whitespace is trimmed, an empty or
+whole-line `#` value is skipped, and the remaining candidate is validated by the same matcher.
+Go instead passes every `p.Values` entry to `MixMatcher.Add` verbatim. This differs deliberately:
+
+- It keeps the R1 invariant that initial load, Vue-shaped POST, persisted file and restart produce
+  the same effective rule set even for untrimmed input.
+- An empty value would otherwise become a root suffix rule that matches every domain
+  (`DomainSuffixMatcher::add("")` sets the root value).
+
+This must not be described as replicating Go's POST verbatim behavior. Pinned by
+`slice7_management_publication.rs::an_approved_post_normalizes_values_across_http_file_show_and_restart`
+(direct HTTP response, persisted file, `/show`, and a restart host) and
+`save_persists_the_current_generation_and_a_post_skips_blank_and_invalid_values`.
+
+### A2 (approved as revised): a shared writable file loads normally but is never managed
+
+Two single-`.txt` tags that resolve to the same writable file no longer fail configuration load.
+They keep loading, matching and answering DNS queries as query-only shapes, and **both** become
+management-ineligible: `/show`, `/save` and `/post` reject them explicitly with a reason naming the
+shared file, and no shared write happens. This replaces the earlier load-time rejection (which was
+itself an unapproved deviation from Go, where the two tags would silently overwrite each other).
+Pinned by
+`slice5_management_config.rs::two_tags_sharing_one_rule_file_still_load_and_are_management_ineligible`
+(load + query + reason) and
+`slice6_management_http.rs::a_writable_file_shared_by_two_tags_is_never_managed`
+(all three routes reject both tags, file unchanged).
 
 ## Blocking questions
 

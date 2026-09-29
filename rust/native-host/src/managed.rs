@@ -13,8 +13,12 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use mosdns_matcher_core::MixMatcher;
+use mosdns_upstream_core::TransportCancellation;
 
 /// Which step of the safe same-directory replacement fails.
 ///
@@ -29,6 +33,65 @@ pub enum PersistFault {
     WriteTemp,
     /// Finish the temporary file, then fail instead of the final rename.
     Rename,
+}
+
+/// A test-only gate that parks the blocking persistence step so a test can
+/// prove that a DNS reader is still served while an update is in flight.
+///
+/// The wait is bounded: if persistence were (wrongly) running on the DNS
+/// runtime thread, the bound turns a hang into an ordinary test failure.
+#[derive(Clone)]
+pub struct PersistGate {
+    state: Arc<(Mutex<bool>, Condvar)>,
+    arrived: Arc<AtomicUsize>,
+    bound: Duration,
+}
+
+impl PersistGate {
+    /// A gate that parks persistence for at most three seconds per waiter.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new((Mutex::new(false), Condvar::new())),
+            arrived: Arc::new(AtomicUsize::new(0)),
+            bound: Duration::from_secs(3),
+        }
+    }
+
+    /// True once at least one persistence step has entered the gate.
+    #[must_use]
+    pub fn arrived(&self) -> bool {
+        self.arrived.load(Ordering::SeqCst) > 0
+    }
+
+    /// Releases every waiter immediately.
+    pub fn release(&self) {
+        let (lock, condvar) = &*self.state;
+        let mut released = lock.lock().unwrap_or_else(|error| error.into_inner());
+        *released = true;
+        condvar.notify_all();
+    }
+
+    fn wait(&self) {
+        self.arrived.fetch_add(1, Ordering::SeqCst);
+        let (lock, condvar) = &*self.state;
+        let mut released = lock.lock().unwrap_or_else(|error| error.into_inner());
+        while !*released {
+            let (guard, timeout) = condvar
+                .wait_timeout(released, self.bound)
+                .unwrap_or_else(|error| error.into_inner());
+            released = guard;
+            if timeout.timed_out() {
+                return;
+            }
+        }
+    }
+}
+
+impl Default for PersistGate {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// One immutable published generation: the accepted rule text and the compiled
@@ -54,6 +117,13 @@ pub struct ManagedDomainSet {
     source_path: String,
     generation: RefCell<Rc<DomainSetGeneration>>,
     fault: Cell<PersistFault>,
+    /// Serializes one whole update (compile, persist, publish) per provider, so
+    /// two updates can never interleave between the file and the generation.
+    update: tokio::sync::Mutex<()>,
+    /// Test-only gate that holds an update immediately before publication.
+    publish_barrier: RefCell<Option<TransportCancellation>>,
+    /// Test-only gate that parks the blocking persistence step.
+    persist_gate: RefCell<Option<PersistGate>>,
 }
 
 impl ManagedDomainSet {
@@ -70,6 +140,9 @@ impl ManagedDomainSet {
             source_path,
             generation: RefCell::new(Rc::new(DomainSetGeneration::new(rules, matcher))),
             fault: Cell::new(PersistFault::None),
+            update: tokio::sync::Mutex::new(()),
+            publish_barrier: RefCell::new(None),
+            persist_gate: RefCell::new(None),
         }
     }
 
@@ -109,19 +182,51 @@ impl ManagedDomainSet {
     }
 
     /// Persists the current generation without publishing anything new.
-    pub(crate) fn save(&self) -> Result<(), ManagedSetError> {
+    pub(crate) async fn save(&self) -> Result<(), ManagedSetError> {
+        let _update = self.update.lock().await;
         let rules = self.rules();
-        persist_rules_atomically(&self.file, &rules, self.fault.get())
+        let file = self.file.clone();
+        let fault = self.fault.get();
+        // File I/O runs on the blocking pool, never on the DNS runtime thread.
+        tokio::task::spawn_blocking(move || persist_rules_atomically(&file, &rules, fault))
+            .await
+            .map_err(|error| ManagedSetError::Blocking(error.to_string()))?
             .map_err(ManagedSetError::Persist)
     }
 
     /// Compiles, persists and then publishes one complete candidate. Returns
     /// the number of accepted rules. An error leaves the file, the generation
     /// and the temporary-file directory unchanged.
-    pub(crate) fn replace(&self, values: &[String]) -> Result<usize, ManagedSetError> {
-        let (matcher, accepted) = compile_candidate(values);
-        persist_rules_atomically(&self.file, &accepted, self.fault.get())
-            .map_err(ManagedSetError::Persist)?;
+    ///
+    /// The candidate compile and the file write run on the blocking pool, so the
+    /// single-threaded DNS runtime keeps serving queries while an update is in
+    /// flight. Updates are serialized per provider and the generation is
+    /// exchanged in one step only after the file write succeeded.
+    pub(crate) async fn replace(&self, values: &[String]) -> Result<usize, ManagedSetError> {
+        let _update = self.update.lock().await;
+        let file = self.file.clone();
+        let fault = self.fault.get();
+        let values = values.to_vec();
+        let gate = self.persist_gate.borrow().clone();
+        let (matcher, accepted) = tokio::task::spawn_blocking(move || {
+            let (matcher, accepted) = compile_candidate(&values);
+            if let Some(gate) = gate {
+                gate.wait();
+            }
+            persist_rules_atomically(&file, &accepted, fault)?;
+            Ok::<_, io::Error>((matcher, accepted))
+        })
+        .await
+        .map_err(|error| ManagedSetError::Blocking(error.to_string()))?
+        .map_err(ManagedSetError::Persist)?;
+
+        // Test-only deterministic gate. Production leaves it unset, so the only
+        // work between the successful write and the swap is this check.
+        let barrier = self.publish_barrier.borrow().clone();
+        if let Some(barrier) = barrier {
+            barrier.cancelled().await;
+        }
+
         let count = accepted.len();
         *self.generation.borrow_mut() = Rc::new(DomainSetGeneration::new(accepted, matcher));
         Ok(count)
@@ -131,6 +236,20 @@ impl ManagedDomainSet {
     #[doc(hidden)]
     pub fn inject_persist_fault(&self, fault: PersistFault) {
         self.fault.set(fault);
+    }
+
+    /// Arms one test-only gate that holds an update immediately before
+    /// publication until the token is cancelled. Only tests call this.
+    #[doc(hidden)]
+    pub fn inject_publish_barrier(&self, barrier: TransportCancellation) {
+        *self.publish_barrier.borrow_mut() = Some(barrier);
+    }
+
+    /// Arms one test-only gate that parks the blocking persistence step. Only
+    /// tests call this.
+    #[doc(hidden)]
+    pub fn inject_persist_gate(&self, gate: PersistGate) {
+        *self.persist_gate.borrow_mut() = Some(gate);
     }
 }
 
@@ -172,12 +291,15 @@ fn compile_candidate(values: &[String]) -> (MixMatcher<()>, Vec<String>) {
 #[derive(Debug)]
 pub enum ManagedSetError {
     Persist(io::Error),
+    /// The blocking candidate/persistence task could not be joined.
+    Blocking(String),
 }
 
 impl fmt::Display for ManagedSetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Persist(error) => write!(formatter, "{error}"),
+            Self::Blocking(error) => write!(formatter, "blocking update task failed: {error}"),
         }
     }
 }

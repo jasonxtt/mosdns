@@ -26,6 +26,8 @@
 | C10 插件 API 子项 | 原生 host 自有 scoped 管理 listener（`api.http`，DNS-only 配置仍有效）；`/plugins/{tag}` 的方法/状态/响应体/Content-Type 契约（`/show` 忽略查询串、`/save` 空 200、`/post` `400 invalid JSON`/`400` 非 `.txt`/`200 domain_set replaced with N entries`）；`GET /api/v1/special-groups` 只读返回真实 `[]`；未知 tag 404、不合格 tag 400、错方法 405；DNS 与 HTTP 由一个顶层 scope 统一 bind/cancel/join 并回收 | 其它插件的 handler、完整指标名/label、group 变更路由（POST/DELETE）、coremain 其余 `/api` 面 |
 | C11 本地规则 UI 流程子项 | 维护中 Vue `/` 的 Rules → 本地规则页在隔离 Vite 代理（显式 `MOSDNS_DEV_TARGET`）下经真实 native HTTP → 文件 → 真实 DNS 查询完成加载/编辑/保存，刷新与 host 重启后保留；POST 失败保留草稿与错误；POST 200 后 canonical `/show` 重读失败时按 tag 标记“服务器已保存但内容未确认”、保留草稿、不计入已保存数、其它脏 tag 独立处理，后续 save/load 先重试 canonical 读取再决定是否再次提交；被服务端跳过的非法规则以服务端内容呈现并提示 | Rust 内置静态资源服务、其它标签页与完整页面操作、`/log`、外部 UI 挂载 |
 
+已批准的产品决策偏差（2026-09-29，写入该任务 PRD 修正案）：POST 的值按规则文件行同样规范化（trim、跳过空行与整行 `#`、再做 matcher 校验），这是有意的 Rust-native 偏差，不得描述为逐字复制 Go 的 POST；两个 tag 指向同一可写文件时仍正常加载与查询，但两者都变为管理不可用并显式报出原因，不发生共享写入。发布路径的候选编译与文件写入在 blocking pool 上执行，受单一 provider 级更新锁串行化，不阻塞单线程 DNS runtime。
+
 证据：`rust/native-host/tests/slice5_management_config.rs`、`slice6_management_http.rs`、`slice7_management_publication.rs`（后者含失败注入与整代不变量）；真实 Chrome + Vite + native 的浏览器证明 `research/slice3-browser-proof/evidence.json`（45/45）；`mosdns-rust` 上的 fmt/clippy/workspace 测试与真实进程 HTTP+DNS 证明 `research/linux-validation/`（20/20）。本项不包含远端 fault/cancel/close 专门 E2E、5D、Phase 6 或生产替换。
 
 ### 5B 代表链实现子项（本地与指定 Linux E2E 通过；用户指定 C2C review PASS；专门远端 fault E2E 延期；已归档）

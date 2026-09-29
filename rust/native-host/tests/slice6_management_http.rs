@@ -204,6 +204,10 @@ fn get(path: &str) -> String {
     format!("GET {path} HTTP/1.1\r\nHost: native\r\nConnection: close\r\n\r\n")
 }
 
+fn raw(method: &str, path: &str) -> String {
+    format!("{method} {path} HTTP/1.1\r\nHost: native\r\nConnection: close\r\n\r\n")
+}
+
 fn post(path: &str, body: &str) -> String {
     format!(
         "POST {path} HTTP/1.1\r\nHost: native\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -478,4 +482,140 @@ fn a_running_side_failure_cancels_and_joins_the_other_listener() {
     // The supervisor must have joined the DNS side and released both sockets.
     StdUdpSocket::bind(dns).expect("the DNS socket must be released");
     StdTcpListener::bind(api).expect("the management socket must be released");
+}
+
+#[test]
+fn a_tag_that_is_not_mounted_is_404_before_any_method_decision() {
+    let fixture = fixture("unknown-tag-methods", free_udp_port(), free_tcp_port());
+    let assembly = assembly_for(&fixture);
+    let bound = assembly
+        .block_on(assembly.bind_host())
+        .expect("bound host listeners");
+    let api = bound.api_addr().expect("management listener address");
+    let shutdown = TransportCancellation::new();
+
+    let result = assembly.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+
+        // Go mounts `/plugins/{tag}` only for a configured tag, so a tag with no
+        // mount is 404 whatever the method is.
+        for (method, path) in [
+            ("POST", "/plugins/absent/show"),
+            ("GET", "/plugins/absent/post"),
+            ("DELETE", "/plugins/absent/save"),
+            ("POST", "/plugins/absent/post"),
+        ] {
+            let response = http_request(api, &raw(method, path)).await;
+            assert_eq!(
+                response.status, 404,
+                "{method} {path} must be 404 because the tag is not mounted: {response:?}"
+            );
+            assert_eq!(response.body, "404 page not found\n");
+        }
+
+        // A mounted tag with a wrong method is 405, and so is a mounted but
+        // ineligible tag: the route exists, the method does not.
+        let wrong_on_managed = http_request(api, &post("/plugins/blocklist/show", "")).await;
+        assert_eq!(wrong_on_managed.status, 405, "{wrong_on_managed:?}");
+        let wrong_on_ineligible = http_request(api, &raw("GET", "/plugins/exps_only/post")).await;
+        assert_eq!(wrong_on_ineligible.status, 405, "{wrong_on_ineligible:?}");
+
+        // A mounted tag with an unknown action has no route either.
+        let unknown_action = http_request(api, &raw("GET", "/plugins/blocklist/nope")).await;
+        assert_eq!(unknown_action.status, 404);
+
+        // The group-list route exists, so a wrong method there is 405.
+        let group_wrong_method = http_request(api, &raw("POST", "/api/v1/special-groups")).await;
+        assert_eq!(group_wrong_method.status, 405);
+
+        shutdown.cancel();
+        task.await.expect("supervisor task")
+    });
+    result.expect("supervisor shutdown is clean");
+}
+
+#[test]
+fn a_writable_file_shared_by_two_tags_is_never_managed() {
+    let fixture = Fixture::new("shared-file-api");
+    fixture.write("rules/shared.txt", "shared.example\n");
+    let yaml = format!(
+        r#"log:
+  level: error
+api:
+  http: "127.0.0.1:{}"
+plugins:
+  - tag: sequence_main
+    type: sequence
+    args:
+      - matches: qname $first
+        exec: reject 3
+      - exec: reject 0
+  - tag: first
+    type: domain_set
+    args:
+      files:
+        - rules/shared.txt
+  - tag: second
+    type: domain_set
+    args:
+      files:
+        - rules/shared.txt
+  - tag: forward_main
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:25999"
+  - tag: listener
+    type: udp_server
+    args:
+      entry: sequence_main
+      listen: "127.0.0.1:{}"
+      enable_audit: false
+"#,
+        free_tcp_port(),
+        free_udp_port()
+    );
+    fixture.write("config.yaml", &yaml);
+    let assembly = assembly_for(&fixture);
+    let bound = assembly
+        .block_on(assembly.bind_host())
+        .expect("bound host listeners");
+    let api = bound.api_addr().expect("management listener address");
+    let shutdown = TransportCancellation::new();
+
+    let result = assembly.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+
+        // Both conflicting tags are rejected explicitly on every management
+        // route, and the shared file is never written through the API.
+        for tag in ["first", "second"] {
+            let show = http_request(api, &get(&format!("/plugins/{tag}/show"))).await;
+            assert_eq!(show.status, 400, "{show:?}");
+            assert!(
+                show.body.contains("shared"),
+                "the rejection must name the shared file: {}",
+                show.body
+            );
+            let save = http_request(api, &get(&format!("/plugins/{tag}/save"))).await;
+            assert_eq!(save.status, 400, "{save:?}");
+            let post = http_request(
+                api,
+                &post(
+                    &format!("/plugins/{tag}/post"),
+                    r#"{"values":["x.example"]}"#,
+                ),
+            )
+            .await;
+            assert_eq!(post.status, 400, "{post:?}");
+        }
+        assert_eq!(
+            fixture.read("rules/shared.txt"),
+            "shared.example\n",
+            "no shared-file write may happen"
+        );
+
+        shutdown.cancel();
+        task.await.expect("supervisor task")
+    });
+    result.expect("supervisor shutdown is clean");
 }
