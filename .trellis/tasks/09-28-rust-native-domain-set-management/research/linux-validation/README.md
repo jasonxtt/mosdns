@@ -5,14 +5,24 @@ run on the `mosdns-rust` SSH alias (`10.0.0.92`) only. Nothing here touches the
 live service (pid 425, `/usr/local/bin/mosdns -d /cus/mosdns`), any live port,
 or `/cus/mosdns`.
 
-Validated revision: `8f7b439d53a4ad379678ca0df47399af0297be95` (branch `rust`, the review
-remediation commit; `git diff --name-only HEAD -- rust/ webui-log/` was empty, so this is exactly the
-validated code).
-Source archive SHA-256: `b9b829a13c056b77227d08a547d75f51500da6250c1995c980fc2c27929575a7`.
+Validated revision: `fab8b682d8365857472603b6631eca279b096d4d` (branch `rust`, the second-round
+review remediation commit; `git diff --name-only HEAD -- rust/ webui-log/` was empty, so this is
+exactly the validated code).
+Source archive SHA-256: `2e396315c0bb4f620d9257353e8e6d56c75bec2a92b5bd7f0f7c8c706567418f`.
 
-The first run (revision `03bdc5b8`, archive `cc32b49a…`) is superseded by the remediated re-run
-below; the first run's 17/20 and its Time-Wait probe correction are kept in the history section.
-The `evidence/` files are the remediated re-run.
+Two earlier runs are superseded history: revision `03bdc5b8` (archive `cc32b49a…`, the first run
+with its 17/20 and Time-Wait probe correction) and revision `8f7b439d` (archive `b9b829a1…`, the
+round-1 remediation). The `evidence/` files are the latest run, listed below.
+
+## Re-run (round 2, 2026-09-29)
+
+Re-run after the round-2 review finding (the cross-tag file-conflict fix). Same root layout and
+commands with `R=/root/mosdns-rust-domainset-v3-20260929`; the remote root was removed after the
+evidence was copied. Results were identical to the round-1 re-run: `cargo fmt` exit 0, clippy exit 0
+with no warnings, `cargo test --workspace` exit 0 across 64 `test result: ok` binaries with 0
+failures / 0 `error` / 0 `warning`, `cargo build -p mosdns-native-host` exit 0, Vue `npm ci` +
+`npm run build` exit 0 with the source snapshot assets byte-identical and the new reconcile state in
+the bundle, and the real-process HTTP+DNS proof 20/20.
 
 ## Environment
 
