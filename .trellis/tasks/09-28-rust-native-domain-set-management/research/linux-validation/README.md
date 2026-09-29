@@ -5,8 +5,14 @@ run on the `mosdns-rust` SSH alias (`10.0.0.92`) only. Nothing here touches the
 live service (pid 425, `/usr/local/bin/mosdns -d /cus/mosdns`), any live port,
 or `/cus/mosdns`.
 
-Validated revision: `03bdc5b8dfcba4ee5d50ecc1f8b1e19ad03ad8b7` (branch `rust`).
-Source archive SHA-256: `cc32b49a3fe8f3b858f3c512d1ed039e94d59de29cb877ab5a5cb72ce43905b4`.
+Validated revision: `8f7b439d53a4ad379678ca0df47399af0297be95` (branch `rust`, the review
+remediation commit; `git diff --name-only HEAD -- rust/ webui-log/` was empty, so this is exactly the
+validated code).
+Source archive SHA-256: `b9b829a13c056b77227d08a547d75f51500da6250c1995c980fc2c27929575a7`.
+
+The first run (revision `03bdc5b8`, archive `cc32b49a…`) is superseded by the remediated re-run
+below; the first run's 17/20 and its Time-Wait probe correction are kept in the history section.
+The `evidence/` files are the remediated re-run.
 
 ## Environment
 
@@ -83,7 +89,24 @@ bash $R/src/.trellis/tasks/09-28-rust-native-domain-set-management/research/linu
   $R/target/debug/mosdns $R/functional
 ```
 
-## Results
+## Remediated re-run (v2, 2026-09-29)
+
+Re-run after the review remediation (non-blocking persistence, tag-existence-before-method HTTP
+ordering, UI preserved-vs-adjusted states, approved PRD amendments A1/A2). Same remote root layout
+and the same commands as above with `R=/root/mosdns-rust-domainset-v2-20260929`; the remote root was
+removed after the evidence was copied.
+
+| Gate | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0, no warnings |
+| `cargo test --workspace` | exit 0, **64 `test result: ok` binaries, 0 failed, 0 `error`, 0 `warning`** |
+| `cargo build -p mosdns-native-host` | exit 0 |
+| Vue `npm ci` + `npm run build` (disposable copy) | exit 0, source snapshot assets byte-identical |
+| Built bundle contains the new reconcile state | `已保留本地编辑` occurs twice in the built `app.js` |
+| Real-process functional proof | **20/20 passed**, exit 0 |
+
+## Results (first run, revision 03bdc5b8; superseded)
 
 | Gate | Result |
 | --- | --- |
