@@ -1,0 +1,364 @@
+{
+  "recordedAt": "2026-09-29T14:54:51.686Z",
+  "nativeBinary": "/Users/tom/github/mosdns-rust/rust/target/debug/mosdns",
+  "viteProxyTarget": "http://127.0.0.1:62536",
+  "viteUrl": "http://127.0.0.1:62537",
+  "ports": {
+    "dns": 61756,
+    "api": 62536,
+    "vite": 62537,
+    "chromeDebug": 62538
+  },
+  "fixture": {
+    "work": "(removed)",
+    "config": "log:\n  level: error\napi:\n  http: \"127.0.0.1:62536\"\nplugins:\n  - tag: sequence_main\n    type: sequence\n    args:\n      - matches: qname $blocklist\n        exec: reject 3\n      - exec: reject 0\n  - tag: blocklist\n    type: domain_set\n    args:\n      files:\n        - rules/blocklist.txt\n  - tag: whitelist\n    type: domain_set\n    args:\n      files:\n        - rules/whitelist.txt\n  - tag: forward_main\n    type: forward\n    args:\n      upstreams:\n        - addr: \"udp://127.0.0.1:25999\"\n  - tag: listener\n    type: udp_server\n    args:\n      entry: sequence_main\n      listen: \"127.0.0.1:61756\"\n      enable_audit: false\n"
+  },
+  "checks": [
+    {
+      "name": "native host serves the scoped API",
+      "ok": true,
+      "detail": "http://127.0.0.1:62536"
+    },
+    {
+      "name": "vite proxies /api/v1/special-groups to the isolated native host",
+      "ok": true,
+      "detail": "actual=\"[]\\n\" expected=\"[]\\n\""
+    },
+    {
+      "name": "vite proxies /plugins to the isolated native host",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\n\" expected=\"seed-blocked.example\\n\""
+    },
+    {
+      "name": "the direct native port answers the same content",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\n\" expected=\"seed-blocked.example\\n\""
+    },
+    {
+      "name": "initial: Rules tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "initial: 本地规则 sub-tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "黑名单 profile button is present and clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "the page loaded the configured tag through the Vite proxy",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\n\" expected=\"seed-blocked.example\\n\""
+    },
+    {
+      "name": "saving the edited list",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "the file contains the edited rule",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-added.example\\n\" expected=\"seed-blocked.example\\nui-added.example\\n\""
+    },
+    {
+      "name": "the next real UDP query reflects the saved rule",
+      "ok": true,
+      "detail": "actual=3 expected=3"
+    },
+    {
+      "name": "a previously blocked rule stays blocked",
+      "ok": true,
+      "detail": "actual=3 expected=3"
+    },
+    {
+      "name": "an unrelated name is not blocked",
+      "ok": true,
+      "detail": "actual=0 expected=0"
+    },
+    {
+      "name": "the save is reported as confirmed",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 1 个列表改动\",\"tone\":\"success\"}]"
+    },
+    {
+      "name": "refresh: Rules tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "refresh: 本地规则 sub-tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "refresh: 黑名单 profile is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "a page refresh retains the saved list",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-added.example\\n\" expected=\"seed-blocked.example\\nui-added.example\\n\""
+    },
+    {
+      "name": "a skipped rule is not presented as canonical",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\n\""
+    },
+    {
+      "name": "the file holds only accepted rules",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\n\""
+    },
+    {
+      "name": "the skipped rule is reported to the user",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 1 个列表；1 个列表已按服务器内容调整（黑名单）\",\"tone\":\"error\"}]"
+    },
+    {
+      "name": "a restarted host serves the same accepted rules",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\n\""
+    },
+    {
+      "name": "a restarted host keeps the DNS effect",
+      "ok": true,
+      "detail": "actual=3 expected=3"
+    },
+    {
+      "name": "post-failure: Rules tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "post-failure: 本地规则 sub-tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "post-failure: 黑名单 profile is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "a failed POST keeps the draft",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\nui-post-fail.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\nui-post-fail.example\\n\""
+    },
+    {
+      "name": "a failed POST does not touch the file",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\n\""
+    },
+    {
+      "name": "a failed POST is reported",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 0 个列表；1 个列表保存失败（黑名单: Failed to fetch）\",\"tone\":\"error\"}]"
+    },
+    {
+      "name": "unconfirmed: Rules tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "unconfirmed: 本地规则 sub-tab is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "unconfirmed: 黑名单 profile is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "unconfirmed: 白名单 profile is clickable",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "unconfirmed: 黑名单 profile re-selected",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "an unconfirmed tag keeps a recoverable draft",
+      "ok": true,
+      "detail": "seed-blocked.example\nui-second.example\nui-unconfirmed.example\n"
+    },
+    {
+      "name": "an unconfirmed tag is reported as unconfirmed, not saved",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 1 个列表；1 个列表服务器保存成功但当前内容未确认（黑名单），请重新加载确认\",\"tone\":\"error\"}]"
+    },
+    {
+      "name": "the confirmed count excludes the unconfirmed tag",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 1 个列表；1 个列表服务器保存成功但当前内容未确认（黑名单），请重新加载确认\",\"tone\":\"error\"}]"
+    },
+    {
+      "name": "the same POST still committed the file",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\nui-unconfirmed.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\nui-unconfirmed.example\\n\""
+    },
+    {
+      "name": "the other dirty tag reconciled independently",
+      "ok": true,
+      "detail": "actual=\"seed-white.example\\nui-white.example\\n\" expected=\"seed-white.example\\nui-white.example\\n\""
+    },
+    {
+      "name": "the unconfirmed tag is visibly marked",
+      "ok": true,
+      "detail": "[{\"name\":\"白名单\",\"dirty\":false},{\"name\":\"黑名单\",\"dirty\":true},{\"name\":\"灰名单\",\"dirty\":false},{\"name\":\"!CN fakeip filter\",\"dirty\":false},{\"name\":\"CN fakeip filter\",\"dirty\":false},{\"name\":\"DDNS 域名\",\"dirty\":false},{\"name\":\"客户端 IP\",\"dirty\":false},{\"name\":\"直连 IP\",\"dirty\":false},{\"name\":\"重定向\",\"dirty\":false}]"
+    },
+    {
+      "name": "a later save reconciles the uncertain tag",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 1 个列表改动\",\"tone\":\"success\"}]"
+    },
+    {
+      "name": "the reconciled tag is no longer marked dirty",
+      "ok": true,
+      "detail": "[{\"name\":\"白名单\",\"dirty\":false},{\"name\":\"黑名单\",\"dirty\":false},{\"name\":\"灰名单\",\"dirty\":false},{\"name\":\"!CN fakeip filter\",\"dirty\":false},{\"name\":\"CN fakeip filter\",\"dirty\":false},{\"name\":\"DDNS 域名\",\"dirty\":false},{\"name\":\"客户端 IP\",\"dirty\":false},{\"name\":\"直连 IP\",\"dirty\":false},{\"name\":\"重定向\",\"dirty\":false}]"
+    },
+    {
+      "name": "the main worktree generated assets are untouched",
+      "ok": true,
+      "detail": "coremain/www/log.html, coremain/www/assets/vue-log/index.html"
+    },
+    {
+      "name": "the DNS port is released after shutdown",
+      "ok": true,
+      "detail": "61756"
+    },
+    {
+      "name": "the management port is released after shutdown",
+      "ok": true,
+      "detail": "62536"
+    }
+  ],
+  "passed": 45,
+  "failed": 0,
+  "failure": null,
+  "pageErrors": [
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)",
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)",
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)",
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)"
+  ],
+  "logs": [
+    {
+      "name": "vite",
+      "stream": "stdout",
+      "data": "\n> mosdns-log-vue@0.1.0 dev\n> vite --port 62537 --strictPort --host 127.0.0.1\n\n"
+    },
+    {
+      "name": "vite",
+      "stream": "stdout",
+      "data": "10:54:34 PM [vite] (client) Re-optimizing dependencies because vite config has changed\n"
+    },
+    {
+      "name": "vite",
+      "stream": "stdout",
+      "data": "\n  VITE v7.3.2  ready in 187 ms\n\n"
+    },
+    {
+      "name": "vite",
+      "stream": "stdout",
+      "data": "  ➜  Local:   http://127.0.0.1:62537/\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "\nDevTools listening on ws://127.0.0.1:62538/devtools/browser/e8f7b521-7f96-4b1f-a540-3ebe75fc920e\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "Trying to load the allocator multiple times. This is *not* supported."
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225435.340709:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225435.340999:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225435.341046:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225435.341110:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225435.341153:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225435.341206:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225437.265519:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225437.344436:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225437.377777:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225437.425296:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225437.447747:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225437.492671:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47873:14634700:0929/225437.516009:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[47867:14634651:0929/225437.985923:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "Created TensorFlow Lite XNNPACK delegate for CPU.\n"
+    }
+  ]
+}
