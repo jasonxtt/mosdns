@@ -78,10 +78,13 @@ This must not be described as replicating Go's POST verbatim behavior. Pinned by
 
 ### A2 (approved as revised): a shared writable file loads normally but is never managed
 
-Two single-`.txt` tags that resolve to the same writable file no longer fail configuration load.
-They keep loading, matching and answering DNS queries as query-only shapes, and **both** become
-management-ineligible: `/show`, `/save` and `/post` reject them explicitly with a reason naming the
-shared file, and no shared write happens. This replaces the earlier load-time rejection (which was
+A single-`.txt` tag whose file is also resolved by **any other** configured `domain_set` tag --
+another managed candidate or a query-only composite -- no longer fails configuration load and is
+never managed. The conflicting tags keep loading, matching and answering DNS queries as query-only
+shapes, and the candidate becomes management-ineligible: `/show`, `/save` and `/post` reject it
+explicitly with a reason naming the other owner(s), and no shared write happens. This was extended
+in the second review round: the original guard only compared two management candidates, which let a
+legal query-only composite tag's persistent source be rewritten by another tag's POST. This replaces the earlier load-time rejection (which was
 itself an unapproved deviation from Go, where the two tags would silently overwrite each other).
 Pinned by
 `slice5_management_config.rs::two_tags_sharing_one_rule_file_still_load_and_are_management_ineligible`

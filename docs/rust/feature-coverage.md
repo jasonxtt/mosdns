@@ -28,7 +28,7 @@
 
 已批准的产品决策偏差（2026-09-29，写入该任务 PRD 修正案）：POST 的值按规则文件行同样规范化（trim、跳过空行与整行 `#`、再做 matcher 校验），这是有意的 Rust-native 偏差，不得描述为逐字复制 Go 的 POST；两个 tag 指向同一可写文件时仍正常加载与查询，但两者都变为管理不可用并显式报出原因，不发生共享写入。发布路径的候选编译与文件写入在 blocking pool 上执行，受单一 provider 级更新锁串行化，不阻塞单线程 DNS runtime。
 
-证据：`rust/native-host/tests/slice5_management_config.rs`、`slice6_management_http.rs`、`slice7_management_publication.rs`（后者含失败注入与整代不变量）；真实 Chrome + Vite + native 的浏览器证明 `research/slice3-browser-proof/evidence.json`（45/45）；`mosdns-rust` 上的 fmt/clippy/workspace 测试与真实进程 HTTP+DNS 证明 `research/linux-validation/`（20/20）。本项不包含远端 fault/cancel/close 专门 E2E、5D、Phase 6 或生产替换。
+证据：`rust/native-host/tests/slice5_management_config.rs`、`slice6_management_http.rs`、`slice7_management_publication.rs`（后者含失败注入与整代不变量）；真实 Chrome + Vite + native 的浏览器证明 `research/slice3-browser-proof/evidence.json`（54/54，含 POST 200 后 canonical 读取失败与“服务器内容与本地编辑不同”两个失败态场景）；`mosdns-rust` 上的 fmt/clippy/workspace 测试与真实进程 HTTP+DNS 证明 `research/linux-validation/`（20/20，修订后重跑）。本项不包含远端 fault/cancel/close 专门 E2E、5D、Phase 6 或生产替换。
 
 ### 5B 代表链实现子项（本地与指定 Linux E2E 通过；用户指定 C2C review PASS；专门远端 fault E2E 延期；已归档）
 

@@ -425,3 +425,51 @@ fn api_listen_address_is_optional_and_strictly_validated() {
         );
     }
 }
+
+#[test]
+fn a_query_only_tag_reading_the_candidate_file_makes_it_ineligible() {
+    let fixture = Fixture::new("composite-conflict");
+    fixture.write("rules/shared.txt", "shared.example\n");
+    fixture.write("rules/extra.txt", "only-extra.example\n");
+    let yaml = config_yaml(
+        &format!(
+            "{}{}",
+            domain_set_plugin("single", "      files:\n        - rules/shared.txt\n"),
+            domain_set_plugin(
+                "composite",
+                "      files:\n        - rules/shared.txt\n        - rules/extra.txt\n",
+            ),
+        ),
+        "",
+    );
+    let config = expect_config(
+        compile(&fixture, &yaml),
+        "a tag reading a candidate's file must still load",
+    );
+
+    // The single-file tag is a shape-level candidate, but another tag also
+    // reads that file, so managing it would rewrite that tag's source.
+    let single = config.domain_set("single").expect("single");
+    assert!(
+        single.matches("shared.example"),
+        "the demoted tag must still participate in queries"
+    );
+    assert!(
+        single.managed.is_none(),
+        "a file also read by another tag may not be managed"
+    );
+    let reason = single
+        .ineligible_reason
+        .as_deref()
+        .expect("a conflicting candidate needs a visible reason");
+    assert!(reason.contains("shared.txt"), "{reason}");
+    assert!(
+        reason.contains("composite"),
+        "the conflicting tag must be named: {reason}"
+    );
+
+    let composite = config.domain_set("composite").expect("composite");
+    assert!(composite.matches("shared.example"));
+    assert!(composite.matches("only-extra.example"));
+    assert!(composite.managed.is_none());
+}

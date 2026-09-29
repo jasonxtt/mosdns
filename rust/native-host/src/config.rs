@@ -382,34 +382,41 @@ fn compile_definitions(
     // Domain sets and forwards are fully built before any sequence compiles,
     // so definition order never decides whether a reference resolves.
     //
-    // Management eligibility is decided once every candidate is known: two
-    // single-`.txt` tags that resolve to the same writable file keep loading and
-    // matching normally, but neither may be managed, so a shared file is never
-    // written through the management API.
+    // Management eligibility is decided once every definition is known. A
+    // single-`.txt` candidate may only be managed when no other `domain_set`
+    // tag -- managed or query-only -- resolves to the same file; otherwise a
+    // POST would rewrite another tag's persistent source behind its live
+    // matcher and change that tag's behavior after a restart. Conflicting tags
+    // keep loading and matching normally and simply stay unmanaged.
     let mut compiled_domain_sets: Vec<CompiledDomainSet> = Vec::new();
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::DomainSet {
             compiled_domain_sets.push(compile_domain_set(plugin)?);
         }
     }
-    let mut file_owners: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    let mut file_owners: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();
     for set in &compiled_domain_sets {
-        if let Some(candidate) = &set.candidate {
-            *file_owners.entry(candidate.identity.clone()).or_default() += 1;
+        for reference in &set.references {
+            file_owners
+                .entry(reference.clone())
+                .or_default()
+                .insert(set.tag.clone());
         }
     }
     let mut domain_sets: Vec<(String, DomainSetHandle)> = Vec::new();
     let mut domain_set_configs: Vec<DomainSetConfig> = Vec::new();
     for set in compiled_domain_sets {
-        let shared = set.candidate.as_ref().is_some_and(|candidate| {
-            file_owners
-                .get(&candidate.identity)
-                .copied()
-                .unwrap_or_default()
-                > 1
+        let conflicting_tags: Option<Vec<String>> = set.candidate.as_ref().and_then(|candidate| {
+            let owners = file_owners.get(&candidate.identity)?;
+            let others: Vec<String> = owners
+                .iter()
+                .filter(|tag| tag.as_str() != set.tag)
+                .cloned()
+                .collect();
+            (!others.is_empty()).then_some(others)
         });
-        let (managed, ineligible_reason, handle) = match set.candidate {
-            Some(candidate) if !shared => {
+        let (managed, ineligible_reason, handle) = match (set.candidate, conflicting_tags) {
+            (Some(candidate), None) => {
                 let provider = Rc::new(ManagedDomainSet::new(
                     set.tag.clone(),
                     candidate.file,
@@ -423,15 +430,16 @@ fn compile_definitions(
                     DomainSetHandle::Managed(provider),
                 )
             }
-            Some(candidate) => (
+            (Some(candidate), Some(others)) => (
                 None,
                 Some(format!(
-                    "writable rule file `{}` is shared with another tag, so neither may be managed",
-                    candidate.file.display()
+                    "writable rule file `{}` is also read by other domain_set tag(s) {}; managing it would rewrite their source, so it may not be managed",
+                    candidate.file.display(),
+                    others.join(", ")
                 )),
                 DomainSetHandle::Fixed(Rc::new(set.matcher)),
             ),
-            None => (None, None, DomainSetHandle::Fixed(Rc::new(set.matcher))),
+            (None, _) => (None, None, DomainSetHandle::Fixed(Rc::new(set.matcher))),
         };
         domain_sets.push((set.tag.clone(), handle.clone()));
         domain_set_configs.push(DomainSetConfig {
@@ -819,12 +827,17 @@ struct CompiledDomainSet {
     matcher: MixMatcher<()>,
     /// Present when the declared shape is a single-`.txt` management candidate.
     candidate: Option<ManagedCandidate>,
+    /// Canonical identity of every resolved `files` entry this tag references,
+    /// whatever its shape. A management candidate may not own a file that any
+    /// other `domain_set` also reads, or a POST would rewrite that tag's
+    /// persistent source behind its live matcher.
+    references: Vec<PathBuf>,
 }
 
 /// A single-`.txt` profile that could be managed, pending the shared-file check.
 struct ManagedCandidate {
     file: PathBuf,
-    /// Canonical identity used to detect two tags claiming one writable file.
+    /// Canonical identity of the writable file, used for the conflict check.
     identity: PathBuf,
     rules: Vec<String>,
     source_path: String,
@@ -860,12 +873,23 @@ fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigErr
         && Path::new(&files[0])
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"));
+    // Every declared file reference is resolved the same way the loader
+    // resolved it, so the conflict check sees query-only shapes too.
+    let references: Vec<PathBuf> = files
+        .iter()
+        .map(|file| {
+            let path = resolve_rule_path(file, &plugin.base_dir);
+            std::fs::canonicalize(&path).unwrap_or(path)
+        })
+        .collect();
     let candidate = if single_txt_file {
         let file = resolve_rule_path(&files[0], &plugin.base_dir);
-        let identity = std::fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
         Some(ManagedCandidate {
             file,
-            identity,
+            identity: references
+                .first()
+                .cloned()
+                .unwrap_or_else(|| files[0].clone().into()),
             rules: accepted,
             source_path: plugin.source_path.clone(),
         })
@@ -876,6 +900,7 @@ fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigErr
         tag: plugin.tag.clone(),
         matcher,
         candidate,
+        references,
     })
 }
 
