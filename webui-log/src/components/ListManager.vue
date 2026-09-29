@@ -11,6 +11,11 @@ const content = ref('')
 const statusText = ref('未加载')
 const specialGroups = ref([])
 const listDrafts = ref({})
+// Tags whose POST returned 200 but whose canonical `/show` reread failed. The
+// server mutation may have happened, but the UI does not know which rules were
+// accepted, so those tags keep their local draft and stay out of the
+// confirmed-saved count until a reread succeeds.
+const uncertainTags = ref([])
 
 const fixedProfiles = [
   { tag: 'whitelist', name: '白名单' },
@@ -119,6 +124,47 @@ function isDraftDirty(tag) {
   return String(draft.content || '') !== String(draft.original || '')
 }
 
+function isUncertain(tag) {
+  return uncertainTags.value.includes(tag)
+}
+
+function markUncertain(tag) {
+  if (!uncertainTags.value.includes(tag)) {
+    uncertainTags.value = [...uncertainTags.value, tag]
+  }
+}
+
+function clearUncertain(tag) {
+  if (uncertainTags.value.includes(tag)) {
+    uncertainTags.value = uncertainTags.value.filter((item) => item !== tag)
+  }
+}
+
+function showUrl(tag) {
+  return `/plugins/${tag}/show?limit=10000`
+}
+
+// The server returns one accepted rule per line with a trailing newline, while
+// the editor content is whatever the user typed. Comparing the effective rule
+// lists keeps a trailing newline or a blank line from looking like a change.
+function canonicalRules(text) {
+  return String(text || '')
+    .split('\n')
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+function sameRules(left, right) {
+  return canonicalRules(left) === canonicalRules(right)
+}
+
+// Reads the canonical server state for one tag. Only a successful read may
+// clear a tag's dirty state, because the server skips rules it rejects.
+async function fetchCanonical(tag) {
+  return String((await getText(showUrl(tag))) || '')
+}
+
 function updateStatus(extra = '', tag = selectedTag.value) {
   const draft = getDraft(tag)
   const base = draft ? String(draft.content || '') : String(content.value || '')
@@ -149,7 +195,9 @@ async function loadList(tag, options = {}) {
   selectedTag.value = tag
   resetMessage()
   const cached = getDraft(tag)
-  if (cached && !options?.forceReload) {
+  // An uncertain tag always retries the canonical read, so a later load
+  // reconciles the server state instead of trusting a cached draft.
+  if (cached && !options?.forceReload && !isUncertain(tag)) {
     content.value = String(cached.content || '')
     updateStatus(isDraftDirty(tag) ? '（未保存）' : '', tag)
     return
@@ -159,17 +207,36 @@ async function loadList(tag, options = {}) {
   content.value = cached ? String(cached.content || '') : ''
   statusText.value = '加载中...'
   try {
-    const text = await getText(`/plugins/${tag}/show?limit=10000`)
-    const normalized = String(text || '')
+    const normalized = await fetchCanonical(tag)
     const draft = ensureDraft(tag, normalized)
-    draft.original = normalized
-    draft.content = normalized
+    if (isUncertain(tag)) {
+      // Reconciliation: adopt the server text as the baseline but keep a local
+      // edit when it differs, so the user decides whether to submit it again.
+      const localContent = String(draft.content || '')
+      const hadLocalEdits = !sameRules(localContent, draft.original)
+      clearUncertain(tag)
+      draft.original = normalized
+      if (!hadLocalEdits || sameRules(localContent, normalized)) {
+        draft.content = normalized
+      } else {
+        setError(
+          `「${getProfileName(tag)}」服务器内容与本地编辑不同，已保留本地编辑，请确认后再保存`
+        )
+      }
+    } else {
+      draft.original = normalized
+      draft.content = normalized
+    }
     if (selectedTag.value === tag) {
-      content.value = normalized
-      updateStatus('', tag)
+      content.value = String(draft.content || '')
+      updateStatus(isDraftDirty(tag) ? '（未保存）' : '', tag)
     }
   } catch (error) {
-    setError(`加载列表失败: ${error.message}`)
+    if (isUncertain(tag)) {
+      setError(`「${getProfileName(tag)}」当前内容仍未确认: ${error.message}`)
+    } else {
+      setError(`加载列表失败: ${error.message}`)
+    }
     statusText.value = '加载失败'
   } finally {
     loading.value = false
@@ -182,51 +249,116 @@ async function saveList() {
     return
   }
 
-  const pending = Object.entries(listDrafts.value)
-    .filter(([_, draft]) => String(draft?.content || '') !== String(draft?.original || ''))
+  const unclean = Object.entries(listDrafts.value)
+    .filter(
+      ([tag, draft]) =>
+        String(draft?.content || '') !== String(draft?.original || '') || isUncertain(tag)
+    )
     .map(([tag, draft]) => ({ tag, draft }))
 
-  if (pending.length === 0) {
+  if (unclean.length === 0) {
     setSuccess('没有需要保存的改动')
     return
   }
 
   saving.value = true
   resetMessage()
-  let successCount = 0
+  let confirmedCount = 0
+  const adjusted = []
+  const unconfirmed = []
   const failed = []
   try {
-    for (const item of pending) {
+    for (const item of unclean) {
+      const tag = item.tag
+
+      // An uncertain tag retries the canonical read first. A POST is never
+      // repeated blindly, and a local edit that differs from the server is
+      // kept for the user to confirm.
+      if (isUncertain(tag)) {
+        let canonical
+        try {
+          canonical = await fetchCanonical(tag)
+        } catch (error) {
+          unconfirmed.push({ tag, message: String(error?.message || '未知错误') })
+          continue
+        }
+        clearUncertain(tag)
+        item.draft.original = canonical
+        if (!sameRules(item.draft.content, canonical)) {
+          adjusted.push({ tag, message: '服务器内容与本地编辑不同，已保留本地编辑' })
+          continue
+        }
+        item.draft.content = canonical
+        confirmedCount += 1
+        continue
+      }
+
       const values = String(item.draft?.content || '')
         .split('\n')
         .map((value) => value.trim())
         .filter(Boolean)
       try {
-        await postJSON(`/plugins/${item.tag}/post`, { values })
-        const normalized = values.join('\n')
-        item.draft.content = normalized
-        item.draft.original = normalized
-        successCount += 1
+        await postJSON(`/plugins/${tag}/post`, { values })
       } catch (error) {
         failed.push({
-          tag: item.tag,
+          tag,
           message: String(error?.message || '未知错误')
         })
+        continue
       }
+
+      // POST 200 means the server mutated. Only a successful canonical reread
+      // confirms which rules the server actually accepted.
+      let canonical
+      try {
+        canonical = await fetchCanonical(tag)
+      } catch (error) {
+        markUncertain(tag)
+        unconfirmed.push({ tag, message: String(error?.message || '未知错误') })
+        continue
+      }
+
+      const submitted = values.join('\n')
+      item.draft.original = canonical
+      item.draft.content = canonical
+      if (!sameRules(canonical, submitted)) {
+        adjusted.push({ tag, message: '部分规则未被服务器接受，已按服务器内容更新' })
+      }
+      confirmedCount += 1
     }
 
     const activeDraft = getDraft(selectedTag.value)
     if (activeDraft) {
       content.value = String(activeDraft.content || '')
-      updateStatus('', selectedTag.value)
+      updateStatus(isDraftDirty(selectedTag.value) ? '（未保存）' : '', selectedTag.value)
     }
 
-    if (failed.length === 0) {
-      setSuccess(`已保存 ${successCount} 个列表改动`)
+    if (failed.length === 0 && unconfirmed.length === 0 && adjusted.length === 0) {
+      setSuccess(`已保存 ${confirmedCount} 个列表改动`)
       return
     }
-    const sample = failed.slice(0, 2).map((item) => `${getProfileName(item.tag)}: ${item.message}`).join('；')
-    setError(`已保存 ${successCount} 个列表，失败 ${failed.length} 个。${sample}`)
+    const names = (items) =>
+      items
+        .slice(0, 2)
+        .map((item) => getProfileName(item.tag))
+        .join('、')
+    const parts = [`已保存 ${confirmedCount} 个列表`]
+    if (adjusted.length > 0) {
+      parts.push(`${adjusted.length} 个列表已按服务器内容调整（${names(adjusted)}）`)
+    }
+    if (unconfirmed.length > 0) {
+      parts.push(
+        `${unconfirmed.length} 个列表服务器保存成功但当前内容未确认（${names(unconfirmed)}），请重新加载确认`
+      )
+    }
+    if (failed.length > 0) {
+      const sample = failed
+        .slice(0, 2)
+        .map((item) => `${getProfileName(item.tag)}: ${item.message}`)
+        .join('；')
+      parts.push(`${failed.length} 个列表保存失败（${sample}）`)
+    }
+    setError(parts.join('；'))
   } finally {
     saving.value = false
   }
@@ -278,6 +410,12 @@ onBeforeUnmount(() => {
           @click="loadList(profile.tag)"
         >
           {{ profile.name }}<span v-if="isDraftDirty(profile.tag)" class="unsaved-dot"></span>
+          <span
+            v-if="isUncertain(profile.tag)"
+            class="unsaved-dot"
+            style="background: #e6a23c"
+            title="服务器保存成功，当前内容未确认"
+          ></span>
         </button>
       </aside>
 
