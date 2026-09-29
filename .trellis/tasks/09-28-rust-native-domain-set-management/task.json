@@ -1,8 +1,8 @@
 {
   "id": "rust-native-domain-set-management",
   "name": "rust-native-domain-set-management",
-  "title": "Rust-native domain_set management save and query closure",
-  "description": "Add the first bounded native domain_set show/save/post management loop after roadmap review and the default 5B review order, or after explicit user approval to reorder when 5B is deferred or blocked.",
+  "title": "Rust-native local rule editing workflow",
+  "description": "Plan one enlarged 5C package: file-backed domain_set management, native HTTP/DNS publication and lifecycle, plus isolated maintained Vue local-list editing through real native API and DNS.",
   "status": "planning",
   "dev_type": null,
   "scope": null,
@@ -12,7 +12,7 @@
   "assignee": "tom",
   "createdAt": "2026-09-28",
   "completedAt": null,
-  "branch": null,
+  "branch": "rust",
   "base_branch": "rust",
   "worktree_path": null,
   "commit": null,
@@ -22,5 +22,13 @@
   "parent": "09-28-rust-next-step-roadmap",
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {
+    "execution_mode": "inline",
+    "implementation_authorized": "true",
+    "implementation_authorized_at": "2026-09-29",
+    "reviewer": "user (self-review; no external C2C binding - user elected to review the exact range personally)",
+    "authorized_units": "Slice 0, Slice 1, Slice 2, Slice 3",
+    "planning_source_head": "39bf33098af3d6bfe4f55e472aaaa340cd8b3c3b",
+    "review_gate": "completion only after the user's own explicit PASS on the exact committed base..HEAD range"
+  }
 }
