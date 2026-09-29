@@ -3,7 +3,7 @@
   "name": "rust-native-domain-set-management",
   "title": "Rust-native local rule editing workflow",
   "description": "Plan one enlarged 5C package: file-backed domain_set management, native HTTP/DNS publication and lifecycle, plus isolated maintained Vue local-list editing through real native API and DNS.",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

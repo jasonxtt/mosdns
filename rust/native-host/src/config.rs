@@ -17,7 +17,7 @@ use serde::de::{self, Deserialize, Deserializer, Error as _, MapAccess, SeqAcces
 
 use crate::matchers::{
     DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher, ResponseIpMatcher, TrueMatcher,
-    build_domain_set,
+    build_domain_set, resolve_rule_path,
 };
 use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 
@@ -75,6 +75,50 @@ pub struct ListenerConfig {
     pub idle_timeout: Option<Duration>,
 }
 
+/// The scoped management HTTP listener. Only the bounded `/plugins/{tag}`
+/// routes and the read-only special-group list are served; this is not a claim
+/// that any other Go API field is supported.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ApiConfig {
+    pub http: SocketAddr,
+}
+
+/// One file-backed `domain_set` that the bounded management API may edit. A
+/// profile is managed only when it declares exactly one `.txt` file and no
+/// `exps`, so the writable source is unambiguous.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManagedDomainSetConfig {
+    /// The rule file resolved against the declaring YAML file's directory.
+    pub file: PathBuf,
+    /// The accepted rule text in Go's provider order (`exps`, then files).
+    pub rules: Vec<String>,
+    /// The YAML source path retained for load and management diagnostics.
+    pub source_path: String,
+}
+
+/// One compiled `domain_set` plus its management eligibility. Query-only
+/// shapes (`exps`, several files, non-`.txt`) stay fully usable for matching
+/// but are not management targets.
+pub struct DomainSetConfig {
+    pub tag: String,
+    pub managed: Option<ManagedDomainSetConfig>,
+    matcher: Rc<MixMatcher<()>>,
+}
+
+impl DomainSetConfig {
+    /// True when the compiled matcher accepts `domain`.
+    #[must_use]
+    pub fn matches(&self, domain: &str) -> bool {
+        self.matcher.r#match(domain).is_some()
+    }
+
+    /// The number of accepted rules in this set.
+    #[must_use]
+    pub fn rule_count(&self) -> usize {
+        self.matcher.len()
+    }
+}
+
 /// The typed, validated graph consumed by pre-I/O host assembly.
 pub struct CompiledConfig {
     pub log_level: LogLevel,
@@ -87,10 +131,20 @@ pub struct CompiledConfig {
     pub cache: Option<CachePluginConfig>,
     pub sequence: SequenceConfig,
     pub listener: ListenerConfig,
+    /// Every compiled `domain_set` with its management eligibility.
+    pub domain_sets: Vec<DomainSetConfig>,
+    /// The scoped management HTTP listener, when one is configured.
+    pub api: Option<ApiConfig>,
     pub program: ValidatedProgram,
 }
 
 impl CompiledConfig {
+    /// Looks up one compiled `domain_set` by tag.
+    #[must_use]
+    pub fn domain_set(&self, tag: &str) -> Option<&DomainSetConfig> {
+        self.domain_sets.iter().find(|set| set.tag == tag)
+    }
+
     /// Creates the canonical resumable sequence machine for one parsed query.
     /// The returned machine owns the state/control and can be held across the
     /// later upstream await without borrowing packet or executor data.
@@ -169,8 +223,9 @@ fn parse_yaml(yaml: &str) -> Result<RawValue, ConfigError> {
 
 fn compile_raw(raw: &RawValue, base_dir: &Path) -> Result<CompiledConfig, ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
-    root.reject_unknown(&["log", "include", "plugins"], "$")?;
+    root.reject_unknown(&["log", "include", "plugins", "api"], "$")?;
     let log = compile_log(root.required("log", "$")?)?;
+    let api = root.get("api").map(compile_api).transpose()?;
 
     // Definition collection: included plugin-only files load in declaration
     // order, then this file's plugins. No definition is resolved until the
@@ -193,7 +248,18 @@ fn compile_raw(raw: &RawValue, base_dir: &Path) -> Result<CompiledConfig, Config
         )?);
     }
 
-    compile_definitions(log, definitions)
+    compile_definitions(log, api, definitions)
+}
+
+/// Compiles the scoped management listener. Only `http` is supported; every
+/// other Go `api` field is rejected rather than silently ignored.
+fn compile_api(value: &RawValue) -> Result<ApiConfig, ConfigError> {
+    let path = "$.api";
+    let map = expect_map(value, path, "api must be a mapping")?;
+    map.reject_unknown(&["http"], path)?;
+    let http = expect_string(map.required("http", path)?, "$.api.http")?;
+    let http = parse_socket_addr(&http, "$.api.http")?;
+    Ok(ApiConfig { http })
 }
 
 /// Loads one plugins-only included file and appends its definitions in file
@@ -290,6 +356,7 @@ impl PluginCatalog<'_> {
 
 fn compile_definitions(
     log: LogLevel,
+    api: Option<ApiConfig>,
     definitions: Vec<RawPlugin>,
 ) -> Result<CompiledConfig, ConfigError> {
     let mut kinds: Vec<(String, PluginKind, usize)> = Vec::with_capacity(definitions.len());
@@ -323,9 +390,33 @@ fn compile_definitions(
     // Domain sets and forwards are fully built before any sequence compiles,
     // so definition order never decides whether a reference resolves.
     let mut domain_sets: Vec<(String, Rc<MixMatcher<()>>)> = Vec::new();
+    let mut domain_set_configs: Vec<DomainSetConfig> = Vec::new();
+    let mut managed_files: BTreeMap<PathBuf, String> = BTreeMap::new();
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::DomainSet {
-            domain_sets.push((plugin.tag.clone(), compile_domain_set(plugin)?));
+            let compiled = compile_domain_set(plugin)?;
+            if let Some(managed) = &compiled.managed {
+                // Two tags sharing one writable file would silently overwrite
+                // each other, so the ambiguity is rejected before bind.
+                let identity =
+                    std::fs::canonicalize(&managed.file).unwrap_or_else(|_| managed.file.clone());
+                if let Some(existing) = managed_files.get(&identity) {
+                    return Err(ConfigError::new(
+                        format!("{}.args.files[0]", plugin.source_path),
+                        format!(
+                            "managed rule file `{}` is already owned by `{existing}`",
+                            managed.file.display()
+                        ),
+                    ));
+                }
+                managed_files.insert(identity, plugin.tag.clone());
+            }
+            domain_sets.push((plugin.tag.clone(), Rc::clone(&compiled.matcher)));
+            domain_set_configs.push(DomainSetConfig {
+                tag: plugin.tag.clone(),
+                managed: compiled.managed,
+                matcher: compiled.matcher,
+            });
         }
     }
     let mut forwards = Vec::new();
@@ -511,6 +602,8 @@ fn compile_definitions(
             forward_executable: primary.as_ref().map(|forward| forward.executable),
         },
         listener,
+        domain_sets: domain_set_configs,
+        api,
         program,
     })
 }
@@ -698,7 +791,13 @@ fn quick_fixture_name(path: &str) -> String {
     format!("__native_quick_{path}")
 }
 
-fn compile_domain_set(plugin: &RawPlugin) -> Result<Rc<MixMatcher<()>>, ConfigError> {
+/// One compiled `domain_set` before it is registered in the public catalog.
+struct CompiledDomainSet {
+    matcher: Rc<MixMatcher<()>>,
+    managed: Option<ManagedDomainSetConfig>,
+}
+
+fn compile_domain_set(plugin: &RawPlugin) -> Result<CompiledDomainSet, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "domain_set args must be a mapping")?;
     args.reject_unknown(&["exps", "files"], &path)?;
@@ -710,15 +809,34 @@ fn compile_domain_set(plugin: &RawPlugin) -> Result<Rc<MixMatcher<()>>, ConfigEr
             "a domain_set requires at least one expression or file",
         ));
     }
-    build_domain_set(&expressions, &files, &plugin.base_dir).map_err(|error| match error {
-        DomainSetError::Expression { index, .. } => {
-            ConfigError::new(format!("{path}.exps[{index}]"), error.to_string())
-        }
-        DomainSetError::File { index, .. } => {
-            ConfigError::new(format!("{path}.files[{index}]"), error.to_string())
-        }
-        DomainSetError::Rule { .. } => ConfigError::new(format!("{path}.files"), error.to_string()),
-    })
+    let (matcher, accepted) =
+        build_domain_set(&expressions, &files, &plugin.base_dir).map_err(|error| match error {
+            DomainSetError::Expression { index, .. } => {
+                ConfigError::new(format!("{path}.exps[{index}]"), error.to_string())
+            }
+            DomainSetError::File { index, .. } => {
+                ConfigError::new(format!("{path}.files[{index}]"), error.to_string())
+            }
+        })?;
+
+    // A managed profile needs exactly one unambiguous writable `.txt` source,
+    // matching Go's POST precondition, so an edit can never silently drop part
+    // of the configured rule set. Everything else stays query-only.
+    let single_txt_file = expressions.is_empty()
+        && files.len() == 1
+        && Path::new(&files[0])
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"));
+    let managed = if single_txt_file {
+        Some(ManagedDomainSetConfig {
+            file: resolve_rule_path(&files[0], &plugin.base_dir),
+            rules: accepted,
+            source_path: plugin.source_path.clone(),
+        })
+    } else {
+        None
+    };
+    Ok(CompiledDomainSet { matcher, managed })
 }
 
 fn string_list(value: Option<&RawValue>, path: &str) -> Result<Vec<String>, ConfigError> {
