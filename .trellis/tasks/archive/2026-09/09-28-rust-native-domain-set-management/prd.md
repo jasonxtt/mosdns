@@ -45,11 +45,20 @@ Deliver one visible 5C workflow on the pure Rust-native host: in an isolated con
 ## Acceptance criteria
 
 - [x] Parent/canary/5B prerequisites and revised-plan review pass; a later explicit user approval authorizes the executing agent to run `task.py start`. (2026-09-29: prerequisites verified as recorded committed PASS; the user approved the final summary for all four slices and authorized `task.py start`.)
-- [ ] Eligible profile, Go-visible `.txt` load/POST/restart semantics, strict `exps`, explicit `sets` rejection, HTTP contract and unsupported composite cases are source-grounded and tested before implementation.
-- [ ] Real HTTP and DNS tests prove two tags stay isolated, show/save/post, temp-write and final-replace failure atomicity and temp cleanup, whole-generation concurrency, restart, and DNS/HTTP shutdown plus rebind.
-- [ ] Reproducible browser proof on maintained Vue page covers edit/save, actual next-query effect, refresh/restart, failed-POST draft/error, and POST-200 followed by canonical-GET failure with an unconfirmed per-tag draft, using isolated native API and DNS.
-- [ ] Rust focused/full tests, fmt, clippy, a Vue build in a disposable source snapshot, and bounded Linux functional E2E run on `mosdns-rust` under the project VM rule, with exact commands/results and resource cleanup recorded. Generated Vue assets are not staged by this source/UI-through-Vite task.
-- [ ] Only proven feature-coverage subitems are updated. Exact committed task range obtains an explicit `FINAL: PASS` before completion is claimed. (2026-09-29 amendment: the user elected to perform this exact-range review personally, superseding the original same-conversation C2C reviewer requirement; completion is claimed only after the user's own explicit PASS, and no external C2C `FINAL: PASS` may be asserted.)
+- [x] Eligible profile, Go-visible `.txt` load/POST/restart semantics, strict `exps`, explicit `sets` rejection, HTTP contract and unsupported composite cases are source-grounded and tested before implementation.
+- [x] Real HTTP and DNS tests prove two tags stay isolated, show/save/post, temp-write and final-replace failure atomicity and temp cleanup, whole-generation concurrency, restart, and DNS/HTTP shutdown plus rebind.
+- [x] Reproducible browser proof on maintained Vue page covers edit/save, actual next-query effect, refresh/restart, failed-POST draft/error, and POST-200 followed by canonical-GET failure with an unconfirmed per-tag draft, using isolated native API and DNS.
+- [x] Rust focused/full tests, fmt, clippy, a Vue build in a disposable source snapshot, and bounded Linux functional E2E run on `mosdns-rust` under the project VM rule, with exact commands/results and resource cleanup recorded. Generated Vue assets are not staged by this source/UI-through-Vite task.
+- [x] Only proven feature-coverage subitems are updated. Exact committed task range obtains an explicit `FINAL: PASS` before completion is claimed. (2026-09-29 amendment: the user elected to perform this exact-range review personally, superseding the original same-conversation C2C reviewer requirement; completion is claimed only after the user's own explicit PASS, and no external C2C `FINAL: PASS` may be asserted.)
+
+Closeout (2026-09-30): The user supplied the exact-range review result for
+`390a6d97..3e1e2183` (`FINAL: PASS`) and requested a completion check and
+conditional archive. The delivered proofs are the Slice 0-3 tests, browser
+`54/54`, and isolated `mosdns-rust` validation at `fab8b682` (64 successful
+Rust test binaries, functional `20/20`). No `rust/` or `webui-log/` source
+changed between that validated revision and the reviewed HEAD. This closeout
+records the user's supplied review result; it does not assert an external C2C
+review binding or a production cutover.
 
 ## Out of scope
 
