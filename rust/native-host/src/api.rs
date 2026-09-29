@@ -197,7 +197,7 @@ async fn process_connection(
         biased;
         () = shutdown.cancelled() => return Ok(()),
         request = read_request(&mut stream) => match request {
-            Ok(Some(request)) => dispatch(&config, &request),
+            Ok(Some(request)) => dispatch(&config, &request).await,
             // The client closed before sending a complete request.
             Ok(None) => return Ok(()),
             Err(_) => Response::error(400, "bad request"),
@@ -312,25 +312,24 @@ const fn reason_phrase(status: u16) -> &'static str {
     }
 }
 
-/// Which configured operation one request addresses.
+/// Which configured operation one request addresses. The HTTP method is
+/// resolved by the dispatcher, because a tag that is not mounted has no route
+/// at all and must fail as 404 before any method decision.
 enum Route<'a> {
-    Show(&'a str),
-    Save(&'a str),
-    Post(&'a str),
+    /// A registered plugin route shape: `/plugins/{tag}/{show|save|post}`.
+    Plugin {
+        tag: &'a str,
+        action: &'a str,
+    },
     SpecialGroups,
     Unknown,
-    WrongMethod,
 }
 
-fn route<'a>(method: &str, target: &'a str) -> Route<'a> {
+fn route(target: &str) -> Route<'_> {
     // Go's `/show` ignores the query string; the UI sends `?limit=10000`.
     let path = target.split_once('?').map_or(target, |(path, _query)| path);
     if path == "/api/v1/special-groups" {
-        return if method == "GET" {
-            Route::SpecialGroups
-        } else {
-            Route::WrongMethod
-        };
+        return Route::SpecialGroups;
     }
     let Some(rest) = path.strip_prefix("/plugins/") else {
         return Route::Unknown;
@@ -342,63 +341,67 @@ fn route<'a>(method: &str, target: &'a str) -> Route<'a> {
         return Route::Unknown;
     }
     match action {
-        "show" | "save" | "post" => match (method, action) {
-            ("GET", "show") => Route::Show(tag),
-            ("GET", "save") => Route::Save(tag),
-            ("POST", "post") => Route::Post(tag),
-            // Any other method on a registered path, as chi replies.
-            _ => Route::WrongMethod,
-        },
+        "show" | "save" | "post" => Route::Plugin { tag, action },
         _ => Route::Unknown,
     }
 }
 
-fn dispatch(config: &CompiledConfig, request: &Request) -> Response {
-    match route(&request.method, &request.target) {
-        Route::Show(tag) => match eligible(config, tag) {
-            Err(response) => response,
-            Ok(provider) => {
-                let mut body = String::new();
-                for rule in provider.rules() {
-                    body.push_str(&rule);
-                    body.push('\n');
-                }
-                Response::text(body)
-            }
-        },
-        Route::Save(tag) => match eligible(config, tag) {
-            Err(response) => response,
-            Ok(provider) => match provider.save() {
-                Ok(()) => Response::empty(200),
-                Err(error) => Response::error(500, &error.to_string()),
-            },
-        },
-        Route::Post(tag) => match eligible(config, tag) {
-            Err(response) => response,
-            Ok(provider) => {
-                let payload: PostPayload = match serde_json::from_slice(&request.body) {
-                    Ok(payload) => payload,
-                    Err(_) => return Response::error(400, "invalid JSON"),
-                };
-                match provider.replace(&payload.values) {
-                    Ok(count) => {
-                        Response::text(format!("domain_set replaced with {count} entries"))
+async fn dispatch(config: &CompiledConfig, request: &Request) -> Response {
+    match route(&request.target) {
+        // Go mounts handlers per existing plugin tag, so a tag that is not
+        // mounted has no route: 404 before any method or eligibility decision.
+        Route::Plugin { tag, .. } if config.domain_set(tag).is_none() => {
+            Response::error(404, "404 page not found")
+        }
+        Route::Plugin { tag, action } => match (request.method.as_str(), action) {
+            ("GET", "show") => match eligible(config, tag) {
+                Err(response) => response,
+                Ok(provider) => {
+                    let mut body = String::new();
+                    for rule in provider.rules() {
+                        body.push_str(&rule);
+                        body.push('\n');
                     }
-                    Err(error) => Response::error(500, &error.to_string()),
+                    Response::text(body)
                 }
-            }
+            },
+            ("GET", "save") => match eligible(config, tag) {
+                Err(response) => response,
+                Ok(provider) => match provider.save().await {
+                    Ok(()) => Response::empty(200),
+                    Err(error) => Response::error(500, &error.to_string()),
+                },
+            },
+            ("POST", "post") => match eligible(config, tag) {
+                Err(response) => response,
+                Ok(provider) => {
+                    let payload: PostPayload = match serde_json::from_slice(&request.body) {
+                        Ok(payload) => payload,
+                        Err(_) => return Response::error(400, "invalid JSON"),
+                    };
+                    match provider.replace(&payload.values).await {
+                        Ok(count) => {
+                            Response::text(format!("domain_set replaced with {count} entries"))
+                        }
+                        Err(error) => Response::error(500, &error.to_string()),
+                    }
+                }
+            },
+            // Any other method on a registered, mounted path, as chi replies.
+            _ => Response::empty(405),
         },
         // The strict native subset cannot configure dedicated routing groups, so
         // an empty list is the true state and no group mutation route exists.
-        Route::SpecialGroups => Response {
-            status: 200,
-            content_type: Some("application/json"),
-            body: b"[]\n".to_vec(),
+        Route::SpecialGroups => match request.method.as_str() {
+            "GET" => Response {
+                status: 200,
+                content_type: Some("application/json"),
+                body: b"[]\n".to_vec(),
+            },
+            _ => Response::empty(405),
         },
-        // Mirrors Go's `http.NotFound` for an unmatched route or unmounted tag.
+        // Mirrors Go's `http.NotFound` for an unmatched route.
         Route::Unknown => Response::error(404, "404 page not found"),
-        // Mirrors chi's method-not-allowed reply: status only, no body.
-        Route::WrongMethod => Response::empty(405),
     }
 }
 
@@ -407,12 +410,19 @@ fn eligible<'a>(config: &'a CompiledConfig, tag: &str) -> Result<&'a ManagedDoma
     let Some(set) = config.domain_set(tag) else {
         return Err(Response::error(404, "404 page not found"));
     };
-    set.managed.as_deref().ok_or_else(|| {
-        Response::error(
-            400,
-            &format!("domain_set `{tag}` is not a single-file .txt managed profile"),
-        )
-    })
+    match set.managed.as_deref() {
+        Some(provider) => Ok(provider),
+        None => {
+            let reason = set
+                .ineligible_reason
+                .clone()
+                .unwrap_or_else(|| "not a single-file .txt managed profile".to_owned());
+            Err(Response::error(
+                400,
+                &format!("domain_set `{tag}` is not manageable: {reason}"),
+            ))
+        }
+    }
 }
 
 /// The UI payload: `{ "values": ["...", ...] }`.

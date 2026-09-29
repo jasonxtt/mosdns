@@ -277,7 +277,7 @@ fn managed_profile_requires_exactly_one_txt_file() {
 }
 
 #[test]
-fn two_managed_tags_may_not_share_one_rule_file() {
+fn two_tags_sharing_one_rule_file_still_load_and_are_management_ineligible() {
     let fixture = Fixture::new("shared-file");
     fixture.write("rules/shared.txt", "shared.example\n");
     let yaml = config_yaml(
@@ -288,11 +288,28 @@ fn two_managed_tags_may_not_share_one_rule_file() {
         ),
         "",
     );
-    let error = expect_config_error(
+    // A shared writable file must not make the configuration unloadable: both
+    // tags keep matching, and neither becomes a management target.
+    let config = expect_config(
         compile(&fixture, &yaml),
-        "two managed tags must not silently overwrite one file",
+        "a shared writable rule file must still load and query",
     );
-    assert!(error.reason.contains("shared.txt"), "{error}");
+    for tag in ["first", "second"] {
+        let set = config.domain_set(tag).expect("tag");
+        assert!(
+            set.matches("shared.example"),
+            "`{tag}` must still participate in DNS queries"
+        );
+        assert!(
+            set.managed.is_none(),
+            "`{tag}` must not be a management target"
+        );
+        let reason = set
+            .ineligible_reason
+            .as_deref()
+            .expect("a shared-file tag needs a visible reason");
+        assert!(reason.contains("shared"), "{reason}");
+    }
 }
 
 #[test]

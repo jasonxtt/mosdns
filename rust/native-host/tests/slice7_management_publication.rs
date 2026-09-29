@@ -10,9 +10,10 @@ use std::fs;
 
 use std::net::{SocketAddr, UdpSocket as StdUdpSocket};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Duration;
 
-use mosdns_native_host::{HostAssembly, HostRunError, PersistFault, load_and_compile};
+use mosdns_native_host::{HostAssembly, HostRunError, PersistFault, PersistGate, load_and_compile};
 use mosdns_upstream_core::TransportCancellation;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -177,6 +178,13 @@ fn udp_query(listener: SocketAddr, request: &[u8]) -> Vec<u8> {
     let mut response = vec![0_u8; 65535];
     let (length, _) = socket.recv_from(&mut response).expect("client response");
     response[..length].to_vec()
+}
+
+/// Sleeps without blocking the single-threaded host runtime.
+async fn pause(millis: u64) {
+    tokio::task::spawn_blocking(move || std::thread::sleep(Duration::from_millis(millis)))
+        .await
+        .expect("pause task");
 }
 
 /// Runs one blocking UDP query off the single-threaded host so the host's own
@@ -610,6 +618,262 @@ fn every_observation_is_one_whole_generation() {
             vec!["blocklist.txt".to_owned()],
             "repeated publication must not leave temporary files"
         );
+    });
+    result.expect("supervisor shutdown is clean");
+}
+
+#[test]
+fn a_paused_update_lets_a_real_dns_reader_finish_on_the_old_generation() {
+    let fixture = udp_fixture(
+        "publish-barrier",
+        "a.example\n",
+        free_udp_port(),
+        free_tcp_port(),
+    );
+    let (observed, result) = with_host(&fixture, async |assembly, dns, api| {
+        let provider = Rc::clone(
+            assembly
+                .config()
+                .domain_set("blocklist")
+                .expect("managed tag")
+                .managed
+                .as_ref()
+                .expect("managed provider"),
+        );
+
+        // Hold the next update immediately before publication.
+        let barrier = TransportCancellation::new();
+        provider.inject_publish_barrier(barrier.clone());
+
+        let posted =
+            tokio::task::spawn_local(
+                async move { post_values(api, "blocklist", &["b.example"]).await },
+            );
+
+        // The candidate file is committed before the gate, so waiting for it
+        // proves the update reached the persist/publish boundary.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while fixture.read("rules/blocklist.txt") != "b.example\n" {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the POST never committed its candidate file"
+            );
+            pause(20).await;
+        }
+        pause(100).await;
+
+        // A real reader must still be served while the update is parked, and it
+        // must observe the whole OLD generation.
+        let old_blocked = udp_rcode(dns, 0x3701, &["a", "example"]).await;
+        let new_not_yet = udp_rcode(dns, 0x3702, &["b", "example"]).await;
+        let show_while_parked = get(api, "/plugins/blocklist/show").await;
+        assert_eq!(show_while_parked.status, 200, "the API stays responsive");
+
+        // Release the gate; the same update then publishes and is visible.
+        barrier.cancel();
+        let posted = posted.await.expect("post task");
+        let new_blocked = udp_rcode(dns, 0x3703, &["b", "example"]).await;
+        let old_now_free = udp_rcode(dns, 0x3704, &["a", "example"]).await;
+        let show_after = get(api, "/plugins/blocklist/show").await;
+
+        // A failing update must still never publish, even with a gate armed.
+        provider.inject_persist_fault(PersistFault::Rename);
+        let barrier = TransportCancellation::new();
+        provider.inject_publish_barrier(barrier.clone());
+        let failed = post_values(api, "blocklist", &["c.example"]).await;
+        barrier.cancel();
+        let after_failure = udp_rcode(dns, 0x3705, &["b", "example"]).await;
+        let show_after_failure = get(api, "/plugins/blocklist/show").await;
+
+        (
+            old_blocked,
+            new_not_yet,
+            show_while_parked.body,
+            posted.status,
+            new_blocked,
+            old_now_free,
+            show_after.body,
+            failed.status,
+            after_failure,
+            show_after_failure.body,
+        )
+    });
+    result.expect("supervisor shutdown is clean");
+
+    let (
+        old_blocked,
+        new_not_yet,
+        show_while_parked,
+        post_status,
+        new_blocked,
+        old_now_free,
+        show_after,
+        failed_status,
+        after_failure,
+        show_after_failure,
+    ) = observed;
+    assert_eq!(
+        old_blocked, 3,
+        "a reader during a paused update sees the old generation"
+    );
+    assert_eq!(
+        new_not_yet, 0,
+        "the parked candidate must not be visible before publication"
+    );
+    assert_eq!(
+        show_while_parked, "a.example\n",
+        "`/show` during a paused update still reports the old generation"
+    );
+    assert_eq!(post_status, 200, "the released update publishes");
+    assert_eq!(new_blocked, 3, "the next reader sees the new generation");
+    assert_eq!(old_now_free, 0);
+    assert_eq!(show_after, "b.example\n");
+    assert_eq!(failed_status, 500, "the injected failure is reported");
+    assert_eq!(
+        after_failure, 3,
+        "a failed update never publishes: the last good generation stays live"
+    );
+    assert_eq!(show_after_failure, "b.example\n");
+}
+
+#[test]
+fn a_slow_persistence_step_does_not_block_dns_readers() {
+    let fixture = udp_fixture(
+        "slow-persist",
+        "a.example\n",
+        free_udp_port(),
+        free_tcp_port(),
+    );
+    let (observed, result) = with_host(&fixture, async |assembly, dns, api| {
+        let provider = Rc::clone(
+            assembly
+                .config()
+                .domain_set("blocklist")
+                .expect("managed tag")
+                .managed
+                .as_ref()
+                .expect("managed provider"),
+        );
+
+        // Park the blocking persistence step before it writes anything.
+        let gate = PersistGate::new();
+        provider.inject_persist_gate(gate.clone());
+        let posted =
+            tokio::task::spawn_local(
+                async move { post_values(api, "blocklist", &["b.example"]).await },
+            );
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !gate.arrived() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the update never entered the persistence step"
+            );
+            pause(10).await;
+        }
+
+        // The persistence step is parked on a blocking thread. The single DNS
+        // runtime must still answer a real query, and it must observe the whole
+        // old generation while the file is still untouched.
+        let old_generation = udp_rcode(dns, 0x3801, &["a", "example"]).await;
+        let not_published = udp_rcode(dns, 0x3802, &["b", "example"]).await;
+        let file_while_parked = fixture.read("rules/blocklist.txt");
+
+        gate.release();
+        let posted = posted.await.expect("post task");
+        let published = udp_rcode(dns, 0x3803, &["b", "example"]).await;
+
+        (
+            old_generation,
+            not_published,
+            file_while_parked,
+            posted.status,
+            published,
+        )
+    });
+    result.expect("supervisor shutdown is clean");
+
+    let (old_generation, not_published, file_while_parked, status, published) = observed;
+    assert_eq!(
+        old_generation, 3,
+        "a real DNS reader must be answered while persistence is parked"
+    );
+    assert_eq!(not_published, 0, "nothing is published before the write");
+    assert_eq!(
+        file_while_parked, "a.example\n",
+        "the file is untouched while the persistence step is parked"
+    );
+    assert_eq!(status, 200);
+    assert_eq!(published, 3, "the released update publishes normally");
+}
+
+#[test]
+fn an_approved_post_normalizes_values_across_http_file_show_and_restart() {
+    // Approved intentional deviation (2026-09-29): a POST value is normalized
+    // like a rule-file line (outer whitespace trimmed, empty and whole-line `#`
+    // skipped, then matcher validation) instead of being handed to the matcher
+    // verbatim as Go does. This pins the deviation on every surface at once.
+    let fixture = udp_fixture(
+        "post-normalization",
+        "seed.example\n",
+        free_udp_port(),
+        free_tcp_port(),
+    );
+    let http_show = {
+        let (show, result) = with_host(&fixture, async |_assembly, _dns, api| {
+            let posted = post_values(
+                api,
+                "blocklist",
+                &[
+                    "  padded.example  ",
+                    "",
+                    "   ",
+                    "# whole-line comment",
+                    "valid-after.example",
+                ],
+            )
+            .await;
+            assert_eq!(posted.status, 200, "{posted:?}");
+            assert_eq!(posted.body, "domain_set replaced with 2 entries");
+            get(api, "/plugins/blocklist/show").await.body
+        });
+        result.expect("supervisor shutdown is clean");
+        show
+    };
+    let expected = "padded.example\nvalid-after.example\n";
+    assert_eq!(
+        http_show, expected,
+        "the direct HTTP response reflects the normalized rules"
+    );
+    assert_eq!(
+        fixture.read("rules/blocklist.txt"),
+        expected,
+        "the persisted file holds the normalized rules"
+    );
+
+    // A restart loads exactly the same effective rules.
+    let restarted = assembly_for(&fixture);
+    {
+        let config = load_and_compile(&fixture.config()).expect("restart config");
+        let set = config.domain_set("blocklist").expect("managed tag");
+        let provider = set.managed.as_ref().expect("managed provider");
+        assert_eq!(
+            provider.rules(),
+            vec![
+                "padded.example".to_owned(),
+                "valid-after.example".to_owned()
+            ],
+            "the restart loads the same normalized rules"
+        );
+    }
+    let ((), result) = with_assembly(&restarted, async |_assembly, dns, api| {
+        assert_eq!(
+            get(api, "/plugins/blocklist/show").await.body,
+            expected,
+            "the restarted host shows the same rules"
+        );
+        assert_eq!(udp_rcode(dns, 0x3901, &["padded", "example"]).await, 3);
+        assert_eq!(udp_rcode(dns, 0x3902, &["seed", "example"]).await, 0);
     });
     result.expect("supervisor shutdown is clean");
 }

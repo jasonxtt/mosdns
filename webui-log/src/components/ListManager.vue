@@ -265,6 +265,7 @@ async function saveList() {
   resetMessage()
   let confirmedCount = 0
   const adjusted = []
+  const preserved = []
   const unconfirmed = []
   const failed = []
   try {
@@ -285,7 +286,9 @@ async function saveList() {
         clearUncertain(tag)
         item.draft.original = canonical
         if (!sameRules(item.draft.content, canonical)) {
-          adjusted.push({ tag, message: '服务器内容与本地编辑不同，已保留本地编辑' })
+          // The editor keeps the local edit; this is not a server-side
+          // adjustment, so it is reported as a separate state.
+          preserved.push({ tag, message: '服务器内容与本地编辑不同，已保留本地编辑' })
           continue
         }
         item.draft.content = canonical
@@ -333,7 +336,12 @@ async function saveList() {
       updateStatus(isDraftDirty(selectedTag.value) ? '（未保存）' : '', selectedTag.value)
     }
 
-    if (failed.length === 0 && unconfirmed.length === 0 && adjusted.length === 0) {
+    if (
+      failed.length === 0 &&
+      unconfirmed.length === 0 &&
+      adjusted.length === 0 &&
+      preserved.length === 0
+    ) {
       setSuccess(`已保存 ${confirmedCount} 个列表改动`)
       return
     }
@@ -344,7 +352,12 @@ async function saveList() {
         .join('、')
     const parts = [`已保存 ${confirmedCount} 个列表`]
     if (adjusted.length > 0) {
-      parts.push(`${adjusted.length} 个列表已按服务器内容调整（${names(adjusted)}）`)
+      parts.push(`${adjusted.length} 个列表部分规则未被服务器接受，已按服务器内容更新（${names(adjusted)}）`)
+    }
+    if (preserved.length > 0) {
+      parts.push(
+        `${preserved.length} 个列表已重新读取服务器内容，但本地编辑与服务器不同，已保留本地编辑（${names(preserved)}），请确认后再保存`
+      )
     }
     if (unconfirmed.length > 0) {
       parts.push(

@@ -1,23 +1,23 @@
 {
-  "recordedAt": "2026-09-29T14:54:51.686Z",
+  "recordedAt": "2026-09-29T15:57:24.249Z",
   "nativeBinary": "/Users/tom/github/mosdns-rust/rust/target/debug/mosdns",
-  "viteProxyTarget": "http://127.0.0.1:62536",
-  "viteUrl": "http://127.0.0.1:62537",
+  "viteProxyTarget": "http://127.0.0.1:50469",
+  "viteUrl": "http://127.0.0.1:50470",
   "ports": {
-    "dns": 61756,
-    "api": 62536,
-    "vite": 62537,
-    "chromeDebug": 62538
+    "dns": 59053,
+    "api": 50469,
+    "vite": 50470,
+    "chromeDebug": 50471
   },
   "fixture": {
     "work": "(removed)",
-    "config": "log:\n  level: error\napi:\n  http: \"127.0.0.1:62536\"\nplugins:\n  - tag: sequence_main\n    type: sequence\n    args:\n      - matches: qname $blocklist\n        exec: reject 3\n      - exec: reject 0\n  - tag: blocklist\n    type: domain_set\n    args:\n      files:\n        - rules/blocklist.txt\n  - tag: whitelist\n    type: domain_set\n    args:\n      files:\n        - rules/whitelist.txt\n  - tag: forward_main\n    type: forward\n    args:\n      upstreams:\n        - addr: \"udp://127.0.0.1:25999\"\n  - tag: listener\n    type: udp_server\n    args:\n      entry: sequence_main\n      listen: \"127.0.0.1:61756\"\n      enable_audit: false\n"
+    "config": "log:\n  level: error\napi:\n  http: \"127.0.0.1:50469\"\nplugins:\n  - tag: sequence_main\n    type: sequence\n    args:\n      - matches: qname $blocklist\n        exec: reject 3\n      - exec: reject 0\n  - tag: blocklist\n    type: domain_set\n    args:\n      files:\n        - rules/blocklist.txt\n  - tag: whitelist\n    type: domain_set\n    args:\n      files:\n        - rules/whitelist.txt\n  - tag: forward_main\n    type: forward\n    args:\n      upstreams:\n        - addr: \"udp://127.0.0.1:25999\"\n  - tag: listener\n    type: udp_server\n    args:\n      entry: sequence_main\n      listen: \"127.0.0.1:59053\"\n      enable_audit: false\n"
   },
   "checks": [
     {
       "name": "native host serves the scoped API",
       "ok": true,
-      "detail": "http://127.0.0.1:62536"
+      "detail": "http://127.0.0.1:50469"
     },
     {
       "name": "vite proxies /api/v1/special-groups to the isolated native host",
@@ -117,7 +117,7 @@
     {
       "name": "the skipped rule is reported to the user",
       "ok": true,
-      "detail": "[{\"message\":\"已保存 1 个列表；1 个列表已按服务器内容调整（黑名单）\",\"tone\":\"error\"}]"
+      "detail": "[{\"message\":\"已保存 1 个列表；1 个列表部分规则未被服务器接受，已按服务器内容更新（黑名单）\",\"tone\":\"error\"}]"
     },
     {
       "name": "a restarted host serves the same accepted rules",
@@ -225,6 +225,51 @@
       "detail": "[{\"name\":\"白名单\",\"dirty\":false},{\"name\":\"黑名单\",\"dirty\":false},{\"name\":\"灰名单\",\"dirty\":false},{\"name\":\"!CN fakeip filter\",\"dirty\":false},{\"name\":\"CN fakeip filter\",\"dirty\":false},{\"name\":\"DDNS 域名\",\"dirty\":false},{\"name\":\"客户端 IP\",\"dirty\":false},{\"name\":\"直连 IP\",\"dirty\":false},{\"name\":\"重定向\",\"dirty\":false}]"
     },
     {
+      "name": "a second injected canonical-read failure leaves the tag unconfirmed",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 0 个列表；1 个列表服务器保存成功但当前内容未确认（黑名单），请重新加载确认\",\"tone\":\"error\"}]"
+    },
+    {
+      "name": "the out-of-band server change succeeded",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "a differing canonical read preserves the local edit",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\nui-unconfirmed.example\\nui-local-only.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\nui-unconfirmed.example\\nui-local-only.example\\n\""
+    },
+    {
+      "name": "the preserved tag stays dirty",
+      "ok": true,
+      "detail": "[{\"name\":\"白名单\",\"dirty\":false},{\"name\":\"黑名单\",\"dirty\":true},{\"name\":\"灰名单\",\"dirty\":false},{\"name\":\"!CN fakeip filter\",\"dirty\":false},{\"name\":\"CN fakeip filter\",\"dirty\":false},{\"name\":\"DDNS 域名\",\"dirty\":false},{\"name\":\"客户端 IP\",\"dirty\":false},{\"name\":\"直连 IP\",\"dirty\":false},{\"name\":\"重定向\",\"dirty\":false}]"
+    },
+    {
+      "name": "the message reports a preserved local edit",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 0 个列表；1 个列表已重新读取服务器内容，但本地编辑与服务器不同，已保留本地编辑（黑名单），请确认后再保存\",\"tone\":\"error\"}]"
+    },
+    {
+      "name": "the message does not claim a server-side adjustment",
+      "ok": true,
+      "detail": "[{\"message\":\"已保存 0 个列表；1 个列表已重新读取服务器内容，但本地编辑与服务器不同，已保留本地编辑（黑名单），请确认后再保存\",\"tone\":\"error\"}]"
+    },
+    {
+      "name": "the server content is not silently adopted",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\n\""
+    },
+    {
+      "name": "the next save submits the preserved local edit",
+      "ok": true,
+      "detail": "actual=\"seed-blocked.example\\nui-second.example\\nui-unconfirmed.example\\nui-local-only.example\\n\" expected=\"seed-blocked.example\\nui-second.example\\nui-unconfirmed.example\\nui-local-only.example\\n\""
+    },
+    {
+      "name": "the preserved tag is clean afterwards",
+      "ok": true,
+      "detail": "[{\"name\":\"白名单\",\"dirty\":false},{\"name\":\"黑名单\",\"dirty\":false},{\"name\":\"灰名单\",\"dirty\":false},{\"name\":\"!CN fakeip filter\",\"dirty\":false},{\"name\":\"CN fakeip filter\",\"dirty\":false},{\"name\":\"DDNS 域名\",\"dirty\":false},{\"name\":\"客户端 IP\",\"dirty\":false},{\"name\":\"直连 IP\",\"dirty\":false},{\"name\":\"重定向\",\"dirty\":false}]"
+    },
+    {
       "name": "the main worktree generated assets are untouched",
       "ok": true,
       "detail": "coremain/www/log.html, coremain/www/assets/vue-log/index.html"
@@ -232,48 +277,48 @@
     {
       "name": "the DNS port is released after shutdown",
       "ok": true,
-      "detail": "61756"
+      "detail": "59053"
     },
     {
       "name": "the management port is released after shutdown",
       "ok": true,
-      "detail": "62536"
+      "detail": "50469"
     }
   ],
-  "passed": 45,
+  "passed": 54,
   "failed": 0,
   "failure": null,
   "pageErrors": [
-    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)",
-    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)",
-    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)",
-    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:62537/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:62537/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:62537/src/composables/useRealtimeMetrics.ts:68:71)"
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:50470/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:50470/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:50470/src/composables/useRealtimeMetrics.ts:68:71)",
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:50470/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:50470/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:50470/src/composables/useRealtimeMetrics.ts:68:71)",
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:50470/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:50470/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:50470/src/composables/useRealtimeMetrics.ts:68:71)",
+    "[DnsOverviewCard] polling failed Error: HTTP 404 Not Found\n    at requestJSON (http://127.0.0.1:50470/src/services/dashboard.ts:19:11)\n    at async fetchDashboardStats (http://127.0.0.1:50470/src/services/dashboard.ts:24:19)\n    at async Promise.allSettled (index 0)\n    at async refreshMetrics (http://127.0.0.1:50470/src/composables/useRealtimeMetrics.ts:68:71)"
   ],
   "logs": [
     {
       "name": "vite",
       "stream": "stdout",
-      "data": "\n> mosdns-log-vue@0.1.0 dev\n> vite --port 62537 --strictPort --host 127.0.0.1\n\n"
+      "data": "\n> mosdns-log-vue@0.1.0 dev\n> vite --port 50470 --strictPort --host 127.0.0.1\n\n"
     },
     {
       "name": "vite",
       "stream": "stdout",
-      "data": "10:54:34 PM [vite] (client) Re-optimizing dependencies because vite config has changed\n"
+      "data": "11:57:02 PM [vite] (client) Re-optimizing dependencies because vite config has changed\n"
     },
     {
       "name": "vite",
       "stream": "stdout",
-      "data": "\n  VITE v7.3.2  ready in 187 ms\n\n"
+      "data": "\n  VITE v7.3.2  ready in 237 ms\n\n"
     },
     {
       "name": "vite",
       "stream": "stdout",
-      "data": "  ➜  Local:   http://127.0.0.1:62537/\n"
+      "data": "  ➜  Local:   http://127.0.0.1:50470/\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "\nDevTools listening on ws://127.0.0.1:62538/devtools/browser/e8f7b521-7f96-4b1f-a540-3ebe75fc920e\n"
+      "data": "\nDevTools listening on ws://127.0.0.1:50471/devtools/browser/c800739e-df38-4841-913b-25eb055bd181\n"
     },
     {
       "name": "chrome",
@@ -288,77 +333,232 @@
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225435.340709:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235704.307030:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225435.340999:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235704.319087:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225435.341046:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235704.321221:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n[66860:14805579:0929/235704.321302:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n[66860:14805579:0929/235704.321362:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n[66860:14805579:0929/235704.321410:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225435.341110:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.188961:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225435.341153:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.264592:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225435.341206:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.295953:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225437.265519:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.335589:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225437.344436:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.361966:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225437.377777:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.405283:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225437.425296:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.430611:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225437.447747:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
+      "data": "[66860:14805579:0929/235706.437155:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
-      "data": "[47873:14634700:0929/225437.492671:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
-    },
-    {
-      "name": "chrome",
-      "stream": "stderr",
-      "data": "[47873:14634700:0929/225437.516009:ERROR:ui/display/mac/cv_display_link_mac.mm:188] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\n"
-    },
-    {
-      "name": "chrome",
-      "stream": "stderr",
-      "data": "[47867:14634651:0929/225437.985923:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\n"
+      "data": "[66854:14805543:0929/235707.140370:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\n"
     },
     {
       "name": "chrome",
       "stream": "stderr",
       "data": "Created TensorFlow Lite XNNPACK delegate for CPU.\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.801572:VERBOSE1:chrome/updater/updater.cc:364] Version: 156.0.8067.0, opt, ARM_64, command line: /Users/tom/Library/Application Support/Google/GoogleUpdater/156.0.8067.0/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --wake-all --enable-logging --vmodule=*/components/update_client/*=2,*/chrome/enterprise_companion/*=2,*/chrome/updater/*=2\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.802044:VERBOSE1:chrome/updater/updater.cc:367] OS version: 26.5.1, arch: arm64, System uptime (seconds): 750237, parent pid: 66854\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.803585:VERBOSE1:chrome/updater/updater.cc:372] Available disk space in install directory (/Users/tom/Library/Application Support/Google/GoogleUpdater): 13072498688B (12.175GiB) / 245107195904B (228.274GiB)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.803613:VERBOSE1:chrome/updater/updater.cc:376] Available disk space in temporary directory (/var/folders/6x/gv39n9t100513whtk1gd5pk40000gn/T/): 13072498688B (12.175GiB) / 245107195904B (228.274GiB)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.803675:VERBOSE2:chrome/updater/event_history.cc:266] Emitted a UPDATER_PROCESS START event to the history log\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66968:14806802:0929/235722.811501:VERBOSE1:chrome/updater/updater.cc:364] Version: 156.0.8067.0, opt, ARM_64, command line: /Users/tom/Library/Application Support/Google/GoogleUpdater/156.0.8067.0/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --crash-handler --database=/Users/tom/Library/Application Support/Google/GoogleUpdater/156.0.8067.0/Crashpad --url=https://clients2.google.com/cr/report --annotation=prod=Update4 --annotation=ver=156.0.8067.0 --handshake-fd=6 --enable-logging --vmodule=*/components/update_client/*=2,*/chrome/enterprise_companion/*=2,*/chrome/updater/*=2\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66968:14806802:0929/235722.816043:VERBOSE1:chrome/updater/updater.cc:367] OS version: 26.5.1, arch: arm64, System uptime (seconds): 750237, parent pid: 1\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66968:14806802:0929/235722.817566:VERBOSE1:chrome/updater/updater.cc:372] Available disk space in install directory (/Users/tom/Library/Application Support/Google/GoogleUpdater): 13072936960B (12.175GiB) / 245107195904B (228.274GiB)\n[66968:14806802:0929/235722.817589:VERBOSE1:chrome/updater/updater.cc:376] Available disk space in temporary directory (/var/folders/6x/gv39n9t100513whtk1gd5pk40000gn/T/): 13072936960B (12.175GiB) / 245107195904B (228.274GiB)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66968:14806802:0929/235722.817734:VERBOSE2:chrome/updater/event_history.cc:266] Emitted a UPDATER_PROCESS START event to the history log\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.818205:VERBOSE1:chrome/updater/crash_reporter.cc:123] Crash handler launched and ready.\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.818766:VERBOSE1:chrome/updater/crash_client.cc:108] Found 0 completed crash reports\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.818825:VERBOSE1:chrome/updater/crash_client.cc:132] Found 0 pending crash reports\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.818891:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:145] open /Users/tom/Library/Application Support/Google/RLZ/Crashpad/settings.dat: No such file or directory (2)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.818902:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:145] open /Users/tom/Library/Application Support/Google/Chrome for Testing/Crashpad/settings.dat: No such file or directory (2)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806798:0929/235722.819073:VERBOSE1:chrome/updater/updater.cc:105] Crash reporting initialized.\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66966:14806810:0929/235722.819299:VERBOSE1:chrome/updater/app/app_wakeall.cc:58] Launching `/Users/tom/Library/Application Support/Google/GoogleUpdater/156.0.8067.0/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --wake`\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.826100:VERBOSE1:chrome/updater/updater.cc:364] Version: 156.0.8067.0, opt, ARM_64, command line: /Users/tom/Library/Application Support/Google/GoogleUpdater/156.0.8067.0/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --wake --enable-logging --vmodule=*/components/update_client/*=2,*/chrome/enterprise_companion/*=2,*/chrome/updater/*=2\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.826460:VERBOSE1:chrome/updater/updater.cc:367] OS version: 26.5.1, arch: arm64, System uptime (seconds): 750237, parent pid: 66966\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.827854:VERBOSE1:chrome/updater/updater.cc:372] Available disk space in install directory (/Users/tom/Library/Application Support/Google/GoogleUpdater): 13072912384B (12.175GiB) / 245107195904B (228.274GiB)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.827876:VERBOSE1:chrome/updater/updater.cc:376] Available disk space in temporary directory (/var/folders/6x/gv39n9t100513whtk1gd5pk40000gn/T/): 13072912384B (12.175GiB) / 245107195904B (228.274GiB)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.827922:VERBOSE2:chrome/updater/event_history.cc:266] Emitted a UPDATER_PROCESS START event to the history log\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66971:14806818:0929/235722.834730:VERBOSE1:chrome/updater/updater.cc:364] Version: 156.0.8067.0, opt, ARM_64, command line: /Users/tom/Library/Application Support/Google/GoogleUpdater/156.0.8067.0/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --crash-handler --database=/Users/tom/Library/Application Support/Google/GoogleUpdater/156.0.8067.0/Crashpad --url=https://clients2.google.com/cr/report --annotation=prod=Update4 --annotation=ver=156.0.8067.0 --handshake-fd=6 --enable-logging --vmodule=*/components/update_client/*=2,*/chrome/enterprise_companion/*=2,*/chrome/updater/*=2\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66971:14806818:0929/235722.835111:VERBOSE1:chrome/updater/updater.cc:367] OS version: 26.5.1, arch: arm64, System uptime (seconds): 750237, parent pid: 1\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66971:14806818:0929/235722.836490:VERBOSE1:chrome/updater/updater.cc:372] Available disk space in install directory (/Users/tom/Library/Application Support/Google/GoogleUpdater): 13072912384B (12.175GiB) / 245107195904B (228.274GiB)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66971:14806818:0929/235722.836515:VERBOSE1:chrome/updater/updater.cc:376] Available disk space in temporary directory (/var/folders/6x/gv39n9t100513whtk1gd5pk40000gn/T/): 13072912384B (12.175GiB) / 245107195904B (228.274GiB)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66971:14806818:0929/235722.836571:VERBOSE2:chrome/updater/event_history.cc:266] Emitted a UPDATER_PROCESS START event to the history log\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.836918:VERBOSE1:chrome/updater/crash_reporter.cc:123] Crash handler launched and ready.\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.837432:VERBOSE1:chrome/updater/crash_client.cc:108] Found 0 completed crash reports\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.837493:VERBOSE1:chrome/updater/crash_client.cc:132] Found 0 pending crash reports\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.837558:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:145] open /Users/tom/Library/Application Support/Google/RLZ/Crashpad/settings.dat: No such file or directory (2)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.837570:ERROR:third_party/crashpad/crashpad/util/file/file_io_posix.cc:145] open /Users/tom/Library/Application Support/Google/Chrome for Testing/Crashpad/settings.dat: No such file or directory (2)\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.837780:VERBOSE1:chrome/updater/updater.cc:105] Crash reporting initialized.\n"
+    },
+    {
+      "name": "chrome",
+      "stream": "stderr",
+      "data": "[66969:14806814:0929/235722.837924:VERBOSE1:chrome/updater/ipc/update_service_internal_proxy_mojo.cc:61] Run\n"
     }
   ]
 }

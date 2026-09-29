@@ -1,11 +1,11 @@
-== isolated ports: dns=52418 api=42551
-== native log: /root/mosdns-rust-domainset-20260929/functional/native-first.log
-[PASS] the native host serves its scoped API 127.0.0.1:42551
+== isolated ports: dns=53900 api=32825
+== native log: /root/mosdns-rust-domainset-v2-20260929/functional/native-first.log
+[PASS] the native host serves its scoped API 127.0.0.1:32825
 [PASS] GET /api/v1/special-groups 200 application/json body=[]
 [PASS] GET /show ignores the query string 200 text/plain; charset=utf-8 body=seed-blocked.example
 [PASS] unknown tag fails explicitly 404 text/plain; charset=utf-8 body=404 page not found
-[PASS] ineligible query-only tag is rejected 400 text/plain; charset=utf-8 body=domain_set `explist` is not a single-file .txt managed profile
-[PASS] wrong method is 405 405
+[PASS] ineligible query-only tag is rejected 400 text/plain; charset=utf-8 body=domain_set `explist` is not manageable: not a single-file .txt managed profile
+[PASS] wrong method is 405 status=405
 [PASS] malformed JSON is 400 invalid JSON 400 text/plain; charset=utf-8 body=invalid JSON
 [PASS] a malformed POST leaves the file unchanged seed-blocked.example
 [PASS] POST publishes the accepted rules and reports the count 200 text/plain; charset=utf-8 body=domain_set replaced with 1 entries
@@ -16,9 +16,9 @@
 [PASS] an unrelated name is still not blocked other.example rcode=0
 [PASS] a restart keeps the committed generation vm-added.example
 [PASS] a restart keeps the DNS effect vm-added.example rcode=3
-[PASS] no listener remains on the management port port 42551
-[PASS] no listener remains on the DNS port port 52418
-[PASS] the management port is bindable again (SO_REUSEADDR) port 42551
-[PASS] the DNS port is bindable again port 52418
+[PASS] no listener remains on the management port port 32825
+[PASS] no listener remains on the DNS port port 53900
+[PASS] the management port is bindable again (SO_REUSEADDR) port 32825
+[PASS] the DNS port is bindable again port 53900
 
 functional checks: 20 passed, 0 failed

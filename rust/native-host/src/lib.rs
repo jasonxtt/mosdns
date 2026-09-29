@@ -26,7 +26,7 @@ pub use config::{
     ListenerConfig, ListenerKind, LogLevel, SequenceConfig, compile_yaml, compile_yaml_with_base,
     load_and_compile, load_yaml,
 };
-pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault};
+pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{
     AuditRecord, AuditSnapshot, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,
     FailureProvenance, LocalFailureKind, MetricsSnapshot, QueryTerminalOutcome, QueryTransport,

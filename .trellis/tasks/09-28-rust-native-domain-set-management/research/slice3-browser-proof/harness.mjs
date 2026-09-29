@@ -455,7 +455,7 @@ async function main() {
     snapshot = await cdp.evaluate(SNAPSHOT)
     equal('a skipped rule is not presented as canonical', snapshot.editor, 'seed-blocked.example\nui-second.example\n')
     equal('the file holds only accepted rules', readFileSync(join(work, 'rules/blocklist.txt'), 'utf8'), 'seed-blocked.example\nui-second.example\n')
-    check('the skipped rule is reported to the user', snapshot.notices.some((notice) => notice.message.includes('已按服务器内容调整')), JSON.stringify(snapshot.notices))
+    check('the skipped rule is reported to the user', snapshot.notices.some((notice) => notice.message.includes('已按服务器内容更新')), JSON.stringify(snapshot.notices))
 
     // 9. Restart the native host; the accepted rules survive.
     native.kill('SIGTERM')
@@ -574,6 +574,98 @@ async function main() {
     )
     const remainingDots = snapshot.unsavedDots.filter((item) => item.name.startsWith('黑名单') && item.dirty)
     check('the reconciled tag is no longer marked dirty', remainingDots.length === 0, JSON.stringify(snapshot.unsavedDots))
+
+    // 13. An uncertain tag whose server content differs from the local draft:
+    //     the editor keeps the local edit, and the message must not claim a
+    //     server-side adjustment.
+    const localDraft =
+      'seed-blocked.example\nui-second.example\nui-unconfirmed.example\nui-local-only.example\n'
+    await cdp.evaluate(`window.__slice3Notices = []`)
+    await cdp.evaluate(SET_EDITOR(localDraft))
+    const faultState = { postSeen: false, armed: true }
+    await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/plugins/*' }] })
+    cdp.on('Fetch.requestPaused', async (params) => {
+      const url = params.request.url
+      if (!faultState.armed) {
+        await cdp.send('Fetch.continueRequest', { requestId: params.requestId })
+        return
+      }
+      if (url.includes('/plugins/blocklist/post')) {
+        faultState.postSeen = true
+        await cdp.send('Fetch.continueRequest', { requestId: params.requestId })
+        return
+      }
+      if (faultState.postSeen && url.includes('/plugins/blocklist/show')) {
+        faultState.postSeen = false
+        faultState.armed = false
+        await cdp.send('Fetch.failRequest', { requestId: params.requestId, errorReason: 'ConnectionFailed' })
+        return
+      }
+      await cdp.send('Fetch.continueRequest', { requestId: params.requestId })
+    })
+    await cdp.evaluate(CLICK_TEXT('.save-list-btn', '保存'))
+    await sleep(1200)
+    await cdp.send('Fetch.disable')
+    const afterSecondFault = await cdp.evaluate(SNAPSHOT)
+    check(
+      'a second injected canonical-read failure leaves the tag unconfirmed',
+      afterSecondFault.notices.some((notice) => notice.message.includes('当前内容未确认')),
+      JSON.stringify(afterSecondFault.notices)
+    )
+
+    // Change the server behind the UI's back so canonical differs from the draft.
+    const outOfBand = await fetch(`${nativeHttp}/plugins/blocklist/post`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: ['seed-blocked.example', 'ui-second.example'] })
+    })
+    check('the out-of-band server change succeeded', outOfBand.status === 200, String(outOfBand.status))
+
+    await cdp.evaluate(`window.__slice3Notices = []`)
+    await cdp.evaluate(CLICK_TEXT('.save-list-btn', '保存'))
+    await sleep(1200)
+    snapshot = await cdp.evaluate(SNAPSHOT)
+    equal(
+      'a differing canonical read preserves the local edit',
+      snapshot.editor,
+      localDraft
+    )
+    check(
+      'the preserved tag stays dirty',
+      snapshot.unsavedDots.some((item) => item.name.startsWith('黑名单') && item.dirty),
+      JSON.stringify(snapshot.unsavedDots)
+    )
+    check(
+      'the message reports a preserved local edit',
+      snapshot.notices.some((notice) => notice.message.includes('已保留本地编辑')),
+      JSON.stringify(snapshot.notices)
+    )
+    check(
+      'the message does not claim a server-side adjustment',
+      !snapshot.notices.some((notice) => notice.message.includes('已按服务器内容更新')),
+      JSON.stringify(snapshot.notices)
+    )
+    equal(
+      'the server content is not silently adopted',
+      readFileSync(join(work, 'rules/blocklist.txt'), 'utf8'),
+      'seed-blocked.example\nui-second.example\n'
+    )
+
+    // Only the next explicit save submits the preserved local edit.
+    await cdp.evaluate(`window.__slice3Notices = []`)
+    await cdp.evaluate(CLICK_TEXT('.save-list-btn', '保存'))
+    await sleep(1200)
+    snapshot = await cdp.evaluate(SNAPSHOT)
+    equal(
+      'the next save submits the preserved local edit',
+      readFileSync(join(work, 'rules/blocklist.txt'), 'utf8'),
+      localDraft
+    )
+    check(
+      'the preserved tag is clean afterwards',
+      !snapshot.unsavedDots.some((item) => item.name.startsWith('黑名单') && item.dirty),
+      JSON.stringify(snapshot.unsavedDots)
+    )
 
     check(
       'the main worktree generated assets are untouched',
