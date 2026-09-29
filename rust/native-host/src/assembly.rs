@@ -10,7 +10,9 @@ use mosdns_upstream_core::{
     Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, TransportCancellation, Upstream,
     UpstreamError,
 };
+use tokio::task::JoinSet;
 
+use crate::api::{ApiServer, ApiServerError};
 use crate::config::{CompiledConfig, ConfigError, compile_yaml, load_and_compile};
 use crate::execution::{ExchangeError, ExchangeExecutor};
 use crate::observer::{AuditSnapshot, MetricsSnapshot, QueryObserver};
@@ -254,6 +256,57 @@ impl HostAssembly {
         Arc::clone(&self.observer)
     }
 
+    /// Binds every configured listener without serving any of them. A failed
+    /// bind drops the listeners that already succeeded, so no socket survives a
+    /// failed startup.
+    pub async fn bind_host(&self) -> Result<BoundHost, HostRunError> {
+        let dns = match self.config.listener.kind {
+            crate::config::ListenerKind::Udp => {
+                let server = UdpServer::bind_configured(self)
+                    .await
+                    .map_err(HostRunError::Udp)?;
+                DnsServer::Udp(server)
+            }
+            crate::config::ListenerKind::Tcp => {
+                let server = TcpServer::bind_configured(self)
+                    .await
+                    .map_err(HostRunError::Tcp)?;
+                DnsServer::Tcp(server)
+            }
+        };
+        let dns_addr = dns.local_addr()?;
+        let api = match &self.config.api {
+            Some(config) => {
+                let server = ApiServer::bind(self.config_handle(), config.http)
+                    .await
+                    .map_err(HostRunError::Api)?;
+                let address = server.local_addr().map_err(HostRunError::Api)?;
+                Some((server, address))
+            }
+            None => None,
+        };
+        let (api, api_addr) = match api {
+            Some((server, address)) => (Some(server), Some(address)),
+            None => (None, None),
+        };
+        Ok(BoundHost {
+            dns,
+            dns_addr,
+            api,
+            api_addr,
+        })
+    }
+
+    /// The top-level supervisor entrypoint: binds DNS and the optional
+    /// management listener, then serves both under one shutdown scope. A
+    /// failure on either side cancels and joins the other before returning.
+    pub async fn serve_host(&self) -> Result<(), HostRunError> {
+        self.bind_host()
+            .await?
+            .serve(TransportCancellation::new())
+            .await
+    }
+
     /// Binds and serves the configured UDP listener without opening any
     /// listener socket during assembly.
     pub fn run_udp(&self) -> Result<(), UdpServerError> {
@@ -267,11 +320,108 @@ impl HostAssembly {
         self.block_on(server.serve(TransportCancellation::new()))
     }
 
-    /// Runs the listener selected by the strictly compiled configuration.
+    /// Runs the configured host: one DNS listener plus the optional scoped
+    /// management listener, owned by one shutdown scope.
     pub fn run(&self) -> Result<(), HostRunError> {
-        match self.config.listener.kind {
-            crate::config::ListenerKind::Udp => self.run_udp().map_err(HostRunError::Udp),
-            crate::config::ListenerKind::Tcp => self.run_tcp().map_err(HostRunError::Tcp),
+        self.block_on(self.serve_host())
+    }
+}
+
+/// One bound DNS listener, before any request is served.
+pub enum DnsServer {
+    Udp(UdpServer),
+    Tcp(TcpServer),
+}
+
+impl DnsServer {
+    fn local_addr(&self) -> Result<std::net::SocketAddr, HostRunError> {
+        match self {
+            Self::Udp(server) => server.local_addr().map_err(HostRunError::Udp),
+            Self::Tcp(server) => server.local_addr().map_err(HostRunError::Tcp),
+        }
+    }
+
+    async fn serve(self, shutdown: TransportCancellation) -> Result<(), HostRunError> {
+        match self {
+            Self::Udp(server) => server.serve(shutdown).await.map_err(HostRunError::Udp),
+            Self::Tcp(server) => server.serve(shutdown).await.map_err(HostRunError::Tcp),
+        }
+    }
+}
+
+/// Every listener the supervisor bound, before any of them started serving.
+/// The sockets are released when this value is dropped or its `serve` returns.
+pub struct BoundHost {
+    dns: DnsServer,
+    dns_addr: std::net::SocketAddr,
+    api: Option<ApiServer>,
+    api_addr: Option<std::net::SocketAddr>,
+}
+
+impl BoundHost {
+    #[must_use]
+    pub const fn dns_addr(&self) -> std::net::SocketAddr {
+        self.dns_addr
+    }
+
+    #[must_use]
+    pub const fn api_addr(&self) -> Option<std::net::SocketAddr> {
+        self.api_addr
+    }
+
+    /// Arms one narrow running-side failure on the management listener. Only
+    /// tests call this.
+    #[doc(hidden)]
+    pub fn inject_api_accept_fault_after(&self, connections: usize) {
+        if let Some(api) = &self.api {
+            api.inject_accept_fault_after(connections);
+        }
+    }
+
+    /// Drives both listeners under one shared shutdown scope. Whichever side
+    /// fails first cancels the other; every listener task is joined and both
+    /// sockets are closed before this returns. The DNS side owns the one
+    /// upstream-catalog close, so the management side never closes it.
+    pub async fn serve(self, shutdown: TransportCancellation) -> Result<(), HostRunError> {
+        let Self {
+            dns,
+            dns_addr: _,
+            api,
+            api_addr: _,
+        } = self;
+        let mut tasks: JoinSet<Result<(), HostRunError>> = JoinSet::new();
+        {
+            let scope = shutdown.child_token();
+            tasks.spawn_local(async move { dns.serve(scope).await });
+        }
+        if let Some(api) = api {
+            let scope = shutdown.child_token();
+            tasks.spawn_local(async move { api.serve(scope).await.map_err(HostRunError::Api) });
+        }
+
+        let mut failure: Option<HostRunError> = None;
+        while let Some(joined) = tasks.join_next().await {
+            match joined {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    if failure.is_none() {
+                        failure = Some(error);
+                    }
+                    // A running-side failure stops the other listener; the
+                    // loop keeps joining until every task has finished.
+                    shutdown.cancel();
+                }
+                Err(error) => {
+                    if failure.is_none() {
+                        failure = Some(HostRunError::Task(error.to_string()));
+                    }
+                    shutdown.cancel();
+                }
+            }
+        }
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
         }
     }
 }
@@ -281,6 +431,8 @@ impl HostAssembly {
 pub enum HostRunError {
     Udp(UdpServerError),
     Tcp(TcpServerError),
+    Api(ApiServerError),
+    Task(String),
 }
 
 impl std::fmt::Display for HostRunError {
@@ -288,6 +440,8 @@ impl std::fmt::Display for HostRunError {
         match self {
             Self::Udp(error) => error.fmt(formatter),
             Self::Tcp(error) => error.fmt(formatter),
+            Self::Api(error) => error.fmt(formatter),
+            Self::Task(error) => write!(formatter, "listener task failed: {error}"),
         }
     }
 }
