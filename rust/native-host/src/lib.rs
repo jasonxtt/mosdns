@@ -18,8 +18,9 @@ pub use assembly::{
 pub use cache::{CacheAdapterError, CacheClock, CacheTestClock, NativeCacheAdapter, PendingStore};
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
-    CachePluginConfig, CompiledConfig, ConfigError, ForwardConfig, ListenerConfig, ListenerKind,
-    LogLevel, SequenceConfig, compile_yaml, compile_yaml_with_base, load_and_compile, load_yaml,
+    ApiConfig, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig, ForwardConfig,
+    ListenerConfig, ListenerKind, LogLevel, ManagedDomainSetConfig, SequenceConfig, compile_yaml,
+    compile_yaml_with_base, load_and_compile, load_yaml,
 };
 pub use observer::{
     AuditRecord, AuditSnapshot, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,

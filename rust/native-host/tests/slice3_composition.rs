@@ -245,14 +245,23 @@ fn included_definitions_keep_their_relative_path_and_source_context() {
         .expect("included rule files resolve from the included YAML directory");
     assert_eq!(config.forwards.len(), 2);
 
+    // Go-visible text-file policy: one invalid individual rule is skipped and
+    // the remaining valid rules still load instead of aborting the whole file.
     fs::write(
         fixture.root.join("sub_config/rules/local.txt"),
-        "regexp:[\n",
+        "regexp:[\nstill-valid.example\n",
     )
     .expect("invalid included rule");
+    let config = mosdns_native_host::load_and_compile(&fixture.config())
+        .expect("an invalid file rule must be skipped, not fatal");
+    assert_eq!(config.forwards.len(), 2);
+
+    // A real file-read failure still retains the included YAML source context
+    // and the offending rule-file path.
+    fs::remove_file(fixture.root.join("sub_config/rules/local.txt")).expect("remove rules");
     let error = expect_config_error(
         mosdns_native_host::load_and_compile(&fixture.config()),
-        "invalid rules must retain their included-file source context",
+        "a missing included rule file must retain its included-file source context",
     );
     assert!(
         error

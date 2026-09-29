@@ -1829,6 +1829,8 @@ plugins:
                 enable_audit: false,
                 idle_timeout: None,
             },
+            api: None,
+            domain_sets: Vec::new(),
             program,
         }
     }
@@ -1918,6 +1920,8 @@ plugins:
                     enable_audit: false,
                     idle_timeout: None,
                 },
+                api: None,
+                domain_sets: Vec::new(),
                 program,
             },
             a_id,
@@ -2438,6 +2442,8 @@ plugins:
                     enable_audit: false,
                     idle_timeout: None,
                 },
+                api: None,
+                domain_sets: Vec::new(),
                 program,
             },
             child_id,
@@ -2935,6 +2941,8 @@ plugins:
                 enable_audit: false,
                 idle_timeout: None,
             },
+            api: None,
+            domain_sets: Vec::new(),
             program,
         };
         let request = query(26);

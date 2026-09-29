@@ -157,20 +157,36 @@ fn wire_name_to_ascii_domain(wire: &[u8]) -> Option<String> {
     }
 }
 
+/// Resolves one configured rule-file path against the declaring YAML
+/// directory. An absolute path and an in-memory compile (empty base) are used
+/// verbatim.
+pub(crate) fn resolve_rule_path(file: &str, base_dir: &std::path::Path) -> std::path::PathBuf {
+    if base_dir.as_os_str().is_empty() || std::path::Path::new(file).is_absolute() {
+        std::path::PathBuf::from(file)
+    } else {
+        base_dir.join(file)
+    }
+}
+
 /// Builds one domain-set matcher from ordered rule expressions and rule files.
 ///
 /// The set uses the shared [`MixMatcher`] grammar and normalization rather than
-/// a second matching engine. Rules loaded from a file are read as UTF-8 text;
-/// blank lines and `#` comments are skipped, matching the current provider
-/// loader. A missing rule file is a load error here, because the caller
+/// a second matching engine. The returned vector is the accepted rule text in
+/// Go's provider order: every `exps` entry, then each file's accepted rules.
+///
+/// File rules follow the Go text-file policy: trim outer whitespace, skip blank
+/// lines and whole-line `#` comments, keep an inline `#` inside the candidate
+/// rule, and skip an invalid individual rule instead of failing the whole load.
+/// A missing or unreadable file stays a load error, because the caller
 /// configured an explicit path.
 pub(crate) fn build_domain_set(
     expressions: &[String],
     files: &[String],
     base_dir: &std::path::Path,
-) -> Result<Rc<MixMatcher<()>>, DomainSetError> {
+) -> Result<(Rc<MixMatcher<()>>, Vec<String>), DomainSetError> {
     let mut set = MixMatcher::new();
     set.set_default("domain");
+    let mut accepted: Vec<String> = Vec::with_capacity(expressions.len());
     for (index, expression) in expressions.iter().enumerate() {
         set.add(expression, ())
             .map_err(|error| DomainSetError::Expression {
@@ -178,35 +194,32 @@ pub(crate) fn build_domain_set(
                 expression: expression.clone(),
                 reason: error.to_string(),
             })?;
+        accepted.push(expression.clone());
     }
     for (index, file) in files.iter().enumerate() {
-        let path = if base_dir.as_os_str().is_empty() || std::path::Path::new(file).is_absolute() {
-            std::path::PathBuf::from(file)
-        } else {
-            base_dir.join(file)
-        };
+        let path = resolve_rule_path(file, base_dir);
         let text = std::fs::read_to_string(&path).map_err(|error| DomainSetError::File {
             index,
             path: path.display().to_string(),
             reason: error.to_string(),
         })?;
-        for (line_index, line) in text.lines().enumerate() {
-            let line = line.split('#').next().unwrap_or_default().trim();
-            if line.is_empty() {
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            set.add(line, ()).map_err(|error| DomainSetError::Rule {
-                path: path.display().to_string(),
-                line: line_index + 1,
-                reason: error.to_string(),
-            })?;
+            // Go adds every candidate line to the matcher and only records the
+            // ones the matcher accepted, so one bad rule never fails the file.
+            if set.add(line, ()).is_ok() {
+                accepted.push(line.to_owned());
+            }
         }
     }
-    Ok(Rc::new(set))
+    Ok((Rc::new(set), accepted))
 }
 
 /// A rule-level rejection from the domain-set loader, keeping the offending
-/// source path and line visible to the caller.
+/// source path visible to the caller.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DomainSetError {
     Expression {
@@ -217,11 +230,6 @@ pub(crate) enum DomainSetError {
     File {
         index: usize,
         path: String,
-        reason: String,
-    },
-    Rule {
-        path: String,
-        line: usize,
         reason: String,
     },
 }
@@ -239,7 +247,6 @@ impl std::fmt::Display for DomainSetError {
                 path,
                 reason,
             } => write!(formatter, "file {index} {path}: {reason}"),
-            Self::Rule { path, line, reason } => write!(formatter, "{path} line {line}: {reason}"),
         }
     }
 }
