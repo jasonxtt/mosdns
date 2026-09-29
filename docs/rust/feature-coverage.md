@@ -16,6 +16,18 @@
 
 2026-09-27 执行方式调整：71 项是完整性台账，不是 71 个独立任务。按真实配置链和共享机制成批推进；先明确本批实际需要的语法/参数，未用条目在其拥有任务补全，不在每批重做全表契约冻结。交付记录新增可运行配置与参数子项、未完成部分和稳定测试入口；基础证据/局部接入不自动升级为整项产品验收。
 
+### 第一条 5C 管理闭环子项：本地规则编辑（规划中任务的已交付切片；整行仍“待验收”）
+
+任务 [09-28-rust-native-domain-set-management](../../.trellis/tasks/09-28-rust-native-domain-set-management/prd.md) 交付一条限定闭环：file-backed `domain_set` 的原生 HTTP 管理、安全持久化与下一 DNS 查询生效，加维护中 Vue `/` 本地规则页的隔离端到端编辑。以下只登记本批实际交付的子项与明确延期；P02/C10/C11 整行仍是“待验收”。
+
+| 条目 | 本批实际交付 | 仍延期 |
+| --- | --- | --- |
+| P02 `domain_set` 管理子项 | 单 `.txt` 文件托管 profile：`/plugins/{tag}` 的 `show`/`save`/`post`；`.txt` 规则语义对齐 Go（trim 外层空白、跳过空行与整行 `#`、保留 inline `#` 作为候选规则、跳过单条非法规则而不中止加载，`exps` 仍严格）；同目录临时文件 + rename 安全整代替换，失败保留旧文件/旧 matcher 并清理临时文件；一次不可变代数发布，重启加载已提交代数；两个 tag 互不影响；重复托管同一文件被拒绝 | `sets` 引用、SRS/geodata、缺失文件兼容、下载/删除/热更新、多文件与 composite 形状的管理、provider API |
+| C10 插件 API 子项 | 原生 host 自有 scoped 管理 listener（`api.http`，DNS-only 配置仍有效）；`/plugins/{tag}` 的方法/状态/响应体/Content-Type 契约（`/show` 忽略查询串、`/save` 空 200、`/post` `400 invalid JSON`/`400` 非 `.txt`/`200 domain_set replaced with N entries`）；`GET /api/v1/special-groups` 只读返回真实 `[]`；未知 tag 404、不合格 tag 400、错方法 405；DNS 与 HTTP 由一个顶层 scope 统一 bind/cancel/join 并回收 | 其它插件的 handler、完整指标名/label、group 变更路由（POST/DELETE）、coremain 其余 `/api` 面 |
+| C11 本地规则 UI 流程子项 | 维护中 Vue `/` 的 Rules → 本地规则页在隔离 Vite 代理（显式 `MOSDNS_DEV_TARGET`）下经真实 native HTTP → 文件 → 真实 DNS 查询完成加载/编辑/保存，刷新与 host 重启后保留；POST 失败保留草稿与错误；POST 200 后 canonical `/show` 重读失败时按 tag 标记“服务器已保存但内容未确认”、保留草稿、不计入已保存数、其它脏 tag 独立处理，后续 save/load 先重试 canonical 读取再决定是否再次提交；被服务端跳过的非法规则以服务端内容呈现并提示 | Rust 内置静态资源服务、其它标签页与完整页面操作、`/log`、外部 UI 挂载 |
+
+证据：`rust/native-host/tests/slice5_management_config.rs`、`slice6_management_http.rs`、`slice7_management_publication.rs`（后者含失败注入与整代不变量）；真实 Chrome + Vite + native 的浏览器证明 `research/slice3-browser-proof/evidence.json`（45/45）；`mosdns-rust` 上的 fmt/clippy/workspace 测试与真实进程 HTTP+DNS 证明 `research/linux-validation/`（20/20）。本项不包含远端 fault/cancel/close 专门 E2E、5D、Phase 6 或生产替换。
+
 ### 5B 代表链实现子项（本地与指定 Linux E2E 通过；用户指定 C2C review PASS；专门远端 fault E2E 延期；已归档）
 
 任务 [09-27-rust-phase5b-config-sequence-composition](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5b-config-sequence-composition/prd.md) 把原生配置从固定 W1/W2/W3 图改为收集后解析的通用编译器，并让一条从本地配置包裁剪的代表链在 native host 上运行。以下只登记本批实际交付的子项与明确延期；整行仍是“待验收”。
@@ -52,7 +64,7 @@
 | ID | 配置/调用名称 | Go 来源 | 已有 Rust 基础证据范围 | 完整归属 |
 | --- | --- | --- | --- | --- |
 | P01 | `domain_mapper` | [plugin/data_provider/domain_mapper](../../plugin/data_provider/domain_mapper/) | matcher-core/Phase 2；不包含完整管理生命周期 | 5B 查询 + 5C 管理 |
-| P02 | `domain_set` | [plugin/data_provider/domain_set](../../plugin/data_provider/domain_set/) | matcher-core/Phase 2；不包含完整管理生命周期 | 5B 查询 + 5C 管理 |
+| P02 | `domain_set` | [plugin/data_provider/domain_set](../../plugin/data_provider/domain_set/) | matcher-core/Phase 2；另有一条限定 5C 管理子项（单 `.txt` 托管 profile，仅 `show`/`save`/`post`，见上文）；不包含完整管理生命周期 | 5B 查询 + 5C 管理 |
 | P03 | `domain_set_light` | [plugin/data_provider/domain_set_light](../../plugin/data_provider/domain_set_light/) | matcher-core/Phase 2；不包含完整管理生命周期 | 5B 查询 + 5C 管理 |
 | P04 | `ip_set` | [plugin/data_provider/ip_set](../../plugin/data_provider/ip_set/) | matcher-core/Phase 2；不包含完整管理生命周期 | 5B 查询 + 5C 管理 |
 | P05 | `sd_set` | [plugin/data_provider/sd_set](../../plugin/data_provider/sd_set/) | matcher-core/Phase 2；不包含完整管理生命周期 | 5B 查询 + 5C 管理 |
@@ -175,8 +187,8 @@ Prometheus、WebUI、持久化仍归5C，容量和整机验收仍待后续阶段
 | C07 | 配置导出/更新/覆盖/生成：[config_manager.go](../../coremain/config_manager.go)、[config_update.go](../../coremain/config_update.go)、[api_overrides.go](../../coremain/api_overrides.go)、[api_domain_generation.go](../../coremain/api_domain_generation.go) | 5C | schema/package ID、managed_files、生成顺序、失败回滚和重启；保留用户数据与运行状态 |
 | C08 | 查询审计 v1/v2：[api_audit.go](../../coremain/api_audit.go)、[api_audit_v2.go](../../coremain/api_audit_v2.go)、[audit.go](../../coremain/audit.go) | 5A 基础 -> 5C 完整 | 启停/容量/清空/查询、统计/排名/窗口、最终路由/上游字段；正常及高负载下不静默缺失要求记录的事件 |
 | C09 | 日志/capture：[api.go](../../coremain/api.go)、[capture.go](../../coremain/capture.go)；统计/摘要 P37/P38 | 5C | 启停和查询、关键字段、容量/并发行为、DNS 热路径开销 |
-| C10 | Prometheus 和插件 API：[mosdns.go](../../coremain/mosdns.go)、各插件注册的 handler/metric | 5C | 指标名/label/单位和插件 `/plugins/{tag}` 路径、请求/响应；加载完整代表性配置枚举路由，不能只覆盖 coremain 的 `/api` |
-| C11 | Vue `/`、兼容 `/log`、assets、外部 UI 挂载：[mosdns.go](../../coremain/mosdns.go)、[webui-log](../../webui-log/) | 5C | 保留既有静态资源构建/服务与完整页面操作、保存/刷新/重启；包含外部 UI 路径及保留名称规则 |
+| C10 | Prometheus 和插件 API：[mosdns.go](../../coremain/mosdns.go)、各插件注册的 handler/metric | 5C | 指标名/label/单位和插件 `/plugins/{tag}` 路径、请求/响应；加载完整代表性配置枚举路由，不能只覆盖 coremain 的 `/api`。现有 `domain_set` 限定子项（见上文）不满足整项 |
+| C11 | Vue `/`、兼容 `/log`、assets、外部 UI 挂载：[mosdns.go](../../coremain/mosdns.go)、[webui-log](../../webui-log/) | 5C | 保留既有静态资源构建/服务与完整页面操作、保存/刷新/重启；包含外部 UI 路径及保留名称规则。现有本地规则页限定子项（见上文）不满足整项 |
 | C12 | 外观与系统设置：[api_appearance.go](../../coremain/api_appearance.go)、[api_system.go](../../coremain/api_system.go)、[webui_port.go](../../coremain/webui_port.go) | 5C | 上传/历史/颜色、health/端口/重启；持久化与界面效果一致 |
 | C13 | cache dump 与运行时文件：[cache](../../plugin/executable/cache/)、[state_files.go](../../coremain/state_files.go)、[file_save.go](../../coremain/file_save.go) | 5B/5C | `mosdns_cache_v2` 导入/导出/flush、runtime JSON、`/cus/mosdns/webinfo` 迁移/优先级、重启恢复、写失败与备份 |
 | C14 | CLI/服务生命周期：[run.go](../../coremain/run.go)、[service.go](../../coremain/service.go)、[openwrt.go](../../coremain/openwrt.go) | 5A 启停 -> 5C；其它平台另排 | Linux amd64 CLI/config/信号退出/服务管理；平台特有操作单独标注，不能误报已验证 OpenWrt |
