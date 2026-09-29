@@ -877,3 +877,103 @@ fn an_approved_post_normalizes_values_across_http_file_show_and_restart() {
     });
     result.expect("supervisor shutdown is clean");
 }
+
+#[test]
+fn a_managed_candidate_sharing_a_file_with_a_query_only_tag_cannot_be_written() {
+    let fixture = Fixture::new("composite-conflict-runtime");
+    fixture.write("rules/shared.txt", "shared.example\n");
+    fixture.write("rules/extra.txt", "only-extra.example\n");
+    let yaml = r#"log:
+  level: error
+api:
+  http: "127.0.0.1:__API__"
+plugins:
+  - tag: sequence_main
+    type: sequence
+    args:
+      - matches: qname $single
+        exec: reject 3
+      - matches: qname $composite
+        exec: reject 3
+      - exec: reject 0
+  - tag: single
+    type: domain_set
+    args:
+      files:
+        - rules/shared.txt
+  - tag: composite
+    type: domain_set
+    args:
+      files:
+        - rules/shared.txt
+        - rules/extra.txt
+  - tag: forward_main
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:25999"
+  - tag: listener
+    type: udp_server
+    args:
+      entry: sequence_main
+      listen: "127.0.0.1:__DNS__"
+      enable_audit: false
+"#
+    .replace("__DNS__", &free_udp_port().to_string())
+    .replace("__API__", &free_tcp_port().to_string());
+    fixture.write("config.yaml", &yaml);
+    let before = fixture.read("rules/shared.txt");
+
+    let observed = {
+        let (observed, result) = with_host(&fixture, async |_assembly, dns, api| {
+            let extra_before = udp_rcode(dns, 0x3a01, &["only-extra", "example"]).await;
+            let shared_before = udp_rcode(dns, 0x3a02, &["shared", "example"]).await;
+            // Every management route rejects the conflicting candidate.
+            let show = get(api, "/plugins/single/show").await;
+            let save = get(api, "/plugins/single/save").await;
+            let post = post_values(api, "single", &["attacker.example"]).await;
+            (
+                extra_before,
+                shared_before,
+                show.status,
+                save.status,
+                post.status,
+            )
+        });
+        result.expect("supervisor shutdown is clean");
+        observed
+    };
+    let (extra_before, shared_before, show_status, save_status, post_status) = observed;
+    assert_eq!(
+        extra_before, 3,
+        "the composite tag answers before the attempt"
+    );
+    assert_eq!(shared_before, 3);
+    assert_eq!(show_status, 400, "`/show` must reject the conflicting tag");
+    assert_eq!(save_status, 400, "`/save` must reject the conflicting tag");
+    assert_eq!(post_status, 400, "`/post` must reject the conflicting tag");
+    assert_eq!(
+        fixture.read("rules/shared.txt"),
+        before,
+        "the shared source file must be byte-for-byte unchanged"
+    );
+
+    // The other tag's behavior is unchanged after the attempted update and
+    // after a restart, because its source was never rewritten.
+    let restarted = assembly_for(&fixture);
+    let ((), result) = with_assembly(&restarted, async |_assembly, dns, api| {
+        assert_eq!(
+            udp_rcode(dns, 0x3a03, &["only-extra", "example"]).await,
+            3,
+            "the composite tag still resolves its own rules"
+        );
+        assert_eq!(udp_rcode(dns, 0x3a04, &["shared", "example"]).await, 3);
+        assert_eq!(
+            udp_rcode(dns, 0x3a05, &["attacker", "example"]).await,
+            0,
+            "the rejected management write never takes effect"
+        );
+        assert_eq!(get(api, "/plugins/single/show").await.status, 400);
+    });
+    result.expect("supervisor shutdown is clean");
+}

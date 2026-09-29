@@ -34,7 +34,19 @@ node .trellis/tasks/09-28-rust-native-domain-set-management/research/slice3-brow
 evidence JSON elsewhere. The default evidence file is `evidence.json` next to
 this file.
 
-## Checks proven (45/45 on 2026-09-29)
+## Checks proven (54/54 on 2026-09-29, remediated revision)
+
+The first run of this harness proved 45 checks; the review remediation added the
+differing-canonical scenario below and the harness now proves 54. The 45-check run is superseded
+history; `evidence.json` is the 54-check remediated run.
+
+Additional check proven after remediation:
+
+- POST 200 followed by a failing canonical `/show` for a tag, then the server content changed behind
+  the UI's back: the next save retries the canonical read, keeps the local draft in the editor, stays
+  dirty, reports "server content re-read, local edit preserved" (and does **not** claim a server-side
+  adjustment), does not silently adopt the server content, and only the next explicit save submits
+  the local edit.
 
 - The Vite dev proxy destination is the isolated native host: `/api/v1/special-groups`
   and `/plugins/blocklist/show?limit=10000` answer through Vite exactly as the
