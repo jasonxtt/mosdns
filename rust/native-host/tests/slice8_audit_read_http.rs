@@ -723,6 +723,15 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
                 .body,
         )
         .expect("domain rank values");
+        assert_eq!(
+            domain_values,
+            serde_json::json!([
+                { "key": "edge.example", "count": 1 },
+                { "key": "new.example", "count": 1 },
+                { "key": "old.example", "count": 1 },
+                { "key": "rich.example", "count": 1 }
+            ])
+        );
         let domain_keys: Vec<_> = domain_values
             .as_array()
             .expect("domain rank array")
