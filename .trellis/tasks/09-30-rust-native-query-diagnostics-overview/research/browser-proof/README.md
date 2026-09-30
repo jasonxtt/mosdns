@@ -20,24 +20,30 @@ correction.
 - The native processes, Vite child, and tunnel were stopped after verification; the
   remote ports were checked clear with `ss`.
 
-## Actions and observations
+## Final-candidate actions and observations
 
-1. `dig @127.0.0.1 -p 15353 browser-udp.example A` returned a real UDP
-   NXDOMAIN response; `dig @127.0.0.1 -p 15354 browser-tcp.example A +tcp`
-   returned a real TCP NXDOMAIN response.
-2. The native UDP API returned one retained rich record with a 51-character
-   `n-<nonce>-<counter>` trace ID, `response_code: NXDOMAIN`, uppercase
-   `response_flags.RA`, empty answers, `answer_details_status: complete`, and
+1. `dig @127.0.0.1 -p 15353 browser-ra-fixed.example A` returned a real UDP
+   NXDOMAIN response; `dig @127.0.0.1 -p 15354 browser-ra-final-tcp.example A
+   +tcp` returned a real TCP NXDOMAIN response. A second disposable run issued
+   `browser-finalpass-0.example` through `browser-finalpass-54.example` over
+   UDP plus `browser-finalpass-tcp.example` over TCP, giving 55 retained rows.
+2. The native UDP API returned rich records with a 51-character
+   `n-<nonce>-<counter>` trace ID, `response_code: NXDOMAIN`, `RA` only (no
+   false `TC`), empty answers, `answer_details_status: complete`, and
    `final_sequence: browser_reject`.
-3. Chrome opened `http://127.0.0.1:15173/` through the owned SSH tunnel.
-   The QueryManager list showed `browser-udp.example`; opening the row showed
-   the trace ID, IN class, NXDOMAIN, RA, complete answer status, and no
-   fabricated route/upstream values.
-4. Overview initially showed a visible per-panel `HTTP 503 Internal Server
-   Error` row while the bounded two-slot read gate was busy; other panels
-   remained populated. After returning to the overview, Top domain/client and
-   slowest data loaded, and clicking Top domain opened exact `logs/domain`
-   drill-down for `browser-udp.example` with one matching record.
+3. Chrome opened `http://127.0.0.1:15173/` through the owned SSH tunnel. The
+   final-candidate QueryManager showed page 1/2 and 55 rows; Load more reached
+   page 2, fuzzy search and quoted exact search each returned one row, opening
+   the row showed IN, trace ID, NXDOMAIN, RA, complete answer status, and no
+   fabricated route/upstream values, and the domain quick-filter action
+   refreshed the list.
+4. The final-candidate Overview loaded Top domain, Top client, slowest and
+   routing/effective panels. Top client showed the raw `127.0.0.1` address
+   with an explicit alias-unavailable message; metrics, switch status and
+   upstream config showed explicit HTTP 404 unavailable messages. Clicking Top
+   domain opened exact `logs/domain` drill-down for
+   `browser-finalpass-0.example` with one matching record, and its nested
+   `查看` action opened the rich query detail.
 
 This is a focused browser/API/wire proof for the new diagnostics surfaces. It
 does not claim full native parity for the unrelated upstream, alias, metrics,

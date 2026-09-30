@@ -3,7 +3,7 @@
 All commands below ran in `/root/mosdns-rust-querydiag/rust` on the
 `mosdns-rust` SSH VM. The browser proof used the fixtures next to this file.
 The final implementation candidate for the code changes is
-`9f5dd01fc663ad490f49ccc97ba11844417f1479`. The later documentation-only
+`768565598e615c6f694e1d354479ba72aea103da`. The later documentation-only
 commit records this exact candidate and does not change product code.
 
 ## Bounded record/projection checks
@@ -14,13 +14,16 @@ commit records this exact candidate and does not change product code.
   and `/api/v2/audit/rank/slowest?limit=300` reads while additional DNS
   requests continue and verifies both projections remain available.
 - `time -p cargo test -p mosdns-native-host --test slice8_audit_read_http`:
-  `1 passed`, `real 29.96` (the VM image does not provide `/usr/bin/time`).
-  The test printed `retained=400000 logs=500 slowest_max=300
-  logs_bytes=187987 logs_bytes_per_record=375.97` for the concurrent views.
+  `1 passed`, `real 32.96` (the VM image does not provide `/usr/bin/time`).
+  The test printed `retained=400000 concurrent_reads=2
+  dns_progress_during_reads=4 logs=500 slowest_max=300 logs_bytes=187585
+  logs_bytes_per_record=375.17` for the concurrent views; the DNS requests
+  are started after both read workers and before either read is awaited.
 - `time -p cargo test -p mosdns-dns-core --lib response::tests::answer_projection_keeps_a_large_ordered_answer_set_without_eviction`:
   `1 passed`, `real 0.33`, `user 0.28`, `sys 0.10`; the test projects 1024
   ordered A answers and checks the first/last TTLs, with no hidden answer
-  eviction.
+  eviction. Its VM output was `records=1024 projection_bytes=16968
+  bytes_per_record=16.57`.
 - No peak-RSS number was claimed because the VM image does not provide
   `/usr/bin/time`. These are bounded-count, projection-size and progress/timing
   observations only; they are not a worst-case memory or production-capacity
