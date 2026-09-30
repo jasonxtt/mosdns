@@ -24,14 +24,17 @@ correction.
 
 1. `dig @127.0.0.1 -p 15353 browser-ra-fixed.example A` returned a real UDP
    NXDOMAIN response; `dig @127.0.0.1 -p 15354 browser-ra-final-tcp.example A
-   +tcp` returned a real TCP NXDOMAIN response. A second disposable run issued
+   +tcp` returned a real TCP NXDOMAIN response. The VM HTTP integration proof
+   also exercised a positive UDP A+CNAME multi-answer and a positive TCP
+   AAAA+CNAME multi-answer through a controlled UDP upstream, with the rich
+   answers visible in the retained audit projection. A second disposable run issued
    `browser-finalpass-0.example` through `browser-finalpass-54.example` over
    UDP plus `browser-finalpass-tcp.example` over TCP, giving 55 retained rows.
 2. The native UDP API returned rich records with a 51-character
    `n-<nonce>-<counter>` trace ID, `response_code: NXDOMAIN`, `RA` only (no
    false `TC`), empty answers, `answer_details_status: complete`, and
    `final_sequence: browser_reject`.
-3. Chrome opened `http://127.0.0.1:15173/` through the owned SSH tunnel. The
+3. A browser opened `http://127.0.0.1:15173/` through the owned SSH tunnel. The
    final-candidate QueryManager showed page 1/2 and 55 rows; Load more reached
    page 2, fuzzy search and quoted exact search each returned one row, opening
    the row showed IN, trace ID, NXDOMAIN, RA, complete answer status, and no
@@ -44,6 +47,14 @@ correction.
    domain opened exact `logs/domain` drill-down for
    `browser-finalpass-0.example` with one matching record, and its nested
    `查看` action opened the rich query detail.
+5. A second browser pass exercised the required existing-workflow surfaces:
+   System settings loaded with the native unsupported sections marked as
+   unavailable while audit status remained visibly `运行中`; Rule management
+   loaded the local-rule editor and the save/query closure returned its honest
+   no-change/error state instead of a synthetic success. The browser also
+   re-ran fuzzy search, quoted exact search, quick-filter, load-more, all four
+   ranking/slowest panels, exact domain drill-down and nested query detail in
+   one session.
 
 This is a focused browser/API/wire proof for the new diagnostics surfaces. It
 does not claim full native parity for the unrelated upstream, alias, metrics,
