@@ -710,12 +710,11 @@ mod tests {
         assert_eq!(projected.len(), 1024);
         assert_eq!(projected.first().expect("first answer").ttl, 0);
         assert_eq!(projected.last().expect("last answer").ttl, 1023);
-        let projection_bytes: usize = projected
-            .iter()
-            .map(|answer| {
-                answer.data.len() + std::mem::size_of::<u16>() + std::mem::size_of::<u32>()
-            })
-            .sum();
+        let projection_bytes = projected.capacity() * std::mem::size_of::<super::AnswerRecord>()
+            + projected
+                .iter()
+                .map(|answer| answer.data.capacity())
+                .sum::<usize>();
         println!(
             "large-answer projection: records={} projection_bytes={} bytes_per_record={}.{:02}",
             projected.len(),

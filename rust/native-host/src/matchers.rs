@@ -36,7 +36,11 @@ impl Matcher for QnameMatcher {
             Some(StateMutation::SetRoutingFields {
                 domain_set: is_provider.then(|| source["domain_set:".len()..].to_owned()),
                 effective_tag: None,
-                matched_rule_source: Some(source.clone()),
+                // Inline qname identity is owned by the containing YAML
+                // rule. The compiler installs that identity only after all
+                // matchers succeed, so the matcher must not publish its
+                // helper path as public provenance.
+                matched_rule_source: is_provider.then(|| source.clone()),
             }),
         ))
     }
