@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::time::Instant;
 
@@ -19,8 +20,9 @@ use crate::config::CompiledConfig;
 use crate::observer::{
     AnswerDetailsStatus, AuditAnswer, CacheStatus, ExecutionCheckpoint, FailureProvenance,
     LocalFailureKind, QueryTerminalOutcome, ResponseDetails, ResponseFlags, ResponseSource,
-    ResponseState as ObservedResponseState, TerminalObservation, UpstreamAttemptList,
-    UpstreamAttemptOutcome, UpstreamAttemptRecord,
+    ResponseState as ObservedResponseState, TerminalObservation, UpstreamAttemptLedger,
+    UpstreamAttemptList, UpstreamAttemptOutcome, UpstreamAttemptRecord, UpstreamDiagnosticAttempt,
+    UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamTransport,
 };
 
 const DEFAULT_FUEL: u64 = 64;
@@ -38,6 +40,35 @@ pub(crate) trait ExchangeExecutor {
         deadline: Instant,
         cancellation: TransportCancellation,
     ) -> Pin<Box<dyn Future<Output = Result<ExchangeResponse, ExchangeError>> + 'a>>;
+
+    /// Executes one host-owned forward invocation. The default keeps the W1/W2
+    /// single-owner seam unchanged; a catalog may override it to fan out the
+    /// invocation's original entry subset without extending sequence-core's
+    /// generic External payload.
+    fn exchange_invocation<'a>(
+        &'a self,
+        executable: ExecutableId,
+        query: &'a [u8],
+        deadline: Instant,
+        cancellation: TransportCancellation,
+        _attempts: &'a mut UpstreamAttemptLedger,
+    ) -> Pin<Box<dyn Future<Output = Result<InvocationExchange, ExchangeError>> + 'a>> {
+        Box::pin(async move {
+            self.exchange(executable, query, deadline, cancellation)
+                .await
+                .map(|response| InvocationExchange {
+                    response,
+                    selected_entry: None,
+                    selected_peer: None,
+                })
+        })
+    }
+}
+
+pub(crate) struct InvocationExchange {
+    pub response: ExchangeResponse,
+    pub selected_entry: Option<usize>,
+    pub selected_peer: Option<SocketAddr>,
 }
 
 /// A host dispatch failure that preserves the distinction between a missing
@@ -74,6 +105,7 @@ pub(crate) struct ExecutionResult {
     pub upstream_targets: Option<String>,
     pub selected_upstream: Option<String>,
     pub upstream_attempts: UpstreamAttemptList,
+    pub upstream_diagnostics: Option<UpstreamDiagnostics>,
     pub failure_provenance: Option<FailureProvenance>,
 }
 
@@ -82,6 +114,8 @@ struct ExecutionFacts<'a> {
     cache_status: CacheStatus,
     response_source: Option<ResponseSource>,
     upstream_attempts: UpstreamAttemptList,
+    selected_peer: Option<SocketAddr>,
+    upstream_diagnostics: Option<UpstreamDiagnostics>,
     failure_provenance: Option<FailureProvenance>,
     /// The real named-sequence execution position, materialized only when
     /// detailed audit capture is enabled.
@@ -98,6 +132,7 @@ struct ExecutionFacts<'a> {
     routing_origin: Option<SequenceId>,
     config: &'a CompiledConfig,
     checkpoint: &'a mut ExecutionCheckpoint,
+    cancellation: TransportCancellation,
     in_flight_executable: Option<ExecutableId>,
     completed: bool,
 }
@@ -177,6 +212,60 @@ impl ExecutionFacts<'_> {
         }
     }
 
+    fn record_invocation_attempt(
+        &mut self,
+        upstream: String,
+        peer: Option<SocketAddr>,
+        transport: Option<UpstreamTransport>,
+        outcome: UpstreamAttemptOutcome,
+    ) {
+        self.upstream_attempts.push(UpstreamAttemptRecord {
+            upstream: upstream.clone(),
+            outcome,
+        });
+        if let Some(diagnostics) = &mut self.upstream_diagnostics {
+            diagnostics.attempts.push(UpstreamDiagnosticAttempt {
+                ordinal: diagnostics.attempts.len(),
+                entry: upstream,
+                peer,
+                transport,
+                outcome,
+            });
+        }
+    }
+
+    fn record_invocation_failure(&mut self, upstream: &str, outcome: UpstreamAttemptOutcome) {
+        if self.capture_audit_details {
+            self.failure_provenance = Some(if outcome == UpstreamAttemptOutcome::TimedOut {
+                FailureProvenance::UpstreamTimeout {
+                    upstream: upstream.to_owned(),
+                }
+            } else {
+                FailureProvenance::UpstreamFailure {
+                    upstream: upstream.to_owned(),
+                }
+            });
+            self.response_source = Some(ResponseSource::Local);
+        }
+    }
+
+    fn select_invocation_attempt(
+        &mut self,
+        upstream: String,
+        peer: Option<SocketAddr>,
+        transport: Option<UpstreamTransport>,
+    ) {
+        if let (Some(peer), Some(transport), Some(diagnostics)) =
+            (peer, transport, &mut self.upstream_diagnostics)
+        {
+            diagnostics.selected = Some(UpstreamDiagnosticSelected {
+                entry: upstream,
+                peer,
+                transport,
+            });
+        }
+    }
+
     fn record_upstream_failure(
         &mut self,
         upstream: String,
@@ -205,6 +294,38 @@ impl Drop for ExecutionFacts<'_> {
         if self.completed {
             return;
         }
+        let ledger = self.checkpoint.take_attempt_ledger();
+        let mut ledger_had_entries = false;
+        if let Some(executable) = self.in_flight_executable {
+            for slot in ledger.slots() {
+                let Some(upstream) = invocation_identity(self.config, executable, slot.entry_index)
+                else {
+                    continue;
+                };
+                ledger_had_entries = true;
+                let outcome = slot.outcome.unwrap_or_else(|| {
+                    if self.cancellation.is_cancelled() {
+                        UpstreamAttemptOutcome::Canceled
+                    } else {
+                        UpstreamAttemptOutcome::Interrupted
+                    }
+                });
+                self.upstream_attempts.push(UpstreamAttemptRecord {
+                    upstream: upstream.clone(),
+                    outcome,
+                });
+                if let Some(diagnostics) = &mut self.upstream_diagnostics {
+                    diagnostics.attempts.push(UpstreamDiagnosticAttempt {
+                        ordinal: diagnostics.attempts.len(),
+                        entry: upstream,
+                        peer: slot.peer,
+                        transport: slot.transport,
+                        outcome,
+                    });
+                    diagnostics.selected = None;
+                }
+            }
+        }
         self.checkpoint.capture_partial(
             &TerminalObservation {
                 outcome: QueryTerminalOutcome::NoResponse,
@@ -228,10 +349,12 @@ impl Drop for ExecutionFacts<'_> {
                 upstream_targets: self.routing.final_upstream_targets.clone(),
                 selected_upstream: None,
                 upstream_attempts: self.upstream_attempts.clone(),
+                upstream_diagnostics: self.upstream_diagnostics.clone(),
                 failure_provenance: self.failure_provenance.clone(),
                 elapsed: std::time::Duration::ZERO,
             },
             self.in_flight_executable
+                .filter(|_| !ledger_had_entries)
                 .and_then(|executable| upstream_identity(self.config, executable)),
         );
     }
@@ -307,6 +430,12 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         } else {
             0
         }),
+        selected_peer: None,
+        upstream_diagnostics: capture_audit_details.then(|| UpstreamDiagnostics {
+            schema_version: 1,
+            selected: None,
+            attempts: Vec::new(),
+        }),
         failure_provenance: None,
         // No entry-tag backfill: the field carries the real executing position
         // recorded during execution, or nothing when none was observed.
@@ -319,6 +448,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         routing_origin: None,
         config,
         checkpoint,
+        cancellation: request_shutdown.clone(),
         in_flight_executable: None,
         completed: false,
     };
@@ -480,52 +610,80 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 publication_deadline = Some(request_deadline);
                 attempted = true;
                 facts.in_flight_executable = Some(dispatch.executable());
+                facts.checkpoint.begin_attempt_ledger();
                 let exchange = executor
-                    .exchange(
+                    .exchange_invocation(
                         dispatch.executable(),
                         raw,
                         request_deadline,
                         request_shutdown.clone(),
+                        facts.checkpoint.attempt_ledger_mut(),
                     )
                     .await;
+                let attempt_ledger = facts.checkpoint.take_attempt_ledger();
                 let in_flight_executable = facts.in_flight_executable.take();
                 if request_shutdown.is_cancelled() {
-                    record_canceled_attempt(config, in_flight_executable, &exchange, &mut facts);
+                    record_invocation_ledger(
+                        config,
+                        in_flight_executable,
+                        &attempt_ledger,
+                        None,
+                        &mut facts,
+                    );
                     return canceled_execution(facts);
                 }
                 // One forward-count-independent policy decides whether a leg's
                 // response is usable and what a rejection means.
                 match exchange {
-                    Ok(response) => match qualify_response(response.wire(), header.id, &question) {
-                        Some(wire) => {
-                            if let Some(upstream) = in_flight_executable
-                                .and_then(|executable| upstream_identity(config, executable))
-                            {
-                                facts.record_upstream_response(upstream);
+                    Ok(batch) => {
+                        match qualify_response(batch.response.wire(), header.id, &question) {
+                            Some(wire) => {
+                                if let Some(selected_entry) = batch.selected_entry {
+                                    facts.selected_peer = batch.selected_peer;
+                                    record_invocation_ledger(
+                                        config,
+                                        Some(dispatch.executable()),
+                                        &attempt_ledger,
+                                        Some(selected_entry),
+                                        &mut facts,
+                                    );
+                                } else if let Some(upstream) = in_flight_executable
+                                    .and_then(|executable| upstream_identity(config, executable))
+                                {
+                                    facts.record_upstream_response(upstream);
+                                }
+                                facts.failure_provenance = None;
+                                upstream_response = true;
+                                machine.state_mut().set_raw_response(wire);
                             }
-                            facts.failure_provenance = None;
-                            upstream_response = true;
-                            machine.state_mut().set_raw_response(wire);
-                        }
-                        None => {
-                            if let Some(upstream) = in_flight_executable
-                                .and_then(|executable| upstream_identity(config, executable))
-                            {
-                                facts.record_upstream_failure(
-                                    upstream,
-                                    UpstreamAttemptOutcome::Failed,
-                                    false,
-                                );
-                            } else {
-                                facts.set_failure_provenance(FailureProvenance::LocalFailure(
-                                    LocalFailureKind::InternalExecution,
-                                ));
+                            None => {
+                                if !attempt_ledger.slots().is_empty() {
+                                    record_invocation_ledger(
+                                        config,
+                                        Some(dispatch.executable()),
+                                        &attempt_ledger,
+                                        None,
+                                        &mut facts,
+                                    );
+                                } else if let Some(upstream) = in_flight_executable
+                                    .and_then(|executable| upstream_identity(config, executable))
+                                {
+                                    facts.record_upstream_failure(
+                                        upstream,
+                                        UpstreamAttemptOutcome::Failed,
+                                        false,
+                                    );
+                                } else {
+                                    facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                        LocalFailureKind::InternalExecution,
+                                    ));
+                                }
+                                set_servfail(&mut machine);
+                                facts.set_response_source(ResponseSource::Local);
+                                return result_from_state(&machine, &header, &question, facts);
                             }
-                            set_servfail(&mut machine);
-                            facts.set_response_source(ResponseSource::Local);
-                            return result_from_state(&machine, &header, &question, facts);
                         }
-                    },
+                    }
                     Err(ExchangeError::UnknownExecutable(_)) => {
                         facts.set_failure_provenance(FailureProvenance::LocalFailure(
                             LocalFailureKind::InternalExecution,
@@ -535,7 +693,15 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         return result_from_state(&machine, &header, &question, facts);
                     }
                     Err(error @ ExchangeError::Upstream(_)) => {
-                        if let Some(upstream) = in_flight_executable
+                        if !attempt_ledger.slots().is_empty() {
+                            record_invocation_ledger(
+                                config,
+                                in_flight_executable,
+                                &attempt_ledger,
+                                None,
+                                &mut facts,
+                            );
+                        } else if let Some(upstream) = in_flight_executable
                             .and_then(|executable| upstream_identity(config, executable))
                         {
                             let timeout = matches!(
@@ -612,6 +778,34 @@ fn upstream_identity(config: &CompiledConfig, executable: ExecutableId) -> Optio
                 .unwrap_or(&forward.tag)
                 .to_owned()
         })
+        .or_else(|| {
+            let invocation = config
+                .forward_invocations
+                .iter()
+                .find(|invocation| invocation.executable == executable)?;
+            let definition = config.forward_definitions.get(invocation.definition)?;
+            let entry_index = invocation.entries.first().copied()?;
+            definition
+                .entries
+                .get(entry_index)
+                .map(|entry| entry.identity.clone())
+        })
+}
+
+fn invocation_identity(
+    config: &CompiledConfig,
+    executable: ExecutableId,
+    entry_index: usize,
+) -> Option<String> {
+    let invocation = config
+        .forward_invocations
+        .iter()
+        .find(|invocation| invocation.executable == executable)?;
+    let definition = config.forward_definitions.get(invocation.definition)?;
+    definition
+        .entries
+        .get(entry_index)
+        .map(|entry| entry.identity.clone())
 }
 
 fn is_timeout(error: &UpstreamError) -> bool {
@@ -628,45 +822,42 @@ fn is_timeout(error: &UpstreamError) -> bool {
     }
 }
 
-fn is_canceled(error: &UpstreamError) -> bool {
-    match error {
-        UpstreamError::Cancelled(_) => true,
-        UpstreamError::Diagnosed { cause, .. } => {
-            matches!(cause, mosdns_upstream_core::TerminalError::Cancelled(_))
-        }
-        UpstreamError::TcpFallback { cause, .. } => is_canceled(cause),
-        _ => false,
-    }
-}
-
-fn record_canceled_attempt(
+fn record_invocation_ledger(
     config: &CompiledConfig,
     executable: Option<ExecutableId>,
-    exchange: &Result<ExchangeResponse, ExchangeError>,
+    ledger: &UpstreamAttemptLedger,
+    selected_entry: Option<usize>,
     facts: &mut ExecutionFacts,
 ) {
-    let upstream = executable.and_then(|executable| upstream_identity(config, executable));
-    let Some(upstream) = upstream else {
+    let Some(executable) = executable else {
         return;
     };
-    let outcome = match exchange {
-        Ok(_) => UpstreamAttemptOutcome::Response,
-        Err(ExchangeError::Upstream(error)) if is_timeout(error) => {
-            UpstreamAttemptOutcome::TimedOut
+    for slot in ledger.slots() {
+        let Some(upstream) = invocation_identity(config, executable, slot.entry_index) else {
+            continue;
+        };
+        let outcome = slot.outcome.unwrap_or_else(|| {
+            if facts.checkpoint.capture_audit_details() {
+                UpstreamAttemptOutcome::Interrupted
+            } else {
+                UpstreamAttemptOutcome::Canceled
+            }
+        });
+        facts.record_invocation_attempt(upstream.clone(), slot.peer, slot.transport, outcome);
+        if selected_entry == Some(slot.entry_index) && outcome == UpstreamAttemptOutcome::Response {
+            facts.response_source = Some(ResponseSource::Upstream(upstream.clone()));
+            facts.select_invocation_attempt(upstream, slot.peer, slot.transport);
+        } else if outcome != UpstreamAttemptOutcome::Response {
+            facts.record_invocation_failure(&upstream, outcome);
         }
-        Err(ExchangeError::Upstream(error)) if is_canceled(error) => {
-            UpstreamAttemptOutcome::Canceled
-        }
-        Err(ExchangeError::Upstream(_)) => UpstreamAttemptOutcome::Failed,
-        Err(ExchangeError::UnknownExecutable(_)) => return,
-    };
-    facts
-        .upstream_attempts
-        .push(UpstreamAttemptRecord { upstream, outcome });
+    }
 }
 
 fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
     facts.response_source = None;
+    if let Some(diagnostics) = &mut facts.upstream_diagnostics {
+        diagnostics.selected = None;
+    }
     result_from_wire(Vec::new(), facts)
 }
 
@@ -729,21 +920,24 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
                 .then(|| "unmatched_rule".to_owned())
             })
     });
-    let actual_upstream = supplying_identity.as_deref().and_then(|identity| {
-        facts
-            .config
-            .forwards
-            .iter()
-            .find(|forward| forward.upstream_tag.as_deref().unwrap_or(&forward.tag) == identity)
-            .map(|forward| forward.endpoint.address().to_string())
-    });
-    let response = observed_response(
-        &response_wire,
-        facts
-            .response_source
-            .take()
-            .unwrap_or(ResponseSource::Local),
-    );
+    let actual_upstream = (!response_wire.is_empty())
+        .then(|| {
+            supplying_identity
+                .as_deref()
+                .and_then(|identity| upstream_endpoint(facts.config, identity))
+                .or_else(|| facts.selected_peer.map(|peer| peer.to_string()))
+        })
+        .flatten();
+    let response_source = facts
+        .response_source
+        .take()
+        .unwrap_or(ResponseSource::Local);
+    if !matches!(response_source, ResponseSource::Upstream(_)) {
+        if let Some(diagnostics) = &mut facts.upstream_diagnostics {
+            diagnostics.selected = None;
+        }
+    }
+    let response = observed_response(&response_wire, response_source);
     let response_details = if facts.capture_audit_details {
         diagnose_response_wire(&response_wire)
     } else {
@@ -766,8 +960,25 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
             .or_else(|| actual_upstream.clone()),
         selected_upstream: actual_upstream,
         upstream_attempts: std::mem::take(&mut facts.upstream_attempts),
+        upstream_diagnostics: facts.upstream_diagnostics.take(),
         failure_provenance: facts.failure_provenance.take(),
     }
+}
+
+fn upstream_endpoint(config: &CompiledConfig, identity: &str) -> Option<String> {
+    config
+        .forwards
+        .iter()
+        .find(|forward| forward.upstream_tag.as_deref().unwrap_or(&forward.tag) == identity)
+        .map(|forward| forward.endpoint.address().to_string())
+        .or_else(|| {
+            config
+                .forward_definitions
+                .iter()
+                .flat_map(|definition| definition.entries.iter())
+                .find(|entry| entry.identity == identity)
+                .and_then(|entry| entry.target.dial_addr.map(|address| address.to_string()))
+        })
 }
 
 fn compute_effective_tag(
@@ -976,7 +1187,7 @@ fn observed_response(response_wire: &[u8], source: ResponseSource) -> ObservedRe
     }
 }
 
-fn qualify_response(
+pub(crate) fn qualify_response(
     response: &[u8],
     request_id: u16,
     request_question: &QuestionInfo,
@@ -999,6 +1210,15 @@ fn qualify_response(
     observe_answer_addresses(&wire).ok()?;
     validate_response(&wire).ok()?;
     Some(wire)
+}
+
+pub(crate) fn response_priority(response: &[u8]) -> u8 {
+    match observe_response_metadata(response) {
+        Ok(metadata) if metadata.answer_count > 0 => 0,
+        Ok(metadata) if metadata.rcode == 0 || metadata.rcode == 3 => 1,
+        Ok(_) => 2,
+        Err(_) => 3,
+    }
 }
 
 fn set_servfail(machine: &mut ExecutionMachine<'_>) {
@@ -1953,6 +2173,15 @@ plugins:
             .iter()
             .find(|forward| forward.upstream_tag.as_deref() == Some("route_c"))
             .expect("route C");
+        let route_a_call = config
+            .forward_invocations
+            .iter()
+            .filter_map(|invocation| {
+                let definition = config.forward_definitions.get(invocation.definition)?;
+                (definition.tag == "phase5a_route_a").then_some(invocation.executable)
+            })
+            .nth(1)
+            .expect("second route A call-site executable");
         let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
 
         let direct_calls = Rc::new(RefCell::new(Vec::new()));
@@ -1994,7 +2223,7 @@ plugins:
         );
         assert_eq!(
             route_a_calls.borrow().as_slice(),
-            &[b.executable, a.executable]
+            &[b.executable, route_a_call]
         );
         assert_eq!(
             route_a
@@ -2133,6 +2362,8 @@ plugins:
                 endpoint,
                 executable: forward_id,
             }],
+            forward_definitions: Vec::new(),
+            forward_invocations: Vec::new(),
             cache: Some(CachePluginConfig {
                 tag: cache,
                 executable: cache_id,
@@ -2228,6 +2459,8 @@ plugins:
                         executable: b_id,
                     },
                 ],
+                forward_definitions: Vec::new(),
+                forward_invocations: Vec::new(),
                 cache: None,
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
@@ -2746,6 +2979,8 @@ plugins:
                         executable: parent_id,
                     },
                 ],
+                forward_definitions: Vec::new(),
+                forward_invocations: Vec::new(),
                 cache: Some(CachePluginConfig {
                     tag: cache,
                     executable: cache_id,
@@ -3531,6 +3766,8 @@ plugins:
                 endpoint,
                 executable: forward_id,
             }],
+            forward_definitions: Vec::new(),
+            forward_invocations: Vec::new(),
             cache: Some(CachePluginConfig {
                 tag: cache_tag,
                 executable: cache_id,

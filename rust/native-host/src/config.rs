@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -12,8 +13,9 @@ use mosdns_sequence_core::{
     ProgramSpec, RuleSpec, SequenceId, SequenceRef, SequenceSpec, ValidatedExecutable,
     ValidatedProgram,
 };
-use mosdns_upstream_core::{Endpoint, Transport};
+use mosdns_upstream_core::{Endpoint, ServerIdentity, Transport};
 use serde::de::{self, Deserialize, Deserializer, Error as _, MapAccess, SeqAccess, Visitor};
+use url::Url;
 
 use crate::managed::{DomainSetHandle, ManagedDomainSet};
 use crate::matchers::{
@@ -44,6 +46,199 @@ pub struct ForwardConfig {
     pub upstream_tag: Option<String>,
     pub endpoint: Endpoint,
     pub executable: ExecutableId,
+}
+
+/// A definition owns entries independently of the call sites selecting them.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ForwardDefinitionConfig {
+    pub tag: String,
+    pub entries: Vec<ForwardEntryConfig>,
+    pub concurrent: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ForwardEntryConfig {
+    pub tag: Option<String>,
+    pub identity: String,
+    /// Numeric dial endpoint for the legacy view, when this entry is already
+    /// numeric or supplies an explicit numeric `dial_addr`.
+    pub endpoint: Option<Endpoint>,
+    pub target: ForwardTargetConfig,
+}
+
+/// The pre-I/O endpoint descriptor consumed by the host catalog. Service
+/// identity and numeric dial are intentionally separate so a hostname can be
+/// resolved later without changing TLS SNI or a DoH authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ForwardTargetConfig {
+    pub scheme: ForwardScheme,
+    pub service: String,
+    pub host: String,
+    pub port: u16,
+    pub dial_addr: Option<SocketAddr>,
+    pub bootstrap: Option<SocketAddr>,
+    pub bootstrap_version: Option<u8>,
+    pub query_timeout: Duration,
+    pub insecure_skip_verify: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ForwardScheme {
+    Udp,
+    Tcp,
+    Tls,
+    Https,
+}
+
+impl ForwardScheme {
+    const fn default_port(self) -> u16 {
+        match self {
+            Self::Udp | Self::Tcp => 53,
+            Self::Tls => 853,
+            Self::Https => 443,
+        }
+    }
+
+    pub(crate) const fn endpoint_transport(self) -> Transport {
+        match self {
+            Self::Udp => Transport::Udp,
+            Self::Tcp | Self::Tls | Self::Https => Transport::Tcp,
+        }
+    }
+}
+
+/// A call site's ordered subset keeps original definition indices.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ForwardInvocationConfig {
+    pub executable: ExecutableId,
+    pub definition: usize,
+    pub entries: Vec<usize>,
+}
+
+#[derive(Default)]
+struct ForwardCompiler {
+    definitions: Vec<ForwardDefinitionConfig>,
+    invocations: Vec<(String, usize, Vec<usize>)>,
+}
+
+impl ForwardCompiler {
+    fn invocation(
+        &mut self,
+        tag: &str,
+        args: &str,
+        path: &str,
+    ) -> Result<ExecutableSpec, ConfigError> {
+        let definition = self
+            .definitions
+            .iter()
+            .position(|item| item.tag == tag)
+            .ok_or_else(|| ConfigError::new(path, "forward definition is missing"))?;
+        let entries = if args.is_empty() {
+            (0..self.definitions[definition].entries.len()).collect()
+        } else {
+            let mut selected = Vec::new();
+            for tag in args.split_whitespace() {
+                let index = self.definitions[definition]
+                    .entries
+                    .iter()
+                    .position(|item| item.tag.as_deref() == Some(tag))
+                    .ok_or_else(|| {
+                        ConfigError::new(path, format!("unknown upstream entry tag `{tag}`"))
+                    })?;
+                if selected.contains(&index) {
+                    return Err(ConfigError::new(
+                        path,
+                        format!("duplicate selected entry tag `{tag}`"),
+                    ));
+                }
+                selected.push(index);
+            }
+            selected
+        };
+        let name = format!("@native-invocation:{}", self.invocations.len());
+        self.invocations.push((name.clone(), definition, entries));
+        Ok(ExecutableSpec::External {
+            target: ExternalRef::new(name),
+        })
+    }
+
+    fn quick(
+        &mut self,
+        sequence_tag: &str,
+        rule_index: usize,
+        exec_index: usize,
+        args: &str,
+        path: &str,
+    ) -> Result<ExecutableSpec, ConfigError> {
+        let addresses: Vec<&str> = args.split_whitespace().collect();
+        if addresses.is_empty() {
+            return Err(ConfigError::new(
+                path,
+                "quick forward requires one or more upstream addresses",
+            ));
+        }
+        let definition = self.definitions.len();
+        let definition_tag = format!(
+            "@native-quick-definition:{}:{rule_index}:{exec_index}",
+            hex_identity(sequence_tag)
+        );
+        let mut entries = Vec::with_capacity(addresses.len());
+        for (entry_index, address) in addresses.into_iter().enumerate() {
+            let target = parse_forward_target(
+                address,
+                &RawMap {
+                    entries: Vec::new(),
+                },
+                None,
+                None,
+                &format!("{path}[{entry_index}]"),
+            )?;
+            let endpoint = target.dial_addr.map(|dial| {
+                Endpoint::new(dial, target.scheme.endpoint_transport()).expect("validated dial")
+            });
+            let identity = format!(
+                "@native-quick:{}:{rule_index}:{exec_index}:{entry_index}",
+                hex_identity(sequence_tag)
+            );
+            if self
+                .definitions
+                .iter()
+                .flat_map(|definition| definition.entries.iter())
+                .any(|entry| entry.identity == identity)
+                || entries
+                    .iter()
+                    .any(|entry: &ForwardEntryConfig| entry.identity == identity)
+            {
+                return Err(ConfigError::new(
+                    path,
+                    format!("duplicate effective upstream identity `{identity}`"),
+                ));
+            }
+            entries.push(ForwardEntryConfig {
+                tag: None,
+                identity,
+                endpoint,
+                target,
+            });
+        }
+        self.definitions.push(ForwardDefinitionConfig {
+            tag: definition_tag,
+            entries,
+            concurrent: 3,
+        });
+        let name = format!(
+            "@native-quick-invocation:{}:{rule_index}:{exec_index}",
+            hex_identity(sequence_tag)
+        );
+        self.invocations.push((
+            name.clone(),
+            definition,
+            (0..self.definitions[definition].entries.len()).collect(),
+        ));
+        Ok(ExecutableSpec::External {
+            target: ExternalRef::new(name),
+        })
+    }
 }
 
 /// The compiled entry sequence.
@@ -120,6 +315,8 @@ pub struct CompiledConfig {
     /// Every validated upstream owner keyed by the executable that can
     /// dispatch it.
     pub forwards: Vec<ForwardConfig>,
+    pub forward_definitions: Vec<ForwardDefinitionConfig>,
+    pub forward_invocations: Vec<ForwardInvocationConfig>,
     pub cache: Option<CachePluginConfig>,
     pub sequence: SequenceConfig,
     pub listener: ListenerConfig,
@@ -321,6 +518,7 @@ struct PluginCatalog<'a> {
     kinds: &'a [(String, PluginKind, usize)],
     domain_sets: &'a [(String, DomainSetHandle)],
     fast_marks: &'a [(String, FastMarkConfig)],
+    forwards: &'a RefCell<ForwardCompiler>,
 }
 
 impl PluginCatalog<'_> {
@@ -468,25 +666,24 @@ fn compile_definitions(
             }
             PluginKind::Forward => {
                 let forward = compile_forward(plugin)?;
-                let identity = forward
-                    .upstream_tag
-                    .as_deref()
-                    .unwrap_or(&forward.tag)
-                    .to_owned();
-                if let Some(existing) = upstream_identities.get(&identity) {
-                    let field = if forward.upstream_tag.is_some() {
-                        "args.upstreams[0].tag"
+                for (entry_index, entry) in forward.entries.iter().enumerate() {
+                    let location = if entry.tag.is_some() {
+                        format!("{}.args.upstreams[{entry_index}].tag", plugin.source_path)
                     } else {
-                        "tag"
+                        format!("{}.args.upstreams[{entry_index}]", plugin.source_path)
                     };
-                    return Err(ConfigError::new(
-                        format!("{}.{}", plugin.source_path, field),
-                        format!(
-                            "duplicate effective upstream identity `{identity}` (already used by `{existing}`)"
-                        ),
-                    ));
+                    if let Some(existing) =
+                        upstream_identities.insert(entry.identity.clone(), location.clone())
+                    {
+                        return Err(ConfigError::new(
+                            location,
+                            format!(
+                                "duplicate effective upstream identity `{}` (already used by `{existing}`)",
+                                entry.identity
+                            ),
+                        ));
+                    }
                 }
-                upstream_identities.insert(identity, forward.tag.clone());
                 forwards.push(forward);
             }
             PluginKind::Cache => {
@@ -513,10 +710,15 @@ fn compile_definitions(
             }
         }
     }
+    let forward_compiler = RefCell::new(ForwardCompiler {
+        definitions: forwards,
+        invocations: Vec::new(),
+    });
     let catalog = PluginCatalog {
         kinds: &kinds,
         domain_sets: &domain_sets,
         fast_marks: &fast_marks,
+        forwards: &forward_compiler,
     };
     let mut sequences = Vec::new();
     let mut fixtures = Vec::new();
@@ -552,7 +754,7 @@ fn compile_definitions(
             format!("unknown sequence reference `{}`", listener.entry),
         ));
     }
-    if forwards.is_empty() {
+    if forward_compiler.borrow().definitions.is_empty() {
         return Err(ConfigError::new(
             "$.plugins",
             "at least one forward plugin is required",
@@ -562,9 +764,19 @@ fn compile_definitions(
     // Build the program. Every sequence becomes a named sequence, every
     // forward and cache becomes a host-fulfilled external, and a direct
     // `$sequence` reference becomes a named child call rather than a jump.
-    let externals: Vec<ExternalSpec> = forwards
+    let forward_compiler = forward_compiler.into_inner();
+    for (name, _, _) in &forward_compiler.invocations {
+        if kinds.iter().any(|(tag, _, _)| tag == name) {
+            return Err(ConfigError::new(
+                "$.plugins",
+                "internal invocation name collision",
+            ));
+        }
+    }
+    let externals: Vec<ExternalSpec> = forward_compiler
+        .invocations
         .iter()
-        .map(|forward| ExternalSpec::new(forward.tag.clone()))
+        .map(|(name, _, _)| ExternalSpec::new(name.clone()))
         .chain(
             cache
                 .as_ref()
@@ -581,21 +793,35 @@ fn compile_definitions(
             )
         })?;
 
-    let mut compiled_forwards = Vec::with_capacity(forwards.len());
-    for forward in forwards {
+    let mut compiled_forwards = Vec::new();
+    let mut forward_invocations = Vec::new();
+    for (name, definition, entries) in forward_compiler.invocations {
         let executable = program
             .externals
             .iter()
-            .find_map(|(id, external)| (external.name == forward.tag).then_some(*id))
-            .ok_or_else(|| {
-                ConfigError::new(
-                    "$.plugins.forward",
-                    format!("compiled forward `{}` is missing", forward.tag),
-                )
-            })?;
-        compiled_forwards.push(ForwardConfig {
+            .find_map(|(id, external)| (external.name == name).then_some(*id))
+            .ok_or_else(|| ConfigError::new("$.plugins", "compiled invocation is missing"))?;
+        let forward = &forward_compiler.definitions[definition];
+        // Legacy introspection is intentionally restricted to a single numeric entry.
+        if entries.len() == 1
+            && !compiled_forwards
+                .iter()
+                .any(|item: &ForwardConfig| item.tag == forward.tag)
+        {
+            let entry = &forward.entries[entries[0]];
+            if let Some(endpoint) = entry.endpoint {
+                compiled_forwards.push(ForwardConfig {
+                    tag: forward.tag.clone(),
+                    upstream_tag: entry.tag.clone(),
+                    endpoint,
+                    executable,
+                });
+            }
+        }
+        forward_invocations.push(ForwardInvocationConfig {
             executable,
-            ..forward
+            definition,
+            entries,
         });
     }
     let compiled_cache = cache
@@ -625,6 +851,8 @@ fn compile_definitions(
         log_level: log,
         forward: primary.clone(),
         forwards: compiled_forwards,
+        forward_definitions: forward_compiler.definitions,
+        forward_invocations,
         cache: compiled_cache,
         sequence: SequenceConfig {
             tag: listener.entry.clone(),
@@ -739,42 +967,118 @@ fn decode_plugin(value: &RawValue, path: &str, base_dir: &Path) -> Result<RawPlu
     })
 }
 
-fn compile_forward(plugin: &RawPlugin) -> Result<ForwardConfig, ConfigError> {
+fn compile_forward(plugin: &RawPlugin) -> Result<ForwardDefinitionConfig, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "forward args must be a mapping")?;
-    args.reject_unknown(&["upstreams"], &path)?;
+    args.reject_unknown(
+        &["upstreams", "concurrent", "bootstrap", "bootstrap_version"],
+        &path,
+    )?;
+    let concurrent = match args.get("concurrent") {
+        None => 1,
+        Some(RawValue::Number(RawNumber::Signed(value))) => (*value).clamp(1, 3) as usize,
+        Some(RawValue::Number(RawNumber::Unsigned(value))) => (*value).clamp(1, 3) as usize,
+        _ => {
+            return Err(ConfigError::new(
+                format!("{path}.concurrent"),
+                "expected an integer",
+            ));
+        }
+    };
     let upstreams_path = format!("{path}.upstreams");
     let upstreams = expect_sequence(args.required("upstreams", &path)?, &upstreams_path)?;
-    if upstreams.len() != 1 {
+    if upstreams.is_empty() {
         return Err(ConfigError::new(
-            &upstreams_path,
-            "exactly one numeric upstream is supported",
+            upstreams_path,
+            "upstreams must not be empty",
         ));
     }
-    let item_path = format!("{upstreams_path}[0]");
-    let upstream = expect_map(&upstreams[0], &item_path, "upstream must be a mapping")?;
-    upstream.reject_unknown(&["tag", "addr"], &item_path)?;
-    let upstream_tag = upstream
-        .get("tag")
-        .map(|value| expect_string(value, &format!("{item_path}.tag")))
+    let global_bootstrap = args
+        .get("bootstrap")
+        .map(|value| parse_bootstrap(value, &format!("{path}.bootstrap")))
         .transpose()?;
-    if upstream_tag.as_ref().is_some_and(|tag| tag.is_empty()) {
-        return Err(ConfigError::new(
-            format!("{item_path}.tag"),
-            "upstream tag must not be empty",
-        ));
+    let global_bootstrap_version = args
+        .get("bootstrap_version")
+        .map(|value| parse_bootstrap_version(value, &format!("{path}.bootstrap_version")))
+        .transpose()?;
+    let mut entries = Vec::new();
+    for (index, value) in upstreams.iter().enumerate() {
+        let item_path = format!("{upstreams_path}[{index}]");
+        let item = expect_map(value, &item_path, "upstream must be a mapping")?;
+        item.reject_unknown(
+            &[
+                "tag",
+                "addr",
+                "dial_addr",
+                "bootstrap",
+                "bootstrap_version",
+                "upstream_query_timeout",
+                "insecure_skip_verify",
+                "idle_timeout",
+                "enable_pipeline",
+                "enable_http3",
+                "max_conns",
+                "socks5",
+                "so_mark",
+                "bind_to_device",
+            ],
+            &item_path,
+        )?;
+        let tag = item
+            .get("tag")
+            .map(|value| expect_string(value, &format!("{item_path}.tag")))
+            .transpose()?;
+        if tag
+            .as_ref()
+            .is_some_and(|tag| tag.is_empty() || tag.contains(char::is_whitespace))
+        {
+            return Err(ConfigError::new(
+                format!("{item_path}.tag"),
+                "entry tag must be nonempty without whitespace",
+            ));
+        }
+        let address = expect_string(
+            item.required("addr", &item_path)?,
+            &format!("{item_path}.addr"),
+        )?;
+        let target = parse_forward_target(
+            &address,
+            item,
+            global_bootstrap,
+            global_bootstrap_version,
+            &item_path,
+        )?;
+        let endpoint = target.dial_addr.map(|dial| {
+            Endpoint::new(dial, target.scheme.endpoint_transport()).expect("validated dial")
+        });
+        let identity = tag.clone().unwrap_or_else(|| {
+            if upstreams.len() == 1 {
+                plugin.tag.clone()
+            } else {
+                format!("@native-forward:{}:{index}", hex_identity(&plugin.tag))
+            }
+        });
+        entries.push(ForwardEntryConfig {
+            tag,
+            identity,
+            endpoint,
+            target,
+        });
     }
-    let address = expect_string(
-        upstream.required("addr", &item_path)?,
-        &format!("{item_path}.addr"),
-    )?;
-    let endpoint = parse_endpoint(&address, &format!("{item_path}.addr"))?;
-    Ok(ForwardConfig {
+    Ok(ForwardDefinitionConfig {
         tag: plugin.tag.clone(),
-        upstream_tag,
-        endpoint,
-        executable: ExecutableId(usize::MAX),
+        entries,
+        concurrent,
     })
+}
+
+fn hex_identity(value: &str) -> String {
+    use std::fmt::Write;
+    let mut output = String::with_capacity(value.len() * 2);
+    for byte in value.bytes() {
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
 }
 
 fn compile_fast_mark(plugin: &RawPlugin) -> Result<FastMarkConfig, ConfigError> {
@@ -962,7 +1266,16 @@ fn compile_sequence(
         }
         let executable = item
             .get("exec")
-            .map(|value| compile_exec(value, &format!("{item_path}.exec"), catalog, fixtures))
+            .map(|value| {
+                compile_exec(
+                    value,
+                    &format!("{item_path}.exec"),
+                    catalog,
+                    fixtures,
+                    &plugin.tag,
+                    rule_index,
+                )
+            })
             .transpose()?;
         if matchers.is_empty() && executable.is_none() {
             return Err(ConfigError::new(
@@ -1152,10 +1465,18 @@ fn compile_exec(
     path: &str,
     catalog: &PluginCatalog<'_>,
     fixtures: &mut Vec<mosdns_sequence_core::FixtureSpec>,
+    sequence_tag: &str,
+    rule_index: usize,
 ) -> Result<Vec<ExecutableSpec>, ConfigError> {
     match value {
         RawValue::String(expression) => Ok(vec![compile_exec_item(
-            expression, path, catalog, fixtures,
+            expression,
+            path,
+            catalog,
+            fixtures,
+            sequence_tag,
+            rule_index,
+            0,
         )?]),
         RawValue::Sequence(values) => values
             .iter()
@@ -1163,7 +1484,15 @@ fn compile_exec(
             .map(|(index, value)| {
                 let item_path = format!("{path}[{index}]");
                 let expression = expect_string(value, &item_path)?;
-                compile_exec_item(&expression, &item_path, catalog, fixtures)
+                compile_exec_item(
+                    &expression,
+                    &item_path,
+                    catalog,
+                    fixtures,
+                    sequence_tag,
+                    rule_index,
+                    index,
+                )
             })
             .collect(),
         _ => Err(ConfigError::new(
@@ -1178,6 +1507,9 @@ fn compile_exec_item(
     path: &str,
     catalog: &PluginCatalog<'_>,
     fixtures: &mut Vec<mosdns_sequence_core::FixtureSpec>,
+    sequence_tag: &str,
+    rule_index: usize,
+    exec_index: usize,
 ) -> Result<ExecutableSpec, ConfigError> {
     let expression = expression.trim();
     if expression.is_empty() {
@@ -1188,6 +1520,12 @@ fn compile_exec_item(
         None => (expression, ""),
     };
     match name {
+        "forward" => {
+            catalog
+                .forwards
+                .borrow_mut()
+                .quick(sequence_tag, rule_index, exec_index, args, path)
+        }
         "fast_mark" => {
             let config =
                 FastMarkConfig::parse(args).map_err(|reason| ConfigError::new(path, reason))?;
@@ -1263,10 +1601,13 @@ fn compile_exec_item(
                     format!("unsupported executable `{name}`"),
                 ));
             };
+            if catalog.kind_of(tag) == Some(PluginKind::Forward) {
+                return catalog.forwards.borrow_mut().invocation(tag, args, path);
+            }
             if !args.is_empty() {
                 return Err(ConfigError::new(
                     path,
-                    format!("`{name}` does not accept arguments in the native host subset"),
+                    format!("`{name}` takes no arguments"),
                 ));
             }
             match catalog.kind_of(tag) {
@@ -1368,26 +1709,279 @@ fn compile_listener(plugin: &RawPlugin) -> Result<ListenerConfig, ConfigError> {
     })
 }
 
-fn parse_endpoint(value: &str, path: &str) -> Result<Endpoint, ConfigError> {
-    let Some((scheme, address)) = value.split_once("://") else {
+fn parse_forward_target(
+    value: &str,
+    item: &RawMap,
+    global_bootstrap: Option<SocketAddr>,
+    global_bootstrap_version: Option<u8>,
+    path: &str,
+) -> Result<ForwardTargetConfig, ConfigError> {
+    if value.is_empty() {
         return Err(ConfigError::new(
-            path,
-            "upstream must use udp:// or tcp:// with a numeric SocketAddr",
+            format!("{path}.addr"),
+            "addr must not be empty",
         ));
-    };
-    let transport = match scheme {
-        "udp" => Transport::Udp,
-        "tcp" => Transport::Tcp,
-        other => {
+    }
+    let (scheme, host, port, service) = parse_service_address(value, path)?;
+    let dial_addr = item
+        .get("dial_addr")
+        .map(|value| parse_numeric_host_port(value, port, &format!("{path}.dial_addr")))
+        .transpose()?;
+    let dial_addr = dial_addr.or_else(|| {
+        host.parse::<std::net::IpAddr>()
+            .ok()
+            .map(|ip| SocketAddr::new(ip, port))
+    });
+    let bootstrap = item
+        .get("bootstrap")
+        .map(|value| parse_bootstrap(value, &format!("{path}.bootstrap")))
+        .transpose()?
+        .or(global_bootstrap);
+    let bootstrap_version = item
+        .get("bootstrap_version")
+        .map(|value| parse_bootstrap_version(value, &format!("{path}.bootstrap_version")))
+        .transpose()?
+        .or(global_bootstrap_version);
+    let query_timeout = parse_query_timeout(item.get("upstream_query_timeout"), path)?;
+    let insecure_skip_verify = item
+        .get("insecure_skip_verify")
+        .map(|value| expect_bool(value, &format!("{path}.insecure_skip_verify")))
+        .transpose()?
+        .unwrap_or(false);
+    validate_inactive_forward_options(item, path)?;
+
+    if host.parse::<std::net::IpAddr>().is_err() && dial_addr.is_none() && bootstrap.is_none() {
+        return Err(ConfigError::new(
+            format!("{path}.addr"),
+            "hostname upstream requires numeric dial_addr or bootstrap",
+        ));
+    }
+    if matches!(scheme, ForwardScheme::Udp | ForwardScheme::Tcp) && insecure_skip_verify {
+        return Err(ConfigError::new(
+            format!("{path}.insecure_skip_verify"),
+            "insecure_skip_verify is only valid for tls/https upstreams",
+        ));
+    }
+    if matches!(scheme, ForwardScheme::Tls | ForwardScheme::Https) {
+        ServerIdentity::new(&host).map_err(|error| {
+            ConfigError::new(
+                format!("{path}.addr"),
+                format!("invalid secure identity: {error}"),
+            )
+        })?;
+        if scheme == ForwardScheme::Https {
+            let dial = dial_addr.unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], port)));
+            mosdns_upstream_core::DohEndpoint::new(&service, dial).map_err(|error| {
+                ConfigError::new(
+                    format!("{path}.addr"),
+                    format!("invalid https endpoint: {error}"),
+                )
+            })?;
+        }
+    }
+
+    Ok(ForwardTargetConfig {
+        scheme,
+        service,
+        host,
+        port,
+        dial_addr,
+        bootstrap,
+        bootstrap_version,
+        query_timeout,
+        insecure_skip_verify,
+    })
+}
+
+fn parse_service_address(
+    value: &str,
+    path: &str,
+) -> Result<(ForwardScheme, String, u16, String), ConfigError> {
+    if let Some((scheme_name, _)) = value.split_once("://") {
+        let scheme = match scheme_name {
+            "udp" => ForwardScheme::Udp,
+            "tcp" => ForwardScheme::Tcp,
+            "tls" => ForwardScheme::Tls,
+            "https" => ForwardScheme::Https,
+            other => {
+                return Err(ConfigError::new(
+                    path,
+                    format!("unsupported upstream scheme `{other}`"),
+                ));
+            }
+        };
+        let url = Url::parse(value)
+            .map_err(|error| ConfigError::new(path, format!("invalid upstream URL: {error}")))?;
+        if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
             return Err(ConfigError::new(
                 path,
-                format!("unsupported upstream scheme `{other}`"),
+                "upstream URL must not contain userinfo or fragment",
+            ));
+        }
+        let host = url
+            .host_str()
+            .ok_or_else(|| ConfigError::new(path, "upstream URL host is missing"))?
+            .trim_matches(['[', ']'])
+            .to_owned();
+        let port = url.port().unwrap_or_else(|| scheme.default_port());
+        if port == 0 {
+            return Err(ConfigError::new(path, "port must be nonzero"));
+        }
+        if !matches!(scheme, ForwardScheme::Https)
+            && ((!url.path().is_empty() && url.path() != "/") || url.query().is_some())
+        {
+            return Err(ConfigError::new(
+                path,
+                "only https upstreams accept path/query components",
+            ));
+        }
+        Ok((scheme, host, port, value.to_owned()))
+    } else if let Ok(socket) = value.parse::<SocketAddr>() {
+        Ok((
+            ForwardScheme::Udp,
+            socket.ip().to_string(),
+            socket.port(),
+            format!("udp://{value}"),
+        ))
+    } else if let Ok(ip) = value.parse::<std::net::IpAddr>() {
+        Ok((
+            ForwardScheme::Udp,
+            ip.to_string(),
+            53,
+            format!("udp://{ip}:53"),
+        ))
+    } else if let Some((host, port)) = value.rsplit_once(':') {
+        if !host.contains(':') {
+            let port = port
+                .parse::<u16>()
+                .map_err(|_| ConfigError::new(path, "invalid upstream port"))?;
+            if port == 0 {
+                return Err(ConfigError::new(path, "port must be nonzero"));
+            }
+            return Ok((
+                ForwardScheme::Udp,
+                host.to_owned(),
+                port,
+                format!("udp://{value}"),
+            ));
+        }
+        Err(ConfigError::new(path, "IPv6 upstreams must use brackets"))
+    } else {
+        Ok((
+            ForwardScheme::Udp,
+            value.to_owned(),
+            53,
+            format!("udp://{value}:53"),
+        ))
+    }
+}
+
+fn parse_numeric_host_port(
+    value: &RawValue,
+    inherited_port: u16,
+    path: &str,
+) -> Result<SocketAddr, ConfigError> {
+    let text = expect_string(value, path)?;
+    if text.is_empty() {
+        return Err(ConfigError::new(path, "numeric address must not be empty"));
+    }
+    if let Ok(socket) = text.parse::<SocketAddr>() {
+        if socket.port() == 0 {
+            return Err(ConfigError::new(path, "port must be nonzero"));
+        }
+        return Ok(socket);
+    }
+    let ip = text
+        .trim_matches(['[', ']'])
+        .parse::<std::net::IpAddr>()
+        .map_err(|_| ConfigError::new(path, "address must be numeric"))?;
+    Ok(SocketAddr::new(ip, inherited_port))
+}
+
+fn parse_bootstrap(value: &RawValue, path: &str) -> Result<SocketAddr, ConfigError> {
+    parse_numeric_host_port(value, 53, path)
+}
+
+fn parse_bootstrap_version(value: &RawValue, path: &str) -> Result<u8, ConfigError> {
+    let version = match value {
+        RawValue::Number(RawNumber::Unsigned(value)) => u8::try_from(*value).ok(),
+        RawValue::Number(RawNumber::Signed(value)) if *value >= 0 => u8::try_from(*value).ok(),
+        _ => None,
+    };
+    match version {
+        Some(0 | 4 | 6) => Ok(version.unwrap_or_default()),
+        Some(value) => Err(ConfigError::new(
+            path,
+            format!("unsupported bootstrap_version {value}; expected 0, 4, or 6"),
+        )),
+        None => Err(ConfigError::new(
+            path,
+            "bootstrap_version must be an integer 0, 4, or 6",
+        )),
+    }
+}
+
+fn parse_query_timeout(value: Option<&RawValue>, path: &str) -> Result<Duration, ConfigError> {
+    let Some(value) = value else {
+        return Ok(Duration::from_secs(5));
+    };
+    let millis = match value {
+        RawValue::Number(RawNumber::Unsigned(value)) => *value,
+        RawValue::Number(RawNumber::Signed(value)) if *value >= 0 => *value as u64,
+        RawValue::Number(RawNumber::Signed(_)) => {
+            return Err(ConfigError::new(
+                format!("{path}.upstream_query_timeout"),
+                "timeout must not be negative",
+            ));
+        }
+        _ => {
+            return Err(ConfigError::new(
+                format!("{path}.upstream_query_timeout"),
+                "timeout must be an integer number of milliseconds",
             ));
         }
     };
-    let socket = parse_socket_addr(address, path)?;
-    Endpoint::new(socket, transport)
-        .map_err(|error| ConfigError::new(path, format!("invalid upstream endpoint: {error}")))
+    if millis == 0 {
+        return Ok(Duration::from_secs(5));
+    }
+    Ok(Duration::from_millis(millis))
+}
+
+fn validate_inactive_forward_options(item: &RawMap, path: &str) -> Result<(), ConfigError> {
+    if let Some(value) = item.get("idle_timeout") {
+        let timeout = expect_nonnegative_integer(value, &format!("{path}.idle_timeout"))?;
+        if timeout != 0 {
+            return Err(ConfigError::new(
+                format!("{path}.idle_timeout"),
+                "positive idle_timeout is unsupported",
+            ));
+        }
+    }
+    if let Some(value) = item.get("enable_pipeline") {
+        if expect_bool(value, &format!("{path}.enable_pipeline"))? {
+            return Err(ConfigError::new(
+                format!("{path}.enable_pipeline"),
+                "pipeline is unsupported",
+            ));
+        }
+    }
+    if let Some(value) = item.get("enable_http3") {
+        if expect_bool(value, &format!("{path}.enable_http3"))? {
+            return Err(ConfigError::new(
+                format!("{path}.enable_http3"),
+                "http3 is unsupported",
+            ));
+        }
+    }
+    for key in ["max_conns", "socks5", "so_mark", "bind_to_device"] {
+        if item.get(key).is_some() {
+            return Err(ConfigError::new(
+                format!("{path}.{key}"),
+                "option is unsupported",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn parse_socket_addr(value: &str, path: &str) -> Result<SocketAddr, ConfigError> {

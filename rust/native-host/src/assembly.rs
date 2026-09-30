@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -6,16 +7,24 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::cache::{CacheAdapterError, CacheClock, NativeCacheAdapter};
+use mosdns_dns_core::parse_query;
 use mosdns_upstream_core::{
-    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, TransportCancellation, Upstream,
-    UpstreamError,
+    AddressFamily, BootstrapEndpoint, BootstrapResolver, DohEndpoint, DohReuseOwner, DotEndpoint,
+    Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, ResolutionMode, ResolutionPolicy,
+    ResolutionTarget, ReuseOwner, SecureReuseOwner, ServerIdentity, SideEffectState, SystemClock,
+    TlsPolicy, Transport, TransportCancellation, UdpTcpPolicy, Upstream, UpstreamError,
 };
 use tokio::task::JoinSet;
 
 use crate::api::{ApiServer, ApiServerError, AuditPersistenceFaults};
-use crate::config::{CompiledConfig, ConfigError, compile_yaml, load_and_compile};
-use crate::execution::{ExchangeError, ExchangeExecutor};
-use crate::observer::{AuditClock, AuditSnapshot, MetricsSnapshot, QueryObserver};
+use crate::config::{
+    CompiledConfig, ConfigError, ForwardScheme, ForwardTargetConfig, compile_yaml, load_and_compile,
+};
+use crate::execution::{ExchangeError, ExchangeExecutor, InvocationExchange};
+use crate::observer::{
+    AuditClock, AuditSnapshot, MetricsSnapshot, QueryObserver, UpstreamAttemptLedger,
+    UpstreamAttemptOutcome, UpstreamTransport,
+};
 use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
 
@@ -31,6 +40,7 @@ pub struct HostOptions {
     pub(crate) audit_clock: Arc<dyn AuditClock>,
     pub(crate) admission_deadline: Option<std::time::Instant>,
     pub(crate) audit_capacity: usize,
+    pub(crate) tls_roots: Option<Arc<rustls::RootCertStore>>,
 }
 
 impl Default for HostOptions {
@@ -42,6 +52,7 @@ impl Default for HostOptions {
             audit_clock: crate::observer::default_audit_clock(),
             admission_deadline: None,
             audit_capacity: DEFAULT_AUDIT_CAPACITY,
+            tls_roots: None,
         }
     }
 }
@@ -58,6 +69,7 @@ impl HostOptions {
             audit_clock: crate::observer::default_audit_clock(),
             admission_deadline: None,
             audit_capacity: DEFAULT_AUDIT_CAPACITY,
+            tls_roots: None,
         }
     }
 
@@ -85,6 +97,16 @@ impl HostOptions {
     #[must_use]
     pub fn with_audit_capacity(mut self, audit_capacity: usize) -> Self {
         self.audit_capacity = audit_capacity;
+        self
+    }
+
+    /// Injects a caller-owned trust store for offline secure-transport tests
+    /// and embedders. Production construction leaves this unset and loads the
+    /// host system trust store instead.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_tls_roots(mut self, roots: rustls::RootCertStore) -> Self {
+        self.tls_roots = Some(Arc::new(roots));
         self
     }
 }
@@ -184,7 +206,8 @@ impl HostAssembly {
     ) -> Result<Self, AssemblyError> {
         let config = Rc::new(config);
         let forwards = Rc::new(
-            ForwardCatalog::from_configs(&config.forwards).map_err(AssemblyError::Catalog)?,
+            ForwardCatalog::from_compiled_config(&config, options.tls_roots.clone())
+                .map_err(AssemblyError::Catalog)?,
         );
         let cache = Rc::new(
             NativeCacheAdapter::with_capacity_and_clock(
@@ -546,24 +569,162 @@ impl std::error::Error for HostRunError {}
 /// runtime, deadline, and cancellation scope.
 pub struct ForwardAdapter {
     executable: mosdns_sequence_core::ExecutableId,
-    upstream: Upstream,
+    entry_index: usize,
+    target: ForwardTargetConfig,
+    resolver: Option<Rc<BootstrapResolver>>,
+    owner: RefCell<Option<Rc<ForwardOwner>>>,
+    retired_owners: RefCell<Vec<Rc<ForwardOwner>>>,
+    active_peer: RefCell<Option<std::net::SocketAddr>>,
+    tls_roots: Option<Arc<rustls::RootCertStore>>,
+    /// Compatibility handle for existing host tests/introspection. The
+    /// transport owner above remains the runtime source of truth.
+    legacy_upstream: Option<Upstream>,
+}
+
+enum ForwardOwner {
+    Udp {
+        policy: UdpTcpPolicy,
+        legacy: Upstream,
+    },
+    Tcp {
+        reuse: ReuseOwner,
+        fallback: Upstream,
+    },
+    Dot(SecureReuseOwner),
+    Doh(DohReuseOwner),
+}
+
+impl ForwardOwner {
+    async fn exchange(
+        &self,
+        query: &[u8],
+        deadline: std::time::Instant,
+        cancellation: TransportCancellation,
+    ) -> Result<ExchangeResponse, UpstreamError> {
+        let request = ExchangeRequest::new(query)?;
+        let context = ExchangeContext::new(deadline, cancellation);
+        match self {
+            Self::Udp { policy, .. } => policy.exchange(request, context).await,
+            Self::Tcp { reuse, fallback } => match reuse.exchange(request, context.clone()).await {
+                Err(UpstreamError::Runtime(SideEffectState::NotSent)) => {
+                    fallback.exchange(request, context).await
+                }
+                result => result,
+            },
+            Self::Dot(owner) => owner
+                .exchange(request, context)
+                .await
+                .map(secure_response)
+                .map_err(secure_error),
+            Self::Doh(owner) => owner
+                .exchange(request, context)
+                .await
+                .map(secure_response)
+                .map_err(secure_error),
+        }
+    }
+
+    async fn close(&self) {
+        match self {
+            Self::Udp { policy, legacy } => {
+                let _ = tokio::join!(policy.close(), legacy.close());
+            }
+            Self::Tcp { reuse, fallback } => {
+                let _ = tokio::join!(reuse.close(), fallback.close());
+            }
+            Self::Dot(owner) => {
+                let _ = owner.close().await;
+            }
+            Self::Doh(owner) => {
+                let _ = owner.close().await;
+            }
+        }
+    }
+}
+
+fn secure_response(response: mosdns_upstream_core::secure::SecureResponse) -> ExchangeResponse {
+    let request_id = response.request_id();
+    let response_id = response.response_id();
+    let truncated = response.truncated();
+    ExchangeResponse::new(
+        response.into_wire(),
+        request_id,
+        response_id,
+        Transport::Tcp,
+        truncated,
+    )
+}
+
+fn secure_error(error: mosdns_upstream_core::SecureError) -> UpstreamError {
+    match error {
+        mosdns_upstream_core::SecureError::Transport(error) => error,
+        mosdns_upstream_core::SecureError::DohProtocol(_)
+        | mosdns_upstream_core::SecureError::DohRequest(_) => UpstreamError::MalformedResponse,
+        mosdns_upstream_core::SecureError::Tls(_)
+        | mosdns_upstream_core::SecureError::TlsConfig(_)
+        | mosdns_upstream_core::SecureError::InvalidIdentity(_)
+        | mosdns_upstream_core::SecureError::InvalidServiceUrl(_)
+        | mosdns_upstream_core::SecureError::ZeroDialPort => UpstreamError::Connect,
+        mosdns_upstream_core::SecureError::DoqProtocolTrailingResponse
+        | mosdns_upstream_core::SecureError::DoqProtocolMissingResponseFin
+        | mosdns_upstream_core::SecureError::DoqProtocolNonzeroResponseId => {
+            UpstreamError::MalformedResponse
+        }
+    }
+}
+
+fn attempt_outcome(error: &UpstreamError) -> UpstreamAttemptOutcome {
+    match error {
+        UpstreamError::DeadlineExceeded(_) => UpstreamAttemptOutcome::TimedOut,
+        UpstreamError::Cancelled(_) | UpstreamError::Closed(_) => UpstreamAttemptOutcome::Canceled,
+        _ => UpstreamAttemptOutcome::Failed,
+    }
+}
+
+fn tls_policy(
+    insecure: bool,
+    custom_roots: Option<&rustls::RootCertStore>,
+) -> Result<TlsPolicy, String> {
+    if insecure {
+        return Ok(TlsPolicy::insecure_skip_verify());
+    }
+    let mut roots = custom_roots
+        .cloned()
+        .unwrap_or_else(rustls::RootCertStore::empty);
+    if custom_roots.is_none() {
+        let loaded = rustls_native_certs::load_native_certs();
+        for certificate in loaded.certs {
+            roots
+                .add(certificate)
+                .map_err(|_| "system trust contains an unusable certificate".to_owned())?;
+        }
+        if !loaded.errors.is_empty() && roots.is_empty() {
+            return Err("system trust store could not provide usable roots".to_owned());
+        }
+    }
+    TlsPolicy::verified(roots).map_err(|error| error.to_string())
 }
 
 /// Immutable executable-ID to upstream-owner catalog. W1/W2 populate one
 /// entry; W3 populates one entry per validated route without introducing a
 /// fallback-to-first-upstream path.
 pub struct ForwardCatalog {
-    owners: BTreeMap<mosdns_sequence_core::ExecutableId, Rc<ForwardAdapter>>,
+    owners: BTreeMap<mosdns_sequence_core::ExecutableId, Vec<Rc<ForwardAdapter>>>,
+    concurrent: BTreeMap<mosdns_sequence_core::ExecutableId, usize>,
 }
 
 impl ForwardCatalog {
+    #[cfg(test)]
     fn from_configs(configs: &[crate::config::ForwardConfig]) -> Result<Self, String> {
         let mut owners = BTreeMap::new();
         for config in configs {
             if owners
                 .insert(
                     config.executable,
-                    Rc::new(ForwardAdapter::new(config.executable, config.endpoint)),
+                    vec![Rc::new(ForwardAdapter::new(
+                        config.executable,
+                        config.endpoint,
+                    ))],
                 )
                 .is_some()
             {
@@ -573,7 +734,51 @@ impl ForwardCatalog {
                 ));
             }
         }
-        Ok(Self { owners })
+        let concurrent = owners.keys().map(|executable| (*executable, 1)).collect();
+        Ok(Self { owners, concurrent })
+    }
+
+    fn from_compiled_config(
+        config: &CompiledConfig,
+        tls_roots: Option<Arc<rustls::RootCertStore>>,
+    ) -> Result<Self, String> {
+        let mut owners: BTreeMap<mosdns_sequence_core::ExecutableId, Vec<Rc<ForwardAdapter>>> =
+            BTreeMap::new();
+        let mut shared: BTreeMap<(usize, usize), Rc<ForwardAdapter>> = BTreeMap::new();
+        let mut concurrent = BTreeMap::new();
+        for invocation in &config.forward_invocations {
+            let definition = config
+                .forward_definitions
+                .get(invocation.definition)
+                .ok_or_else(|| {
+                    format!("forward definition {} is missing", invocation.definition)
+                })?;
+            concurrent.insert(invocation.executable, definition.concurrent);
+            let mut invocation_owners = Vec::with_capacity(invocation.entries.len());
+            for &entry_index in &invocation.entries {
+                let entry = definition.entries.get(entry_index).ok_or_else(|| {
+                    format!(
+                        "forward invocation {:?} references missing entry {}",
+                        invocation.executable, entry_index
+                    )
+                })?;
+                let owner = if let Some(owner) = shared.get(&(invocation.definition, entry_index)) {
+                    Rc::clone(owner)
+                } else {
+                    let owner = Rc::new(ForwardAdapter::new_entry(
+                        invocation.executable,
+                        entry_index,
+                        entry.target.clone(),
+                        tls_roots.clone(),
+                    )?);
+                    shared.insert((invocation.definition, entry_index), Rc::clone(&owner));
+                    owner
+                };
+                invocation_owners.push(owner);
+            }
+            owners.insert(invocation.executable, invocation_owners);
+        }
+        Ok(Self { owners, concurrent })
     }
 
     #[must_use]
@@ -581,12 +786,20 @@ impl ForwardCatalog {
         &self,
         executable: mosdns_sequence_core::ExecutableId,
     ) -> Option<&ForwardAdapter> {
-        self.owners.get(&executable).map(Rc::as_ref)
+        self.owners
+            .get(&executable)
+            .and_then(|owners| (owners.len() == 1).then(|| owners[0].as_ref()))
     }
 
     pub async fn close_all(&self) {
-        for owner in self.owners.values() {
-            let _ = owner.upstream().close().await;
+        let mut closed = BTreeSet::new();
+        for owners in self.owners.values() {
+            for owner in owners {
+                let key = Rc::as_ptr(owner) as usize;
+                if closed.insert(key) {
+                    owner.close().await;
+                }
+            }
         }
     }
 }
@@ -601,7 +814,11 @@ impl ExchangeExecutor for ForwardCatalog {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<ExchangeResponse, ExchangeError>> + 'a>,
     > {
-        let Some(owner) = self.owners.get(&executable) else {
+        let Some(owner) = self
+            .owners
+            .get(&executable)
+            .and_then(|owners| owners.first())
+        else {
             return Box::pin(async move { Err(ExchangeError::UnknownExecutable(executable)) });
         };
         Box::pin(async move {
@@ -611,14 +828,249 @@ impl ExchangeExecutor for ForwardCatalog {
                 .map_err(ExchangeError::Upstream)
         })
     }
+
+    fn exchange_invocation<'a>(
+        &'a self,
+        executable: mosdns_sequence_core::ExecutableId,
+        query: &'a [u8],
+        deadline: std::time::Instant,
+        cancellation: TransportCancellation,
+        ledger: &'a mut UpstreamAttemptLedger,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<InvocationExchange, ExchangeError>> + 'a>,
+    > {
+        let Some(owners) = self.owners.get(&executable) else {
+            return Box::pin(async move { Err(ExchangeError::UnknownExecutable(executable)) });
+        };
+        let concurrent = self.concurrent.get(&executable).copied().unwrap_or(1);
+        if owners.len() <= 1 || concurrent <= 1 {
+            let owner = Rc::clone(&owners[0]);
+            let slot = ledger.start(owner.entry_index());
+            return Box::pin(async move {
+                let result = owner.exchange(query, deadline, cancellation).await;
+                let peer = owner.current_peer();
+                let transport = owner.diagnostic_transport(result.as_ref().ok());
+                let outcome = result
+                    .as_ref()
+                    .map(|_| UpstreamAttemptOutcome::Response)
+                    .unwrap_or_else(attempt_outcome);
+                ledger.finish(slot, peer, Some(transport), outcome);
+                result
+                    .map(|response| InvocationExchange {
+                        selected_entry: Some(owner.entry_index()),
+                        selected_peer: peer,
+                        response,
+                    })
+                    .map_err(ExchangeError::Upstream)
+            });
+        }
+
+        let query = query.to_vec();
+        let scope = cancellation.child_token();
+        let limit = concurrent.min(3).min(owners.len());
+        let owners = owners[..limit].to_vec();
+        let slots = owners
+            .iter()
+            .map(|owner| (owner.entry_index(), ledger.start(owner.entry_index())))
+            .collect::<BTreeMap<_, _>>();
+        Box::pin(async move {
+            let (header, question) = parse_query(&query).map_err(|_| {
+                ExchangeError::Upstream(UpstreamError::InvalidRequest(
+                    mosdns_upstream_core::RequestError::Malformed,
+                ))
+            })?;
+            let mut tasks = JoinSet::new();
+            for owner in owners {
+                let entry_index = owner.entry_index();
+                let slot = slots[&entry_index];
+                let leg_cancellation = scope.child_token();
+                let leg_query = query.clone();
+                tasks.spawn_local(async move {
+                    let result = owner.exchange(&leg_query, deadline, leg_cancellation).await;
+                    let peer = owner.current_peer();
+                    let transport = owner.diagnostic_transport(result.as_ref().ok());
+                    (slot, entry_index, peer, transport, result)
+                });
+            }
+
+            let mut winner: Option<(usize, ExchangeResponse, u8)> = None;
+            let mut last_error = None;
+            while let Some(result) = tasks.join_next().await {
+                match result {
+                    Ok((slot, entry_index, peer, transport, Ok(response))) => {
+                        let Some(wire) = crate::execution::qualify_response(
+                            response.wire(),
+                            header.id,
+                            &question,
+                        ) else {
+                            ledger.finish(
+                                slot,
+                                peer,
+                                Some(transport),
+                                UpstreamAttemptOutcome::Failed,
+                            );
+                            last_error = Some(UpstreamError::MalformedResponse);
+                            continue;
+                        };
+                        ledger.finish(
+                            slot,
+                            peer,
+                            Some(transport),
+                            UpstreamAttemptOutcome::Response,
+                        );
+                        let priority = crate::execution::response_priority(&wire);
+                        let replace = winner
+                            .as_ref()
+                            .is_none_or(|(_, _, current_priority)| priority < *current_priority);
+                        if replace {
+                            winner = Some((
+                                entry_index,
+                                ExchangeResponse::new(
+                                    wire,
+                                    response.request_id(),
+                                    response.response_id(),
+                                    response.transport(),
+                                    response.truncated(),
+                                ),
+                                priority,
+                            ));
+                        }
+                        if priority == 0 {
+                            scope.cancel();
+                        }
+                    }
+                    Ok((slot, _entry_index, peer, transport, Err(error))) => {
+                        ledger.finish(slot, peer, Some(transport), attempt_outcome(&error));
+                        last_error = Some(error);
+                    }
+                    Err(_) => {
+                        last_error = Some(UpstreamError::Runtime(
+                            mosdns_upstream_core::SideEffectState::NotSent,
+                        ));
+                    }
+                }
+            }
+
+            for (entry_index, slot) in slots {
+                if ledger.slots()[slot].outcome.is_none() {
+                    ledger.finish(slot, None, None, UpstreamAttemptOutcome::Interrupted);
+                    last_error.get_or_insert(UpstreamError::Runtime(
+                        mosdns_upstream_core::SideEffectState::NotSent,
+                    ));
+                    let _ = entry_index;
+                }
+            }
+
+            let Some((selected_entry, response, _)) = winner else {
+                return Err(ExchangeError::Upstream(
+                    last_error.unwrap_or(UpstreamError::MalformedResponse),
+                ));
+            };
+            let selected_peer = ledger
+                .slots()
+                .iter()
+                .find(|attempt| {
+                    attempt.entry_index == selected_entry
+                        && attempt.outcome == Some(UpstreamAttemptOutcome::Response)
+                })
+                .and_then(|attempt| attempt.peer);
+            Ok(InvocationExchange {
+                response,
+                selected_entry: Some(selected_entry),
+                selected_peer,
+            })
+        })
+    }
 }
 
 impl ForwardAdapter {
+    #[cfg(test)]
     pub(crate) fn new(executable: mosdns_sequence_core::ExecutableId, endpoint: Endpoint) -> Self {
-        Self {
+        let scheme = match endpoint.transport() {
+            Transport::Udp => ForwardScheme::Udp,
+            Transport::Tcp | Transport::Quic => ForwardScheme::Tcp,
+        };
+        Self::new_entry(
             executable,
-            upstream: Upstream::new(endpoint),
-        }
+            0,
+            ForwardTargetConfig {
+                scheme,
+                service: endpoint.address().to_string(),
+                host: endpoint.address().ip().to_string(),
+                port: endpoint.address().port(),
+                dial_addr: Some(endpoint.address()),
+                bootstrap: None,
+                bootstrap_version: None,
+                query_timeout: Duration::from_secs(5),
+                insecure_skip_verify: false,
+            },
+            None,
+        )
+        .expect("legacy numeric endpoint must build")
+    }
+
+    pub(crate) fn new_entry(
+        executable: mosdns_sequence_core::ExecutableId,
+        entry_index: usize,
+        target: ForwardTargetConfig,
+        tls_roots: Option<Arc<rustls::RootCertStore>>,
+    ) -> Result<Self, String> {
+        let legacy_upstream = target.dial_addr.map(|dial| {
+            Upstream::new(
+                Endpoint::new(dial, target.scheme.endpoint_transport())
+                    .expect("validated numeric dial"),
+            )
+        });
+        let owner = target
+            .dial_addr
+            .map(|dial| build_owner(&target, dial, tls_roots.as_deref()).map(Rc::new))
+            .transpose()?;
+        let resolver = if target.dial_addr.is_none() {
+            let bootstrap = target
+                .bootstrap
+                .ok_or_else(|| "hostname forward is missing numeric bootstrap".to_owned())?;
+            let version = target.bootstrap_version.unwrap_or(0);
+            let mode = match version {
+                0 => ResolutionMode::PreferIpv4Dual,
+                4 => ResolutionMode::Ipv4,
+                6 => ResolutionMode::Ipv6,
+                _ => return Err("unsupported bootstrap_version".to_owned()),
+            };
+            let family = if mode == ResolutionMode::Ipv6 {
+                AddressFamily::Ipv6
+            } else {
+                AddressFamily::Ipv4
+            };
+            let target_input = ResolutionTarget::new(&target.host, target.port, family)
+                .map_err(|error| format!("invalid resolver target: {error}"))?;
+            let bootstrap_input =
+                BootstrapEndpoint::new(&bootstrap.ip().to_string(), bootstrap.port())
+                    .map_err(|error| format!("invalid resolver bootstrap: {error}"))?;
+            Some(Rc::new(
+                BootstrapResolver::with_mode(
+                    target_input,
+                    bootstrap_input,
+                    ResolutionPolicy::default(),
+                    Arc::new(SystemClock),
+                    mode,
+                )
+                .map_err(|error| format!("resolver setup failed: {error}"))?,
+            ))
+        } else {
+            None
+        };
+        let initial_peer = target.dial_addr;
+        Ok(Self {
+            executable,
+            entry_index,
+            target,
+            resolver,
+            owner: RefCell::new(owner),
+            retired_owners: RefCell::new(Vec::new()),
+            active_peer: RefCell::new(initial_peer),
+            tls_roots,
+            legacy_upstream,
+        })
     }
 
     #[must_use]
@@ -627,13 +1079,43 @@ impl ForwardAdapter {
     }
 
     #[must_use]
-    pub const fn endpoint(&self) -> Endpoint {
-        self.upstream.endpoint()
+    pub const fn entry_index(&self) -> usize {
+        self.entry_index
+    }
+
+    fn current_peer(&self) -> Option<std::net::SocketAddr> {
+        *self.active_peer.borrow()
+    }
+
+    pub(crate) fn diagnostic_transport(
+        &self,
+        response: Option<&ExchangeResponse>,
+    ) -> UpstreamTransport {
+        match self.target.scheme {
+            ForwardScheme::Udp => match response.map(ExchangeResponse::transport) {
+                Some(Transport::Tcp) => UpstreamTransport::Tcp,
+                _ => UpstreamTransport::Udp,
+            },
+            ForwardScheme::Tcp => UpstreamTransport::Tcp,
+            ForwardScheme::Tls => UpstreamTransport::Tls,
+            ForwardScheme::Https => UpstreamTransport::Https,
+        }
+    }
+
+    #[must_use]
+    pub fn endpoint(&self) -> Endpoint {
+        let dial = self
+            .target
+            .dial_addr
+            .expect("resolver-backed forwards have no legacy endpoint");
+        Endpoint::new(dial, self.target.scheme.endpoint_transport()).expect("validated endpoint")
     }
 
     #[must_use]
     pub fn upstream(&self) -> &Upstream {
-        &self.upstream
+        self.legacy_upstream
+            .as_ref()
+            .expect("resolver-backed forwards have no legacy upstream")
     }
 
     /// Performs one caller-owned exchange on the caller's Tokio runtime.
@@ -645,9 +1127,93 @@ impl ForwardAdapter {
         deadline: std::time::Instant,
         cancellation: TransportCancellation,
     ) -> Result<ExchangeResponse, UpstreamError> {
-        let request = ExchangeRequest::new(query)?;
-        let context = ExchangeContext::new(deadline, cancellation);
-        self.upstream.exchange(request, context).await
+        let deadline = deadline.min(std::time::Instant::now() + self.target.query_timeout);
+        let owner = if let Some(resolver) = &self.resolver {
+            let context = ExchangeContext::new(deadline, cancellation.clone());
+            let published = resolver
+                .resolve(context)
+                .await
+                .map_err(|_| UpstreamError::Connect)?;
+            let peer = published.dial();
+            let current = self.owner.borrow().clone();
+            if self.active_peer.borrow().as_ref() != Some(&peer) || current.is_none() {
+                let next = Rc::new(
+                    build_owner(&self.target, peer, self.tls_roots.as_deref())
+                        .map_err(|_| UpstreamError::Connect)?,
+                );
+                if let Some(previous) = self.owner.borrow_mut().replace(Rc::clone(&next)) {
+                    self.retired_owners.borrow_mut().push(previous);
+                }
+                *self.active_peer.borrow_mut() = Some(peer);
+                next
+            } else {
+                current.ok_or(UpstreamError::Connect)?
+            }
+        } else {
+            self.owner.borrow().clone().ok_or(UpstreamError::Connect)?
+        };
+        owner.exchange(query, deadline, cancellation).await
+    }
+
+    async fn close(&self) {
+        let mut owners = self
+            .retired_owners
+            .borrow_mut()
+            .drain(..)
+            .collect::<Vec<_>>();
+        if let Some(owner) = self.owner.borrow_mut().take() {
+            owners.push(owner);
+        }
+        for owner in owners {
+            owner.close().await;
+        }
+        if let Some(legacy) = &self.legacy_upstream {
+            let _ = legacy.close().await;
+        }
+        if let Some(resolver) = &self.resolver {
+            let _ = resolver.close().await;
+        }
+    }
+}
+
+fn build_owner(
+    target: &ForwardTargetConfig,
+    dial: std::net::SocketAddr,
+    tls_roots: Option<&rustls::RootCertStore>,
+) -> Result<ForwardOwner, String> {
+    match target.scheme {
+        ForwardScheme::Udp => {
+            let endpoint =
+                Endpoint::new(dial, Transport::Udp).map_err(|error| error.to_string())?;
+            Ok(ForwardOwner::Udp {
+                policy: UdpTcpPolicy::new(endpoint),
+                legacy: Upstream::new(endpoint),
+            })
+        }
+        ForwardScheme::Tcp => {
+            let endpoint =
+                Endpoint::new(dial, Transport::Tcp).map_err(|error| error.to_string())?;
+            Ok(ForwardOwner::Tcp {
+                reuse: ReuseOwner::new(endpoint),
+                fallback: Upstream::new(endpoint),
+            })
+        }
+        ForwardScheme::Tls => {
+            let identity = ServerIdentity::new(&target.host).map_err(|error| error.to_string())?;
+            let endpoint = DotEndpoint::new(dial, identity).map_err(|error| error.to_string())?;
+            let policy = tls_policy(target.insecure_skip_verify, tls_roots)?;
+            SecureReuseOwner::new(endpoint, policy)
+                .map(ForwardOwner::Dot)
+                .map_err(|error| error.to_string())
+        }
+        ForwardScheme::Https => {
+            let endpoint =
+                DohEndpoint::new(&target.service, dial).map_err(|error| error.to_string())?;
+            let policy = tls_policy(target.insecure_skip_verify, tls_roots)?;
+            DohReuseOwner::new(endpoint, policy)
+                .map(ForwardOwner::Doh)
+                .map_err(|error| error.to_string())
+        }
     }
 }
 

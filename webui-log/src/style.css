@@ -567,6 +567,14 @@ body::after {
   line-height: 1.5;
 }
 
+.detail-grid > .detail-wide {
+  grid-column: 1 / -1;
+}
+
+.upstream-diagnostics-table {
+  margin-top: 8px;
+}
+
 .detail-inline-actions {
   display: inline-flex;
   align-items: center;
