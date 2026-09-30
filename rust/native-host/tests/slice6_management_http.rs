@@ -10,7 +10,7 @@ use std::net::{SocketAddr, TcpListener as StdTcpListener, UdpSocket as StdUdpSoc
 use std::path::PathBuf;
 use std::time::Duration;
 
-use mosdns_native_host::{HostAssembly, load_and_compile};
+use mosdns_native_host::{HostAssembly, HostOptions, load_and_compile};
 use mosdns_upstream_core::TransportCancellation;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -101,6 +101,19 @@ plugins:
 fn assembly_for(fixture: &Fixture) -> HostAssembly {
     HostAssembly::from_config(load_and_compile(&fixture.config()).expect("fixture config"))
         .expect("fixture assembly")
+}
+
+fn audit_assembly_for(fixture: &Fixture) -> HostAssembly {
+    let yaml = fixture
+        .read("config.yaml")
+        .replace("enable_audit: false", "enable_audit: true");
+    fixture.write("config.yaml", &yaml);
+    HostAssembly::with_options_and_state_root(
+        load_and_compile(&fixture.config()).expect("audit fixture config"),
+        HostOptions::default(),
+        &fixture.root,
+    )
+    .expect("audit fixture assembly")
 }
 
 /// A minimal DNS query for one name.
@@ -325,6 +338,173 @@ fn management_routes_match_the_go_visible_contract() {
     });
 
     result.expect("supervisor shutdown is clean");
+}
+
+#[test]
+fn audit_v1_controls_use_real_http_and_dns_and_persist_capacity() {
+    let fixture = fixture("audit-v1", free_udp_port(), free_tcp_port());
+    let assembly = audit_assembly_for(&fixture);
+    let bound = assembly
+        .block_on(assembly.bind_host())
+        .expect("bound host listeners");
+    let dns = bound.dns_addr();
+    let api = bound.api_addr().expect("management listener address");
+    let shutdown = TransportCancellation::new();
+
+    let result = assembly.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let status = http_request(api, &get("/api/v1/audit/status")).await;
+        assert_eq!(status.status, 200);
+        assert_eq!(status.header("content-type"), Some("application/json"));
+        assert_eq!(status.body, "{\"capturing\":true}\n");
+
+        let stopped = http_request(api, &raw("POST", "/api/v1/audit/stop")).await;
+        assert_eq!(stopped.status, 200);
+        assert_eq!(stopped.header("content-type"), None);
+        assert_eq!(stopped.body, "Audit log collection stopped.");
+        let stopped_status = http_request(api, &get("/api/v1/audit/status")).await;
+        assert_eq!(stopped_status.body, "{\"capturing\":false}\n");
+
+        let first_dns = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0x7101, &["a", "example"]))
+        })
+        .await
+        .expect("stopped DNS client");
+        assert_eq!(rcode(&first_dns), 3);
+        assert!(assembly.audit_snapshot().records.is_empty());
+
+        let started = http_request(api, &raw("POST", "/api/v1/audit/start")).await;
+        assert_eq!(started.status, 200);
+        assert_eq!(started.body, "Audit log collection started.");
+        let second_dns = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0x7102, &["a", "example"]))
+        })
+        .await
+        .expect("started DNS client");
+        assert_eq!(rcode(&second_dns), 3);
+        assert_eq!(assembly.audit_snapshot().records.len(), 1);
+
+        let capacity = http_request(api, &get("/api/v1/audit/capacity")).await;
+        assert_eq!(capacity.body, "{\"capacity\":100000}\n");
+        let resized = http_request(api, &post("/api/v1/audit/capacity", r#"{"capacity":2}"#)).await;
+        assert_eq!(resized.status, 200, "{resized:?}");
+        assert_eq!(resized.header("content-type"), None);
+        assert_eq!(
+            resized.body,
+            "Audit log capacity set to 2. Existing logs have been cleared."
+        );
+        assert_eq!(assembly.audit_capacity(), 2);
+        assert!(assembly.audit_snapshot().records.is_empty());
+        assert!(fixture.root.join("webinfo/audit_settings.json").is_file());
+
+        for body in [
+            "{}",
+            r#"{"capacity":1.5}"#,
+            r#"{"capacity":"1"}"#,
+            r#"{"capacity":1,"extra":true}"#,
+            r#"{"capacity":400001}"#,
+        ] {
+            let invalid = http_request(api, &post("/api/v1/audit/capacity", body)).await;
+            assert_eq!(invalid.status, 400, "{body}: {invalid:?}");
+            assert_eq!(
+                invalid.header("content-type"),
+                Some("text/plain; charset=utf-8")
+            );
+            assert_eq!(invalid.body, "invalid audit capacity request\n");
+            assert_eq!(assembly.audit_capacity(), 2);
+        }
+
+        let clear = http_request(api, &raw("POST", "/api/v1/audit/clear")).await;
+        assert_eq!(clear.status, 200);
+        assert_eq!(clear.body, "In-memory audit logs cleared.");
+        let wrong_method = http_request(api, &raw("POST", "/api/v1/audit/status")).await;
+        assert_eq!(wrong_method.status, 405);
+        assert_eq!(wrong_method.body, "method not allowed\n");
+
+        shutdown.cancel();
+        task.await.expect("supervisor task")
+    });
+    result.expect("supervisor shutdown is clean");
+
+    let restarted = HostAssembly::with_options_and_state_root(
+        load_and_compile(&fixture.config()).expect("restart config"),
+        HostOptions::default(),
+        &fixture.root,
+    )
+    .expect("restart assembly");
+    assert_eq!(restarted.audit_capacity(), 2);
+}
+
+#[test]
+fn audit_capacity_without_state_root_and_failed_replace_keep_old_runtime_state() {
+    let audit_fixture = fixture("audit-no-root", free_udp_port(), free_tcp_port());
+    let _ = audit_assembly_for(&audit_fixture);
+    let no_root = HostAssembly::from_config(
+        load_and_compile(&audit_fixture.config()).expect("no-root config"),
+    )
+    .expect("no-root assembly");
+    let no_root_bound = no_root
+        .block_on(no_root.bind_host())
+        .expect("no-root host bind");
+    let no_root_api = no_root_bound.api_addr().expect("no-root API");
+    let no_root_shutdown = TransportCancellation::new();
+    let result = no_root.block_on(async {
+        let task = tokio::task::spawn_local(no_root_bound.serve(no_root_shutdown.clone()));
+        let response = http_request(
+            no_root_api,
+            &post("/api/v1/audit/capacity", r#"{"capacity":2}"#),
+        )
+        .await;
+        assert_eq!(response.status, 500);
+        assert_eq!(response.body, "audit settings state root is unavailable\n");
+        no_root_shutdown.cancel();
+        task.await.expect("no-root fixture task")
+    });
+    result.expect("fixture shutdown");
+
+    let failure_fixture = fixture("audit-write-failure", free_udp_port(), free_tcp_port());
+    let failure = audit_assembly_for(&failure_fixture);
+    fs::create_dir(failure_fixture.root.join("webinfo")).expect("webinfo directory");
+    fs::create_dir(failure_fixture.root.join("webinfo/audit_settings.json"))
+        .expect("settings directory");
+    let bound = failure
+        .block_on(failure.bind_host())
+        .expect("failure host bind");
+    let dns = bound.dns_addr();
+    let api = bound.api_addr().expect("failure API");
+    let shutdown = TransportCancellation::new();
+    let result = failure.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let dns_response = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0x7201, &["a", "example"]))
+        })
+        .await
+        .expect("failure fixture DNS client");
+        assert_eq!(rcode(&dns_response), 3);
+        assert_eq!(failure.audit_snapshot().records.len(), 1);
+        let response =
+            http_request(api, &post("/api/v1/audit/capacity", r#"{"capacity":2}"#)).await;
+        assert_eq!(response.status, 500);
+        assert_eq!(response.body, "audit settings persistence failed\n");
+        assert_eq!(failure.audit_capacity(), 100_000);
+        assert_eq!(failure.audit_snapshot().records.len(), 1);
+        shutdown.cancel();
+        task.await.expect("failure fixture task")
+    });
+    result.expect("failure fixture shutdown");
+    assert!(
+        failure_fixture
+            .root
+            .join("webinfo/audit_settings.json")
+            .is_dir()
+    );
+    assert_eq!(
+        fs::read_dir(failure_fixture.root.join("webinfo"))
+            .expect("webinfo entries")
+            .count(),
+        1,
+        "failed replace must clean temporary settings files"
+    );
 }
 
 #[test]
