@@ -989,11 +989,18 @@ async function reloadOverview(showMessage = false) {
   }
   try {
     const auditPanel = (promise) => promise
-      .then((data) => ({ data, error: '' }))
-      .catch((error) => ({ data: null, error: error?.message || '请求失败' }))
+      .then((data) => ({ data, error: '', status: 200 }))
+      .catch((error) => ({
+        data: null,
+        error: error?.message || '请求失败',
+        status: Number(error?.status || 0)
+      }))
     const domainSetRankPromise = auditPanel(getJSON('/api/v2/audit/rank/effective?limit=20'))
       .then(async (result) => {
         if (!result.error) {
+          return { ...result, source: 'effective_tag' }
+        }
+        if (result.status !== 404) {
           return { ...result, source: 'effective_tag' }
         }
         const fallback = await auditPanel(getJSON('/api/v2/audit/rank/domain_set?limit=20'))

@@ -205,16 +205,18 @@ pub fn observe_answer_records(packet: &[u8]) -> Result<Vec<AnswerRecord>, Respon
 
 fn project_rdata(packet: &[u8], record: &RecordMetadata<'_>) -> Result<String, ResponseError> {
     match record.rrtype {
-        TYPE_A if record.rdata.len() == 4 => Ok(std::net::Ipv4Addr::new(
-            record.rdata[0],
-            record.rdata[1],
-            record.rdata[2],
-            record.rdata[3],
-        )
-        .to_string()),
-        TYPE_AAAA if record.rdata.len() == 16 => {
-            let mut octets = [0_u8; 16];
-            octets.copy_from_slice(record.rdata);
+        TYPE_A => {
+            let octets: [u8; 4] = record
+                .rdata
+                .try_into()
+                .map_err(|_| ResponseError::InvalidRecordData)?;
+            Ok(std::net::Ipv4Addr::from(octets).to_string())
+        }
+        TYPE_AAAA => {
+            let octets: [u8; 16] = record
+                .rdata
+                .try_into()
+                .map_err(|_| ResponseError::InvalidRecordData)?;
             Ok(std::net::Ipv6Addr::from(octets).to_string())
         }
         2 | 5 | 12 => project_name_rdata(packet, record, 0),
@@ -675,6 +677,30 @@ mod tests {
         assert_eq!(answers[1].data, "one two");
         assert_eq!(answers[2].rrtype, 99);
         assert_eq!(answers[2].data, r"\# 2 dead");
+    }
+
+    #[test]
+    fn answer_projection_rejects_malformed_known_rdata_without_partial_answers() {
+        let wire = resp_wire(&[a_rr(60, &[192, 0, 2, 1]), rr(1, &[192, 0, 2])], &[], &[]);
+        assert_eq!(
+            observe_answer_records(&wire),
+            Err(ResponseError::InvalidRecordData)
+        );
+    }
+
+    #[test]
+    fn answer_projection_keeps_a_large_ordered_answer_set_without_eviction() {
+        let answers: Vec<_> = (0..1024)
+            .map(|index| {
+                let octets = [192, 0, (index / 256) as u8, (index % 256) as u8];
+                a_rr(index as u32, &octets)
+            })
+            .collect();
+        let wire = resp_wire(&answers, &[], &[]);
+        let projected = observe_answer_records(&wire).expect("large answer projection");
+        assert_eq!(projected.len(), 1024);
+        assert_eq!(projected.first().expect("first answer").ttl, 0);
+        assert_eq!(projected.last().expect("last answer").ttl, 1023);
     }
 
     #[test]

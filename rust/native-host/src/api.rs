@@ -494,6 +494,7 @@ async fn process_connection(
                     &audit_persistence_faults,
                     &audit_clock,
                     &audit_read_slots,
+                    &shutdown,
                     &request,
                 )
                 .await
@@ -941,6 +942,14 @@ fn response_code_name(response: &ResponseState, code: u16) -> String {
         8 => "NXRRSET",
         9 => "NOTAUTH",
         10 => "NOTZONE",
+        16 => "BADVERS",
+        17 => "BADKEY",
+        18 => "BADTIME",
+        19 => "BADMODE",
+        20 => "BADNAME",
+        21 => "BADALG",
+        22 => "BADTRUNC",
+        23 => "BADCOOKIE",
         _ => return String::new(),
     }
     .to_owned()
@@ -1244,17 +1253,38 @@ fn parse_bool_like(value: &str) -> bool {
 }
 
 fn normalized_ip(value: &str) -> Option<String> {
-    if let Ok(address) = value.parse::<SocketAddr>() {
-        return Some(address.ip().to_string());
+    let address = if let Ok(address) = value.parse::<SocketAddr>() {
+        address.ip()
+    } else if let Ok(address) = value.parse::<std::net::IpAddr>() {
+        address
+    } else {
+        value
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+            .and_then(|value| value.parse::<std::net::IpAddr>().ok())?
+    };
+    let address = match address {
+        std::net::IpAddr::V4(address) => std::net::IpAddr::V4(address),
+        std::net::IpAddr::V6(address) => canonical_ip(std::net::IpAddr::V6(address)),
+    };
+    Some(address.to_string())
+}
+
+fn canonical_ip(address: std::net::IpAddr) -> std::net::IpAddr {
+    match address {
+        std::net::IpAddr::V4(address) => std::net::IpAddr::V4(address),
+        std::net::IpAddr::V6(address) => {
+            let segments = address.segments();
+            if segments[..5] == [0, 0, 0, 0, 0] && segments[5] == 0xffff {
+                let octets = address.octets();
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(
+                    octets[12], octets[13], octets[14], octets[15],
+                ))
+            } else {
+                std::net::IpAddr::V6(address)
+            }
+        }
     }
-    let value = value
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .unwrap_or(value);
-    value
-        .parse::<std::net::IpAddr>()
-        .ok()
-        .map(|address| address.to_string())
 }
 
 fn text_matches(value: &str, query: &str, exact: bool) -> bool {
@@ -1279,7 +1309,7 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
         let ip_query = normalized_ip(query);
         let mut values = vec![
             projected_query_name(record),
-            record.client_addr.ip().to_string(),
+            canonical_ip(record.client_addr.ip()).to_string(),
             record.trace_id.clone(),
         ];
         values.extend(record.domain_set.clone());
@@ -1307,7 +1337,7 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
     let client_match = if filter.client_ips.is_empty() {
         true
     } else {
-        let record_ip = record.client_addr.ip().to_string();
+        let record_ip = canonical_ip(record.client_addr.ip()).to_string();
         filter
             .client_ips
             .iter()
@@ -1411,9 +1441,13 @@ fn parse_rank_limit(target: &str, default: usize) -> Result<usize, String> {
 fn rank_items(
     records: &[std::sync::Arc<AuditRecord>],
     key: impl Fn(&AuditRecord) -> Option<String>,
-) -> Vec<AuditRankItem> {
+    shutdown: &TransportCancellation,
+) -> Option<Vec<AuditRankItem>> {
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
-    for record in records {
+    for (index, record) in records.iter().enumerate() {
+        if index % 1024 == 0 && shutdown.is_cancelled() {
+            return None;
+        }
         if let Some(value) = key(record) {
             *counts.entry(value).or_default() += 1;
         }
@@ -1428,7 +1462,7 @@ fn rank_items(
             .cmp(&left.count)
             .then_with(|| left.key.cmp(&right.key))
     });
-    items
+    (!shutdown.is_cancelled()).then_some(items)
 }
 
 fn rank_response(
@@ -1436,49 +1470,70 @@ fn rank_response(
     kind: AuditReadKind,
     limit: usize,
     filter: Option<AuditFilter>,
-) -> Response {
+    shutdown: &TransportCancellation,
+) -> Option<Response> {
     let records = match filter {
         None => snapshot.records,
-        Some(filter) => snapshot
-            .records
-            .into_iter()
-            .filter(|record| audit_record_matches(record, &filter))
-            .collect(),
+        Some(filter) => {
+            let mut records = Vec::new();
+            for (index, record) in snapshot.records.into_iter().enumerate() {
+                if index % 1024 == 0 && shutdown.is_cancelled() {
+                    return None;
+                }
+                if audit_record_matches(&record, &filter) {
+                    records.push(record);
+                }
+            }
+            records
+        }
     };
     match kind {
         AuditReadKind::Logs { .. } => unreachable!("logs use their own projection"),
-        AuditReadKind::RankDomain => Response::json_compact(
-            &rank_items(&records, |record| Some(projected_query_name(record)))
+        AuditReadKind::RankDomain => Some(Response::json_compact(
+            &rank_items(
+                &records,
+                |record| Some(projected_query_name(record)),
+                shutdown,
+            )?
+            .into_iter()
+            .take(limit)
+            .collect::<Vec<_>>(),
+        )),
+        AuditReadKind::RankClient => Some(Response::json_compact(
+            &rank_items(
+                &records,
+                |record| Some(canonical_ip(record.client_addr.ip()).to_string()),
+                shutdown,
+            )?
+            .into_iter()
+            .take(limit)
+            .collect::<Vec<_>>(),
+        )),
+        AuditReadKind::RankDomainSet => Some(Response::json_compact(
+            &rank_items(&records, |record| record.domain_set.clone(), shutdown)?
                 .into_iter()
                 .take(limit)
                 .collect::<Vec<_>>(),
-        ),
-        AuditReadKind::RankClient => Response::json_compact(
-            &rank_items(&records, |record| Some(record.client_addr.ip().to_string()))
+        )),
+        AuditReadKind::RankEffective => Some(Response::json_compact(
+            &rank_items(&records, |record| record.effective_tag.clone(), shutdown)?
                 .into_iter()
                 .take(limit)
                 .collect::<Vec<_>>(),
-        ),
-        AuditReadKind::RankDomainSet => Response::json_compact(
-            &rank_items(&records, |record| record.domain_set.clone())
-                .into_iter()
-                .take(limit)
-                .collect::<Vec<_>>(),
-        ),
-        AuditReadKind::RankEffective => Response::json_compact(
-            &rank_items(&records, |record| record.effective_tag.clone())
-                .into_iter()
-                .take(limit)
-                .collect::<Vec<_>>(),
-        ),
-        AuditReadKind::RankSlowest => Response::json_compact(
-            &snapshot
-                .slowest
-                .iter()
-                .take(limit)
-                .map(|record| project_log(record))
-                .collect::<Vec<_>>(),
-        ),
+        )),
+        AuditReadKind::RankSlowest => {
+            if shutdown.is_cancelled() {
+                return None;
+            }
+            Some(Response::json_compact(
+                &snapshot
+                    .slowest
+                    .iter()
+                    .take(limit)
+                    .map(|record| project_log(record))
+                    .collect::<Vec<_>>(),
+            ))
+        }
     }
 }
 
@@ -1487,6 +1542,7 @@ async fn dispatch_audit_read(
     slots: &Arc<Semaphore>,
     target: &str,
     kind: AuditReadKind,
+    shutdown: TransportCancellation,
 ) -> Response {
     let (filter, page, limit) = match kind {
         AuditReadKind::Logs { domain_route } => match parse_audit_filter(target, domain_route) {
@@ -1516,18 +1572,25 @@ async fn dispatch_audit_read(
         let _permit: OwnedSemaphorePermit = permit;
         let snapshot = observer.audit_read_snapshot();
         if let AuditReadKind::Logs { .. } = kind {
-            let records = snapshot
-                .records
-                .into_iter()
-                .filter(|record| {
-                    filter
-                        .as_ref()
-                        .is_none_or(|filter| audit_record_matches(record, filter))
-                })
-                .collect();
+            let mut records = Vec::new();
+            for (index, record) in snapshot.records.into_iter().enumerate() {
+                if index % 1024 == 0 && shutdown.is_cancelled() {
+                    return Response::empty(499);
+                }
+                if filter
+                    .as_ref()
+                    .is_none_or(|filter| audit_record_matches(&record, filter))
+                {
+                    records.push(record);
+                }
+            }
+            if shutdown.is_cancelled() {
+                return Response::empty(499);
+            }
             Response::json_compact(&audit_logs_from_records(records, page, limit))
         } else {
-            rank_response(snapshot, kind, limit, filter)
+            rank_response(snapshot, kind, limit, filter, &shutdown)
+                .unwrap_or_else(|| Response::empty(499))
         }
     })
     .await
@@ -1543,6 +1606,7 @@ async fn dispatch(
     audit_persistence_faults: &AuditPersistenceFaults,
     audit_clock: &Arc<dyn AuditClock>,
     audit_read_slots: &Arc<Semaphore>,
+    shutdown: &TransportCancellation,
     request: &Request,
 ) -> Response {
     match route(&request.target) {
@@ -1569,6 +1633,7 @@ async fn dispatch(
                     AuditReadKind::Logs {
                         domain_route: false,
                     },
+                    shutdown.clone(),
                 )
                 .await
             }
@@ -1581,6 +1646,7 @@ async fn dispatch(
                     audit_read_slots,
                     &request.target,
                     AuditReadKind::Logs { domain_route: true },
+                    shutdown.clone(),
                 )
                 .await
             }
@@ -1606,6 +1672,7 @@ async fn dispatch(
                 audit_read_slots,
                 &request.target,
                 kind,
+                shutdown.clone(),
             )
             .await
         }
@@ -1763,8 +1830,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        load_audit_capacity, migrate_legacy_settings, normalized_ip, parse_audit_filter,
-        parse_rank_limit, query_pairs, query_type_name,
+        ResponseState, load_audit_capacity, migrate_legacy_settings, normalized_ip,
+        parse_audit_filter, parse_rank_limit, query_pairs, query_type_name, response_code_name,
     };
 
     fn test_root(name: &str) -> std::path::PathBuf {
@@ -1868,6 +1935,20 @@ mod tests {
             Some("127.0.0.1".to_owned())
         );
         assert_eq!(normalized_ip("[::1]:5353"), Some("::1".to_owned()));
+        assert_eq!(
+            normalized_ip("::ffff:192.0.2.7"),
+            Some("192.0.2.7".to_owned())
+        );
+        assert_eq!(
+            response_code_name(
+                &ResponseState::Dns {
+                    rcode: 16,
+                    source: crate::observer::ResponseSource::Local,
+                },
+                16
+            ),
+            "BADVERS"
+        );
     }
 
     #[test]
