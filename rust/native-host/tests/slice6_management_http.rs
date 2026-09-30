@@ -397,6 +397,20 @@ fn audit_v1_controls_use_real_http_and_dns_and_persist_capacity() {
         assert!(assembly.audit_snapshot().records.is_empty());
         assert!(fixture.root.join("webinfo/audit_settings.json").is_file());
 
+        for (capacity, expected) in [(0, 0), (400_000, 400_000), (2, 2)] {
+            let response = http_request(
+                api,
+                &post(
+                    "/api/v1/audit/capacity",
+                    &format!(r#"{{"capacity":{capacity}}}"#),
+                ),
+            )
+            .await;
+            assert_eq!(response.status, 200, "{capacity}: {response:?}");
+            assert_eq!(assembly.audit_capacity(), expected);
+            assert!(assembly.audit_snapshot().records.is_empty());
+        }
+
         for body in [
             "{}",
             r#"{"capacity":1.5}"#,
@@ -463,10 +477,12 @@ fn audit_capacity_without_state_root_and_failed_replace_keep_old_runtime_state()
     result.expect("fixture shutdown");
 
     let failure_fixture = fixture("audit-write-failure", free_udp_port(), free_tcp_port());
+    let canonical = failure_fixture.root.join("webinfo/audit_settings.json");
+    let old_bytes = b"{\"capacity\":100000}\n";
+    fs::create_dir_all(canonical.parent().expect("canonical parent")).expect("webinfo directory");
+    fs::write(&canonical, old_bytes).expect("old settings");
     let failure = audit_assembly_for(&failure_fixture);
-    fs::create_dir(failure_fixture.root.join("webinfo")).expect("webinfo directory");
-    fs::create_dir(failure_fixture.root.join("webinfo/audit_settings.json"))
-        .expect("settings directory");
+    failure.inject_audit_temp_write_failure();
     let bound = failure
         .block_on(failure.bind_host())
         .expect("failure host bind");
@@ -488,6 +504,14 @@ fn audit_capacity_without_state_root_and_failed_replace_keep_old_runtime_state()
         assert_eq!(response.body, "audit settings persistence failed\n");
         assert_eq!(failure.audit_capacity(), 100_000);
         assert_eq!(failure.audit_snapshot().records.len(), 1);
+
+        failure.inject_audit_final_replace_failure();
+        let response =
+            http_request(api, &post("/api/v1/audit/capacity", r#"{"capacity":2}"#)).await;
+        assert_eq!(response.status, 500);
+        assert_eq!(response.body, "audit settings persistence failed\n");
+        assert_eq!(failure.audit_capacity(), 100_000);
+        assert_eq!(failure.audit_snapshot().records.len(), 1);
         shutdown.cancel();
         task.await.expect("failure fixture task")
     });
@@ -496,14 +520,18 @@ fn audit_capacity_without_state_root_and_failed_replace_keep_old_runtime_state()
         failure_fixture
             .root
             .join("webinfo/audit_settings.json")
-            .is_dir()
+            .is_file()
+    );
+    assert_eq!(
+        fs::read(&canonical).expect("old settings remains"),
+        old_bytes
     );
     assert_eq!(
         fs::read_dir(failure_fixture.root.join("webinfo"))
             .expect("webinfo entries")
             .count(),
         1,
-        "failed replace must clean temporary settings files"
+        "failed writes must clean temporary settings files"
     );
 }
 

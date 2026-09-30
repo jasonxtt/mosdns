@@ -12,7 +12,7 @@ use mosdns_upstream_core::{
 };
 use tokio::task::JoinSet;
 
-use crate::api::{ApiServer, ApiServerError};
+use crate::api::{ApiServer, ApiServerError, AuditPersistenceFaults};
 use crate::config::{CompiledConfig, ConfigError, compile_yaml, load_and_compile};
 use crate::execution::{ExchangeError, ExchangeExecutor};
 use crate::observer::{AuditSnapshot, MetricsSnapshot, QueryObserver};
@@ -120,6 +120,7 @@ pub struct HostAssembly {
     runtime: HostRuntime,
     options: HostOptions,
     state_root: Option<PathBuf>,
+    audit_persistence_faults: AuditPersistenceFaults,
 }
 
 impl HostAssembly {
@@ -210,6 +211,7 @@ impl HostAssembly {
             runtime: HostRuntime::new()?,
             options,
             state_root,
+            audit_persistence_faults: AuditPersistenceFaults::default(),
         })
     }
 
@@ -271,6 +273,18 @@ impl HostAssembly {
     #[must_use]
     pub fn audit_capturing(&self) -> bool {
         self.observer.is_capturing()
+    }
+
+    /// Arms a one-shot persistence failure before writing the temporary file.
+    #[doc(hidden)]
+    pub fn inject_audit_temp_write_failure(&self) {
+        self.audit_persistence_faults.fail_next_temp_write();
+    }
+
+    /// Arms a one-shot persistence failure before replacing the canonical file.
+    #[doc(hidden)]
+    pub fn inject_audit_final_replace_failure(&self) {
+        self.audit_persistence_faults.fail_next_final_replace();
     }
 
     #[must_use]
@@ -339,6 +353,7 @@ impl HostAssembly {
                     self.config_handle(),
                     self.observer_handle(),
                     self.state_root.clone(),
+                    self.audit_persistence_faults.clone(),
                     config.http,
                 )
                 .await

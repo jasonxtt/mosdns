@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -31,6 +31,30 @@ use crate::udp::{drain_tasks, reap_one_task};
 pub(crate) const AUDIT_SETTINGS_FILENAME: &str = "audit_settings.json";
 const MAX_AUDIT_CAPACITY: usize = 400_000;
 static AUDIT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Default)]
+pub(crate) struct AuditPersistenceFaults {
+    fail_temp_write: Arc<AtomicBool>,
+    fail_final_replace: Arc<AtomicBool>,
+}
+
+impl AuditPersistenceFaults {
+    pub(crate) fn fail_next_temp_write(&self) {
+        self.fail_temp_write.store(true, Ordering::Relaxed);
+    }
+
+    pub(crate) fn fail_next_final_replace(&self) {
+        self.fail_final_replace.store(true, Ordering::Relaxed);
+    }
+
+    fn take_temp_write_failure(&self) -> bool {
+        self.fail_temp_write.swap(false, Ordering::Relaxed)
+    }
+
+    fn take_final_replace_failure(&self) -> bool {
+        self.fail_final_replace.swap(false, Ordering::Relaxed)
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct AuditSettings {
@@ -53,9 +77,10 @@ fn clamp_audit_capacity(value: i64) -> usize {
     }
 }
 
-fn parse_audit_capacity(bytes: &[u8]) -> Option<usize> {
-    let settings: AuditSettings = serde_json::from_slice(bytes).ok()?;
-    Some(clamp_audit_capacity(settings.capacity.unwrap_or(0)))
+fn parse_audit_capacity(bytes: &[u8]) -> Result<usize, String> {
+    let settings: AuditSettings =
+        serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+    Ok(clamp_audit_capacity(settings.capacity.unwrap_or(0)))
 }
 
 fn audit_settings_path(root: &Path) -> PathBuf {
@@ -69,53 +94,98 @@ fn legacy_audit_settings_paths(root: &Path) -> [PathBuf; 2] {
     ]
 }
 
+fn audit_settings_diagnostic(path: &Path, message: impl AsRef<str>) {
+    eprintln!(
+        "native audit settings diagnostic: {} ({})",
+        message.as_ref(),
+        path.display()
+    );
+}
+
 /// Loads the canonical settings first. A present but malformed canonical file
 /// wins over legacy locations and falls back to the caller's default.
 pub(crate) fn load_audit_capacity(root: &Path, fallback: usize) -> usize {
     let canonical = audit_settings_path(root);
     match std::fs::read(&canonical) {
-        Ok(bytes) => parse_audit_capacity(&bytes).unwrap_or(fallback),
+        Ok(bytes) => match parse_audit_capacity(&bytes) {
+            Ok(capacity) => capacity,
+            Err(error) => {
+                audit_settings_diagnostic(&canonical, format!("using default: {error}"));
+                fallback
+            }
+        },
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             for legacy in legacy_audit_settings_paths(root) {
                 match std::fs::read(&legacy) {
                     Ok(bytes) => {
-                        let Some(capacity) = parse_audit_capacity(&bytes) else {
-                            return fallback;
+                        let capacity = match parse_audit_capacity(&bytes) {
+                            Ok(capacity) => capacity,
+                            Err(error) => {
+                                audit_settings_diagnostic(
+                                    &legacy,
+                                    format!("using default: {error}"),
+                                );
+                                return fallback;
+                            }
                         };
-                        migrate_legacy_settings(&canonical, &legacy, &bytes);
+                        if let Err(error) = migrate_legacy_settings(&canonical, &legacy, &bytes) {
+                            audit_settings_diagnostic(
+                                &legacy,
+                                format!("migration failed: {error}"),
+                            );
+                        };
                         return capacity;
                     }
                     Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                    Err(_) => return fallback,
+                    Err(error) => {
+                        audit_settings_diagnostic(&legacy, format!("using default: {error}"));
+                        return fallback;
+                    }
                 }
             }
+            audit_settings_diagnostic(&canonical, "using default: settings file is missing");
             fallback
         }
-        Err(_) => fallback,
+        Err(error) => {
+            audit_settings_diagnostic(&canonical, format!("using default: {error}"));
+            fallback
+        }
     }
 }
 
-fn migrate_legacy_settings(canonical: &Path, legacy: &Path, bytes: &[u8]) {
-    let Some(parent) = canonical.parent() else {
-        return;
-    };
-    if std::fs::create_dir_all(parent).is_err() {
-        return;
-    }
+fn migrate_legacy_settings(canonical: &Path, legacy: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = canonical
+        .parent()
+        .ok_or_else(|| io::Error::other("canonical settings path has no parent"))?;
+    std::fs::create_dir_all(parent)?;
     let counter = AUDIT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temporary = parent.join(format!(
         ".{AUDIT_SETTINGS_FILENAME}.migration.{}.{}",
         std::process::id(),
         counter
     ));
-    if std::fs::write(&temporary, bytes).is_ok() && std::fs::rename(&temporary, canonical).is_ok() {
-        let _ = std::fs::remove_file(legacy);
-    } else {
+    let result = (|| {
+        std::fs::write(&temporary, bytes)?;
+        std::fs::rename(&temporary, canonical)
+    })();
+    if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
+        return result;
     }
+    if let Err(error) = std::fs::remove_file(legacy) {
+        audit_settings_diagnostic(
+            legacy,
+            format!("canonicalized but could not remove source: {error}"),
+        );
+    }
+    Ok(())
 }
 
-fn write_audit_settings(root: &Path, capacity: usize) -> io::Result<()> {
+fn write_audit_settings(
+    root: &Path,
+    capacity: usize,
+    faults: &AuditPersistenceFaults,
+) -> io::Result<()> {
     let directory = root.join("webinfo");
     std::fs::create_dir_all(&directory)?;
     let bytes =
@@ -129,7 +199,17 @@ fn write_audit_settings(root: &Path, capacity: usize) -> io::Result<()> {
         counter
     ));
     let result = (|| {
+        if faults.take_temp_write_failure() {
+            return Err(io::Error::other(
+                "injected audit settings temp-write failure",
+            ));
+        }
         std::fs::write(&temporary, &bytes)?;
+        if faults.take_final_replace_failure() {
+            return Err(io::Error::other(
+                "injected audit settings final-replace failure",
+            ));
+        }
         std::fs::rename(&temporary, directory.join(AUDIT_SETTINGS_FILENAME))
     })();
     if result.is_err() {
@@ -138,19 +218,22 @@ fn write_audit_settings(root: &Path, capacity: usize) -> io::Result<()> {
     result
 }
 
-async fn persist_audit_capacity(
+async fn persist_and_publish_audit_capacity(
     root: Option<PathBuf>,
     lock: Arc<AsyncMutex<()>>,
+    observer: &QueryObserver,
+    faults: AuditPersistenceFaults,
     capacity: usize,
 ) -> Result<(), &'static str> {
     let Some(root) = root else {
         return Err("audit settings state root is unavailable");
     };
     let _guard = lock.lock().await;
-    tokio::task::spawn_blocking(move || write_audit_settings(&root, capacity))
+    tokio::task::spawn_blocking(move || write_audit_settings(&root, capacity, &faults))
         .await
         .map_err(|_| "audit settings persistence failed")?
         .map_err(|_| "audit settings persistence failed")
+        .map(|()| observer.set_audit_capacity(capacity))
 }
 
 /// The largest request head accepted before the connection is rejected.
@@ -165,6 +248,7 @@ pub struct ApiServer {
     observer: Arc<QueryObserver>,
     state_root: Option<PathBuf>,
     audit_persist_lock: Arc<AsyncMutex<()>>,
+    audit_persistence_faults: AuditPersistenceFaults,
     accept_fault_after: Cell<Option<usize>>,
 }
 
@@ -176,6 +260,7 @@ impl ApiServer {
         config: Rc<CompiledConfig>,
         observer: Arc<QueryObserver>,
         state_root: Option<PathBuf>,
+        audit_persistence_faults: AuditPersistenceFaults,
         address: SocketAddr,
     ) -> Result<Self, ApiServerError> {
         let listener = TcpListener::bind(address)
@@ -187,6 +272,7 @@ impl ApiServer {
             observer,
             state_root,
             audit_persist_lock: Arc::new(AsyncMutex::new(())),
+            audit_persistence_faults,
             accept_fault_after: Cell::new(None),
         })
     }
@@ -240,6 +326,7 @@ impl ApiServer {
                             let observer = Arc::clone(&self.observer);
                             let state_root = self.state_root.clone();
                             let audit_persist_lock = Arc::clone(&self.audit_persist_lock);
+                            let audit_persistence_faults = self.audit_persistence_faults.clone();
                             let connection_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
                                 let _ = process_connection(
@@ -248,6 +335,7 @@ impl ApiServer {
                                     observer,
                                     state_root,
                                     audit_persist_lock,
+                                    audit_persistence_faults,
                                     connection_shutdown,
                                 )
                                 .await;
@@ -365,6 +453,7 @@ async fn process_connection(
     observer: Arc<QueryObserver>,
     state_root: Option<PathBuf>,
     audit_persist_lock: Arc<AsyncMutex<()>>,
+    audit_persistence_faults: AuditPersistenceFaults,
     shutdown: TransportCancellation,
 ) -> io::Result<()> {
     let response = tokio::select! {
@@ -377,6 +466,7 @@ async fn process_connection(
                     &observer,
                     state_root.as_deref(),
                     &audit_persist_lock,
+                    &audit_persistence_faults,
                     &request,
                 )
                 .await
@@ -570,6 +660,7 @@ async fn dispatch(
     observer: &QueryObserver,
     state_root: Option<&Path>,
     audit_persist_lock: &Arc<AsyncMutex<()>>,
+    audit_persistence_faults: &AuditPersistenceFaults,
     request: &Request,
 ) -> Response {
     match route(&request.target) {
@@ -616,16 +707,17 @@ async fn dispatch(
                 };
                 let capacity =
                     usize::try_from(payload.capacity).expect("validated audit capacity fits usize");
-                if let Err(message) = persist_audit_capacity(
+                if let Err(message) = persist_and_publish_audit_capacity(
                     state_root.map(Path::to_path_buf),
                     Arc::clone(audit_persist_lock),
+                    observer,
+                    audit_persistence_faults.clone(),
                     capacity,
                 )
                 .await
                 {
                     return Response::error(500, message);
                 }
-                observer.set_audit_capacity(capacity);
                 Response::success(&format!(
                     "Audit log capacity set to {capacity}. Existing logs have been cleared."
                 ))
@@ -750,6 +842,13 @@ mod tests {
         )
         .expect("above-range canonical");
         assert_eq!(load_audit_capacity(&root, 100_000), 400_000);
+
+        fs::remove_file(root.join("webinfo/audit_settings.json")).expect("remove canonical");
+        fs::write(root.join("audit_settings.json"), b"{\"capacity\":3}")
+            .expect("root-level legacy");
+        assert_eq!(load_audit_capacity(&root, 100_000), 3);
+        assert!(root.join("webinfo/audit_settings.json").is_file());
+        assert!(!root.join("audit_settings.json").exists());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -772,7 +871,8 @@ mod tests {
         let legacy = root.join("state/audit_settings.json");
         let bytes = b"{\"capacity\":7}";
         fs::write(&legacy, bytes).expect("legacy");
-        migrate_legacy_settings(&root.join("webinfo/audit_settings.json"), &legacy, bytes);
+        migrate_legacy_settings(&root.join("webinfo/audit_settings.json"), &legacy, bytes)
+            .expect_err("blocked migration");
         assert!(legacy.is_file());
         fs::remove_dir(root.join("webinfo/audit_settings.json")).expect("remove blocking target");
         assert_eq!(load_audit_capacity(&root, 100_000), 7);
