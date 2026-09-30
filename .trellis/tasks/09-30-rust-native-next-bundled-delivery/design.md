@@ -44,11 +44,14 @@ state. Existing `MetricsSnapshot` is a separate lifetime view and is never
 mapped into v2 audit statistics.
 
 Keep DNS hot-path locks short. HTTP request tasks must not hold observer locks
-while awaiting, formatting JSON, or writing files. Choose a bounded-cost
-snapshot/aggregation strategy for 400000 retained records during Slice 0 and
-verify under concurrent real DNS queries. `stats/windows` may derive from a
-bounded snapshot outside the lock; maintain minimal incremental aggregates
-or a compact projection when a full-record clone would stall readers.
+while awaiting, formatting JSON, or writing files. During Slice 0 choose and
+test only the internal bounded-cost snapshot/aggregation primitive for 400000
+retained records, with direct observer-handle concurrency proof and no HTTP
+route dependency. Slice 2 builds the HTTP stats/windows/log projections on
+that primitive and owns the API-level read-load proof. `stats/windows` may
+derive from a bounded snapshot outside the lock; maintain minimal incremental
+aggregates or a compact projection when a full-record clone would stall
+readers.
 Never JSON-encode under the observer lock or deep-copy all 400000 complete
 records to serve a small log page. Continuous read traffic at a near-full
 ring must still allow real DNS requests to complete; formal latency/QPS
@@ -67,8 +70,12 @@ values clamp to 0/400000. Missing file or malformed JSON/field type uses
 default 100000 with a diagnostic; a malformed canonical file never falls
 back to a valid legacy file. Retain a valid legacy value and migrate it to
 canonical only after a complete safe write.
-Never remove a legacy source before that write succeeds. File/path failures
-must be diagnosable, and no live `/cus/mosdns` path is used by task fixtures.
+Never remove a legacy source before that write succeeds. If migration cannot
+publish the canonical copy, retain the legacy bytes and value and do not leave
+an incomplete canonical file. An in-memory host with no explicit state root
+must reject capacity mutation without falling back to the working directory.
+File/path failures must be diagnosable, and no live `/cus/mosdns` path is used
+by task fixtures.
 
 For capacity POST: require a JSON object containing only `capacity` as an
 integer in 0..400000. Missing, null, floating-point, string, extra-field and
@@ -93,10 +100,13 @@ though the Vue form intentionally accepts only 1..400000.
 ## HTTP projections
 
 Use the existing route/method/error dispatch conventions in `api.rs`. Freeze
-only the six scoped v1 responses from `coremain/api_audit.go` at the handler boundary:
-JSON status/capacity, plain-text success for start/stop/clear/capacity POST,
-correct method errors, and no false 200 from absent routes. Keep unsupported
-native API endpoints absent or explicitly unsupported.
+only the six scoped v1 responses from `coremain/api_audit.go` at the handler
+boundary: JSON status/capacity, plain-text success for start/stop/clear/capacity
+POST, correct method errors, and no false 200 from absent routes. The exact
+wire bodies, header rules, strict-capacity errors, v2 schemas and projection
+fields are recorded in `research/api-contract.md`; implementation must not
+silently revise them. Keep unsupported native API endpoints absent or
+explicitly unsupported.
 
 For v2, define a small serializer from internal `AuditRecord` to the fields
 needed by the DNS card. The internal record has `SystemTime`, `SocketAddr`,

@@ -62,8 +62,10 @@ review.
 - Serve `GET /api/v1/audit/status`, `POST /start`, `POST /stop`, `POST /clear`,
   `GET /capacity`, and `POST /capacity` on the existing host-owned HTTP
   listener. Freeze method, status, JSON or plain-text body, and content type
-  against current Go and Vue callers. Unsupported method/path combinations
-  fail explicitly; no synthetic success from unrelated API routes.
+  against current Go and Vue callers as the route matrix in
+  `research/api-contract.md`; that matrix is part of this task's reviewed
+  contract. Unsupported method/path combinations fail explicitly; no
+  synthetic success from unrelated API routes.
 - Persist capacity to `<config-base>/webinfo/audit_settings.json` and recover
   it on fresh host start. Choose the source path before parsing: an existing
   canonical file wins even if malformed; only when absent, try legacy
@@ -103,7 +105,9 @@ review.
   record's admission timestamp; `complete` means only that this timestamp is
   no later than the window cutoff, not that capture was continuous. With no
   retained record, omit `coverage_start` from JSON (`omitempty`), rather than
-  returning an empty string.
+  returning an empty string. The exact response field set, timestamp formats,
+  error bodies, pagination defaults and unsupported-parameter behavior are
+  frozen in `research/api-contract.md` and must be reviewed with this task.
 - Logs are newest first, default page 1 and limit 50, with malformed or
   nonpositive input falling back to defaults as characterized. Positive limits
   above 500 return 400, an intentional bounded-API deviation from Go; limit
@@ -156,8 +160,9 @@ review.
 - [ ] R1 is proven by real UDP/TCP and in-flight boundary tests; audit-derived
   stats and lifetime metrics stay independent through start/stop/clear/eviction.
 - [ ] R2 v1 methods, status/body/type, canonical/legacy settings precedence,
-  capacity zero, restart, temp-write/final-replace failure and cleanup pass
-  through real HTTP/DNS tests; DNS/HTTP shutdown and rebind still pass.
+  capacity zero, restart, no-state-root rejection, legacy-migration failure
+  preservation, temp-write/final-replace failure and cleanup pass through real
+  HTTP/DNS tests; DNS/HTTP shutdown and rebind still pass.
 - [ ] R3 exact retained-ring statistics, windows (including a cutoff-equal
   record, complete/incomplete and eviction changes) and newest-first paginated
   logs match the bounded API contract; unsupported filters fail visibly.

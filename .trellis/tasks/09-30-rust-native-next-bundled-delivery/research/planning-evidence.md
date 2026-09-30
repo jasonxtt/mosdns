@@ -15,8 +15,9 @@
   `rust`, commit `96fcd0b9` and a dirty worktree. Existing dirty files include
   canary archive movement, parent roadmap documents, workflow/spec/test edits
   and `docs/rust/next-stage-plan.md`. This task's eight new planning artifacts
-  and the precise child-link change in parent `task.json` form one planning
-  range; all other dirty paths stay out.
+  form the exact planning range. The parent `task.json` already contains the
+  child link as workspace metadata but is outside this task's committed range;
+  it must remain read-only during this task and must not be staged with it.
 
 ## C2C discussion in `核查任务问题`
 
@@ -51,3 +52,26 @@ Conversation ID: `6abbc3e5-dc34-83e8-9d07-eb45af7783da`.
 The user consented to create a new planning task. A direction-choice question
 was sent; this draft follows the recommended audit package while that answer
 is pending. Task creation and discussion do not authorize `task.py start`.
+
+## Current dedicated-review attempt
+
+- The new project conversation is the dedicated reviewer binding for this
+  task. The first exact-range review covered
+  `96fcd0b9320e677acf42d3688b564a1c2a6af2b9..2b61fc37f2819672ce3fd123e052a140dd89c3f2`
+  and returned `FINAL: FAIL` with `P1-1`, `P1-2`, `P2-1`, and `P2-2`.
+- `P1-1`: the plan incorrectly described a parent `task.json` child-link
+  change as part of the range although that file was intentionally outside
+  this task's committed paths. The plan now records the link as read-only
+  workspace metadata and limits the range to this child's eight artifacts.
+- `P1-2`: the exact v1/v2 route matrix, JSON shapes, error bodies, header
+  rules, pagination and field projection are now frozen in
+  `research/api-contract.md`, referenced by PRD/design/implement, and added to
+  both context manifests.
+- `P2-1`: Slice 1 now explicitly tests missing-state-root rejection and failed
+  legacy-to-canonical migration, including preservation of legacy bytes/value
+  and absence of an incomplete canonical file.
+- `P2-2`: Slice 0 now owns only the internal bounded observer snapshot/projection
+  primitive and its direct concurrency proof; Slice 2 owns HTTP read routes
+  and the API-level near-full-ring load proof.
+- These corrections are planning-only and do not expand the four slices or
+  authorize product code before the next exact-range review returns PASS.
