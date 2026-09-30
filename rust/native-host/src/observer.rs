@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
 use std::ops::Index;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -610,6 +609,8 @@ impl MetricsState {
 struct ObserverState {
     metrics: MetricsState,
     audit_records: VecDeque<AuditRecord>,
+    audit_capacity: usize,
+    capturing: bool,
     evicted_total: u64,
 }
 
@@ -617,7 +618,6 @@ struct ObserverState {
 #[cfg_attr(not(test), allow(dead_code))] // Listener terminalization is wired in Slice 2.
 pub(crate) struct QueryObserver {
     audit_enabled: bool,
-    audit_capacity: NonZeroUsize,
     in_flight: AtomicU64,
     state: Mutex<ObserverState>,
 }
@@ -626,20 +626,19 @@ impl QueryObserver {
     pub(crate) fn new(
         audit_enabled: bool,
         upstream_identities: impl IntoIterator<Item = String>,
-        audit_capacity: NonZeroUsize,
+        audit_capacity: usize,
     ) -> Self {
         let forward_attempts_by_upstream = upstream_identities
             .into_iter()
             .map(|identity| (identity, UpstreamAttemptMetricsSnapshot::default()))
             .collect();
         let audit_records = VecDeque::with_capacity(if audit_enabled {
-            audit_capacity.get().min(INITIAL_AUDIT_RECORD_CAPACITY)
+            audit_capacity.min(INITIAL_AUDIT_RECORD_CAPACITY)
         } else {
             0
         });
         Self {
             audit_enabled,
-            audit_capacity,
             in_flight: AtomicU64::new(0),
             state: Mutex::new(ObserverState {
                 metrics: MetricsState {
@@ -647,6 +646,8 @@ impl QueryObserver {
                     ..MetricsState::default()
                 },
                 audit_records,
+                audit_capacity,
+                capturing: audit_enabled,
                 ..ObserverState::default()
             }),
         }
@@ -669,9 +670,9 @@ impl QueryObserver {
         observation: TerminalObservation,
         make_audit_record: impl FnOnce(TerminalObservation) -> AuditRecord,
     ) {
-        if self.audit_enabled {
+        let mut state = self.lock();
+        if self.audit_enabled && state.capturing {
             let record = make_audit_record(observation);
-            let mut state = self.lock();
             state.metrics.record_terminal(
                 record.terminal_outcome,
                 &record.response,
@@ -680,13 +681,15 @@ impl QueryObserver {
                 record.elapsed,
             );
             self.decrement_in_flight();
-            if state.audit_records.len() == self.audit_capacity.get() {
+            if state.audit_capacity == 0 {
+                return;
+            }
+            if state.audit_records.len() == state.audit_capacity {
                 state.audit_records.pop_front();
                 state.evicted_total = state.evicted_total.saturating_add(1);
             }
             state.audit_records.push_back(record);
         } else {
-            let mut state = self.lock();
             state.metrics.record_terminal(
                 observation.outcome,
                 &observation.response,
@@ -696,6 +699,51 @@ impl QueryObserver {
             );
             self.decrement_in_flight();
         }
+    }
+
+    pub(crate) fn start_capture(&self) -> bool {
+        let mut state = self.lock();
+        if !self.audit_enabled {
+            return false;
+        }
+        state.capturing = true;
+        true
+    }
+
+    pub(crate) fn stop_capture(&self) -> bool {
+        let mut state = self.lock();
+        if !self.audit_enabled {
+            return false;
+        }
+        state.capturing = false;
+        true
+    }
+
+    pub(crate) fn clear_audit(&self) {
+        let mut state = self.lock();
+        state.audit_records.clear();
+    }
+
+    pub(crate) fn set_audit_capacity(&self, capacity: usize) {
+        let mut state = self.lock();
+        state.audit_capacity = capacity;
+        while state.audit_records.len() > capacity {
+            state.audit_records.pop_front();
+            state.evicted_total = state.evicted_total.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn audit_capacity(&self) -> usize {
+        self.lock().audit_capacity
+    }
+
+    pub(crate) fn is_capturing(&self) -> bool {
+        self.lock().capturing
+    }
+
+    #[cfg(test)]
+    fn audit_capturing(&self) -> bool {
+        self.lock().capturing
     }
 
     fn decrement_in_flight(&self) {
@@ -912,7 +960,6 @@ fn render_qname(wire: &[u8]) -> String {
 mod tests {
     use std::cell::Cell;
     use std::net::SocketAddr;
-    use std::num::NonZeroUsize;
     use std::time::{Duration, SystemTime};
 
     use mosdns_upstream_core::TransportCancellation;
@@ -928,8 +975,87 @@ mod tests {
         QueryObserver::new(
             audit_enabled,
             ["route-a".to_owned(), "route-b".to_owned()],
-            NonZeroUsize::new(capacity).expect("non-zero capacity"),
+            capacity,
         )
+    }
+
+    #[test]
+    fn runtime_capture_defaults_on_and_static_gate_cannot_be_overridden() {
+        let enabled = observer(true, 2);
+        assert!(enabled.audit_capturing());
+        assert!(enabled.stop_capture());
+        assert!(!enabled.audit_capturing());
+        assert!(enabled.start_capture());
+        assert!(enabled.audit_capturing());
+
+        let disabled = observer(false, 2);
+        assert!(!disabled.audit_capturing());
+        assert!(!disabled.start_capture());
+        assert!(!disabled.stop_capture());
+        assert!(!disabled.audit_capturing());
+    }
+
+    #[test]
+    fn terminal_capture_uses_the_runtime_state_at_terminalization() {
+        let observer = std::sync::Arc::new(observer(true, 4));
+        let question = mosdns_dns_core::QuestionInfo {
+            qname_wire: vec![3, b'o', b'l', b'd', 0],
+            qtype: 1,
+            qclass: 1,
+        };
+        let first = observer.admit(
+            "192.0.2.10:53000".parse().expect("client"),
+            QueryTransport::Udp,
+            &question,
+            TransportCancellation::new(),
+        );
+        observer.stop_capture();
+        drop(first);
+        assert!(observer.audit_snapshot().records.is_empty());
+
+        let second = observer.admit(
+            "192.0.2.11:53000".parse().expect("client"),
+            QueryTransport::Udp,
+            &question,
+            TransportCancellation::new(),
+        );
+        observer.start_capture();
+        drop(second);
+        assert_eq!(observer.audit_snapshot().records.len(), 1);
+        assert_eq!(observer.metrics_snapshot().completed_total, 2);
+    }
+
+    #[test]
+    fn zero_capacity_keeps_lifetime_metrics_without_retaining_records() {
+        let observer = observer(true, 0);
+        for _ in 0..3 {
+            observer.admit_query();
+            observer.record_terminal(observation(Duration::from_micros(1)), |observation| {
+                audit_record(observation, "zero.example")
+            });
+        }
+
+        assert!(observer.audit_snapshot().records.is_empty());
+        assert_eq!(observer.metrics_snapshot().completed_total, 3);
+        assert_eq!(observer.metrics_snapshot().duration.count, 3);
+        assert_eq!(observer.audit_snapshot().evicted_total, 0);
+    }
+
+    #[test]
+    fn clear_and_resize_linearize_against_the_retained_ring() {
+        let observer = observer(true, 3);
+        for name in ["one.example", "two.example", "three.example"] {
+            observer.admit_query();
+            observer.record_terminal(observation(Duration::from_micros(1)), |observation| {
+                audit_record(observation, name)
+            });
+        }
+        observer.set_audit_capacity(1);
+        assert_eq!(observer.audit_snapshot().records.len(), 1);
+        assert_eq!(observer.audit_snapshot().evicted_total, 2);
+        observer.clear_audit();
+        assert!(observer.audit_snapshot().records.is_empty());
+        assert_eq!(observer.metrics_snapshot().completed_total, 3);
     }
 
     #[test]

@@ -150,6 +150,14 @@ fn assembly_for(upstream: SocketAddr, options: HostOptions) -> HostAssembly {
     HostAssembly::with_options(config, options).expect("test assembly")
 }
 
+fn audit_assembly_for(upstream: SocketAddr) -> HostAssembly {
+    let yaml = TCP_CONFIG
+        .replace("enable_audit: false", "enable_audit: true")
+        .replace("tcp://127.0.0.1:15454", &format!("tcp://{upstream}"));
+    let config = compile_yaml(&yaml).expect("audit test config compile");
+    HostAssembly::with_options(config, HostOptions::default()).expect("audit test assembly")
+}
+
 fn response_id_rcode(response: &[u8]) -> (u16, u16) {
     let header = inspect_response_header(response).expect("response header");
     validate_response(response).expect("valid DNS response");
@@ -157,6 +165,55 @@ fn response_id_rcode(response: &[u8]) -> (u16, u16) {
         header.id,
         u16::from_be_bytes([response[2], response[3]]) & 0x000f,
     )
+}
+
+#[test]
+fn tcp_runtime_audit_controls_sample_at_terminal_time_without_resetting_metrics() {
+    let mock = MockTcpUpstream::start();
+    let assembly = audit_assembly_for(mock.address);
+    let server = assembly
+        .block_on(TcpServer::bind(&assembly, "127.0.0.1:0".parse().unwrap()))
+        .expect("TCP listener bind");
+    let listener = server.local_addr().expect("listener address");
+    let shutdown = TransportCancellation::new();
+    assembly.block_on(async {
+        let server_task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+        for (id, name) in [(0x6201, "first"), (0x6202, "stopped"), (0x6203, "resumed")] {
+            if name == "stopped" {
+                assert!(assembly.stop_audit());
+            } else if name == "resumed" {
+                assert!(assembly.start_audit());
+            }
+            let _ = tokio::task::spawn_blocking(move || {
+                let mut stream = StdTcpStream::connect(listener).expect("TCP client");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .expect("TCP timeout");
+                let request = query(id, &[name, "example"]);
+                write_frame_in_fragments(&mut stream, &request);
+                response_id_rcode(&read_response(&mut stream))
+            })
+            .await
+            .expect("client task");
+        }
+        shutdown.cancel();
+        server_task
+            .await
+            .expect("server task")
+            .expect("server shutdown");
+    });
+
+    assert_eq!(assembly.metrics_snapshot().completed_total, 3);
+    assert_eq!(assembly.audit_snapshot().records.len(), 2);
+    assert_eq!(assembly.audit_snapshot().records[0].qname, "first.example.");
+    assert_eq!(
+        assembly.audit_snapshot().records[1].qname,
+        "resumed.example."
+    );
+    assembly.clear_audit();
+    assert!(assembly.audit_snapshot().records.is_empty());
+    assert_eq!(assembly.metrics_snapshot().completed_total, 3);
+    mock.stop();
 }
 
 #[test]

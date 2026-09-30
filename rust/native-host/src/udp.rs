@@ -464,11 +464,7 @@ mod tests {
                 .expect("receiver socket");
             let peer = receiver.local_addr().expect("receiver address");
             let cancellation = TransportCancellation::new();
-            let observer = Arc::new(QueryObserver::new(
-                true,
-                ["phase5a_forward".to_owned()],
-                std::num::NonZeroUsize::new(2).expect("audit capacity"),
-            ));
+            let observer = Arc::new(QueryObserver::new(true, ["phase5a_forward".to_owned()], 2));
             let question = mosdns_dns_core::QuestionInfo {
                 qname_wire: vec![3, b'n', b'o', b'p', 0],
                 qtype: 1,

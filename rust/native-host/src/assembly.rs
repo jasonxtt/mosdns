@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,10 +20,6 @@ use crate::udp::{UdpServer, UdpServerError};
 
 const DEFAULT_AUDIT_CAPACITY: usize = 100_000;
 
-fn default_audit_capacity() -> NonZeroUsize {
-    NonZeroUsize::new(DEFAULT_AUDIT_CAPACITY).expect("the default audit capacity is nonzero")
-}
-
 /// Host-side options reserved for tests and the later request runner.
 /// Configuration files cannot override these values in this task.
 #[derive(Clone)]
@@ -33,7 +28,7 @@ pub struct HostOptions {
     pub cancellation: Option<TransportCancellation>,
     pub cache_clock: Rc<dyn CacheClock>,
     pub(crate) admission_deadline: Option<std::time::Instant>,
-    pub(crate) audit_capacity: NonZeroUsize,
+    pub(crate) audit_capacity: usize,
 }
 
 impl Default for HostOptions {
@@ -43,7 +38,7 @@ impl Default for HostOptions {
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
             admission_deadline: None,
-            audit_capacity: default_audit_capacity(),
+            audit_capacity: DEFAULT_AUDIT_CAPACITY,
         }
     }
 }
@@ -58,7 +53,7 @@ impl HostOptions {
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
             admission_deadline: None,
-            audit_capacity: default_audit_capacity(),
+            audit_capacity: DEFAULT_AUDIT_CAPACITY,
         }
     }
 
@@ -77,7 +72,7 @@ impl HostOptions {
 
     /// Sets a focused-test audit retention capacity without changing YAML.
     #[must_use]
-    pub fn with_audit_capacity(mut self, audit_capacity: NonZeroUsize) -> Self {
+    pub fn with_audit_capacity(mut self, audit_capacity: usize) -> Self {
         self.audit_capacity = audit_capacity;
         self
     }
@@ -213,6 +208,38 @@ impl HostAssembly {
     #[must_use]
     pub fn audit_snapshot(&self) -> AuditSnapshot {
         self.observer.audit_snapshot()
+    }
+
+    /// Starts terminal-time audit capture when the listener's static audit
+    /// gate is enabled. The return value reports whether capture is active.
+    pub fn start_audit(&self) -> bool {
+        self.observer.start_capture()
+    }
+
+    /// Stops terminal-time audit capture without resetting lifetime metrics.
+    pub fn stop_audit(&self) -> bool {
+        self.observer.stop_capture()
+    }
+
+    /// Removes retained audit records without resetting lifetime metrics.
+    pub fn clear_audit(&self) {
+        self.observer.clear_audit();
+    }
+
+    /// Changes the bounded audit retention capacity, evicting oldest records
+    /// immediately when the new capacity is smaller than the current ring.
+    pub fn set_audit_capacity(&self, capacity: usize) {
+        self.observer.set_audit_capacity(capacity);
+    }
+
+    #[must_use]
+    pub fn audit_capacity(&self) -> usize {
+        self.observer.audit_capacity()
+    }
+
+    #[must_use]
+    pub fn audit_capturing(&self) -> bool {
+        self.observer.is_capturing()
     }
 
     #[must_use]
@@ -633,7 +660,7 @@ mod tests {
 
     #[test]
     fn audit_retention_defaults_to_the_frozen_hundred_thousand_record_limit() {
-        assert_eq!(HostOptions::default().audit_capacity.get(), 100_000);
+        assert_eq!(HostOptions::default().audit_capacity, 100_000);
     }
 
     #[test]

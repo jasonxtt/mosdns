@@ -121,6 +121,61 @@ fn assembly_for(upstream: SocketAddr, options: HostOptions) -> HostAssembly {
     HostAssembly::with_options(config, options).expect("test assembly")
 }
 
+fn audit_assembly_for(upstream: SocketAddr) -> HostAssembly {
+    let yaml = UDP_CONFIG
+        .replace("enable_audit: false", "enable_audit: true")
+        .replace("udp://127.0.0.1:15453", &format!("udp://{upstream}"));
+    let config = compile_yaml(&yaml).expect("audit test config compile");
+    HostAssembly::with_options(config, HostOptions::default()).expect("audit test assembly")
+}
+
+#[test]
+fn udp_runtime_audit_controls_sample_at_terminal_time_without_resetting_metrics() {
+    let mock = MockUpstream::start();
+    let assembly = audit_assembly_for(mock.address);
+    let server = assembly
+        .block_on(UdpServer::bind(&assembly, "127.0.0.1:0".parse().unwrap()))
+        .expect("UDP listener bind");
+    let listener = server.local_addr().expect("listener address");
+    let shutdown = TransportCancellation::new();
+    assembly.block_on(async {
+        let server_task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+        for (id, name) in [(0x6101, "first"), (0x6102, "stopped"), (0x6103, "resumed")] {
+            if name == "stopped" {
+                assert!(assembly.stop_audit());
+            } else if name == "resumed" {
+                assert!(assembly.start_audit());
+            }
+            tokio::task::spawn_blocking(move || {
+                client_request(
+                    listener,
+                    &query(id, &[name, "example"]),
+                    Duration::from_secs(2),
+                )
+            })
+            .await
+            .expect("client task");
+        }
+        shutdown.cancel();
+        server_task
+            .await
+            .expect("server task")
+            .expect("server shutdown");
+    });
+
+    assert_eq!(assembly.metrics_snapshot().completed_total, 3);
+    assert_eq!(assembly.audit_snapshot().records.len(), 2);
+    assert_eq!(assembly.audit_snapshot().records[0].qname, "first.example.");
+    assert_eq!(
+        assembly.audit_snapshot().records[1].qname,
+        "resumed.example."
+    );
+    assembly.clear_audit();
+    assert!(assembly.audit_snapshot().records.is_empty());
+    assert_eq!(assembly.metrics_snapshot().completed_total, 3);
+    mock.stop();
+}
+
 #[test]
 fn udp_answers_positive_nxdomain_and_concurrent_distinct_queries() {
     let mock = MockUpstream::start();
