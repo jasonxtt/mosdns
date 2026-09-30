@@ -10,7 +10,8 @@ const {
   metrics,
   initialized,
   warningMessage,
-  recentLogs
+  recentLogs,
+  recentLogsError
 } = useRealtimeMetrics({
   pollIntervalMs: 3000,
   windowSize: 40,
@@ -331,7 +332,10 @@ onBeforeUnmount(() => {
           <h4>最近查询</h4>
           <span>{{ recentLogPreview.length ? `最近 ${recentLogPreview.length} 条` : '暂无记录' }}</span>
         </header>
-        <div v-if="recentLogPreview.length === 0" class="recent-logs-empty">
+        <div v-if="recentLogsError" class="recent-logs-empty recent-logs-error">
+          {{ recentLogsError }}
+        </div>
+        <div v-else-if="recentLogPreview.length === 0" class="recent-logs-empty">
           当前没有可显示的审计日志。
         </div>
         <div v-else class="recent-log-list">

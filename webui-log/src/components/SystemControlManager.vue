@@ -528,9 +528,10 @@ async function submitCapacity() {
   if (audit.busy || audit.capacity === null) {
     return;
   }
-  const capacity = Number(audit.newCapacity || 0);
-  if (!Number.isFinite(capacity) || capacity <= 0 || capacity > 400000) {
-    setError("请输入 1 到 400000 之间的有效热日志上限");
+  const rawCapacity = String(audit.newCapacity ?? "").trim();
+  const capacity = Number(rawCapacity);
+  if (!rawCapacity || !Number.isInteger(capacity) || capacity < 0 || capacity > 400000) {
+    setError("请输入 0 到 400000 之间的有效热日志上限");
     return;
   }
   if (
