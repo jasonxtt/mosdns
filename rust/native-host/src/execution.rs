@@ -187,7 +187,7 @@ impl Drop for ExecutionFacts<'_> {
                 matched_rule_source: self.routing.matched_rule_source.clone(),
                 final_upstream: self.routing.final_upstream.clone(),
                 upstream_targets: self.routing.final_upstream_targets.clone(),
-                selected_upstream: self.routing.selected_upstream.clone(),
+                selected_upstream: None,
                 upstream_attempts: self.upstream_attempts.clone(),
                 failure_provenance: self.failure_provenance.clone(),
                 elapsed: std::time::Duration::ZERO,
@@ -1650,6 +1650,7 @@ mod tests {
         assert_eq!(record.cache_status, CacheStatus::Miss);
         assert_eq!(record.final_sequence.as_deref(), Some("root"));
         assert_eq!(record.final_upstream, None);
+        assert_eq!(record.selected_upstream, None);
         assert_eq!(record.response, ResponseState::NoResponse);
         assert_eq!(record.upstream_attempts.len(), 1);
         assert_eq!(record.upstream_attempts[0].upstream, "forward");
@@ -1754,6 +1755,7 @@ plugins:
             Some("configured_upstream")
         );
         assert_eq!(record.response, ResponseState::NoResponse);
+        assert_eq!(record.selected_upstream, None);
         assert_eq!(record.upstream_attempts.len(), 1);
         assert_eq!(record.upstream_attempts[0].upstream, "forward");
         assert_eq!(

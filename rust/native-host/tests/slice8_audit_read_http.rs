@@ -431,6 +431,36 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             serde_json::from_str::<Value>(&full_stats.body).expect("full stats")["total_queries"],
             400_000
         );
+        let (full_logs, full_slowest) = tokio::join!(
+            http_request(api, "GET", "/api/v2/audit/logs?limit=500"),
+            http_request(api, "GET", "/api/v2/audit/rank/slowest?limit=300"),
+        );
+        assert_eq!(full_logs.status, 200);
+        assert_eq!(full_slowest.status, 200);
+        let full_logs_json: Value = serde_json::from_str(&full_logs.body).expect("full logs");
+        let projected_records = full_logs_json["logs"]
+            .as_array()
+            .expect("full logs records")
+            .len();
+        assert_eq!(projected_records, 500);
+        let slowest_records: Value =
+            serde_json::from_str(&full_slowest.body).expect("full slowest records");
+        assert!(slowest_records
+            .as_array()
+            .expect("slowest list")
+            .len()
+            <= 300);
+        let body_bytes = u64::try_from(full_logs.body.len()).expect("body length fits u64");
+        let record_count = u64::try_from(projected_records).expect("record count fits u64");
+        let bytes_per_record_hundredths =
+            (u128::from(body_bytes) * 100) / u128::from(record_count);
+        assert!(bytes_per_record_hundredths > 0);
+        println!(
+            "full-ring projection: retained=400000 logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02}",
+            full_logs.body.len(),
+            bytes_per_record_hundredths / 100,
+            bytes_per_record_hundredths % 100
+        );
         for _ in 0..3 {
             let dns_task = tokio::task::spawn_blocking(move || {
                 udp_query(dns, &dns_query(0x9001, "after-full.example."))

@@ -754,7 +754,14 @@ fn run_rule(
             .evaluate(state)
             .map_err(ExecutionError::Matcher)?;
         if let Some(mutation) = outcome.mutation {
-            if matches!(&mutation, crate::StateMutation::SetRoutingFields { .. }) {
+            if matches!(
+                &mutation,
+                crate::StateMutation::SetRoutingFields { .. }
+                    | crate::StateMutation::SetRouting {
+                        field: crate::RoutingField::MatchedRuleSource,
+                        ..
+                    }
+            ) {
                 deferred_routing.push(mutation);
             } else {
                 state.apply_mutation(mutation);

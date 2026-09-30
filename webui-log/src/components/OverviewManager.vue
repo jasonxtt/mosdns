@@ -64,10 +64,18 @@ const slowDetailOpen = ref(false)
 const selectedSlowQuery = ref(null)
 const domainSetRankSource = ref('effective_tag')
 const rankingErrors = reactive({
+  stats: '',
   domain: '',
   client: '',
   slowest: '',
   rules: ''
+})
+const integrationErrors = reactive({
+  aliases: '',
+  metrics: '',
+  switch: '',
+  specialGroups: '',
+  upstreamConfig: ''
 })
 const rankingDetail = reactive({
   open: false,
@@ -995,24 +1003,31 @@ async function reloadOverview(showMessage = false) {
         error: error?.message || '请求失败',
         status: Number(error?.status || 0)
       }))
-    const domainSetRankPromise = auditPanel(getJSON('/api/v2/audit/rank/effective?limit=20'))
-      .then(async (result) => {
-        if (!result.error) {
-          return { ...result, source: 'effective_tag' }
-        }
-        if (result.status !== 404) {
-          return { ...result, source: 'effective_tag' }
-        }
+    const optionalPanel = (promise) => auditPanel(promise)
+    const rankPanels = async () => {
+      // Native audit ranks use a two-slot, no-queue backend gate. Keep one
+      // Overview refresh within that budget even when the page has four rank
+      // cards, so a normal refresh cannot manufacture its own 503s.
+      const panels = {
+        domain: await auditPanel(getJSON('/api/v2/audit/rank/domain?limit=20')),
+        client: await auditPanel(getJSON('/api/v2/audit/rank/client?limit=20')),
+        slowest: await auditPanel(getJSON('/api/v2/audit/rank/slowest?limit=20'))
+      }
+      const effective = await auditPanel(getJSON('/api/v2/audit/rank/effective?limit=20'))
+      if (!effective.error) {
+        panels.rules = { ...effective, source: 'effective_tag' }
+      } else if (effective.status === 404) {
         const fallback = await auditPanel(getJSON('/api/v2/audit/rank/domain_set?limit=20'))
-        return { ...fallback, source: 'domain_set' }
-      })
+        panels.rules = { ...fallback, source: 'domain_set' }
+      } else {
+        panels.rules = { ...effective, source: 'effective_tag' }
+      }
+      return panels
+    }
 
     const [
       statsRes,
-      topDomainsRes,
-      topClientsRes,
-      slowestRes,
-      domainSetRes,
+      rankRes,
       specialGroupsRes,
       aliasesRes,
       upstreamConfigRes,
@@ -1020,23 +1035,32 @@ async function reloadOverview(showMessage = false) {
       dnsRoutingModeRes
     ] = await Promise.all([
       auditPanel(getJSON('/api/v2/audit/stats')),
-      auditPanel(getJSON('/api/v2/audit/rank/domain?limit=20')),
-      auditPanel(getJSON('/api/v2/audit/rank/client?limit=20')),
-      auditPanel(getJSON('/api/v2/audit/rank/slowest?limit=20')),
-      domainSetRankPromise,
-      getJSON('/api/v1/special-groups'),
-      getJSON('/plugins/clientname').catch(() => ({})),
-      getJSON('/api/v1/upstream/config').catch(() => ({})),
-      getText('/metrics').catch(() => ''),
-      getText('/plugins/switch17/show').catch(() => '')
+      rankPanels(),
+      optionalPanel(getJSON('/api/v1/special-groups')),
+      optionalPanel(getJSON('/plugins/clientname')),
+      optionalPanel(getJSON('/api/v1/upstream/config')),
+      optionalPanel(getText('/metrics')),
+      optionalPanel(getText('/plugins/switch17/show'))
     ])
 
+    const topDomainsRes = rankRes.domain
+    const topClientsRes = rankRes.client
+    const slowestRes = rankRes.slowest
+    const domainSetRes = rankRes.rules
+    rankingErrors.stats = statsRes.error
     rankingErrors.domain = topDomainsRes.error
     rankingErrors.client = topClientsRes.error
     rankingErrors.slowest = slowestRes.error
     rankingErrors.rules = domainSetRes.error
-    stats.totalQueries = Number(statsRes?.data?.total_queries || 0)
-    stats.averageDurationMs = Number(statsRes?.data?.average_duration_ms || 0)
+    integrationErrors.specialGroups = specialGroupsRes.error
+    integrationErrors.aliases = aliasesRes.error
+    integrationErrors.upstreamConfig = upstreamConfigRes.error
+    integrationErrors.metrics = metricsRes.error
+    integrationErrors.switch = dnsRoutingModeRes.error
+    if (!statsRes.error) {
+      stats.totalQueries = Number(statsRes?.data?.total_queries || 0)
+      stats.averageDurationMs = Number(statsRes?.data?.average_duration_ms || 0)
+    }
     addHistoryPoint(stats.totalQueries, stats.averageDurationMs)
 
     topDomains.value = Array.isArray(topDomainsRes.data) ? topDomainsRes.data : []
@@ -1044,12 +1068,14 @@ async function reloadOverview(showMessage = false) {
     slowestQueries.value = Array.isArray(slowestRes.data) ? slowestRes.data : []
     domainSetRank.value = Array.isArray(domainSetRes?.data) ? domainSetRes.data : []
     domainSetRankSource.value = domainSetRes?.source || 'effective_tag'
-    specialGroups.value = Array.isArray(specialGroupsRes) ? specialGroupsRes : []
-    aliases.value = normalizeAliasMap(aliasesRes)
-    upstreamConfig.value = upstreamConfigRes && typeof upstreamConfigRes === 'object' ? upstreamConfigRes : {}
-    upstreamMetricsText.value = String(metricsRes || '')
-    dnsRoutingMode.value = String(dnsRoutingModeRes || '').trim()
-    applySystemSummaryState({ metricsText: metricsRes })
+    specialGroups.value = Array.isArray(specialGroupsRes.data) ? specialGroupsRes.data : []
+    aliases.value = normalizeAliasMap(aliasesRes.data)
+    upstreamConfig.value = upstreamConfigRes.data && typeof upstreamConfigRes.data === 'object' ? upstreamConfigRes.data : {}
+    upstreamMetricsText.value = metricsRes.error ? '' : String(metricsRes.data || '')
+    dnsRoutingMode.value = dnsRoutingModeRes.error ? '' : String(dnsRoutingModeRes.data || '').trim()
+    if (!metricsRes.error) {
+      applySystemSummaryState({ metricsText: metricsRes.data })
+    }
     lastUpdatedText.value = new Date().toLocaleString('zh-CN', { hour12: false })
 
     if (showMessage) {
@@ -1089,12 +1115,21 @@ onBeforeUnmount(() => {
   <section class="overview-page" :style="overviewLayoutVars">
     <DnsOverviewCard />
 
+    <div v-if="rankingErrors.stats" class="overview-unavailable" role="status">
+      查询统计不可用：{{ rankingErrors.stats }}
+    </div>
+
     <section class="panel sub-panel upstream-stats-panel">
       <header class="upstream-stats-head">
         <div class="upstream-stats-title-wrap">
           <h3>上游 DNS 统计</h3>
         </div>
       </header>
+      <div v-if="integrationErrors.metrics || integrationErrors.switch || integrationErrors.upstreamConfig" class="overview-unavailable" role="status">
+        <span v-if="integrationErrors.metrics">指标不可用：{{ integrationErrors.metrics }}</span>
+        <span v-if="integrationErrors.switch">切换状态不可用：{{ integrationErrors.switch }}</span>
+        <span v-if="integrationErrors.upstreamConfig">上游配置不可用：{{ integrationErrors.upstreamConfig }}</span>
+      </div>
       <div class="table-wrap upstream-stats-table-wrap">
         <table class="upstream-stats-table">
           <thead>
@@ -1184,6 +1219,9 @@ onBeforeUnmount(() => {
 
       <section class="panel sub-panel overview-metric-module">
         <h3>Top 客户端</h3>
+        <div v-if="integrationErrors.aliases" class="overview-unavailable" role="status">
+          客户端别名不可用：{{ integrationErrors.aliases }}；以下显示原始地址
+        </div>
         <div class="table-wrap overview-table-fit top-clients-fit module-scroll-list">
           <table>
             <thead>
@@ -1267,6 +1305,9 @@ onBeforeUnmount(() => {
 
       <section class="panel sub-panel overview-metric-module">
         <h3>分流统计</h3>
+        <div v-if="integrationErrors.specialGroups" class="overview-unavailable" role="status">
+          特殊分组名称不可用：{{ integrationErrors.specialGroups }}；以下显示原始标签
+        </div>
         <div class="table-wrap overview-table-fit domain-set-fit module-scroll-list">
           <table>
             <thead>
@@ -1585,6 +1626,16 @@ onBeforeUnmount(() => {
 
 .overview-system-summary-panel {
   padding-bottom: 12px;
+}
+
+.overview-unavailable {
+  margin: 8px 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.overview-unavailable span + span {
+  margin-left: 12px;
 }
 
 .overview-system-summary-head {
