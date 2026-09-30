@@ -660,9 +660,8 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
                 )
             })
             .or_else(|| {
-                supplying_identity
-                    .as_ref()
-                    .map(|_| "unmatched_rule".to_owned())
+                (routing.matched_rule_source.is_none() && supplying_identity.is_some())
+                    .then(|| "unmatched_rule".to_owned())
             })
     });
     let actual_upstream = supplying_identity.as_deref().and_then(|identity| {
@@ -700,7 +699,7 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
         upstream_targets: routing
             .final_upstream_targets
             .or_else(|| actual_upstream.clone()),
-        selected_upstream: actual_upstream.or(routing.selected_upstream),
+        selected_upstream: actual_upstream,
         upstream_attempts: std::mem::take(&mut facts.upstream_attempts),
         failure_provenance: facts.failure_provenance.take(),
     }
