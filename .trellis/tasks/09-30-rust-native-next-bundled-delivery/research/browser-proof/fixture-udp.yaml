@@ -1,0 +1,24 @@
+log:
+  level: error
+
+api:
+  http: "127.0.0.1:25099"
+
+plugins:
+  - tag: browser_forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://1.1.1.1:53"
+
+  - tag: browser_entry
+    type: sequence
+    args:
+      - exec: $browser_forward
+
+  - tag: browser_udp
+    type: udp_server
+    args:
+      entry: browser_entry
+      listen: "127.0.0.1:25053"
+      enable_audit: true

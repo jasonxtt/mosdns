@@ -48,6 +48,8 @@ const audit = reactive({
   capturing: null,
   capacity: null,
   newCapacity: "",
+  busy: false,
+  error: "",
 });
 
 const update = reactive({
@@ -453,16 +455,32 @@ async function readSwitchValue(tag) {
 }
 
 async function loadAuditStatusAndCapacity() {
-  const [statusRes, capacityRes] = await Promise.all([
+  audit.error = "";
+  const [statusResult, capacityResult] = await Promise.allSettled([
     getJSON("/api/v1/audit/status"),
     getJSON("/api/v1/audit/capacity"),
   ]);
-  audit.capturing = Boolean(statusRes?.capturing);
-  audit.capacity = Number(capacityRes?.capacity || 0);
+  if (statusResult.status === "fulfilled") {
+    audit.capturing = Boolean(statusResult.value?.capturing);
+  }
+  if (capacityResult.status === "fulfilled") {
+    audit.capacity = Number(capacityResult.value?.capacity || 0);
+  }
+  const failure = [statusResult, capacityResult].find((result) => result.status === "rejected");
+  if (failure) {
+    const reason = failure.reason;
+    audit.error = `审计状态读取失败: ${reason?.message || reason}`;
+    throw reason;
+  }
 }
 
 async function toggleAuditCapture() {
+  if (audit.busy || audit.capturing === null) {
+    return;
+  }
   clearMessage();
+  audit.busy = true;
+  audit.error = "";
   try {
     if (audit.capturing) {
       await postEmpty("/api/v1/audit/stop");
@@ -474,10 +492,16 @@ async function toggleAuditCapture() {
     await loadAuditStatusAndCapacity();
   } catch (error) {
     setError(`切换审计状态失败: ${error.message}`);
+    audit.error = `最近一次操作失败: ${error.message}`;
+  } finally {
+    audit.busy = false;
   }
 }
 
 async function clearAuditLogs() {
+  if (audit.busy || audit.capturing === null) {
+    return;
+  }
   if (
     !(await openConfirm("将删除当前所有内存审计日志，此操作不可恢复。", {
       tone: "danger",
@@ -486,16 +510,24 @@ async function clearAuditLogs() {
     return;
   }
   clearMessage();
+  audit.busy = true;
+  audit.error = "";
   try {
     await postEmpty("/api/v1/audit/clear");
     setSuccess("日志已清空");
     await loadAuditStatusAndCapacity();
   } catch (error) {
     setError(`清空日志失败: ${error.message}`);
+    audit.error = `最近一次操作失败: ${error.message}`;
+  } finally {
+    audit.busy = false;
   }
 }
 
 async function submitCapacity() {
+  if (audit.busy || audit.capacity === null) {
+    return;
+  }
   const capacity = Number(audit.newCapacity || 0);
   if (!Number.isFinite(capacity) || capacity <= 0 || capacity > 400000) {
     setError("请输入 1 到 400000 之间的有效热日志上限");
@@ -510,6 +542,8 @@ async function submitCapacity() {
     return;
   }
   clearMessage();
+  audit.busy = true;
+  audit.error = "";
   try {
     await postJSON("/api/v1/audit/capacity", { capacity });
     audit.newCapacity = "";
@@ -517,6 +551,9 @@ async function submitCapacity() {
     await loadAuditStatusAndCapacity();
   } catch (error) {
     setError(`设置详细日志热数据上限失败: ${error.message}`);
+    audit.error = `最近一次操作失败: ${error.message}`;
+  } finally {
+    audit.busy = false;
   }
 }
 
@@ -1715,22 +1752,22 @@ function onAutoRefreshIntervalChange() {
 async function reloadAll() {
   loading.value = true;
   clearMessage();
-  try {
-    await Promise.all([
-      loadAuditStatusAndCapacity(),
-      loadFeatureSwitches(),
-      loadDomainGenerationSettings(),
-      loadOverrides(),
-      loadSystemInfo(),
-      loadUpdateStatus(),
-      loadWebUIPortSettings(),
-      loadSystemHealth(),
-    ]);
-  } catch (error) {
-    setError(`加载系统设置失败: ${error.message}`);
-  } finally {
-    loading.value = false;
+  const results = await Promise.allSettled([
+    loadAuditStatusAndCapacity(),
+    loadFeatureSwitches(),
+    loadDomainGenerationSettings(),
+    loadOverrides(),
+    loadSystemInfo(),
+    loadUpdateStatus(),
+    loadWebUIPortSettings(),
+    loadSystemHealth(),
+  ]);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) {
+    const reason = failure.reason;
+    setError(`部分系统设置暂不可用: ${reason?.message || reason}`);
   }
+  loading.value = false;
 }
 
 async function refreshOnGlobalEvent() {

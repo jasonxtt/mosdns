@@ -2,13 +2,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRealtimeMetrics } from '../../composables/useRealtimeMetrics'
 import { fetchDashboardWindowStats, type DashboardWindowStat } from '../../services/dashboard'
+import type { DashboardAuditLog } from '../../types/dashboard'
 import { formatCount, formatLatencyMs } from '../../utils/dashboardFormat'
 import RealtimeTrendChart from './RealtimeTrendChart.vue'
 
 const {
   metrics,
   initialized,
-  warningMessage
+  warningMessage,
+  recentLogs
 } = useRealtimeMetrics({
   pollIntervalMs: 3000,
   windowSize: 40,
@@ -30,6 +32,7 @@ const totalQueriesText = computed(() => formatCount(metrics.totalQueries))
 const averageLatencyText = computed(() => formatLatencyMs(metrics.averageLatency))
 const currentQueriesText = computed(() => formatCount(metrics.currentQueries))
 const currentLatencyText = computed(() => formatLatencyMs(metrics.currentLatency))
+const recentLogPreview = computed(() => recentLogs.value.slice(0, 5))
 const currentTheme = ref<'light' | 'dark'>('light')
 
 const trendCardRef = ref<HTMLElement | null>(null)
@@ -56,6 +59,22 @@ const popoverPosition = reactive({
 let themeObserver: MutationObserver | null = null
 
 const popoverThemeClass = computed(() => currentTheme.value === 'light' ? 'theme-light' : 'theme-dark')
+
+function formatRecentLogName(log: DashboardAuditLog): string {
+  const name = String(log.query_name || '').trim()
+  return name || '.'
+}
+
+function formatRecentLogTime(log: DashboardAuditLog): string {
+  const raw = String(log.query_time || '').trim()
+  if (!raw) {
+    return '--'
+  }
+  const date = new Date(raw)
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleTimeString('zh-CN', { hour12: false })
+    : raw
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
@@ -306,6 +325,28 @@ onBeforeUnmount(() => {
         :show-request-series="seriesState.request"
         :show-latency-series="seriesState.latency"
       />
+
+      <section class="recent-logs" aria-label="最近查询">
+        <header class="recent-logs-header">
+          <h4>最近查询</h4>
+          <span>{{ recentLogPreview.length ? `最近 ${recentLogPreview.length} 条` : '暂无记录' }}</span>
+        </header>
+        <div v-if="recentLogPreview.length === 0" class="recent-logs-empty">
+          当前没有可显示的审计日志。
+        </div>
+        <div v-else class="recent-log-list">
+          <article v-for="(log, index) in recentLogPreview" :key="`${log.query_time || 'log'}-${index}`" class="recent-log-row">
+            <div class="recent-log-main">
+              <strong :title="formatRecentLogName(log)">{{ formatRecentLogName(log) }}</strong>
+              <span>{{ log.query_type || '--' }}</span>
+            </div>
+            <div class="recent-log-meta">
+              <span>{{ formatRecentLogTime(log) }}</span>
+              <span>{{ formatLatencyMs(Number(log.duration_ms || 0)) }}</span>
+            </div>
+          </article>
+        </div>
+      </section>
 
       <div class="series-toggle-row">
         <button
@@ -563,6 +604,87 @@ onBeforeUnmount(() => {
   gap: 6px;
   flex-wrap: wrap;
   padding-left: 22px;
+}
+
+.recent-logs {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding: 7px 0 0;
+}
+
+.recent-logs-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.recent-logs-header h4 {
+  margin: 0;
+  color: var(--ink-0);
+  font-size: 0.78rem;
+}
+
+.recent-logs-header span,
+.recent-logs-empty,
+.recent-log-meta {
+  color: var(--ink-1);
+  font-size: 0.7rem;
+}
+
+.recent-log-list {
+  display: grid;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.recent-log-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px 4px;
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.recent-log-main,
+.recent-log-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.recent-log-main {
+  overflow: hidden;
+}
+
+.recent-log-main strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-0);
+  font-size: 0.73rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-log-main span {
+  flex: 0 0 auto;
+  color: var(--ink-1);
+  font-size: 0.68rem;
+}
+
+.recent-log-meta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.recent-logs-empty {
+  padding: 7px 4px 2px;
 }
 
 .series-toggle-btn {

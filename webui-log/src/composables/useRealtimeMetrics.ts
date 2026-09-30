@@ -40,6 +40,7 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
   const initialized = ref(false)
   const warningMessage = ref('')
   const lastUpdatedText = ref('--')
+  const recentLogs = ref<DashboardAuditLog[]>([])
 
   const inFlight = ref(false)
   const auditCapacity = ref(0)
@@ -116,6 +117,7 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
 
       if (logsResult.status === 'fulfilled') {
         const logs = logsResult.value
+        recentLogs.value = logs
         if (logs.length > 0) {
           const newest = logs[0]
           const newestKey = buildLogKey(newest)
@@ -199,6 +201,7 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
     initialized,
     warningMessage,
     lastUpdatedText,
+    recentLogs,
     refreshMetrics
   }
 }
