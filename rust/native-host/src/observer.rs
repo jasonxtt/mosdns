@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::ops::Index;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
@@ -14,6 +14,67 @@ const DURATION_BUCKET_UPPER_BOUNDS_MICROS: [u64; 15] = [
 ];
 const DURATION_HISTOGRAM_BUCKET_COUNT: usize = DURATION_BUCKET_UPPER_BOUNDS_MICROS.len() + 1;
 const INITIAL_AUDIT_RECORD_CAPACITY: usize = 1_024;
+
+/// Wall-clock source shared by audit admission and window projections.
+pub trait AuditClock: Send + Sync {
+    /// Returns the current wall-clock instant.
+    fn now(&self) -> SystemTime;
+}
+
+#[derive(Default)]
+struct SystemAuditClock;
+
+impl AuditClock for SystemAuditClock {
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+}
+
+pub(crate) fn default_audit_clock() -> Arc<dyn AuditClock> {
+    Arc::new(SystemAuditClock)
+}
+
+/// Deterministic wall clock for native audit API tests.
+#[derive(Clone)]
+pub struct AuditTestClock {
+    now: Arc<Mutex<SystemTime>>,
+}
+
+impl AuditTestClock {
+    /// Creates a test clock at one fixed instant.
+    #[must_use]
+    pub fn new(now: SystemTime) -> Self {
+        Self {
+            now: Arc::new(Mutex::new(now)),
+        }
+    }
+
+    /// Sets the current test instant.
+    pub fn set(&self, now: SystemTime) {
+        *self
+            .now
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = now;
+    }
+
+    /// Advances the current test instant.
+    pub fn advance(&self, duration: Duration) {
+        let mut now = self
+            .now
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *now = now.checked_add(duration).expect("test clock overflow");
+    }
+}
+
+impl AuditClock for AuditTestClock {
+    fn now(&self) -> SystemTime {
+        *self
+            .now
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
 
 /// The lifecycle result of an admitted query at the existing transport boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -618,15 +679,31 @@ struct ObserverState {
 #[cfg_attr(not(test), allow(dead_code))] // Listener terminalization is wired in Slice 2.
 pub(crate) struct QueryObserver {
     audit_enabled: bool,
+    audit_clock: Arc<dyn AuditClock>,
     in_flight: AtomicU64,
     state: Mutex<ObserverState>,
 }
 
 impl QueryObserver {
+    #[cfg(test)]
     pub(crate) fn new(
         audit_enabled: bool,
         upstream_identities: impl IntoIterator<Item = String>,
         audit_capacity: usize,
+    ) -> Self {
+        Self::with_clock(
+            audit_enabled,
+            upstream_identities,
+            audit_capacity,
+            Arc::new(SystemAuditClock),
+        )
+    }
+
+    pub(crate) fn with_clock(
+        audit_enabled: bool,
+        upstream_identities: impl IntoIterator<Item = String>,
+        audit_capacity: usize,
+        audit_clock: Arc<dyn AuditClock>,
     ) -> Self {
         let forward_attempts_by_upstream = upstream_identities
             .into_iter()
@@ -639,6 +716,7 @@ impl QueryObserver {
         });
         Self {
             audit_enabled,
+            audit_clock,
             in_flight: AtomicU64::new(0),
             state: Mutex::new(ObserverState {
                 metrics: MetricsState {
@@ -764,7 +842,7 @@ impl QueryObserver {
     ) -> AdmittedQueryGuard {
         let admitted_at = Instant::now();
         let audit_context = self.audit_enabled.then(|| AuditContext {
-            timestamp: SystemTime::now(),
+            timestamp: self.audit_clock.now(),
             client_addr,
             transport,
             qname: render_qname(&question.qname_wire),
