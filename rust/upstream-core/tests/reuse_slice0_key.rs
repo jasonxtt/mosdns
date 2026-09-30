@@ -825,7 +825,7 @@ fn a_second_concurrent_exchange_for_a_busy_key_is_refused_not_queued() {
             // Either the second caller was refused because the serial slot was
             // held, or the first exchange had already completed and released it.
             // Both are legal; a queue is not, because it would block instead.
-            Err(UpstreamError::Runtime(SideEffectState::NotSent)) | Ok(_) => {}
+            Err(UpstreamError::Backpressure(SideEffectState::NotSent)) | Ok(_) => {}
             Err(error) => panic!("a busy key must be refused or served, got {error:?}"),
         }
 

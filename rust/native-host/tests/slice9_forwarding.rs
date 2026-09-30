@@ -179,9 +179,20 @@ fn multi_entry_listener_selects_ip_answer_and_accounts_each_started_entry() {
         .expect("native schema 1 diagnostics");
     assert_eq!(diagnostics.schema_version, 1);
     assert_eq!(diagnostics.attempts.len(), 2);
-    assert_eq!(diagnostics.attempts[0].ordinal, 0);
-    assert_eq!(diagnostics.attempts[0].entry, "a");
-    assert_eq!(diagnostics.attempts[1].entry, "b");
+    assert_eq!(
+        diagnostics
+            .attempts
+            .iter()
+            .map(|attempt| attempt.ordinal)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    let attempted = diagnostics
+        .attempts
+        .iter()
+        .map(|attempt| attempt.entry.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(attempted, ["a", "b"].into_iter().collect());
     assert_eq!(diagnostics.selected.as_ref().unwrap().entry, "b");
     assert_eq!(diagnostics.selected.as_ref().unwrap().peer, b_address);
     assert_eq!(

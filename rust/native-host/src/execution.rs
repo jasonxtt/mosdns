@@ -22,7 +22,7 @@ use crate::observer::{
     LocalFailureKind, QueryTerminalOutcome, ResponseDetails, ResponseFlags, ResponseSource,
     ResponseState as ObservedResponseState, TerminalObservation, UpstreamAttemptLedger,
     UpstreamAttemptList, UpstreamAttemptOutcome, UpstreamAttemptRecord, UpstreamDiagnosticAttempt,
-    UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamTransport,
+    UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamMetricAttempt, UpstreamTransport,
 };
 
 const DEFAULT_FUEL: u64 = 64;
@@ -205,6 +205,9 @@ impl ExecutionFacts<'_> {
             });
             self.response_source = Some(ResponseSource::Upstream(upstream));
         } else {
+            // Compatibility fallback for legacy test/embedding executors that
+            // do not expose the native entry ledger. Native catalog calls use
+            // record_invocation_attempt and stay ID-only when audit is off.
             self.upstream_attempts.push(UpstreamAttemptRecord {
                 upstream,
                 outcome: UpstreamAttemptOutcome::Response,
@@ -214,23 +217,34 @@ impl ExecutionFacts<'_> {
 
     fn record_invocation_attempt(
         &mut self,
-        upstream: String,
+        executable: ExecutableId,
+        entry_index: usize,
+        upstream: Option<String>,
         peer: Option<SocketAddr>,
         transport: Option<UpstreamTransport>,
         outcome: UpstreamAttemptOutcome,
     ) {
-        self.upstream_attempts.push(UpstreamAttemptRecord {
-            upstream: upstream.clone(),
+        self.upstream_attempts.push_metric(UpstreamMetricAttempt {
+            executable,
+            entry_index,
             outcome,
         });
-        if let Some(diagnostics) = &mut self.upstream_diagnostics {
-            diagnostics.attempts.push(UpstreamDiagnosticAttempt {
-                ordinal: diagnostics.attempts.len(),
-                entry: upstream,
-                peer,
-                transport,
-                outcome,
-            });
+        if let Some(upstream) = upstream {
+            if self.capture_audit_details {
+                self.upstream_attempts.push(UpstreamAttemptRecord {
+                    upstream: upstream.clone(),
+                    outcome,
+                });
+                if let Some(diagnostics) = &mut self.upstream_diagnostics {
+                    diagnostics.attempts.push(UpstreamDiagnosticAttempt {
+                        ordinal: diagnostics.attempts.len(),
+                        entry: upstream,
+                        peer,
+                        transport,
+                        outcome,
+                    });
+                }
+            }
         }
     }
 
@@ -298,11 +312,11 @@ impl Drop for ExecutionFacts<'_> {
         let mut ledger_had_entries = false;
         if let Some(executable) = self.in_flight_executable {
             for slot in ledger.slots() {
-                let Some(upstream) = invocation_identity(self.config, executable, slot.entry_index)
-                else {
-                    continue;
-                };
                 ledger_had_entries = true;
+                let upstream = self
+                    .capture_audit_details
+                    .then(|| invocation_identity(self.config, executable, slot.entry_index))
+                    .flatten();
                 let outcome = slot.outcome.unwrap_or_else(|| {
                     if self.cancellation.is_cancelled() {
                         UpstreamAttemptOutcome::Canceled
@@ -310,19 +324,30 @@ impl Drop for ExecutionFacts<'_> {
                         UpstreamAttemptOutcome::Interrupted
                     }
                 });
-                self.upstream_attempts.push(UpstreamAttemptRecord {
-                    upstream: upstream.clone(),
+                self.upstream_attempts.push_metric(UpstreamMetricAttempt {
+                    executable,
+                    entry_index: slot.entry_index,
                     outcome,
                 });
-                if let Some(diagnostics) = &mut self.upstream_diagnostics {
-                    diagnostics.attempts.push(UpstreamDiagnosticAttempt {
-                        ordinal: diagnostics.attempts.len(),
-                        entry: upstream,
-                        peer: slot.peer,
-                        transport: slot.transport,
-                        outcome,
-                    });
-                    diagnostics.selected = None;
+                if self.capture_audit_details {
+                    if let Some(upstream) = upstream {
+                        self.upstream_attempts.push(UpstreamAttemptRecord {
+                            upstream: upstream.clone(),
+                            outcome,
+                        });
+                        if let Some(diagnostics) = &mut self.upstream_diagnostics {
+                            diagnostics.attempts.push(UpstreamDiagnosticAttempt {
+                                ordinal: diagnostics.attempts.len(),
+                                entry: upstream,
+                                peer: slot.peer,
+                                transport: slot.transport,
+                                outcome,
+                            });
+                        }
+                    }
+                    if let Some(diagnostics) = &mut self.upstream_diagnostics {
+                        diagnostics.selected = None;
+                    }
                 }
             }
         }
@@ -355,6 +380,7 @@ impl Drop for ExecutionFacts<'_> {
             },
             self.in_flight_executable
                 .filter(|_| !ledger_had_entries)
+                .filter(|_| self.capture_audit_details)
                 .and_then(|executable| upstream_identity(self.config, executable)),
         );
     }
@@ -833,9 +859,10 @@ fn record_invocation_ledger(
         return;
     };
     for slot in ledger.slots() {
-        let Some(upstream) = invocation_identity(config, executable, slot.entry_index) else {
-            continue;
-        };
+        let upstream = facts
+            .capture_audit_details
+            .then(|| invocation_identity(config, executable, slot.entry_index))
+            .flatten();
         let outcome = slot.outcome.unwrap_or_else(|| {
             if facts.checkpoint.capture_audit_details() {
                 UpstreamAttemptOutcome::Interrupted
@@ -843,12 +870,23 @@ fn record_invocation_ledger(
                 UpstreamAttemptOutcome::Canceled
             }
         });
-        facts.record_invocation_attempt(upstream.clone(), slot.peer, slot.transport, outcome);
+        facts.record_invocation_attempt(
+            executable,
+            slot.entry_index,
+            upstream.clone(),
+            slot.peer,
+            slot.transport,
+            outcome,
+        );
         if selected_entry == Some(slot.entry_index) && outcome == UpstreamAttemptOutcome::Response {
-            facts.response_source = Some(ResponseSource::Upstream(upstream.clone()));
-            facts.select_invocation_attempt(upstream, slot.peer, slot.transport);
+            if let Some(upstream) = upstream {
+                facts.response_source = Some(ResponseSource::Upstream(upstream.clone()));
+                facts.select_invocation_attempt(upstream, slot.peer, slot.transport);
+            }
         } else if outcome != UpstreamAttemptOutcome::Response {
-            facts.record_invocation_failure(&upstream, outcome);
+            if let Some(upstream) = upstream {
+                facts.record_invocation_failure(&upstream, outcome);
+            }
         }
     }
 }
@@ -1214,7 +1252,14 @@ pub(crate) fn qualify_response(
 
 pub(crate) fn response_priority(response: &[u8]) -> u8 {
     match observe_response_metadata(response) {
-        Ok(metadata) if metadata.answer_count > 0 => 0,
+        Ok(metadata)
+            if metadata.answer_count > 0
+                && observe_answer_addresses(response)
+                    .map(|addresses| !addresses.is_empty())
+                    .unwrap_or(false) =>
+        {
+            0
+        }
         Ok(metadata) if metadata.rcode == 0 || metadata.rcode == 3 => 1,
         Ok(_) => 2,
         Err(_) => 3,

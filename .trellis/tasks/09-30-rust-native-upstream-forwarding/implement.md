@@ -128,3 +128,19 @@ unit. Implementation and validation evidence is retained in
 committed parent/head and changed-path list are supplied to the reviewer only
 after the narrow task commit is created. No Go/cgo/default-release,
 production, push, deployment, or 5B/5C/5D acceptance claim is included.
+
+## Review remediation closeout
+
+The dedicated reviewer’s first committed-range result was `FINAL: FAIL` with
+seven scoped findings covering response priority, live attempt facts, typed busy
+fallback, resolver-owner retention, selection rotation, failure choice, and
+audit-off allocation. The current follow-up range addresses each finding in
+the native forwarding implementation and the required upstream-core seams.
+The corrected isolated SSH validation, native build, disposable UI builds,
+and updated browser proof all passed; the transient remote test failure caused
+by an incorrect source-sync destination was corrected and rerun successfully.
+
+A new narrow commit and exact parent/head are supplied to the same dedicated
+reviewer for `REVIEW_ONLY` re-review. No unrelated dirty-worktree changes are
+included, and no Go/cgo/default-release, production, push, deployment, or
+5B/5C/5D acceptance claim is made.

@@ -23,7 +23,7 @@ use crate::config::{
 use crate::execution::{ExchangeError, ExchangeExecutor, InvocationExchange};
 use crate::observer::{
     AuditClock, AuditSnapshot, MetricsSnapshot, QueryObserver, UpstreamAttemptLedger,
-    UpstreamAttemptOutcome, UpstreamTransport,
+    UpstreamAttemptOutcome, UpstreamAttemptTracker, UpstreamTransport,
 };
 use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
@@ -227,14 +227,32 @@ impl HostAssembly {
                     .to_owned()
             })
             .collect::<Vec<_>>();
+        let metric_registry = config
+            .forward_invocations
+            .iter()
+            .flat_map(|invocation| {
+                config
+                    .forward_definitions
+                    .get(invocation.definition)
+                    .into_iter()
+                    .flat_map(move |definition| {
+                        invocation.entries.iter().filter_map(move |&entry_index| {
+                            definition.entries.get(entry_index).map(|entry| {
+                                (invocation.executable, entry_index, entry.identity.clone())
+                            })
+                        })
+                    })
+            })
+            .collect::<Vec<_>>();
         let audit_capacity = state_root
             .as_deref()
             .map(|root| crate::api::load_audit_capacity(root, options.audit_capacity))
             .unwrap_or(options.audit_capacity);
         let observer = Arc::new(
-            QueryObserver::try_with_clock(
+            QueryObserver::try_with_clock_and_registry(
                 config.listener.enable_audit,
                 upstream_identities,
+                metric_registry,
                 audit_capacity,
                 options.audit_clock.clone(),
             )
@@ -573,7 +591,6 @@ pub struct ForwardAdapter {
     target: ForwardTargetConfig,
     resolver: Option<Rc<BootstrapResolver>>,
     owner: RefCell<Option<Rc<ForwardOwner>>>,
-    retired_owners: RefCell<Vec<Rc<ForwardOwner>>>,
     active_peer: RefCell<Option<std::net::SocketAddr>>,
     tls_roots: Option<Arc<rustls::RootCertStore>>,
     /// Compatibility handle for existing host tests/introspection. The
@@ -600,13 +617,24 @@ impl ForwardOwner {
         query: &[u8],
         deadline: std::time::Instant,
         cancellation: TransportCancellation,
+        tracker: &mut UpstreamAttemptTracker,
     ) -> Result<ExchangeResponse, UpstreamError> {
         let request = ExchangeRequest::new(query)?;
         let context = ExchangeContext::new(deadline, cancellation);
         match self {
-            Self::Udp { policy, .. } => policy.exchange(request, context).await,
+            Self::Udp { policy, .. } => {
+                policy
+                    .exchange_with_phase_hook(request, context, |transport| {
+                        tracker.set_transport(match transport {
+                            Transport::Udp => UpstreamTransport::Udp,
+                            Transport::Tcp => UpstreamTransport::Tcp,
+                            Transport::Quic => UpstreamTransport::Tcp,
+                        });
+                    })
+                    .await
+            }
             Self::Tcp { reuse, fallback } => match reuse.exchange(request, context.clone()).await {
-                Err(UpstreamError::Runtime(SideEffectState::NotSent)) => {
+                Err(UpstreamError::Backpressure(SideEffectState::NotSent)) => {
                     fallback.exchange(request, context).await
                 }
                 result => result,
@@ -711,11 +739,20 @@ fn tls_policy(
 pub struct ForwardCatalog {
     owners: BTreeMap<mosdns_sequence_core::ExecutableId, Vec<Rc<ForwardAdapter>>>,
     concurrent: BTreeMap<mosdns_sequence_core::ExecutableId, usize>,
+    rotation: RefCell<u64>,
 }
 
 impl ForwardCatalog {
     #[cfg(test)]
     fn from_configs(configs: &[crate::config::ForwardConfig]) -> Result<Self, String> {
+        Self::from_configs_with_seed(configs, 1)
+    }
+
+    #[cfg(test)]
+    fn from_configs_with_seed(
+        configs: &[crate::config::ForwardConfig],
+        seed: u64,
+    ) -> Result<Self, String> {
         let mut owners = BTreeMap::new();
         for config in configs {
             if owners
@@ -735,7 +772,11 @@ impl ForwardCatalog {
             }
         }
         let concurrent = owners.keys().map(|executable| (*executable, 1)).collect();
-        Ok(Self { owners, concurrent })
+        Ok(Self {
+            owners,
+            concurrent,
+            rotation: RefCell::new(seed),
+        })
     }
 
     fn from_compiled_config(
@@ -778,7 +819,29 @@ impl ForwardCatalog {
             }
             owners.insert(invocation.executable, invocation_owners);
         }
-        Ok(Self { owners, concurrent })
+        let mut seed_bytes = [0_u8; 8];
+        let seed = if getrandom::fill(&mut seed_bytes).is_ok() {
+            u64::from_ne_bytes(seed_bytes)
+        } else {
+            0x9e37_79b9_7f4a_7c15
+        };
+        Ok(Self {
+            owners,
+            concurrent,
+            rotation: RefCell::new(seed),
+        })
+    }
+
+    fn rotation_start(&self, len: usize) -> usize {
+        if len == 0 {
+            return 0;
+        }
+        let mut state = self.rotation.borrow_mut();
+        let value = *state;
+        *state = value
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (value as usize) % len
     }
 
     #[must_use]
@@ -843,53 +906,85 @@ impl ExchangeExecutor for ForwardCatalog {
             return Box::pin(async move { Err(ExchangeError::UnknownExecutable(executable)) });
         };
         let concurrent = self.concurrent.get(&executable).copied().unwrap_or(1);
+        let query = query.to_vec();
+        let (header, question) = match parse_query(&query) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                return Box::pin(async move {
+                    Err(ExchangeError::Upstream(UpstreamError::InvalidRequest(
+                        mosdns_upstream_core::RequestError::Malformed,
+                    )))
+                });
+            }
+        };
         if owners.len() <= 1 || concurrent <= 1 {
             let owner = Rc::clone(&owners[0]);
-            let slot = ledger.start(owner.entry_index());
+            let shared = std::mem::take(ledger).into_shared();
+            let slot = shared.borrow_mut().start(owner.entry_index());
+            let mut tracker =
+                UpstreamAttemptTracker::new(Rc::clone(&shared), slot, cancellation.clone());
             return Box::pin(async move {
-                let result = owner.exchange(query, deadline, cancellation).await;
-                let peer = owner.current_peer();
-                let transport = owner.diagnostic_transport(result.as_ref().ok());
+                let result = owner
+                    .exchange_tracked(&query, deadline, cancellation, &mut tracker)
+                    .await;
+                let peer = tracker.peer();
+                let transport = tracker.transport();
                 let outcome = result
                     .as_ref()
                     .map(|_| UpstreamAttemptOutcome::Response)
                     .unwrap_or_else(attempt_outcome);
-                ledger.finish(slot, peer, Some(transport), outcome);
-                result
+                tracker.finish(peer, transport, outcome);
+                drop(tracker);
+                let response = result
                     .map(|response| InvocationExchange {
                         selected_entry: Some(owner.entry_index()),
                         selected_peer: peer,
                         response,
                     })
-                    .map_err(ExchangeError::Upstream)
+                    .map_err(ExchangeError::Upstream);
+                *ledger = UpstreamAttemptLedger::restore_from_shared(shared);
+                response
             });
         }
 
-        let query = query.to_vec();
         let scope = cancellation.child_token();
         let limit = concurrent.min(3).min(owners.len());
-        let owners = owners[..limit].to_vec();
+        let start = self.rotation_start(owners.len());
+        let owners = (0..limit)
+            .map(|offset| Rc::clone(&owners[(start + offset) % owners.len()]))
+            .collect::<Vec<_>>();
+        let shared = std::mem::take(ledger).into_shared();
         let slots = owners
             .iter()
-            .map(|owner| (owner.entry_index(), ledger.start(owner.entry_index())))
+            .map(|owner| {
+                (
+                    owner.entry_index(),
+                    shared.borrow_mut().start(owner.entry_index()),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         Box::pin(async move {
-            let (header, question) = parse_query(&query).map_err(|_| {
-                ExchangeError::Upstream(UpstreamError::InvalidRequest(
-                    mosdns_upstream_core::RequestError::Malformed,
-                ))
-            })?;
             let mut tasks = JoinSet::new();
             for owner in owners {
                 let entry_index = owner.entry_index();
                 let slot = slots[&entry_index];
                 let leg_cancellation = scope.child_token();
                 let leg_query = query.clone();
+                let shared = Rc::clone(&shared);
                 tasks.spawn_local(async move {
-                    let result = owner.exchange(&leg_query, deadline, leg_cancellation).await;
-                    let peer = owner.current_peer();
-                    let transport = owner.diagnostic_transport(result.as_ref().ok());
-                    (slot, entry_index, peer, transport, result)
+                    let mut tracker =
+                        UpstreamAttemptTracker::new(shared, slot, leg_cancellation.clone());
+                    let result = owner
+                        .exchange_tracked(&leg_query, deadline, leg_cancellation, &mut tracker)
+                        .await;
+                    let peer = tracker.peer();
+                    let transport = tracker.transport();
+                    let outcome = result
+                        .as_ref()
+                        .map(|_| UpstreamAttemptOutcome::Response)
+                        .unwrap_or_else(attempt_outcome);
+                    tracker.finish(peer, transport, outcome);
+                    (entry_index, peer, transport, result)
                 });
             }
 
@@ -897,27 +992,21 @@ impl ExchangeExecutor for ForwardCatalog {
             let mut last_error = None;
             while let Some(result) = tasks.join_next().await {
                 match result {
-                    Ok((slot, entry_index, peer, transport, Ok(response))) => {
+                    Ok((entry_index, peer, transport, Ok(response))) => {
                         let Some(wire) = crate::execution::qualify_response(
                             response.wire(),
                             header.id,
                             &question,
                         ) else {
-                            ledger.finish(
-                                slot,
+                            shared.borrow_mut().finish(
+                                slots[&entry_index],
                                 peer,
-                                Some(transport),
+                                transport,
                                 UpstreamAttemptOutcome::Failed,
                             );
-                            last_error = Some(UpstreamError::MalformedResponse);
+                            last_error.get_or_insert(UpstreamError::MalformedResponse);
                             continue;
                         };
-                        ledger.finish(
-                            slot,
-                            peer,
-                            Some(transport),
-                            UpstreamAttemptOutcome::Response,
-                        );
                         let priority = crate::execution::response_priority(&wire);
                         let replace = winner
                             .as_ref()
@@ -939,34 +1028,39 @@ impl ExchangeExecutor for ForwardCatalog {
                             scope.cancel();
                         }
                     }
-                    Ok((slot, _entry_index, peer, transport, Err(error))) => {
-                        ledger.finish(slot, peer, Some(transport), attempt_outcome(&error));
-                        last_error = Some(error);
+                    Ok((_entry_index, _peer, _transport, Err(error))) => {
+                        last_error.get_or_insert(error);
                     }
                     Err(_) => {
-                        last_error = Some(UpstreamError::Runtime(
+                        last_error.get_or_insert(UpstreamError::Runtime(
                             mosdns_upstream_core::SideEffectState::NotSent,
                         ));
                     }
                 }
             }
 
-            for (entry_index, slot) in slots {
-                if ledger.slots()[slot].outcome.is_none() {
-                    ledger.finish(slot, None, None, UpstreamAttemptOutcome::Interrupted);
+            for slot in slots.values() {
+                if shared.borrow().slots()[*slot].outcome.is_none() {
+                    shared.borrow_mut().finish(
+                        *slot,
+                        None,
+                        None,
+                        UpstreamAttemptOutcome::Interrupted,
+                    );
                     last_error.get_or_insert(UpstreamError::Runtime(
                         mosdns_upstream_core::SideEffectState::NotSent,
                     ));
-                    let _ = entry_index;
                 }
             }
 
             let Some((selected_entry, response, _)) = winner else {
+                *ledger = UpstreamAttemptLedger::restore_from_shared(shared);
                 return Err(ExchangeError::Upstream(
                     last_error.unwrap_or(UpstreamError::MalformedResponse),
                 ));
             };
-            let selected_peer = ledger
+            let selected_peer = shared
+                .borrow()
                 .slots()
                 .iter()
                 .find(|attempt| {
@@ -974,6 +1068,7 @@ impl ExchangeExecutor for ForwardCatalog {
                         && attempt.outcome == Some(UpstreamAttemptOutcome::Response)
                 })
                 .and_then(|attempt| attempt.peer);
+            *ledger = UpstreamAttemptLedger::restore_from_shared(shared);
             Ok(InvocationExchange {
                 response,
                 selected_entry: Some(selected_entry),
@@ -1066,7 +1161,6 @@ impl ForwardAdapter {
             target,
             resolver,
             owner: RefCell::new(owner),
-            retired_owners: RefCell::new(Vec::new()),
             active_peer: RefCell::new(initial_peer),
             tls_roots,
             legacy_upstream,
@@ -1081,25 +1175,6 @@ impl ForwardAdapter {
     #[must_use]
     pub const fn entry_index(&self) -> usize {
         self.entry_index
-    }
-
-    fn current_peer(&self) -> Option<std::net::SocketAddr> {
-        *self.active_peer.borrow()
-    }
-
-    pub(crate) fn diagnostic_transport(
-        &self,
-        response: Option<&ExchangeResponse>,
-    ) -> UpstreamTransport {
-        match self.target.scheme {
-            ForwardScheme::Udp => match response.map(ExchangeResponse::transport) {
-                Some(Transport::Tcp) => UpstreamTransport::Tcp,
-                _ => UpstreamTransport::Udp,
-            },
-            ForwardScheme::Tcp => UpstreamTransport::Tcp,
-            ForwardScheme::Tls => UpstreamTransport::Tls,
-            ForwardScheme::Https => UpstreamTransport::Https,
-        }
     }
 
     #[must_use]
@@ -1127,6 +1202,20 @@ impl ForwardAdapter {
         deadline: std::time::Instant,
         cancellation: TransportCancellation,
     ) -> Result<ExchangeResponse, UpstreamError> {
+        let shared = UpstreamAttemptLedger::default().into_shared();
+        let slot = shared.borrow_mut().start(self.entry_index);
+        let mut tracker = UpstreamAttemptTracker::new(shared, slot, cancellation.clone());
+        self.exchange_tracked(query, deadline, cancellation, &mut tracker)
+            .await
+    }
+
+    async fn exchange_tracked(
+        &self,
+        query: &[u8],
+        deadline: std::time::Instant,
+        cancellation: TransportCancellation,
+        tracker: &mut UpstreamAttemptTracker,
+    ) -> Result<ExchangeResponse, UpstreamError> {
         let deadline = deadline.min(std::time::Instant::now() + self.target.query_timeout);
         let owner = if let Some(resolver) = &self.resolver {
             let context = ExchangeContext::new(deadline, cancellation.clone());
@@ -1141,9 +1230,7 @@ impl ForwardAdapter {
                     build_owner(&self.target, peer, self.tls_roots.as_deref())
                         .map_err(|_| UpstreamError::Connect)?,
                 );
-                if let Some(previous) = self.owner.borrow_mut().replace(Rc::clone(&next)) {
-                    self.retired_owners.borrow_mut().push(previous);
-                }
+                let _previous = self.owner.borrow_mut().replace(Rc::clone(&next));
                 *self.active_peer.borrow_mut() = Some(peer);
                 next
             } else {
@@ -1152,19 +1239,24 @@ impl ForwardAdapter {
         } else {
             self.owner.borrow().clone().ok_or(UpstreamError::Connect)?
         };
-        owner.exchange(query, deadline, cancellation).await
+        let peer = if self.resolver.is_some() {
+            *self.active_peer.borrow()
+        } else {
+            self.target.dial_addr
+        };
+        let transport = match self.target.scheme {
+            ForwardScheme::Udp => UpstreamTransport::Udp,
+            ForwardScheme::Tcp => UpstreamTransport::Tcp,
+            ForwardScheme::Tls => UpstreamTransport::Tls,
+            ForwardScheme::Https => UpstreamTransport::Https,
+        };
+        tracker.phase(peer, Some(transport));
+        owner.exchange(query, deadline, cancellation, tracker).await
     }
 
     async fn close(&self) {
-        let mut owners = self
-            .retired_owners
-            .borrow_mut()
-            .drain(..)
-            .collect::<Vec<_>>();
-        if let Some(owner) = self.owner.borrow_mut().take() {
-            owners.push(owner);
-        }
-        for owner in owners {
+        let owner = self.owner.borrow_mut().take();
+        if let Some(owner) = owner {
             owner.close().await;
         }
         if let Some(legacy) = &self.legacy_upstream {
