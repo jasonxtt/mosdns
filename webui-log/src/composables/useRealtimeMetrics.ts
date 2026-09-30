@@ -41,6 +41,7 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
   const warningMessage = ref('')
   const lastUpdatedText = ref('--')
   const recentLogs = ref<DashboardAuditLog[]>([])
+  const recentLogsError = ref('')
 
   const inFlight = ref(false)
   const auditCapacity = ref(0)
@@ -118,6 +119,7 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
       if (logsResult.status === 'fulfilled') {
         const logs = logsResult.value
         recentLogs.value = logs
+        recentLogsError.value = ''
         if (logs.length > 0) {
           const newest = logs[0]
           const newestKey = buildLogKey(newest)
@@ -136,6 +138,10 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
 
           previousTopLogKey = newestKey
         }
+      } else {
+        recentLogs.value = []
+        const message = logsResult.reason instanceof Error ? logsResult.reason.message : String(logsResult.reason)
+        recentLogsError.value = `最近日志读取失败: ${message}`
       }
 
       if (currentQueries === 0 && fallbackCurrentQueries > 0) {
@@ -150,7 +156,7 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
       metrics.currentLatency = currentLatency
 
       appendPoint(formatTimelineLabel(new Date()), currentQueries, currentLatency)
-      warningMessage.value = ''
+      warningMessage.value = recentLogsError.value
       lastUpdatedText.value = new Date().toLocaleString('zh-CN', { hour12: false })
       initialized.value = true
     } catch (error) {
@@ -202,6 +208,7 @@ export function useRealtimeMetrics(options: UseRealtimeMetricsOptions = {}) {
     warningMessage,
     lastUpdatedText,
     recentLogs,
+    recentLogsError,
     refreshMetrics
   }
 }
