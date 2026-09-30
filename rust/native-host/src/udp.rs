@@ -220,6 +220,7 @@ async fn process_request(task: RequestTask) {
         upstream_targets: execution.upstream_targets,
         selected_upstream: execution.selected_upstream,
         upstream_attempts: execution.upstream_attempts,
+        upstream_diagnostics: execution.upstream_diagnostics,
         failure_provenance: execution.failure_provenance,
         elapsed: std::time::Duration::ZERO,
     });

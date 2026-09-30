@@ -23,8 +23,9 @@ pub use cache::{CacheAdapterError, CacheClock, CacheTestClock, NativeCacheAdapte
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
     ApiConfig, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig, ForwardConfig,
-    ListenerConfig, ListenerKind, LogLevel, SequenceConfig, compile_yaml, compile_yaml_with_base,
-    load_and_compile, load_yaml,
+    ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig, ForwardScheme,
+    ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel, SequenceConfig, compile_yaml,
+    compile_yaml_with_base, load_and_compile, load_yaml,
 };
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{
@@ -32,7 +33,8 @@ pub use observer::{
     AuditTestClock, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,
     FailureProvenance, LocalFailureKind, MetricsSnapshot, QueryTerminalOutcome, QueryTransport,
     ResponseDetails, ResponseFlags, ResponseSource, ResponseState, UpstreamAttemptMetricsSnapshot,
-    UpstreamAttemptOutcome, UpstreamAttemptRecord,
+    UpstreamAttemptOutcome, UpstreamAttemptRecord, UpstreamDiagnosticAttempt,
+    UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamTransport,
 };
 pub use tcp::{TcpServer, TcpServerError};
 pub use udp::{UdpServer, UdpServerError};

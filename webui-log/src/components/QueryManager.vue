@@ -986,6 +986,30 @@ onBeforeUnmount(() => {
             <div><strong>最终上游组:</strong> {{ selectedLog.final_upstream || '-' }}</div>
             <div><strong>上游目标:</strong> {{ selectedLog.upstream_targets || '-' }}</div>
             <div><strong>最终上游:</strong> {{ selectedLog.selected_upstream || '-' }}</div>
+            <div v-if="selectedLog.upstream_diagnostics?.schema_version === 1" class="detail-wide">
+              <strong>原生上游诊断:</strong>
+              <span v-if="selectedLog.upstream_diagnostics.selected">
+                选中 {{ selectedLog.upstream_diagnostics.selected.entry || '-' }} ·
+                {{ selectedLog.upstream_diagnostics.selected.peer || '-' }} ·
+                {{ selectedLog.upstream_diagnostics.selected.transport || '-' }}
+              </span>
+              <span v-else>未选中最终网络上游</span>
+              <div class="table-wrap upstream-diagnostics-table">
+                <table>
+                  <thead><tr><th>序号</th><th>Entry</th><th>Peer</th><th>传输</th><th>结果</th></tr></thead>
+                  <tbody>
+                    <tr v-if="!selectedLog.upstream_diagnostics.attempts?.length"><td colspan="5" class="empty">无已启动上游</td></tr>
+                    <tr v-for="attempt in (selectedLog.upstream_diagnostics.attempts || [])" :key="`diagnostic-${attempt.ordinal}`">
+                      <td>{{ attempt.ordinal ?? '-' }}</td>
+                      <td class="mono">{{ attempt.entry || '-' }}</td>
+                      <td class="mono">{{ attempt.peer || '-' }}</td>
+                      <td>{{ attempt.transport || '-' }}</td>
+                      <td>{{ attempt.outcome || '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
             <div>
               <strong>响应码:</strong>
               {{ selectedLog.response_code || '-' }}<span v-if="selectedLog.is_blocked"> (已拦截)</span>

@@ -67,6 +67,21 @@ export interface DashboardAuditLog {
   final_upstream?: string
   upstream_targets?: string
   selected_upstream?: string
+  upstream_diagnostics?: {
+    schema_version?: number
+    selected?: {
+      entry?: string
+      peer?: string
+      transport?: string
+    }
+    attempts?: Array<{
+      ordinal?: number
+      entry?: string
+      peer?: string
+      transport?: string
+      outcome?: string
+    }>
+  }
   matched_rule_source?: string
 }
 

@@ -30,7 +30,7 @@ use crate::config::CompiledConfig;
 use crate::managed::ManagedDomainSet;
 use crate::observer::{
     AnswerDetailsStatus, AuditClock, AuditReadSnapshot, AuditRecord, AuditStatsSnapshot,
-    AuditTimingSnapshot, QueryObserver, ResponseState,
+    AuditTimingSnapshot, QueryObserver, ResponseState, UpstreamAttemptOutcome, UpstreamDiagnostics,
 };
 use crate::udp::{drain_tasks, reap_one_task};
 
@@ -838,7 +838,35 @@ struct AuditLogResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_upstream: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    upstream_diagnostics: Option<AuditUpstreamDiagnostics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     matched_rule_source: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AuditUpstreamDiagnostics {
+    schema_version: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected: Option<AuditUpstreamSelected>,
+    attempts: Vec<AuditUpstreamAttempt>,
+}
+
+#[derive(Serialize)]
+struct AuditUpstreamSelected {
+    entry: String,
+    peer: String,
+    transport: &'static str,
+}
+
+#[derive(Serialize)]
+struct AuditUpstreamAttempt {
+    ordinal: usize,
+    entry: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    peer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transport: Option<&'static str>,
+    outcome: &'static str,
 }
 
 #[derive(Serialize)]
@@ -1090,7 +1118,42 @@ fn project_log(record: &AuditRecord) -> AuditLogResponse {
         final_upstream: record.final_upstream.clone(),
         upstream_targets: record.upstream_targets.clone(),
         selected_upstream: record.selected_upstream.clone(),
+        upstream_diagnostics: record
+            .upstream_diagnostics
+            .as_ref()
+            .map(project_upstream_diagnostics),
         matched_rule_source: record.matched_rule_source.clone(),
+    }
+}
+
+fn project_upstream_diagnostics(diagnostics: &UpstreamDiagnostics) -> AuditUpstreamDiagnostics {
+    AuditUpstreamDiagnostics {
+        schema_version: diagnostics.schema_version,
+        selected: diagnostics
+            .selected
+            .as_ref()
+            .map(|selected| AuditUpstreamSelected {
+                entry: selected.entry.clone(),
+                peer: selected.peer.to_string(),
+                transport: selected.transport.as_str(),
+            }),
+        attempts: diagnostics
+            .attempts
+            .iter()
+            .map(|attempt| AuditUpstreamAttempt {
+                ordinal: attempt.ordinal,
+                entry: attempt.entry.clone(),
+                peer: attempt.peer.map(|peer| peer.to_string()),
+                transport: attempt.transport.map(|transport| transport.as_str()),
+                outcome: match attempt.outcome {
+                    UpstreamAttemptOutcome::Response => "response",
+                    UpstreamAttemptOutcome::TimedOut => "timed_out",
+                    UpstreamAttemptOutcome::Failed => "failed",
+                    UpstreamAttemptOutcome::Canceled => "canceled",
+                    UpstreamAttemptOutcome::Interrupted => "interrupted",
+                },
+            })
+            .collect(),
     }
 }
 

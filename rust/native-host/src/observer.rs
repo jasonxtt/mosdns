@@ -246,6 +246,106 @@ pub enum UpstreamAttemptOutcome {
     Interrupted,
 }
 
+/// The destination transport used by a configured upstream leg.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UpstreamTransport {
+    Udp,
+    Tcp,
+    Tls,
+    Https,
+}
+
+impl UpstreamTransport {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Udp => "udp",
+            Self::Tcp => "tcp",
+            Self::Tls => "tls",
+            Self::Https => "https",
+        }
+    }
+}
+
+/// The selected network leg in the optional schema-versioned diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpstreamDiagnosticSelected {
+    pub entry: String,
+    pub peer: SocketAddr,
+    pub transport: UpstreamTransport,
+}
+
+/// One started configured entry in the optional schema-versioned diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpstreamDiagnosticAttempt {
+    pub ordinal: usize,
+    pub entry: String,
+    pub peer: Option<SocketAddr>,
+    pub transport: Option<UpstreamTransport>,
+    pub outcome: UpstreamAttemptOutcome,
+}
+
+/// Native-only schema 1 supplier diagnostics. Old supplier fields remain the
+/// compatibility surface; this object is emitted only for new detailed native
+/// records with actual structured instrumentation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpstreamDiagnostics {
+    pub schema_version: u8,
+    pub selected: Option<UpstreamDiagnosticSelected>,
+    pub attempts: Vec<UpstreamDiagnosticAttempt>,
+}
+
+/// Copyable host-side attempt state shared by the async invocation and the
+/// terminal checkpoint. It deliberately carries entry IDs and enums rather
+/// than display strings so cancellation/drop paths do not need an audit-only
+/// allocation.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct UpstreamAttemptLedger {
+    slots: Vec<UpstreamAttemptSlot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct UpstreamAttemptSlot {
+    pub entry_index: usize,
+    pub peer: Option<SocketAddr>,
+    pub transport: Option<UpstreamTransport>,
+    pub outcome: Option<UpstreamAttemptOutcome>,
+}
+
+impl UpstreamAttemptLedger {
+    pub(crate) fn clear(&mut self) {
+        self.slots.clear();
+    }
+
+    pub(crate) fn start(&mut self, entry_index: usize) -> usize {
+        let slot = self.slots.len();
+        self.slots.push(UpstreamAttemptSlot {
+            entry_index,
+            peer: None,
+            transport: None,
+            outcome: None,
+        });
+        slot
+    }
+
+    pub(crate) fn finish(
+        &mut self,
+        slot: usize,
+        peer: Option<SocketAddr>,
+        transport: Option<UpstreamTransport>,
+        outcome: UpstreamAttemptOutcome,
+    ) {
+        if let Some(entry) = self.slots.get_mut(slot) {
+            entry.peer = peer;
+            entry.transport = transport;
+            entry.outcome = Some(outcome);
+        }
+    }
+
+    pub(crate) fn slots(&self) -> &[UpstreamAttemptSlot] {
+        &self.slots
+    }
+}
+
 /// One actual upstream attempt made by the request execution path.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpstreamAttemptRecord {
@@ -432,6 +532,8 @@ pub struct AuditRecord {
     pub selected_upstream: Option<String>,
     /// Actual upstream attempts in execution order.
     pub upstream_attempts: Vec<UpstreamAttemptRecord>,
+    /// Optional native schema-versioned supplier facts.
+    pub upstream_diagnostics: Option<UpstreamDiagnostics>,
     /// Distinct failure provenance when execution establishes one.
     pub failure_provenance: Option<FailureProvenance>,
 }
@@ -615,6 +717,7 @@ pub(crate) struct TerminalObservation {
     pub upstream_targets: Option<String>,
     pub selected_upstream: Option<String>,
     pub upstream_attempts: UpstreamAttemptList,
+    pub upstream_diagnostics: Option<UpstreamDiagnostics>,
     pub failure_provenance: Option<FailureProvenance>,
     pub elapsed: Duration,
 }
@@ -635,6 +738,7 @@ impl Default for TerminalObservation {
             upstream_targets: None,
             selected_upstream: None,
             upstream_attempts: UpstreamAttemptList::default(),
+            upstream_diagnostics: None,
             failure_provenance: None,
             elapsed: Duration::ZERO,
         }
@@ -656,6 +760,8 @@ pub(crate) struct ExecutionCheckpoint {
     upstream_targets: Option<String>,
     selected_upstream: Option<String>,
     upstream_attempts: UpstreamAttemptList,
+    upstream_diagnostics: Option<UpstreamDiagnostics>,
+    attempt_ledger: UpstreamAttemptLedger,
     failure_provenance: Option<FailureProvenance>,
     in_flight_upstream: Option<String>,
     completed_observation: Option<TerminalObservation>,
@@ -677,6 +783,8 @@ impl ExecutionCheckpoint {
             upstream_targets: None,
             selected_upstream: None,
             upstream_attempts: UpstreamAttemptList::default(),
+            upstream_diagnostics: None,
+            attempt_ledger: UpstreamAttemptLedger::default(),
             failure_provenance: None,
             in_flight_upstream: None,
             completed_observation: None,
@@ -685,6 +793,18 @@ impl ExecutionCheckpoint {
 
     pub(crate) fn capture_audit_details(&self) -> bool {
         self.capture_audit_details
+    }
+
+    pub(crate) fn begin_attempt_ledger(&mut self) {
+        self.attempt_ledger.clear();
+    }
+
+    pub(crate) fn attempt_ledger_mut(&mut self) -> &mut UpstreamAttemptLedger {
+        &mut self.attempt_ledger
+    }
+
+    pub(crate) fn take_attempt_ledger(&mut self) -> UpstreamAttemptLedger {
+        std::mem::take(&mut self.attempt_ledger)
     }
 
     pub(crate) fn capture_partial(
@@ -708,6 +828,8 @@ impl ExecutionCheckpoint {
             .clone_from(&observation.selected_upstream);
         self.upstream_attempts
             .clone_from(&observation.upstream_attempts);
+        self.upstream_diagnostics
+            .clone_from(&observation.upstream_diagnostics);
         self.failure_provenance
             .clone_from(&observation.failure_provenance);
         self.in_flight_upstream = in_flight_upstream;
@@ -744,6 +866,7 @@ impl ExecutionCheckpoint {
             upstream_targets: self.upstream_targets.clone(),
             selected_upstream: self.selected_upstream.clone(),
             upstream_attempts,
+            upstream_diagnostics: self.upstream_diagnostics.clone(),
             failure_provenance: self.failure_provenance.clone(),
             elapsed,
         }
@@ -1286,6 +1409,7 @@ impl AdmittedQueryGuard {
                 upstream_targets: observation.upstream_targets,
                 selected_upstream: observation.selected_upstream,
                 upstream_attempts: observation.upstream_attempts.into_vec(),
+                upstream_diagnostics: observation.upstream_diagnostics,
                 failure_provenance: observation.failure_provenance,
             }
         });
@@ -1824,6 +1948,7 @@ mod tests {
             matched_group: None,
             final_upstream: Some("route-a".to_owned()),
             upstream_attempts: observation.upstream_attempts.into_vec(),
+            upstream_diagnostics: observation.upstream_diagnostics,
             failure_provenance: None,
             trace_id: "n-11111111111111111111111111111111-0000000000000001".to_owned(),
             response_details: ResponseDetails::no_response(),
