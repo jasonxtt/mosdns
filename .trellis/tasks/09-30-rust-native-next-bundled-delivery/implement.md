@@ -17,19 +17,23 @@ this PRD/design and the backend spec index before code changes.
   evidence, parent roadmap and dirty-path inventory. `docs/rust/next-stage-plan.md`
   and parent roadmap documents have pre-existing uncommitted work; do not
   stage or overwrite those documents. The new child's eight task artifacts
-  and the exact child-link change in parent `task.json` belong together in
-  the planning range. Trellis auto-commit remains disabled.
+  The parent `task.json` already contains this child link as workspace metadata
+  and is outside this task's committed range; inspect it read-only and do not
+  stage it here. Trellis auto-commit remains disabled.
 - [ ] Before implementation approval, validate this child and the parent
   task metadata with `task.py validate`, run `git diff --check`, and inspect
-  the precise planning diff: eight child artifacts plus only the new child
-  link in parent `task.json`. Never stage all of `.trellis/tasks` or use
-  `git add .` in this dirty worktree.
+  the precise planning diff containing only this child's eight artifacts.
+  Never stage all of `.trellis/tasks` or use `git add .` in this dirty
+  worktree.
 - [ ] Slice 0 freezes source-level contracts from the scoped v1 handlers in
   `coremain/api_audit.go`, `api_audit_v2.go:16-205`,
   `audit.go:205-245,698-844,918-1320`, `state_files.go:41-110`,
   native `observer.rs`, and the current Vue dashboard/System callers. Record
   exact JSON samples, route method/body/type, named window definitions and
-  settings precedence under `research/` before implementing their handlers.
+  settings precedence under `research/api-contract.md` before implementing
+  their handlers. The route matrix and bounded v2 schemas in that file are
+  part of this reviewed planning contract; changing them requires a new
+  planning review.
   Follow the frozen root-name, unknown-qtype, timestamp and IPv4-mapped
   address projections in design. Any new product
   deviation returns to the PRD and planning review.
@@ -49,9 +53,10 @@ this PRD/design and the backend spec index before code changes.
   eligible requests; terminalization samples capturing once and publishes a
   whole record. Keep DNS locks short; no metrics reset from audit controls.
 - [ ] Run the focused observer, UDP/TCP and existing native-host management
-  regressions on `mosdns-rust`; prove real DNS progress while repeated read
-  requests run against a near-full 400000-record ring. Choose a bounded read
-  strategy without full-record clone for a small log page.
+  regressions on `mosdns-rust`; prove the internal bounded observer snapshot
+  or projection primitive is safe under concurrent real DNS progress at a
+  near-full 400000-record ring. Slice 0 does not require HTTP read routes yet
+  and must not depend on Slice 2's pagination implementation.
 
 ## Slice 1 — v1 HTTP controls and persistent capacity
 
@@ -66,10 +71,13 @@ this PRD/design and the backend spec index before code changes.
 - [ ] Add settings tests: default 100000, canonical `webinfo` precedence
   even when malformed, valid legacy `state/` and root locations, malformed
   JSON/type fallback, missing/null capacity as zero, unknown fields accepted,
-  saved out-of-range clamp, saved zero, fresh-host restart, temp-write failure
-  and final-replace failure. Keep file loader separate from strict POST parser.
-  Verify old file bytes, old runtime capacity/ring, no temp leftovers and a
-  5xx failure. A slow injected write must not stall real DNS readers.
+  saved out-of-range clamp, saved zero, fresh-host restart, no-explicit-state-
+  root rejection, temp-write failure and final-replace failure. Keep file
+  loader separate from strict POST parser. Verify old file bytes, old runtime
+  capacity/ring, no temp leftovers and a 5xx failure. Also inject a failure
+  while migrating a valid legacy source and verify the source/value remain
+  intact and no incomplete canonical file is published. A slow injected write
+  must not stall real DNS readers.
 - [ ] Implement serialized persist-before-publish on a blocking pool using
   same-directory replacement and one clear/capacity publication step. Reuse
   the existing supervisor; test both listener cleanup/rebind and a running
@@ -81,7 +89,9 @@ this PRD/design and the backend spec index before code changes.
   `/logs?page=&limit=` with real DNS requests. Show stop/clear/resize/eviction
   change audit numbers while `MetricsSnapshot` continues growing. A recent
   window and an incomplete window must report truthful coverage; empty ring
-  must omit `coverage_start`. Add a narrow
+  must omit `coverage_start`. Exercise repeated HTTP stats/windows/log reads at
+  a near-full ring while real DNS continues; this is the Slice 2 API-level
+  load proof built on Slice 0's internal projection primitive. Add a narrow
   injectable test clock for both record admission wall time and window now;
   prove cutoff equality, before/after cutoff and eviction-driven completeness
   using real DNS requests.

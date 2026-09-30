@@ -2,3 +2,4 @@
 {"file": ".trellis/spec/backend/rust-migration.md", "reason": "Use the pure native host and retain 5D/Phase 6 gates without extending hybrid scaffolding."}
 {"file": ".trellis/spec/backend/error-handling.md", "reason": "Keep failure propagation and rollback visible at HTTP, file and runtime boundaries."}
 {"file": ".trellis/tasks/09-30-rust-native-next-bundled-delivery/research/observability-option.md", "reason": "Current source anchors and audit/metrics/Vue compatibility risks for Slice 0."}
+{"file": ".trellis/tasks/09-30-rust-native-next-bundled-delivery/research/api-contract.md", "reason": "Frozen v1/v2 wire schemas, status/body/content-type rules and bounded error contract for implementation tests."}
