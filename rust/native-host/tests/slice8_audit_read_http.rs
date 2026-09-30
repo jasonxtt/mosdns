@@ -80,7 +80,7 @@ fn udp_query_with_timeout(listener: SocketAddr, request: &[u8], timeout: Duratio
 fn tcp_query(listener: SocketAddr, request: &[u8]) -> Vec<u8> {
     let mut stream = StdTcpStream::connect(listener).expect("DNS TCP connect");
     stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
+        .set_read_timeout(Some(Duration::from_secs(7)))
         .expect("DNS TCP timeout");
     stream
         .write_all(
@@ -164,10 +164,10 @@ fn malformed_response(query: &[u8]) -> Vec<u8> {
     response.extend_from_slice(&query[12..]);
     response.extend_from_slice(&[
         0xc0, 0x0c, // owner pointer
-        0, 5, // CNAME
+        0, 16, // TXT
         0, 1, // IN
         0, 0, 0, 60, // TTL
-        0, 3, 0xc0, 0x0c, // declared RDATA is truncated
+        0, 2, 3, b'x', // structurally valid wire; TXT projection is truncated
     ]);
     response
 }
@@ -373,6 +373,91 @@ plugins:
     mosdns_native_host::load_and_compile(&path).expect("compile cache config")
 }
 
+fn replacement_config(
+    root: &std::path::Path,
+    dns_port: u16,
+    api_port: u16,
+    child_port: u16,
+    parent_port: u16,
+) -> mosdns_native_host::CompiledConfig {
+    let yaml = format!(
+        r#"log:
+  level: error
+api:
+  http: "127.0.0.1:{api_port}"
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $child
+      - exec: $parent
+  - tag: child
+    type: sequence
+    args:
+      - exec: $child_forward
+  - tag: parent
+    type: sequence
+    args:
+      - exec: $parent_forward
+  - tag: child_forward
+    type: forward
+    args:
+      upstreams:
+        - tag: child_peer
+          addr: "udp://127.0.0.1:{child_port}"
+  - tag: parent_forward
+    type: forward
+    args:
+      upstreams:
+        - tag: parent_peer
+          addr: "udp://127.0.0.1:{parent_port}"
+  - tag: listener
+    type: udp_server
+    args:
+      entry: entry
+      listen: "127.0.0.1:{dns_port}"
+      enable_audit: true
+"#
+    );
+    let path = root.join("replacement-config.yaml");
+    std::fs::write(&path, yaml).expect("write replacement config");
+    mosdns_native_host::load_and_compile(&path).expect("compile replacement config")
+}
+
+fn local_default_config(
+    root: &std::path::Path,
+    dns_port: u16,
+    api_port: u16,
+) -> mosdns_native_host::CompiledConfig {
+    let yaml = format!(
+        r#"log:
+  level: error
+api:
+  http: "127.0.0.1:{api_port}"
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: reject 3
+  - tag: unused_forward
+    type: forward
+    args:
+      upstreams:
+        - tag: unused_peer
+          addr: "udp://127.0.0.1:1"
+  - tag: listener
+    type: udp_server
+    args:
+      entry: entry
+      listen: "127.0.0.1:{dns_port}"
+      enable_audit: true
+"#
+    );
+    let path = root.join("local-default-config.yaml");
+    std::fs::write(&path, yaml).expect("write local default config");
+    mosdns_native_host::load_and_compile(&path).expect("compile local default config")
+}
+
 fn at(seconds: u64, nanos: u32) -> SystemTime {
     UNIX_EPOCH + Duration::new(seconds, nanos)
 }
@@ -493,6 +578,10 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         assert_eq!(logs_json["logs"][0]["response_code"], "NXDOMAIN");
         assert_eq!(logs_json["logs"][0]["answer_details_status"], "complete");
         assert!(logs_json["logs"][0]["response_flags"]["RA"].is_boolean());
+        let local_default = http_request(api, "GET", "/api/v2/audit/logs/domain?domain=old.example").await;
+        let local_default_json: Value = serde_json::from_str(&local_default.body).expect("local default JSON");
+        assert_eq!(local_default_json["pagination"]["total_items"], 1);
+        assert_eq!(local_default_json["logs"][0]["effective_tag"], Value::Null);
 
         let page_one = http_request(api, "GET", "/api/v2/audit/logs?page=1&limit=2").await;
         let page_one_json: Value = serde_json::from_str(&page_one.body).expect("page one JSON");
@@ -542,6 +631,8 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let rich_filters = [
             ("domain=rich.example", 1),
             ("domain=example", 4),
+            ("domain=rich.example", 1),
+            ("domain=example.com", 0),
             ("answer_ip=192.0.2.55", 1),
             ("cname=alias.example.", 1),
             ("domain_set=rich_rules", 1),
@@ -683,14 +774,20 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         })
         .await
         .expect("malformed DNS client");
-        validate_response(&malformed).expect("listener SERVFAIL response");
-        assert_eq!(malformed[3] & 0x0f, 2);
+        validate_response(&malformed).expect("listener decode-error response");
+        assert_eq!(malformed[3] & 0x0f, 0);
         let malformed_logs =
             http_request(api, "GET", "/api/v2/audit/logs?domain=decode-error.example").await;
         let malformed_body: Value =
             serde_json::from_str(&malformed_logs.body).expect("malformed audit JSON");
-        assert_eq!(malformed_body["logs"][0]["response_code"], "SERVFAIL");
-        assert_eq!(malformed_body["logs"][0]["selected_upstream"], Value::Null);
+        assert_eq!(malformed_body["logs"][0]["response_code"], "NOERROR");
+        assert_eq!(
+            malformed_body["logs"][0]["selected_upstream"],
+            format!("127.0.0.1:{upstream_port}")
+        );
+        assert_eq!(malformed_body["logs"][0]["answer_details_status"], "decode_error");
+        assert_eq!(malformed_body["logs"][0]["answers"], serde_json::json!([]));
+        assert_eq!(malformed_body["logs"][0]["answer_decode_error"], "invalid_rdata");
         let timed_out = tokio::task::spawn_blocking(move || {
             udp_query_with_timeout(
                 dns,
@@ -763,6 +860,15 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
                 { "key": "evict-middle.example", "count": 1 },
                 { "key": "evict-new.example", "count": 1 }
             ])
+        );
+        let evicted_slowest = http_request(api, "GET", "/api/v2/audit/rank/slowest?limit=300").await;
+        let evicted_slowest_json: Value = serde_json::from_str(&evicted_slowest.body).expect("evicted slowest");
+        assert!(evicted_slowest_json
+            .as_array()
+            .expect("evicted slowest array")
+            .iter()
+            .any(|item| item["query_name"] == "evict-old.example"),
+            "slowest history must retain records evicted from the ordinary ring"
         );
 
         for id in 0x8200..0x8210 {
@@ -941,12 +1047,15 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let large_answer_projection_bytes_per_record = 49_152_u64;
         let estimated_large_projection =
             large_answer_projection_bytes_per_record * 400_000_u64;
-        let two_view_projection = body_bytes
+        let handle_bytes = u64::try_from(std::mem::size_of::<Arc<mosdns_native_host::AuditRecord>>())
+            .expect("Arc handle size fits u64");
+        let two_view_projection = handle_bytes
+            .saturating_mul(400_000)
             .saturating_mul(2)
-            .saturating_add(u64::try_from(full_slowest.body.len()).expect("slowest body length"));
+            .saturating_add(handle_bytes.saturating_mul(300));
         assert!(estimated_large_projection > two_view_projection);
         println!(
-            "resource-screen: retained=400000 concurrent_reads=2 dns_progress_during_reads={} logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02} large_answer_projection_bytes_per_record={} estimated_400000_large_projection_bytes={} two_view_projection_bytes={}",
+            "resource-screen: retained=400000 concurrent_reads=2 dns_progress_during_reads={} logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02} large_answer_projection_bytes_per_record={} estimated_400000_large_projection_bytes={} two_snapshot_arc_handle_bytes={}",
             dns_progress_during_reads,
             full_logs.body.len(),
             bytes_per_record_hundredths / 100,
@@ -1075,6 +1184,7 @@ fn udp_real_listener_audits_cache_miss_hit_and_ttl_aging() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn tcp_real_listener_preserves_positive_cname_and_audit_projection() {
     validate_response(&rich_response(&dns_query_type(0x9101, "rich.example.", 28)))
         .expect("valid rich AAAA response");
@@ -1137,11 +1247,188 @@ fn tcp_real_listener_preserves_positive_cname_and_audit_projection() {
         );
         assert_eq!(body["logs"][0]["answers"][0]["type"], "CNAME");
         assert_eq!(body["logs"][0]["answers"][1]["data"], "2001:db8::55");
+
+        let raw = tokio::task::spawn_blocking(move || {
+            tcp_query(dns, &dns_query_type(0x9102, "raw.example.", 1))
+        })
+        .await
+        .expect("TCP raw DNS client");
+        validate_response(&raw).expect("TCP raw response");
+        let raw_logs =
+            http_request(api, "GET", "/api/v2/audit/logs/domain?domain=raw.example").await;
+        let raw_body: Value = serde_json::from_str(&raw_logs.body).expect("TCP raw audit JSON");
+        assert_eq!(raw_body["logs"][0]["answer_details_status"], "raw_rdata");
+        assert_eq!(raw_body["logs"][0]["answers"][2]["type"], "TYPE65000");
+
+        let decode_error = tokio::task::spawn_blocking(move || {
+            tcp_query(dns, &dns_query_type(0x9103, "decode-error.example.", 1))
+        })
+        .await
+        .expect("TCP decode-error DNS client");
+        validate_response(&decode_error).expect("TCP decode-error response");
+        assert_eq!(decode_error[3] & 0x0f, 0);
+        let decode_logs = http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs/domain?domain=decode-error.example",
+        )
+        .await;
+        let decode_body: Value =
+            serde_json::from_str(&decode_logs.body).expect("TCP decode audit JSON");
+        assert_eq!(decode_body["logs"][0]["response_code"], "NOERROR");
+        assert_eq!(
+            decode_body["logs"][0]["answer_details_status"],
+            "decode_error"
+        );
+        assert_eq!(
+            decode_body["logs"][0]["answer_decode_error"],
+            "invalid_rdata"
+        );
+
+        let timed_out = tokio::task::spawn_blocking(move || {
+            tcp_query(dns, &dns_query_type(0x9104, "timeout.example.", 1))
+        })
+        .await
+        .expect("TCP timeout DNS client");
+        validate_response(&timed_out).expect("TCP timeout response");
+        assert_eq!(timed_out[3] & 0x0f, 2);
+        let timeout_logs = http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs/domain?domain=timeout.example",
+        )
+        .await;
+        let timeout_body: Value =
+            serde_json::from_str(&timeout_logs.body).expect("TCP timeout audit JSON");
+        assert_eq!(timeout_body["logs"][0]["response_code"], "SERVFAIL");
+        assert_eq!(timeout_body["logs"][0]["selected_upstream"], Value::Null);
         shutdown.cancel();
         task.await.expect("TCP audit read supervisor")
     });
     result.expect("TCP audit read supervisor shutdown");
     upstream_stopped.store(true, Ordering::Release);
     upstream_task.join().expect("TCP rich upstream shutdown");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn udp_real_listener_audits_parent_ownership_after_identical_child_response() {
+    let root =
+        std::env::temp_dir().join(format!("mosdns-audit-replacement-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("replacement audit root");
+    let dns_port = free_udp_port();
+    let api_port = free_tcp_port();
+    let child_port = free_udp_port();
+    let parent_port = free_udp_port();
+    let child_socket =
+        std::net::UdpSocket::bind(("127.0.0.1", child_port)).expect("child upstream bind");
+    let parent_socket =
+        std::net::UdpSocket::bind(("127.0.0.1", parent_port)).expect("parent upstream bind");
+    let child_stopped = Arc::new(AtomicBool::new(false));
+    let parent_stopped = Arc::new(AtomicBool::new(false));
+    let child_served = Arc::new(AtomicUsize::new(0));
+    let parent_served = Arc::new(AtomicUsize::new(0));
+    let child_task = {
+        let stopped = Arc::clone(&child_stopped);
+        let served = Arc::clone(&child_served);
+        std::thread::spawn(move || run_rich_upstream(&child_socket, &stopped, &served))
+    };
+    let parent_task = {
+        let stopped = Arc::clone(&parent_stopped);
+        let served = Arc::clone(&parent_served);
+        std::thread::spawn(move || run_rich_upstream(&parent_socket, &stopped, &served))
+    };
+    let host = HostAssembly::with_options_and_state_root(
+        replacement_config(&root, dns_port, api_port, child_port, parent_port),
+        HostOptions::default().with_audit_capacity(8),
+        &root,
+    )
+    .expect("assemble replacement host");
+    let bound = host
+        .block_on(host.bind_host())
+        .expect("bind replacement host");
+    let dns = bound.dns_addr();
+    let api = bound.api_addr().expect("replacement API");
+    let shutdown = TransportCancellation::new();
+
+    let result = host.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let response = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0x9201, "replacement.example."))
+        })
+        .await
+        .expect("replacement DNS client");
+        validate_response(&response).expect("replacement response");
+        assert_eq!(child_served.load(Ordering::Relaxed), 1);
+        assert_eq!(parent_served.load(Ordering::Relaxed), 1);
+        let logs = http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs/domain?domain=replacement.example",
+        )
+        .await;
+        let body: Value = serde_json::from_str(&logs.body).expect("replacement audit JSON");
+        assert_eq!(body["pagination"]["total_items"], 1);
+        assert_eq!(body["logs"][0]["final_upstream"], "parent_peer");
+        assert_eq!(
+            body["logs"][0]["selected_upstream"],
+            format!("127.0.0.1:{parent_port}")
+        );
+        assert_eq!(body["logs"][0]["effective_tag"], "unmatched_rule");
+        shutdown.cancel();
+        task.await.expect("replacement supervisor shutdown")
+    });
+    result.expect("replacement supervisor");
+    child_stopped.store(true, Ordering::Release);
+    parent_stopped.store(true, Ordering::Release);
+    child_task.join().expect("child upstream shutdown");
+    parent_task.join().expect("parent upstream shutdown");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn udp_real_listener_audits_matcherless_local_default_as_unmatched() {
+    let root =
+        std::env::temp_dir().join(format!("mosdns-audit-local-default-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("local default audit root");
+    let host = HostAssembly::with_options_and_state_root(
+        local_default_config(&root, free_udp_port(), free_tcp_port()),
+        HostOptions::default().with_audit_capacity(4),
+        &root,
+    )
+    .expect("assemble local default host");
+    let bound = host
+        .block_on(host.bind_host())
+        .expect("bind local default host");
+    let dns = bound.dns_addr();
+    let api = bound.api_addr().expect("local default API");
+    let shutdown = TransportCancellation::new();
+
+    let result = host.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let response = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0x9301, "local-default.example."))
+        })
+        .await
+        .expect("local default DNS client");
+        validate_response(&response).expect("local default response");
+        assert_eq!(response[3] & 0x0f, 3);
+        let logs = http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs/domain?domain=local-default.example",
+        )
+        .await;
+        let body: Value = serde_json::from_str(&logs.body).expect("local default audit JSON");
+        assert_eq!(body["pagination"]["total_items"], 1);
+        assert_eq!(body["logs"][0]["effective_tag"], "unmatched_rule");
+        assert_eq!(body["logs"][0]["final_upstream"], Value::Null);
+        assert_eq!(body["logs"][0]["selected_upstream"], Value::Null);
+        shutdown.cancel();
+        task.await.expect("local default supervisor shutdown")
+    });
+    result.expect("local default supervisor");
     let _ = std::fs::remove_dir_all(root);
 }

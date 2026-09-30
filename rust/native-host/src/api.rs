@@ -1341,7 +1341,7 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
     let domain_match = filter
         .domain
         .as_ref()
-        .is_none_or(|domain| projected_query_name(record).contains(domain));
+        .is_none_or(|domain| domain_suffix_matches(&projected_query_name(record), domain));
     let client_match = if filter.client_ips.is_empty() {
         true
     } else {
@@ -1386,6 +1386,12 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
         && domain_set_match
         && effective_match
         && exact_domain_match
+}
+
+fn domain_suffix_matches(query_name: &str, domain: &str) -> bool {
+    let query_name = query_name.trim_end_matches('.').to_ascii_lowercase();
+    let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+    query_name == domain || query_name.ends_with(&format!(".{domain}"))
 }
 
 fn audit_logs_from_records(
@@ -2016,36 +2022,88 @@ mod tests {
 
     #[test]
     fn canceled_audit_read_releases_its_slot_only_after_worker_exit() {
-        let observer = Arc::new(QueryObserver::new(true, [], 4));
+        let observer = Arc::new(QueryObserver::new(true, [], 20_000));
+        let question = mosdns_dns_core::QuestionInfo {
+            qname_wire: vec![3, b'r', b'e', b'c', 0],
+            qtype: 1,
+            qclass: 1,
+        };
+        for _ in 0..20_000 {
+            drop(observer.admit(
+                "127.0.0.1:53000".parse().expect("client"),
+                crate::observer::QueryTransport::Udp,
+                &question,
+                TransportCancellation::new(),
+            ));
+        }
         let slots = Arc::new(Semaphore::new(1));
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("audit read runtime");
         let canceled = TransportCancellation::new();
-        canceled.cancel();
-        let first = runtime.block_on(dispatch_audit_read(
-            observer.clone(),
-            &slots,
-            "/api/v2/audit/logs?limit=50",
-            AuditReadKind::Logs {
-                domain_route: false,
-            },
-            canceled,
-        ));
-        assert_eq!(first.status, 499);
+        runtime.block_on(async {
+            let first_slots = Arc::clone(&slots);
+            let first_observer = observer;
+            let first_shutdown = canceled.clone();
+            let first = tokio::spawn(async move {
+                dispatch_audit_read(
+                    first_observer,
+                    &first_slots,
+                    "/api/v2/audit/logs?limit=50",
+                    AuditReadKind::Logs {
+                        domain_route: false,
+                    },
+                    first_shutdown,
+                )
+                .await
+            });
+            for _ in 0..100 {
+                if slots.available_permits() == 0 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                slots.available_permits(),
+                0,
+                "worker must own the read slot"
+            );
+            assert!(
+                !first.is_finished(),
+                "the expensive worker must still be active"
+            );
+            canceled.cancel();
 
-        let second = runtime.block_on(dispatch_audit_read(
-            observer,
-            &slots,
-            "/api/v2/audit/logs?limit=50",
-            AuditReadKind::Logs {
-                domain_route: false,
-            },
-            TransportCancellation::new(),
-        ));
-        assert_eq!(second.status, 200);
-        assert_eq!(slots.available_permits(), 1);
+            let rejected = dispatch_audit_read(
+                Arc::new(QueryObserver::new(true, [], 4)),
+                &slots,
+                "/api/v2/audit/logs?limit=50",
+                AuditReadKind::Logs {
+                    domain_route: false,
+                },
+                TransportCancellation::new(),
+            )
+            .await;
+            assert_eq!(rejected.status, 503);
+            assert_eq!(rejected.body, b"audit read capacity exhausted\n");
+
+            let first_response = first.await.expect("canceled audit worker");
+            assert_eq!(first_response.status, 499);
+            assert_eq!(slots.available_permits(), 1);
+
+            let rebound = dispatch_audit_read(
+                Arc::new(QueryObserver::new(true, [], 4)),
+                &slots,
+                "/api/v2/audit/logs?limit=50",
+                AuditReadKind::Logs {
+                    domain_route: false,
+                },
+                TransportCancellation::new(),
+            )
+            .await;
+            assert_eq!(rebound.status, 200);
+        });
     }
 
     #[test]
