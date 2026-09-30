@@ -786,7 +786,11 @@ fn run_rule(
     for mutation in deferred_routing {
         state.apply_mutation(mutation);
     }
-    if state.routing.matched_rule_source.is_none() {
+    // A matcher-less executable is the canonical default/unmatched route. It
+    // must remain eligible for the public `unmatched_rule` sentinel instead
+    // of being relabelled as an inline rule merely because the compiler gave
+    // every executable-bearing rule a private source identity.
+    if !rule.matchers.is_empty() && state.routing.matched_rule_source.is_none() {
         if let Some(source) = &rule.audit_source {
             state.apply_mutation(crate::StateMutation::SetRouting {
                 field: crate::RoutingField::MatchedRuleSource,

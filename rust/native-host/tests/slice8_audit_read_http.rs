@@ -447,6 +447,12 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             ("domain_set=rich_rules", 1),
             ("effective_tag=rich_rules", 1),
             ("client_ip=127.0.0.1&answer_ip=192.0.2.55", 1),
+            ("q=rich_rules", 1),
+            ("q=192.0.2.55", 1),
+            ("q=rich.example&domain=rich.example&answer_ip=192.0.2.55", 1),
+            ("domain=does-not-match&domain=rich.example", 0),
+            ("exact=1&q=rich.example", 1),
+            ("exact=FALSE&q=rich.example", 1),
         ];
         for (query, expected) in rich_filters {
             let response = http_request(api, "GET", &format!("/api/v2/audit/logs?{query}")).await;
@@ -490,11 +496,43 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             let values: Value = serde_json::from_str(&response.body).expect("rank JSON");
             assert_eq!(values[0]["key"], expected_key, "{route}");
             assert_eq!(values[0]["count"], expected_count, "{route}");
+            assert!(values.as_array().expect("rank array").windows(2).all(|pair| {
+                let left = (&pair[0]["count"], &pair[0]["key"]);
+                let right = (&pair[1]["count"], &pair[1]["key"]);
+                left.0.as_u64().expect("left count") > right.0.as_u64().expect("right count")
+                    || (left.0 == right.0 && left.1.as_str() <= right.1.as_str())
+            }));
         }
+        let domain_values: Value = serde_json::from_str(
+            &http_request(api, "GET", "/api/v2/audit/rank/domain?limit=20")
+                .await
+                .body,
+        )
+        .expect("domain rank values");
+        let domain_keys: Vec<_> = domain_values
+            .as_array()
+            .expect("domain rank array")
+            .iter()
+            .map(|item| item["key"].as_str().expect("domain rank key"))
+            .collect();
+        assert_eq!(
+            domain_keys,
+            vec!["edge.example", "new.example", "old.example", "rich.example"]
+        );
         let slowest = http_request(api, "GET", "/api/v2/audit/rank/slowest?limit=300").await;
         assert_eq!(slowest.status, 200);
         let slowest_values: Value = serde_json::from_str(&slowest.body).expect("slowest JSON");
-        assert!(slowest_values.as_array().expect("slowest values").iter().any(|item| item["query_name"] == "rich.example"));
+        let mut slowest_names: Vec<_> = slowest_values
+            .as_array()
+            .expect("slowest values")
+            .iter()
+            .map(|item| item["query_name"].as_str().expect("slowest name"))
+            .collect();
+        slowest_names.sort_unstable();
+        assert_eq!(
+            slowest_names,
+            vec!["edge.example", "new.example", "old.example", "rich.example"]
+        );
 
         let resized = http_post(api, "/api/v1/audit/capacity", r#"{"capacity":2}"#).await;
         assert_eq!(resized.status, 200);
@@ -618,6 +656,18 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             !full_logs_task.is_finished() || !full_slowest_task.is_finished(),
             "at least one bounded read must still be active before progress probes"
         );
+        assert!(
+            !full_logs_task.is_finished() && !full_slowest_task.is_finished(),
+            "both expensive reads must hold the two permits before the 503 probe"
+        );
+        let third_read = tokio::spawn(http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs?limit=500",
+        ));
+        let third_response = third_read.await.expect("third bounded read");
+        assert_eq!(third_response.status, 503);
+        assert_eq!(third_response.body, "audit read capacity exhausted\n");
         let mut dns_progress_during_reads = 0;
         let mut active_read_probe = false;
         for id in 0x9001..0x9005 {

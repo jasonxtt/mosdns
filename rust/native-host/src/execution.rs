@@ -783,11 +783,16 @@ fn compute_effective_tag(
     {
         return special;
     }
-    let tags: Vec<_> = domain_set
+    let mut tags = Vec::new();
+    for tag in domain_set
         .split('|')
         .map(str::trim)
         .filter(|tag| !tag.is_empty())
-        .collect();
+    {
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
     if tags.is_empty() {
         return "unmatched_rule".to_owned();
     }
@@ -868,7 +873,7 @@ fn compute_effective_tag(
     if let Some(tag) = candidates.iter().find(|candidate| tags.contains(candidate)) {
         return join_effective_tags(&no_v, tag);
     }
-    domain_set.to_owned()
+    tags.join("|")
 }
 
 fn normalize_special_tag(value: Option<&str>) -> Option<String> {
@@ -881,11 +886,17 @@ fn normalize_special_tag(value: Option<&str>) -> Option<String> {
 }
 
 fn join_effective_tags(no_v: &[&str], core: &str) -> String {
-    no_v.iter()
+    let mut tags = Vec::new();
+    for tag in no_v
+        .iter()
         .copied()
         .chain((!core.is_empty()).then_some(core))
-        .collect::<Vec<_>>()
-        .join("|")
+    {
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags.join("|")
 }
 
 fn diagnose_response_wire(response_wire: &[u8]) -> ResponseDetails {
@@ -2916,6 +2927,76 @@ plugins:
         assert_eq!(reverse_result.domain_set, None);
         assert_eq!(reverse_result.effective_tag, None);
 
+        let inline_config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - matches: qname inline.test.
+        exec: $forward
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { tag: peer, addr: "udp://127.0.0.1:1" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:53056", enable_audit: true }
+"#,
+        )
+        .expect("inline qname config");
+        let inline_query = query_name(95, "inline.test.");
+        let inline_result = execute_observed(
+            &inline_config,
+            &cache,
+            &HostOptions::default(),
+            &inline_query,
+            &MockExchange {
+                calls: Rc::new(Cell::new(0)),
+                response: response(&inline_query),
+                fail: false,
+            },
+        );
+        assert_eq!(
+            inline_result.matched_rule_source.as_deref(),
+            Some("inline:entry#0")
+        );
+
+        let default_config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $forward
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { tag: peer, addr: "udp://127.0.0.1:1" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:53057", enable_audit: true }
+"#,
+        )
+        .expect("default route config");
+        let default_query = query_name(96, "default.test.");
+        let default_result = execute_observed(
+            &default_config,
+            &cache,
+            &HostOptions::default(),
+            &default_query,
+            &MockExchange {
+                calls: Rc::new(Cell::new(0)),
+                response: response(&default_query),
+                fail: false,
+            },
+        );
+        assert_eq!(default_result.matched_rule_source, None);
+        assert_eq!(
+            default_result.effective_tag.as_deref(),
+            Some("unmatched_rule")
+        );
+
         let parent_config = compile_yaml(
             r#"
 log: { level: error }
@@ -3579,6 +3660,10 @@ plugins:
         assert_eq!(
             compute_effective_tag("unmatched_rule", Some("foreign"), None, None),
             "unmatched_rule"
+        );
+        assert_eq!(
+            compute_effective_tag("foo|foo|bar|foo", None, None, None),
+            "foo|bar"
         );
     }
 
