@@ -49,12 +49,20 @@ correction.
    `查看` action opened the rich query detail.
 5. A second browser pass exercised the required existing-workflow surfaces:
    System settings loaded with the native unsupported sections marked as
-   unavailable while audit status remained visibly `运行中`; Rule management
-   loaded the local-rule editor and the save/query closure returned its honest
-   no-change/error state instead of a synthetic success. The browser also
-   re-ran fuzzy search, quoted exact search, quick-filter, load-more, all four
-   ranking/slowest panels, exact domain drill-down and nested query detail in
-   one session.
+   unavailable while audit status remained visibly `运行中`. A disposable
+   managed `whitelist` fixture loaded in Rule management; editing it and
+   saving through the UI reported `已保存 1 个列表改动`. The VM file and
+   `/plugins/whitelist/show` then contained `browser-proof-rule.example`, and
+   a real UDP query returned NXDOMAIN with an audit row showing
+   `domain_set:whitelist`; the browser QueryManager opened the same row and
+   displayed its rule source, final sequence, RA flag, and complete answer
+   status. No unsupported action was reported as a synthetic success.
+6. The browser also re-ran fuzzy search, quoted exact search, quick-filter,
+   load-more, all four ranking/slowest panels, exact domain drill-down and
+   nested query detail in one session. On Overview it clicked the DNS-card
+   `查询趋势` action and switched the card metric to `平均处理时间`, while
+   the native-unavailable metrics, switch, and upstream panels stayed explicit
+   404/unavailable states.
 
 This is a focused browser/API/wire proof for the new diagnostics surfaces. It
 does not claim full native parity for the unrelated upstream, alias, metrics,
