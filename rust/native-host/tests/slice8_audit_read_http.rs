@@ -241,6 +241,18 @@ async fn http_request(address: SocketAddr, method: &str, target: &str) -> HttpRe
     }
 }
 
+async fn open_and_disconnect_http_request(address: SocketAddr, target: &str) {
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("HTTP disconnect connect");
+    let request = format!("GET {target} HTTP/1.1\r\nHost: native\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("HTTP disconnect write");
+    stream.shutdown().await.expect("HTTP disconnect shutdown");
+}
+
 async fn http_post(address: SocketAddr, target: &str, body: &str) -> HttpResponse {
     let mut stream = tokio::net::TcpStream::connect(address)
         .await
@@ -582,6 +594,11 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let local_default_json: Value = serde_json::from_str(&local_default.body).expect("local default JSON");
         assert_eq!(local_default_json["pagination"]["total_items"], 1);
         assert_eq!(local_default_json["logs"][0]["effective_tag"], Value::Null);
+        let case_insensitive_domain =
+            http_request(api, "GET", "/api/v2/audit/logs/domain?domain=OLD.EXAMPLE").await;
+        assert_eq!(case_insensitive_domain.status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&case_insensitive_domain.body)
+            .expect("case-insensitive exact domain JSON")["pagination"]["total_items"], 1);
 
         let page_one = http_request(api, "GET", "/api/v2/audit/logs?page=1&limit=2").await;
         let page_one_json: Value = serde_json::from_str(&page_one.body).expect("page one JSON");
@@ -631,6 +648,9 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let rich_filters = [
             ("domain=rich.example", 1),
             ("domain=example", 4),
+            ("domain=old", 1),
+            ("domain=OLD", 0),
+            ("domain=ch.exa", 1),
             ("domain=rich.example", 1),
             ("domain=example.com", 0),
             ("answer_ip=192.0.2.55", 1),
@@ -1059,9 +1079,8 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let handle_bytes = u64::try_from(std::mem::size_of::<Arc<mosdns_native_host::AuditRecord>>())
             .expect("Arc handle size fits u64");
         let two_view_projection = handle_bytes
-            .saturating_mul(400_000)
-            .saturating_mul(2)
-            .saturating_add(handle_bytes.saturating_mul(300));
+            .saturating_mul(400_000_u64.saturating_add(300))
+            .saturating_mul(2);
         assert!(estimated_large_projection > two_view_projection);
         println!(
             "resource-screen: retained=400000 concurrent_reads=2 dns_progress_during_reads={} logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02} large_answer_projection_bytes_per_record={} estimated_400000_large_projection_bytes={} two_snapshot_arc_handle_bytes={}",
@@ -1072,6 +1091,26 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             large_answer_projection_bytes_per_record,
             estimated_large_projection,
             two_view_projection
+        );
+
+        let disconnected = tokio::spawn(open_and_disconnect_http_request(
+            api,
+            "/api/v2/audit/logs?limit=500",
+        ));
+        let companion = tokio::spawn(http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs?limit=500",
+        ));
+        tokio::task::yield_now().await;
+        let saturated = http_request(api, "GET", "/api/v2/audit/logs?limit=500").await;
+        assert_eq!(saturated.status, 503, "socket disconnect read must hold a slot");
+        disconnected.await.expect("disconnected HTTP client");
+        assert_eq!(companion.await.expect("companion HTTP read").status, 200);
+        assert_eq!(
+            http_request(api, "GET", "/api/v2/audit/logs?limit=1").await.status,
+            200,
+            "canceled socket worker must release its slot after exit"
         );
         for _ in 0..3 {
             let dns_task = tokio::task::spawn_blocking(move || {

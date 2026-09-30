@@ -1174,12 +1174,19 @@ impl QueryObserver {
         }
     }
 
-    pub(crate) fn audit_read_snapshot(&self) -> AuditReadSnapshot {
+    pub(crate) fn audit_read_snapshot(&self) -> Result<AuditReadSnapshot, ()> {
         let state = self.lock();
-        AuditReadSnapshot {
-            records: state.audit_records.iter().cloned().collect(),
-            slowest: state.slowest_records.clone(),
-        }
+        let mut records = Vec::new();
+        records
+            .try_reserve(state.audit_records.len())
+            .map_err(|_| ())?;
+        records.extend(state.audit_records.iter().cloned());
+        let mut slowest = Vec::new();
+        slowest
+            .try_reserve(state.slowest_records.len())
+            .map_err(|_| ())?;
+        slowest.extend(state.slowest_records.iter().cloned());
+        Ok(AuditReadSnapshot { records, slowest })
     }
 
     pub(crate) fn audit_stats_snapshot(&self) -> AuditStatsSnapshot {

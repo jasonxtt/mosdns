@@ -17,7 +17,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -412,6 +413,24 @@ struct Response {
     body: Vec<u8>,
 }
 
+struct FallibleJsonWriter {
+    body: Vec<u8>,
+}
+
+impl io::Write for FallibleJsonWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.body
+            .try_reserve(bytes.len())
+            .map_err(|_| io::Error::other("JSON response allocation failed"))?;
+        self.body.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 impl Response {
     fn empty(status: u16) -> Self {
         Self {
@@ -465,10 +484,12 @@ impl Response {
     }
 
     fn try_json_compact<T: Serialize>(value: &T) -> Result<Self, serde_json::Error> {
+        let mut writer = FallibleJsonWriter { body: Vec::new() };
+        serde_json::to_writer(&mut writer, value)?;
         Ok(Self {
             status: 200,
             content_type: Some("application/json"),
-            body: serde_json::to_vec(value)?,
+            body: writer.body,
         })
     }
 
@@ -489,33 +510,74 @@ async fn process_connection(
     audit_read_slots: Arc<Semaphore>,
     shutdown: TransportCancellation,
 ) -> io::Result<()> {
-    let response = tokio::select! {
+    let request = tokio::select! {
         biased;
         () = shutdown.cancelled() => return Ok(()),
         request = read_request(&mut stream) => match request {
-            Ok(Some(request)) => {
-                dispatch(
-                    &config,
-                    &observer,
-                    state_root.as_deref(),
-                    &audit_persist_lock,
-                    &audit_persistence_faults,
-                    &audit_clock,
-                    &audit_read_slots,
-                    &shutdown,
-                    &request,
-                )
-                .await
-            }
+            Ok(Some(request)) => request,
             // The client closed before sending a complete request.
             Ok(None) => return Ok(()),
-            Err(_) => Response::error(400, "bad request"),
+            Err(_) => {
+                let response = Response::error(400, "bad request");
+                let (_reader, mut writer) = stream.into_split();
+                return write_response(&mut writer, &response).await;
+            }
         },
     };
+    let (_reader, mut writer) = stream.into_split();
+    let request_shutdown = shutdown.child_token();
+    let dispatch = dispatch(
+        &config,
+        &observer,
+        state_root.as_deref(),
+        &audit_persist_lock,
+        &audit_persistence_faults,
+        &audit_clock,
+        &audit_read_slots,
+        &request_shutdown,
+        &request,
+    );
+    tokio::pin!(dispatch);
+    let disconnect = watch_client_disconnect(_reader, request_shutdown.clone());
+    tokio::pin!(disconnect);
+    let response = tokio::select! {
+        biased;
+        () = shutdown.cancelled() => {
+            request_shutdown.cancel();
+            dispatch.await
+        }
+        () = &mut disconnect => {
+            // Keep awaiting the worker after the peer closes. The worker owns
+            // the expensive-read permit until it observes cancellation and
+            // exits, so a disconnect cannot create an unbounded admission path.
+            request_shutdown.cancel();
+            dispatch.await
+        }
+        response = &mut dispatch => response,
+    };
+    if request_shutdown.is_cancelled() {
+        return Ok(());
+    }
     tokio::select! {
         biased;
         () = shutdown.cancelled() => Ok(()),
-        written = write_response(&mut stream, &response) => written,
+        written = write_response(&mut writer, &response) => written,
+    }
+}
+
+/// Watches the request-side half after the complete request has been read.
+/// EOF or a socket error is the client-disconnect signal for the in-flight
+/// dispatch; the caller still awaits that dispatch before dropping its permit.
+async fn watch_client_disconnect(mut stream: OwnedReadHalf, cancellation: TransportCancellation) {
+    let mut buffer = [0_u8; 1024];
+    loop {
+        match stream.read(&mut buffer).await {
+            Ok(0) | Err(_) => {
+                cancellation.cancel();
+                return;
+            }
+            Ok(_) => {}
+        }
     }
 }
 
@@ -593,7 +655,10 @@ fn head_end(buffer: &[u8]) -> Option<usize> {
     buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-async fn write_response(stream: &mut TcpStream, response: &Response) -> io::Result<()> {
+async fn write_response<W: AsyncWrite + Unpin>(
+    stream: &mut W,
+    response: &Response,
+) -> io::Result<()> {
     let mut head = format!(
         "HTTP/1.1 {} {}\r\n",
         response.status,
@@ -1341,7 +1406,7 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
     let domain_match = filter
         .domain
         .as_ref()
-        .is_none_or(|domain| domain_suffix_matches(&projected_query_name(record), domain));
+        .is_none_or(|domain| projected_query_name(record).contains(domain));
     let client_match = if filter.client_ips.is_empty() {
         true
     } else {
@@ -1377,7 +1442,7 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
     let exact_domain_match = filter
         .exact_domain
         .as_ref()
-        .is_none_or(|value| projected_query_name(record) == value.as_str());
+        .is_none_or(|value| domain_suffix_matches(&projected_query_name(record), value));
     query_match
         && domain_match
         && client_match
@@ -1465,24 +1530,31 @@ fn rank_items(
     key: impl Fn(&AuditRecord) -> Option<String>,
     shutdown: &TransportCancellation,
 ) -> Result<Vec<AuditRankItem>, AuditReadFailure> {
-    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut keys = Vec::new();
+    keys.try_reserve(records.len())
+        .map_err(|_| AuditReadFailure::Allocation)?;
     for (index, record) in records.iter().enumerate() {
         if index % 1024 == 0 && shutdown.is_cancelled() {
             return Err(AuditReadFailure::Canceled);
         }
         if let Some(value) = key(record) {
-            *counts.entry(value).or_default() += 1;
+            keys.push(value);
         }
     }
+    keys.sort_unstable();
     let mut items = Vec::new();
     items
-        .try_reserve(counts.len())
+        .try_reserve(keys.len())
         .map_err(|_| AuditReadFailure::Allocation)?;
-    items.extend(
-        counts
-            .into_iter()
-            .map(|(key, count)| AuditRankItem { key, count }),
-    );
+    let mut keys = keys.into_iter().peekable();
+    while let Some(key) = keys.next() {
+        let mut count = 1;
+        while keys.peek().is_some_and(|next| next == &key) {
+            let _ = keys.next();
+            count += 1;
+        }
+        items.push(AuditRankItem { key, count });
+    }
     items.sort_by(|left, right| {
         right
             .count
@@ -1516,6 +1588,9 @@ fn rank_response(
         None => snapshot.records,
         Some(filter) => {
             let mut records = Vec::new();
+            records
+                .try_reserve(snapshot.records.len())
+                .map_err(|_| AuditReadFailure::Allocation)?;
             for (index, record) in snapshot.records.into_iter().enumerate() {
                 if index % 1024 == 0 && shutdown.is_cancelled() {
                     return Err(AuditReadFailure::Canceled);
@@ -1610,7 +1685,10 @@ async fn dispatch_audit_read(
     };
     tokio::task::spawn_blocking(move || {
         let _permit: OwnedSemaphorePermit = permit;
-        let snapshot = observer.audit_read_snapshot();
+        let snapshot = match observer.audit_read_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(()) => return Response::error(500, "audit read failed"),
+        };
         if let AuditReadKind::Logs { .. } = kind {
             let mut records = Vec::new();
             if records.try_reserve(snapshot.records.len()).is_err() {
