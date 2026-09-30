@@ -594,11 +594,15 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let local_default_json: Value = serde_json::from_str(&local_default.body).expect("local default JSON");
         assert_eq!(local_default_json["pagination"]["total_items"], 1);
         assert_eq!(local_default_json["logs"][0]["effective_tag"], Value::Null);
-        let case_insensitive_domain =
+        let case_sensitive_domain =
             http_request(api, "GET", "/api/v2/audit/logs/domain?domain=OLD.EXAMPLE").await;
-        assert_eq!(case_insensitive_domain.status, 200);
-        assert_eq!(serde_json::from_str::<Value>(&case_insensitive_domain.body)
-            .expect("case-insensitive exact domain JSON")["pagination"]["total_items"], 1);
+        assert_eq!(case_sensitive_domain.status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&case_sensitive_domain.body)
+            .expect("case-sensitive exact domain JSON")["pagination"]["total_items"], 0);
+        let parent_domain = http_request(api, "GET", "/api/v2/audit/logs/domain?domain=example").await;
+        assert_eq!(parent_domain.status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&parent_domain.body)
+            .expect("parent exact domain JSON")["pagination"]["total_items"], 0);
 
         let page_one = http_request(api, "GET", "/api/v2/audit/logs?page=1&limit=2").await;
         let page_one_json: Value = serde_json::from_str(&page_one.body).expect("page one JSON");

@@ -1442,7 +1442,7 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
     let exact_domain_match = filter
         .exact_domain
         .as_ref()
-        .is_none_or(|value| domain_suffix_matches(&projected_query_name(record), value));
+        .is_none_or(|value| projected_query_name(record) == value.as_str());
     query_match
         && domain_match
         && client_match
@@ -1451,12 +1451,6 @@ fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
         && domain_set_match
         && effective_match
         && exact_domain_match
-}
-
-fn domain_suffix_matches(query_name: &str, domain: &str) -> bool {
-    let query_name = query_name.trim_end_matches('.').to_ascii_lowercase();
-    let domain = domain.trim_end_matches('.').to_ascii_lowercase();
-    query_name == domain || query_name.ends_with(&format!(".{domain}"))
 }
 
 fn audit_logs_from_records(
