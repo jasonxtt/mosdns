@@ -8,7 +8,13 @@ diagnostics, native admission IDs, routing provenance, filtered logs, four
 categorical ranks, independent top-300 slowest history, bounded two-slot read
 admission, and exact domain drill-down. QueryManager and OverviewManager use
 the real fields, show read failures per panel, and expose query/ranking detail
-drill-down without fabricating unsupported native sections.
+drill-down without fabricating unsupported native sections. The final review
+corrections also cover matcher-less local/default `unmatched_rule` identity,
+real-listener cache miss/hit/TTL-aging, uncommon raw-RDATA and malformed-wire
+projections, upstream-timeout agreement, complete rank membership/lifecycle,
+and fallible expensive-read encoding: cancellation is 499, allocation or
+serialization failure is 500, and the semaphore permit remains owned until
+the worker exits.
 
 All product builds and validation ran through the `mosdns-rust` SSH alias in
 `/root/mosdns-rust-querydiag`; no local Cargo or UI build, production deploy,
@@ -17,10 +23,11 @@ run passed, as did `cargo fmt --all -- --check`, workspace clippy with
 `-D warnings`, the native-host build, focused native-host and `slice8` tests,
 and disposable VM `npm ci && npm run build`. Real UDP/TCP/HTTP/browser proof
 is recorded in `research/browser-proof/README.md`; the 400000-record concurrent
-read evidence is in `research/browser-proof/vm-validation.md`. The code
-candidate is the narrow commit
-`be8f8ce14a0602fff3559d94a3523919d76013a4`; a complete independent C2C review
-of the final exact range remains the last handoff gate.
+read evidence is in `research/browser-proof/vm-validation.md`. The current
+narrow code candidate is commit `64b298e2` (`fix(native): close query
+diagnostics review gaps`), following the earlier provenance/projection commit
+`be8f8ce1`. The final independent C2C review of the exact committed range
+remains the last handoff gate.
 
 ## State and start gate
 
