@@ -184,10 +184,12 @@ product change explicitly before implementation.
 6. No new hidden byte eviction/truncation; preserve the existing 400000-record
    query-diagnostics cap and complete answer payloads. The user explicitly
    approved this resource behavior on 2026-09-30: if retaining a detailed
-   projection cannot allocate, keep terminalization/lifetime metrics and omit
-   only the detailed retained record; if an expensive diagnostic read cannot
-   allocate or encode, return HTTP 500. These failures must not affect DNS
-   service behavior or statistics.
+   projection reaches a recoverable fallible allocation boundary, keep
+   terminalization/lifetime metrics and omit only the detailed retained
+   record; if an expensive diagnostic read reaches a recoverable allocation or
+   encoding failure, return HTTP 500. This does not claim that a hard
+   process-level allocator OOM is catchable. These failure paths must not
+   affect DNS service behavior or statistics.
 
 Items 1–5 were approved by the execution prompt. Item 6 was explicitly
 confirmed by the user on 2026-09-30 after the measured resource screen. The
@@ -218,9 +220,10 @@ and project 400000 records plus two read-handle views/top300; run near-full
 a 400000 maximal-wire-response allocation or call tiny-record success a worst-
 case memory proof. Resource estimates/observations are diagnostics. The
 approved policy is to keep the 400000 cap and complete answers, avoid hidden
-byte eviction/truncation, return diagnostic-read HTTP 500 on allocation or
-encoding failure, and keep DNS behavior/statistics running if detailed
-retention cannot allocate.
+byte eviction/truncation, return diagnostic-read HTTP 500 on recoverable
+allocation or encoding failure, and keep DNS behavior/statistics running if a
+recoverable detailed-retention allocation boundary fails. Hard process-level
+allocator OOM is outside the catchable failure contract.
 
 ## URL query decoding and missing-category contract
 

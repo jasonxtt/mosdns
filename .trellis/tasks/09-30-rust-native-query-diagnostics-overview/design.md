@@ -92,11 +92,13 @@ answer truncation or second hidden eviction policy. If the proposed projection
 cannot fit reasonable resources at configured capacity, present a concrete
 byte-limit/truncation tradeoff for user approval instead of silently lowering
 capacity. The user approved preserving the 400000-record cap and complete
-answers: detailed-retention allocation failure drops only the detailed record
-projection after terminalization/lifetime metrics are kept, while diagnostic
-read allocation/encoding failure returns HTTP 500. Neither path may affect DNS
-service behavior or statistics. Do not retain raw response wire alongside
-decoded answers.
+answers: a recoverable detailed-retention allocation failure drops only the
+detailed record projection after terminalization/lifetime metrics are kept,
+while a recoverable diagnostic-read allocation/encoding failure returns HTTP
+500. These are explicit fallible-boundary guarantees, not a claim that a hard
+process-level allocator OOM is catchable. Neither path may affect DNS service
+behavior or statistics. Do not retain raw response wire alongside decoded
+answers.
 
 ## Compatibility, failure and rollback
 

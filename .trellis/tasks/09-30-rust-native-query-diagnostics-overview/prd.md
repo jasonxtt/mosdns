@@ -166,7 +166,9 @@ approval. Any subsequent product change requires a specific new decision.
 
 The user explicitly approved retaining the existing 400000 query-diagnostics
 record limit and complete answers. No byte-based eviction, answer truncation,
-or capacity reduction is allowed. If detailed retention cannot allocate, DNS
-terminalization and statistics continue while the detailed record is omitted;
-if a diagnostic read cannot allocate or encode, that diagnostic page returns
-HTTP 500 without affecting DNS service behavior or statistics.
+or capacity reduction is allowed. At a recoverable fallible allocation
+boundary, detailed-retention failure leaves DNS terminalization and statistics
+running while omitting the detailed record; a recoverable diagnostic-read
+allocation or encoding failure returns HTTP 500. This does not claim that a
+hard process-level allocator OOM is catchable. Neither path affects DNS
+service behavior or statistics.

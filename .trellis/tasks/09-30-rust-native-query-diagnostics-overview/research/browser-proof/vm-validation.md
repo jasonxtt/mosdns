@@ -3,7 +3,8 @@
 All commands below ran in `/root/mosdns-rust-querydiag/rust` on the
 `mosdns-rust` SSH VM. The browser proof used the fixtures next to this file.
 The final implementation candidate for the code changes is
-`47868d8e` (`fix(native): harden query diagnostic read boundaries`), following
+`19557022` (`fix(native): align query drilldown and allocation contract`),
+following `47868d8e` (`fix(native): harden query diagnostic read boundaries`),
 `1cb9e00e` (`test(native): tighten audit rank membership proof`) and
 `9ce9947e` (`fix(native): close final query diagnostics gaps`). The latest
 focused evidence below was collected from this candidate; documentation-only
@@ -28,8 +29,8 @@ updates do not change product code.
   AAAA+CNAME response, and a separate real UDP case proves cache miss/hit and
   TTL aging.
 - The latest full-ring test printed `retained=400000 concurrent_reads=2
-  dns_progress_during_reads=4 logs=500 slowest_max=300 logs_bytes=211487
-  logs_bytes_per_record=422.97 large_answer_projection_bytes_per_record=49152
+  dns_progress_during_reads=4 logs=500 slowest_max=300 logs_bytes=211616
+  logs_bytes_per_record=423.23 large_answer_projection_bytes_per_record=49152
   estimated_400000_large_projection_bytes=19660800000
   two_snapshot_arc_handle_bytes=6404800`. It also holds both expensive reads
   open and proves a third simultaneous read receives 503 `audit read capacity
@@ -69,7 +70,7 @@ npm ci
 npm run build
 ```
 
-On `47868d8e`, all six commands completed successfully on the VM: workspace
+On `19557022`, all six commands completed successfully on the VM: workspace
 clippy had no warnings, `cargo test --workspace` passed all unit, integration,
 and doctest groups, including the five real slice8 listener tests, and the
 native-host build completed. `npm ci` installed
