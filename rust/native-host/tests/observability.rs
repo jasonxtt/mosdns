@@ -1,5 +1,3 @@
-use std::num::NonZeroUsize;
-
 use mosdns_native_host::{HostAssembly, HostOptions};
 
 const UDP_CONFIG: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
@@ -42,8 +40,7 @@ fn audit_enabled_yaml_assembles_and_test_capacity_is_explicit() {
     let yaml = UDP_CONFIG.replace("enable_audit: false", "enable_audit: true");
     let config = mosdns_native_host::compile_yaml(&yaml)
         .expect("the existing listener audit flag is accepted");
-    let options = HostOptions::default()
-        .with_audit_capacity(NonZeroUsize::new(2).expect("test ring capacity is nonzero"));
+    let options = HostOptions::default().with_audit_capacity(2);
     let host = HostAssembly::with_options(config, options)
         .expect("audit-enabled host assembles before listener I/O");
 

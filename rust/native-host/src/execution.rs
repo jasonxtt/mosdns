@@ -718,7 +718,6 @@ pub(crate) fn frame_native_response(response: &[u8], mode: FrameMode) -> Option<
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::num::NonZeroUsize;
     use std::rc::Rc;
     use std::sync::Arc;
     use std::time::Duration;
@@ -1173,11 +1172,7 @@ mod tests {
         };
         let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
         let cancellation = TransportCancellation::new();
-        let observer = Arc::new(QueryObserver::new(
-            false,
-            ["phase5a_forward".to_owned()],
-            NonZeroUsize::new(8).expect("nonzero audit capacity"),
-        ));
+        let observer = Arc::new(QueryObserver::new(false, ["phase5a_forward".to_owned()], 8));
         let mut admitted = observer.admit(
             "192.0.2.30:53000".parse().expect("client address"),
             QueryTransport::Udp,
@@ -1361,11 +1356,7 @@ mod tests {
             .build()
             .expect("test runtime");
         let local = tokio::task::LocalSet::new();
-        let observer = std::sync::Arc::new(QueryObserver::new(
-            true,
-            ["forward".to_owned()],
-            std::num::NonZeroUsize::new(2).expect("audit capacity"),
-        ));
+        let observer = std::sync::Arc::new(QueryObserver::new(true, ["forward".to_owned()], 2));
         let entered = Rc::new(Cell::new(false));
 
         local.block_on(&runtime, async {
@@ -1442,11 +1433,7 @@ mod tests {
             .build()
             .expect("test runtime");
         let local = tokio::task::LocalSet::new();
-        let observer = std::sync::Arc::new(QueryObserver::new(
-            true,
-            ["forward".to_owned()],
-            std::num::NonZeroUsize::new(2).expect("audit capacity"),
-        ));
+        let observer = std::sync::Arc::new(QueryObserver::new(true, ["forward".to_owned()], 2));
         let entered = Rc::new(Cell::new(false));
         let config = compile_yaml(
             r#"
@@ -1542,7 +1529,7 @@ plugins:
         let observer = std::sync::Arc::new(QueryObserver::new(
             true,
             ["a".to_owned(), "b".to_owned()],
-            std::num::NonZeroUsize::new(2).expect("audit capacity"),
+            2,
         ));
         let entered_pending_leg = Rc::new(Cell::new(false));
 
