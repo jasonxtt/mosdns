@@ -104,3 +104,23 @@ instead of always selecting entry zero. It adds deterministic seeded coverage
 for both single-leg and bounded adjacent selection and a real dropped active
 three-leg ledger test. The corrected native-host library run passed 78/78 and
 the existing slice9 forwarding run passed 9/9 after these changes.
+
+## Final candidate rerun
+
+After commit `fdeadfa9`, the final isolated SSH validation passed again:
+
+- `cargo fmt --all -- --check`.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- `cargo test --workspace` with all workspace tests and doctests passing; the
+  long `slice3_doh` group completed with 23/23.
+- `cargo build -p mosdns-native-host`.
+- `webui-log`: `npm ci`, `npm run build`, and `npm run build:log1`.
+
+The browser proof was rerun with the rebuilt native binary. A controlled
+loopback query to `127.0.0.1:15400` returned ID `7311`, `NOERROR`, and answer
+tail `c000027b`. The maintained Vue page then visibly showed `browser.test`,
+`192.0.2.123`, `NOERROR`, schema 1 selected `primary` at
+`127.0.0.1:15453` over `udp`, and ordered attempt
+`0 / primary / 127.0.0.1:15453 / udp / response`. The owned upstream, native,
+Vite, and SSH forwarding processes were stopped; the final remote port check
+returned `proof-pids-cleaned`.
