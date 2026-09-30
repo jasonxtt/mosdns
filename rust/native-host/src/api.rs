@@ -1174,7 +1174,7 @@ fn first_value(pairs: &[(String, String)], key: &str) -> Option<String> {
 
 fn positive_or_default(value: Option<&String>, default: usize) -> usize {
     value
-        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|value| value.parse::<i64>().ok())
         .filter(|value| *value > 0)
         .and_then(|value| usize::try_from(value).ok())
         .unwrap_or(default)
@@ -1209,7 +1209,7 @@ fn parse_audit_filter(
     let parsed_limit = positive_or_default(limit_value.as_ref(), 50);
     if limit_value
         .as_ref()
-        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|value| value.parse::<i64>().ok())
         .is_some_and(|value| value > 500)
     {
         return Err("audit log limit must be between 1 and 500".to_owned());
@@ -1430,7 +1430,7 @@ fn parse_rank_limit(target: &str, default: usize) -> Result<usize, String> {
     let value = first_value(&pairs, "limit");
     if value
         .as_ref()
-        .and_then(|value| value.parse::<u64>().ok())
+        .and_then(|value| value.parse::<i64>().ok())
         .is_some_and(|value| value > 500)
     {
         return Err("audit rank limit must be between 1 and 500".to_owned());
@@ -1948,6 +1948,18 @@ mod tests {
                 16
             ),
             "BADVERS"
+        );
+        let (_, page) = parse_audit_filter(
+            "/api/v2/audit/logs?page=9223372036854775808&limit=9223372036854775808",
+            false,
+        )
+        .expect("signed-64 overflow uses defaults");
+        assert_eq!(page.page, 1);
+        assert_eq!(page.limit, 50);
+        assert_eq!(
+            parse_rank_limit("/api/v2/audit/rank/domain?limit=9223372036854775808", 20,)
+                .expect("rank signed-64 overflow uses default"),
+            20
         );
     }
 
