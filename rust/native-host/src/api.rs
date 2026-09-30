@@ -10,18 +10,148 @@ use std::cell::Cell;
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinSet;
 
 use mosdns_upstream_core::TransportCancellation;
 
 use crate::config::CompiledConfig;
 use crate::managed::ManagedDomainSet;
+use crate::observer::QueryObserver;
 use crate::udp::{drain_tasks, reap_one_task};
+
+pub(crate) const AUDIT_SETTINGS_FILENAME: &str = "audit_settings.json";
+const MAX_AUDIT_CAPACITY: usize = 400_000;
+static AUDIT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Deserialize)]
+struct AuditSettings {
+    #[serde(default)]
+    capacity: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct SavedAuditSettings {
+    capacity: usize,
+}
+
+fn clamp_audit_capacity(value: i64) -> usize {
+    if value < 0 {
+        0
+    } else {
+        usize::try_from(value)
+            .unwrap_or(MAX_AUDIT_CAPACITY)
+            .min(MAX_AUDIT_CAPACITY)
+    }
+}
+
+fn parse_audit_capacity(bytes: &[u8]) -> Option<usize> {
+    let settings: AuditSettings = serde_json::from_slice(bytes).ok()?;
+    Some(clamp_audit_capacity(settings.capacity.unwrap_or(0)))
+}
+
+fn audit_settings_path(root: &Path) -> PathBuf {
+    root.join("webinfo").join(AUDIT_SETTINGS_FILENAME)
+}
+
+fn legacy_audit_settings_paths(root: &Path) -> [PathBuf; 2] {
+    [
+        root.join("state").join(AUDIT_SETTINGS_FILENAME),
+        root.join(AUDIT_SETTINGS_FILENAME),
+    ]
+}
+
+/// Loads the canonical settings first. A present but malformed canonical file
+/// wins over legacy locations and falls back to the caller's default.
+pub(crate) fn load_audit_capacity(root: &Path, fallback: usize) -> usize {
+    let canonical = audit_settings_path(root);
+    match std::fs::read(&canonical) {
+        Ok(bytes) => parse_audit_capacity(&bytes).unwrap_or(fallback),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            for legacy in legacy_audit_settings_paths(root) {
+                match std::fs::read(&legacy) {
+                    Ok(bytes) => {
+                        let Some(capacity) = parse_audit_capacity(&bytes) else {
+                            return fallback;
+                        };
+                        migrate_legacy_settings(&canonical, &legacy, &bytes);
+                        return capacity;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                    Err(_) => return fallback,
+                }
+            }
+            fallback
+        }
+        Err(_) => fallback,
+    }
+}
+
+fn migrate_legacy_settings(canonical: &Path, legacy: &Path, bytes: &[u8]) {
+    let Some(parent) = canonical.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let counter = AUDIT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        ".{AUDIT_SETTINGS_FILENAME}.migration.{}.{}",
+        std::process::id(),
+        counter
+    ));
+    if std::fs::write(&temporary, bytes).is_ok() && std::fs::rename(&temporary, canonical).is_ok() {
+        let _ = std::fs::remove_file(legacy);
+    } else {
+        let _ = std::fs::remove_file(&temporary);
+    }
+}
+
+fn write_audit_settings(root: &Path, capacity: usize) -> io::Result<()> {
+    let directory = root.join("webinfo");
+    std::fs::create_dir_all(&directory)?;
+    let bytes =
+        serde_json::to_vec_pretty(&SavedAuditSettings { capacity }).map_err(io::Error::other)?;
+    let mut bytes = bytes;
+    bytes.push(b'\n');
+    let counter = AUDIT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary = directory.join(format!(
+        ".{AUDIT_SETTINGS_FILENAME}.tmp.{}.{}",
+        std::process::id(),
+        counter
+    ));
+    let result = (|| {
+        std::fs::write(&temporary, &bytes)?;
+        std::fs::rename(&temporary, directory.join(AUDIT_SETTINGS_FILENAME))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+async fn persist_audit_capacity(
+    root: Option<PathBuf>,
+    lock: Arc<AsyncMutex<()>>,
+    capacity: usize,
+) -> Result<(), &'static str> {
+    let Some(root) = root else {
+        return Err("audit settings state root is unavailable");
+    };
+    let _guard = lock.lock().await;
+    tokio::task::spawn_blocking(move || write_audit_settings(&root, capacity))
+        .await
+        .map_err(|_| "audit settings persistence failed")?
+        .map_err(|_| "audit settings persistence failed")
+}
 
 /// The largest request head accepted before the connection is rejected.
 const MAX_HEADER_BYTES: usize = 16 * 1024;
@@ -32,6 +162,9 @@ const MAX_BODY_BYTES: usize = 1024 * 1024;
 pub struct ApiServer {
     listener: TcpListener,
     config: Rc<CompiledConfig>,
+    observer: Arc<QueryObserver>,
+    state_root: Option<PathBuf>,
+    audit_persist_lock: Arc<AsyncMutex<()>>,
     accept_fault_after: Cell<Option<usize>>,
 }
 
@@ -39,8 +172,10 @@ impl ApiServer {
     /// Binds the configured management address. Binding is separate from
     /// serving so the supervisor can bind every listener before any of them
     /// starts accepting.
-    pub async fn bind(
+    pub(crate) async fn bind(
         config: Rc<CompiledConfig>,
+        observer: Arc<QueryObserver>,
+        state_root: Option<PathBuf>,
         address: SocketAddr,
     ) -> Result<Self, ApiServerError> {
         let listener = TcpListener::bind(address)
@@ -49,6 +184,9 @@ impl ApiServer {
         Ok(Self {
             listener,
             config,
+            observer,
+            state_root,
+            audit_persist_lock: Arc::new(AsyncMutex::new(())),
             accept_fault_after: Cell::new(None),
         })
     }
@@ -99,9 +237,20 @@ impl ApiServer {
                                 break;
                             }
                             let config = Rc::clone(&self.config);
+                            let observer = Arc::clone(&self.observer);
+                            let state_root = self.state_root.clone();
+                            let audit_persist_lock = Arc::clone(&self.audit_persist_lock);
                             let connection_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
-                                let _ = process_connection(stream, config, connection_shutdown).await;
+                                let _ = process_connection(
+                                    stream,
+                                    config,
+                                    observer,
+                                    state_root,
+                                    audit_persist_lock,
+                                    connection_shutdown,
+                                )
+                                .await;
                             });
                         }
                         Err(error) => {
@@ -186,18 +335,52 @@ impl Response {
             body: body.into_bytes(),
         }
     }
+
+    fn success(body: &str) -> Self {
+        Self {
+            status: 200,
+            content_type: None,
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    fn json<T: Serialize>(value: &T) -> Self {
+        let mut body = serde_json::to_vec(value).expect("small API response serializes");
+        body.push(b'\n');
+        Self {
+            status: 200,
+            content_type: Some("application/json"),
+            body,
+        }
+    }
+
+    fn method_not_allowed() -> Self {
+        Self::error(405, "method not allowed")
+    }
 }
 
 async fn process_connection(
     mut stream: TcpStream,
     config: Rc<CompiledConfig>,
+    observer: Arc<QueryObserver>,
+    state_root: Option<PathBuf>,
+    audit_persist_lock: Arc<AsyncMutex<()>>,
     shutdown: TransportCancellation,
 ) -> io::Result<()> {
     let response = tokio::select! {
         biased;
         () = shutdown.cancelled() => return Ok(()),
         request = read_request(&mut stream) => match request {
-            Ok(Some(request)) => dispatch(&config, &request).await,
+            Ok(Some(request)) => {
+                dispatch(
+                    &config,
+                    &observer,
+                    state_root.as_deref(),
+                    &audit_persist_lock,
+                    &request,
+                )
+                .await
+            }
             // The client closed before sending a complete request.
             Ok(None) => return Ok(()),
             Err(_) => Response::error(400, "bad request"),
@@ -321,8 +504,18 @@ enum Route<'a> {
         tag: &'a str,
         action: &'a str,
     },
+    Audit(AuditRoute),
     SpecialGroups,
     Unknown,
+}
+
+#[derive(Clone, Copy)]
+enum AuditRoute {
+    Status,
+    Start,
+    Stop,
+    Clear,
+    Capacity,
 }
 
 fn route(target: &str) -> Route<'_> {
@@ -330,6 +523,16 @@ fn route(target: &str) -> Route<'_> {
     let path = target.split_once('?').map_or(target, |(path, _query)| path);
     if path == "/api/v1/special-groups" {
         return Route::SpecialGroups;
+    }
+    if let Some(suffix) = path.strip_prefix("/api/v1/audit/") {
+        return match suffix {
+            "status" => Route::Audit(AuditRoute::Status),
+            "start" => Route::Audit(AuditRoute::Start),
+            "stop" => Route::Audit(AuditRoute::Stop),
+            "clear" => Route::Audit(AuditRoute::Clear),
+            "capacity" => Route::Audit(AuditRoute::Capacity),
+            _ => Route::Unknown,
+        };
     }
     let Some(rest) = path.strip_prefix("/plugins/") else {
         return Route::Unknown;
@@ -346,8 +549,89 @@ fn route(target: &str) -> Route<'_> {
     }
 }
 
-async fn dispatch(config: &CompiledConfig, request: &Request) -> Response {
+#[derive(Serialize)]
+struct AuditStatusResponse {
+    capturing: bool,
+}
+
+#[derive(Serialize)]
+struct AuditCapacityResponse {
+    capacity: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuditCapacityRequest {
+    capacity: i64,
+}
+
+async fn dispatch(
+    config: &CompiledConfig,
+    observer: &QueryObserver,
+    state_root: Option<&Path>,
+    audit_persist_lock: &Arc<AsyncMutex<()>>,
+    request: &Request,
+) -> Response {
     match route(&request.target) {
+        Route::Audit(AuditRoute::Status) => match request.method.as_str() {
+            "GET" => Response::json(&AuditStatusResponse {
+                capturing: observer.is_capturing(),
+            }),
+            _ => Response::method_not_allowed(),
+        },
+        Route::Audit(AuditRoute::Start) => match request.method.as_str() {
+            "POST" => {
+                observer.start_capture();
+                Response::success("Audit log collection started.")
+            }
+            _ => Response::method_not_allowed(),
+        },
+        Route::Audit(AuditRoute::Stop) => match request.method.as_str() {
+            "POST" => {
+                observer.stop_capture();
+                Response::success("Audit log collection stopped.")
+            }
+            _ => Response::method_not_allowed(),
+        },
+        Route::Audit(AuditRoute::Clear) => match request.method.as_str() {
+            "POST" => {
+                observer.clear_audit();
+                Response::success("In-memory audit logs cleared.")
+            }
+            _ => Response::method_not_allowed(),
+        },
+        Route::Audit(AuditRoute::Capacity) => match request.method.as_str() {
+            "GET" => Response::json(&AuditCapacityResponse {
+                capacity: observer.audit_capacity(),
+            }),
+            "POST" => {
+                let payload: AuditCapacityRequest = match serde_json::from_slice::<
+                    AuditCapacityRequest,
+                >(&request.body)
+                {
+                    Ok(payload) if (0..=MAX_AUDIT_CAPACITY as i64).contains(&payload.capacity) => {
+                        payload
+                    }
+                    _ => return Response::error(400, "invalid audit capacity request"),
+                };
+                let capacity =
+                    usize::try_from(payload.capacity).expect("validated audit capacity fits usize");
+                if let Err(message) = persist_audit_capacity(
+                    state_root.map(Path::to_path_buf),
+                    Arc::clone(audit_persist_lock),
+                    capacity,
+                )
+                .await
+                {
+                    return Response::error(500, message);
+                }
+                observer.set_audit_capacity(capacity);
+                Response::success(&format!(
+                    "Audit log capacity set to {capacity}. Existing logs have been cleared."
+                ))
+            }
+            _ => Response::method_not_allowed(),
+        },
         // Go mounts handlers per existing plugin tag, so a tag that is not
         // mounted has no route: 404 before any method or eligibility decision.
         Route::Plugin { tag, .. } if config.domain_set(tag).is_none() => {
@@ -430,4 +714,69 @@ fn eligible<'a>(config: &'a CompiledConfig, tag: &str) -> Result<&'a ManagedDoma
 struct PostPayload {
     #[serde(default)]
     values: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::{load_audit_capacity, migrate_legacy_settings};
+
+    fn test_root(name: &str) -> std::path::PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("mosdns-native-audit-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("test root");
+        root
+    }
+
+    #[test]
+    fn canonical_settings_win_before_legacy_and_clamp_saved_values() {
+        let root = test_root("precedence");
+        fs::create_dir_all(root.join("webinfo")).expect("webinfo");
+        fs::create_dir_all(root.join("state")).expect("state");
+        fs::write(root.join("webinfo/audit_settings.json"), b"not-json").expect("canonical");
+        fs::write(root.join("state/audit_settings.json"), b"{\"capacity\":2}").expect("legacy");
+        assert_eq!(load_audit_capacity(&root, 100_000), 100_000);
+
+        fs::remove_file(root.join("webinfo/audit_settings.json")).expect("remove canonical");
+        assert_eq!(load_audit_capacity(&root, 100_000), 2);
+        assert!(root.join("webinfo/audit_settings.json").is_file());
+        assert!(!root.join("state/audit_settings.json").exists());
+
+        fs::write(
+            root.join("webinfo/audit_settings.json"),
+            b"{\"capacity\":999999}",
+        )
+        .expect("above-range canonical");
+        assert_eq!(load_audit_capacity(&root, 100_000), 400_000);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn null_or_missing_capacity_is_zero_and_failed_migration_keeps_source() {
+        let root = test_root("migration");
+        fs::create_dir_all(root.join("webinfo")).expect("webinfo");
+        fs::write(root.join("webinfo/audit_settings.json"), b"{}").expect("missing capacity");
+        assert_eq!(load_audit_capacity(&root, 100_000), 0);
+        fs::write(
+            root.join("webinfo/audit_settings.json"),
+            b"{\"capacity\":null}",
+        )
+        .expect("null capacity");
+        assert_eq!(load_audit_capacity(&root, 100_000), 0);
+
+        fs::remove_file(root.join("webinfo/audit_settings.json")).expect("remove canonical");
+        fs::create_dir(root.join("webinfo/audit_settings.json")).expect("blocking target");
+        fs::create_dir_all(root.join("state")).expect("state");
+        let legacy = root.join("state/audit_settings.json");
+        let bytes = b"{\"capacity\":7}";
+        fs::write(&legacy, bytes).expect("legacy");
+        migrate_legacy_settings(&root.join("webinfo/audit_settings.json"), &legacy, bytes);
+        assert!(legacy.is_file());
+        fs::remove_dir(root.join("webinfo/audit_settings.json")).expect("remove blocking target");
+        assert_eq!(load_audit_capacity(&root, 100_000), 7);
+        assert!(!legacy.exists());
+        let _ = fs::remove_dir_all(root);
+    }
 }

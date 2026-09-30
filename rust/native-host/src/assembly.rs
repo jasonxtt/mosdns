@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,7 +19,7 @@ use crate::observer::{AuditSnapshot, MetricsSnapshot, QueryObserver};
 use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
 
-const DEFAULT_AUDIT_CAPACITY: usize = 100_000;
+pub(crate) const DEFAULT_AUDIT_CAPACITY: usize = 100_000;
 
 /// Host-side options reserved for tests and the later request runner.
 /// Configuration files cannot override these values in this task.
@@ -118,6 +119,7 @@ pub struct HostAssembly {
     observer: Arc<QueryObserver>,
     runtime: HostRuntime,
     options: HostOptions,
+    state_root: Option<PathBuf>,
 }
 
 impl HostAssembly {
@@ -131,7 +133,8 @@ impl HostAssembly {
     /// and rule-file paths against that file's directory.
     pub fn from_config_file(path: &std::path::Path) -> Result<Self, AssemblyError> {
         let config = load_and_compile(path).map_err(AssemblyError::Config)?;
-        Self::from_config(config)
+        let state_root = path.parent().unwrap_or_else(|| Path::new(""));
+        Self::with_options_and_state_root(config, HostOptions::default(), state_root)
     }
 
     /// Constructs a pre-I/O graph from an already compiled configuration.
@@ -144,6 +147,29 @@ impl HostAssembly {
     pub fn with_options(
         config: CompiledConfig,
         options: HostOptions,
+    ) -> Result<Self, AssemblyError> {
+        Self::with_options_and_optional_state_root(config, options, None)
+    }
+
+    /// Constructs an in-memory graph with an explicit directory for managed
+    /// runtime state. This is the test and embedding seam for persistent API
+    /// settings; it never changes YAML path resolution.
+    pub fn with_options_and_state_root(
+        config: CompiledConfig,
+        options: HostOptions,
+        state_root: impl AsRef<Path>,
+    ) -> Result<Self, AssemblyError> {
+        Self::with_options_and_optional_state_root(
+            config,
+            options,
+            Some(state_root.as_ref().to_path_buf()),
+        )
+    }
+
+    fn with_options_and_optional_state_root(
+        config: CompiledConfig,
+        options: HostOptions,
+        state_root: Option<PathBuf>,
     ) -> Result<Self, AssemblyError> {
         let config = Rc::new(config);
         let forwards = Rc::new(
@@ -167,10 +193,14 @@ impl HostAssembly {
                     .to_owned()
             })
             .collect::<Vec<_>>();
+        let audit_capacity = state_root
+            .as_deref()
+            .map(|root| crate::api::load_audit_capacity(root, options.audit_capacity))
+            .unwrap_or(options.audit_capacity);
         let observer = Arc::new(QueryObserver::new(
             config.listener.enable_audit,
             upstream_identities,
-            options.audit_capacity,
+            audit_capacity,
         ));
         Ok(Self {
             config,
@@ -179,6 +209,7 @@ impl HostAssembly {
             observer,
             runtime: HostRuntime::new()?,
             options,
+            state_root,
         })
     }
 
@@ -304,9 +335,14 @@ impl HostAssembly {
         let dns_addr = dns.local_addr()?;
         let api = match &self.config.api {
             Some(config) => {
-                let server = ApiServer::bind(self.config_handle(), config.http)
-                    .await
-                    .map_err(HostRunError::Api)?;
+                let server = ApiServer::bind(
+                    self.config_handle(),
+                    self.observer_handle(),
+                    self.state_root.clone(),
+                    config.http,
+                )
+                .await
+                .map_err(HostRunError::Api)?;
                 let address = server.local_addr().map_err(HostRunError::Api)?;
                 Some((server, address))
             }
