@@ -3,6 +3,7 @@ use std::net::{Shutdown, SocketAddr, TcpListener as StdTcpListener, TcpStream as
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
+    mpsc,
 };
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -65,6 +66,75 @@ impl MockTcpUpstream {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(thread) = self.thread.take() {
             thread.join().expect("mock upstream thread");
+        }
+    }
+}
+
+struct GatedMockTcpUpstream {
+    address: SocketAddr,
+    entered: Arc<std::sync::atomic::AtomicUsize>,
+    release: mpsc::Sender<()>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl GatedMockTcpUpstream {
+    fn start() -> Self {
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("gated TCP upstream bind");
+        listener
+            .set_nonblocking(true)
+            .expect("gated TCP listener nonblocking");
+        let address = listener.local_addr().expect("gated TCP upstream address");
+        let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let thread_entered = Arc::clone(&entered);
+        let (release, releases) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = thread::spawn(move || {
+            while !thread_stop.load(Ordering::SeqCst) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    thread::sleep(Duration::from_millis(2));
+                    continue;
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_millis(250)))
+                    .expect("gated TCP read timeout");
+                let Ok(query) = read_frame(&mut stream) else {
+                    continue;
+                };
+                thread_entered.fetch_add(1, Ordering::SeqCst);
+                while releases.recv_timeout(Duration::from_millis(20)).is_err() {
+                    if thread_stop.load(Ordering::SeqCst) {
+                        return;
+                    }
+                }
+                let response = response_for(&query, false).expect("gated TCP query shape");
+                let length = u16::try_from(response.len()).expect("gated response fits");
+                if stream.write_all(&length.to_be_bytes()).is_err()
+                    || stream.write_all(&response).is_err()
+                {
+                    return;
+                }
+            }
+        });
+        Self {
+            address,
+            entered,
+            release,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn release_one(&self) {
+        self.release.send(()).expect("gated TCP release");
+    }
+
+    fn stop(mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = self.release.send(());
+        if let Some(thread) = self.thread.take() {
+            thread.join().expect("gated TCP upstream thread");
         }
     }
 }
@@ -165,6 +235,68 @@ fn response_id_rcode(response: &[u8]) -> (u16, u16) {
         header.id,
         u16::from_be_bytes([response[2], response[3]]) & 0x000f,
     )
+}
+
+async fn wait_for_gate(entered: &std::sync::atomic::AtomicUsize, count: usize) {
+    while entered.load(Ordering::SeqCst) < count {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+}
+
+#[test]
+fn tcp_real_listener_samples_start_stop_at_an_in_flight_terminal_barrier() {
+    let gated = GatedMockTcpUpstream::start();
+    let assembly = audit_assembly_for(gated.address);
+    let server = assembly
+        .block_on(TcpServer::bind(&assembly, "127.0.0.1:0".parse().unwrap()))
+        .expect("TCP listener bind");
+    let listener = server.local_addr().expect("listener address");
+    let shutdown = TransportCancellation::new();
+    assembly.block_on(async {
+        let server_task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+
+        let first = tokio::task::spawn_blocking(move || {
+            let mut stream = StdTcpStream::connect(listener).expect("first TCP client");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("first TCP timeout");
+            let request = query(0x6401, &["stop-after-admit", "example"]);
+            write_frame_in_fragments(&mut stream, &request);
+            response_id_rcode(&read_response(&mut stream))
+        });
+        wait_for_gate(&gated.entered, 1).await;
+        assert!(assembly.stop_audit());
+        gated.release_one();
+        first.await.expect("first client task");
+        assert!(assembly.audit_snapshot().records.is_empty());
+
+        let second = tokio::task::spawn_blocking(move || {
+            let mut stream = StdTcpStream::connect(listener).expect("second TCP client");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("second TCP timeout");
+            let request = query(0x6402, &["start-after-admit", "example"]);
+            write_frame_in_fragments(&mut stream, &request);
+            response_id_rcode(&read_response(&mut stream))
+        });
+        wait_for_gate(&gated.entered, 2).await;
+        assert!(assembly.start_audit());
+        gated.release_one();
+        second.await.expect("second client task");
+
+        shutdown.cancel();
+        server_task
+            .await
+            .expect("server task")
+            .expect("server shutdown");
+    });
+    assert_eq!(assembly.metrics_snapshot().completed_total, 2);
+    assert_eq!(assembly.audit_snapshot().records.len(), 1);
+    assert_eq!(
+        assembly.audit_snapshot().records[0].qname,
+        "start-after-admit.example."
+    );
+    gated.stop();
 }
 
 #[test]

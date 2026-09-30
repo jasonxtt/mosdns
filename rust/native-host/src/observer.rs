@@ -670,9 +670,10 @@ impl QueryObserver {
         observation: TerminalObservation,
         make_audit_record: impl FnOnce(TerminalObservation) -> AuditRecord,
     ) {
-        let mut state = self.lock();
-        if self.audit_enabled && state.capturing {
+        let capture_at_terminal = self.audit_enabled && self.lock().capturing;
+        if capture_at_terminal {
             let record = make_audit_record(observation);
+            let mut state = self.lock();
             state.metrics.record_terminal(
                 record.terminal_outcome,
                 &record.response,
@@ -690,6 +691,7 @@ impl QueryObserver {
             }
             state.audit_records.push_back(record);
         } else {
+            let mut state = self.lock();
             state.metrics.record_terminal(
                 observation.outcome,
                 &observation.response,
@@ -722,15 +724,14 @@ impl QueryObserver {
     pub(crate) fn clear_audit(&self) {
         let mut state = self.lock();
         state.audit_records.clear();
+        state.evicted_total = 0;
     }
 
     pub(crate) fn set_audit_capacity(&self, capacity: usize) {
         let mut state = self.lock();
         state.audit_capacity = capacity;
-        while state.audit_records.len() > capacity {
-            state.audit_records.pop_front();
-            state.evicted_total = state.evicted_total.saturating_add(1);
-        }
+        state.audit_records.clear();
+        state.evicted_total = 0;
     }
 
     pub(crate) fn audit_capacity(&self) -> usize {
@@ -1051,8 +1052,8 @@ mod tests {
             });
         }
         observer.set_audit_capacity(1);
-        assert_eq!(observer.audit_snapshot().records.len(), 1);
-        assert_eq!(observer.audit_snapshot().evicted_total, 2);
+        assert!(observer.audit_snapshot().records.is_empty());
+        assert_eq!(observer.audit_snapshot().evicted_total, 0);
         observer.clear_audit();
         assert!(observer.audit_snapshot().records.is_empty());
         assert_eq!(observer.metrics_snapshot().completed_total, 3);
