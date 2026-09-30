@@ -320,8 +320,8 @@ mod slice2_dispatch_tests {
     use crate::{
         DispatchMetadata, ExecutableSpec, ExecutionCompletion, ExecutionControl, ExecutionError,
         ExecutionState, Executor, ExecutorError, ExecutorOutcome, FixtureRef, FixtureSpec,
-        MatchOutcome, Matcher, MatcherError, MatcherSpecInput, ProgramSpec, RuleSpec, SequenceRef,
-        SequenceSpec, StateMutation, execute,
+        MatchOutcome, Matcher, MatcherError, MatcherSpecInput, ProgramSpec, RoutingField, RuleSpec,
+        SequenceRef, SequenceSpec, StateMutation, execute,
     };
 
     fn state(qtype: u16) -> ExecutionState {
@@ -569,7 +569,10 @@ mod slice2_dispatch_tests {
                     vec![MatcherSpecInput::new(
                         Box::new(FixedMatcher {
                             matched: false,
-                            mutation: None,
+                            mutation: Some(StateMutation::SetRouting {
+                                field: RoutingField::MatchedRuleSource,
+                                value: Some("negated:qname".to_owned()),
+                            }),
                             error: None,
                             calls: Rc::new(Cell::new(0)),
                         }),
@@ -578,10 +581,17 @@ mod slice2_dispatch_tests {
                             rule_name: "must-not-appear".to_owned(),
                         },
                     )],
-                    None,
+                    Some(vec![ExecutableSpec::Fixture {
+                        target: FixtureRef::new("exec"),
+                    }]),
                 )],
             )],
-            Vec::new(),
+            vec![fixture(
+                "exec",
+                "exec",
+                &fixture_calls,
+                ExecutorOutcome::Continue,
+            )],
         );
         let reverse_program = reverse_spec.validate().expect("valid reverse program");
         let mut reverse_state = state(1);
@@ -594,6 +604,10 @@ mod slice2_dispatch_tests {
         )
         .expect("reverse execution");
         assert_eq!(reverse_state.routing.domain_set, None);
+        assert_eq!(
+            reverse_state.routing.matched_rule_source.as_deref(),
+            Some("negated:qname")
+        );
     }
 
     #[test]
