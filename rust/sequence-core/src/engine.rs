@@ -786,6 +786,14 @@ fn run_rule(
     for mutation in deferred_routing {
         state.apply_mutation(mutation);
     }
+    if state.routing.matched_rule_source.is_none() {
+        if let Some(source) = &rule.audit_source {
+            state.apply_mutation(crate::StateMutation::SetRouting {
+                field: crate::RoutingField::MatchedRuleSource,
+                value: Some(source.clone()),
+            });
+        }
+    }
     consume_dispatch(control)?;
     dispatch_executable(program, executable, scopes, state)
 }

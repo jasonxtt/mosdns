@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use mosdns_dns_core::observe_answer_addresses;
 use mosdns_matcher_core::{IpPrefixList, MixMatcher};
 use mosdns_sequence_core::{
-    ExecutionState, MatchOutcome, Matcher, MatcherError, ResponseState, RoutingField, StateMutation,
+    ExecutionState, MatchOutcome, Matcher, MatcherError, ResponseState, StateMutation,
 };
 
 use crate::managed::DomainSetHandle;
@@ -25,22 +25,10 @@ impl QnameMatcher {
 impl Matcher for QnameMatcher {
     fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
         let Some(domain) = wire_name_to_ascii_domain(&state.query.question.qname_wire) else {
-            return Ok(MatchOutcome::new(
-                false,
-                Some(StateMutation::SetRouting {
-                    field: RoutingField::MatchedRuleSource,
-                    value: Some("negated:qname".to_owned()),
-                }),
-            ));
+            return Ok(MatchOutcome::new(false, None));
         };
         let Some((source, _set)) = self.groups.iter().find(|(_, set)| set.matches(&domain)) else {
-            return Ok(MatchOutcome::new(
-                false,
-                Some(StateMutation::SetRouting {
-                    field: RoutingField::MatchedRuleSource,
-                    value: Some("negated:qname".to_owned()),
-                }),
-            ));
+            return Ok(MatchOutcome::new(false, None));
         };
         let is_provider = source.starts_with("domain_set:");
         Ok(MatchOutcome::new(

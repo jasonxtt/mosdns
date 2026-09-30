@@ -249,12 +249,24 @@ pub struct RuleSpec {
     /// `None` is a missing executable; `Some(vec![])` is an explicit empty
     /// executable list. Both are legal no-op forms.
     pub exec: Option<Vec<ExecutableSpec>>,
+    /// Optional configuration-owned identity for the executable-bearing rule.
+    pub audit_source: Option<String>,
 }
 
 impl RuleSpec {
     #[must_use]
     pub fn new(matchers: Vec<MatcherSpecInput>, exec: Option<Vec<ExecutableSpec>>) -> Self {
-        Self { matchers, exec }
+        Self {
+            matchers,
+            exec,
+            audit_source: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_audit_source(mut self, source: impl Into<String>) -> Self {
+        self.audit_source = Some(source.into());
+        self
     }
 
     #[must_use]
@@ -444,6 +456,7 @@ impl ProgramSpec {
 pub struct ValidatedRule {
     pub matchers: Vec<MatcherSpec>,
     pub executable: Option<ValidatedExecutable>,
+    pub audit_source: Option<String>,
 }
 
 /// A validated sequence. Synthetic inline sequences have stable IDs but do
@@ -561,6 +574,7 @@ fn normalize_rules(
             Ok(ValidatedRule {
                 matchers,
                 executable,
+                audit_source: rule.audit_source,
             })
         })
         .collect()

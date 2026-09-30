@@ -12,6 +12,7 @@ pub struct ExecutionState {
     pub fast_flags: u64,
     pub response: ResponseState,
     pub routing: RoutingState,
+    response_generation: u64,
 }
 
 impl ExecutionState {
@@ -23,6 +24,7 @@ impl ExecutionState {
             fast_flags: 0,
             response: ResponseState::None,
             routing: RoutingState::default(),
+            response_generation: 0,
         }
     }
 
@@ -38,7 +40,16 @@ impl ExecutionState {
     }
 
     pub fn set_response(&mut self, response: ResponseState) {
+        self.response_generation = self.response_generation.wrapping_add(1);
         self.response = response;
+    }
+
+    /// Identity of the latest response replacement event. This is distinct
+    /// from response bytes so a parent replacing a child with an identical
+    /// wire still gets independent final-response provenance.
+    #[must_use]
+    pub fn response_generation(&self) -> u64 {
+        self.response_generation
     }
 
     pub fn set_raw_response(&mut self, wire: Vec<u8>) {

@@ -96,6 +96,17 @@ mod slice1_state_tests {
     }
 
     #[test]
+    fn response_generation_tracks_equal_replacements() {
+        let mut state = state();
+        assert_eq!(state.response_generation(), 0);
+        let wire = response_wire();
+        state.set_raw_response(wire.clone());
+        assert_eq!(state.response_generation(), 1);
+        state.set_raw_response(wire);
+        assert_eq!(state.response_generation(), 2);
+    }
+
+    #[test]
     fn malformed_raw_response_is_retained_as_typed_error() {
         let mut state = state();
         state.set_raw_response(vec![0x80]);
