@@ -725,8 +725,6 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
             .or_else(|| {
                 (routing.matched_rule_source.is_none()
                     && routing.domain_set.is_none()
-                    && routing.final_upstream.is_none()
-                    && routing.matched_group.is_none()
                     && final_sequence.is_some())
                 .then(|| "unmatched_rule".to_owned())
             })
@@ -3032,6 +3030,45 @@ plugins:
         assert_eq!(local_default_result.selected_upstream, None);
         assert_eq!(
             local_default_result.effective_tag.as_deref(),
+            Some("unmatched_rule")
+        );
+
+        let configured_default = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: flow_setter upstream=configured_default_upstream
+      - exec: reject 3
+  - tag: unused_forward
+    type: forward
+    args: { upstreams: [ { tag: unused_peer, addr: "udp://127.0.0.1:1" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:53059", enable_audit: true }
+"#,
+        )
+        .expect("configured matcher-less default route config");
+        let configured_default_result = execute_observed(
+            &configured_default,
+            &cache,
+            &HostOptions::default(),
+            &query_name(98, "configured-local-default.test."),
+            &MockExchange {
+                calls: Rc::new(Cell::new(0)),
+                response: Vec::new(),
+                fail: false,
+            },
+        );
+        assert_eq!(configured_default_result.selected_upstream, None);
+        assert_eq!(
+            configured_default_result.final_upstream.as_deref(),
+            Some("configured_default_upstream")
+        );
+        assert_eq!(
+            configured_default_result.effective_tag.as_deref(),
             Some("unmatched_rule")
         );
 

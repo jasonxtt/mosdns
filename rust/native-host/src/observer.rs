@@ -981,8 +981,32 @@ impl QueryObserver {
     ) {
         let capture_at_terminal = self.audit_enabled && self.lock().capturing;
         if capture_at_terminal {
-            let record = Arc::new(make_audit_record(observation));
             let mut state = self.lock();
+            let can_retain = if state.audit_capacity == 0 {
+                true
+            } else {
+                let ring_ready = state.audit_records.len() == state.audit_capacity
+                    || state.audit_records.try_reserve(1).is_ok();
+                let timing_ready = state.audit_timings.len() == state.audit_capacity
+                    || state.audit_timings.try_reserve(1).is_ok();
+                ring_ready && timing_ready && state.slowest_records.try_reserve(1).is_ok()
+            };
+            if !can_retain {
+                // Retention is best-effort at the configured boundary: a
+                // variable-detail allocation failure must not lose lifetime
+                // metrics or the admitted-query terminalization. Read-side
+                // projections use the same explicit 500 policy.
+                state.metrics.record_terminal(
+                    observation.outcome,
+                    &observation.response,
+                    observation.cache_status,
+                    observation.upstream_attempts.as_slice(),
+                    observation.elapsed,
+                );
+                self.decrement_in_flight();
+                return;
+            }
+            let record = Arc::new(make_audit_record(observation));
             state.metrics.record_terminal(
                 record.terminal_outcome,
                 &record.response,
