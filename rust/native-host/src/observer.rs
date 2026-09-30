@@ -992,10 +992,11 @@ impl QueryObserver {
                 ring_ready && timing_ready && state.slowest_records.try_reserve(1).is_ok()
             };
             if !can_retain {
-                // Retention is best-effort at the configured boundary: a
-                // variable-detail allocation failure must not lose lifetime
-                // metrics or the admitted-query terminalization. Read-side
-                // projections use the same explicit 500 policy.
+                // Retention is best-effort at the configured fallible
+                // boundary: a recoverable variable-detail allocation failure
+                // must not lose lifetime metrics or admitted-query
+                // terminalization. Read-side recoverable projections use the
+                // explicit 500 policy; hard allocator OOM is not catchable.
                 state.metrics.record_terminal(
                     observation.outcome,
                     &observation.response,

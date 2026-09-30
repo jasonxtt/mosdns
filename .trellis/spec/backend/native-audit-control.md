@@ -41,9 +41,10 @@ does not complete C08, C11, the full Overview/System pages, or `/metrics`.
   real `query_time`, `query_name`, `query_type`, `client_ip`, `duration_ms`.
 - The detailed ring remains capped at 400000 records and retains complete
   answer payloads; do not introduce byte eviction or silently lower capacity.
-  A detailed-retention allocation failure may omit only that record after
-  terminalization and lifetime metrics are recorded. Expensive diagnostic
-  reads own one of two bounded worker permits through worker exit, including
+  A recoverable detailed-retention allocation failure may omit only that
+  record after terminalization and lifetime metrics are recorded. Expensive
+  diagnostic reads own one of two bounded worker permits through worker exit,
+  including
   after a client disconnect; cancellation returns 499, while recoverable
   snapshot, projection, or encoding allocation failures return 500. Neither
   retention nor read failures may affect DNS service behavior or statistics.
