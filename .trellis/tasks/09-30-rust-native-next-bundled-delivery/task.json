@@ -1,0 +1,29 @@
+{
+  "id": "rust-native-next-bundled-delivery",
+  "name": "rust-native-next-bundled-delivery",
+  "title": "Rust-native audit control, DNS card and audit panel",
+  "description": "Plan one bounded 5C package spanning native audit runtime control, persistent capacity, v1/v2 API projections, and maintained Vue DNS overview and audit controls.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-09-30",
+  "completedAt": null,
+  "branch": "rust",
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-28-rust-next-step-roadmap",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "execution_mode": "inline",
+    "automation_required": "true"
+  }
+}
