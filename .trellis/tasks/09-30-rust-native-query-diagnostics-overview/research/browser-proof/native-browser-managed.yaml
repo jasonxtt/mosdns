@@ -1,0 +1,32 @@
+log:
+  level: error
+
+api:
+  http: "127.0.0.1:18080"
+
+plugins:
+  - tag: browser_forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:9"
+
+  - tag: browser_sequence
+    type: sequence
+    args:
+      - matches: qname $whitelist
+        exec: reject 3
+      - exec: reject 3
+
+  - tag: whitelist
+    type: domain_set
+    args:
+      files:
+        - browser-rules.txt
+
+  - tag: browser_udp
+    type: udp_server
+    args:
+      entry: browser_sequence
+      listen: "127.0.0.1:15353"
+      enable_audit: true

@@ -19,7 +19,7 @@ and disposable VM `npm ci && npm run build`. Real UDP/TCP/HTTP/browser proof
 is recorded in `research/browser-proof/README.md`; the 400000-record concurrent
 read evidence is in `research/browser-proof/vm-validation.md`. The code
 candidate is the narrow commit
-`768565598e615c6f694e1d354479ba72aea103da`; a complete independent C2C review
+`be8f8ce14a0602fff3559d94a3523919d76013a4`; a complete independent C2C review
 of the final exact range remains the last handoff gate.
 
 ## State and start gate
