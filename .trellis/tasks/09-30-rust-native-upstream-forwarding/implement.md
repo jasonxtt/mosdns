@@ -144,3 +144,15 @@ A new narrow commit and exact parent/head are supplied to the same dedicated
 reviewer for `REVIEW_ONLY` re-review. No unrelated dirty-worktree changes are
 included, and no Go/cgo/default-release, production, push, deployment, or
 5B/5C/5D acceptance claim is made.
+
+## Second review remediation
+
+The second `REVIEW_ONLY` recheck returned `FINAL: FAIL` with only P1-2
+(checkpoint-visible abnormal-drop ledger and exactly-once terminalization) and
+P2-1 (`concurrent: 1` bypassing rotation) still open. The follow-up changes
+keep one shared ledger handle in the checkpoint throughout the async await,
+guard terminalization against overwrite, qualify responses before marking a
+successful attempt, and apply the bounded seeded rotation before the
+single-leg branch. It also adds deterministic rotation coverage and a dropped
+active multi-leg ledger test. Native-host library validation is now 78/78 and
+slice9 remains 9/9; a new narrow commit is pending final reviewer recheck.
