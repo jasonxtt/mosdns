@@ -65,11 +65,11 @@ metrics.
 
 ```json
 {"generated_at":"2026-09-30T12:00:00Z","items":[
-  {"key":"1h","label":"1小时内","window_seconds":3600,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-30T11:00:00Z"},
-  {"key":"6h","label":"最近6小时","window_seconds":21600,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-30T11:00:00Z"},
-  {"key":"24h","label":"24小时内","window_seconds":86400,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-30T11:00:00Z"},
-  {"key":"3d","label":"最近3天","window_seconds":259200,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-30T11:00:00Z"},
-  {"key":"7d","label":"最近7天","window_seconds":604800,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-30T11:00:00Z"}
+  {"key":"1h","label":"1小时内","window_seconds":3600,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-29T00:00:00Z"},
+  {"key":"6h","label":"最近6小时","window_seconds":21600,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-29T00:00:00Z"},
+  {"key":"24h","label":"24小时内","window_seconds":86400,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-29T00:00:00Z"},
+  {"key":"3d","label":"最近3天","window_seconds":259200,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-29T00:00:00Z"},
+  {"key":"7d","label":"最近7天","window_seconds":604800,"request_count":2,"average_duration_ms":1.5,"complete":true,"coverage_start":"2026-09-29T00:00:00Z"}
 ]}
 ```
 

@@ -14,7 +14,7 @@
 - The connected `Codex with ChatGPT · mosdns-rust` workspace reported branch
   `rust`, commit `96fcd0b9` and a dirty worktree. Existing dirty files include
   canary archive movement, parent roadmap documents, workflow/spec/test edits
-  and `docs/rust/next-stage-plan.md`. This task's eight new planning artifacts
+  and `docs/rust/next-stage-plan.md`. This task's nine planning artifacts
   form the exact planning range. The parent `task.json` already contains the
   child link as workspace metadata but is outside this task's committed range;
   it must remain read-only during this task and must not be staged with it.
@@ -75,3 +75,16 @@ is pending. Task creation and discussion do not authorize `task.py start`.
   and the API-level near-full-ring load proof.
 - These corrections are planning-only and do not expand the four slices or
   authorize product code before the next exact-range review returns PASS.
+
+## Second re-review corrections
+
+- The correction range `2b61fc37f2819672ce3fd123e052a140dd89c3f2..eb1b5d8b3ea0799e6804c51ceb5ee01d836b684b`
+  closed `P1-1` through `P2-2` but returned `FINAL: FAIL` with `P1-3` and
+  `P1-4`.
+- `P1-3`: adding `research/api-contract.md` makes the exact child planning set
+  nine artifacts, not eight. The gate now says nine and requires the exact
+  task path list.
+- `P1-4`: the windows contract example now uses an oldest retained timestamp
+  of `2026-09-29T00:00:00Z` for a `2026-09-30T12:00:00Z` snapshot, so every
+  displayed window satisfies `coverage_start <= cutoff` and
+  `complete:true` consistently.

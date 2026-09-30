@@ -16,15 +16,15 @@ this PRD/design and the backend spec index before code changes.
 - [ ] Refresh the exact `rust` HEAD, `task.py current/list`, archived prior 5C
   evidence, parent roadmap and dirty-path inventory. `docs/rust/next-stage-plan.md`
   and parent roadmap documents have pre-existing uncommitted work; do not
-  stage or overwrite those documents. The new child's eight task artifacts
-  The parent `task.json` already contains this child link as workspace metadata
+  stage or overwrite those documents. The parent `task.json` already contains
+  this child link as workspace metadata
   and is outside this task's committed range; inspect it read-only and do not
   stage it here. Trellis auto-commit remains disabled.
 - [ ] Before implementation approval, validate this child and the parent
   task metadata with `task.py validate`, run `git diff --check`, and inspect
-  the precise planning diff containing only this child's eight artifacts.
-  Never stage all of `.trellis/tasks` or use `git add .` in this dirty
-  worktree.
+  the precise planning diff containing only this child's nine artifacts,
+  enumerated by the task path list. Never stage all of `.trellis/tasks` or use
+  `git add .` in this dirty worktree.
 - [ ] Slice 0 freezes source-level contracts from the scoped v1 handlers in
   `coremain/api_audit.go`, `api_audit_v2.go:16-205`,
   `audit.go:205-245,698-844,918-1320`, `state_files.go:41-110`,
