@@ -91,7 +91,12 @@ worst-case bound, recorded peak memory and allocation failure policy; no silent
 answer truncation or second hidden eviction policy. If the proposed projection
 cannot fit reasonable resources at configured capacity, present a concrete
 byte-limit/truncation tradeoff for user approval instead of silently lowering
-capacity. Do not retain raw response wire alongside decoded answers.
+capacity. The user approved preserving the 400000-record cap and complete
+answers: detailed-retention allocation failure drops only the detailed record
+projection after terminalization/lifetime metrics are kept, while diagnostic
+read allocation/encoding failure returns HTTP 500. Neither path may affect DNS
+service behavior or statistics. Do not retain raw response wire alongside
+decoded answers.
 
 ## Compatibility, failure and rollback
 

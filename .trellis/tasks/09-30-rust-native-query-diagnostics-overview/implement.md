@@ -16,6 +16,13 @@ and fallible expensive-read encoding: cancellation is 499, allocation or
 serialization failure is 500, and the semaphore permit remains owned until
 the worker exits.
 
+The user confirmed the resource contract on 2026-09-30: preserve the existing
+400000-record cap and complete answers, with no hidden byte eviction or answer
+truncation. A detailed-retention allocation failure may omit only the detailed
+record after terminalization/lifetime metrics are kept; a diagnostic-read
+allocation or encoding failure returns HTTP 500. Neither failure may affect DNS
+service behavior or statistics.
+
 All product builds and validation ran through the `mosdns-rust` SSH alias in
 `/root/mosdns-rust-querydiag`; no local Cargo or UI build, production deploy,
 Go/cgo bridge edit, or push was performed. The full `cargo test --workspace`
@@ -24,10 +31,11 @@ run passed, as did `cargo fmt --all -- --check`, workspace clippy with
 and disposable VM `npm ci && npm run build`. Real UDP/TCP/HTTP/browser proof
 is recorded in `research/browser-proof/README.md`; the 400000-record concurrent
 read evidence is in `research/browser-proof/vm-validation.md`. The current
-narrow code candidate is commit `64b298e2` (`fix(native): close query
-diagnostics review gaps`), following the earlier provenance/projection commit
-`be8f8ce1`. The final independent C2C review of the exact committed range
-remains the last handoff gate.
+narrow code candidate is commit `47868d8e` (`fix(native): harden query
+diagnostic read boundaries`), following `1cb9e00e` (`test(native): tighten
+audit rank membership proof`) and `9ce9947e` (`fix(native): close final query
+diagnostics gaps`). The final independent C2C review of the exact committed
+range remains the last handoff gate.
 
 ## State and start gate
 

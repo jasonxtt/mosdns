@@ -171,7 +171,7 @@ extra 300 doesn't duplicate large answers. No synthetic deletion on normal
 ring eviction. If the user instead wants ring-only slowest, approve that
 product change explicitly before implementation.
 
-## Decisions awaiting final execution approval
+## Approved execution decisions — 2026-09-30
 
 1. New rank limit 500, deterministic ties, two-expensive-job admission with
    visible503 (no queue), and exact logs/domain drill-down
@@ -181,13 +181,19 @@ product change explicitly before implementation.
 4. Preserve top-300 slowest history rather than silently convert it to ring-only.
 5. Strict form-query encoding errors and omission of unavailable provenance
    from categorical ranks (genuine unmatched_rule remains counted).
-6. No new hidden byte eviction/truncation; measure variable-payload resources.
-   If this fails the bounded resource screen, stop for a concrete revised
-   budget/payload proposal instead of claiming A5 PASS.
+6. No new hidden byte eviction/truncation; preserve the existing 400000-record
+   query-diagnostics cap and complete answer payloads. The user explicitly
+   approved this resource behavior on 2026-09-30: if retaining a detailed
+   projection cannot allocate, keep terminalization/lifetime metrics and omit
+   only the detailed retained record; if an expensive diagnostic read cannot
+   allocate or encode, return HTTP 500. These failures must not affect DNS
+   service behavior or statistics.
 
-These are proposed contracts in a planning-only task. The execution handoff
-must request final approval or rely on a subsequent user prompt explicitly
-approving this exact plan; planning/C2C discussion isn't that approval.
+Items 1–5 were approved by the execution prompt. Item 6 was explicitly
+confirmed by the user on 2026-09-30 after the measured resource screen. The
+18.00 GiB large-answer projection estimate is retained as a diagnostic
+worst-case observation, not a reason to silently lower capacity or truncate
+answers.
 
 ## Expensive read admission and resource screen
 
@@ -210,9 +216,11 @@ measure ordinary and deliberately large multi-answer projection bytes/record
 and project 400000 records plus two read-handle views/top300; run near-full
 400000 rich-record DNS/HTTP progress with a VM-sized fixture. Do not attempt
 a 400000 maximal-wire-response allocation or call tiny-record success a worst-
-case memory proof. Resource estimates/observations are diagnostics. If evidence
-requires truncation/byte eviction/capacity reduction, pause for a concrete user
-decision; this planning turn authorizes none.
+case memory proof. Resource estimates/observations are diagnostics. The
+approved policy is to keep the 400000 cap and complete answers, avoid hidden
+byte eviction/truncation, return diagnostic-read HTTP 500 on allocation or
+encoding failure, and keep DNS behavior/statistics running if detailed
+retention cannot allocate.
 
 ## URL query decoding and missing-category contract
 

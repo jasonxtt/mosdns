@@ -3,14 +3,16 @@
 All commands below ran in `/root/mosdns-rust-querydiag/rust` on the
 `mosdns-rust` SSH VM. The browser proof used the fixtures next to this file.
 The final implementation candidate for the code changes is
-`64b298e2` (`fix(native): close query diagnostics review gaps`), following
-`be8f8ce1` (`fix(native): preserve query provenance and projection bounds`).
-The later evidence commit records this exact candidate and does not change
-product code.
+`47868d8e` (`fix(native): harden query diagnostic read boundaries`), following
+`1cb9e00e` (`test(native): tighten audit rank membership proof`) and
+`9ce9947e` (`fix(native): close final query diagnostics gaps`). The latest
+focused evidence below was collected from this candidate; documentation-only
+updates do not change product code.
 
 ## Bounded record/projection checks
 
-- `cargo test -p mosdns-native-host --test slice8_audit_read_http`: `3 passed`.
+- `cargo test -p mosdns-native-host --test slice8_audit_read_http -- --nocapture`:
+  `5 passed`.
   The real UDP/HTTP test fills the configured retained ring with `400000`
   real DNS records, performs concurrent `/api/v2/audit/logs?limit=500` and
   `/api/v2/audit/rank/slowest?limit=300` reads, asserts a bounded read remains
@@ -25,18 +27,18 @@ product code.
   agreement; a sibling case uses a real TCP listener for a positive
   AAAA+CNAME response, and a separate real UDP case proves cache miss/hit and
   TTL aging.
-- `cargo test -p mosdns-native-host --test slice8_audit_read_http` with a
-  `/proc`/`ps` polling wrapper: `3 passed`, `slice8_peak_rss_kib=421744`.
-  The full-ring test printed `retained=400000 concurrent_reads=2
-  dns_progress_during_reads=4 logs=500 slowest_max=300 logs_bytes=211539
-  logs_bytes_per_record=423.07 large_answer_projection_bytes_per_record=49152
+- The latest full-ring test printed `retained=400000 concurrent_reads=2
+  dns_progress_during_reads=4 logs=500 slowest_max=300 logs_bytes=211487
+  logs_bytes_per_record=422.97 large_answer_projection_bytes_per_record=49152
   estimated_400000_large_projection_bytes=19660800000
-  two_view_projection_bytes=549958` for the concurrent views; it also holds both
-  expensive reads open and proves a third simultaneous read receives 503
-  `audit read capacity exhausted`. The test checks that at least one HTTP
-  worker remains active before and during the DNS probes. The VM image does not provide `/usr/bin/time`, so the recorded
-  peak is the test-process resident-set observation from `/proc`/`ps`, not a
-  production capacity claim.
+  two_snapshot_arc_handle_bytes=6404800`. It also holds both expensive reads
+  open and proves a third simultaneous read receives 503 `audit read capacity
+  exhausted`. The test checks that at least one HTTP worker remains active
+  before and during the DNS probes. The same real HTTP fixture sends a request
+  on a socket that is closed before the response and proves that the
+  disconnecting worker still occupies a slot until its canceled worker exits.
+  These are projection-size and progress observations, not a production
+  capacity claim.
 - `cargo test -p mosdns-native-host --lib
   canceled_audit_read_releases_its_slot_only_after_worker_exit`: `1 passed`.
   A canceled worker returns 499, and a following read cannot acquire the
@@ -67,9 +69,10 @@ npm ci
 npm run build
 ```
 
-On `64b298e2`, all six commands completed successfully on the VM: workspace
+On `47868d8e`, all six commands completed successfully on the VM: workspace
 clippy had no warnings, `cargo test --workspace` passed all unit, integration,
-and doctest groups, and the native-host build completed. `npm ci` installed
+and doctest groups, including the five real slice8 listener tests, and the
+native-host build completed. `npm ci` installed
 the lockfile set and `npm run build` completed; Vite emitted only its existing
 large-chunk warning (npm also reported the disposable dependency audit's
 5-vulnerability summary, without applying `npm audit fix`). The focused
