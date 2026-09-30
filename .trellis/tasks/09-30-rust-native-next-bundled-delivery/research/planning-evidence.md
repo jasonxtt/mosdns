@@ -85,6 +85,11 @@ is pending. Task creation and discussion do not authorize `task.py start`.
   nine artifacts, not eight. The gate now says nine and requires the exact
   task path list.
 - `P1-4`: the windows contract example now uses an oldest retained timestamp
-  of `2026-09-29T00:00:00Z` for a `2026-09-30T12:00:00Z` snapshot, so every
+  of `2026-09-23T00:00:00Z` for a `2026-09-30T12:00:00Z` snapshot, so every
   displayed window satisfies `coverage_start <= cutoff` and
   `complete:true` consistently.
+
+The next exact-range review confirmed `P1-3` closed and kept `P1-4` open
+because the prior `2026-09-29T00:00:00Z` example was newer than the 3-day and
+7-day cutoffs. This correction moves it before the 7-day cutoff; no scope or
+contract rule changes.
