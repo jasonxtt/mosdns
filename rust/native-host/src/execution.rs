@@ -92,7 +92,7 @@ struct ExecutionFacts<'a> {
     /// child's routing fields, so the live machine routing state is not by
     /// itself a safe final-audit source.
     response_routing: Option<RoutingState>,
-    last_response: MachineResponseState,
+    last_response_generation: u64,
     routing_changed_since_response: bool,
     current_origin: Option<SequenceId>,
     routing_origin: Option<SequenceId>,
@@ -132,7 +132,7 @@ impl ExecutionFacts<'_> {
     }
 
     fn note_response(&mut self, state: &ExecutionState) {
-        if self.last_response == state.response {
+        if self.last_response_generation == state.response_generation() {
             return;
         }
         self.response_routing = match &state.response {
@@ -152,7 +152,7 @@ impl ExecutionFacts<'_> {
                 )
             }
         };
-        self.last_response = state.response.clone();
+        self.last_response_generation = state.response_generation();
         self.routing_changed_since_response = false;
     }
 
@@ -313,7 +313,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         final_sequence: None,
         routing: RoutingState::default(),
         response_routing: None,
-        last_response: MachineResponseState::None,
+        last_response_generation: 0,
         routing_changed_since_response: false,
         current_origin: None,
         routing_origin: None,
@@ -2911,7 +2911,7 @@ plugins:
         );
         assert_eq!(
             reverse_result.matched_rule_source.as_deref(),
-            Some("negated:qname")
+            Some("inline:entry#0")
         );
         assert_eq!(reverse_result.domain_set, None);
         assert_eq!(reverse_result.effective_tag, None);
@@ -2960,6 +2960,56 @@ plugins:
         assert_eq!(parent_result.matched_rule_source, None);
         assert_eq!(parent_result.effective_tag, None);
         assert_eq!(parent_result.selected_upstream, None);
+    }
+
+    #[test]
+    fn byte_identical_parent_response_replacement_drops_child_provenance() {
+        let config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $child
+      - exec: $parent_forward
+  - tag: child
+    type: sequence
+    args:
+      - matches: qname $child_rules
+        exec: $child_forward
+  - tag: child_rules
+    type: domain_set
+    args:
+      exps: ["full:child.test"]
+  - tag: child_forward
+    type: forward
+    args: { upstreams: [ { tag: child_peer, addr: "udp://127.0.0.1:1" } ] }
+  - tag: parent_forward
+    type: forward
+    args: { upstreams: [ { tag: parent_peer, addr: "udp://127.0.0.1:2" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:53055", enable_audit: true }
+"#,
+        )
+        .expect("byte-identical parent replacement config");
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(100)).expect("cache");
+        let request = query_name(94, "child.test.");
+        let result = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &request,
+            &MockExchange {
+                calls: Rc::new(Cell::new(0)),
+                response: response(&request),
+                fail: false,
+            },
+        );
+        assert_eq!(result.domain_set, None);
+        assert_eq!(result.matched_rule_source, None);
+        assert_eq!(result.selected_upstream, Some("127.0.0.1:2".to_owned()));
     }
 
     #[test]

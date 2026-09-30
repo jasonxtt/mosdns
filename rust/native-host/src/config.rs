@@ -970,7 +970,10 @@ fn compile_sequence(
                 "a sequence rule requires at least one matcher or executable",
             ));
         }
-        rules.push(RuleSpec::new(matchers, executable));
+        rules.push(
+            RuleSpec::new(matchers, executable)
+                .with_audit_source(format!("inline:{}#{}", plugin.tag, rule_index)),
+        );
     }
     Ok(SequenceSpec::new(plugin.tag.clone(), rules))
 }

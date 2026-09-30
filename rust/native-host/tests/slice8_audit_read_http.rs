@@ -1,9 +1,16 @@
 //! Slice 2: retained-ring v2 audit projections over real HTTP and DNS.
 
-use std::net::{SocketAddr, TcpListener as StdTcpListener, UdpSocket as StdUdpSocket};
-use std::sync::Arc;
+use std::io::{Read, Write};
+use std::net::{
+    SocketAddr, TcpListener as StdTcpListener, TcpStream as StdTcpStream, UdpSocket as StdUdpSocket,
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use mosdns_dns_core::validate_response;
 use mosdns_native_host::{AuditTestClock, HostAssembly, HostOptions};
 use mosdns_upstream_core::TransportCancellation;
 use serde_json::Value;
@@ -24,6 +31,10 @@ fn free_udp_port() -> u16 {
 }
 
 fn dns_query(id: u16, name: &str) -> Vec<u8> {
+    dns_query_type(id, name, 1)
+}
+
+fn dns_query_type(id: u16, name: &str, qtype: u16) -> Vec<u8> {
     let mut packet = vec![
         u8::try_from(id >> 8).expect("high DNS ID byte"),
         u8::try_from(id & 0x00ff).expect("low DNS ID byte"),
@@ -42,7 +53,9 @@ fn dns_query(id: u16, name: &str) -> Vec<u8> {
         packet.push(u8::try_from(label.len()).expect("DNS label length"));
         packet.extend_from_slice(label.as_bytes());
     }
-    packet.extend_from_slice(&[0, 0, 1, 0, 1]);
+    packet.push(0);
+    packet.extend_from_slice(&qtype.to_be_bytes());
+    packet.extend_from_slice(&[0, 1]);
     packet
 }
 
@@ -59,6 +72,28 @@ fn udp_query(listener: SocketAddr, request: &[u8]) -> Vec<u8> {
     response[..length].to_vec()
 }
 
+fn tcp_query(listener: SocketAddr, request: &[u8]) -> Vec<u8> {
+    let mut stream = StdTcpStream::connect(listener).expect("DNS TCP connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("DNS TCP timeout");
+    stream
+        .write_all(
+            &u16::try_from(request.len())
+                .expect("DNS TCP request length")
+                .to_be_bytes(),
+        )
+        .expect("DNS TCP length write");
+    stream.write_all(request).expect("DNS TCP request write");
+    let mut length = [0_u8; 2];
+    stream.read_exact(&mut length).expect("DNS TCP length read");
+    let mut response = vec![0_u8; usize::from(u16::from_be_bytes(length))];
+    stream
+        .read_exact(&mut response)
+        .expect("DNS TCP response read");
+    response
+}
+
 fn fill_real_ring(listener: SocketAddr, count: u32) {
     let socket = StdUdpSocket::bind("127.0.0.1:0").expect("bulk DNS client bind");
     socket
@@ -72,6 +107,57 @@ fn fill_real_ring(listener: SocketAddr, count: u32) {
         );
         socket.send_to(&request, listener).expect("bulk DNS send");
         socket.recv_from(&mut response).expect("bulk DNS response");
+    }
+}
+
+fn rich_response(query: &[u8]) -> Vec<u8> {
+    let mut response = query[..2].to_vec();
+    response.extend_from_slice(&[0x81, 0x80, 0, 1, 0, 2, 0, 0, 0, 0]);
+    response.extend_from_slice(&query[12..]);
+    let cname = b"\x05alias\x07example\x00";
+    response.extend_from_slice(&[0xc0, 0x0c, 0, 5, 0, 1, 0, 0, 0, 60]);
+    response.extend_from_slice(
+        &u16::try_from(cname.len())
+            .expect("CNAME length")
+            .to_be_bytes(),
+    );
+    response.extend_from_slice(cname);
+    let qtype_offset = query
+        .iter()
+        .enumerate()
+        .skip(12)
+        .find_map(|(index, byte)| (*byte == 0).then_some(index + 1))
+        .expect("rich qname terminator");
+    let qtype = u16::from_be_bytes([query[qtype_offset], query[qtype_offset + 1]]);
+    if qtype == 28 {
+        response.extend_from_slice(&[
+            0xc0, 0x0c, 0, 28, 0, 1, 0, 0, 0, 60, 0, 16, 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0x55,
+        ]);
+    } else {
+        response.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 55]);
+    }
+    response
+}
+
+fn run_rich_upstream(
+    socket: &std::net::UdpSocket,
+    stopped: &Arc<AtomicBool>,
+    served: &Arc<AtomicUsize>,
+) {
+    socket
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .expect("rich upstream timeout");
+    let mut query = [0_u8; 4096];
+    while !stopped.load(Ordering::Acquire) {
+        let Ok((length, peer)) = socket.recv_from(&mut query) else {
+            continue;
+        };
+        served.fetch_add(1, Ordering::Relaxed);
+        let response = rich_response(&query[..length]);
+        socket
+            .send_to(&response, peer)
+            .expect("rich upstream response");
     }
 }
 
@@ -146,7 +232,14 @@ fn config(
     root: &std::path::Path,
     dns_port: u16,
     api_port: u16,
+    upstream_port: u16,
+    listener_type: &str,
 ) -> mosdns_native_host::CompiledConfig {
+    let idle_timeout = if listener_type == "tcp_server" {
+        "      idle_timeout: 5\n"
+    } else {
+        ""
+    };
     let yaml = format!(
         r#"log:
   level: error
@@ -156,18 +249,26 @@ plugins:
   - tag: sequence_main
     type: sequence
     args:
-      - exec: reject 3
+      - matches: "!qname $rich_rules"
+        exec: reject 3
+      - matches: qname $rich_rules
+        exec: $forward_main
+  - tag: rich_rules
+    type: domain_set
+    args:
+      exps: ["full:rich.example."]
   - tag: forward_main
     type: forward
     args:
       upstreams:
-        - addr: "udp://127.0.0.1:25999"
+        - addr: "udp://127.0.0.1:{upstream_port}"
   - tag: listener
-    type: udp_server
+    type: {listener_type}
     args:
       entry: sequence_main
       listen: "127.0.0.1:{dns_port}"
       enable_audit: true
+{idle_timeout}
 "#
     );
     let path = root.join("config.yaml");
@@ -202,9 +303,23 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
     std::fs::create_dir_all(&root).expect("audit read root");
     let dns_port = free_udp_port();
     let api_port = free_tcp_port();
+    let upstream_port = free_udp_port();
+    let upstream_socket =
+        std::net::UdpSocket::bind(("127.0.0.1", upstream_port)).expect("rich upstream bind");
+    let upstream_stopped = Arc::new(AtomicBool::new(false));
+    let upstream_served = Arc::new(AtomicUsize::new(0));
+    let upstream_stopped_for_thread = Arc::clone(&upstream_stopped);
+    let upstream_served_for_thread = Arc::clone(&upstream_served);
+    let upstream_task = std::thread::spawn(move || {
+        run_rich_upstream(
+            &upstream_socket,
+            &upstream_stopped_for_thread,
+            &upstream_served_for_thread,
+        );
+    });
     let clock = AuditTestClock::new(at(1_700_000_000, 0));
     let host = HostAssembly::with_options_and_state_root(
-        config(&root, dns_port, api_port),
+        config(&root, dns_port, api_port, upstream_port, "udp_server"),
         HostOptions::default()
             .with_audit_capacity(8)
             .with_audit_clock(Arc::new(clock.clone())),
@@ -310,6 +425,48 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         assert_eq!(exact.status, 200);
         let exact_json: Value = serde_json::from_str(&exact.body).expect("exact JSON");
         assert_eq!(exact_json["pagination"]["total_items"], 1);
+        let repeated_client_ip = http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs?client_ip=127.0.0.2&client_ip=::ffff:127.0.0.1",
+        )
+        .await;
+        assert_eq!(repeated_client_ip.status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&repeated_client_ip.body).expect("repeated client JSON")["pagination"]["total_items"], 3);
+        let no_client_match = http_request(api, "GET", "/api/v2/audit/logs?client_ip=127.0.0.2").await;
+        assert_eq!(no_client_match.status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&no_client_match.body).expect("no client JSON")["pagination"]["total_items"], 0);
+        let rich = tokio::task::spawn_blocking(move || udp_query(dns, &dns_query(0x8109, "rich.example.")))
+            .await
+            .expect("rich DNS client");
+        assert!(!rich.is_empty());
+        let rich_filters = [
+            ("domain=rich.example", 1),
+            ("answer_ip=192.0.2.55", 1),
+            ("cname=alias.example.", 1),
+            ("domain_set=rich_rules", 1),
+            ("effective_tag=rich_rules", 1),
+            ("client_ip=127.0.0.1&answer_ip=192.0.2.55", 1),
+        ];
+        for (query, expected) in rich_filters {
+            let response = http_request(api, "GET", &format!("/api/v2/audit/logs?{query}")).await;
+            assert_eq!(response.status, 200, "filter {query}");
+            assert_eq!(serde_json::from_str::<Value>(&response.body).expect("rich filter JSON")["pagination"]["total_items"], expected, "filter {query}");
+        }
+        let overflow = http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs?page=9223372036854775808&limit=9223372036854775808",
+        )
+        .await;
+        assert_eq!(overflow.status, 200);
+        assert!(serde_json::from_str::<Value>(&overflow.body).expect("overflow JSON")["logs"].as_array().expect("overflow logs").len() <= 50);
+        let malformed = http_request(api, "GET", "/api/v2/audit/logs?q=%FF").await;
+        assert_eq!(malformed.status, 400);
+        assert_eq!(malformed.body, "invalid audit query encoding\n");
+        let unknown = http_request(api, "GET", "/api/v2/audit/logs?bogus=1").await;
+        assert_eq!(unknown.status, 400);
+        assert_eq!(unknown.body, "unsupported audit query parameter\n");
         let rank = http_request(api, "GET", "/api/v2/audit/rank/domain?limit=20").await;
         assert_eq!(rank.status, 200);
         let rank_json: Value = serde_json::from_str(&rank.body).expect("rank JSON");
@@ -323,6 +480,21 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         assert_eq!(domain_logs.status, 200);
         let domain_logs_json: Value = serde_json::from_str(&domain_logs.body).expect("domain logs JSON");
         assert_eq!(domain_logs_json["pagination"]["total_items"], 1);
+        for (route, expected_key, expected_count) in [
+            ("rank/client", "127.0.0.1", 4),
+            ("rank/domain_set", "rich_rules", 1),
+            ("rank/effective", "rich_rules", 1),
+        ] {
+            let response = http_request(api, "GET", &format!("/api/v2/audit/{route}?limit=20")).await;
+            assert_eq!(response.status, 200, "{route}");
+            let values: Value = serde_json::from_str(&response.body).expect("rank JSON");
+            assert_eq!(values[0]["key"], expected_key, "{route}");
+            assert_eq!(values[0]["count"], expected_count, "{route}");
+        }
+        let slowest = http_request(api, "GET", "/api/v2/audit/rank/slowest?limit=300").await;
+        assert_eq!(slowest.status, 200);
+        let slowest_values: Value = serde_json::from_str(&slowest.body).expect("slowest JSON");
+        assert!(slowest_values.as_array().expect("slowest values").iter().any(|item| item["query_name"] == "rich.example"));
 
         let resized = http_post(api, "/api/v1/audit/capacity", r#"{"capacity":2}"#).await;
         assert_eq!(resized.status, 200);
@@ -441,17 +613,27 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             "GET",
             "/api/v2/audit/rank/slowest?limit=300",
         ));
+        tokio::task::yield_now().await;
+        assert!(
+            !full_logs_task.is_finished() || !full_slowest_task.is_finished(),
+            "at least one bounded read must still be active before progress probes"
+        );
         let mut dns_progress_during_reads = 0;
+        let mut active_read_probe = false;
         for id in 0x9001..0x9005 {
+            let read_active = !full_logs_task.is_finished() || !full_slowest_task.is_finished();
+            active_read_probe |= read_active;
             let response = tokio::task::spawn_blocking(move || {
                 udp_query(dns, &dns_query(id, "during-full-read.example."))
             })
             .await
             .expect("during-read DNS client");
-            if !response.is_empty() {
+            if read_active && !response.is_empty() {
                 dns_progress_during_reads += 1;
             }
         }
+        assert!(active_read_probe, "DNS probes must observe a live HTTP read");
+        assert!(dns_progress_during_reads > 0, "DNS must progress during HTTP reads");
         let full_logs = full_logs_task.await.expect("full logs read");
         let full_slowest = full_slowest_task.await.expect("full slowest read");
         assert_eq!(full_logs.status, 200);
@@ -510,5 +692,79 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         task.await.expect("audit read supervisor")
     });
     result.expect("audit read supervisor shutdown");
+    upstream_stopped.store(true, Ordering::Release);
+    upstream_task.join().expect("rich upstream shutdown");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn tcp_real_listener_preserves_positive_cname_and_audit_projection() {
+    validate_response(&rich_response(&dns_query_type(0x9101, "rich.example.", 28)))
+        .expect("valid rich AAAA response");
+    let root = std::env::temp_dir().join(format!("mosdns-audit-tcp-read-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("TCP audit read root");
+    let dns_port = free_tcp_port();
+    let api_port = free_tcp_port();
+    let upstream_port = free_udp_port();
+    let upstream_socket =
+        std::net::UdpSocket::bind(("127.0.0.1", upstream_port)).expect("TCP rich upstream bind");
+    let upstream_stopped = Arc::new(AtomicBool::new(false));
+    let upstream_served = Arc::new(AtomicUsize::new(0));
+    let upstream_stopped_for_thread = Arc::clone(&upstream_stopped);
+    let upstream_served_for_thread = Arc::clone(&upstream_served);
+    let upstream_task = std::thread::spawn(move || {
+        run_rich_upstream(
+            &upstream_socket,
+            &upstream_stopped_for_thread,
+            &upstream_served_for_thread,
+        );
+    });
+    let clock = AuditTestClock::new(at(1_700_000_000, 0));
+    let host = HostAssembly::with_options_and_state_root(
+        config(&root, dns_port, api_port, upstream_port, "tcp_server"),
+        HostOptions::default()
+            .with_audit_capacity(8)
+            .with_audit_clock(Arc::new(clock)),
+        &root,
+    )
+    .expect("assemble TCP audit read host");
+    let bound = host
+        .block_on(host.bind_host())
+        .expect("bind TCP audit read host");
+    let dns = bound.dns_addr();
+    let api = bound.api_addr().expect("TCP audit read API");
+    let shutdown = TransportCancellation::new();
+
+    let result = host.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let response = tokio::task::spawn_blocking(move || {
+            tcp_query(dns, &dns_query_type(0x9101, "rich.example.", 28))
+        })
+        .await
+        .expect("TCP DNS client");
+        assert!(!response.is_empty());
+        assert_eq!(upstream_served.load(Ordering::Relaxed), 1);
+        let logs = http_request(api, "GET", "/api/v2/audit/logs?domain=rich.example").await;
+        assert_eq!(logs.status, 200);
+        let body: Value = serde_json::from_str(&logs.body).expect("TCP audit logs JSON");
+        assert_eq!(body["pagination"]["total_items"], 1);
+        assert_eq!(body["logs"][0]["query_type"], "AAAA");
+        assert_eq!(body["logs"][0]["response_code"], "NOERROR");
+        assert_eq!(
+            body["logs"][0]["answers"]
+                .as_array()
+                .expect("TCP answers")
+                .len(),
+            2
+        );
+        assert_eq!(body["logs"][0]["answers"][0]["type"], "CNAME");
+        assert_eq!(body["logs"][0]["answers"][1]["data"], "2001:db8::55");
+        shutdown.cancel();
+        task.await.expect("TCP audit read supervisor")
+    });
+    result.expect("TCP audit read supervisor shutdown");
+    upstream_stopped.store(true, Ordering::Release);
+    upstream_task.join().expect("TCP rich upstream shutdown");
     let _ = std::fs::remove_dir_all(root);
 }
