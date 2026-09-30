@@ -420,11 +420,10 @@ impl std::error::Error for PoolError {}
 impl From<PoolError> for UpstreamError {
     fn from(error: PoolError) -> Self {
         match error {
-            // A busy key has written nothing, so the side-effect state is
-            // `NotSent`. It is reported through the existing closed-style
-            // transport error rather than a new transport variant, keeping the
-            // transport error set closed.
-            PoolError::Busy => Self::Runtime(SideEffectState::NotSent),
+            // A busy key has written nothing. Preserve the typed local-capacity
+            // distinction so callers can take the narrowly authorized fresh
+            // connection path without retrying arbitrary `NotSent` failures.
+            PoolError::Busy => Self::Backpressure(SideEffectState::NotSent),
             PoolError::Closed => Self::Closed(SideEffectState::NotSent),
             PoolError::NotReusable => Self::InvalidRequest(RequestError::Malformed),
         }

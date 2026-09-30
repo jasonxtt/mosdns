@@ -111,8 +111,24 @@ impl UdpTcpPolicy {
         request: ExchangeRequest<'q>,
         context: ExchangeContext,
     ) -> Result<ExchangeResponse, UpstreamError> {
+        self.exchange_with_phase_hook(request, context, |_| {})
+            .await
+    }
+
+    /// Runs the composite exchange while reporting the target phase immediately
+    /// before each physical leg starts.
+    pub async fn exchange_with_phase_hook<'q, F>(
+        &self,
+        request: ExchangeRequest<'q>,
+        context: ExchangeContext,
+        mut phase: F,
+    ) -> Result<ExchangeResponse, UpstreamError>
+    where
+        F: FnMut(Transport),
+    {
         // The UDP leg validates the request once and owns one registration.
         // The response is a complete answer or a TC observation.
+        phase(Transport::Udp);
         let udp_response = self.udp.exchange(request, context.clone()).await?;
         if !udp_response.truncated() {
             return Ok(udp_response);
@@ -139,6 +155,7 @@ impl UdpTcpPolicy {
         // same context clone (same absolute deadline, same cancellation token).
         // A failure keeps the original typed TCP cause nested under the prior
         // TC context; it is never stringified, relabelled, or retried.
+        phase(Transport::Tcp);
         match self.tcp.exchange(request, context).await {
             Ok(response) => Ok(response),
             Err(cause) => Err(UpstreamError::TcpFallback {

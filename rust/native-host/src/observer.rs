@@ -1,11 +1,14 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::ops::Index;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
+use mosdns_sequence_core::ExecutableId;
 use mosdns_upstream_core::TransportCancellation;
 
 /// One final-wire Answer record retained for diagnostics.
@@ -344,6 +347,97 @@ impl UpstreamAttemptLedger {
     pub(crate) fn slots(&self) -> &[UpstreamAttemptSlot] {
         &self.slots
     }
+
+    pub(crate) fn into_shared(self) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(self))
+    }
+
+    pub(crate) fn restore_from_shared(shared: Rc<RefCell<Self>>) -> Self {
+        Rc::try_unwrap(shared)
+            .expect("all attempt trackers must drain before ledger restoration")
+            .into_inner()
+    }
+}
+
+/// RAII handle for one started entry. It is the live phase source for both
+/// normal completion and an invocation future dropped while target I/O is
+/// active; no terminal fact is reconstructed from an owner after the await.
+pub(crate) struct UpstreamAttemptTracker {
+    ledger: Rc<RefCell<UpstreamAttemptLedger>>,
+    slot: usize,
+    peer: Option<SocketAddr>,
+    transport: Option<UpstreamTransport>,
+    cancellation: TransportCancellation,
+    finished: bool,
+}
+
+impl UpstreamAttemptTracker {
+    pub(crate) fn new(
+        ledger: Rc<RefCell<UpstreamAttemptLedger>>,
+        slot: usize,
+        cancellation: TransportCancellation,
+    ) -> Self {
+        Self {
+            ledger,
+            slot,
+            peer: None,
+            transport: None,
+            cancellation,
+            finished: false,
+        }
+    }
+
+    /// Publishes the currently started target phase before its I/O is polled.
+    pub(crate) fn phase(&mut self, peer: Option<SocketAddr>, transport: Option<UpstreamTransport>) {
+        self.peer = peer;
+        self.transport = transport;
+        if let Some(slot) = self.ledger.borrow_mut().slots.get_mut(self.slot) {
+            slot.peer = peer;
+            slot.transport = transport;
+        }
+    }
+
+    pub(crate) fn set_transport(&mut self, transport: UpstreamTransport) {
+        self.phase(self.peer, Some(transport));
+    }
+
+    pub(crate) const fn peer(&self) -> Option<SocketAddr> {
+        self.peer
+    }
+
+    pub(crate) const fn transport(&self) -> Option<UpstreamTransport> {
+        self.transport
+    }
+
+    pub(crate) fn finish(
+        &mut self,
+        peer: Option<SocketAddr>,
+        transport: Option<UpstreamTransport>,
+        outcome: UpstreamAttemptOutcome,
+    ) {
+        self.phase(peer, transport);
+        self.ledger
+            .borrow_mut()
+            .finish(self.slot, peer, transport, outcome);
+        self.finished = true;
+    }
+}
+
+impl Drop for UpstreamAttemptTracker {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let outcome = if self.cancellation.is_cancelled() {
+            UpstreamAttemptOutcome::Canceled
+        } else {
+            UpstreamAttemptOutcome::Interrupted
+        };
+        self.ledger
+            .borrow_mut()
+            .finish(self.slot, self.peer, self.transport, outcome);
+        self.finished = true;
+    }
 }
 
 /// One actual upstream attempt made by the request execution path.
@@ -369,6 +463,14 @@ enum UpstreamAttemptStorage {
 pub(crate) struct UpstreamAttemptList {
     storage: UpstreamAttemptStorage,
     capacity_hint: usize,
+    metric_attempts: Vec<UpstreamMetricAttempt>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct UpstreamMetricAttempt {
+    pub executable: ExecutableId,
+    pub entry_index: usize,
+    pub outcome: UpstreamAttemptOutcome,
 }
 
 impl UpstreamAttemptList {
@@ -376,7 +478,16 @@ impl UpstreamAttemptList {
         Self {
             storage: UpstreamAttemptStorage::Empty,
             capacity_hint,
+            metric_attempts: Vec::new(),
         }
+    }
+
+    pub(crate) fn push_metric(&mut self, attempt: UpstreamMetricAttempt) {
+        self.metric_attempts.push(attempt);
+    }
+
+    pub(crate) fn metric_attempts(&self) -> &[UpstreamMetricAttempt] {
+        &self.metric_attempts
     }
 
     pub(crate) fn push(&mut self, attempt: UpstreamAttemptRecord) {
@@ -439,10 +550,12 @@ impl From<Vec<UpstreamAttemptRecord>> for UpstreamAttemptList {
             1 => Self {
                 storage: UpstreamAttemptStorage::One(attempts.remove(0)),
                 capacity_hint: 0,
+                metric_attempts: Vec::new(),
             },
             _ => Self {
                 storage: UpstreamAttemptStorage::Many(attempts),
                 capacity_hint: 0,
+                metric_attempts: Vec::new(),
             },
         }
     }
@@ -453,6 +566,7 @@ impl From<UpstreamAttemptRecord> for UpstreamAttemptList {
         Self {
             storage: UpstreamAttemptStorage::One(attempt),
             capacity_hint: 0,
+            metric_attempts: Vec::new(),
         }
     }
 }
@@ -875,6 +989,7 @@ impl ExecutionCheckpoint {
 
 #[derive(Clone, Debug, Default)]
 struct MetricsState {
+    metric_identities: BTreeMap<(ExecutableId, usize), Arc<str>>,
     completed_total: u64,
     malformed_total: u64,
     send_succeeded_total: u64,
@@ -892,6 +1007,45 @@ struct MetricsState {
 }
 
 impl MetricsState {
+    fn record_metric(&mut self, identity: &str, outcome: UpstreamAttemptOutcome) {
+        if let Some(counters) = self.forward_attempts_by_upstream.get_mut(identity) {
+            counters.attempts_total = counters.attempts_total.saturating_add(1);
+            let counter = match outcome {
+                UpstreamAttemptOutcome::Response => &mut counters.responses_total,
+                UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
+                UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
+                UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
+                UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
+            };
+            *counter = counter.saturating_add(1);
+        } else {
+            self.unknown_forward_attempts_total =
+                self.unknown_forward_attempts_total.saturating_add(1);
+        }
+    }
+
+    fn record_metric_key(&mut self, key: (ExecutableId, usize), outcome: UpstreamAttemptOutcome) {
+        let Some(identity) = self.metric_identities.get(&key).cloned() else {
+            self.unknown_forward_attempts_total =
+                self.unknown_forward_attempts_total.saturating_add(1);
+            return;
+        };
+        if let Some(counters) = self.forward_attempts_by_upstream.get_mut(identity.as_ref()) {
+            counters.attempts_total = counters.attempts_total.saturating_add(1);
+            let counter = match outcome {
+                UpstreamAttemptOutcome::Response => &mut counters.responses_total,
+                UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
+                UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
+                UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
+                UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
+            };
+            *counter = counter.saturating_add(1);
+        } else {
+            self.unknown_forward_attempts_total =
+                self.unknown_forward_attempts_total.saturating_add(1);
+        }
+    }
+
     fn snapshot(&self, in_flight: u64) -> MetricsSnapshot {
         MetricsSnapshot {
             admitted_total: self.completed_total.saturating_add(in_flight),
@@ -919,6 +1073,7 @@ impl MetricsState {
         response: &ResponseState,
         cache_status: CacheStatus,
         upstream_attempts: &[UpstreamAttemptRecord],
+        metric_attempts: &[UpstreamMetricAttempt],
         elapsed: Duration,
     ) {
         self.completed_total = self.completed_total.saturating_add(1);
@@ -954,20 +1109,13 @@ impl MetricsState {
                 self.cache_misses_total = self.cache_misses_total.saturating_add(1);
             }
         }
-        for attempt in upstream_attempts {
-            if let Some(counters) = self.forward_attempts_by_upstream.get_mut(&attempt.upstream) {
-                counters.attempts_total = counters.attempts_total.saturating_add(1);
-                let counter = match attempt.outcome {
-                    UpstreamAttemptOutcome::Response => &mut counters.responses_total,
-                    UpstreamAttemptOutcome::Failed => &mut counters.failures_total,
-                    UpstreamAttemptOutcome::TimedOut => &mut counters.timeouts_total,
-                    UpstreamAttemptOutcome::Canceled => &mut counters.canceled_total,
-                    UpstreamAttemptOutcome::Interrupted => &mut counters.interrupted_total,
-                };
-                *counter = counter.saturating_add(1);
-            } else {
-                self.unknown_forward_attempts_total =
-                    self.unknown_forward_attempts_total.saturating_add(1);
+        if metric_attempts.is_empty() {
+            for attempt in upstream_attempts {
+                self.record_metric(&attempt.upstream, attempt.outcome);
+            }
+        } else {
+            for attempt in metric_attempts {
+                self.record_metric_key((attempt.executable, attempt.entry_index), attempt.outcome);
             }
         }
         self.duration.observe(elapsed);
@@ -1027,16 +1175,18 @@ impl QueryObserver {
         )
     }
 
-    pub(crate) fn try_with_clock(
+    pub(crate) fn try_with_clock_and_registry(
         audit_enabled: bool,
         upstream_identities: impl IntoIterator<Item = String>,
+        metric_registry: impl IntoIterator<Item = (ExecutableId, usize, String)>,
         audit_capacity: usize,
         audit_clock: Arc<dyn AuditClock>,
     ) -> Result<Self, AdmissionError> {
         let request_ids = NativeRequestIdAllocator::random()?;
-        let observer = Self::with_parts(
+        let observer = Self::with_parts_and_registry(
             audit_enabled,
             upstream_identities,
+            metric_registry,
             audit_capacity,
             audit_clock,
             request_ids,
@@ -1044,6 +1194,7 @@ impl QueryObserver {
         Ok(observer)
     }
 
+    #[cfg(test)]
     fn with_parts(
         audit_enabled: bool,
         upstream_identities: impl IntoIterator<Item = String>,
@@ -1051,10 +1202,40 @@ impl QueryObserver {
         audit_clock: Arc<dyn AuditClock>,
         request_ids: NativeRequestIdAllocator,
     ) -> Self {
+        Self::with_parts_and_registry(
+            audit_enabled,
+            upstream_identities,
+            std::iter::empty(),
+            audit_capacity,
+            audit_clock,
+            request_ids,
+        )
+    }
+
+    fn with_parts_and_registry(
+        audit_enabled: bool,
+        upstream_identities: impl IntoIterator<Item = String>,
+        metric_registry: impl IntoIterator<Item = (ExecutableId, usize, String)>,
+        audit_capacity: usize,
+        audit_clock: Arc<dyn AuditClock>,
+        request_ids: NativeRequestIdAllocator,
+    ) -> Self {
         let forward_attempts_by_upstream = upstream_identities
             .into_iter()
             .map(|identity| (identity, UpstreamAttemptMetricsSnapshot::default()))
-            .collect();
+            .collect::<BTreeMap<_, _>>();
+        let metric_identities = metric_registry
+            .into_iter()
+            .map(|(executable, entry_index, identity)| {
+                ((executable, entry_index), Arc::<str>::from(identity))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut forward_attempts_by_upstream = forward_attempts_by_upstream;
+        for identity in metric_identities.values() {
+            forward_attempts_by_upstream
+                .entry(identity.to_string())
+                .or_default();
+        }
         let audit_records = VecDeque::with_capacity(if audit_enabled {
             audit_capacity.min(INITIAL_AUDIT_RECORD_CAPACITY)
         } else {
@@ -1068,6 +1249,7 @@ impl QueryObserver {
             state: Mutex::new(ObserverState {
                 metrics: MetricsState {
                     forward_attempts_by_upstream,
+                    metric_identities,
                     ..MetricsState::default()
                 },
                 audit_records,
@@ -1125,19 +1307,21 @@ impl QueryObserver {
                     &observation.response,
                     observation.cache_status,
                     observation.upstream_attempts.as_slice(),
+                    observation.upstream_attempts.metric_attempts(),
                     observation.elapsed,
                 );
                 self.decrement_in_flight();
                 return;
             }
-            let record = Arc::new(make_audit_record(observation));
             state.metrics.record_terminal(
-                record.terminal_outcome,
-                &record.response,
-                record.cache_status,
-                &record.upstream_attempts,
-                record.elapsed,
+                observation.outcome,
+                &observation.response,
+                observation.cache_status,
+                observation.upstream_attempts.as_slice(),
+                observation.upstream_attempts.metric_attempts(),
+                observation.elapsed,
             );
+            let record = Arc::new(make_audit_record(observation));
             self.decrement_in_flight();
             if state.audit_capacity == 0 {
                 return;
@@ -1174,6 +1358,7 @@ impl QueryObserver {
                 &observation.response,
                 observation.cache_status,
                 observation.upstream_attempts.as_slice(),
+                observation.upstream_attempts.metric_attempts(),
                 observation.elapsed,
             );
             self.decrement_in_flight();

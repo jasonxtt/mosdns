@@ -48,3 +48,42 @@ visibly showed:
 
 The directly queried native endpoint returned the same schema-versioned object
 from `/api/v2/audit/logs` before the browser interaction.
+
+## Review remediation and final rerun
+
+The dedicated c2c-web reviewer returned `FINAL: FAIL` on the first committed
+range. The findings were limited to this forwarding scope: non-address
+responses winning too early, stale peer/transport facts during terminalization,
+over-broad fresh-connection fallback after reuse busy, retained resolver-owner
+history, fixed-prefix rather than rotated bounded selection, last-error rather
+than first-completed failure selection, and audit-off identity allocation.
+
+The follow-up range addresses those findings with A/AAAA response priority,
+one live RAII attempt ledger plus an explicit UDP/TCP phase hook, typed
+`Backpressure(NotSent)` busy handling, scoped owner retention, seeded/injectable
+rotation, first-failure preservation, and ID/enumeration-based audit-off
+metrics. The native catalog path does not materialize identity strings for
+audit-off attempts.
+
+After the fix round, the isolated SSH checkout passed the corrected final
+commands:
+
+- `cargo fmt --all -- --check`.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- `cargo test --workspace`, including all workspace tests and doctests.
+- `cargo build -p mosdns-native-host`.
+- `npm ci`, `npm run build`, and `npm run build:log1` in `webui-log`.
+
+One intermediate `w1_tcp` failure occurred while the remote checkout still had
+an old copy of `reuse.rs` at an incorrect sync destination; the corrected
+explicit source sync changed the typed busy mapping, and the focused test plus
+the subsequent complete workspace run passed. This was a remote source-sync
+failure, not a product regression. The earlier remote capacity failures and
+their cleanup remain recorded above.
+
+The latest browser proof used the updated binary and controlled loopback
+upstream. The browser accessibility state showed selected `primary`, peer
+`127.0.0.1:15453`, `udp`, ordered attempt `0 / primary / 127.0.0.1:15453 /
+udp / response`, answer `192.0.2.123`, and `NOERROR`. The owned processes and
+SSH tunnel were then stopped; the final port check returned
+`proof-pids-cleaned`.
