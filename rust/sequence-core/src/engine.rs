@@ -746,6 +746,7 @@ fn run_rule(
     state: &mut ExecutionState,
     control: &mut ExecutionControl,
 ) -> Result<Step, ExecutionError> {
+    let mut deferred_routing = Vec::new();
     for matcher in &rule.matchers {
         consume_dispatch(control)?;
         let outcome = matcher
@@ -753,7 +754,11 @@ fn run_rule(
             .evaluate(state)
             .map_err(ExecutionError::Matcher)?;
         if let Some(mutation) = outcome.mutation {
-            state.apply_mutation(mutation);
+            if matches!(&mutation, crate::StateMutation::SetRoutingFields { .. }) {
+                deferred_routing.push(mutation);
+            } else {
+                state.apply_mutation(mutation);
+            }
         }
         let effective_match = if matcher.reverse {
             !outcome.matched
@@ -771,6 +776,9 @@ fn run_rule(
     let Some(executable) = &rule.executable else {
         return Ok(Step::Continue);
     };
+    for mutation in deferred_routing {
+        state.apply_mutation(mutation);
+    }
     consume_dispatch(control)?;
     dispatch_executable(program, executable, scopes, state)
 }

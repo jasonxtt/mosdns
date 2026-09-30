@@ -8,12 +8,97 @@ use std::time::{Duration, SystemTime};
 
 use mosdns_upstream_core::TransportCancellation;
 
+/// One final-wire Answer record retained for diagnostics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditAnswer {
+    pub rrtype: u16,
+    pub ttl: u32,
+    pub data: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AnswerDetailsStatus {
+    Complete,
+    RawRdata,
+    DecodeError,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ResponseFlags {
+    pub aa: bool,
+    pub tc: bool,
+    pub ra: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseDetails {
+    pub rcode: u16,
+    pub flags: ResponseFlags,
+    pub answers: Vec<AuditAnswer>,
+    pub answer_details_status: AnswerDetailsStatus,
+    pub answer_decode_error: Option<String>,
+}
+
+impl ResponseDetails {
+    pub fn no_response() -> Self {
+        Self {
+            rcode: 0,
+            flags: ResponseFlags::default(),
+            answers: Vec::new(),
+            answer_details_status: AnswerDetailsStatus::Complete,
+            answer_decode_error: None,
+        }
+    }
+}
+
 const DURATION_BUCKET_UPPER_BOUNDS_MICROS: [u64; 15] = [
     50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000, 250_000, 500_000,
     1_000_000, 2_500_000,
 ];
 const DURATION_HISTOGRAM_BUCKET_COUNT: usize = DURATION_BUCKET_UPPER_BOUNDS_MICROS.len() + 1;
 const INITIAL_AUDIT_RECORD_CAPACITY: usize = 1_024;
+const MAX_NATIVE_REQUEST_ID: u64 = u64::MAX;
+
+struct NativeRequestIdAllocator {
+    nonce: [u8; 16],
+    next: AtomicU64,
+}
+
+impl NativeRequestIdAllocator {
+    fn from_nonce(nonce: [u8; 16]) -> Self {
+        Self {
+            nonce,
+            next: AtomicU64::new(1),
+        }
+    }
+
+    fn random() -> Result<Self, AdmissionError> {
+        let mut nonce = [0_u8; 16];
+        getrandom::fill(&mut nonce).map_err(|_| AdmissionError::RequestIdExhausted)?;
+        Ok(Self::from_nonce(nonce))
+    }
+
+    fn allocate(&self) -> Result<String, AdmissionError> {
+        let counter = self
+            .next
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                if current == 0 {
+                    None
+                } else if current == MAX_NATIVE_REQUEST_ID {
+                    Some(0)
+                } else {
+                    Some(current + 1)
+                }
+            })
+            .map_err(|_| AdmissionError::RequestIdExhausted)?;
+        let mut nonce_hex = String::with_capacity(32);
+        for byte in self.nonce {
+            use std::fmt::Write;
+            let _ = write!(nonce_hex, "{byte:02x}");
+        }
+        Ok(format!("n-{nonce_hex}-{counter:016x}"))
+    }
+}
 
 /// Wall-clock source shared by audit admission and window projections.
 pub trait AuditClock: Send + Sync {
@@ -88,6 +173,21 @@ pub enum QueryTerminalOutcome {
     /// Execution ended without a DNS response and without cancellation.
     NoResponse,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AdmissionError {
+    RequestIdExhausted,
+}
+
+impl std::fmt::Display for AdmissionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RequestIdExhausted => formatter.write_str("native request ID counter exhausted"),
+        }
+    }
+}
+
+impl std::error::Error for AdmissionError {}
 
 /// The listener transport that admitted a query.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -302,20 +402,34 @@ pub struct AuditRecord {
     pub qtype: u16,
     /// Parsed question class.
     pub qclass: u16,
+    /// Native admission identifier, independent of the DNS transaction ID.
+    pub trace_id: String,
     /// Monotonic elapsed time from admission through terminalization.
     pub elapsed: Duration,
     /// Mutually exclusive lifecycle terminal outcome.
     pub terminal_outcome: QueryTerminalOutcome,
     /// Final response state and source, independent from transport outcome.
     pub response: ResponseState,
+    /// Safe flags and all-or-none final Answer projection.
+    pub response_details: ResponseDetails,
     /// Cache result for this query.
     pub cache_status: CacheStatus,
     /// Final executed sequence tag, if established.
     pub final_sequence: Option<String>,
     /// Configured matched group, when the sequence set one.
     pub matched_group: Option<String>,
+    /// Provider or inline rule identity that established the route.
+    pub domain_set: Option<String>,
+    /// Effective product routing label, when provenance is known.
+    pub effective_tag: Option<String>,
+    /// Configuration-owned source descriptor, when established.
+    pub matched_rule_source: Option<String>,
     /// Upstream that supplied the final response, if any.
     pub final_upstream: Option<String>,
+    /// Configured targets belonging to the final supplying leg.
+    pub upstream_targets: Option<String>,
+    /// Actual numeric endpoint that supplied the final wire.
+    pub selected_upstream: Option<String>,
     /// Actual upstream attempts in execution order.
     pub upstream_attempts: Vec<UpstreamAttemptRecord>,
     /// Distinct failure provenance when execution establishes one.
@@ -480,9 +594,9 @@ pub(crate) struct AuditStatsSnapshot {
     pub elapsed_micros: u128,
 }
 
-pub(crate) struct AuditLogPage {
-    pub total_items: usize,
-    pub records: Vec<AuditRecord>,
+pub(crate) struct AuditReadSnapshot {
+    pub records: Vec<Arc<AuditRecord>>,
+    pub slowest: Vec<Arc<AuditRecord>>,
 }
 
 #[derive(Clone, Debug)]
@@ -490,23 +604,57 @@ pub(crate) struct AuditLogPage {
 pub(crate) struct TerminalObservation {
     pub outcome: QueryTerminalOutcome,
     pub response: ResponseState,
+    pub response_details: ResponseDetails,
     pub cache_status: CacheStatus,
     pub final_sequence: Option<String>,
     pub matched_group: Option<String>,
+    pub domain_set: Option<String>,
+    pub effective_tag: Option<String>,
+    pub matched_rule_source: Option<String>,
     pub final_upstream: Option<String>,
+    pub upstream_targets: Option<String>,
+    pub selected_upstream: Option<String>,
     pub upstream_attempts: UpstreamAttemptList,
     pub failure_provenance: Option<FailureProvenance>,
     pub elapsed: Duration,
+}
+
+impl Default for TerminalObservation {
+    fn default() -> Self {
+        Self {
+            outcome: QueryTerminalOutcome::NoResponse,
+            response: ResponseState::NoResponse,
+            response_details: ResponseDetails::no_response(),
+            cache_status: CacheStatus::Undetermined,
+            final_sequence: None,
+            matched_group: None,
+            domain_set: None,
+            effective_tag: None,
+            matched_rule_source: None,
+            final_upstream: None,
+            upstream_targets: None,
+            selected_upstream: None,
+            upstream_attempts: UpstreamAttemptList::default(),
+            failure_provenance: None,
+            elapsed: Duration::ZERO,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct ExecutionCheckpoint {
     capture_audit_details: bool,
     response: ResponseState,
+    response_details: ResponseDetails,
     cache_status: CacheStatus,
     final_sequence: Option<String>,
     matched_group: Option<String>,
+    domain_set: Option<String>,
+    effective_tag: Option<String>,
+    matched_rule_source: Option<String>,
     final_upstream: Option<String>,
+    upstream_targets: Option<String>,
+    selected_upstream: Option<String>,
     upstream_attempts: UpstreamAttemptList,
     failure_provenance: Option<FailureProvenance>,
     in_flight_upstream: Option<String>,
@@ -518,10 +666,16 @@ impl ExecutionCheckpoint {
         Self {
             capture_audit_details,
             response: ResponseState::NoResponse,
+            response_details: ResponseDetails::no_response(),
             cache_status: CacheStatus::Undetermined,
             final_sequence: None,
             matched_group: None,
+            domain_set: None,
+            effective_tag: None,
+            matched_rule_source: None,
             final_upstream: None,
+            upstream_targets: None,
+            selected_upstream: None,
             upstream_attempts: UpstreamAttemptList::default(),
             failure_provenance: None,
             in_flight_upstream: None,
@@ -539,10 +693,19 @@ impl ExecutionCheckpoint {
         in_flight_upstream: Option<String>,
     ) {
         self.response = observation.response.clone();
+        self.response_details = observation.response_details.clone();
         self.cache_status = observation.cache_status;
         self.final_sequence.clone_from(&observation.final_sequence);
         self.matched_group.clone_from(&observation.matched_group);
+        self.domain_set.clone_from(&observation.domain_set);
+        self.effective_tag.clone_from(&observation.effective_tag);
+        self.matched_rule_source
+            .clone_from(&observation.matched_rule_source);
         self.final_upstream.clone_from(&observation.final_upstream);
+        self.upstream_targets
+            .clone_from(&observation.upstream_targets);
+        self.selected_upstream
+            .clone_from(&observation.selected_upstream);
         self.upstream_attempts
             .clone_from(&observation.upstream_attempts);
         self.failure_provenance
@@ -570,10 +733,16 @@ impl ExecutionCheckpoint {
         TerminalObservation {
             outcome,
             response: self.response.clone(),
+            response_details: self.response_details.clone(),
             cache_status: self.cache_status,
             final_sequence: self.final_sequence.clone(),
             matched_group: self.matched_group.clone(),
+            domain_set: self.domain_set.clone(),
+            effective_tag: self.effective_tag.clone(),
+            matched_rule_source: self.matched_rule_source.clone(),
             final_upstream: self.final_upstream.clone(),
+            upstream_targets: self.upstream_targets.clone(),
+            selected_upstream: self.selected_upstream.clone(),
             upstream_attempts,
             failure_provenance: self.failure_provenance.clone(),
             elapsed,
@@ -685,7 +854,8 @@ impl MetricsState {
 #[derive(Default)]
 struct ObserverState {
     metrics: MetricsState,
-    audit_records: VecDeque<AuditRecord>,
+    audit_records: VecDeque<Arc<AuditRecord>>,
+    slowest_records: Vec<Arc<AuditRecord>>,
     audit_timings: VecDeque<AuditTimingSnapshot>,
     audit_elapsed_micros: u128,
     audit_capacity: usize,
@@ -698,6 +868,7 @@ struct ObserverState {
 pub(crate) struct QueryObserver {
     audit_enabled: bool,
     audit_clock: Arc<dyn AuditClock>,
+    request_ids: NativeRequestIdAllocator,
     in_flight: AtomicU64,
     state: Mutex<ObserverState>,
 }
@@ -717,11 +888,45 @@ impl QueryObserver {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn with_clock(
         audit_enabled: bool,
         upstream_identities: impl IntoIterator<Item = String>,
         audit_capacity: usize,
         audit_clock: Arc<dyn AuditClock>,
+    ) -> Self {
+        Self::with_parts(
+            audit_enabled,
+            upstream_identities,
+            audit_capacity,
+            audit_clock,
+            NativeRequestIdAllocator::from_nonce([0x11; 16]),
+        )
+    }
+
+    pub(crate) fn try_with_clock(
+        audit_enabled: bool,
+        upstream_identities: impl IntoIterator<Item = String>,
+        audit_capacity: usize,
+        audit_clock: Arc<dyn AuditClock>,
+    ) -> Result<Self, AdmissionError> {
+        let request_ids = NativeRequestIdAllocator::random()?;
+        let observer = Self::with_parts(
+            audit_enabled,
+            upstream_identities,
+            audit_capacity,
+            audit_clock,
+            request_ids,
+        );
+        Ok(observer)
+    }
+
+    fn with_parts(
+        audit_enabled: bool,
+        upstream_identities: impl IntoIterator<Item = String>,
+        audit_capacity: usize,
+        audit_clock: Arc<dyn AuditClock>,
+        request_ids: NativeRequestIdAllocator,
     ) -> Self {
         let forward_attempts_by_upstream = upstream_identities
             .into_iter()
@@ -735,6 +940,7 @@ impl QueryObserver {
         Self {
             audit_enabled,
             audit_clock,
+            request_ids,
             in_flight: AtomicU64::new(0),
             state: Mutex::new(ObserverState {
                 metrics: MetricsState {
@@ -742,6 +948,7 @@ impl QueryObserver {
                     ..MetricsState::default()
                 },
                 audit_records,
+                slowest_records: Vec::new(),
                 audit_timings: VecDeque::with_capacity(if audit_enabled {
                     audit_capacity.min(INITIAL_AUDIT_RECORD_CAPACITY)
                 } else {
@@ -774,7 +981,7 @@ impl QueryObserver {
     ) {
         let capture_at_terminal = self.audit_enabled && self.lock().capturing;
         if capture_at_terminal {
-            let record = make_audit_record(observation);
+            let record = Arc::new(make_audit_record(observation));
             let mut state = self.lock();
             state.metrics.record_terminal(
                 record.terminal_outcome,
@@ -787,6 +994,14 @@ impl QueryObserver {
             if state.audit_capacity == 0 {
                 return;
             }
+            state.slowest_records.push(Arc::clone(&record));
+            state.slowest_records.sort_by(|left, right| {
+                right
+                    .elapsed
+                    .cmp(&left.elapsed)
+                    .then_with(|| right.trace_id.cmp(&left.trace_id))
+            });
+            state.slowest_records.truncate(300);
             if state.audit_records.len() == state.audit_capacity {
                 state.audit_records.pop_front();
                 if let Some(timing) = state.audit_timings.pop_front() {
@@ -838,6 +1053,7 @@ impl QueryObserver {
     pub(crate) fn clear_audit(&self) {
         let mut state = self.lock();
         state.audit_records.clear();
+        state.slowest_records.clear();
         state.audit_timings.clear();
         state.audit_elapsed_micros = 0;
         state.evicted_total = 0;
@@ -847,6 +1063,7 @@ impl QueryObserver {
         let mut state = self.lock();
         state.audit_capacity = capacity;
         state.audit_records.clear();
+        state.slowest_records.clear();
         state.audit_timings.clear();
         state.audit_elapsed_micros = 0;
         state.evicted_total = 0;
@@ -873,14 +1090,15 @@ impl QueryObserver {
             .expect("terminal query must have a matching admission");
     }
 
-    pub(crate) fn admit(
+    pub(crate) fn try_admit(
         self: &std::sync::Arc<Self>,
         client_addr: SocketAddr,
         transport: QueryTransport,
         question: &mosdns_dns_core::QuestionInfo,
         cancellation: TransportCancellation,
-    ) -> AdmittedQueryGuard {
+    ) -> Result<AdmittedQueryGuard, AdmissionError> {
         let admitted_at = Instant::now();
+        let trace_id = self.request_ids.allocate()?;
         let audit_context = self.audit_enabled.then(|| AuditContext {
             timestamp: self.audit_clock.now(),
             client_addr,
@@ -888,16 +1106,29 @@ impl QueryObserver {
             qname: render_qname(&question.qname_wire),
             qtype: question.qtype,
             qclass: question.qclass,
+            trace_id,
         });
         self.admit_query();
-        AdmittedQueryGuard {
+        Ok(AdmittedQueryGuard {
             observer: std::sync::Arc::clone(self),
             admitted_at,
             audit_context,
             cancellation,
             execution_checkpoint: Box::new(ExecutionCheckpoint::new(self.audit_enabled)),
             finalized: false,
-        }
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn admit(
+        self: &std::sync::Arc<Self>,
+        client_addr: SocketAddr,
+        transport: QueryTransport,
+        question: &mosdns_dns_core::QuestionInfo,
+        cancellation: TransportCancellation,
+    ) -> AdmittedQueryGuard {
+        self.try_admit(client_addr, transport, question, cancellation)
+            .expect("test request ID allocation")
     }
 
     pub(crate) fn metrics_snapshot(&self) -> MetricsSnapshot {
@@ -910,8 +1141,20 @@ impl QueryObserver {
     pub(crate) fn audit_snapshot(&self) -> AuditSnapshot {
         let state = self.lock();
         AuditSnapshot {
-            records: state.audit_records.iter().cloned().collect(),
+            records: state
+                .audit_records
+                .iter()
+                .map(|record| record.as_ref().clone())
+                .collect(),
             evicted_total: state.evicted_total,
+        }
+    }
+
+    pub(crate) fn audit_read_snapshot(&self) -> AuditReadSnapshot {
+        let state = self.lock();
+        AuditReadSnapshot {
+            records: state.audit_records.iter().cloned().collect(),
+            slowest: state.slowest_records.clone(),
         }
     }
 
@@ -925,22 +1168,6 @@ impl QueryObserver {
 
     pub(crate) fn audit_timing_snapshot(&self) -> Vec<AuditTimingSnapshot> {
         self.lock().audit_timings.iter().copied().collect()
-    }
-
-    pub(crate) fn audit_log_page(&self, page: usize, limit: usize) -> AuditLogPage {
-        let state = self.lock();
-        let start = page.saturating_sub(1).saturating_mul(limit);
-        AuditLogPage {
-            total_items: state.audit_records.len(),
-            records: state
-                .audit_records
-                .iter()
-                .rev()
-                .skip(start)
-                .take(limit)
-                .cloned()
-                .collect(),
-        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ObserverState> {
@@ -957,6 +1184,7 @@ struct AuditContext {
     qname: String,
     qtype: u16,
     qclass: u16,
+    trace_id: String,
 }
 
 /// Finalizes one admitted request. Dropping an unfinished request records one
@@ -1011,13 +1239,20 @@ impl AdmittedQueryGuard {
                 qname: context.qname,
                 qtype: context.qtype,
                 qclass: context.qclass,
+                trace_id: context.trace_id,
                 elapsed: observation.elapsed,
                 terminal_outcome: observation.outcome,
                 response: observation.response,
+                response_details: observation.response_details,
                 cache_status: observation.cache_status,
                 final_sequence: observation.final_sequence,
                 matched_group: observation.matched_group,
+                domain_set: observation.domain_set,
+                effective_tag: observation.effective_tag,
+                matched_rule_source: observation.matched_rule_source,
                 final_upstream,
+                upstream_targets: observation.upstream_targets,
+                selected_upstream: observation.selected_upstream,
                 upstream_attempts: observation.upstream_attempts.into_vec(),
                 failure_provenance: observation.failure_provenance,
             }
@@ -1107,15 +1342,16 @@ fn render_qname(wire: &[u8]) -> String {
 mod tests {
     use std::cell::Cell;
     use std::net::SocketAddr;
+    use std::sync::atomic::Ordering;
     use std::time::{Duration, SystemTime};
 
     use mosdns_upstream_core::TransportCancellation;
 
     use super::{
         AuditRecord, CacheStatus, FailureProvenance, INITIAL_AUDIT_RECORD_CAPACITY,
-        LocalFailureKind, QueryObserver, QueryTerminalOutcome, QueryTransport, ResponseSource,
-        ResponseState, TerminalObservation, UpstreamAttemptList, UpstreamAttemptOutcome,
-        UpstreamAttemptRecord,
+        LocalFailureKind, MAX_NATIVE_REQUEST_ID, NativeRequestIdAllocator, QueryObserver,
+        QueryTerminalOutcome, QueryTransport, ResponseDetails, ResponseSource, ResponseState,
+        TerminalObservation, UpstreamAttemptList, UpstreamAttemptOutcome, UpstreamAttemptRecord,
     };
 
     fn observer(audit_enabled: bool, capacity: usize) -> QueryObserver {
@@ -1124,6 +1360,20 @@ mod tests {
             ["route-a".to_owned(), "route-b".to_owned()],
             capacity,
         )
+    }
+
+    #[test]
+    fn native_request_ids_are_fixed_width_and_fail_closed_at_counter_exhaustion() {
+        let allocator = NativeRequestIdAllocator::from_nonce([0xab; 16]);
+        assert_eq!(
+            allocator.allocate().expect("first request id"),
+            "n-abababababababababababababababab-0000000000000001"
+        );
+        allocator
+            .next
+            .store(MAX_NATIVE_REQUEST_ID, Ordering::SeqCst);
+        assert!(allocator.allocate().is_ok());
+        assert!(allocator.allocate().is_err());
     }
 
     #[test]
@@ -1305,6 +1555,7 @@ mod tests {
             }]),
             failure_provenance: None,
             elapsed: Duration::ZERO,
+            ..Default::default()
         });
 
         cancellation.cancel();
@@ -1420,6 +1671,7 @@ mod tests {
                     upstream: "route-a".to_owned(),
                 }),
                 elapsed: Duration::ZERO,
+                ..Default::default()
             },
             Some("route-b".to_owned()),
         );
@@ -1463,6 +1715,7 @@ mod tests {
                 upstream_attempts: UpstreamAttemptList::default(),
                 failure_provenance: None,
                 elapsed: Duration::ZERO,
+                ..Default::default()
             },
             Some("route-a".to_owned()),
         );
@@ -1517,6 +1770,7 @@ mod tests {
             }]),
             failure_provenance: None,
             elapsed,
+            ..Default::default()
         }
     }
 
@@ -1539,6 +1793,13 @@ mod tests {
             final_upstream: Some("route-a".to_owned()),
             upstream_attempts: observation.upstream_attempts.into_vec(),
             failure_provenance: None,
+            trace_id: "n-11111111111111111111111111111111-0000000000000001".to_owned(),
+            response_details: ResponseDetails::no_response(),
+            domain_set: None,
+            effective_tag: None,
+            matched_rule_source: None,
+            upstream_targets: None,
+            selected_upstream: None,
         }
     }
 
@@ -1697,6 +1958,7 @@ mod tests {
                     upstream_attempts: upstream_attempts.into(),
                     failure_provenance: None,
                     elapsed: Duration::from_micros(250),
+                    ..Default::default()
                 },
                 |_| unreachable!("disabled audit must not construct a record"),
             );

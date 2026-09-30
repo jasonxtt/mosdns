@@ -130,13 +130,13 @@ const flowDurationMs = computed(() => {
 const responseFlagText = computed(() => {
   const flags = selectedLog.value?.response_flags || {}
   const items = []
-  if (flags.ra) {
+  if (flags.RA ?? flags.ra) {
     items.push('RA')
   }
-  if (flags.aa) {
+  if (flags.AA ?? flags.aa) {
     items.push('AA')
   }
-  if (flags.tc) {
+  if (flags.TC ?? flags.tc) {
     items.push('TC')
   }
   return items.length ? items.join(', ') : '-'
@@ -991,6 +991,11 @@ onBeforeUnmount(() => {
               {{ selectedLog.response_code || '-' }}<span v-if="selectedLog.is_blocked"> (已拦截)</span>
             </div>
             <div><strong>响应标志:</strong> {{ responseFlagText }}</div>
+            <div>
+              <strong>应答详情:</strong>
+              {{ selectedLog.answer_details_status || 'complete' }}
+              <span v-if="selectedLog.answer_decode_error" class="muted">（{{ selectedLog.answer_decode_error }}）</span>
+            </div>
             <div><strong>耗时:</strong> {{ Number(selectedLog.duration_ms || 0).toFixed(2) }} ms</div>
           </div>
 

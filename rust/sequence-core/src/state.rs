@@ -70,6 +70,15 @@ impl ExecutionState {
             StateMutation::SetRouting { field, value } => {
                 self.routing.set(field, value);
             }
+            StateMutation::SetRoutingFields {
+                domain_set,
+                effective_tag,
+                matched_rule_source,
+            } => {
+                self.routing.domain_set = domain_set;
+                self.routing.effective_tag = effective_tag;
+                self.routing.matched_rule_source = matched_rule_source;
+            }
             StateMutation::SetResponse(response) => {
                 self.set_response(response);
             }
@@ -107,6 +116,7 @@ pub struct QueryState {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RoutingState {
     pub domain_set: Option<String>,
+    pub effective_tag: Option<String>,
     pub matched_group: Option<String>,
     pub final_sequence: Option<String>,
     pub final_upstream: Option<String>,
@@ -119,6 +129,7 @@ impl RoutingState {
     fn set(&mut self, field: RoutingField, value: Option<String>) {
         match field {
             RoutingField::DomainSet => self.domain_set = value,
+            RoutingField::EffectiveTag => self.effective_tag = value,
             RoutingField::MatchedGroup => self.matched_group = value,
             RoutingField::FinalSequence => self.final_sequence = value,
             RoutingField::FinalUpstream => self.final_upstream = value,
@@ -133,6 +144,7 @@ impl RoutingState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoutingField {
     DomainSet,
+    EffectiveTag,
     MatchedGroup,
     FinalSequence,
     FinalUpstream,
@@ -219,6 +231,11 @@ pub enum StateMutation {
     SetRouting {
         field: RoutingField,
         value: Option<String>,
+    },
+    SetRoutingFields {
+        domain_set: Option<String>,
+        effective_tag: Option<String>,
+        matched_rule_source: Option<String>,
     },
     SetResponse(ResponseState),
 }

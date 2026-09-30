@@ -275,7 +275,12 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         assert_eq!(logs_json["logs"][0]["query_time"], "2023-11-14T22:13:19.876543211Z");
         assert_eq!(logs_json["logs"][0]["query_type"], "A");
         assert_eq!(logs_json["logs"][0]["client_ip"], "127.0.0.1");
-        assert!(logs_json["logs"][0].get("trace_id").is_none());
+        let trace_id = logs_json["logs"][0]["trace_id"].as_str().expect("trace id");
+        assert_eq!(trace_id.len(), 51);
+        assert!(trace_id.starts_with("n-"));
+        assert_eq!(logs_json["logs"][0]["response_code"], "NXDOMAIN");
+        assert_eq!(logs_json["logs"][0]["answer_details_status"], "complete");
+        assert!(logs_json["logs"][0]["response_flags"]["RA"].is_boolean());
 
         let page_one = http_request(api, "GET", "/api/v2/audit/logs?page=1&limit=2").await;
         let page_one_json: Value = serde_json::from_str(&page_one.body).expect("page one JSON");
@@ -297,9 +302,27 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let too_large = http_request(api, "GET", "/api/v2/audit/logs?limit=501").await;
         assert_eq!(too_large.status, 400);
         assert_eq!(too_large.body, "audit log limit must be between 1 and 500\n");
-        let unsupported = http_request(api, "GET", "/api/v2/audit/logs?q=example").await;
-        assert_eq!(unsupported.status, 400);
-        assert_eq!(unsupported.body, "unsupported audit log parameter: q\n");
+        let filtered = http_request(api, "GET", "/api/v2/audit/logs?q=example").await;
+        assert_eq!(filtered.status, 200);
+        let filtered_json: Value = serde_json::from_str(&filtered.body).expect("filtered JSON");
+        assert_eq!(filtered_json["pagination"]["total_items"], 3);
+        let exact = http_request(api, "GET", "/api/v2/audit/logs?q=new.example&exact=true").await;
+        assert_eq!(exact.status, 200);
+        let exact_json: Value = serde_json::from_str(&exact.body).expect("exact JSON");
+        assert_eq!(exact_json["pagination"]["total_items"], 1);
+        let rank = http_request(api, "GET", "/api/v2/audit/rank/domain?limit=20").await;
+        assert_eq!(rank.status, 200);
+        let rank_json: Value = serde_json::from_str(&rank.body).expect("rank JSON");
+        assert_eq!(rank_json[0]["key"], "edge.example");
+        let domain_logs = http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs/domain?domain=edge.example&limit=50",
+        )
+        .await;
+        assert_eq!(domain_logs.status, 200);
+        let domain_logs_json: Value = serde_json::from_str(&domain_logs.body).expect("domain logs JSON");
+        assert_eq!(domain_logs_json["pagination"]["total_items"], 1);
 
         let resized = http_post(api, "/api/v1/audit/capacity", r#"{"capacity":2}"#).await;
         assert_eq!(resized.status, 200);

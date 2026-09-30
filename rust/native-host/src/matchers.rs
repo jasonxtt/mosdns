@@ -2,7 +2,9 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use mosdns_dns_core::observe_answer_addresses;
 use mosdns_matcher_core::{IpPrefixList, MixMatcher};
-use mosdns_sequence_core::{ExecutionState, MatchOutcome, Matcher, MatcherError, ResponseState};
+use mosdns_sequence_core::{
+    ExecutionState, MatchOutcome, Matcher, MatcherError, ResponseState, StateMutation,
+};
 
 use crate::managed::DomainSetHandle;
 
@@ -11,20 +13,32 @@ use crate::managed::DomainSetHandle;
 /// managed set is read through its current published generation at every
 /// evaluation, so a POST is visible to the very next query.
 pub(crate) struct QnameMatcher {
-    groups: Vec<DomainSetHandle>,
+    groups: Vec<(String, DomainSetHandle)>,
 }
 
 impl QnameMatcher {
-    pub(crate) fn new(groups: Vec<DomainSetHandle>) -> Self {
+    pub(crate) fn new(groups: Vec<(String, DomainSetHandle)>) -> Self {
         Self { groups }
     }
 }
 
 impl Matcher for QnameMatcher {
     fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
-        let matched = wire_name_to_ascii_domain(&state.query.question.qname_wire)
-            .is_some_and(|domain| self.groups.iter().any(|set| set.matches(&domain)));
-        Ok(MatchOutcome::new(matched, None))
+        let Some(domain) = wire_name_to_ascii_domain(&state.query.question.qname_wire) else {
+            return Ok(MatchOutcome::new(false, None));
+        };
+        let Some((source, _set)) = self.groups.iter().find(|(_, set)| set.matches(&domain)) else {
+            return Ok(MatchOutcome::new(false, None));
+        };
+        let is_provider = source.starts_with("domain_set:");
+        Ok(MatchOutcome::new(
+            true,
+            Some(StateMutation::SetRoutingFields {
+                domain_set: is_provider.then(|| source["domain_set:".len()..].to_owned()),
+                effective_tag: None,
+                matched_rule_source: Some(source.clone()),
+            }),
+        ))
     }
 }
 

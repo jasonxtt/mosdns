@@ -28,10 +28,11 @@ pub use config::{
 };
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{
-    AuditClock, AuditRecord, AuditSnapshot, AuditTestClock, CacheStatus, DurationHistogramBucket,
-    DurationHistogramSnapshot, FailureProvenance, LocalFailureKind, MetricsSnapshot,
-    QueryTerminalOutcome, QueryTransport, ResponseSource, ResponseState,
-    UpstreamAttemptMetricsSnapshot, UpstreamAttemptOutcome, UpstreamAttemptRecord,
+    AdmissionError, AnswerDetailsStatus, AuditAnswer, AuditClock, AuditRecord, AuditSnapshot,
+    AuditTestClock, CacheStatus, DurationHistogramBucket, DurationHistogramSnapshot,
+    FailureProvenance, LocalFailureKind, MetricsSnapshot, QueryTerminalOutcome, QueryTransport,
+    ResponseDetails, ResponseFlags, ResponseSource, ResponseState, UpstreamAttemptMetricsSnapshot,
+    UpstreamAttemptOutcome, UpstreamAttemptRecord,
 };
 pub use tcp::{TcpServer, TcpServerError};
 pub use udp::{UdpServer, UdpServerError};

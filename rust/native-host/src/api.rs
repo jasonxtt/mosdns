@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 
 use mosdns_upstream_core::TransportCancellation;
@@ -27,7 +28,8 @@ use mosdns_upstream_core::TransportCancellation;
 use crate::config::CompiledConfig;
 use crate::managed::ManagedDomainSet;
 use crate::observer::{
-    AuditClock, AuditLogPage, AuditRecord, AuditStatsSnapshot, AuditTimingSnapshot, QueryObserver,
+    AnswerDetailsStatus, AuditClock, AuditReadSnapshot, AuditRecord, AuditStatsSnapshot,
+    AuditTimingSnapshot, QueryObserver, ResponseState,
 };
 use crate::udp::{drain_tasks, reap_one_task};
 
@@ -253,6 +255,7 @@ pub struct ApiServer {
     audit_persist_lock: Arc<AsyncMutex<()>>,
     audit_persistence_faults: AuditPersistenceFaults,
     audit_clock: Arc<dyn AuditClock>,
+    audit_read_slots: Arc<Semaphore>,
     accept_fault_after: Cell<Option<usize>>,
 }
 
@@ -279,6 +282,7 @@ impl ApiServer {
             audit_persist_lock: Arc::new(AsyncMutex::new(())),
             audit_persistence_faults,
             audit_clock,
+            audit_read_slots: Arc::new(Semaphore::new(2)),
             accept_fault_after: Cell::new(None),
         })
     }
@@ -334,6 +338,7 @@ impl ApiServer {
                             let audit_persist_lock = Arc::clone(&self.audit_persist_lock);
                             let audit_persistence_faults = self.audit_persistence_faults.clone();
                             let audit_clock = Arc::clone(&self.audit_clock);
+                            let audit_read_slots = Arc::clone(&self.audit_read_slots);
                             let connection_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
                                 let _ = process_connection(
@@ -344,6 +349,7 @@ impl ApiServer {
                                     audit_persist_lock,
                                     audit_persistence_faults,
                                     audit_clock,
+                                    audit_read_slots,
                                     connection_shutdown,
                                 )
                                 .await;
@@ -472,6 +478,7 @@ async fn process_connection(
     audit_persist_lock: Arc<AsyncMutex<()>>,
     audit_persistence_faults: AuditPersistenceFaults,
     audit_clock: Arc<dyn AuditClock>,
+    audit_read_slots: Arc<Semaphore>,
     shutdown: TransportCancellation,
 ) -> io::Result<()> {
     let response = tokio::select! {
@@ -486,6 +493,7 @@ async fn process_connection(
                     &audit_persist_lock,
                     &audit_persistence_faults,
                     &audit_clock,
+                    &audit_read_slots,
                     &request,
                 )
                 .await
@@ -633,6 +641,12 @@ enum AuditV2Route {
     Stats,
     Windows,
     Logs,
+    LogsDomain,
+    RankDomain,
+    RankClient,
+    RankDomainSet,
+    RankEffective,
+    RankSlowest,
 }
 
 fn route(target: &str) -> Route<'_> {
@@ -646,6 +660,12 @@ fn route(target: &str) -> Route<'_> {
             "stats" => Route::AuditV2(AuditV2Route::Stats),
             "stats/windows" => Route::AuditV2(AuditV2Route::Windows),
             "logs" => Route::AuditV2(AuditV2Route::Logs),
+            "logs/domain" => Route::AuditV2(AuditV2Route::LogsDomain),
+            "rank/domain" => Route::AuditV2(AuditV2Route::RankDomain),
+            "rank/client" => Route::AuditV2(AuditV2Route::RankClient),
+            "rank/domain_set" => Route::AuditV2(AuditV2Route::RankDomainSet),
+            "rank/effective" => Route::AuditV2(AuditV2Route::RankEffective),
+            "rank/slowest" => Route::AuditV2(AuditV2Route::RankSlowest),
             _ => Route::Unknown,
         };
     }
@@ -719,8 +739,50 @@ struct AuditLogResponse {
     query_time: String,
     query_name: String,
     query_type: String,
+    query_class: String,
     client_ip: String,
+    trace_id: String,
     duration_ms: f64,
+    response_code: String,
+    response_flags: AuditResponseFlags,
+    answers: Vec<AuditAnswerResponse>,
+    answer_details_status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    answer_decode_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    domain_set: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effective_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matched_group: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    final_sequence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    final_upstream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    upstream_targets: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected_upstream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matched_rule_source: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AuditResponseFlags {
+    #[serde(rename = "AA")]
+    aa: bool,
+    #[serde(rename = "TC")]
+    tc: bool,
+    #[serde(rename = "RA")]
+    ra: bool,
+}
+
+#[derive(Serialize)]
+struct AuditAnswerResponse {
+    #[serde(rename = "type")]
+    rrtype: String,
+    ttl: u32,
+    data: String,
 }
 
 #[derive(Serialize)]
@@ -735,6 +797,12 @@ struct AuditLogPagination {
 struct AuditLogsResponse {
     pagination: AuditLogPagination,
     logs: Vec<AuditLogResponse>,
+}
+
+#[derive(Serialize)]
+struct AuditRankItem {
+    key: String,
+    count: usize,
 }
 
 fn format_rfc3339(timestamp: SystemTime, seconds_only: bool) -> String {
@@ -848,6 +916,53 @@ fn query_type_name(qtype: u16) -> &'static str {
     }
 }
 
+fn query_class_name(qclass: u16) -> &'static str {
+    match qclass {
+        1 => "IN",
+        3 => "CH",
+        4 => "HS",
+        _ => "",
+    }
+}
+
+fn response_code_name(response: &ResponseState, code: u16) -> String {
+    if matches!(response, ResponseState::NoResponse) {
+        return "NO_RESPONSE".to_owned();
+    }
+    match code {
+        0 => "NOERROR",
+        1 => "FORMERR",
+        2 => "SERVFAIL",
+        3 => "NXDOMAIN",
+        4 => "NOTIMP",
+        5 => "REFUSED",
+        6 => "YXDOMAIN",
+        7 => "YXRRSET",
+        8 => "NXRRSET",
+        9 => "NOTAUTH",
+        10 => "NOTZONE",
+        _ => return String::new(),
+    }
+    .to_owned()
+}
+
+fn answer_type_name(rrtype: u16) -> String {
+    let name = query_type_name(rrtype);
+    if name.is_empty() {
+        format!("TYPE{rrtype}")
+    } else {
+        name.to_owned()
+    }
+}
+
+fn answer_details_status_name(status: AnswerDetailsStatus) -> &'static str {
+    match status {
+        AnswerDetailsStatus::Complete => "complete",
+        AnswerDetailsStatus::RawRdata => "raw_rdata",
+        AnswerDetailsStatus::DecodeError => "decode_error",
+    }
+}
+
 fn project_log(record: &AuditRecord) -> AuditLogResponse {
     let query_name = if record.qname == "." {
         ".".to_owned()
@@ -862,8 +977,38 @@ fn project_log(record: &AuditRecord) -> AuditLogResponse {
         query_time: format_rfc3339(record.timestamp, false),
         query_name,
         query_type: query_type_name(record.qtype).to_owned(),
+        query_class: query_class_name(record.qclass).to_owned(),
         client_ip: record.client_addr.ip().to_string(),
+        trace_id: record.trace_id.clone(),
         duration_ms: record.elapsed.as_secs_f64() * 1_000.0,
+        response_code: response_code_name(&record.response, record.response_details.rcode),
+        response_flags: AuditResponseFlags {
+            aa: record.response_details.flags.aa,
+            tc: record.response_details.flags.tc,
+            ra: record.response_details.flags.ra,
+        },
+        answers: record
+            .response_details
+            .answers
+            .iter()
+            .map(|answer| AuditAnswerResponse {
+                rrtype: answer_type_name(answer.rrtype),
+                ttl: answer.ttl,
+                data: answer.data.clone(),
+            })
+            .collect(),
+        answer_details_status: answer_details_status_name(
+            record.response_details.answer_details_status,
+        ),
+        answer_decode_error: record.response_details.answer_decode_error.clone(),
+        domain_set: record.domain_set.clone(),
+        effective_tag: record.effective_tag.clone(),
+        matched_group: record.matched_group.clone(),
+        final_sequence: record.final_sequence.clone(),
+        final_upstream: record.final_upstream.clone(),
+        upstream_targets: record.upstream_targets.clone(),
+        selected_upstream: record.selected_upstream.clone(),
+        matched_rule_source: record.matched_rule_source.clone(),
     }
 }
 
@@ -937,43 +1082,293 @@ fn audit_windows(records: &[AuditTimingSnapshot], now: SystemTime) -> AuditWindo
     }
 }
 
-fn parse_log_pagination(target: &str) -> Result<(usize, usize), String> {
-    let Some((_, query)) = target.split_once('?') else {
-        return Ok((1, 50));
-    };
-    let mut page = 1_usize;
-    let mut limit = 50_usize;
-    for parameter in query.split('&').filter(|parameter| !parameter.is_empty()) {
-        let (key, value) = parameter.split_once('=').unwrap_or((parameter, ""));
-        match key {
-            "page" => {
-                if let Ok(parsed) = value.parse::<u64>() {
-                    if parsed > 0 {
-                        page = usize::try_from(parsed).unwrap_or(1);
-                    }
-                }
-            }
-            "limit" => match value.parse::<u64>() {
-                Ok(0) | Err(_) => {}
-                Ok(parsed) if parsed <= 500 => {
-                    limit = usize::try_from(parsed).expect("small audit limit fits usize");
-                }
-                Ok(_) => return Err("audit log limit must be between 1 and 500".to_owned()),
-            },
-            _ => return Err(format!("unsupported audit log parameter: {key}")),
-        }
-    }
-    Ok((page, limit))
+#[derive(Clone, Debug, Default)]
+struct AuditFilter {
+    q: Option<String>,
+    exact: bool,
+    domain: Option<String>,
+    client_ips: Vec<String>,
+    answer_ip: Option<String>,
+    cname: Option<String>,
+    domain_set: Option<String>,
+    effective_tag: Option<String>,
+    exact_domain: Option<String>,
 }
 
-fn audit_logs(page_snapshot: &AuditLogPage, page: usize, limit: usize) -> AuditLogsResponse {
-    let total_items = page_snapshot.total_items;
+#[derive(Clone, Copy, Debug)]
+struct AuditPage {
+    page: usize,
+    limit: usize,
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn decode_query_component(value: &str) -> Result<String, ()> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => decoded.push(b' '),
+            b'%' => {
+                let high = bytes
+                    .get(index + 1)
+                    .and_then(|byte| hex_value(*byte))
+                    .ok_or(())?;
+                let low = bytes
+                    .get(index + 2)
+                    .and_then(|byte| hex_value(*byte))
+                    .ok_or(())?;
+                decoded.push((high << 4) | low);
+                index += 2;
+            }
+            byte => decoded.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8(decoded).map_err(|_| ())
+}
+
+fn query_pairs(target: &str) -> Result<Vec<(String, String)>, String> {
+    let Some((_, query)) = target.split_once('?') else {
+        return Ok(Vec::new());
+    };
+    if query.contains(';') {
+        return Err("invalid audit query encoding".to_owned());
+    }
+    query
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let (key, value) = part.split_once('=').unwrap_or((part, ""));
+            Ok((
+                decode_query_component(key).map_err(|_| "invalid audit query encoding")?,
+                decode_query_component(value).map_err(|_| "invalid audit query encoding")?,
+            ))
+        })
+        .collect()
+}
+
+fn first_value(pairs: &[(String, String)], key: &str) -> Option<String> {
+    pairs
+        .iter()
+        .find(|(candidate, _)| candidate == key)
+        .map(|(_, value)| value.clone())
+}
+
+fn positive_or_default(value: Option<&String>, default: usize) -> usize {
+    value
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(default)
+}
+
+fn parse_audit_filter(
+    target: &str,
+    domain_route: bool,
+) -> Result<(AuditFilter, AuditPage), String> {
+    let pairs = query_pairs(target).map_err(|message| message.to_owned())?;
+    let allowed = [
+        "page",
+        "limit",
+        "q",
+        "exact",
+        "domain",
+        "client_ip",
+        "answer_ip",
+        "cname",
+        "domain_set",
+        "effective_tag",
+    ];
+    for (key, _) in &pairs {
+        if domain_route && !["domain", "page", "limit"].contains(&key.as_str()) {
+            return Err("unsupported audit query parameter".to_owned());
+        }
+        if !allowed.contains(&key.as_str()) {
+            return Err("unsupported audit query parameter".to_owned());
+        }
+    }
+    let limit_value = first_value(&pairs, "limit");
+    let parsed_limit = positive_or_default(limit_value.as_ref(), 50);
+    if limit_value
+        .as_ref()
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|value| value > 500)
+    {
+        return Err("audit log limit must be between 1 and 500".to_owned());
+    }
+    let mut filter = AuditFilter {
+        q: first_value(&pairs, "q").filter(|value| !value.is_empty()),
+        exact: first_value(&pairs, "exact")
+            .as_deref()
+            .is_some_and(parse_bool_like),
+        domain: first_value(&pairs, "domain").filter(|value| !value.is_empty()),
+        client_ips: pairs
+            .iter()
+            .filter(|(key, _)| key == "client_ip")
+            .map(|(_, value)| value.clone())
+            .collect(),
+        answer_ip: first_value(&pairs, "answer_ip").filter(|value| !value.is_empty()),
+        cname: first_value(&pairs, "cname").filter(|value| !value.is_empty()),
+        domain_set: first_value(&pairs, "domain_set").filter(|value| !value.is_empty()),
+        effective_tag: first_value(&pairs, "effective_tag").filter(|value| !value.is_empty()),
+        exact_domain: None,
+    };
+    if domain_route {
+        let domain = first_value(&pairs, "domain").filter(|value| !value.is_empty());
+        if domain.is_none() {
+            return Err("exact domain is required".to_owned());
+        }
+        filter.exact_domain = domain;
+        filter.domain = None;
+    }
+    Ok((
+        filter,
+        AuditPage {
+            page: positive_or_default(first_value(&pairs, "page").as_ref(), 1),
+            limit: parsed_limit,
+        },
+    ))
+}
+
+fn parse_bool_like(value: &str) -> bool {
+    matches!(value, "1" | "t" | "T" | "TRUE" | "true" | "True")
+}
+
+fn normalized_ip(value: &str) -> Option<String> {
+    if let Ok(address) = value.parse::<SocketAddr>() {
+        return Some(address.ip().to_string());
+    }
+    let value = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(value);
+    value
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .map(|address| address.to_string())
+}
+
+fn text_matches(value: &str, query: &str, exact: bool) -> bool {
+    if exact {
+        value == query
+    } else {
+        value.to_lowercase().contains(&query.to_lowercase())
+    }
+}
+
+fn projected_query_name(record: &AuditRecord) -> String {
+    if record.qname == "." {
+        ".".to_owned()
+    } else {
+        record.qname.trim_end_matches('.').to_owned()
+    }
+}
+
+fn audit_record_matches(record: &AuditRecord, filter: &AuditFilter) -> bool {
+    let query_match = filter.q.as_ref().is_none_or(|query| {
+        let exact = filter.exact;
+        let ip_query = normalized_ip(query);
+        let mut values = vec![
+            projected_query_name(record),
+            record.client_addr.ip().to_string(),
+            record.trace_id.clone(),
+        ];
+        values.extend(record.domain_set.clone());
+        values.extend(record.effective_tag.clone());
+        values.extend(record.matched_rule_source.clone());
+        values.extend(record.selected_upstream.clone());
+        values.extend(
+            record
+                .response_details
+                .answers
+                .iter()
+                .map(|answer| answer.data.clone()),
+        );
+        values.iter().any(|value| {
+            let ip_matches = ip_query
+                .as_deref()
+                .is_some_and(|ip| normalized_ip(value).as_deref() == Some(ip));
+            ip_matches || text_matches(value, query, exact)
+        })
+    });
+    let domain_match = filter
+        .domain
+        .as_ref()
+        .is_none_or(|domain| projected_query_name(record).contains(domain));
+    let client_match = if filter.client_ips.is_empty() {
+        true
+    } else {
+        let record_ip = record.client_addr.ip().to_string();
+        filter
+            .client_ips
+            .iter()
+            .any(|candidate| normalized_ip(candidate).as_deref() == Some(record_ip.as_str()))
+    };
+    let answer_ip_match = filter.answer_ip.as_ref().is_none_or(|ip| {
+        normalized_ip(ip).is_some_and(|ip| {
+            record.response_details.answers.iter().any(|answer| {
+                matches!(answer.rrtype, 1 | 28)
+                    && normalized_ip(&answer.data).as_deref() == Some(&ip)
+            })
+        })
+    });
+    let cname_match = filter.cname.as_ref().is_none_or(|cname| {
+        record
+            .response_details
+            .answers
+            .iter()
+            .any(|answer| answer.rrtype == 5 && answer.data.contains(cname))
+    });
+    let domain_set_match = filter
+        .domain_set
+        .as_ref()
+        .is_none_or(|value| record.domain_set.as_deref() == Some(value));
+    let effective_match = filter
+        .effective_tag
+        .as_ref()
+        .is_none_or(|value| record.effective_tag.as_deref() == Some(value));
+    let exact_domain_match = filter
+        .exact_domain
+        .as_ref()
+        .is_none_or(|value| projected_query_name(record) == value.as_str());
+    query_match
+        && domain_match
+        && client_match
+        && answer_ip_match
+        && cname_match
+        && domain_set_match
+        && effective_match
+        && exact_domain_match
+}
+
+fn audit_logs_from_records(
+    records: Vec<std::sync::Arc<AuditRecord>>,
+    page: usize,
+    limit: usize,
+) -> AuditLogsResponse {
+    let total_items = records.len();
     let total_pages = if total_items == 0 {
         0
     } else {
         (total_items - 1) / limit + 1
     };
-    let logs = page_snapshot.records.iter().map(project_log).collect();
+    let start = page.saturating_sub(1).saturating_mul(limit);
+    let logs = records
+        .iter()
+        .rev()
+        .skip(start)
+        .take(limit)
+        .map(|record| project_log(record))
+        .collect();
     AuditLogsResponse {
         pagination: AuditLogPagination {
             total_items,
@@ -985,13 +1380,169 @@ fn audit_logs(page_snapshot: &AuditLogPage, page: usize, limit: usize) -> AuditL
     }
 }
 
+#[derive(Clone, Copy)]
+enum AuditReadKind {
+    Logs { domain_route: bool },
+    RankDomain,
+    RankClient,
+    RankDomainSet,
+    RankEffective,
+    RankSlowest,
+}
+
+fn parse_rank_limit(target: &str, default: usize) -> Result<usize, String> {
+    let pairs = query_pairs(target).map_err(|message| message.to_owned())?;
+    for (key, _) in &pairs {
+        if key != "limit" {
+            return Err("unsupported audit query parameter".to_owned());
+        }
+    }
+    let value = first_value(&pairs, "limit");
+    if value
+        .as_ref()
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|value| value > 500)
+    {
+        return Err("audit rank limit must be between 1 and 500".to_owned());
+    }
+    Ok(positive_or_default(value.as_ref(), default).min(500))
+}
+
+fn rank_items(
+    records: &[std::sync::Arc<AuditRecord>],
+    key: impl Fn(&AuditRecord) -> Option<String>,
+) -> Vec<AuditRankItem> {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for record in records {
+        if let Some(value) = key(record) {
+            *counts.entry(value).or_default() += 1;
+        }
+    }
+    let mut items: Vec<_> = counts
+        .into_iter()
+        .map(|(key, count)| AuditRankItem { key, count })
+        .collect();
+    items.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    items
+}
+
+fn rank_response(
+    snapshot: AuditReadSnapshot,
+    kind: AuditReadKind,
+    limit: usize,
+    filter: Option<AuditFilter>,
+) -> Response {
+    let records = match filter {
+        None => snapshot.records,
+        Some(filter) => snapshot
+            .records
+            .into_iter()
+            .filter(|record| audit_record_matches(record, &filter))
+            .collect(),
+    };
+    match kind {
+        AuditReadKind::Logs { .. } => unreachable!("logs use their own projection"),
+        AuditReadKind::RankDomain => Response::json_compact(
+            &rank_items(&records, |record| Some(projected_query_name(record)))
+                .into_iter()
+                .take(limit)
+                .collect::<Vec<_>>(),
+        ),
+        AuditReadKind::RankClient => Response::json_compact(
+            &rank_items(&records, |record| Some(record.client_addr.ip().to_string()))
+                .into_iter()
+                .take(limit)
+                .collect::<Vec<_>>(),
+        ),
+        AuditReadKind::RankDomainSet => Response::json_compact(
+            &rank_items(&records, |record| record.domain_set.clone())
+                .into_iter()
+                .take(limit)
+                .collect::<Vec<_>>(),
+        ),
+        AuditReadKind::RankEffective => Response::json_compact(
+            &rank_items(&records, |record| record.effective_tag.clone())
+                .into_iter()
+                .take(limit)
+                .collect::<Vec<_>>(),
+        ),
+        AuditReadKind::RankSlowest => Response::json_compact(
+            &snapshot
+                .slowest
+                .iter()
+                .take(limit)
+                .map(|record| project_log(record))
+                .collect::<Vec<_>>(),
+        ),
+    }
+}
+
+async fn dispatch_audit_read(
+    observer: Arc<QueryObserver>,
+    slots: &Arc<Semaphore>,
+    target: &str,
+    kind: AuditReadKind,
+) -> Response {
+    let (filter, page, limit) = match kind {
+        AuditReadKind::Logs { domain_route } => match parse_audit_filter(target, domain_route) {
+            Ok((filter, page)) => (Some(filter), page.page, page.limit),
+            Err(message) => return Response::error(400, &message),
+        },
+        AuditReadKind::RankSlowest
+        | AuditReadKind::RankDomain
+        | AuditReadKind::RankClient
+        | AuditReadKind::RankDomainSet
+        | AuditReadKind::RankEffective => match parse_rank_limit(
+            target,
+            if matches!(kind, AuditReadKind::RankSlowest) {
+                100
+            } else {
+                20
+            },
+        ) {
+            Ok(limit) => (None, 1, limit),
+            Err(message) => return Response::error(400, &message),
+        },
+    };
+    let Ok(permit) = Arc::clone(slots).try_acquire_owned() else {
+        return Response::error(503, "audit read capacity exhausted");
+    };
+    tokio::task::spawn_blocking(move || {
+        let _permit: OwnedSemaphorePermit = permit;
+        let snapshot = observer.audit_read_snapshot();
+        if let AuditReadKind::Logs { .. } = kind {
+            let records = snapshot
+                .records
+                .into_iter()
+                .filter(|record| {
+                    filter
+                        .as_ref()
+                        .is_none_or(|filter| audit_record_matches(record, filter))
+                })
+                .collect();
+            Response::json_compact(&audit_logs_from_records(records, page, limit))
+        } else {
+            rank_response(snapshot, kind, limit, filter)
+        }
+    })
+    .await
+    .unwrap_or_else(|_| Response::error(500, "audit read failed"))
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn dispatch(
     config: &CompiledConfig,
-    observer: &QueryObserver,
+    observer: &Arc<QueryObserver>,
     state_root: Option<&Path>,
     audit_persist_lock: &Arc<AsyncMutex<()>>,
     audit_persistence_faults: &AuditPersistenceFaults,
     audit_clock: &Arc<dyn AuditClock>,
+    audit_read_slots: &Arc<Semaphore>,
     request: &Request,
 ) -> Response {
     match route(&request.target) {
@@ -1011,15 +1562,58 @@ async fn dispatch(
         },
         Route::AuditV2(AuditV2Route::Logs) => match request.method.as_str() {
             "GET" => {
-                let (page, limit) = match parse_log_pagination(&request.target) {
-                    Ok(pagination) => pagination,
-                    Err(message) => return Response::error(400, &message),
-                };
-                let snapshot = observer.audit_log_page(page, limit);
-                Response::json_compact(&audit_logs(&snapshot, page, limit))
+                dispatch_audit_read(
+                    Arc::clone(observer),
+                    audit_read_slots,
+                    &request.target,
+                    AuditReadKind::Logs {
+                        domain_route: false,
+                    },
+                )
+                .await
             }
             _ => Response::method_not_allowed(),
         },
+        Route::AuditV2(AuditV2Route::LogsDomain) => match request.method.as_str() {
+            "GET" => {
+                dispatch_audit_read(
+                    Arc::clone(observer),
+                    audit_read_slots,
+                    &request.target,
+                    AuditReadKind::Logs { domain_route: true },
+                )
+                .await
+            }
+            _ => Response::method_not_allowed(),
+        },
+        Route::AuditV2(AuditV2Route::RankDomain)
+        | Route::AuditV2(AuditV2Route::RankClient)
+        | Route::AuditV2(AuditV2Route::RankDomainSet)
+        | Route::AuditV2(AuditV2Route::RankEffective)
+        | Route::AuditV2(AuditV2Route::RankSlowest)
+            if request.method.as_str() == "GET" =>
+        {
+            let kind = match route(&request.target) {
+                Route::AuditV2(AuditV2Route::RankDomain) => AuditReadKind::RankDomain,
+                Route::AuditV2(AuditV2Route::RankClient) => AuditReadKind::RankClient,
+                Route::AuditV2(AuditV2Route::RankDomainSet) => AuditReadKind::RankDomainSet,
+                Route::AuditV2(AuditV2Route::RankEffective) => AuditReadKind::RankEffective,
+                Route::AuditV2(AuditV2Route::RankSlowest) => AuditReadKind::RankSlowest,
+                _ => unreachable!("route arm is exhaustive"),
+            };
+            dispatch_audit_read(
+                Arc::clone(observer),
+                audit_read_slots,
+                &request.target,
+                kind,
+            )
+            .await
+        }
+        Route::AuditV2(AuditV2Route::RankDomain)
+        | Route::AuditV2(AuditV2Route::RankClient)
+        | Route::AuditV2(AuditV2Route::RankDomainSet)
+        | Route::AuditV2(AuditV2Route::RankEffective)
+        | Route::AuditV2(AuditV2Route::RankSlowest) => Response::method_not_allowed(),
         Route::Audit(AuditRoute::Status) => match request.method.as_str() {
             "GET" => Response::json(&AuditStatusResponse {
                 capturing: observer.is_capturing(),
@@ -1168,7 +1762,10 @@ struct PostPayload {
 mod tests {
     use std::fs;
 
-    use super::{load_audit_capacity, migrate_legacy_settings, query_type_name};
+    use super::{
+        load_audit_capacity, migrate_legacy_settings, normalized_ip, parse_audit_filter,
+        parse_rank_limit, query_pairs, query_type_name,
+    };
 
     fn test_root(name: &str) -> std::path::PathBuf {
         let root =
@@ -1241,6 +1838,36 @@ mod tests {
         assert_eq!(query_type_name(13), "HINFO");
         assert_eq!(query_type_name(44), "SSHFP");
         assert_eq!(query_type_name(65535), "");
+    }
+
+    #[test]
+    fn audit_query_decoding_is_form_strict_and_rank_limits_are_bounded() {
+        assert_eq!(
+            query_pairs("/api/v2/audit/logs?q=one+two&domain=%E4%B8%AD").expect("query pairs"),
+            vec![
+                ("q".to_owned(), "one two".to_owned()),
+                ("domain".to_owned(), "中".to_owned()),
+            ]
+        );
+        assert_eq!(
+            query_pairs("/api/v2/audit/logs?q=%ff").expect_err("invalid UTF-8"),
+            "invalid audit query encoding"
+        );
+        assert_eq!(
+            parse_rank_limit("/api/v2/audit/rank/domain?limit=501", 20)
+                .expect_err("bounded rank limit"),
+            "audit rank limit must be between 1 and 500"
+        );
+        assert_eq!(
+            parse_audit_filter("/api/v2/audit/logs/domain", true)
+                .expect_err("missing exact domain"),
+            "exact domain is required"
+        );
+        assert_eq!(
+            normalized_ip("127.0.0.1:5353"),
+            Some("127.0.0.1".to_owned())
+        );
+        assert_eq!(normalized_ip("[::1]:5353"), Some("::1".to_owned()));
     }
 
     #[test]

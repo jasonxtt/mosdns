@@ -156,12 +156,18 @@ async fn process_request(task: RequestTask) {
         return;
     };
 
-    let mut admitted = observer.admit(
+    let mut admitted = match observer.try_admit(
         peer,
         QueryTransport::Udp,
         &question,
         request_shutdown.clone(),
-    );
+    ) {
+        Ok(admitted) => admitted,
+        Err(error) => {
+            eprintln!("native query admission failed: {error}");
+            return;
+        }
+    };
     let mut execution = execute_request(
         ExecutionRequest {
             config: &config,
@@ -203,10 +209,16 @@ async fn process_request(task: RequestTask) {
     admitted.capture_execution(TerminalObservation {
         outcome: terminal.unwrap_or(QueryTerminalOutcome::NoResponse),
         response: execution.response,
+        response_details: execution.response_details,
         cache_status: execution.cache_status,
         final_sequence: execution.final_sequence,
         matched_group: execution.matched_group,
+        domain_set: execution.domain_set,
+        effective_tag: execution.effective_tag,
+        matched_rule_source: execution.matched_rule_source,
         final_upstream: execution.final_upstream,
+        upstream_targets: execution.upstream_targets,
+        selected_upstream: execution.selected_upstream,
         upstream_attempts: execution.upstream_attempts,
         failure_provenance: execution.failure_provenance,
         elapsed: std::time::Duration::ZERO,
@@ -495,6 +507,7 @@ mod tests {
                 upstream_attempts: crate::observer::UpstreamAttemptList::default(),
                 failure_provenance: None,
                 elapsed: std::time::Duration::ZERO,
+                ..Default::default()
             });
             admitted.finish(outcome);
             let metrics = observer.metrics_snapshot();

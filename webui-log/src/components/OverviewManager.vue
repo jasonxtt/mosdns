@@ -63,6 +63,12 @@ const dnsRoutingMode = ref('')
 const slowDetailOpen = ref(false)
 const selectedSlowQuery = ref(null)
 const domainSetRankSource = ref('effective_tag')
+const rankingErrors = reactive({
+  domain: '',
+  client: '',
+  slowest: '',
+  rules: ''
+})
 const rankingDetail = reactive({
   open: false,
   type: 'domain',
@@ -537,9 +543,15 @@ function formatResponseFlags(flags) {
   if (!flags || typeof flags !== 'object') {
     return '-'
   }
-  const enabled = ['ra', 'aa', 'tc', 'ad', 'cd']
-    .filter((key) => Boolean(flags[key]))
-    .map((key) => key.toUpperCase())
+  const enabled = [
+    ['RA', flags.RA ?? flags.ra],
+    ['AA', flags.AA ?? flags.aa],
+    ['TC', flags.TC ?? flags.tc],
+    ['AD', flags.AD ?? flags.ad],
+    ['CD', flags.CD ?? flags.cd]
+  ]
+    .filter(([, value]) => Boolean(value))
+    .map(([key]) => key)
   return enabled.length > 0 ? enabled.join(', ') : '-'
 }
 
@@ -687,13 +699,29 @@ async function loadRankingDetailLogs() {
       page: '1',
       limit: '50'
     })
-    if (filterField === 'q') {
+    let endpoint = '/api/v2/audit/logs'
+    if (rankingDetail.type === 'domain') {
+      endpoint = '/api/v2/audit/logs/domain'
+      params.set('domain', detailKey)
+    } else if (filterField === 'q') {
       params.set('q', detailKey)
       params.set('exact', 'true')
     } else {
       params.set(filterField, detailKey)
     }
-    const data = await getJSON(`/api/v2/audit/logs?${params.toString()}`)
+    let data
+    try {
+      data = await getJSON(`${endpoint}?${params.toString()}`)
+    } catch (error) {
+      if (rankingDetail.type === 'domain' && error?.status === 404) {
+        params.delete('domain')
+        params.set('q', detailKey)
+        params.set('exact', 'true')
+        data = await getJSON(`/api/v2/audit/logs?${params.toString()}`)
+      } else {
+        throw error
+      }
+    }
     if (!rankingDetail.open || rankingDetail.key !== detailKey || rankingDetail.filterField !== filterField) {
       return
     }
@@ -960,12 +988,17 @@ async function reloadOverview(showMessage = false) {
     clearTopNotice()
   }
   try {
-    const domainSetRankPromise = getJSON('/api/v2/audit/rank/effective?limit=20')
-      .then((data) => ({ data, source: 'effective_tag' }))
-      .catch(async () => ({
-        data: await getJSON('/api/v2/audit/rank/domain_set?limit=20'),
-        source: 'domain_set'
-      }))
+    const auditPanel = (promise) => promise
+      .then((data) => ({ data, error: '' }))
+      .catch((error) => ({ data: null, error: error?.message || '请求失败' }))
+    const domainSetRankPromise = auditPanel(getJSON('/api/v2/audit/rank/effective?limit=20'))
+      .then(async (result) => {
+        if (!result.error) {
+          return { ...result, source: 'effective_tag' }
+        }
+        const fallback = await auditPanel(getJSON('/api/v2/audit/rank/domain_set?limit=20'))
+        return { ...fallback, source: 'domain_set' }
+      })
 
     const [
       statsRes,
@@ -979,10 +1012,10 @@ async function reloadOverview(showMessage = false) {
       metricsRes,
       dnsRoutingModeRes
     ] = await Promise.all([
-      getJSON('/api/v2/audit/stats'),
-      getJSON('/api/v2/audit/rank/domain?limit=20'),
-      getJSON('/api/v2/audit/rank/client?limit=20'),
-      getJSON('/api/v2/audit/rank/slowest?limit=20'),
+      auditPanel(getJSON('/api/v2/audit/stats')),
+      auditPanel(getJSON('/api/v2/audit/rank/domain?limit=20')),
+      auditPanel(getJSON('/api/v2/audit/rank/client?limit=20')),
+      auditPanel(getJSON('/api/v2/audit/rank/slowest?limit=20')),
       domainSetRankPromise,
       getJSON('/api/v1/special-groups'),
       getJSON('/plugins/clientname').catch(() => ({})),
@@ -991,13 +1024,17 @@ async function reloadOverview(showMessage = false) {
       getText('/plugins/switch17/show').catch(() => '')
     ])
 
-    stats.totalQueries = Number(statsRes?.total_queries || 0)
-    stats.averageDurationMs = Number(statsRes?.average_duration_ms || 0)
+    rankingErrors.domain = topDomainsRes.error
+    rankingErrors.client = topClientsRes.error
+    rankingErrors.slowest = slowestRes.error
+    rankingErrors.rules = domainSetRes.error
+    stats.totalQueries = Number(statsRes?.data?.total_queries || 0)
+    stats.averageDurationMs = Number(statsRes?.data?.average_duration_ms || 0)
     addHistoryPoint(stats.totalQueries, stats.averageDurationMs)
 
-    topDomains.value = Array.isArray(topDomainsRes) ? topDomainsRes : []
-    topClients.value = Array.isArray(topClientsRes) ? topClientsRes : []
-    slowestQueries.value = Array.isArray(slowestRes) ? slowestRes : []
+    topDomains.value = Array.isArray(topDomainsRes.data) ? topDomainsRes.data : []
+    topClients.value = Array.isArray(topClientsRes.data) ? topClientsRes.data : []
+    slowestQueries.value = Array.isArray(slowestRes.data) ? slowestRes.data : []
     domainSetRank.value = Array.isArray(domainSetRes?.data) ? domainSetRes.data : []
     domainSetRankSource.value = domainSetRes?.source || 'effective_tag'
     specialGroups.value = Array.isArray(specialGroupsRes) ? specialGroupsRes : []
@@ -1113,7 +1150,10 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="topDomains.length === 0">
+              <tr v-if="rankingErrors.domain">
+                <td colspan="2" class="empty">{{ rankingErrors.domain }}</td>
+              </tr>
+              <tr v-else-if="topDomains.length === 0">
                 <td colspan="2" class="empty">暂无数据</td>
               </tr>
               <tr
@@ -1146,7 +1186,10 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="topClients.length === 0">
+              <tr v-if="rankingErrors.client">
+                <td colspan="2" class="empty">{{ rankingErrors.client }}</td>
+              </tr>
+              <tr v-else-if="topClients.length === 0">
                 <td colspan="2" class="empty">暂无数据</td>
               </tr>
               <tr
@@ -1185,7 +1228,10 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="slowestQueries.length === 0">
+              <tr v-if="rankingErrors.slowest">
+                <td colspan="2" class="empty">{{ rankingErrors.slowest }}</td>
+              </tr>
+              <tr v-else-if="slowestQueries.length === 0">
                 <td colspan="2" class="empty">暂无数据</td>
               </tr>
               <tr
@@ -1224,7 +1270,10 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="domainSetRows.length === 0">
+              <tr v-if="rankingErrors.rules">
+                <td colspan="3" class="empty">{{ rankingErrors.rules }}</td>
+              </tr>
+              <tr v-else-if="domainSetRows.length === 0">
                 <td colspan="3" class="empty">暂无数据</td>
               </tr>
               <tr
@@ -1322,6 +1371,11 @@ onBeforeUnmount(() => {
             <div><strong>最终上游:</strong> {{ selectedSlowQuery.selected_upstream || '-' }}</div>
             <div><strong>响应码:</strong> {{ selectedSlowQuery.response_code || '-' }}</div>
             <div><strong>响应标志:</strong> {{ formatResponseFlags(selectedSlowQuery.response_flags) }}</div>
+            <div>
+              <strong>应答详情:</strong>
+              {{ selectedSlowQuery.answer_details_status || 'complete' }}
+              <span v-if="selectedSlowQuery.answer_decode_error" class="muted">（{{ selectedSlowQuery.answer_decode_error }}）</span>
+            </div>
             <div><strong>耗时:</strong> {{ formatDuration(selectedSlowQuery.duration_ms) }}</div>
           </div>
           <div class="table-wrap" style="margin-top: 10px;">

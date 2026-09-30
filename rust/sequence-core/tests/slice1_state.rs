@@ -47,6 +47,7 @@ fn state_snapshot_is_typed_owned_and_deterministic() {
     state.fast_flags = 1 << 48;
     state.routing = RoutingState {
         domain_set: Some("domain".to_owned()),
+        effective_tag: None,
         matched_group: Some("group".to_owned()),
         final_sequence: Some("sequence".to_owned()),
         final_upstream: Some("upstream".to_owned()),
