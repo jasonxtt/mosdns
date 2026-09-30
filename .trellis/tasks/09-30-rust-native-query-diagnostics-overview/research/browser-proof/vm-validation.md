@@ -2,9 +2,8 @@
 
 All commands below ran in `/root/mosdns-rust-querydiag/rust` on the
 `mosdns-rust` SSH VM. The browser proof used the fixtures next to this file.
-The exact implementation commit was `9774952008029f3edd2e2674eed392bc13aef372`
-before the corrective review iteration; the corrective iteration is kept in
-the same task scope and is revalidated before its follow-up commit.
+The final implementation candidate is `df83609c` (full SHA recorded by Git).
+It includes the initial implementation and the corrective review iteration.
 
 ## Bounded record/projection checks
 
