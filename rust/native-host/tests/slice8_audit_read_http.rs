@@ -59,6 +59,22 @@ fn udp_query(listener: SocketAddr, request: &[u8]) -> Vec<u8> {
     response[..length].to_vec()
 }
 
+fn fill_real_ring(listener: SocketAddr, count: u32) {
+    let socket = StdUdpSocket::bind("127.0.0.1:0").expect("bulk DNS client bind");
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("bulk DNS client timeout");
+    let mut response = [0_u8; 2048];
+    for id in 0..count {
+        let request = dns_query(
+            u16::try_from(id % u32::from(u16::MAX)).expect("bulk DNS ID"),
+            "bulk.example.",
+        );
+        socket.send_to(&request, listener).expect("bulk DNS send");
+        socket.recv_from(&mut response).expect("bulk DNS response");
+    }
+}
+
 #[derive(Debug)]
 struct HttpResponse {
     status: u16,
@@ -379,6 +395,43 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let incomplete_windows_json: Value = serde_json::from_str(&incomplete_windows.body).expect("incomplete windows");
         assert_eq!(incomplete_windows_json["items"][0]["complete"], false);
         assert_eq!(incomplete_windows_json["items"][4]["complete"], false);
+
+        let full_capacity =
+            http_post(api, "/api/v1/audit/capacity", r#"{"capacity":400000}"#).await;
+        assert_eq!(full_capacity.status, 200);
+        clock.set(origin);
+        tokio::task::spawn_blocking(move || fill_real_ring(dns, 400_000))
+            .await
+            .expect("near-full DNS fill task");
+        let full_stats = http_request(api, "GET", "/api/v2/audit/stats").await;
+        assert_eq!(
+            serde_json::from_str::<Value>(&full_stats.body).expect("full stats")["total_queries"],
+            400_000
+        );
+        for _ in 0..3 {
+            let dns_task = tokio::task::spawn_blocking(move || {
+                udp_query(dns, &dns_query(0x9001, "after-full.example."))
+            });
+            assert_eq!(
+                http_request(api, "GET", "/api/v2/audit/stats")
+                    .await
+                    .status,
+                200
+            );
+            assert_eq!(
+                http_request(api, "GET", "/api/v2/audit/stats/windows")
+                    .await
+                    .status,
+                200
+            );
+            assert_eq!(
+                http_request(api, "GET", "/api/v2/audit/logs?limit=160")
+                    .await
+                    .status,
+                200
+            );
+            assert!(!dns_task.await.expect("post-full DNS client").is_empty());
+        }
 
         shutdown.cancel();
         task.await.expect("audit read supervisor")

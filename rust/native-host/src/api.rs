@@ -26,7 +26,9 @@ use mosdns_upstream_core::TransportCancellation;
 
 use crate::config::CompiledConfig;
 use crate::managed::ManagedDomainSet;
-use crate::observer::{AuditClock, AuditRecord, QueryObserver};
+use crate::observer::{
+    AuditClock, AuditLogPage, AuditRecord, AuditStatsSnapshot, AuditTimingSnapshot, QueryObserver,
+};
 use crate::udp::{drain_tasks, reap_one_task};
 
 pub(crate) const AUDIT_SETTINGS_FILENAME: &str = "audit_settings.json";
@@ -755,33 +757,91 @@ fn query_type_name(qtype: u16) -> &'static str {
     match qtype {
         1 => "A",
         2 => "NS",
+        3 => "MD",
+        4 => "MF",
         5 => "CNAME",
         6 => "SOA",
+        7 => "MB",
+        8 => "MG",
+        9 => "MR",
+        10 => "NULL",
+        11 => "WKS",
         12 => "PTR",
+        13 => "HINFO",
+        14 => "MINFO",
         15 => "MX",
         16 => "TXT",
+        17 => "RP",
+        18 => "AFSDB",
+        19 => "X25",
+        20 => "ISDN",
+        21 => "RT",
+        22 => "NSAP",
+        23 => "NSAP-PTR",
+        24 => "SIG",
+        25 => "KEY",
+        26 => "PX",
+        27 => "GPOS",
         28 => "AAAA",
+        29 => "LOC",
+        30 => "NXT",
+        31 => "EID",
+        32 => "NIMLOC",
         33 => "SRV",
+        34 => "ATMA",
         35 => "NAPTR",
+        36 => "KX",
+        37 => "CERT",
+        38 => "A6",
         39 => "DNAME",
+        40 => "SINK",
         41 => "OPT",
+        42 => "APL",
         43 => "DS",
+        44 => "SSHFP",
+        45 => "IPSECKEY",
         46 => "RRSIG",
         47 => "NSEC",
         48 => "DNSKEY",
+        49 => "DHCID",
         50 => "NSEC3",
         51 => "NSEC3PARAM",
         52 => "TLSA",
+        53 => "SMIMEA",
+        55 => "HIP",
+        56 => "NINFO",
+        57 => "RKEY",
+        58 => "TALINK",
+        59 => "CDS",
+        60 => "CDNSKEY",
+        61 => "OPENPGPKEY",
+        62 => "CSYNC",
+        63 => "ZONEMD",
         64 => "SVCB",
         65 => "HTTPS",
         99 => "SPF",
+        100 => "UINFO",
+        101 => "UID",
+        102 => "GID",
+        103 => "UNSPEC",
+        104 => "NID",
+        105 => "L32",
+        106 => "L64",
+        107 => "LP",
+        108 => "EUI48",
+        109 => "EUI64",
         249 => "TKEY",
         250 => "TSIG",
         251 => "IXFR",
         252 => "AXFR",
+        253 => "MAILB",
+        254 => "MAILA",
         255 => "ANY",
         256 => "URI",
         257 => "CAA",
+        258 => "AVC",
+        259 => "DOA",
+        260 => "AMTRELAY",
         32768 => "TA",
         32769 => "DLV",
         _ => "",
@@ -807,16 +867,12 @@ fn project_log(record: &AuditRecord) -> AuditLogResponse {
     }
 }
 
-fn audit_stats(records: &[AuditRecord]) -> AuditStatsResponse {
-    let total_queries = records.len();
+fn audit_stats(snapshot: &AuditStatsSnapshot) -> AuditStatsResponse {
+    let total_queries = snapshot.total_queries;
     let average_duration_ms = if total_queries == 0 {
         0.0
     } else {
-        records
-            .iter()
-            .map(|record| record.elapsed.as_secs_f64() * 1_000.0)
-            .sum::<f64>()
-            / total_queries as f64
+        snapshot.elapsed_micros as f64 / 1_000.0 / total_queries as f64
     };
     AuditStatsResponse {
         total_queries,
@@ -824,7 +880,7 @@ fn audit_stats(records: &[AuditRecord]) -> AuditStatsResponse {
     }
 }
 
-fn audit_windows(records: &[AuditRecord], now: SystemTime) -> AuditWindowsResponse {
+fn audit_windows(records: &[AuditTimingSnapshot], now: SystemTime) -> AuditWindowsResponse {
     const WINDOWS: [(&str, &str, u64); 5] = [
         ("1h", "1小时内", 3_600),
         ("6h", "最近6小时", 21_600),
@@ -905,21 +961,14 @@ fn parse_log_pagination(target: &str) -> Result<(usize, usize), String> {
     Ok((page, limit))
 }
 
-fn audit_logs(records: &[AuditRecord], page: usize, limit: usize) -> AuditLogsResponse {
-    let total_items = records.len();
+fn audit_logs(page_snapshot: &AuditLogPage, page: usize, limit: usize) -> AuditLogsResponse {
+    let total_items = page_snapshot.total_items;
     let total_pages = if total_items == 0 {
         0
     } else {
         (total_items - 1) / limit + 1
     };
-    let start = page.saturating_sub(1).saturating_mul(limit);
-    let logs = records
-        .iter()
-        .rev()
-        .skip(start)
-        .take(limit)
-        .map(project_log)
-        .collect();
+    let logs = page_snapshot.records.iter().map(project_log).collect();
     AuditLogsResponse {
         pagination: AuditLogPagination {
             total_items,
@@ -943,15 +992,15 @@ async fn dispatch(
     match route(&request.target) {
         Route::AuditV2(AuditV2Route::Stats) => match request.method.as_str() {
             "GET" => {
-                let snapshot = observer.audit_snapshot();
-                Response::json_compact(&audit_stats(&snapshot.records))
+                let snapshot = observer.audit_stats_snapshot();
+                Response::json_compact(&audit_stats(&snapshot))
             }
             _ => Response::method_not_allowed(),
         },
         Route::AuditV2(AuditV2Route::Windows) => match request.method.as_str() {
             "GET" => {
-                let snapshot = observer.audit_snapshot();
-                Response::json_compact(&audit_windows(&snapshot.records, audit_clock.now()))
+                let snapshot = observer.audit_timing_snapshot();
+                Response::json_compact(&audit_windows(&snapshot, audit_clock.now()))
             }
             _ => Response::method_not_allowed(),
         },
@@ -961,8 +1010,8 @@ async fn dispatch(
                     Ok(pagination) => pagination,
                     Err(message) => return Response::error(400, &message),
                 };
-                let snapshot = observer.audit_snapshot();
-                Response::json_compact(&audit_logs(&snapshot.records, page, limit))
+                let snapshot = observer.audit_log_page(page, limit);
+                Response::json_compact(&audit_logs(&snapshot, page, limit))
             }
             _ => Response::method_not_allowed(),
         },
@@ -1114,7 +1163,7 @@ struct PostPayload {
 mod tests {
     use std::fs;
 
-    use super::{load_audit_capacity, migrate_legacy_settings};
+    use super::{load_audit_capacity, migrate_legacy_settings, query_type_name};
 
     fn test_root(name: &str) -> std::path::PathBuf {
         let root =
@@ -1180,5 +1229,12 @@ mod tests {
         assert_eq!(load_audit_capacity(&root, 100_000), 7);
         assert!(!legacy.exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn known_dns_types_keep_mnemonics_and_unknown_types_are_empty() {
+        assert_eq!(query_type_name(13), "HINFO");
+        assert_eq!(query_type_name(44), "SSHFP");
+        assert_eq!(query_type_name(65535), "");
     }
 }
