@@ -1,7 +1,22 @@
 # Implementation plan — native audit control, DNS card and audit panel
 
-Planning only. Do not run `task.py start`, edit product code, deploy, or claim a
-final implementation PASS from this planning turn. The next execution agent
+## Completion record — 2026-09-30
+
+The checklist below preserves the approved execution plan. Product slices 0–3
+were implemented in commits from `f4b64336` through `d7fc11ec`. The designated C2C
+review of the final corrective range `70440349..d7fc11ec` returned
+`FINAL: PASS`. An independent check of exact product HEAD `d7fc11ec` on the
+isolated `mosdns-rust` VM passed `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test
+--workspace`, a native binary build, a disposable Vite build, and real DNS +
+browser clear/capacity/restart actions. The initially incomplete source archive
+omitted `tests/phase5a-baseline`; that same-HEAD fixture was copied before the
+successful full check. See `research/browser-proof/README.md` for topology,
+observations, cleanup and deferred UI scope. This record does not claim a
+production cutover or acceptance of full C08/C11 rows.
+
+Original planning instructions: do not run `task.py start`, edit product code,
+deploy, or claim a final implementation PASS from the planning turn. The execution agent
 must read `AGENTS.md`, the Rust migration documents, `.trellis/workflow.md`,
 this PRD/design and the backend spec index before code changes.
 

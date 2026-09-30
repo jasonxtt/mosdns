@@ -12,6 +12,7 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Logging](./logging-guidelines.md) | Structured operational logs without secrets |
 | [Quality](./quality-guidelines.md) | Tests, builds, deployment order, and surgical changes |
 | [Rust migration](./rust-migration.md) | Architecture, reuse policy, ABI, and phase gates |
+| [Native audit control](./native-audit-control.md) | Runtime capture, settings, v1/v2 API and Vue audit proof |
 
 ## Before development
 
