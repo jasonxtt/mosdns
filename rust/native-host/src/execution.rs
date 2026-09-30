@@ -87,6 +87,15 @@ struct ExecutionFacts<'a> {
     /// detailed audit capture is enabled.
     final_sequence: Option<String>,
     routing: RoutingState,
+    /// Routing facts committed by the response that ultimately owns the wire.
+    /// A parent sequence may replace a child response without touching the
+    /// child's routing fields, so the live machine routing state is not by
+    /// itself a safe final-audit source.
+    response_routing: Option<RoutingState>,
+    last_response: MachineResponseState,
+    routing_changed_since_response: bool,
+    current_origin: Option<SequenceId>,
+    routing_origin: Option<SequenceId>,
     config: &'a CompiledConfig,
     checkpoint: &'a mut ExecutionCheckpoint,
     in_flight_executable: Option<ExecutableId>,
@@ -103,6 +112,7 @@ impl ExecutionFacts<'_> {
     /// Records the actual executed named sequence. A synthetic inline scope
     /// never reaches here, so the position is always a real configured name.
     fn note_origin(&mut self, origin: Option<SequenceId>) {
+        self.current_origin = origin;
         if !self.capture_audit_details {
             return;
         }
@@ -114,7 +124,36 @@ impl ExecutionFacts<'_> {
     }
 
     fn note_routing(&mut self, state: &ExecutionState) {
-        self.routing = state.routing.clone();
+        if self.routing != state.routing {
+            self.routing = state.routing.clone();
+            self.routing_changed_since_response = true;
+            self.routing_origin = self.current_origin;
+        }
+    }
+
+    fn note_response(&mut self, state: &ExecutionState) {
+        if self.last_response == state.response {
+            return;
+        }
+        self.response_routing = match &state.response {
+            MachineResponseState::None => None,
+            MachineResponseState::Raw(_) | MachineResponseState::Synthesized(_) => {
+                if matches!(&state.response, MachineResponseState::Synthesized(_)) {
+                    self.response_source = Some(ResponseSource::Local);
+                }
+                Some(
+                    if self.routing_changed_since_response
+                        && self.routing_origin == self.current_origin
+                    {
+                        self.routing.clone()
+                    } else {
+                        RoutingState::default()
+                    },
+                )
+            }
+        };
+        self.last_response = state.response.clone();
+        self.routing_changed_since_response = false;
     }
 
     fn set_failure_provenance(&mut self, provenance: FailureProvenance) {
@@ -273,6 +312,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         // recorded during execution, or nothing when none was observed.
         final_sequence: None,
         routing: RoutingState::default(),
+        response_routing: None,
+        last_response: MachineResponseState::None,
+        routing_changed_since_response: false,
+        current_origin: None,
+        routing_origin: None,
         config,
         checkpoint,
         in_flight_executable: None,
@@ -316,6 +360,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     loop {
         facts.note_origin(machine.last_origin());
         facts.note_routing(machine.state());
+        facts.note_response(machine.state());
         match step {
             MachineStep::Complete(_) => {
                 // Publication is owned by the cache's successor boundary, so a
@@ -327,12 +372,21 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 // successor completion point: the response now in state is
                 // what that successor produced, before the caller's remaining
                 // rules can rewrite it.
+                facts.note_response(machine.state());
                 publish_successor(
                     &mut pending_store,
                     &machine,
                     request_shutdown.is_cancelled(),
                     publication_deadline,
                 );
+                // A parent may replace the child response without adding any
+                // routing fields of its own. Keep the child facts in the
+                // response-owned snapshot, but start the parent with an
+                // empty audit-routing candidate so stale child provenance
+                // cannot become the parent's final decision.
+                machine.state_mut().routing = RoutingState::default();
+                facts.routing = RoutingState::default();
+                facts.routing_changed_since_response = false;
                 step = match machine.resume_scope_completion(completion.executable()) {
                     Ok(step) => step,
                     Err(_) => {
@@ -625,12 +679,21 @@ fn result_from_state(
     if facts.cache_status == CacheStatus::Undetermined {
         facts.cache_status = CacheStatus::NotApplicable;
     }
+    facts.note_routing(machine.state());
+    facts.note_response(machine.state());
     let response = response_from_state(machine, header, question);
     result_from_wire(response, facts)
 }
 
 fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> ExecutionResult {
-    let routing = std::mem::take(&mut facts.routing);
+    let routing = if response_wire.is_empty() {
+        RoutingState::default()
+    } else {
+        facts
+            .response_routing
+            .take()
+            .unwrap_or_else(|| std::mem::take(&mut facts.routing))
+    };
     let supplying_identity = facts.response_source.as_ref().and_then(|source| {
         if let ResponseSource::Upstream(upstream) = source {
             Some(upstream.clone())
@@ -829,14 +892,14 @@ fn diagnose_response_wire(response_wire: &[u8]) -> ResponseDetails {
     if response_wire.is_empty() {
         return ResponseDetails::no_response();
     }
-    let safe_flags = response_wire
-        .get(2)
-        .copied()
-        .map_or_else(ResponseFlags::default, |flags| ResponseFlags {
-            aa: flags & 0x04 != 0,
-            tc: flags & 0x02 != 0,
-            ra: flags & 0x80 != 0,
-        });
+    let safe_flags = match (response_wire.get(2), response_wire.get(3)) {
+        (Some(&high), Some(&low)) => ResponseFlags {
+            aa: high & 0x04 != 0,
+            tc: high & 0x02 != 0,
+            ra: low & 0x80 != 0,
+        },
+        _ => ResponseFlags::default(),
+    };
     let base_rcode = response_wire
         .get(3)
         .map_or(0, |flags| u16::from(flags & 0x0f));
@@ -976,7 +1039,7 @@ mod tests {
 
     use super::{
         ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, compute_effective_tag,
-        execute_request_with_executor, execute_request_with_observation,
+        diagnose_response_wire, execute_request_with_executor, execute_request_with_observation,
     };
     use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
@@ -1357,6 +1420,20 @@ mod tests {
         let address_offset = response.len() - address.len();
         response[address_offset..].copy_from_slice(&address);
         response
+    }
+
+    #[test]
+    fn final_response_flags_read_ra_from_the_low_dns_header_byte() {
+        let query = query(91);
+        let mut no_ra = response(&query);
+        no_ra[3] &= !0x80;
+        let no_ra_flags = diagnose_response_wire(&no_ra).flags;
+        assert!(!no_ra_flags.ra);
+        assert!(!no_ra_flags.tc, "RCODE bit 1 is not the TC flag");
+
+        let mut with_ra = response(&query);
+        with_ra[3] |= 0x80;
+        assert!(diagnose_response_wire(&with_ra).flags.ra);
     }
 
     fn query_name(id: u16, name: &str) -> Vec<u8> {
@@ -2793,6 +2870,96 @@ plugins:
             before + 1,
             "a cache hit must skip the child forward and run only the parent's"
         );
+    }
+
+    #[test]
+    fn reverse_qname_and_parent_replacement_do_not_publish_stale_route_provenance() {
+        let reverse_config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - matches: "!qname $rules"
+        exec: $forward
+  - tag: rules
+    type: domain_set
+    args:
+      exps: ["full:matched.test"]
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { tag: peer, addr: "udp://127.0.0.1:1" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:53053", enable_audit: true }
+"#,
+        )
+        .expect("reverse qname config");
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(100)).expect("cache");
+        let reverse_query = query_name(92, "other.test.");
+        let reverse_result = execute_observed(
+            &reverse_config,
+            &cache,
+            &HostOptions::default(),
+            &reverse_query,
+            &MockExchange {
+                calls: Rc::new(Cell::new(0)),
+                response: response(&reverse_query),
+                fail: false,
+            },
+        );
+        assert_eq!(
+            reverse_result.matched_rule_source.as_deref(),
+            Some("negated:qname")
+        );
+        assert_eq!(reverse_result.domain_set, None);
+        assert_eq!(reverse_result.effective_tag, None);
+
+        let parent_config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $child
+      - exec: reject 3
+  - tag: child
+    type: sequence
+    args:
+      - matches: qname $child_rules
+        exec: $forward
+  - tag: child_rules
+    type: domain_set
+    args:
+      exps: ["full:child.test"]
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { tag: child_peer, addr: "udp://127.0.0.1:1" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:53054", enable_audit: true }
+"#,
+        )
+        .expect("parent replacement config");
+        let parent_query = query_name(93, "child.test.");
+        let parent_result = execute_observed(
+            &parent_config,
+            &cache,
+            &HostOptions::default(),
+            &parent_query,
+            &MockExchange {
+                calls: Rc::new(Cell::new(0)),
+                response: response(&parent_query),
+                fail: false,
+            },
+        );
+        assert_eq!(parent_result.response_wire[3] & 0x0f, 3);
+        assert_eq!(parent_result.domain_set, None);
+        assert_eq!(parent_result.matched_rule_source, None);
+        assert_eq!(parent_result.effective_tag, None);
+        assert_eq!(parent_result.selected_upstream, None);
     }
 
     #[test]

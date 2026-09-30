@@ -431,10 +431,29 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             serde_json::from_str::<Value>(&full_stats.body).expect("full stats")["total_queries"],
             400_000
         );
-        let (full_logs, full_slowest) = tokio::join!(
-            http_request(api, "GET", "/api/v2/audit/logs?limit=500"),
-            http_request(api, "GET", "/api/v2/audit/rank/slowest?limit=300"),
-        );
+        let full_logs_task = tokio::spawn(http_request(
+            api,
+            "GET",
+            "/api/v2/audit/logs?limit=500",
+        ));
+        let full_slowest_task = tokio::spawn(http_request(
+            api,
+            "GET",
+            "/api/v2/audit/rank/slowest?limit=300",
+        ));
+        let mut dns_progress_during_reads = 0;
+        for id in 0x9001..0x9005 {
+            let response = tokio::task::spawn_blocking(move || {
+                udp_query(dns, &dns_query(id, "during-full-read.example."))
+            })
+            .await
+            .expect("during-read DNS client");
+            if !response.is_empty() {
+                dns_progress_during_reads += 1;
+            }
+        }
+        let full_logs = full_logs_task.await.expect("full logs read");
+        let full_slowest = full_slowest_task.await.expect("full slowest read");
         assert_eq!(full_logs.status, 200);
         assert_eq!(full_slowest.status, 200);
         let full_logs_json: Value = serde_json::from_str(&full_logs.body).expect("full logs");
@@ -456,7 +475,8 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             (u128::from(body_bytes) * 100) / u128::from(record_count);
         assert!(bytes_per_record_hundredths > 0);
         println!(
-            "full-ring projection: retained=400000 logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02}",
+            "full-ring projection: retained=400000 concurrent_reads=2 dns_progress_during_reads={} logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02}",
+            dns_progress_during_reads,
             full_logs.body.len(),
             bytes_per_record_hundredths / 100,
             bytes_per_record_hundredths % 100

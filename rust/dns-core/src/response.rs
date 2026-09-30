@@ -259,7 +259,7 @@ fn project_name_rdata(
         return Err(ResponseError::InvalidRecordData);
     }
     let (name_end, name) = read_name(packet, start)?;
-    if name_end > end {
+    if name_end != end {
         return Err(ResponseError::InvalidRecordData);
     }
     Ok(render_wire_name(&name))
@@ -277,7 +277,16 @@ fn render_wire_name(wire: &[u8]) -> String {
         let Some(label) = wire.get(position..position + length) else {
             return ".".to_owned();
         };
-        labels.push(String::from_utf8_lossy(label).into_owned());
+        let mut rendered = String::new();
+        for &byte in label {
+            match byte {
+                b'!'..=b'~' if byte != b'.' && byte != b'\\' => rendered.push(byte as char),
+                b'.' => rendered.push_str("\\."),
+                b'\\' => rendered.push_str("\\\\"),
+                _ => rendered.push_str(&format!("\\{byte:03}")),
+            }
+        }
+        labels.push(rendered);
         position += length;
     }
     if labels.is_empty() {
@@ -701,6 +710,33 @@ mod tests {
         assert_eq!(projected.len(), 1024);
         assert_eq!(projected.first().expect("first answer").ttl, 0);
         assert_eq!(projected.last().expect("last answer").ttl, 1023);
+        let projection_bytes: usize = projected
+            .iter()
+            .map(|answer| {
+                answer.data.len() + std::mem::size_of::<u16>() + std::mem::size_of::<u32>()
+            })
+            .sum();
+        println!(
+            "large-answer projection: records={} projection_bytes={} bytes_per_record={}.{:02}",
+            projected.len(),
+            projection_bytes,
+            projection_bytes / projected.len(),
+            (projection_bytes % projected.len()) * 100 / projected.len()
+        );
+        assert!(projection_bytes > projected.len());
+    }
+
+    #[test]
+    fn answer_projection_rejects_trailing_name_rdata_and_escapes_labels() {
+        let malformed = resp_wire(&[rr(5, &[0xc0, 0x0c, 0xaa])], &[], &[]);
+        assert_eq!(
+            observe_answer_records(&malformed),
+            Err(ResponseError::InvalidRecordData)
+        );
+
+        let escaped = resp_wire(&[rr(5, &[3, b'a', b'.', b'\\', 0])], &[], &[]);
+        let answers = observe_answer_records(&escaped).expect("escaped DNS name");
+        assert_eq!(answers[0].data, r"a\.\\.");
     }
 
     #[test]
