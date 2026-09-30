@@ -58,6 +58,16 @@ pub struct ResponseMetadata {
     pub truncated: bool,
 }
 
+/// One Answer-section record projected for diagnostics after the complete
+/// response walk has succeeded. The owner name is intentionally omitted: the
+/// query log contract displays the ordered type/TTL/data answer facts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnswerRecord {
+    pub rrtype: u16,
+    pub ttl: u32,
+    pub data: String,
+}
+
 const DNS_HEADER_LEN: usize = 12;
 const RR_FIXED_LEN: usize = 10;
 const TYPE_OPT: u16 = 41;
@@ -171,6 +181,119 @@ pub fn observe_response_metadata(packet: &[u8]) -> Result<ResponseMetadata, Resp
     })
 }
 
+/// Projects every Answer-section record in wire order.
+///
+/// The walk validates the question and all declared sections before returning
+/// any records. Supported name-bearing RDATA is expanded with the same
+/// compression guards as the response validator; other legal RR types remain
+/// visible as exact raw RDATA instead of disappearing from diagnostics.
+pub fn observe_answer_records(packet: &[u8]) -> Result<Vec<AnswerRecord>, ResponseError> {
+    let mut answers = Vec::new();
+    walk_records(packet, |record| {
+        if record.section != ResponseSection::Answer {
+            return Ok(());
+        }
+        answers.push(AnswerRecord {
+            rrtype: record.rrtype,
+            ttl: record.ttl,
+            data: project_rdata(packet, &record)?,
+        });
+        Ok(())
+    })?;
+    Ok(answers)
+}
+
+fn project_rdata(packet: &[u8], record: &RecordMetadata<'_>) -> Result<String, ResponseError> {
+    match record.rrtype {
+        TYPE_A if record.rdata.len() == 4 => Ok(std::net::Ipv4Addr::new(
+            record.rdata[0],
+            record.rdata[1],
+            record.rdata[2],
+            record.rdata[3],
+        )
+        .to_string()),
+        TYPE_AAAA if record.rdata.len() == 16 => {
+            let mut octets = [0_u8; 16];
+            octets.copy_from_slice(record.rdata);
+            Ok(std::net::Ipv6Addr::from(octets).to_string())
+        }
+        2 | 5 | 12 => project_name_rdata(packet, record, 0),
+        15 => project_name_rdata(packet, record, 2),
+        16 => {
+            let mut offset = 0;
+            let mut chunks = Vec::new();
+            while offset < record.rdata.len() {
+                let length = usize::from(record.rdata[offset]);
+                offset = offset
+                    .checked_add(1)
+                    .and_then(|value| value.checked_add(length))
+                    .ok_or(ResponseError::InvalidRecordData)?;
+                let start = offset - length;
+                let chunk = record
+                    .rdata
+                    .get(start..offset)
+                    .ok_or(ResponseError::InvalidRecordData)?;
+                chunks.push(String::from_utf8_lossy(chunk).into_owned());
+            }
+            Ok(chunks.join(" "))
+        }
+        _ => Ok(raw_rdata(record.rdata)),
+    }
+}
+
+fn project_name_rdata(
+    packet: &[u8],
+    record: &RecordMetadata<'_>,
+    prefix: usize,
+) -> Result<String, ResponseError> {
+    let start = record
+        .rdata_offset
+        .checked_add(prefix)
+        .ok_or(ResponseError::InvalidRecordData)?;
+    let end = start
+        .checked_add(record.rdata.len().saturating_sub(prefix))
+        .ok_or(ResponseError::InvalidRecordData)?;
+    if prefix > record.rdata.len() {
+        return Err(ResponseError::InvalidRecordData);
+    }
+    let (name_end, name) = read_name(packet, start)?;
+    if name_end > end {
+        return Err(ResponseError::InvalidRecordData);
+    }
+    Ok(render_wire_name(&name))
+}
+
+fn render_wire_name(wire: &[u8]) -> String {
+    let mut position = 0;
+    let mut labels = Vec::new();
+    while let Some(&length) = wire.get(position) {
+        position += 1;
+        if length == 0 {
+            break;
+        }
+        let length = usize::from(length);
+        let Some(label) = wire.get(position..position + length) else {
+            return ".".to_owned();
+        };
+        labels.push(String::from_utf8_lossy(label).into_owned());
+        position += length;
+    }
+    if labels.is_empty() {
+        ".".to_owned()
+    } else {
+        format!("{}.", labels.join("."))
+    }
+}
+
+fn raw_rdata(rdata: &[u8]) -> String {
+    let mut hex = String::with_capacity(rdata.len().saturating_mul(2));
+    for byte in rdata {
+        use std::fmt::Write;
+        let _ = write!(hex, "{byte:02x}");
+    }
+    format!("\\# {} {hex}", rdata.len())
+}
+
 /// Reports the minimal non-OPT TTL and count, mirroring the Go oracle.
 ///
 /// # Errors
@@ -246,6 +369,7 @@ struct RecordMetadata<'a> {
     rrtype: u16,
     ttl: u32,
     ttl_offset: usize,
+    rdata_offset: usize,
     rdata: &'a [u8],
 }
 
@@ -306,6 +430,7 @@ fn walk_records<'a>(
                 rrtype,
                 ttl,
                 ttl_offset: position + 4,
+                rdata_offset: fixed_end,
                 rdata,
             })?;
             if rrtype != TYPE_OPT {
@@ -410,8 +535,8 @@ fn read_u32(packet: &[u8], offset: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ResponseError, TtlInfo, age_response_ttls, observe_answer_addresses, observe_response_ttl,
-        replace_response_ttls, validate_response,
+        ResponseError, TtlInfo, age_response_ttls, observe_answer_addresses,
+        observe_answer_records, observe_response_ttl, replace_response_ttls, validate_response,
     };
 
     const TYPE_OPT: u16 = 41;
@@ -530,6 +655,26 @@ mod tests {
         ] {
             validate_response(&wire).unwrap_or_else(|e| panic!("rejected: {e:?}"));
         }
+    }
+
+    #[test]
+    fn answer_projection_preserves_order_and_uncommon_types() {
+        let wire = resp_wire(
+            &[
+                a_rr(60, &[192, 0, 2, 1]),
+                rr(16, &[3, b'o', b'n', b'e', 3, b't', b'w', b'o']),
+                rr(99, &[0xde, 0xad]),
+            ],
+            &[],
+            &[],
+        );
+        let answers = observe_answer_records(&wire).expect("answer projection");
+        assert_eq!(answers.len(), 3);
+        assert_eq!(answers[0].data, "192.0.2.1");
+        assert_eq!(answers[0].ttl, 60);
+        assert_eq!(answers[1].data, "one two");
+        assert_eq!(answers[2].rrtype, 99);
+        assert_eq!(answers[2].data, r"\# 2 dead");
     }
 
     #[test]

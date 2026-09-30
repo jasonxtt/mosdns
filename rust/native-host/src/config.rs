@@ -1103,22 +1103,26 @@ fn compile_qname(
     path: &str,
     catalog: &PluginCatalog<'_>,
 ) -> Result<QnameMatcher, ConfigError> {
-    let mut groups: Vec<DomainSetHandle> = Vec::new();
+    let mut groups: Vec<(String, DomainSetHandle)> = Vec::new();
     let mut inline = MixMatcher::new();
     inline.set_default("domain");
     let mut has_inline = false;
+    let mut first_inline_index = None;
     for field in args.split_whitespace() {
         if let Some(tag) = field.strip_prefix('$') {
             let set = catalog.domain_set(tag).ok_or_else(|| {
                 ConfigError::new(path, format!("unknown domain_set reference `${tag}`"))
             })?;
-            groups.push(set);
+            groups.push((format!("domain_set:{tag}"), set));
         } else if field.starts_with('&') {
             return Err(ConfigError::new(
                 path,
                 "qname file references use a domain_set plugin `files` entry",
             ));
         } else {
+            if first_inline_index.is_none() {
+                first_inline_index = Some(0);
+            }
             inline.add(field, ()).map_err(|error| {
                 ConfigError::new(path, format!("invalid qname rule `{field}`: {error}"))
             })?;
@@ -1132,7 +1136,10 @@ fn compile_qname(
         ));
     }
     if has_inline {
-        groups.push(DomainSetHandle::Fixed(Rc::new(inline)));
+        groups.push((
+            format!("inline:{path}#{}", first_inline_index.unwrap_or(0)),
+            DomainSetHandle::Fixed(Rc::new(inline)),
+        ));
     }
     Ok(QnameMatcher::new(groups))
 }

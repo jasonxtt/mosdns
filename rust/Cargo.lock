@@ -650,6 +650,7 @@ dependencies = [
  "mosdns-matcher-core",
  "mosdns-sequence-core",
  "mosdns-upstream-core",
+ "getrandom 0.4.3",
  "serde",
  "serde_json",
  "time",

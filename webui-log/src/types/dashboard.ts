@@ -41,8 +41,33 @@ export interface DashboardAuditLog {
   query_time?: string
   query_name?: string
   query_type?: string
+  query_class?: string
   client_ip?: string
   duration_ms?: number
+  response_code?: string
+  response_flags?: {
+    AA?: boolean
+    TC?: boolean
+    RA?: boolean
+    aa?: boolean
+    tc?: boolean
+    ra?: boolean
+  }
+  answers?: Array<{
+    type?: string
+    ttl?: number
+    data?: string
+  }>
+  answer_details_status?: 'complete' | 'raw_rdata' | 'decode_error' | string
+  answer_decode_error?: string
+  domain_set?: string
+  effective_tag?: string
+  matched_group?: string
+  final_sequence?: string
+  final_upstream?: string
+  upstream_targets?: string
+  selected_upstream?: string
+  matched_rule_source?: string
 }
 
 export interface DashboardAuditLogsResponse {

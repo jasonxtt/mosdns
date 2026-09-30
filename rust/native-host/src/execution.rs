@@ -3,9 +3,9 @@ use std::pin::Pin;
 use std::time::Instant;
 
 use mosdns_dns_core::{
-    FrameMode, QueryHeader, QuestionInfo, frame_response, inspect_response_header,
-    observe_answer_addresses, observe_response_metadata, patch_response_id_ra, synthesize_response,
-    validate_response,
+    FrameMode, QueryHeader, QuestionInfo, ResponseError, frame_response, inspect_response_header,
+    observe_answer_addresses, observe_answer_records, observe_response_metadata,
+    patch_response_id_ra, synthesize_response, validate_response,
 };
 use mosdns_sequence_core::{
     ExecutableId, ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep,
@@ -17,9 +17,10 @@ use crate::assembly::{ForwardAdapter, ForwardCatalog, HostOptions};
 use crate::cache::{NativeCacheAdapter, PendingStore};
 use crate::config::CompiledConfig;
 use crate::observer::{
-    CacheStatus, ExecutionCheckpoint, FailureProvenance, LocalFailureKind, QueryTerminalOutcome,
-    ResponseSource, ResponseState as ObservedResponseState, TerminalObservation,
-    UpstreamAttemptList, UpstreamAttemptOutcome, UpstreamAttemptRecord,
+    AnswerDetailsStatus, AuditAnswer, CacheStatus, ExecutionCheckpoint, FailureProvenance,
+    LocalFailureKind, QueryTerminalOutcome, ResponseDetails, ResponseFlags, ResponseSource,
+    ResponseState as ObservedResponseState, TerminalObservation, UpstreamAttemptList,
+    UpstreamAttemptOutcome, UpstreamAttemptRecord,
 };
 
 const DEFAULT_FUEL: u64 = 64;
@@ -62,10 +63,16 @@ pub(crate) struct ExecutionRequest<'a> {
 pub(crate) struct ExecutionResult {
     pub response_wire: Vec<u8>,
     pub response: ObservedResponseState,
+    pub response_details: ResponseDetails,
     pub cache_status: CacheStatus,
     pub final_sequence: Option<String>,
     pub matched_group: Option<String>,
+    pub domain_set: Option<String>,
+    pub effective_tag: Option<String>,
+    pub matched_rule_source: Option<String>,
     pub final_upstream: Option<String>,
+    pub upstream_targets: Option<String>,
+    pub selected_upstream: Option<String>,
     pub upstream_attempts: UpstreamAttemptList,
     pub failure_provenance: Option<FailureProvenance>,
 }
@@ -167,6 +174,7 @@ impl Drop for ExecutionFacts<'_> {
                 // final response provenance, so an unfinished execution
                 // must not publish an intermediate W3 answer here.
                 response: ObservedResponseState::NoResponse,
+                response_details: ResponseDetails::no_response(),
                 cache_status: self.cache_status,
                 final_sequence: self
                     .routing
@@ -174,7 +182,12 @@ impl Drop for ExecutionFacts<'_> {
                     .clone()
                     .or_else(|| self.final_sequence.clone()),
                 matched_group: self.routing.matched_group.clone(),
+                domain_set: self.routing.domain_set.clone(),
+                effective_tag: self.routing.effective_tag.clone(),
+                matched_rule_source: self.routing.matched_rule_source.clone(),
                 final_upstream: self.routing.final_upstream.clone(),
+                upstream_targets: self.routing.final_upstream_targets.clone(),
+                selected_upstream: self.routing.selected_upstream.clone(),
                 upstream_attempts: self.upstream_attempts.clone(),
                 failure_provenance: self.failure_provenance.clone(),
                 elapsed: std::time::Duration::ZERO,
@@ -618,12 +631,47 @@ fn result_from_state(
 
 fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> ExecutionResult {
     let routing = std::mem::take(&mut facts.routing);
-    let derived_final_upstream = facts.response_source.as_ref().and_then(|source| {
+    let supplying_identity = facts.response_source.as_ref().and_then(|source| {
         if let ResponseSource::Upstream(upstream) = source {
             Some(upstream.clone())
         } else {
             None
         }
+    });
+    let derived_final_upstream = supplying_identity.clone();
+    let final_sequence = routing
+        .final_sequence
+        .clone()
+        .or_else(|| facts.final_sequence.clone());
+    let final_upstream = routing
+        .final_upstream
+        .clone()
+        .or(derived_final_upstream.clone());
+    let effective_tag = routing.effective_tag.clone().or_else(|| {
+        routing
+            .domain_set
+            .as_deref()
+            .map(|domain_set| {
+                compute_effective_tag(
+                    domain_set,
+                    final_upstream.as_deref(),
+                    routing.matched_group.as_deref(),
+                    final_sequence.as_deref(),
+                )
+            })
+            .or_else(|| {
+                supplying_identity
+                    .as_ref()
+                    .map(|_| "unmatched_rule".to_owned())
+            })
+    });
+    let actual_upstream = supplying_identity.as_deref().and_then(|identity| {
+        facts
+            .config
+            .forwards
+            .iter()
+            .find(|forward| forward.upstream_tag.as_deref().unwrap_or(&forward.tag) == identity)
+            .map(|forward| forward.endpoint.address().to_string())
     });
     let response = observed_response(
         &response_wire,
@@ -632,16 +680,211 @@ fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> Execut
             .take()
             .unwrap_or(ResponseSource::Local),
     );
+    let response_details = if facts.capture_audit_details {
+        diagnose_response_wire(&response_wire)
+    } else {
+        ResponseDetails::no_response()
+    };
     facts.completed = true;
     ExecutionResult {
         response_wire,
         response,
+        response_details,
         cache_status: facts.cache_status,
-        final_sequence: routing.final_sequence.or(facts.final_sequence.take()),
+        final_sequence,
         matched_group: routing.matched_group,
-        final_upstream: routing.final_upstream.or(derived_final_upstream),
+        domain_set: routing.domain_set,
+        effective_tag,
+        matched_rule_source: routing.matched_rule_source,
+        final_upstream,
+        upstream_targets: routing
+            .final_upstream_targets
+            .or_else(|| actual_upstream.clone()),
+        selected_upstream: actual_upstream.or(routing.selected_upstream),
         upstream_attempts: std::mem::take(&mut facts.upstream_attempts),
         failure_provenance: facts.failure_provenance.take(),
+    }
+}
+
+fn compute_effective_tag(
+    domain_set: &str,
+    final_upstream: Option<&str>,
+    matched_group: Option<&str>,
+    final_sequence: Option<&str>,
+) -> String {
+    let domain_set = domain_set.trim();
+    if domain_set.is_empty() || domain_set == "unmatched_rule" {
+        return "unmatched_rule".to_owned();
+    }
+    if let Some(special) =
+        normalize_special_tag(matched_group).or_else(|| normalize_special_tag(final_upstream))
+    {
+        return special;
+    }
+    let tags: Vec<_> = domain_set
+        .split('|')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if tags.is_empty() {
+        return "unmatched_rule".to_owned();
+    }
+    if let Some(tag) = tags.iter().find(|tag| tag.starts_with("特殊上游")) {
+        return (*tag).to_owned();
+    }
+    for candidate in [
+        "重定向",
+        "指定客户端直连",
+        "黑名单",
+        "广告屏蔽",
+        "BANAAAA",
+        "BANSOA",
+        "BANPTR",
+        "BANHTTPS",
+        "DDNS域名",
+        "stash国内",
+        "stash国外",
+        "clashmi国内",
+        "clashmi国外",
+        "sing-box国内",
+        "sing-box国外",
+    ] {
+        if tags.contains(&candidate) {
+            return candidate.to_owned();
+        }
+    }
+    let no_v: Vec<_> = ["记忆无V4", "记忆无V6"]
+        .into_iter()
+        .filter(|tag| tags.contains(tag))
+        .collect();
+    if tags.contains(&"!CN fakeip filter") {
+        return join_effective_tags(&no_v, "!CN fakeip filter");
+    }
+    let route_kind = match final_upstream.map(str::trim) {
+        Some("domestic" | "cnfake") => Some("direct"),
+        Some("foreign" | "foreignecs" | "nocnfake") => Some("proxy"),
+        _ => None,
+    };
+    let has_direct_memory = tags.contains(&"记忆直连");
+    let has_proxy_memory = tags.contains(&"记忆代理");
+    if has_direct_memory || has_proxy_memory {
+        let memory = match (has_direct_memory, has_proxy_memory, route_kind) {
+            (true, true, Some("proxy")) | (true, false, Some("proxy")) => "记忆代理",
+            (true, true, _) | (true, false, _) => "记忆直连",
+            (false, true, Some("direct")) => "记忆代理转直连",
+            (false, true, _) => "记忆代理",
+            _ => "",
+        };
+        if !memory.is_empty() {
+            return join_effective_tags(&no_v, memory);
+        }
+    }
+    if route_kind == Some("proxy")
+        && matches!(
+            final_sequence.map(str::trim),
+            Some("sequence_fakeip_addlist" | "sequence_fakeip_addlist_exit")
+        )
+    {
+        for candidate in ["白名单", "订阅直连补充", "订阅直连", "CN fakeip filter"] {
+            if tags.contains(&candidate) {
+                return join_effective_tags(&no_v, "直连候选转代理");
+            }
+        }
+    }
+    let candidates = match route_kind {
+        Some("direct") => [
+            "白名单",
+            "订阅直连补充",
+            "订阅直连",
+            "CN fakeip filter",
+            "!CN fakeip filter",
+        ]
+        .as_slice(),
+        Some("proxy") => ["灰名单", "订阅代理补充", "订阅代理"].as_slice(),
+        _ => [].as_slice(),
+    };
+    if let Some(tag) = candidates.iter().find(|candidate| tags.contains(candidate)) {
+        return join_effective_tags(&no_v, tag);
+    }
+    domain_set.to_owned()
+}
+
+fn normalize_special_tag(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    let slot = value
+        .strip_prefix("special_upstream_")
+        .or_else(|| value.strip_prefix("special_"))?;
+    (!slot.is_empty() && slot.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| format!("特殊上游{slot}"))
+}
+
+fn join_effective_tags(no_v: &[&str], core: &str) -> String {
+    no_v.iter()
+        .copied()
+        .chain((!core.is_empty()).then_some(core))
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn diagnose_response_wire(response_wire: &[u8]) -> ResponseDetails {
+    if response_wire.is_empty() {
+        return ResponseDetails::no_response();
+    }
+    let safe_flags = response_wire
+        .get(2)
+        .copied()
+        .map_or_else(ResponseFlags::default, |flags| ResponseFlags {
+            aa: flags & 0x04 != 0,
+            tc: flags & 0x02 != 0,
+            ra: flags & 0x80 != 0,
+        });
+    let base_rcode = response_wire
+        .get(3)
+        .map_or(0, |flags| u16::from(flags & 0x0f));
+    let metadata = observe_response_metadata(response_wire).ok();
+    let rcode = metadata.as_ref().map_or(base_rcode, |value| value.rcode);
+    match observe_answer_records(response_wire) {
+        Ok(records) => {
+            let has_raw = records
+                .iter()
+                .any(|record| !matches!(record.rrtype, 1 | 2 | 5 | 12 | 15 | 16 | 28));
+            ResponseDetails {
+                rcode,
+                flags: safe_flags,
+                answers: records
+                    .into_iter()
+                    .map(|record| AuditAnswer {
+                        rrtype: record.rrtype,
+                        ttl: record.ttl,
+                        data: record.data,
+                    })
+                    .collect(),
+                answer_details_status: if has_raw {
+                    AnswerDetailsStatus::RawRdata
+                } else {
+                    AnswerDetailsStatus::Complete
+                },
+                answer_decode_error: None,
+            }
+        }
+        Err(error) => ResponseDetails {
+            rcode,
+            flags: safe_flags,
+            answers: Vec::new(),
+            answer_details_status: AnswerDetailsStatus::DecodeError,
+            answer_decode_error: Some(answer_decode_error_name(error).to_owned()),
+        },
+    }
+}
+
+fn answer_decode_error_name(error: ResponseError) -> &'static str {
+    match error {
+        ResponseError::TooShort
+        | ResponseError::TruncatedQuestion
+        | ResponseError::TruncatedRecord => "truncated_message",
+        ResponseError::NotResponse => "invalid_response",
+        ResponseError::BadName => "bad_name",
+        ResponseError::InvalidRecordData => "invalid_rdata",
     }
 }
 
@@ -733,8 +976,8 @@ mod tests {
     };
 
     use super::{
-        ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, execute_request_with_executor,
-        execute_request_with_observation,
+        ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, compute_effective_tag,
+        execute_request_with_executor, execute_request_with_observation,
     };
     use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
@@ -1209,6 +1452,7 @@ mod tests {
             upstream_attempts: result.upstream_attempts,
             failure_provenance: result.failure_provenance,
             elapsed: Duration::ZERO,
+            ..Default::default()
         });
         admitted.finish(QueryTerminalOutcome::SendSucceeded);
 
@@ -3088,6 +3332,36 @@ plugins:
             cancellation,
         ));
         assert_eq!(calls.get(), 2, "deadline must prevent publication");
+    }
+
+    #[test]
+    fn effective_tag_normalization_keeps_special_and_memory_precedence() {
+        assert_eq!(
+            compute_effective_tag(
+                "记忆无V6|订阅直连",
+                Some("foreign"),
+                None,
+                Some("sequence_google")
+            ),
+            "记忆无V6|订阅直连"
+        );
+        assert_eq!(
+            compute_effective_tag(
+                "订阅直连",
+                Some("foreign"),
+                None,
+                Some("sequence_fakeip_addlist")
+            ),
+            "直连候选转代理"
+        );
+        assert_eq!(
+            compute_effective_tag("anything", Some("special_upstream_7"), None, None),
+            "特殊上游7"
+        );
+        assert_eq!(
+            compute_effective_tag("unmatched_rule", Some("foreign"), None, None),
+            "unmatched_rule"
+        );
     }
 
     fn futures_like_block_on<F: std::future::Future>(future: F) -> F::Output {

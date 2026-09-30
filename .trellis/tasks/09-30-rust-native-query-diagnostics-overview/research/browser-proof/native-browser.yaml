@@ -1,0 +1,24 @@
+log:
+  level: error
+
+api:
+  http: "127.0.0.1:18080"
+
+plugins:
+  - tag: browser_forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:9"
+
+  - tag: browser_reject
+    type: sequence
+    args:
+      - exec: reject 3
+
+  - tag: browser_udp
+    type: udp_server
+    args:
+      entry: browser_reject
+      listen: "127.0.0.1:15353"
+      enable_audit: true

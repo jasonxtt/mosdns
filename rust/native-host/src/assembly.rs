@@ -208,12 +208,15 @@ impl HostAssembly {
             .as_deref()
             .map(|root| crate::api::load_audit_capacity(root, options.audit_capacity))
             .unwrap_or(options.audit_capacity);
-        let observer = Arc::new(QueryObserver::with_clock(
-            config.listener.enable_audit,
-            upstream_identities,
-            audit_capacity,
-            options.audit_clock.clone(),
-        ));
+        let observer = Arc::new(
+            QueryObserver::try_with_clock(
+                config.listener.enable_audit,
+                upstream_identities,
+                audit_capacity,
+                options.audit_clock.clone(),
+            )
+            .map_err(|error| AssemblyError::Runtime(error.to_string()))?,
+        );
         Ok(Self {
             config,
             forwards,

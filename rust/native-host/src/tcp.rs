@@ -182,12 +182,18 @@ async fn process_connection(task: ConnectionTask) {
             observer.record_malformed();
             return;
         };
-        let mut admitted = observer.admit(
+        let mut admitted = match observer.try_admit(
             client_addr,
             QueryTransport::Tcp,
             &question,
             connection_shutdown.clone(),
-        );
+        ) {
+            Ok(admitted) => admitted,
+            Err(error) => {
+                eprintln!("native query admission failed: {error}");
+                return;
+            }
+        };
         let mut request_options = options.clone();
         request_options.admission_deadline = Some(Instant::now() + options.request_deadline);
         let mut execution = execute_request(
@@ -227,10 +233,16 @@ async fn process_connection(task: ConnectionTask) {
         admitted.capture_execution(TerminalObservation {
             outcome: terminal.unwrap_or(QueryTerminalOutcome::NoResponse),
             response: execution.response,
+            response_details: execution.response_details,
             cache_status: execution.cache_status,
             final_sequence: execution.final_sequence,
             matched_group: execution.matched_group,
+            domain_set: execution.domain_set,
+            effective_tag: execution.effective_tag,
+            matched_rule_source: execution.matched_rule_source,
             final_upstream: execution.final_upstream,
+            upstream_targets: execution.upstream_targets,
+            selected_upstream: execution.selected_upstream,
             upstream_attempts: execution.upstream_attempts,
             failure_provenance: execution.failure_provenance,
             elapsed: Duration::ZERO,

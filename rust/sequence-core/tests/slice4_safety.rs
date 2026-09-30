@@ -835,6 +835,7 @@ fn canonical_contract_snapshot_is_typed_and_deterministic() {
     state.fast_flags = 0x0001_0000_0000_0001;
     state.routing = RoutingState {
         domain_set: Some("domain-set".to_owned()),
+        effective_tag: None,
         matched_group: Some("group".to_owned()),
         final_sequence: Some("final-sequence".to_owned()),
         final_upstream: Some("final-upstream".to_owned()),
@@ -857,6 +858,7 @@ fn canonical_contract_snapshot_is_typed_and_deterministic() {
             ),
             routing: RoutingState {
                 domain_set: Some("domain-set".to_owned()),
+                effective_tag: None,
                 matched_group: Some("group".to_owned()),
                 final_sequence: Some("final-sequence".to_owned()),
                 final_upstream: Some("final-upstream".to_owned()),
