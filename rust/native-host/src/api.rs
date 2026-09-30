@@ -888,10 +888,15 @@ fn audit_windows(records: &[AuditTimingSnapshot], now: SystemTime) -> AuditWindo
         ("3d", "最近3天", 259_200),
         ("7d", "最近7天", 604_800),
     ];
-    let coverage_start = records
-        .first()
-        .map(|record| format_rfc3339(record.timestamp, true));
-    let oldest = records.first().map(|record| record.timestamp);
+    let oldest = records.iter().map(|record| record.timestamp).fold(
+        None,
+        |oldest: Option<SystemTime>, timestamp| match oldest {
+            None => Some(timestamp),
+            Some(current) if timestamp.duration_since(current).is_err() => Some(timestamp),
+            Some(current) => Some(current),
+        },
+    );
+    let coverage_start = oldest.map(|timestamp| format_rfc3339(timestamp, true));
     let items = WINDOWS
         .into_iter()
         .map(|(key, label, window_seconds)| {
@@ -1236,5 +1241,32 @@ mod tests {
         assert_eq!(query_type_name(13), "HINFO");
         assert_eq!(query_type_name(44), "SSHFP");
         assert_eq!(query_type_name(65535), "");
+    }
+
+    #[test]
+    fn windows_use_the_oldest_admission_time_not_terminal_order() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let now = UNIX_EPOCH + Duration::from_secs(7_200);
+        let older = now - Duration::from_secs(7_200);
+        let newer = now - Duration::from_secs(1_800);
+        let windows = super::audit_windows(
+            &[
+                super::AuditTimingSnapshot {
+                    timestamp: newer,
+                    elapsed: Duration::from_millis(1),
+                },
+                super::AuditTimingSnapshot {
+                    timestamp: older,
+                    elapsed: Duration::from_millis(2),
+                },
+            ],
+            now,
+        );
+        assert_eq!(
+            windows.items[0].coverage_start,
+            Some("1970-01-01T00:00:00Z".to_owned())
+        );
+        assert!(windows.items[0].complete);
     }
 }
