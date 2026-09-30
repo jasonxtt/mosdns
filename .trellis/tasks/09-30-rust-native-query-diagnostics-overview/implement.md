@@ -16,8 +16,11 @@ Go/cgo bridge edit, or push was performed. The full `cargo test --workspace`
 run passed, as did `cargo fmt --all -- --check`, workspace clippy with
 `-D warnings`, the native-host build, focused native-host and `slice8` tests,
 and disposable VM `npm ci && npm run build`. Real UDP/TCP/HTTP/browser proof
-is recorded in `research/browser-proof/README.md`. A complete independent C2C
-review is the final handoff gate and is recorded after the narrow task commit.
+is recorded in `research/browser-proof/README.md`; the 400000-record concurrent
+read evidence is in `research/browser-proof/vm-validation.md`. The code
+candidate is the narrow commit
+`9f5dd01f9f9b9c2816c5e2a3d10fb0f7a50a9d21`; a complete independent C2C review
+of the final exact range remains the last handoff gate.
 
 ## State and start gate
 
