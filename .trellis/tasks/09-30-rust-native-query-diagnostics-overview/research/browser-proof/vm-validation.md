@@ -3,7 +3,7 @@
 All commands below ran in `/root/mosdns-rust-querydiag/rust` on the
 `mosdns-rust` SSH VM. The browser proof used the fixtures next to this file.
 The final implementation candidate for the code changes is
-`9f5dd01f9f9b9c2816c5e2a3d10fb0f7a50a9d21`. The later documentation-only
+`9f5dd01fc663ad490f49ccc97ba11844417f1479`. The later documentation-only
 commit records this exact candidate and does not change product code.
 
 ## Bounded record/projection checks
