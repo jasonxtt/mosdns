@@ -21,8 +21,9 @@ use crate::observer::{
     AnswerDetailsStatus, AuditAnswer, CacheStatus, ExecutionCheckpoint, FailureProvenance,
     LocalFailureKind, QueryTerminalOutcome, ResponseDetails, ResponseFlags, ResponseSource,
     ResponseState as ObservedResponseState, TerminalObservation, UpstreamAttemptLedger,
-    UpstreamAttemptList, UpstreamAttemptOutcome, UpstreamAttemptRecord, UpstreamDiagnosticAttempt,
-    UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamMetricAttempt, UpstreamTransport,
+    UpstreamAttemptLedgerHandle, UpstreamAttemptList, UpstreamAttemptOutcome,
+    UpstreamAttemptRecord, UpstreamDiagnosticAttempt, UpstreamDiagnosticSelected,
+    UpstreamDiagnostics, UpstreamMetricAttempt, UpstreamTransport,
 };
 
 const DEFAULT_FUEL: u64 = 64;
@@ -51,7 +52,7 @@ pub(crate) trait ExchangeExecutor {
         query: &'a [u8],
         deadline: Instant,
         cancellation: TransportCancellation,
-        _attempts: &'a mut UpstreamAttemptLedger,
+        _attempts: UpstreamAttemptLedgerHandle,
     ) -> Pin<Box<dyn Future<Output = Result<InvocationExchange, ExchangeError>> + 'a>> {
         Box::pin(async move {
             self.exchange(executable, query, deadline, cancellation)
@@ -308,7 +309,7 @@ impl Drop for ExecutionFacts<'_> {
         if self.completed {
             return;
         }
-        let ledger = self.checkpoint.take_attempt_ledger();
+        let ledger = self.checkpoint.attempt_ledger_snapshot();
         let mut ledger_had_entries = false;
         if let Some(executable) = self.in_flight_executable {
             for slot in ledger.slots() {
@@ -643,7 +644,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         raw,
                         request_deadline,
                         request_shutdown.clone(),
-                        facts.checkpoint.attempt_ledger_mut(),
+                        facts.checkpoint.attempt_ledger_handle(),
                     )
                     .await;
                 let attempt_ledger = facts.checkpoint.take_attempt_ledger();

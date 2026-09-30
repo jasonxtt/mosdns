@@ -87,3 +87,20 @@ upstream. The browser accessibility state showed selected `primary`, peer
 udp / response`, answer `192.0.2.123`, and `NOERROR`. The owned processes and
 SSH tunnel were then stopped; the final port check returned
 `proof-pids-cleaned`.
+
+The second dedicated-review recheck returned `FINAL: FAIL` with two remaining
+scope findings. The current follow-up keeps the same shared ledger handle in
+the `ExecutionCheckpoint` for the complete async invocation instead of moving
+it into an invocation-local owner; abnormal future drop therefore leaves the
+started slots, live peer/transport, and RAII outcome visible to checkpoint
+terminalization. Ledger terminalization is now guarded as exactly-once, and
+response qualification occurs before a transport tracker is terminalized as a
+successful response, so a correlation-invalid leg cannot overwrite a finished
+slot.
+
+The same follow-up applies the seeded/entropy-backed rotation before the
+single-leg branch, so `concurrent: 1` rotates across the original entry order
+instead of always selecting entry zero. It adds deterministic seeded coverage
+for both single-leg and bounded adjacent selection and a real dropped active
+three-leg ledger test. The corrected native-host library run passed 78/78 and
+the existing slice9 forwarding run passed 9/9 after these changes.

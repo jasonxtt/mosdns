@@ -23,7 +23,7 @@ use crate::config::{
 use crate::execution::{ExchangeError, ExchangeExecutor, InvocationExchange};
 use crate::observer::{
     AuditClock, AuditSnapshot, MetricsSnapshot, QueryObserver, UpstreamAttemptLedger,
-    UpstreamAttemptOutcome, UpstreamAttemptTracker, UpstreamTransport,
+    UpstreamAttemptLedgerHandle, UpstreamAttemptOutcome, UpstreamAttemptTracker, UpstreamTransport,
 };
 use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
@@ -844,6 +844,11 @@ impl ForwardCatalog {
         (value as usize) % len
     }
 
+    fn selected_owner_indices(len: usize, concurrent: usize, start: usize) -> Vec<usize> {
+        let limit = concurrent.min(3).min(len);
+        (0..limit).map(|offset| (start + offset) % len).collect()
+    }
+
     #[must_use]
     pub fn forward(
         &self,
@@ -898,7 +903,7 @@ impl ExchangeExecutor for ForwardCatalog {
         query: &'a [u8],
         deadline: std::time::Instant,
         cancellation: TransportCancellation,
-        ledger: &'a mut UpstreamAttemptLedger,
+        ledger: UpstreamAttemptLedgerHandle,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<InvocationExchange, ExchangeError>> + 'a>,
     > {
@@ -917,9 +922,14 @@ impl ExchangeExecutor for ForwardCatalog {
                 });
             }
         };
+        if owners.is_empty() {
+            return Box::pin(async move { Err(ExchangeError::Upstream(UpstreamError::Connect)) });
+        }
+        let start = self.rotation_start(owners.len());
+        let selected_indices = Self::selected_owner_indices(owners.len(), concurrent, start);
         if owners.len() <= 1 || concurrent <= 1 {
-            let owner = Rc::clone(&owners[0]);
-            let shared = std::mem::take(ledger).into_shared();
+            let owner = Rc::clone(&owners[selected_indices[0]]);
+            let shared = Rc::clone(&ledger);
             let slot = shared.borrow_mut().start(owner.entry_index());
             let mut tracker =
                 UpstreamAttemptTracker::new(Rc::clone(&shared), slot, cancellation.clone());
@@ -929,31 +939,43 @@ impl ExchangeExecutor for ForwardCatalog {
                     .await;
                 let peer = tracker.peer();
                 let transport = tracker.transport();
-                let outcome = result
-                    .as_ref()
-                    .map(|_| UpstreamAttemptOutcome::Response)
-                    .unwrap_or_else(attempt_outcome);
-                tracker.finish(peer, transport, outcome);
-                drop(tracker);
-                let response = result
-                    .map(|response| InvocationExchange {
-                        selected_entry: Some(owner.entry_index()),
-                        selected_peer: peer,
-                        response,
-                    })
-                    .map_err(ExchangeError::Upstream);
-                *ledger = UpstreamAttemptLedger::restore_from_shared(shared);
-                response
+                match result {
+                    Ok(response) => {
+                        let Some(wire) = crate::execution::qualify_response(
+                            response.wire(),
+                            header.id,
+                            &question,
+                        ) else {
+                            tracker.finish(peer, transport, UpstreamAttemptOutcome::Failed);
+                            return Err(ExchangeError::Upstream(UpstreamError::MalformedResponse));
+                        };
+                        tracker.finish(peer, transport, UpstreamAttemptOutcome::Response);
+                        Ok(InvocationExchange {
+                            selected_entry: Some(owner.entry_index()),
+                            selected_peer: peer,
+                            response: ExchangeResponse::new(
+                                wire,
+                                response.request_id(),
+                                response.response_id(),
+                                response.transport(),
+                                response.truncated(),
+                            ),
+                        })
+                    }
+                    Err(error) => {
+                        tracker.finish(peer, transport, attempt_outcome(&error));
+                        Err(ExchangeError::Upstream(error))
+                    }
+                }
             });
         }
 
         let scope = cancellation.child_token();
-        let limit = concurrent.min(3).min(owners.len());
-        let start = self.rotation_start(owners.len());
-        let owners = (0..limit)
-            .map(|offset| Rc::clone(&owners[(start + offset) % owners.len()]))
+        let owners = selected_indices
+            .into_iter()
+            .map(|index| Rc::clone(&owners[index]))
             .collect::<Vec<_>>();
-        let shared = std::mem::take(ledger).into_shared();
+        let shared = Rc::clone(&ledger);
         let slots = owners
             .iter()
             .map(|owner| {
@@ -971,6 +993,8 @@ impl ExchangeExecutor for ForwardCatalog {
                 let leg_cancellation = scope.child_token();
                 let leg_query = query.clone();
                 let shared = Rc::clone(&shared);
+                let leg_question = question.clone();
+                let request_id = header.id;
                 tasks.spawn_local(async move {
                     let mut tracker =
                         UpstreamAttemptTracker::new(shared, slot, leg_cancellation.clone());
@@ -979,11 +1003,35 @@ impl ExchangeExecutor for ForwardCatalog {
                         .await;
                     let peer = tracker.peer();
                     let transport = tracker.transport();
-                    let outcome = result
-                        .as_ref()
-                        .map(|_| UpstreamAttemptOutcome::Response)
-                        .unwrap_or_else(attempt_outcome);
-                    tracker.finish(peer, transport, outcome);
+                    let result = match result {
+                        Ok(response) => {
+                            let Some(wire) = crate::execution::qualify_response(
+                                response.wire(),
+                                request_id,
+                                &leg_question,
+                            ) else {
+                                tracker.finish(peer, transport, UpstreamAttemptOutcome::Failed);
+                                return (
+                                    entry_index,
+                                    peer,
+                                    transport,
+                                    Err(UpstreamError::MalformedResponse),
+                                );
+                            };
+                            tracker.finish(peer, transport, UpstreamAttemptOutcome::Response);
+                            Ok(ExchangeResponse::new(
+                                wire,
+                                response.request_id(),
+                                response.response_id(),
+                                response.transport(),
+                                response.truncated(),
+                            ))
+                        }
+                        Err(error) => {
+                            tracker.finish(peer, transport, attempt_outcome(&error));
+                            Err(error)
+                        }
+                    };
                     (entry_index, peer, transport, result)
                 });
             }
@@ -992,37 +1040,13 @@ impl ExchangeExecutor for ForwardCatalog {
             let mut last_error = None;
             while let Some(result) = tasks.join_next().await {
                 match result {
-                    Ok((entry_index, peer, transport, Ok(response))) => {
-                        let Some(wire) = crate::execution::qualify_response(
-                            response.wire(),
-                            header.id,
-                            &question,
-                        ) else {
-                            shared.borrow_mut().finish(
-                                slots[&entry_index],
-                                peer,
-                                transport,
-                                UpstreamAttemptOutcome::Failed,
-                            );
-                            last_error.get_or_insert(UpstreamError::MalformedResponse);
-                            continue;
-                        };
-                        let priority = crate::execution::response_priority(&wire);
+                    Ok((entry_index, _peer, _transport, Ok(response))) => {
+                        let priority = crate::execution::response_priority(response.wire());
                         let replace = winner
                             .as_ref()
                             .is_none_or(|(_, _, current_priority)| priority < *current_priority);
                         if replace {
-                            winner = Some((
-                                entry_index,
-                                ExchangeResponse::new(
-                                    wire,
-                                    response.request_id(),
-                                    response.response_id(),
-                                    response.transport(),
-                                    response.truncated(),
-                                ),
-                                priority,
-                            ));
+                            winner = Some((entry_index, response, priority));
                         }
                         if priority == 0 {
                             scope.cancel();
@@ -1054,7 +1078,6 @@ impl ExchangeExecutor for ForwardCatalog {
             }
 
             let Some((selected_entry, response, _)) = winner else {
-                *ledger = UpstreamAttemptLedger::restore_from_shared(shared);
                 return Err(ExchangeError::Upstream(
                     last_error.unwrap_or(UpstreamError::MalformedResponse),
                 ));
@@ -1068,7 +1091,6 @@ impl ExchangeExecutor for ForwardCatalog {
                         && attempt.outcome == Some(UpstreamAttemptOutcome::Response)
                 })
                 .and_then(|attempt| attempt.peer);
-            *ledger = UpstreamAttemptLedger::restore_from_shared(shared);
             Ok(InvocationExchange {
                 response,
                 selected_entry: Some(selected_entry),
@@ -1205,8 +1227,17 @@ impl ForwardAdapter {
         let shared = UpstreamAttemptLedger::default().into_shared();
         let slot = shared.borrow_mut().start(self.entry_index);
         let mut tracker = UpstreamAttemptTracker::new(shared, slot, cancellation.clone());
-        self.exchange_tracked(query, deadline, cancellation, &mut tracker)
-            .await
+        let result = self
+            .exchange_tracked(query, deadline, cancellation, &mut tracker)
+            .await;
+        let peer = tracker.peer();
+        let transport = tracker.transport();
+        let outcome = result
+            .as_ref()
+            .map(|_| UpstreamAttemptOutcome::Response)
+            .unwrap_or_else(attempt_outcome);
+        tracker.finish(peer, transport, outcome);
+        result
     }
 
     async fn exchange_tracked(
@@ -1436,6 +1467,31 @@ mod tests {
                 .upstream()
                 .lifecycle_state(),
             LifecycleState::Closed
+        );
+    }
+
+    #[test]
+    fn seeded_rotation_also_selects_the_single_leg_start() {
+        let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
+            .expect("endpoint");
+        let config = ForwardConfig {
+            tag: "rotating".to_owned(),
+            upstream_tag: None,
+            endpoint,
+            executable: ExecutableId(3),
+        };
+        let catalog = ForwardCatalog::from_configs_with_seed(&[config], 5).expect("catalog");
+        let first = catalog.rotation_start(4);
+        let second = catalog.rotation_start(4);
+        assert_eq!(first, 1);
+        assert_ne!(first, second);
+        assert_eq!(
+            ForwardCatalog::selected_owner_indices(4, 1, first),
+            vec![first]
+        );
+        assert_eq!(
+            ForwardCatalog::selected_owner_indices(4, 3, first),
+            vec![first, (first + 1) % 4, (first + 2) % 4]
         );
     }
 }

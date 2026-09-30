@@ -306,6 +306,8 @@ pub(crate) struct UpstreamAttemptLedger {
     slots: Vec<UpstreamAttemptSlot>,
 }
 
+pub(crate) type UpstreamAttemptLedgerHandle = Rc<RefCell<UpstreamAttemptLedger>>;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct UpstreamAttemptSlot {
     pub entry_index: usize,
@@ -338,6 +340,9 @@ impl UpstreamAttemptLedger {
         outcome: UpstreamAttemptOutcome,
     ) {
         if let Some(entry) = self.slots.get_mut(slot) {
+            if entry.outcome.is_some() {
+                return;
+            }
             entry.peer = peer;
             entry.transport = transport;
             entry.outcome = Some(outcome);
@@ -348,14 +353,8 @@ impl UpstreamAttemptLedger {
         &self.slots
     }
 
-    pub(crate) fn into_shared(self) -> Rc<RefCell<Self>> {
+    pub(crate) fn into_shared(self) -> UpstreamAttemptLedgerHandle {
         Rc::new(RefCell::new(self))
-    }
-
-    pub(crate) fn restore_from_shared(shared: Rc<RefCell<Self>>) -> Self {
-        Rc::try_unwrap(shared)
-            .expect("all attempt trackers must drain before ledger restoration")
-            .into_inner()
     }
 }
 
@@ -363,7 +362,7 @@ impl UpstreamAttemptLedger {
 /// normal completion and an invocation future dropped while target I/O is
 /// active; no terminal fact is reconstructed from an owner after the await.
 pub(crate) struct UpstreamAttemptTracker {
-    ledger: Rc<RefCell<UpstreamAttemptLedger>>,
+    ledger: UpstreamAttemptLedgerHandle,
     slot: usize,
     peer: Option<SocketAddr>,
     transport: Option<UpstreamTransport>,
@@ -373,7 +372,7 @@ pub(crate) struct UpstreamAttemptTracker {
 
 impl UpstreamAttemptTracker {
     pub(crate) fn new(
-        ledger: Rc<RefCell<UpstreamAttemptLedger>>,
+        ledger: UpstreamAttemptLedgerHandle,
         slot: usize,
         cancellation: TransportCancellation,
     ) -> Self {
@@ -389,6 +388,9 @@ impl UpstreamAttemptTracker {
 
     /// Publishes the currently started target phase before its I/O is polled.
     pub(crate) fn phase(&mut self, peer: Option<SocketAddr>, transport: Option<UpstreamTransport>) {
+        if self.finished {
+            return;
+        }
         self.peer = peer;
         self.transport = transport;
         if let Some(slot) = self.ledger.borrow_mut().slots.get_mut(self.slot) {
@@ -415,6 +417,9 @@ impl UpstreamAttemptTracker {
         transport: Option<UpstreamTransport>,
         outcome: UpstreamAttemptOutcome,
     ) {
+        if self.finished {
+            return;
+        }
         self.phase(peer, transport);
         self.ledger
             .borrow_mut()
@@ -875,7 +880,7 @@ pub(crate) struct ExecutionCheckpoint {
     selected_upstream: Option<String>,
     upstream_attempts: UpstreamAttemptList,
     upstream_diagnostics: Option<UpstreamDiagnostics>,
-    attempt_ledger: UpstreamAttemptLedger,
+    attempt_ledger: UpstreamAttemptLedgerHandle,
     failure_provenance: Option<FailureProvenance>,
     in_flight_upstream: Option<String>,
     completed_observation: Option<TerminalObservation>,
@@ -898,7 +903,7 @@ impl ExecutionCheckpoint {
             selected_upstream: None,
             upstream_attempts: UpstreamAttemptList::default(),
             upstream_diagnostics: None,
-            attempt_ledger: UpstreamAttemptLedger::default(),
+            attempt_ledger: UpstreamAttemptLedger::default().into_shared(),
             failure_provenance: None,
             in_flight_upstream: None,
             completed_observation: None,
@@ -910,15 +915,19 @@ impl ExecutionCheckpoint {
     }
 
     pub(crate) fn begin_attempt_ledger(&mut self) {
-        self.attempt_ledger.clear();
+        self.attempt_ledger.borrow_mut().clear();
     }
 
-    pub(crate) fn attempt_ledger_mut(&mut self) -> &mut UpstreamAttemptLedger {
-        &mut self.attempt_ledger
+    pub(crate) fn attempt_ledger_handle(&self) -> UpstreamAttemptLedgerHandle {
+        Rc::clone(&self.attempt_ledger)
     }
 
     pub(crate) fn take_attempt_ledger(&mut self) -> UpstreamAttemptLedger {
-        std::mem::take(&mut self.attempt_ledger)
+        std::mem::take(&mut *self.attempt_ledger.borrow_mut())
+    }
+
+    pub(crate) fn attempt_ledger_snapshot(&self) -> UpstreamAttemptLedger {
+        self.attempt_ledger.borrow().clone()
     }
 
     pub(crate) fn capture_partial(
@@ -1683,6 +1692,7 @@ fn render_qname(wire: &[u8]) -> String {
 mod tests {
     use std::cell::Cell;
     use std::net::SocketAddr;
+    use std::rc::Rc;
     use std::sync::atomic::Ordering;
     use std::time::{Duration, SystemTime};
 
@@ -1693,6 +1703,7 @@ mod tests {
         LocalFailureKind, MAX_NATIVE_REQUEST_ID, NativeRequestIdAllocator, QueryObserver,
         QueryTerminalOutcome, QueryTransport, ResponseDetails, ResponseSource, ResponseState,
         TerminalObservation, UpstreamAttemptList, UpstreamAttemptOutcome, UpstreamAttemptRecord,
+        UpstreamAttemptTracker, UpstreamTransport,
     };
 
     fn observer(audit_enabled: bool, capacity: usize) -> QueryObserver {
@@ -1731,6 +1742,76 @@ mod tests {
         assert!(!disabled.start_capture());
         assert!(!disabled.stop_capture());
         assert!(!disabled.audit_capturing());
+    }
+
+    #[test]
+    fn checkpoint_shared_ledger_survives_dropped_active_multi_leg() {
+        let mut checkpoint = super::ExecutionCheckpoint::new(true);
+        checkpoint.begin_attempt_ledger();
+        let shared = checkpoint.attempt_ledger_handle();
+        let slots = (0..3)
+            .map(|entry_index| shared.borrow_mut().start(entry_index))
+            .collect::<Vec<_>>();
+        let entered = Rc::new(Cell::new(0_usize));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(tokio::task::LocalSet::new().run_until(async {
+            let mut tasks = Vec::new();
+            for (offset, slot) in slots.iter().copied().enumerate() {
+                let shared = Rc::clone(&shared);
+                let entered = Rc::clone(&entered);
+                tasks.push(tokio::task::spawn_local(async move {
+                    let mut tracker =
+                        UpstreamAttemptTracker::new(shared, slot, TransportCancellation::new());
+                    tracker.phase(
+                        Some(
+                            format!("127.0.0.{}:15453", offset + 1)
+                                .parse()
+                                .expect("peer"),
+                        ),
+                        Some(UpstreamTransport::Udp),
+                    );
+                    entered.set(entered.get() + 1);
+                    std::future::pending::<()>().await;
+                }));
+            }
+            while entered.get() != slots.len() {
+                tokio::task::yield_now().await;
+            }
+            for task in tasks {
+                task.abort();
+                let _ = task.await;
+            }
+        }));
+
+        let snapshot = checkpoint.attempt_ledger_snapshot();
+        assert_eq!(snapshot.slots().len(), 3);
+        for (offset, slot) in snapshot.slots().iter().enumerate() {
+            assert_eq!(slot.entry_index, offset);
+            assert_eq!(slot.transport, Some(UpstreamTransport::Udp));
+            assert_eq!(slot.outcome, Some(UpstreamAttemptOutcome::Interrupted));
+            assert_eq!(
+                slot.peer,
+                Some(
+                    format!("127.0.0.{}:15453", offset + 1)
+                        .parse()
+                        .expect("peer")
+                )
+            );
+        }
+
+        shared.borrow_mut().finish(
+            slots[0],
+            None,
+            Some(UpstreamTransport::Tcp),
+            UpstreamAttemptOutcome::Response,
+        );
+        assert_eq!(
+            checkpoint.attempt_ledger_snapshot().slots()[0].outcome,
+            Some(UpstreamAttemptOutcome::Interrupted)
+        );
     }
 
     #[test]
