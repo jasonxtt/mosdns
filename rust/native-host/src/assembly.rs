@@ -15,7 +15,7 @@ use tokio::task::JoinSet;
 use crate::api::{ApiServer, ApiServerError, AuditPersistenceFaults};
 use crate::config::{CompiledConfig, ConfigError, compile_yaml, load_and_compile};
 use crate::execution::{ExchangeError, ExchangeExecutor};
-use crate::observer::{AuditSnapshot, MetricsSnapshot, QueryObserver};
+use crate::observer::{AuditClock, AuditSnapshot, MetricsSnapshot, QueryObserver};
 use crate::tcp::{TcpServer, TcpServerError};
 use crate::udp::{UdpServer, UdpServerError};
 
@@ -28,6 +28,7 @@ pub struct HostOptions {
     pub request_deadline: Duration,
     pub cancellation: Option<TransportCancellation>,
     pub cache_clock: Rc<dyn CacheClock>,
+    pub(crate) audit_clock: Arc<dyn AuditClock>,
     pub(crate) admission_deadline: Option<std::time::Instant>,
     pub(crate) audit_capacity: usize,
 }
@@ -38,6 +39,7 @@ impl Default for HostOptions {
             request_deadline: Duration::from_secs(5),
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
+            audit_clock: crate::observer::default_audit_clock(),
             admission_deadline: None,
             audit_capacity: DEFAULT_AUDIT_CAPACITY,
         }
@@ -53,6 +55,7 @@ impl HostOptions {
             request_deadline,
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
+            audit_clock: crate::observer::default_audit_clock(),
             admission_deadline: None,
             audit_capacity: DEFAULT_AUDIT_CAPACITY,
         }
@@ -68,6 +71,13 @@ impl HostOptions {
     #[must_use]
     pub fn with_cache_clock(mut self, cache_clock: Rc<dyn CacheClock>) -> Self {
         self.cache_clock = cache_clock;
+        self
+    }
+
+    /// Injects the wall-clock source used by audit admission and windows.
+    #[must_use]
+    pub fn with_audit_clock(mut self, audit_clock: Arc<dyn AuditClock>) -> Self {
+        self.audit_clock = audit_clock;
         self
     }
 
@@ -198,10 +208,11 @@ impl HostAssembly {
             .as_deref()
             .map(|root| crate::api::load_audit_capacity(root, options.audit_capacity))
             .unwrap_or(options.audit_capacity);
-        let observer = Arc::new(QueryObserver::new(
+        let observer = Arc::new(QueryObserver::with_clock(
             config.listener.enable_audit,
             upstream_identities,
             audit_capacity,
+            options.audit_clock.clone(),
         ));
         Ok(Self {
             config,
@@ -354,6 +365,7 @@ impl HostAssembly {
                     self.observer_handle(),
                     self.state_root.clone(),
                     self.audit_persistence_faults.clone(),
+                    self.options.audit_clock.clone(),
                     config.http,
                 )
                 .await

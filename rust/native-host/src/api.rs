@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,7 +26,7 @@ use mosdns_upstream_core::TransportCancellation;
 
 use crate::config::CompiledConfig;
 use crate::managed::ManagedDomainSet;
-use crate::observer::QueryObserver;
+use crate::observer::{AuditClock, AuditRecord, QueryObserver};
 use crate::udp::{drain_tasks, reap_one_task};
 
 pub(crate) const AUDIT_SETTINGS_FILENAME: &str = "audit_settings.json";
@@ -249,6 +250,7 @@ pub struct ApiServer {
     state_root: Option<PathBuf>,
     audit_persist_lock: Arc<AsyncMutex<()>>,
     audit_persistence_faults: AuditPersistenceFaults,
+    audit_clock: Arc<dyn AuditClock>,
     accept_fault_after: Cell<Option<usize>>,
 }
 
@@ -261,6 +263,7 @@ impl ApiServer {
         observer: Arc<QueryObserver>,
         state_root: Option<PathBuf>,
         audit_persistence_faults: AuditPersistenceFaults,
+        audit_clock: Arc<dyn AuditClock>,
         address: SocketAddr,
     ) -> Result<Self, ApiServerError> {
         let listener = TcpListener::bind(address)
@@ -273,6 +276,7 @@ impl ApiServer {
             state_root,
             audit_persist_lock: Arc::new(AsyncMutex::new(())),
             audit_persistence_faults,
+            audit_clock,
             accept_fault_after: Cell::new(None),
         })
     }
@@ -327,6 +331,7 @@ impl ApiServer {
                             let state_root = self.state_root.clone();
                             let audit_persist_lock = Arc::clone(&self.audit_persist_lock);
                             let audit_persistence_faults = self.audit_persistence_faults.clone();
+                            let audit_clock = Arc::clone(&self.audit_clock);
                             let connection_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
                                 let _ = process_connection(
@@ -336,6 +341,7 @@ impl ApiServer {
                                     state_root,
                                     audit_persist_lock,
                                     audit_persistence_faults,
+                                    audit_clock,
                                     connection_shutdown,
                                 )
                                 .await;
@@ -442,11 +448,20 @@ impl Response {
         }
     }
 
+    fn json_compact<T: Serialize>(value: &T) -> Self {
+        Self {
+            status: 200,
+            content_type: Some("application/json"),
+            body: serde_json::to_vec(value).expect("small API response serializes"),
+        }
+    }
+
     fn method_not_allowed() -> Self {
         Self::error(405, "method not allowed")
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_connection(
     mut stream: TcpStream,
     config: Rc<CompiledConfig>,
@@ -454,6 +469,7 @@ async fn process_connection(
     state_root: Option<PathBuf>,
     audit_persist_lock: Arc<AsyncMutex<()>>,
     audit_persistence_faults: AuditPersistenceFaults,
+    audit_clock: Arc<dyn AuditClock>,
     shutdown: TransportCancellation,
 ) -> io::Result<()> {
     let response = tokio::select! {
@@ -467,6 +483,7 @@ async fn process_connection(
                     state_root.as_deref(),
                     &audit_persist_lock,
                     &audit_persistence_faults,
+                    &audit_clock,
                     &request,
                 )
                 .await
@@ -595,6 +612,7 @@ enum Route<'a> {
         action: &'a str,
     },
     Audit(AuditRoute),
+    AuditV2(AuditV2Route),
     SpecialGroups,
     Unknown,
 }
@@ -608,11 +626,26 @@ enum AuditRoute {
     Capacity,
 }
 
+#[derive(Clone, Copy)]
+enum AuditV2Route {
+    Stats,
+    Windows,
+    Logs,
+}
+
 fn route(target: &str) -> Route<'_> {
     // Go's `/show` ignores the query string; the UI sends `?limit=10000`.
     let path = target.split_once('?').map_or(target, |(path, _query)| path);
     if path == "/api/v1/special-groups" {
         return Route::SpecialGroups;
+    }
+    if let Some(suffix) = path.strip_prefix("/api/v2/audit/") {
+        return match suffix {
+            "stats" => Route::AuditV2(AuditV2Route::Stats),
+            "stats/windows" => Route::AuditV2(AuditV2Route::Windows),
+            "logs" => Route::AuditV2(AuditV2Route::Logs),
+            _ => Route::Unknown,
+        };
     }
     if let Some(suffix) = path.strip_prefix("/api/v1/audit/") {
         return match suffix {
@@ -655,15 +688,284 @@ struct AuditCapacityRequest {
     capacity: i64,
 }
 
+#[derive(Serialize)]
+struct AuditStatsResponse {
+    total_queries: usize,
+    average_duration_ms: f64,
+}
+
+#[derive(Serialize)]
+struct AuditWindowResponse {
+    key: &'static str,
+    label: &'static str,
+    window_seconds: u64,
+    request_count: usize,
+    average_duration_ms: f64,
+    complete: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coverage_start: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AuditWindowsResponse {
+    generated_at: String,
+    items: Vec<AuditWindowResponse>,
+}
+
+#[derive(Serialize)]
+struct AuditLogResponse {
+    query_time: String,
+    query_name: String,
+    query_type: String,
+    client_ip: String,
+    duration_ms: f64,
+}
+
+#[derive(Serialize)]
+struct AuditLogPagination {
+    total_items: usize,
+    total_pages: usize,
+    current_page: usize,
+    items_per_page: usize,
+}
+
+#[derive(Serialize)]
+struct AuditLogsResponse {
+    pagination: AuditLogPagination,
+    logs: Vec<AuditLogResponse>,
+}
+
+fn format_rfc3339(timestamp: SystemTime, seconds_only: bool) -> String {
+    let timestamp = if seconds_only {
+        timestamp
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| UNIX_EPOCH.checked_add(Duration::from_secs(duration.as_secs())))
+            .unwrap_or(UNIX_EPOCH)
+    } else {
+        timestamp
+    };
+    let value = time::OffsetDateTime::from(timestamp).to_offset(time::UtcOffset::UTC);
+    value
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned())
+}
+
+fn query_type_name(qtype: u16) -> &'static str {
+    match qtype {
+        1 => "A",
+        2 => "NS",
+        5 => "CNAME",
+        6 => "SOA",
+        12 => "PTR",
+        15 => "MX",
+        16 => "TXT",
+        28 => "AAAA",
+        33 => "SRV",
+        35 => "NAPTR",
+        39 => "DNAME",
+        41 => "OPT",
+        43 => "DS",
+        46 => "RRSIG",
+        47 => "NSEC",
+        48 => "DNSKEY",
+        50 => "NSEC3",
+        51 => "NSEC3PARAM",
+        52 => "TLSA",
+        64 => "SVCB",
+        65 => "HTTPS",
+        99 => "SPF",
+        249 => "TKEY",
+        250 => "TSIG",
+        251 => "IXFR",
+        252 => "AXFR",
+        255 => "ANY",
+        256 => "URI",
+        257 => "CAA",
+        32768 => "TA",
+        32769 => "DLV",
+        _ => "",
+    }
+}
+
+fn project_log(record: &AuditRecord) -> AuditLogResponse {
+    let query_name = if record.qname == "." {
+        ".".to_owned()
+    } else {
+        record
+            .qname
+            .strip_suffix('.')
+            .unwrap_or(&record.qname)
+            .to_owned()
+    };
+    AuditLogResponse {
+        query_time: format_rfc3339(record.timestamp, false),
+        query_name,
+        query_type: query_type_name(record.qtype).to_owned(),
+        client_ip: record.client_addr.ip().to_string(),
+        duration_ms: record.elapsed.as_secs_f64() * 1_000.0,
+    }
+}
+
+fn audit_stats(records: &[AuditRecord]) -> AuditStatsResponse {
+    let total_queries = records.len();
+    let average_duration_ms = if total_queries == 0 {
+        0.0
+    } else {
+        records
+            .iter()
+            .map(|record| record.elapsed.as_secs_f64() * 1_000.0)
+            .sum::<f64>()
+            / total_queries as f64
+    };
+    AuditStatsResponse {
+        total_queries,
+        average_duration_ms,
+    }
+}
+
+fn audit_windows(records: &[AuditRecord], now: SystemTime) -> AuditWindowsResponse {
+    const WINDOWS: [(&str, &str, u64); 5] = [
+        ("1h", "1小时内", 3_600),
+        ("6h", "最近6小时", 21_600),
+        ("24h", "24小时内", 86_400),
+        ("3d", "最近3天", 259_200),
+        ("7d", "最近7天", 604_800),
+    ];
+    let coverage_start = records
+        .first()
+        .map(|record| format_rfc3339(record.timestamp, true));
+    let oldest = records.first().map(|record| record.timestamp);
+    let items = WINDOWS
+        .into_iter()
+        .map(|(key, label, window_seconds)| {
+            let cutoff = now
+                .checked_sub(Duration::from_secs(window_seconds))
+                .unwrap_or(UNIX_EPOCH);
+            let (request_count, duration_total) = records
+                .iter()
+                .filter(|record| {
+                    record.timestamp.duration_since(cutoff).is_ok()
+                        && now.duration_since(record.timestamp).is_ok()
+                })
+                .fold((0_usize, 0.0_f64), |(count, total), record| {
+                    (
+                        count.saturating_add(1),
+                        total + record.elapsed.as_secs_f64() * 1_000.0,
+                    )
+                });
+            let average_duration_ms = if request_count == 0 {
+                0.0
+            } else {
+                duration_total / request_count as f64
+            };
+            AuditWindowResponse {
+                key,
+                label,
+                window_seconds,
+                request_count,
+                average_duration_ms,
+                complete: oldest.is_some_and(|timestamp| cutoff.duration_since(timestamp).is_ok()),
+                coverage_start: coverage_start.clone(),
+            }
+        })
+        .collect();
+    AuditWindowsResponse {
+        generated_at: format_rfc3339(now, true),
+        items,
+    }
+}
+
+fn parse_log_pagination(target: &str) -> Result<(usize, usize), String> {
+    let Some((_, query)) = target.split_once('?') else {
+        return Ok((1, 50));
+    };
+    let mut page = 1_usize;
+    let mut limit = 50_usize;
+    for parameter in query.split('&').filter(|parameter| !parameter.is_empty()) {
+        let (key, value) = parameter.split_once('=').unwrap_or((parameter, ""));
+        match key {
+            "page" => {
+                if let Ok(parsed) = value.parse::<u64>() {
+                    if parsed > 0 {
+                        page = usize::try_from(parsed).unwrap_or(1);
+                    }
+                }
+            }
+            "limit" => match value.parse::<u64>() {
+                Ok(0) | Err(_) => {}
+                Ok(parsed) if parsed <= 500 => {
+                    limit = usize::try_from(parsed).expect("small audit limit fits usize");
+                }
+                Ok(_) => return Err("audit log limit must be between 1 and 500".to_owned()),
+            },
+            _ => return Err(format!("unsupported audit log parameter: {key}")),
+        }
+    }
+    Ok((page, limit))
+}
+
+fn audit_logs(records: &[AuditRecord], page: usize, limit: usize) -> AuditLogsResponse {
+    let total_items = records.len();
+    let total_pages = if total_items == 0 {
+        0
+    } else {
+        (total_items - 1) / limit + 1
+    };
+    let start = page.saturating_sub(1).saturating_mul(limit);
+    let logs = records
+        .iter()
+        .rev()
+        .skip(start)
+        .take(limit)
+        .map(project_log)
+        .collect();
+    AuditLogsResponse {
+        pagination: AuditLogPagination {
+            total_items,
+            total_pages,
+            current_page: page,
+            items_per_page: limit,
+        },
+        logs,
+    }
+}
+
 async fn dispatch(
     config: &CompiledConfig,
     observer: &QueryObserver,
     state_root: Option<&Path>,
     audit_persist_lock: &Arc<AsyncMutex<()>>,
     audit_persistence_faults: &AuditPersistenceFaults,
+    audit_clock: &Arc<dyn AuditClock>,
     request: &Request,
 ) -> Response {
     match route(&request.target) {
+        Route::AuditV2(AuditV2Route::Stats) => match request.method.as_str() {
+            "GET" => {
+                let snapshot = observer.audit_snapshot();
+                Response::json_compact(&audit_stats(&snapshot.records))
+            }
+            _ => Response::method_not_allowed(),
+        },
+        Route::AuditV2(AuditV2Route::Windows) => match request.method.as_str() {
+            "GET" => {
+                let snapshot = observer.audit_snapshot();
+                Response::json_compact(&audit_windows(&snapshot.records, audit_clock.now()))
+            }
+            _ => Response::method_not_allowed(),
+        },
+        Route::AuditV2(AuditV2Route::Logs) => match request.method.as_str() {
+            "GET" => {
+                let (page, limit) = match parse_log_pagination(&request.target) {
+                    Ok(pagination) => pagination,
+                    Err(message) => return Response::error(400, &message),
+                };
+                let snapshot = observer.audit_snapshot();
+                Response::json_compact(&audit_logs(&snapshot.records, page, limit))
+            }
+            _ => Response::method_not_allowed(),
+        },
         Route::Audit(AuditRoute::Status) => match request.method.as_str() {
             "GET" => Response::json(&AuditStatusResponse {
                 capturing: observer.is_capturing(),
