@@ -469,6 +469,22 @@ pub struct AuditSnapshot {
     pub evicted_total: u64,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct AuditTimingSnapshot {
+    pub timestamp: SystemTime,
+    pub elapsed: Duration,
+}
+
+pub(crate) struct AuditStatsSnapshot {
+    pub total_queries: usize,
+    pub elapsed_micros: u128,
+}
+
+pub(crate) struct AuditLogPage {
+    pub total_items: usize,
+    pub records: Vec<AuditRecord>,
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(not(test), allow(dead_code))] // Listener terminalization is wired in Slice 2.
 pub(crate) struct TerminalObservation {
@@ -670,6 +686,8 @@ impl MetricsState {
 struct ObserverState {
     metrics: MetricsState,
     audit_records: VecDeque<AuditRecord>,
+    audit_timings: VecDeque<AuditTimingSnapshot>,
+    audit_elapsed_micros: u128,
     audit_capacity: usize,
     capturing: bool,
     evicted_total: u64,
@@ -724,6 +742,12 @@ impl QueryObserver {
                     ..MetricsState::default()
                 },
                 audit_records,
+                audit_timings: VecDeque::with_capacity(if audit_enabled {
+                    audit_capacity.min(INITIAL_AUDIT_RECORD_CAPACITY)
+                } else {
+                    0
+                }),
+                audit_elapsed_micros: 0,
                 audit_capacity,
                 capturing: audit_enabled,
                 ..ObserverState::default()
@@ -765,8 +789,20 @@ impl QueryObserver {
             }
             if state.audit_records.len() == state.audit_capacity {
                 state.audit_records.pop_front();
+                if let Some(timing) = state.audit_timings.pop_front() {
+                    state.audit_elapsed_micros = state
+                        .audit_elapsed_micros
+                        .saturating_sub(timing.elapsed.as_micros());
+                }
                 state.evicted_total = state.evicted_total.saturating_add(1);
             }
+            state.audit_elapsed_micros = state
+                .audit_elapsed_micros
+                .saturating_add(record.elapsed.as_micros());
+            state.audit_timings.push_back(AuditTimingSnapshot {
+                timestamp: record.timestamp,
+                elapsed: record.elapsed,
+            });
             state.audit_records.push_back(record);
         } else {
             let mut state = self.lock();
@@ -802,6 +838,8 @@ impl QueryObserver {
     pub(crate) fn clear_audit(&self) {
         let mut state = self.lock();
         state.audit_records.clear();
+        state.audit_timings.clear();
+        state.audit_elapsed_micros = 0;
         state.evicted_total = 0;
     }
 
@@ -809,6 +847,8 @@ impl QueryObserver {
         let mut state = self.lock();
         state.audit_capacity = capacity;
         state.audit_records.clear();
+        state.audit_timings.clear();
+        state.audit_elapsed_micros = 0;
         state.evicted_total = 0;
     }
 
@@ -872,6 +912,34 @@ impl QueryObserver {
         AuditSnapshot {
             records: state.audit_records.iter().cloned().collect(),
             evicted_total: state.evicted_total,
+        }
+    }
+
+    pub(crate) fn audit_stats_snapshot(&self) -> AuditStatsSnapshot {
+        let state = self.lock();
+        AuditStatsSnapshot {
+            total_queries: state.audit_records.len(),
+            elapsed_micros: state.audit_elapsed_micros,
+        }
+    }
+
+    pub(crate) fn audit_timing_snapshot(&self) -> Vec<AuditTimingSnapshot> {
+        self.lock().audit_timings.iter().copied().collect()
+    }
+
+    pub(crate) fn audit_log_page(&self, page: usize, limit: usize) -> AuditLogPage {
+        let state = self.lock();
+        let start = page.saturating_sub(1).saturating_mul(limit);
+        AuditLogPage {
+            total_items: state.audit_records.len(),
+            records: state
+                .audit_records
+                .iter()
+                .rev()
+                .skip(start)
+                .take(limit)
+                .cloned()
+                .collect(),
         }
     }
 
