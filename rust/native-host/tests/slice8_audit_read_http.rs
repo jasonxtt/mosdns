@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::{
     SocketAddr, TcpListener as StdTcpListener, TcpStream as StdTcpStream, UdpSocket as StdUdpSocket,
 };
+use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -11,7 +12,7 @@ use std::sync::{
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mosdns_dns_core::validate_response;
-use mosdns_native_host::{AuditTestClock, HostAssembly, HostOptions};
+use mosdns_native_host::{AuditTestClock, CacheStatus, CacheTestClock, HostAssembly, HostOptions};
 use mosdns_upstream_core::TransportCancellation;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -60,9 +61,13 @@ fn dns_query_type(id: u16, name: &str, qtype: u16) -> Vec<u8> {
 }
 
 fn udp_query(listener: SocketAddr, request: &[u8]) -> Vec<u8> {
+    udp_query_with_timeout(listener, request, Duration::from_secs(2))
+}
+
+fn udp_query_with_timeout(listener: SocketAddr, request: &[u8], timeout: Duration) -> Vec<u8> {
     let socket = StdUdpSocket::bind("127.0.0.1:0").expect("DNS client bind");
     socket
-        .set_read_timeout(Some(Duration::from_secs(2)))
+        .set_read_timeout(Some(timeout))
         .expect("DNS client timeout");
     socket.send_to(request, listener).expect("DNS client send");
     let mut response = vec![0_u8; 65535];
@@ -140,6 +145,33 @@ fn rich_response(query: &[u8]) -> Vec<u8> {
     response
 }
 
+fn raw_response(query: &[u8]) -> Vec<u8> {
+    let mut response = rich_response(query);
+    response[6..8].copy_from_slice(&3_u16.to_be_bytes());
+    response.extend_from_slice(&[
+        0xc0, 0x0c, // owner pointer
+        0xfd, 0xe8, // unknown RR type 65000
+        0, 1, // IN
+        0, 0, 0, 60, // TTL
+        0, 2, 0xde, 0xad, // raw RDATA
+    ]);
+    response
+}
+
+fn malformed_response(query: &[u8]) -> Vec<u8> {
+    let mut response = query[..2].to_vec();
+    response.extend_from_slice(&[0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0]);
+    response.extend_from_slice(&query[12..]);
+    response.extend_from_slice(&[
+        0xc0, 0x0c, // owner pointer
+        0, 5, // CNAME
+        0, 1, // IN
+        0, 0, 0, 60, // TTL
+        0, 3, 0xc0, 0x0c, // declared RDATA is truncated
+    ]);
+    response
+}
+
 fn run_rich_upstream(
     socket: &std::net::UdpSocket,
     stopped: &Arc<AtomicBool>,
@@ -154,7 +186,22 @@ fn run_rich_upstream(
             continue;
         };
         served.fetch_add(1, Ordering::Relaxed);
-        let response = rich_response(&query[..length]);
+        if query[..length]
+            .windows(7)
+            .any(|window| window == b"timeout")
+        {
+            continue;
+        }
+        let response = if query[..length].windows(3).any(|window| window == b"raw") {
+            raw_response(&query[..length])
+        } else if query[..length]
+            .windows(7)
+            .any(|window| window == b"decode-")
+        {
+            malformed_response(&query[..length])
+        } else {
+            rich_response(&query[..length])
+        };
         socket
             .send_to(&response, peer)
             .expect("rich upstream response");
@@ -249,7 +296,17 @@ plugins:
   - tag: sequence_main
     type: sequence
     args:
-      - matches: "!qname $rich_rules"
+      - matches: qname full:raw.example.
+        exec: $forward_main
+      - matches: qname full:decode-error.example.
+        exec: $forward_main
+      - matches: qname full:timeout.example.
+        exec: $forward_main
+      - matches:
+          - "!qname $rich_rules"
+          - "!qname full:raw.example."
+          - "!qname full:decode-error.example."
+          - "!qname full:timeout.example."
         exec: reject 3
       - matches: qname $rich_rules
         exec: $forward_main
@@ -274,6 +331,46 @@ plugins:
     let path = root.join("config.yaml");
     std::fs::write(&path, yaml).expect("write audit read config");
     mosdns_native_host::load_and_compile(&path).expect("compile audit read config")
+}
+
+fn cache_config(
+    root: &std::path::Path,
+    dns_port: u16,
+    api_port: u16,
+    upstream_port: u16,
+) -> mosdns_native_host::CompiledConfig {
+    let yaml = format!(
+        r#"log:
+  level: error
+api:
+  http: "127.0.0.1:{api_port}"
+plugins:
+  - tag: cache_main
+    type: cache
+    args:
+      size: 8
+      lazy_cache_ttl: 0
+  - tag: forward_main
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:{upstream_port}"
+  - tag: sequence_main
+    type: sequence
+    args:
+      - exec: $cache_main
+      - exec: $forward_main
+  - tag: listener
+    type: udp_server
+    args:
+      entry: sequence_main
+      listen: "127.0.0.1:{dns_port}"
+      enable_audit: true
+"#
+    );
+    let path = root.join("cache-config.yaml");
+    std::fs::write(&path, yaml).expect("write cache config");
+    mosdns_native_host::load_and_compile(&path).expect("compile cache config")
 }
 
 fn at(seconds: u64, nanos: u32) -> SystemTime {
@@ -440,19 +537,36 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
             .await
             .expect("rich DNS client");
         assert!(!rich.is_empty());
+        validate_response(&rich).expect("real UDP rich response");
+        assert_eq!(u16::from_be_bytes([rich[6], rich[7]]), 2);
         let rich_filters = [
             ("domain=rich.example", 1),
+            ("domain=example", 4),
             ("answer_ip=192.0.2.55", 1),
             ("cname=alias.example.", 1),
             ("domain_set=rich_rules", 1),
             ("effective_tag=rich_rules", 1),
             ("client_ip=127.0.0.1&answer_ip=192.0.2.55", 1),
+            ("client_ip=&client_ip=127.0.0.1", 4),
             ("q=rich_rules", 1),
             ("q=192.0.2.55", 1),
+            ("q=rich_rules&domain=rich.example", 1),
+            ("q=rich_rules&answer_ip=192.0.2.55", 1),
+            ("q=RICH.EXAMPLE", 1),
+            ("exact=1&q=RICH.EXAMPLE", 0),
             ("q=rich.example&domain=rich.example&answer_ip=192.0.2.55", 1),
             ("domain=does-not-match&domain=rich.example", 0),
+            ("domain=example&domain=rich.example", 4),
+            ("domain=&domain=rich.example", 4),
             ("exact=1&q=rich.example", 1),
+            ("exact=t&q=rich.example", 1),
+            ("exact=T&q=rich.example", 1),
+            ("exact=TRUE&q=rich.example", 1),
+            ("exact=garbage&q=rich.example", 1),
             ("exact=FALSE&q=rich.example", 1),
+            ("q=rich%2Eexample", 1),
+            ("q=rich+example", 0),
+            ("q=%E4%B8%AD", 0),
         ];
         for (query, expected) in rich_filters {
             let response = http_request(api, "GET", &format!("/api/v2/audit/logs?{query}")).await;
@@ -486,6 +600,15 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         assert_eq!(domain_logs.status, 200);
         let domain_logs_json: Value = serde_json::from_str(&domain_logs.body).expect("domain logs JSON");
         assert_eq!(domain_logs_json["pagination"]["total_items"], 1);
+        let cross_field_domain =
+            http_request(api, "GET", "/api/v2/audit/logs/domain?domain=rich_rules").await;
+        assert_eq!(cross_field_domain.status, 200);
+        assert_eq!(
+            serde_json::from_str::<Value>(&cross_field_domain.body)
+                .expect("cross-field domain JSON")["pagination"]["total_items"],
+            0,
+            "domain drill-down must not search tags or answers"
+        );
         for (route, expected_key, expected_count) in [
             ("rank/client", "127.0.0.1", 4),
             ("rank/domain_set", "rich_rules", 1),
@@ -522,17 +645,87 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let slowest = http_request(api, "GET", "/api/v2/audit/rank/slowest?limit=300").await;
         assert_eq!(slowest.status, 200);
         let slowest_values: Value = serde_json::from_str(&slowest.body).expect("slowest JSON");
-        let mut slowest_names: Vec<_> = slowest_values
-            .as_array()
-            .expect("slowest values")
+        let slowest_items = slowest_values.as_array().expect("slowest values");
+        let mut slowest_names: Vec<_> = slowest_items
             .iter()
             .map(|item| item["query_name"].as_str().expect("slowest name"))
             .collect();
+        assert_eq!(slowest_names.len(), 4);
+        assert!(slowest_items.windows(2).all(|pair| {
+            let left_duration = pair[0]["duration_ms"].as_f64().expect("left duration");
+            let right_duration = pair[1]["duration_ms"].as_f64().expect("right duration");
+            let duration_order = left_duration.total_cmp(&right_duration);
+            duration_order.is_gt()
+                || (duration_order.is_eq()
+                    && pair[0]["trace_id"].as_str() >= pair[1]["trace_id"].as_str())
+        }));
         slowest_names.sort_unstable();
         assert_eq!(
             slowest_names,
             vec!["edge.example", "new.example", "old.example", "rich.example"]
         );
+
+        validate_response(&raw_response(&dns_query(0x810a, "raw.example.")))
+            .expect("raw upstream fixture");
+        let raw = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0x810a, "raw.example."))
+        })
+            .await
+            .expect("raw DNS client");
+        validate_response(&raw).expect("real UDP uncommon response");
+        let raw_logs = http_request(api, "GET", "/api/v2/audit/logs?domain=raw.example").await;
+        let raw_body: Value = serde_json::from_str(&raw_logs.body).expect("raw audit JSON");
+        assert_eq!(raw_body["logs"][0]["response_code"], "NOERROR");
+        assert_eq!(raw_body["logs"][0]["answers"][2]["type"], "TYPE65000");
+        assert_eq!(raw_body["logs"][0]["answers"][2]["data"], r"\# 2 dead");
+        let malformed = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0x810b, "decode-error.example."))
+        })
+        .await
+        .expect("malformed DNS client");
+        validate_response(&malformed).expect("listener SERVFAIL response");
+        assert_eq!(malformed[3] & 0x0f, 2);
+        let malformed_logs =
+            http_request(api, "GET", "/api/v2/audit/logs?domain=decode-error.example").await;
+        let malformed_body: Value =
+            serde_json::from_str(&malformed_logs.body).expect("malformed audit JSON");
+        assert_eq!(malformed_body["logs"][0]["response_code"], "SERVFAIL");
+        assert_eq!(malformed_body["logs"][0]["selected_upstream"], Value::Null);
+        let timed_out = tokio::task::spawn_blocking(move || {
+            udp_query_with_timeout(
+                dns,
+                &dns_query(0x810c, "timeout.example."),
+                Duration::from_secs(7),
+            )
+        })
+        .await
+        .expect("timeout DNS client");
+        validate_response(&timed_out).expect("listener timeout response");
+        assert_eq!(timed_out[3] & 0x0f, 2);
+        let timeout_logs =
+            http_request(api, "GET", "/api/v2/audit/logs?domain=timeout.example").await;
+        let timeout_body: Value = serde_json::from_str(&timeout_logs.body).expect("timeout audit JSON");
+        assert_eq!(timeout_body["logs"][0]["response_code"], "SERVFAIL");
+        assert_eq!(timeout_body["logs"][0]["selected_upstream"], Value::Null);
+
+        for (route, expected) in [
+            (
+                "rank/client",
+                serde_json::json!([{ "key": "127.0.0.1", "count": 7 }]),
+            ),
+            (
+                "rank/domain_set",
+                serde_json::json!([{ "key": "rich_rules", "count": 1 }]),
+            ),
+            (
+                "rank/effective",
+                serde_json::json!([{ "key": "rich_rules", "count": 1 }]),
+            ),
+        ] {
+            let response = http_request(api, "GET", &format!("/api/v2/audit/{route}?limit=20")).await;
+            let values: Value = serde_json::from_str(&response.body).expect("complete rank JSON");
+            assert_eq!(values, expected, "complete membership for {route}");
+        }
 
         let resized = http_post(api, "/api/v1/audit/capacity", r#"{"capacity":2}"#).await;
         assert_eq!(resized.status, 200);
@@ -563,6 +756,14 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let evicted_logs_json: Value = serde_json::from_str(&evicted_logs.body).expect("evicted logs");
         assert_eq!(evicted_logs_json["logs"].as_array().expect("evicted log list").len(), 2);
         assert_eq!(evicted_logs_json["logs"][0]["query_name"], "evict-new.example");
+        let evicted_rank = http_request(api, "GET", "/api/v2/audit/rank/domain?limit=20").await;
+        assert_eq!(
+            serde_json::from_str::<Value>(&evicted_rank.body).expect("evicted rank"),
+            serde_json::json!([
+                { "key": "evict-middle.example", "count": 1 },
+                { "key": "evict-new.example", "count": 1 }
+            ])
+        );
 
         for id in 0x8200..0x8210 {
             clock.set(origin);
@@ -612,9 +813,29 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let empty_logs_json: Value = serde_json::from_str(&empty_logs.body).expect("empty logs");
         assert_eq!(empty_logs_json["pagination"]["total_pages"], 0);
         assert!(empty_logs_json["logs"].as_array().expect("empty log list").is_empty());
+        for route in [
+            "rank/domain",
+            "rank/client",
+            "rank/domain_set",
+            "rank/effective",
+            "rank/slowest",
+        ] {
+            let response = http_request(api, "GET", &format!("/api/v2/audit/{route}")).await;
+            assert_eq!(response.status, 200, "empty {route}");
+            assert!(
+                serde_json::from_str::<Value>(&response.body)
+                    .expect("empty rank JSON")
+                    .as_array()
+                    .expect("empty rank array")
+                    .is_empty(),
+                "clear must empty {route}"
+            );
+        }
 
         let started = http_request(api, "POST", "/api/v1/audit/start").await;
         assert_eq!(started.status, 200);
+        let zero_capacity = http_post(api, "/api/v1/audit/capacity", r#"{"capacity":0}"#).await;
+        assert_eq!(zero_capacity.status, 200);
         send_dns(
             dns,
             &clock,
@@ -628,6 +849,13 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let incomplete_windows_json: Value = serde_json::from_str(&incomplete_windows.body).expect("incomplete windows");
         assert_eq!(incomplete_windows_json["items"][0]["complete"], false);
         assert_eq!(incomplete_windows_json["items"][4]["complete"], false);
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &http_request(api, "GET", "/api/v2/audit/stats").await.body
+            )
+            .expect("zero-capacity stats")["total_queries"],
+            0
+        );
 
         let full_capacity =
             http_post(api, "/api/v1/audit/capacity", r#"{"capacity":400000}"#).await;
@@ -706,12 +934,26 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
         let bytes_per_record_hundredths =
             (u128::from(body_bytes) * 100) / u128::from(record_count);
         assert!(bytes_per_record_hundredths > 0);
+        // The DNS-core focused 1024-answer projection reports 49152 bytes,
+        // including the projected Vec and String capacities. Keep the
+        // aggregate screen explicit without allocating 400000 maximal-wire
+        // responses in this near-full progress fixture.
+        let large_answer_projection_bytes_per_record = 49_152_u64;
+        let estimated_large_projection =
+            large_answer_projection_bytes_per_record * 400_000_u64;
+        let two_view_projection = body_bytes
+            .saturating_mul(2)
+            .saturating_add(u64::try_from(full_slowest.body.len()).expect("slowest body length"));
+        assert!(estimated_large_projection > two_view_projection);
         println!(
-            "full-ring projection: retained=400000 concurrent_reads=2 dns_progress_during_reads={} logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02}",
+            "resource-screen: retained=400000 concurrent_reads=2 dns_progress_during_reads={} logs=500 slowest_max=300 logs_bytes={} logs_bytes_per_record={}.{:02} large_answer_projection_bytes_per_record={} estimated_400000_large_projection_bytes={} two_view_projection_bytes={}",
             dns_progress_during_reads,
             full_logs.body.len(),
             bytes_per_record_hundredths / 100,
-            bytes_per_record_hundredths % 100
+            bytes_per_record_hundredths % 100,
+            large_answer_projection_bytes_per_record,
+            estimated_large_projection,
+            two_view_projection
         );
         for _ in 0..3 {
             let dns_task = tokio::task::spawn_blocking(move || {
@@ -744,6 +986,91 @@ fn v2_stats_windows_and_logs_use_retained_real_dns_records() {
     result.expect("audit read supervisor shutdown");
     upstream_stopped.store(true, Ordering::Release);
     upstream_task.join().expect("rich upstream shutdown");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn udp_real_listener_audits_cache_miss_hit_and_ttl_aging() {
+    let root = std::env::temp_dir().join(format!("mosdns-audit-cache-read-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("cache audit root");
+    let dns_port = free_udp_port();
+    let api_port = free_tcp_port();
+    let upstream_port = free_udp_port();
+    let upstream_socket =
+        std::net::UdpSocket::bind(("127.0.0.1", upstream_port)).expect("cache upstream bind");
+    let upstream_stopped = Arc::new(AtomicBool::new(false));
+    let upstream_served = Arc::new(AtomicUsize::new(0));
+    let upstream_stopped_for_thread = Arc::clone(&upstream_stopped);
+    let upstream_served_for_thread = Arc::clone(&upstream_served);
+    let upstream_task = std::thread::spawn(move || {
+        run_rich_upstream(
+            &upstream_socket,
+            &upstream_stopped_for_thread,
+            &upstream_served_for_thread,
+        );
+    });
+    let cache_clock = CacheTestClock::new(100);
+    let host = HostAssembly::with_options_and_state_root(
+        cache_config(&root, dns_port, api_port, upstream_port),
+        HostOptions::default()
+            .with_cache_clock(Rc::new(cache_clock.clone()))
+            .with_audit_capacity(8),
+        &root,
+    )
+    .expect("assemble cache audit host");
+    let bound = host
+        .block_on(host.bind_host())
+        .expect("bind cache audit host");
+    let dns = bound.dns_addr();
+    let api = bound.api_addr().expect("cache audit API");
+    let shutdown = TransportCancellation::new();
+    let result = host.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let first = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0xa101, "cache.example."))
+        })
+        .await
+        .expect("cache miss DNS client");
+        validate_response(&first).expect("cache miss response");
+        cache_clock.advance(10);
+        let second = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0xa102, "cache.example."))
+        })
+        .await
+        .expect("cache hit DNS client");
+        validate_response(&second).expect("cache hit response");
+        cache_clock.advance(51);
+        let third = tokio::task::spawn_blocking(move || {
+            udp_query(dns, &dns_query(0xa103, "cache.example."))
+        })
+        .await
+        .expect("expired cache DNS client");
+        validate_response(&third).expect("expired cache response");
+        assert_eq!(upstream_served.load(Ordering::Relaxed), 2);
+        let audit = host.audit_snapshot();
+        assert_eq!(audit.records.len(), 3);
+        assert_eq!(
+            audit
+                .records
+                .iter()
+                .map(|record| record.cache_status)
+                .collect::<Vec<_>>(),
+            vec![CacheStatus::Miss, CacheStatus::Hit, CacheStatus::Miss]
+        );
+        let logs = http_request(api, "GET", "/api/v2/audit/logs?domain=cache.example").await;
+        assert_eq!(logs.status, 200);
+        let body: Value = serde_json::from_str(&logs.body).expect("cache audit JSON");
+        assert_eq!(body["pagination"]["total_items"], 3);
+        assert_eq!(body["logs"][0]["answers"][0]["ttl"], 60);
+        assert_eq!(body["logs"][1]["answers"][0]["ttl"], 50);
+        assert_eq!(body["logs"][2]["answers"][0]["ttl"], 60);
+        shutdown.cancel();
+        task.await.expect("cache audit supervisor shutdown")
+    });
+    result.expect("cache audit supervisor");
+    upstream_stopped.store(true, Ordering::Release);
+    upstream_task.join().expect("cache upstream shutdown");
     let _ = std::fs::remove_dir_all(root);
 }
 

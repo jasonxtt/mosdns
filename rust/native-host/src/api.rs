@@ -464,6 +464,14 @@ impl Response {
         }
     }
 
+    fn try_json_compact<T: Serialize>(value: &T) -> Result<Self, serde_json::Error> {
+        Ok(Self {
+            status: 200,
+            content_type: Some("application/json"),
+            body: serde_json::to_vec(value)?,
+        })
+    }
+
     fn method_not_allowed() -> Self {
         Self::error(405, "method not allowed")
     }
@@ -1384,7 +1392,7 @@ fn audit_logs_from_records(
     records: Vec<std::sync::Arc<AuditRecord>>,
     page: usize,
     limit: usize,
-) -> AuditLogsResponse {
+) -> Result<AuditLogsResponse, ()> {
     let total_items = records.len();
     let total_pages = if total_items == 0 {
         0
@@ -1392,14 +1400,17 @@ fn audit_logs_from_records(
         (total_items - 1) / limit + 1
     };
     let start = page.saturating_sub(1).saturating_mul(limit);
-    let logs = records
-        .iter()
-        .rev()
-        .skip(start)
-        .take(limit)
-        .map(|record| project_log(record))
-        .collect();
-    AuditLogsResponse {
+    let mut logs = Vec::new();
+    logs.try_reserve(limit.min(total_items)).map_err(|_| ())?;
+    logs.extend(
+        records
+            .iter()
+            .rev()
+            .skip(start)
+            .take(limit)
+            .map(|record| project_log(record)),
+    );
+    Ok(AuditLogsResponse {
         pagination: AuditLogPagination {
             total_items,
             total_pages,
@@ -1407,7 +1418,7 @@ fn audit_logs_from_records(
             items_per_page: limit,
         },
         logs,
-    }
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -1438,31 +1449,54 @@ fn parse_rank_limit(target: &str, default: usize) -> Result<usize, String> {
     Ok(positive_or_default(value.as_ref(), default).min(500))
 }
 
+enum AuditReadFailure {
+    Canceled,
+    Allocation,
+}
+
 fn rank_items(
     records: &[std::sync::Arc<AuditRecord>],
     key: impl Fn(&AuditRecord) -> Option<String>,
     shutdown: &TransportCancellation,
-) -> Option<Vec<AuditRankItem>> {
+) -> Result<Vec<AuditRankItem>, AuditReadFailure> {
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
     for (index, record) in records.iter().enumerate() {
         if index % 1024 == 0 && shutdown.is_cancelled() {
-            return None;
+            return Err(AuditReadFailure::Canceled);
         }
         if let Some(value) = key(record) {
             *counts.entry(value).or_default() += 1;
         }
     }
-    let mut items: Vec<_> = counts
-        .into_iter()
-        .map(|(key, count)| AuditRankItem { key, count })
-        .collect();
+    let mut items = Vec::new();
+    items
+        .try_reserve(counts.len())
+        .map_err(|_| AuditReadFailure::Allocation)?;
+    items.extend(
+        counts
+            .into_iter()
+            .map(|(key, count)| AuditRankItem { key, count }),
+    );
     items.sort_by(|left, right| {
         right
             .count
             .cmp(&left.count)
             .then_with(|| left.key.cmp(&right.key))
     });
-    (!shutdown.is_cancelled()).then_some(items)
+    if shutdown.is_cancelled() {
+        Err(AuditReadFailure::Canceled)
+    } else {
+        Ok(items)
+    }
+}
+
+fn take_rank_items<T>(items: Vec<T>, limit: usize) -> Result<Vec<T>, AuditReadFailure> {
+    let mut selected = Vec::new();
+    selected
+        .try_reserve(limit.min(items.len()))
+        .map_err(|_| AuditReadFailure::Allocation)?;
+    selected.extend(items.into_iter().take(limit));
+    Ok(selected)
 }
 
 fn rank_response(
@@ -1471,14 +1505,14 @@ fn rank_response(
     limit: usize,
     filter: Option<AuditFilter>,
     shutdown: &TransportCancellation,
-) -> Option<Response> {
+) -> Result<Response, AuditReadFailure> {
     let records = match filter {
         None => snapshot.records,
         Some(filter) => {
             let mut records = Vec::new();
             for (index, record) in snapshot.records.into_iter().enumerate() {
                 if index % 1024 == 0 && shutdown.is_cancelled() {
-                    return None;
+                    return Err(AuditReadFailure::Canceled);
                 }
                 if audit_record_matches(&record, &filter) {
                     records.push(record);
@@ -1489,50 +1523,50 @@ fn rank_response(
     };
     match kind {
         AuditReadKind::Logs { .. } => unreachable!("logs use their own projection"),
-        AuditReadKind::RankDomain => Some(Response::json_compact(
-            &rank_items(
+        AuditReadKind::RankDomain => Response::try_json_compact(&take_rank_items(
+            rank_items(
                 &records,
                 |record| Some(projected_query_name(record)),
                 shutdown,
-            )?
-            .into_iter()
-            .take(limit)
-            .collect::<Vec<_>>(),
-        )),
-        AuditReadKind::RankClient => Some(Response::json_compact(
-            &rank_items(
+            )?,
+            limit,
+        )?)
+        .map_err(|_| AuditReadFailure::Allocation),
+        AuditReadKind::RankClient => Response::try_json_compact(&take_rank_items(
+            rank_items(
                 &records,
                 |record| Some(canonical_ip(record.client_addr.ip()).to_string()),
                 shutdown,
-            )?
-            .into_iter()
-            .take(limit)
-            .collect::<Vec<_>>(),
-        )),
-        AuditReadKind::RankDomainSet => Some(Response::json_compact(
-            &rank_items(&records, |record| record.domain_set.clone(), shutdown)?
-                .into_iter()
-                .take(limit)
-                .collect::<Vec<_>>(),
-        )),
-        AuditReadKind::RankEffective => Some(Response::json_compact(
-            &rank_items(&records, |record| record.effective_tag.clone(), shutdown)?
-                .into_iter()
-                .take(limit)
-                .collect::<Vec<_>>(),
-        )),
+            )?,
+            limit,
+        )?)
+        .map_err(|_| AuditReadFailure::Allocation),
+        AuditReadKind::RankDomainSet => Response::try_json_compact(&take_rank_items(
+            rank_items(&records, |record| record.domain_set.clone(), shutdown)?,
+            limit,
+        )?)
+        .map_err(|_| AuditReadFailure::Allocation),
+        AuditReadKind::RankEffective => Response::try_json_compact(&take_rank_items(
+            rank_items(&records, |record| record.effective_tag.clone(), shutdown)?,
+            limit,
+        )?)
+        .map_err(|_| AuditReadFailure::Allocation),
         AuditReadKind::RankSlowest => {
             if shutdown.is_cancelled() {
-                return None;
+                return Err(AuditReadFailure::Canceled);
             }
-            Some(Response::json_compact(
-                &snapshot
+            let mut records = Vec::new();
+            records
+                .try_reserve(limit.min(snapshot.slowest.len()))
+                .map_err(|_| AuditReadFailure::Allocation)?;
+            records.extend(
+                snapshot
                     .slowest
                     .iter()
                     .take(limit)
-                    .map(|record| project_log(record))
-                    .collect::<Vec<_>>(),
-            ))
+                    .map(|record| project_log(record)),
+            );
+            Response::try_json_compact(&records).map_err(|_| AuditReadFailure::Allocation)
         }
     }
 }
@@ -1573,6 +1607,9 @@ async fn dispatch_audit_read(
         let snapshot = observer.audit_read_snapshot();
         if let AuditReadKind::Logs { .. } = kind {
             let mut records = Vec::new();
+            if records.try_reserve(snapshot.records.len()).is_err() {
+                return Response::error(500, "audit read failed");
+            }
             for (index, record) in snapshot.records.into_iter().enumerate() {
                 if index % 1024 == 0 && shutdown.is_cancelled() {
                     return Response::empty(499);
@@ -1587,10 +1624,19 @@ async fn dispatch_audit_read(
             if shutdown.is_cancelled() {
                 return Response::empty(499);
             }
-            Response::json_compact(&audit_logs_from_records(records, page, limit))
+            match audit_logs_from_records(records, page, limit)
+                .ok()
+                .and_then(|logs| Response::try_json_compact(&logs).ok())
+            {
+                Some(response) => response,
+                None => Response::error(500, "audit read failed"),
+            }
         } else {
-            rank_response(snapshot, kind, limit, filter, &shutdown)
-                .unwrap_or_else(|| Response::empty(499))
+            match rank_response(snapshot, kind, limit, filter, &shutdown) {
+                Ok(response) => response,
+                Err(AuditReadFailure::Canceled) => Response::empty(499),
+                Err(AuditReadFailure::Allocation) => Response::error(500, "audit read failed"),
+            }
         }
     })
     .await
@@ -1828,10 +1874,15 @@ struct PostPayload {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::Arc;
+
+    use mosdns_upstream_core::TransportCancellation;
+    use tokio::sync::Semaphore;
 
     use super::{
-        ResponseState, load_audit_capacity, migrate_legacy_settings, normalized_ip,
-        parse_audit_filter, parse_rank_limit, query_pairs, query_type_name, response_code_name,
+        AuditReadKind, QueryObserver, ResponseState, dispatch_audit_read, load_audit_capacity,
+        migrate_legacy_settings, normalized_ip, parse_audit_filter, parse_rank_limit, query_pairs,
+        query_type_name, response_code_name,
     };
 
     fn test_root(name: &str) -> std::path::PathBuf {
@@ -1961,6 +2012,40 @@ mod tests {
                 .expect("rank signed-64 overflow uses default"),
             20
         );
+    }
+
+    #[test]
+    fn canceled_audit_read_releases_its_slot_only_after_worker_exit() {
+        let observer = Arc::new(QueryObserver::new(true, [], 4));
+        let slots = Arc::new(Semaphore::new(1));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("audit read runtime");
+        let canceled = TransportCancellation::new();
+        canceled.cancel();
+        let first = runtime.block_on(dispatch_audit_read(
+            observer.clone(),
+            &slots,
+            "/api/v2/audit/logs?limit=50",
+            AuditReadKind::Logs {
+                domain_route: false,
+            },
+            canceled,
+        ));
+        assert_eq!(first.status, 499);
+
+        let second = runtime.block_on(dispatch_audit_read(
+            observer,
+            &slots,
+            "/api/v2/audit/logs?limit=50",
+            AuditReadKind::Logs {
+                domain_route: false,
+            },
+            TransportCancellation::new(),
+        ));
+        assert_eq!(second.status, 200);
+        assert_eq!(slots.available_permits(), 1);
     }
 
     #[test]
