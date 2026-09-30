@@ -753,3 +753,37 @@ Completed bounded native fast_mark and flow_setter YAML, sequence execution, per
 ### Status
 
 [OK] **Completed**
+
+
+## Session 27: Native audit delivery verified and archived
+
+**Date**: 2026-09-30
+**Task**: Native audit delivery verified and archived
+**Branch**: `rust`
+
+### Summary
+
+Verified native audit C08/C11 bounded slice at d7fc11ec, recorded independent VM and browser evidence, updated feature coverage and backend spec, and archived the task.
+
+### Main Changes
+
+- Recorded exact-scope completion evidence and C08/C11 subitems
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5331eabc` | (see git log) |
+
+### Testing
+
+- [OK] On mosdns-rust: cargo fmt, clippy, workspace tests, native build and disposable Vite build passed
+- [OK] Real DNS and browser clear/capacity/restart flow passed; isolated processes and tunnel cleaned up
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Continue remaining Rust-native roadmap slices; full C08/C11 and production cutover remain open
