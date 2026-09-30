@@ -2,6 +2,7 @@ use std::net::{SocketAddr, UdpSocket as StdUdpSocket};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
+    mpsc,
 };
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -50,6 +51,64 @@ impl MockUpstream {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(thread) = self.thread.take() {
             thread.join().expect("mock thread join");
+        }
+    }
+}
+
+struct GatedMockUpstream {
+    address: SocketAddr,
+    entered: Arc<std::sync::atomic::AtomicUsize>,
+    release: mpsc::Sender<()>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl GatedMockUpstream {
+    fn start() -> Self {
+        let socket = StdUdpSocket::bind("127.0.0.1:0").expect("gated upstream bind");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .expect("gated timeout");
+        let address = socket.local_addr().expect("gated upstream address");
+        let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let thread_entered = Arc::clone(&entered);
+        let (release, releases) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = thread::spawn(move || {
+            let mut input = vec![0_u8; 65535];
+            while !thread_stop.load(Ordering::SeqCst) {
+                let Ok((length, peer)) = socket.recv_from(&mut input) else {
+                    continue;
+                };
+                thread_entered.fetch_add(1, Ordering::SeqCst);
+                while releases.recv_timeout(Duration::from_millis(20)).is_err() {
+                    if thread_stop.load(Ordering::SeqCst) {
+                        return;
+                    }
+                }
+                let response = response_for(&input[..length], false).expect("gated query shape");
+                socket.send_to(&response, peer).expect("gated response");
+            }
+        });
+        Self {
+            address,
+            entered,
+            release,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn release_one(&self) {
+        self.release.send(()).expect("gated release");
+    }
+
+    fn stop(mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = self.release.send(());
+        if let Some(thread) = self.thread.take() {
+            thread.join().expect("gated upstream thread");
         }
     }
 }
@@ -127,6 +186,64 @@ fn audit_assembly_for(upstream: SocketAddr) -> HostAssembly {
         .replace("udp://127.0.0.1:15453", &format!("udp://{upstream}"));
     let config = compile_yaml(&yaml).expect("audit test config compile");
     HostAssembly::with_options(config, HostOptions::default()).expect("audit test assembly")
+}
+
+async fn wait_for_gate(entered: &std::sync::atomic::AtomicUsize, count: usize) {
+    while entered.load(Ordering::SeqCst) < count {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+}
+
+#[test]
+fn udp_real_listener_samples_start_stop_at_an_in_flight_terminal_barrier() {
+    let gated = GatedMockUpstream::start();
+    let assembly = audit_assembly_for(gated.address);
+    let server = assembly
+        .block_on(UdpServer::bind(&assembly, "127.0.0.1:0".parse().unwrap()))
+        .expect("UDP listener bind");
+    let listener = server.local_addr().expect("listener address");
+    let shutdown = TransportCancellation::new();
+    assembly.block_on(async {
+        let server_task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+
+        let first = tokio::task::spawn_blocking(move || {
+            client_request(
+                listener,
+                &query(0x6301, &["stop-after-admit", "example"]),
+                Duration::from_secs(2),
+            )
+        });
+        wait_for_gate(&gated.entered, 1).await;
+        assert!(assembly.stop_audit());
+        gated.release_one();
+        first.await.expect("first client task");
+        assert!(assembly.audit_snapshot().records.is_empty());
+
+        let second = tokio::task::spawn_blocking(move || {
+            client_request(
+                listener,
+                &query(0x6302, &["start-after-admit", "example"]),
+                Duration::from_secs(2),
+            )
+        });
+        wait_for_gate(&gated.entered, 2).await;
+        assert!(assembly.start_audit());
+        gated.release_one();
+        second.await.expect("second client task");
+
+        shutdown.cancel();
+        server_task
+            .await
+            .expect("server task")
+            .expect("server shutdown");
+    });
+    assert_eq!(assembly.metrics_snapshot().completed_total, 2);
+    assert_eq!(assembly.audit_snapshot().records.len(), 1);
+    assert_eq!(
+        assembly.audit_snapshot().records[0].qname,
+        "start-after-admit.example."
+    );
+    gated.stop();
 }
 
 #[test]
