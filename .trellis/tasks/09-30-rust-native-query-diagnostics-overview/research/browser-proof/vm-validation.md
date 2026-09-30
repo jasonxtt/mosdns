@@ -3,30 +3,39 @@
 All commands below ran in `/root/mosdns-rust-querydiag/rust` on the
 `mosdns-rust` SSH VM. The browser proof used the fixtures next to this file.
 The final implementation candidate for the code changes is
-`768565598e615c6f694e1d354479ba72aea103da`. The later documentation-only
-commit records this exact candidate and does not change product code.
+`35c87bc8` (`feat(native): close query diagnostics provenance and HTTP proof
+gaps`). The later documentation-only commit records this exact candidate and
+does not change product code.
 
 ## Bounded record/projection checks
 
-- `cargo test -p mosdns-native-host --test slice8_audit_read_http`: `1 passed`.
-  This real UDP/HTTP test fills the configured retained ring with `400000`
-  real DNS records, then performs concurrent `/api/v2/audit/logs?limit=500`
-  and `/api/v2/audit/rank/slowest?limit=300` reads while additional DNS
-  requests continue and verifies both projections remain available.
-- `time -p cargo test -p mosdns-native-host --test slice8_audit_read_http`:
-  `1 passed`, `real 32.96` (the VM image does not provide `/usr/bin/time`).
-  The test printed `retained=400000 concurrent_reads=2
-  dns_progress_during_reads=4 logs=500 slowest_max=300 logs_bytes=187585
-  logs_bytes_per_record=375.17` for the concurrent views; the DNS requests
-  are started after both read workers and before either read is awaited.
+- `cargo test -p mosdns-native-host --test slice8_audit_read_http`: `2 passed`.
+  The real UDP/HTTP test fills the configured retained ring with `400000`
+  real DNS records, performs concurrent `/api/v2/audit/logs?limit=500` and
+  `/api/v2/audit/rank/slowest?limit=300` reads, asserts a bounded read remains
+  active while DNS probes complete, and verifies both projections remain
+  available. The same test also proves every real HTTP filter family,
+  combinations, repeated mapped client IP candidates, malformed/overflow
+  queries, all four rank routes, slowest membership, and exact domain logs.
+  A sibling case uses a real TCP listener for a positive AAAA+CNAME response.
+- `cargo test -p mosdns-native-host --test slice8_audit_read_http` with a
+  `/proc`/`ps` polling wrapper: `2 passed`, `slice8_peak_rss_kib=317400`.
+  The full-ring test printed `retained=400000 concurrent_reads=2
+  dns_progress_during_reads=4 logs=500 slowest_max=300 logs_bytes=211754
+  logs_bytes_per_record=423.50` for the concurrent views; the test checks
+  that at least one HTTP worker remains active before and during those DNS
+  probes. The VM image does not provide `/usr/bin/time`, so the recorded
+  peak is the test-process resident-set observation from `/proc`/`ps`, not a
+  production capacity claim.
 - `time -p cargo test -p mosdns-dns-core --lib response::tests::answer_projection_keeps_a_large_ordered_answer_set_without_eviction`:
   `1 passed`, `real 0.33`, `user 0.28`, `sys 0.10`; the test projects 1024
   ordered A answers and checks the first/last TTLs, with no hidden answer
   eviction. Its VM output was `records=1024 projection_bytes=16968
   bytes_per_record=16.57`.
-- No peak-RSS number was claimed because the VM image does not provide
-  `/usr/bin/time`. These are bounded-count, projection-size and progress/timing
-  observations only; they are not a worst-case memory or production-capacity
+- The deliberately-large answer projection records `records=1024
+  projection_bytes=16968 bytes_per_record=16.57`; the ordinary full-ring
+  projection records `423.50` bytes/record. These are bounded-count,
+  projection-size and progress/timing observations, not a production-capacity
   claim, and no byte truncation or capacity reduction was introduced.
 
 ## Final exact-candidate commands
@@ -42,7 +51,7 @@ npm ci
 npm run build
 ```
 
-The exact-candidate run also passed `cargo test --workspace`, focused native
+The `35c87bc8` candidate also passed `cargo test --workspace`, focused native
 host/DNS/sequence tests, and the real UDP/TCP/HTTP/browser proof described in
 `README.md`. The Vue build completed with only the existing Vite large-chunk
 warning. No production process, push, or alternate build host is involved;
