@@ -56,3 +56,41 @@ SystemControlManager, QueryManager, or `/log` compatibility.
   output written to the main worktree's `coremain/www`.
 - Native process and Vite were run only on loopback and were stopped after the
   proof. The temporary fixture directories are disposable `/tmp` paths.
+
+## Independent completion recheck — 2026-09-30
+
+The original proof above is retained as the execution agent's record. This
+recheck used committed product HEAD `d7fc11ec3b061a5fe811fe4980e75d3d54b59ee0`
+on the `mosdns-rust` VM. The source was copied with `git archive HEAD` into the
+isolated `/root/mosdns-audit-verify-d7fc11ec` directory. Native UDP and HTTP
+listened on VM loopback `127.0.0.1:25053` and `127.0.0.1:25099`; Vite listened
+on `127.0.0.1:25173` with
+`MOSDNS_DEV_TARGET=http://127.0.0.1:25099`. The local in-app browser reached
+Vite through a task-owned SSH forward of local port 25173 to VM port 25173.
+The tunnel process was PID 89127; the second native and npm launcher processes
+were PIDs 542091 and 542092. No service or `/cus/mosdns` state was changed.
+
+- `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo
+  build -p mosdns-native-host --bin mosdns` passed. `npm ci --ignore-scripts`
+  and `npm run build` passed in the disposable VM copy (Vite 7.3.2, 616
+  transformed modules), leaving main-checkout embedded assets untouched.
+- The first `cargo clippy` attempt failed because the archive omitted the
+  compile-time `tests/phase5a-baseline` fixture. After copying that fixture
+  from the same HEAD, `cargo fmt --all -- --check`, `cargo clippy --workspace
+  --all-targets -- -D warnings`, and `cargo test --workspace` all exited 0.
+- A real VM `dig` query to UDP port 25053 answered. The browser DNS card
+  subsequently showed one retained query and a recent-log row. In the System
+  audit panel, the actual **clear** confirmation was submitted; its success
+  message appeared, the v2 stats response returned zero, and the Overview DNS
+  card reread as zero records with `0.00 ms` and no recent rows.
+- The actual **capacity** confirmation was submitted with `7`. The panel
+  showed success and capacity 7; the API returned 7 and isolated
+  `webinfo/audit_settings.json` recorded 7. A fresh native process with the
+  same config returned capacity 7, answered another real UDP query, and the
+  browser panel reread 7. Start/stop state was also exercised through the
+  panel; stopping retained capture state through clear, then starting restored
+  `运行中`.
+- The containing Overview still showed the deferred rank endpoint
+  `加载概览失败: HTTP 404`. This is outside the DNS card and audit panel slice.
+  The native process, Vite and local tunnel were stopped; task ports were no
+  longer listening and `mosdns.service` remained active.

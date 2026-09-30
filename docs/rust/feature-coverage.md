@@ -16,6 +16,17 @@
 
 2026-09-27 执行方式调整：71 项是完整性台账，不是 71 个独立任务。按真实配置链和共享机制成批推进；先明确本批实际需要的语法/参数，未用条目在其拥有任务补全，不在每批重做全表契约冻结。交付记录新增可运行配置与参数子项、未完成部分和稳定测试入口；基础证据/局部接入不自动升级为整项产品验收。
 
+### 审计控制与 DNS 卡片限定闭环（C08/C11 子项；整行仍“待验收”）
+
+`09-30-rust-native-next-bundled-delivery` 在原生 host 上新增动态审计采集、容量设置与安全持久化、限定的 v1/v2 审计 API，并让维护中的 Vue DNS 概览卡片和 System 审计面板消费真实 HTTP/DNS 数据。本批仅登记下列可运行子项；C08/C11 整行未完成，C10 的 Prometheus 与插件 API 没有获得新证据。
+
+| 条目 | 本批实际交付 | 仍延期 |
+| --- | --- | --- |
+| C08 审计子项 | listener `enable_audit` 静态资格与请求结束时的动态 `capturing` 判定；retained ring 与终身 host metrics 分离；v1 `status/start/stop/clear/capacity`，容量 `0..400000`、`webinfo/audit_settings.json` 重启保留、旧路径读取、写入失败不发布；v2 retained `stats`、五个 `stats/windows` 和只含真实五字段的最新优先分页 `logs`。严格 POST 和最大 500 条日志为明确的 Rust 安全偏差 | v1 完整日志、v2 排名/搜索/过滤、完整 AuditLog 字段、capture 文件、Prometheus、全量审计及高负载完整性验收 |
+| C11 Vue 审计流程子项 | 维护中 `/` 的 DNS 卡片显示真实 retained 数量、延迟、最近查询和时间窗；System 审计面板可启停、清空与设置容量，成功动作回读服务器状态，失败动作显式报错；隔离 VM 上真实 DNS/HTTP、Vite 与浏览器闭环，容量经 native host 重启保留 | OverviewManager 的 rank/上游区域、其它 System 面板、QueryManager 完整日志查询、`/log`、Rust 静态资源服务与外部 UI 挂载 |
+
+代码与测试入口为 `rust/native-host/src/observer.rs`、`src/api.rs`、`tests/observability.rs`、`tests/slice6_management_http.rs`、`tests/slice8_audit_read_http.rs`，以及 `webui-log/src/components/dashboard/DnsOverviewCard.vue`、`SystemControlManager.vue`。可复现的真实进程与浏览器证据记录在本任务 `research/browser-proof/README.md`；最终 Vue 修正范围 `70440349..d7fc11ec` 经指定 C2C review 为 `FINAL: PASS`，当前产品 HEAD `d7fc11ec` 又经过独立 VM 校验。这不构成 5D、Phase 6 或生产替换验收。
+
 ### 第一条 5C 管理闭环子项：本地规则编辑（规划中任务的已交付切片；整行仍“待验收”）
 
 任务 [09-28-rust-native-domain-set-management](../../.trellis/tasks/09-28-rust-native-domain-set-management/prd.md) 交付一条限定闭环：file-backed `domain_set` 的原生 HTTP 管理、安全持久化与下一 DNS 查询生效，加维护中 Vue `/` 本地规则页的隔离端到端编辑。以下只登记本批实际交付的子项与明确延期；P02/C10/C11 整行仍是“待验收”。
