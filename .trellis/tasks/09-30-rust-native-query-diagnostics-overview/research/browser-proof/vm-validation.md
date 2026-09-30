@@ -44,8 +44,10 @@ updates do not change product code.
   canceled_audit_read_releases_its_slot_only_after_worker_exit`: `1 passed`.
   A canceled worker returns 499, and a following read cannot acquire the
   single test permit until that worker has exited; the permit is available
-  again afterwards. Rank allocation/serialization failures use the same
-  worker-owned path and return 500 rather than being reported as cancellation.
+  again afterwards. Recoverable rank allocation/serialization failures use
+  the same worker-owned path and return 500 rather than being reported as
+  cancellation; this focused test proves cancellation/permit lifetime, not
+  generic allocator-failure injection.
 - `time -p cargo test -p mosdns-dns-core --lib response::tests::answer_projection_keeps_a_large_ordered_answer_set_without_eviction`:
   `1 passed`, `real 0.33`, `user 0.28`, `sys 0.10`; the test projects 1024
   ordered A answers and checks the first/last TTLs, with no hidden answer
