@@ -188,3 +188,27 @@ suites, the terminal-error regression, fmt, workspace clippy with
 this rerun exhausted the task-owned filesystem while a second target was
 present; both exact task-owned targets were removed before the successful
 clean rerun and the resource check passed.
+
+## Final commit-gate repair rerun
+
+The dedicated reviewer then isolated three remaining final-commit gaps. The
+repair makes final network supplier selection overwrite stale ancestor peer
+identity, clears peer and trace selection when a local/cache/suppressed result
+wins, and synchronizes the selected peer from the committed schema-2 trace.
+It also routes every buffered preference-original return through
+`commit_branch_winner`, and terminalizes any tentative selected branch as
+`canceled` or `interrupted` when the root cancellation/deadline gate rejects
+the result.
+
+After syncing the changed source to the task-owned directory, the isolated
+SSH run passed `cargo test -p mosdns-native-host --tests -j 1`: all 83 native
+unit tests and every native integration suite, including secure DoT/DoH and
+stream/close coverage. `cargo fmt --all -- --check` and workspace clippy with
+`-D warnings` also passed. A `cargo build --workspace --all-targets
+--all-features` attempt was stopped after the task-owned filesystem reached
+100% during test-target linking; its exact task-owned process and target were
+removed. The subsequent serial `cargo build --workspace --all-features`
+passed. Final cleanup restored approximately 3.1 GiB free and 16% inode use.
+The earlier complete workspace integration/doctest split and real DNS/HTTP/
+Vue/secure transport proofs remain valid because this repair is confined to
+`rust/native-host/src/execution.rs`.
