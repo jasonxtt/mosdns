@@ -320,15 +320,8 @@ impl BranchTrace {
         }
     }
 
-    fn clear_selection(&mut self, terminal_decision: Option<&str>) {
+    fn clear_selection(&mut self) {
         self.selected = None;
-        if let Some(decision) = terminal_decision {
-            for branch in &mut self.branches {
-                if branch.decision == "selected" {
-                    branch.decision = decision.to_owned();
-                }
-            }
-        }
     }
 
     fn registration_hook(
@@ -680,7 +673,7 @@ impl ExecutionFacts<'_> {
                     diagnostics.selected = None;
                 }
                 if let Some(trace) = &self.policy_trace {
-                    trace.borrow_mut().clear_selection(None);
+                    trace.borrow_mut().clear_selection();
                 }
             }
         } else if self.capture_audit_details {
@@ -1235,7 +1228,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     absorb_branch_cache(&context, &outcome);
                     cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
-                        facts.record_policy_failure(error.clone());
                         // The captured successor has already been driven by
                         // the branch. Commit its state, then return the typed
                         // policy failure through the pending dispatch. The
@@ -1243,7 +1235,10 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         // owns the caller/try failure boundary.
                         *machine.state_mut() = outcome.state;
                         let core_error = match policy_failure_for_core(&error) {
-                            Ok(core_error) => core_error,
+                            Ok(core_error) => {
+                                facts.record_policy_failure(error.clone());
+                                core_error
+                            }
                             Err(terminal) => {
                                 return terminal_policy_failure(terminal, facts);
                             }
@@ -1324,10 +1319,12 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     absorb_branch_cache(&context, &outcome);
                     cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
-                        facts.record_policy_failure(error.clone());
                         *machine.state_mut() = outcome.state;
                         let core_error = match policy_failure_for_core(&error) {
-                            Ok(core_error) => core_error,
+                            Ok(core_error) => {
+                                facts.record_policy_failure(error.clone());
+                                core_error
+                            }
                             Err(terminal) => {
                                 return terminal_policy_failure(terminal, facts);
                             }
@@ -2153,7 +2150,8 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                         if secondary_result.is_none() {
                             let _ = secondary.as_mut().await;
                         }
-                        trace_outcome(&context, primary_id, &result, true);
+                        let committed = commit_branch_winner(result, &context, successor.state());
+                        trace_outcome(&context, primary_id, &committed, committed.is_success());
                         if let Some(secondary_result) = secondary_result.as_ref() {
                             trace_outcome(&context, secondary_id, secondary_result, false);
                         } else if secondary_id.is_some() {
@@ -2161,7 +2159,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                                 trace.borrow_mut().mark(secondary_id, "canceled");
                             }
                         }
-                        return commit_branch_winner(result, &context, successor.state());
+                        return committed;
                     }
                     primary_result = Some(result);
                 }
@@ -2175,7 +2173,8 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                         if primary_result.is_none() {
                             let _ = primary.as_mut().await;
                         }
-                        trace_outcome(&context, secondary_id, &result, true);
+                        let committed = commit_branch_winner(result, &context, successor.state());
+                        trace_outcome(&context, secondary_id, &committed, committed.is_success());
                         if let Some(primary_result) = primary_result.as_ref() {
                             trace_outcome(&context, primary_id, primary_result, false);
                         } else if primary_id.is_some() {
@@ -2183,7 +2182,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                                 trace.borrow_mut().mark(primary_id, "canceled");
                             }
                         }
-                        return commit_branch_winner(result, &context, successor.state());
+                        return committed;
                     }
                     secondary_result = Some(result);
                 }
@@ -2220,8 +2219,9 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                 if result.is_success() {
                     secondary_cancel.cancel();
                     secondary_core_cancel.cancel();
-                    trace_outcome(&context, primary_id, &result, true);
-                    return commit_branch_winner(result, &context, successor.state());
+                    let committed = commit_branch_winner(result, &context, successor.state());
+                    trace_outcome(&context, primary_id, &committed, committed.is_success());
+                    return committed;
                 }
                 trace_outcome(&context, primary_id, &result, false);
                 trace_start(&context, secondary_id);
@@ -2236,8 +2236,9 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                 let secondary = Box::pin(secondary);
                 let result = secondary.await;
                 if result.is_success() {
-                    trace_outcome(&context, secondary_id, &result, true);
-                    return commit_branch_winner(result, &context, successor.state());
+                    let committed = commit_branch_winner(result, &context, successor.state());
+                    trace_outcome(&context, secondary_id, &committed, committed.is_success());
+                    return committed;
                 }
                 trace_outcome(&context, secondary_id, &result, false);
                 BranchOutcome::failure(
@@ -2265,19 +2266,28 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                             secondary_cancel.cancel();
                             secondary_core_cancel.cancel();
                             let _ = secondary.as_mut().await;
-                            trace_outcome(&context, primary_id, &result, true);
+                            let committed =
+                                commit_branch_winner(result, &context, successor.state());
+                            trace_outcome(&context, primary_id, &committed, committed.is_success());
                             if secondary_id.is_some() {
                                 if let Some(trace) = &context.trace {
                                     trace.borrow_mut().mark(secondary_id, "canceled");
                                 }
                             }
-                            commit_branch_winner(result, &context, successor.state())
+                            committed
                         } else {
                             trace_outcome(&context, primary_id, &result, false);
                             let result = secondary.await;
                             if result.is_success() {
-                                trace_outcome(&context, secondary_id, &result, true);
-                                commit_branch_winner(result, &context, successor.state())
+                                let committed =
+                                    commit_branch_winner(result, &context, successor.state());
+                                trace_outcome(
+                                    &context,
+                                    secondary_id,
+                                    &committed,
+                                    committed.is_success(),
+                                );
+                                committed
                             } else {
                                 trace_outcome(&context, secondary_id, &result, false);
                                 BranchOutcome::failure(successor.state().clone(), ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new("fallback branches produced no usable response")))
@@ -2289,19 +2299,28 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                             primary_cancel.cancel();
                             primary_core_cancel.cancel();
                             let _ = primary.as_mut().await;
-                            trace_outcome(&context, secondary_id, &result, true);
+                            let committed =
+                                commit_branch_winner(result, &context, successor.state());
+                            trace_outcome(&context, secondary_id, &committed, committed.is_success());
                             if primary_id.is_some() {
                                 if let Some(trace) = &context.trace {
                                     trace.borrow_mut().mark(primary_id, "canceled");
                                 }
                             }
-                            commit_branch_winner(result, &context, successor.state())
+                            committed
                         } else {
                             trace_outcome(&context, secondary_id, &result, false);
                             let result = primary.await;
                             if result.is_success() {
-                                trace_outcome(&context, primary_id, &result, true);
-                                commit_branch_winner(result, &context, successor.state())
+                                let committed =
+                                    commit_branch_winner(result, &context, successor.state());
+                                trace_outcome(
+                                    &context,
+                                    primary_id,
+                                    &committed,
+                                    committed.is_success(),
+                                );
+                                committed
                             } else {
                                 trace_outcome(&context, primary_id, &result, false);
                                 BranchOutcome::failure(successor.state().clone(), ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new("fallback branches produced no usable response")))
@@ -2384,14 +2403,16 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                 id
             });
             let result = drive_branch(successor, context.with_branch(branch_id), source).await;
-            trace_outcome(&context, branch_id, &result, result.is_success());
-            if result.is_success()
-                && response_raw(&result.state.response)
+            let fallback_state = result.state.clone();
+            let committed = commit_branch_winner(result, &context, &fallback_state);
+            trace_outcome(&context, branch_id, &committed, committed.is_success());
+            if committed.is_success()
+                && response_raw(&committed.state.response)
                     .is_some_and(|wire| response_has_type(wire, preferred_qtype))
             {
                 remember_preference(&policy, key);
             }
-            return result;
+            return committed;
         }
 
         let original_machine = match successor.fork_branch(CancellationToken::new()) {
@@ -2851,7 +2872,7 @@ fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
         diagnostics.selected = None;
     }
     if let Some(trace) = &facts.policy_trace {
-        trace.borrow_mut().clear_selection(Some("canceled"));
+        trace.borrow_mut().clear_selection();
     }
     result_from_wire(Vec::new(), facts)
 }
@@ -2866,13 +2887,8 @@ fn terminal_policy_failure(error: ExecutionError, mut facts: ExecutionFacts) -> 
     if let Some(diagnostics) = &mut facts.upstream_diagnostics {
         diagnostics.selected = None;
     }
-    let terminal_decision = if matches!(&error, ExecutionError::Cancelled) {
-        "canceled"
-    } else {
-        "interrupted"
-    };
     if let Some(trace) = &facts.policy_trace {
-        trace.borrow_mut().clear_selection(Some(terminal_decision));
+        trace.borrow_mut().clear_selection();
     }
     result_from_wire(Vec::new(), facts)
 }
@@ -3296,6 +3312,7 @@ pub(crate) fn frame_native_response(response: &[u8], mode: FrameMode) -> Option<
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::net::SocketAddr;
     use std::rc::Rc;
     use std::sync::Arc;
     use std::time::Duration;
@@ -3311,9 +3328,9 @@ mod tests {
     };
 
     use super::{
-        ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, compute_effective_tag,
-        diagnose_response_wire, execute_request_with_executor, execute_request_with_observation,
-        policy_failure_for_core,
+        BranchTrace, ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, UpstreamTransport,
+        compute_effective_tag, diagnose_response_wire, execute_request_with_executor,
+        execute_request_with_observation, policy_failure_for_core,
     };
     use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
@@ -6282,6 +6299,25 @@ plugins:
             ))),
             Ok(ExecutorError::Failed(message)) if message == "ordinary policy failure"
         ));
+    }
+
+    #[test]
+    fn terminal_trace_cleanup_clears_supplier_without_relabeling_history() {
+        let mut trace = BranchTrace::new(1);
+        let branch_id = trace.add_branch(None, "original", "prefer_ipv4", 1);
+        trace.mark(Some(branch_id), "selected");
+        trace.candidate(
+            Some(branch_id),
+            "forward".to_owned(),
+            Some("127.0.0.1:53".parse::<SocketAddr>().expect("peer")),
+            Some(UpstreamTransport::Udp),
+        );
+        trace.select(Some(branch_id), true);
+
+        trace.clear_selection();
+
+        assert!(trace.selected.is_none());
+        assert_eq!(trace.branches[branch_id].decision, "selected");
     }
 
     fn futures_like_block_on<F: std::future::Future>(future: F) -> F::Output {
