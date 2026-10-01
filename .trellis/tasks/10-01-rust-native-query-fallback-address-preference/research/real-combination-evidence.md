@@ -212,3 +212,26 @@ passed. Final cleanup restored approximately 3.1 GiB free and 16% inode use.
 The earlier complete workspace integration/doctest split and real DNS/HTTP/
 Vue/secure transport proofs remain valid because this repair is confined to
 `rust/native-host/src/execution.rs`.
+
+## Final terminal-state repair rerun
+
+The dedicated reviewer found two coupled terminal-state defects in the last
+repair. Root `Cancelled` and `BudgetExceeded` errors were classified only
+after the temporary no-usable-upstream provenance had been written, and
+terminal cleanup could relabel every historical selected branch. The repair
+classifies terminal errors before recording recoverable policy failure and
+reduces trace cleanup to clearing only the factual selected supplier. Every
+fallback winner and the preferred-family direct path now records branch
+selection only after its commit gate has returned, so a rejected tentative
+winner cannot leave a newly selected supplier behind; completed historical
+branch decisions remain unchanged.
+
+The next isolated SSH rerun passed all 84 native-host unit tests and all
+native integration suites. The new regression confirms supplier cleanup does
+not relabel historical branch decisions. The cancellation-sensitive API test
+briefly failed once with a timing result of 200 instead of 503, passed on its
+immediate isolated rerun, and passed again in the complete suite. Fmt,
+workspace clippy with `-D warnings`, and serial
+`cargo build --workspace --all-features` passed; exact task-owned Cargo
+targets were removed afterward and resource checks again reported about 3.1
+GiB free and 16% inode use.
