@@ -3,7 +3,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mosdns_dns_core::{
     FrameMode, QueryHeader, QuestionInfo, ResponseError, frame_response, inspect_response_header,
@@ -12,8 +12,8 @@ use mosdns_dns_core::{
 };
 use mosdns_sequence_core::{
     CancellationToken, ExecutableId, ExecutionControl, ExecutionError, ExecutionMachine,
-    ExecutionState, ExecutorOutcome, MachineStep, ResponseState as MachineResponseState,
-    RootFuelHandle, RoutingState, SequenceId,
+    ExecutionState, ExecutorError, ExecutorOutcome, MachineStep,
+    ResponseState as MachineResponseState, RootFuelHandle, RoutingState, SequenceId,
 };
 use mosdns_upstream_core::{ExchangeResponse, TransportCancellation, UpstreamError};
 
@@ -103,6 +103,7 @@ struct BranchContext<'a, E: ExchangeExecutor + ?Sized> {
     root_cancellation: TransportCancellation,
     branch_cancellation: TransportCancellation,
     trace: Option<Rc<RefCell<BranchTrace>>>,
+    branch_metrics: Rc<RefCell<UpstreamAttemptList>>,
     branch_id: Option<usize>,
 }
 
@@ -119,6 +120,7 @@ impl<E: ExchangeExecutor + ?Sized> Clone for BranchContext<'_, E> {
             root_cancellation: self.root_cancellation.clone(),
             branch_cancellation: self.branch_cancellation.clone(),
             trace: self.trace.clone(),
+            branch_metrics: self.branch_metrics.clone(),
             branch_id: self.branch_id,
         }
     }
@@ -254,14 +256,25 @@ impl BranchTrace {
     }
 
     fn finish_attempt(&mut self, token: u64) {
+        self.pending_attempts.remove(&token);
+    }
+
+    fn complete_attempt(
+        &mut self,
+        token: u64,
+        entry: String,
+        peer: Option<SocketAddr>,
+        transport: Option<UpstreamTransport>,
+        outcome: UpstreamAttemptOutcome,
+    ) {
         let Some(index) = self.pending_attempts.remove(&token) else {
             return;
         };
-        self.attempts.remove(index);
-        for pending in self.pending_attempts.values_mut() {
-            if *pending > index {
-                *pending -= 1;
-            }
+        if let Some(attempt) = self.attempts.get_mut(index) {
+            attempt.entry = entry;
+            attempt.peer = peer;
+            attempt.transport = transport;
+            attempt.outcome = outcome;
         }
     }
 
@@ -298,8 +311,84 @@ struct TraceAttemptGuard {
 }
 
 impl TraceAttemptGuard {
+    fn token(&self) -> u64 {
+        self.token
+    }
+
     fn finish(self) {
         self.trace.borrow_mut().finish_attempt(self.token);
+    }
+}
+
+struct BranchLedgerGuard<'a> {
+    config: &'a CompiledConfig,
+    trace: Option<Rc<RefCell<BranchTrace>>>,
+    branch_metrics: Rc<RefCell<UpstreamAttemptList>>,
+    branch_id: Option<usize>,
+    qtype: u16,
+    root_cancellation: TransportCancellation,
+    executable: ExecutableId,
+    ledger: UpstreamAttemptLedgerHandle,
+    trace_token: Option<u64>,
+    recorded: bool,
+}
+
+impl<'a> BranchLedgerGuard<'a> {
+    fn new<E: ExchangeExecutor + ?Sized>(
+        context: &BranchContext<'a, E>,
+        executable: ExecutableId,
+        ledger: UpstreamAttemptLedgerHandle,
+        trace_token: Option<u64>,
+    ) -> Self {
+        Self {
+            config: context.config,
+            trace: context.trace.clone(),
+            branch_metrics: context.branch_metrics.clone(),
+            branch_id: context.branch_id,
+            qtype: context.question.qtype,
+            root_cancellation: context.root_cancellation.clone(),
+            executable,
+            ledger,
+            trace_token,
+            recorded: false,
+        }
+    }
+
+    fn record(
+        &mut self,
+        selected_entry: Option<usize>,
+        fallback_transport: Option<UpstreamTransport>,
+        fallback_outcome: UpstreamAttemptOutcome,
+    ) {
+        record_branch_ledger_data(BranchLedgerRecord {
+            config: self.config,
+            trace: self.trace.as_ref(),
+            branch_metrics: &self.branch_metrics,
+            root_cancelled: self.root_cancellation.is_cancelled(),
+            branch_id: self.branch_id,
+            qtype: self.qtype,
+            executable: self.executable,
+            ledger: &self.ledger,
+            trace_token: self.trace_token,
+            selected_entry,
+            fallback_transport,
+            fallback_outcome,
+        });
+        self.recorded = true;
+    }
+}
+
+impl Drop for BranchLedgerGuard<'_> {
+    fn drop(&mut self) {
+        if self.recorded {
+            return;
+        }
+        let outcome = if self.root_cancellation.is_cancelled() {
+            UpstreamAttemptOutcome::Canceled
+        } else {
+            UpstreamAttemptOutcome::Interrupted
+        };
+        self.record(None, None, outcome);
     }
 }
 
@@ -391,6 +480,30 @@ fn commit_branch_winner<E: ExchangeExecutor + ?Sized>(
     outcome
 }
 
+fn ensure_branch_alive<E: ExchangeExecutor + ?Sized>(
+    machine: &ExecutionMachine<'_>,
+    context: &BranchContext<'_, E>,
+) -> Result<(), ExecutionError> {
+    if context.root_cancellation.is_cancelled()
+        || context.branch_cancellation.is_cancelled()
+        || machine.control().is_cancelled()
+    {
+        return Err(ExecutionError::Cancelled);
+    }
+    if Instant::now() >= context.deadline {
+        return Err(ExecutionError::BudgetExceeded);
+    }
+    Ok(())
+}
+
+fn consume_external_target<E: ExchangeExecutor + ?Sized>(
+    machine: &mut ExecutionMachine<'_>,
+    context: &BranchContext<'_, E>,
+) -> Result<(), ExecutionError> {
+    ensure_branch_alive(machine, context)?;
+    machine.control_mut().try_consume()
+}
+
 /// Facts produced by the canonical execution path for one parsed query.
 /// Listener-owned framing and terminal transport outcome are added later.
 #[derive(Clone, Debug)]
@@ -420,6 +533,7 @@ struct ExecutionFacts<'a> {
     selected_peer: Option<SocketAddr>,
     upstream_diagnostics: Option<UpstreamDiagnostics>,
     policy_trace: Option<Rc<RefCell<BranchTrace>>>,
+    branch_metrics: Rc<RefCell<UpstreamAttemptList>>,
     failure_provenance: Option<FailureProvenance>,
     /// The real named-sequence execution position, materialized only when
     /// detailed audit capture is enabled.
@@ -448,6 +562,12 @@ impl ExecutionFacts<'_> {
         }
         if self.policy_trace.is_none() {
             self.policy_trace = Some(Rc::new(RefCell::new(BranchTrace::new(qtype))));
+            if let Some(diagnostics) = self.upstream_diagnostics.as_mut() {
+                for attempt in &mut diagnostics.attempts {
+                    attempt.branch_id = Some(0);
+                    attempt.qtype = Some(qtype);
+                }
+            }
         }
         self.policy_trace.clone()
     }
@@ -466,7 +586,16 @@ impl ExecutionFacts<'_> {
         for (ordinal, attempt) in diagnostics.attempts.iter_mut().enumerate() {
             attempt.ordinal = ordinal;
         }
-        diagnostics.selected = trace.selected.clone();
+        if trace.selected.is_some() {
+            diagnostics.selected = trace.selected.clone();
+        }
+    }
+
+    fn absorb_branch_metrics(&mut self) {
+        let branch_metrics = std::mem::take(&mut *self.branch_metrics.borrow_mut());
+        for attempt in branch_metrics.metric_attempts() {
+            self.upstream_attempts.push_metric(*attempt);
+        }
     }
 
     fn set_response_source(&mut self, source: ResponseSource) {
@@ -801,6 +930,13 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
             attempts: Vec::new(),
         }),
         policy_trace: None,
+        branch_metrics: Rc::new(RefCell::new(UpstreamAttemptList::with_capacity_hint(
+            if multi_forward {
+                config.forwards.len()
+            } else {
+                0
+            },
+        ))),
         failure_provenance: None,
         // No entry-tag backfill: the field carries the real executing position
         // recorded during execution, or nothing when none was observed.
@@ -914,6 +1050,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         root_cancellation: request_shutdown.clone(),
                         branch_cancellation: request_shutdown.child_token(),
                         trace,
+                        branch_metrics: facts.branch_metrics.clone(),
                         branch_id: Some(0),
                     };
                     let successor = match machine.fork_successor(CancellationToken::new()) {
@@ -927,14 +1064,18 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             return result_from_state(&machine, &header, &question, facts);
                         }
                     };
-                    let outcome = run_fallback(policy.clone(), successor, context, None).await;
+                    let inherited_source = match facts.response_source.as_ref() {
+                        Some(ResponseSource::Upstream(source)) => Some(source.clone()),
+                        _ => None,
+                    };
+                    let outcome =
+                        run_fallback(policy.clone(), successor, context, inherited_source).await;
                     if let Some(error) = outcome.error {
                         facts.set_failure_provenance(FailureProvenance::LocalFailure(
                             LocalFailureKind::NoUsableUpstreamResponse,
                         ));
-                        set_servfail(&mut machine);
-                        facts.set_response_source(ResponseSource::Local);
-                        let _ = error;
+                        let _ = machine
+                            .resume(dispatch.executable(), Err(policy_execution_error(error)));
                         return result_from_state(&machine, &header, &question, facts);
                     }
                     if let Some(source) = outcome.source.clone() {
@@ -972,6 +1113,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         root_cancellation: request_shutdown.clone(),
                         branch_cancellation: request_shutdown.child_token(),
                         trace,
+                        branch_metrics: facts.branch_metrics.clone(),
                         branch_id: Some(0),
                     };
                     let successor = match machine.fork_successor(CancellationToken::new()) {
@@ -985,15 +1127,19 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             return result_from_state(&machine, &header, &question, facts);
                         }
                     };
+                    let inherited_source = match facts.response_source.as_ref() {
+                        Some(ResponseSource::Upstream(source)) => Some(source.clone()),
+                        _ => None,
+                    };
                     let outcome =
-                        run_preference(preference.clone(), successor, context, None).await;
+                        run_preference(preference.clone(), successor, context, inherited_source)
+                            .await;
                     if let Some(error) = outcome.error {
                         facts.set_failure_provenance(FailureProvenance::LocalFailure(
                             LocalFailureKind::NoUsableUpstreamResponse,
                         ));
-                        set_servfail(&mut machine);
-                        facts.set_response_source(ResponseSource::Local);
-                        let _ = error;
+                        let _ = machine
+                            .resume(dispatch.executable(), Err(policy_execution_error(error)));
                         return result_from_state(&machine, &header, &question, facts);
                     }
                     if let Some(source) = outcome.source.clone() {
@@ -1258,6 +1404,9 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
     mut source: Option<String>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
     Box::pin(async move {
+        if let Err(error) = ensure_branch_alive(&machine, &context) {
+            return BranchOutcome::failure(machine.state().clone(), error);
+        }
         let mut pending_store = None;
         let mut cache_accessed = false;
         let mut publication_deadline = None;
@@ -1266,6 +1415,9 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
             Err(error) => return BranchOutcome::failure(machine.state().clone(), error),
         };
         loop {
+            if let Err(error) = ensure_branch_alive(&machine, &context) {
+                return BranchOutcome::failure(machine.state().clone(), error);
+            }
             match step {
                 MachineStep::Complete(_) => {
                     if matches!(machine.state().response, MachineResponseState::None) {
@@ -1419,6 +1571,12 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
                     let branch_cancellation = context.branch_cancellation.child_token();
                     let ledger = UpstreamAttemptLedger::default().into_shared();
                     let trace_attempt = begin_branch_attempt(&context, dispatch.executable());
+                    let mut ledger_guard = BranchLedgerGuard::new(
+                        &context,
+                        dispatch.executable(),
+                        ledger.clone(),
+                        trace_attempt.as_ref().map(TraceAttemptGuard::token),
+                    );
                     let exchange = context
                         .executor
                         .exchange_invocation(
@@ -1429,9 +1587,6 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
                             ledger.clone(),
                         )
                         .await;
-                    if let Some(trace_attempt) = trace_attempt {
-                        trace_attempt.finish();
-                    }
                     let selected_entry = exchange
                         .as_ref()
                         .ok()
@@ -1463,10 +1618,7 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
                         }),
                         Err(_) => None,
                     };
-                    record_branch_ledger(
-                        &context,
-                        dispatch.executable(),
-                        &ledger,
+                    ledger_guard.record(
                         selected_entry,
                         response_transport,
                         if response.is_some() {
@@ -1475,6 +1627,9 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
                             UpstreamAttemptOutcome::Failed
                         },
                     );
+                    if let Some(trace_attempt) = trace_attempt {
+                        trace_attempt.finish();
+                    }
                     let Some((wire, identity)) = response else {
                         return BranchOutcome::failure(
                             machine.state().clone(),
@@ -1573,6 +1728,9 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                 }
             }
             NativeTarget::External(executable) => {
+                if let Err(error) = consume_external_target(&mut successor, &context) {
+                    return BranchOutcome::failure(successor.state().clone(), error);
+                }
                 if let Some(policy) = context
                     .config
                     .fallbacks
@@ -1595,20 +1753,33 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                     .as_ref()
                     .is_some_and(|cache| cache.executable == executable)
                 {
-                    let Some(wire) = context.cache.lookup(context.raw()).ok().flatten() else {
-                        return BranchOutcome::failure(
-                            successor.state().clone(),
-                            ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
-                                "fallback cache branch missed",
-                            )),
-                        );
-                    };
-                    successor.state_mut().set_raw_response(wire);
-                    return drive_branch(successor, context, None).await;
+                    if let Ok(Some(wire)) = context.cache.lookup(context.raw()) {
+                        successor.state_mut().set_raw_response(wire);
+                        return drive_branch(successor, context, None).await;
+                    }
+                    let pending_store = context.cache.begin_store(context.raw()).ok().flatten();
+                    let result = drive_branch(successor, context.clone(), source).await;
+                    if result.is_success()
+                        && !context.root_cancellation.is_cancelled()
+                        && Instant::now() < context.deadline
+                    {
+                        if let Some(token) = pending_store {
+                            if let MachineResponseState::Raw(wire) = &result.state.response {
+                                let _ = token.publish(wire.as_bytes());
+                            }
+                        }
+                    }
+                    return result;
                 }
                 let cancellation = context.branch_cancellation.child_token();
                 let ledger = UpstreamAttemptLedger::default().into_shared();
                 let trace_attempt = begin_branch_attempt(&context, executable);
+                let mut ledger_guard = BranchLedgerGuard::new(
+                    &context,
+                    executable,
+                    ledger.clone(),
+                    trace_attempt.as_ref().map(TraceAttemptGuard::token),
+                );
                 let exchange = context
                     .executor
                     .exchange_invocation(
@@ -1619,9 +1790,6 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                         ledger.clone(),
                     )
                     .await;
-                if let Some(trace_attempt) = trace_attempt {
-                    trace_attempt.finish();
-                }
                 let selected_entry = exchange
                     .as_ref()
                     .ok()
@@ -1633,10 +1801,7 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                 let wire = exchange.as_ref().ok().and_then(|batch| {
                     qualify_response(batch.response.wire(), context.header.id, &context.question)
                 });
-                record_branch_ledger(
-                    &context,
-                    executable,
-                    &ledger,
+                ledger_guard.record(
                     selected_entry,
                     response_transport,
                     if wire.is_some() {
@@ -1645,6 +1810,9 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                         UpstreamAttemptOutcome::Failed
                     },
                 );
+                if let Some(trace_attempt) = trace_attempt {
+                    trace_attempt.finish();
+                }
                 let Some(wire) = wire else {
                     return BranchOutcome::failure(
                         successor.state().clone(),
@@ -1680,6 +1848,8 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
         let secondary_cancel = context.branch_cancellation.child_token();
         let primary_core = CancellationToken::new();
         let secondary_core = CancellationToken::new();
+        let primary_core_cancel = primary_core.clone();
+        let secondary_core_cancel = secondary_core.clone();
         let primary_machine = match successor.fork_branch(primary_core) {
             Ok(machine) => machine,
             Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
@@ -1735,6 +1905,10 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                 if let Some(result) = primary_result.take() {
                     if result.is_success() && (released || secondary_result.is_some()) {
                         secondary_cancel.cancel();
+                        secondary_core_cancel.cancel();
+                        if secondary_result.is_none() {
+                            let _ = secondary.as_mut().await;
+                        }
                         trace_outcome(&context, primary_id, &result, true);
                         if let Some(secondary_result) = secondary_result.as_ref() {
                             trace_outcome(&context, secondary_id, secondary_result, false);
@@ -1750,6 +1924,10 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                 if let Some(result) = secondary_result.take() {
                     if result.is_success() && (released || primary_result.is_some()) {
                         primary_cancel.cancel();
+                        primary_core_cancel.cancel();
+                        if primary_result.is_none() {
+                            let _ = primary.as_mut().await;
+                        }
                         trace_outcome(&context, secondary_id, &result, true);
                         if let Some(primary_result) = primary_result.as_ref() {
                             trace_outcome(&context, primary_id, primary_result, false);
@@ -1791,6 +1969,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
             result = &mut primary => {
                 if result.is_success() {
                     secondary_cancel.cancel();
+                    secondary_core_cancel.cancel();
                     trace_outcome(&context, primary_id, &result, true);
                     return commit_branch_winner(result, &context, successor.state());
                 }
@@ -1802,7 +1981,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                     context
                         .with_branch(secondary_id)
                         .with_transport_cancellation(secondary_cancel.clone()),
-                    result.source.clone(),
+                    source.clone(),
                 );
                 let secondary = Box::pin(secondary);
                 let result = secondary.await;
@@ -1834,6 +2013,8 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                     result = &mut primary => {
                         if result.is_success() {
                             secondary_cancel.cancel();
+                            secondary_core_cancel.cancel();
+                            let _ = secondary.as_mut().await;
                             trace_outcome(&context, primary_id, &result, true);
                             if secondary_id.is_some() {
                                 if let Some(trace) = &context.trace {
@@ -1856,6 +2037,8 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                     result = &mut secondary => {
                         if result.is_success() {
                             primary_cancel.cancel();
+                            primary_core_cancel.cancel();
+                            let _ = primary.as_mut().await;
                             trace_outcome(&context, secondary_id, &result, true);
                             if primary_id.is_some() {
                                 if let Some(trace) = &context.trace {
@@ -1907,6 +2090,23 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
             if context.question.qtype != preferred_qtype
                 && evidence.get(&key).is_some_and(|expiry| *expiry > now)
             {
+                if let Some(trace) = &context.trace {
+                    let mut trace = trace.borrow_mut();
+                    let original_id = trace.add_branch(
+                        context.branch_id,
+                        "original",
+                        policy_name,
+                        context.question.qtype,
+                    );
+                    let reference_id = trace.add_branch(
+                        context.branch_id,
+                        "reference",
+                        policy_name,
+                        preferred_qtype,
+                    );
+                    trace.mark(Some(original_id), "suppressed");
+                    trace.mark(Some(reference_id), "skipped");
+                }
                 if successor.state_mut().set_synthesized_response(0).is_err() {
                     return BranchOutcome::failure(
                         successor.state().clone(),
@@ -1966,6 +2166,8 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
         let reference_context = context.with_query(reference_raw, reference_question);
         let original_transport = context.branch_cancellation.child_token();
         let reference_transport = context.branch_cancellation.child_token();
+        let original_core_cancel = original_machine.control().cancellation_token();
+        let reference_core_cancel = reference_machine.control().cancellation_token();
         let original_context = context.with_transport_cancellation(original_transport.clone());
         let reference_context =
             reference_context.with_transport_cancellation(reference_transport.clone());
@@ -1985,17 +2187,13 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
             (None, None)
         };
         trace_start(&context, reference_id);
-        let wait = context
-            .deadline
-            .saturating_duration_since(Instant::now())
-            .min(std::time::Duration::from_millis(500));
         let original_context = original_context.with_branch(original_id);
         let reference_context = reference_context.with_branch(reference_id);
         let mut original = Box::pin(drive_branch(original_machine, original_context, source));
         let mut reference = Box::pin(drive_branch(reference_machine, reference_context, None));
         let mut original_result: Option<BranchOutcome> = None;
         let mut reference_result: Option<BranchOutcome> = None;
-        let mut wait_timer = Box::pin(tokio::time::sleep(wait));
+        let mut wait_timer = Box::pin(tokio::time::sleep(Duration::from_secs(31_536_000)));
         loop {
             if let Some(reference_value) = reference_result.as_ref() {
                 if reference_value.is_success()
@@ -2011,6 +2209,10 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                         );
                     }
                     original_transport.cancel();
+                    original_core_cancel.cancel();
+                    if original_result.is_none() {
+                        let _ = original.as_mut().await;
+                    }
                     if let Some(reference_value) = reference_result.as_ref() {
                         trace_outcome(&context, reference_id, reference_value, false);
                     }
@@ -2054,10 +2256,21 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
             }
             tokio::select! {
                 biased;
-                result = &mut original, if original_result.is_none() => original_result = Some(result),
+                result = &mut original, if original_result.is_none() => {
+                    original_result = Some(result);
+                    let wait = context
+                        .deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(500));
+                    wait_timer
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + wait);
+                },
                 result = &mut reference, if reference_result.is_none() => reference_result = Some(result),
                 _ = &mut wait_timer, if original_result.is_some() && reference_result.is_none() => {
                     reference_transport.cancel();
+                    reference_core_cancel.cancel();
+                    let _ = reference.as_mut().await;
                     let original_value = original_result.take().unwrap_or_else(|| BranchOutcome::failure(
                         successor.state().clone(),
                         ExecutionError::BudgetExceeded,
@@ -2247,55 +2460,145 @@ fn branch_transport(transport: mosdns_upstream_core::Transport) -> UpstreamTrans
     }
 }
 
-fn record_branch_ledger<E: ExchangeExecutor + ?Sized>(
-    context: &BranchContext<'_, E>,
+struct BranchLedgerRecord<'a> {
+    config: &'a CompiledConfig,
+    trace: Option<&'a Rc<RefCell<BranchTrace>>>,
+    branch_metrics: &'a Rc<RefCell<UpstreamAttemptList>>,
+    root_cancelled: bool,
+    branch_id: Option<usize>,
+    qtype: u16,
     executable: ExecutableId,
-    ledger: &UpstreamAttemptLedgerHandle,
+    ledger: &'a UpstreamAttemptLedgerHandle,
+    trace_token: Option<u64>,
     selected_entry: Option<usize>,
     fallback_transport: Option<UpstreamTransport>,
     fallback_outcome: UpstreamAttemptOutcome,
-) {
-    let Some(trace) = &context.trace else {
-        return;
-    };
+}
+
+fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
+    let BranchLedgerRecord {
+        config,
+        trace,
+        branch_metrics,
+        root_cancelled,
+        branch_id,
+        qtype,
+        executable,
+        ledger,
+        trace_token,
+        selected_entry,
+        fallback_transport,
+        fallback_outcome,
+    } = record;
     let slots = ledger.borrow().slots().to_vec();
-    let mut trace = trace.borrow_mut();
+    let trace = trace.cloned();
     if slots.is_empty() {
-        let entry = upstream_identity(context.config, executable)
+        let entry = upstream_identity(config, executable)
             .unwrap_or_else(|| format!("executable:{:?}", executable));
-        trace.record_attempt(
-            context.branch_id,
-            context.question.qtype,
-            entry.clone(),
-            None,
-            fallback_transport,
-            fallback_outcome,
-        );
-        if fallback_outcome == UpstreamAttemptOutcome::Response {
-            trace.candidate(context.branch_id, entry, None, fallback_transport);
+        branch_metrics
+            .borrow_mut()
+            .push_metric(UpstreamMetricAttempt {
+                executable,
+                entry_index: 0,
+                outcome: fallback_outcome,
+            });
+        if let Some(trace) = trace {
+            let mut trace = trace.borrow_mut();
+            if let Some(token) = trace_token {
+                trace.complete_attempt(
+                    token,
+                    entry.clone(),
+                    None,
+                    fallback_transport,
+                    fallback_outcome,
+                );
+            } else {
+                trace.record_attempt(
+                    branch_id,
+                    qtype,
+                    entry.clone(),
+                    None,
+                    fallback_transport,
+                    fallback_outcome,
+                );
+            }
+            if fallback_outcome == UpstreamAttemptOutcome::Response {
+                trace.candidate(branch_id, entry, None, fallback_transport);
+            }
         }
         return;
     }
-    for slot in slots {
-        let entry = invocation_identity(context.config, executable, slot.entry_index)
+    let mut slots = slots.into_iter();
+    if let Some(slot) = slots.next() {
+        let entry = invocation_identity(config, executable, slot.entry_index)
             .unwrap_or_else(|| format!("executable:{:?}:{}", executable, slot.entry_index));
-        let outcome = slot.outcome.unwrap_or_else(|| {
-            if context.root_cancellation.is_cancelled() {
+        let outcome = slot.outcome.unwrap_or({
+            if root_cancelled {
                 UpstreamAttemptOutcome::Canceled
             } else {
                 UpstreamAttemptOutcome::Interrupted
             }
         });
-        trace.record_attempt(
-            context.branch_id,
-            context.question.qtype,
-            entry.clone(),
-            slot.peer,
-            slot.transport,
-            outcome,
-        );
-        if selected_entry == Some(slot.entry_index) && outcome == UpstreamAttemptOutcome::Response {
-            trace.candidate(context.branch_id, entry, slot.peer, slot.transport);
+        branch_metrics
+            .borrow_mut()
+            .push_metric(UpstreamMetricAttempt {
+                executable,
+                entry_index: slot.entry_index,
+                outcome,
+            });
+        if let Some(trace) = &trace {
+            let mut trace = trace.borrow_mut();
+            if let Some(token) = trace_token {
+                trace.complete_attempt(token, entry.clone(), slot.peer, slot.transport, outcome);
+            } else {
+                trace.record_attempt(
+                    branch_id,
+                    qtype,
+                    entry.clone(),
+                    slot.peer,
+                    slot.transport,
+                    outcome,
+                );
+            }
+            if selected_entry == Some(slot.entry_index)
+                && outcome == UpstreamAttemptOutcome::Response
+            {
+                trace.candidate(branch_id, entry, slot.peer, slot.transport);
+            }
+        }
+    }
+    for slot in slots {
+        let entry = invocation_identity(config, executable, slot.entry_index)
+            .unwrap_or_else(|| format!("executable:{:?}:{}", executable, slot.entry_index));
+        let outcome = slot.outcome.unwrap_or({
+            if root_cancelled {
+                UpstreamAttemptOutcome::Canceled
+            } else {
+                UpstreamAttemptOutcome::Interrupted
+            }
+        });
+        branch_metrics
+            .borrow_mut()
+            .push_metric(UpstreamMetricAttempt {
+                executable,
+                entry_index: slot.entry_index,
+                outcome,
+            });
+        if let Some(trace) = &trace {
+            let mut trace = trace.borrow_mut();
+            trace.record_attempt(
+                branch_id,
+                qtype,
+                entry.clone(),
+                slot.peer,
+                slot.transport,
+                outcome,
+            );
+            if selected_entry == Some(slot.entry_index)
+                && outcome == UpstreamAttemptOutcome::Response
+            {
+                trace.candidate(branch_id, entry, slot.peer, slot.transport);
+            }
         }
     }
 }
@@ -2324,6 +2627,7 @@ fn result_from_state(
 }
 
 fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> ExecutionResult {
+    facts.absorb_branch_metrics();
     facts.finalize_policy_trace();
     let routing = if response_wire.is_empty() {
         RoutingState::default()
@@ -2680,6 +2984,13 @@ fn set_servfail(machine: &mut ExecutionMachine<'_>) {
     let _ = machine
         .state_mut()
         .set_synthesized_response(u16::from(SERVFAIL));
+}
+
+fn policy_execution_error(error: ExecutionError) -> ExecutorError {
+    match error {
+        ExecutionError::Executor(error) => error,
+        error => ExecutorError::new(format!("native policy branch failed: {error:?}")),
+    }
 }
 
 pub(crate) fn response_from_state(

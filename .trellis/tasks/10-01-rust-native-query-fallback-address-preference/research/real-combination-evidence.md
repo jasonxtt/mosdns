@@ -34,6 +34,12 @@ task-owned isolated directory:
   `cargo clippy --workspace --all-targets -- -D warnings`: passed.
 - `cargo build -p mosdns-native-host -j 1`: passed.
 
+After the dedicated review's scoped FAIL, the repair round repeated the
+native-host test package and the non-native workspace split. Both passed
+again, including integrations and doctests. The repair round also repeated
+format check, workspace clippy, the fallback/preference unit tests, and the
+native-host binary build.
+
 The split workspace commands cover the same workspace packages while keeping
 the task-owned remote target below the available disk budget. The monolithic
 workspace attempt is retained as a resource limitation, not reported as green.
@@ -53,6 +59,9 @@ secondary. The HTTP audit response showed:
 - primary branch `decision: canceled` with an `interrupted` attempt;
 - secondary branch `decision: selected`;
 - selected source `secondary_forward`, peer `127.0.0.1:18532`, transport `udp`.
+
+The repaired run additionally showed the primary attempt's peer and preserved
+registration order: ordinal 0 primary/canceled, ordinal 1 secondary/response.
 
 The built Vue bundle was served from a task-owned static HTTP process on port
 18082 and returned `HTTP/1.0 200 OK` for `/index.html`. All four task-owned
