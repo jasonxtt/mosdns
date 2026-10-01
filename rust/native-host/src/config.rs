@@ -24,8 +24,6 @@ use crate::matchers::{
 };
 use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 
-const MAX_FALLBACK_THRESHOLD: Duration = Duration::from_secs(100 * 365 * 24 * 60 * 60);
-
 /// The only accepted log level in the native host subset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogLevel {
@@ -1363,7 +1361,7 @@ fn compile_fallback(plugin: &RawPlugin) -> Result<FallbackDefinition, ConfigErro
             ));
         }
     };
-    if threshold > MAX_FALLBACK_THRESHOLD || Instant::now().checked_add(threshold).is_none() {
+    if Instant::now().checked_add(threshold).is_none() {
         return Err(ConfigError::new(
             format!("{path}.threshold"),
             "threshold is too large for monotonic deadline arithmetic",
@@ -2565,7 +2563,7 @@ impl<'de> Deserialize<'de> for RawValue {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use mosdns_sequence_core::{ExecutionControl, ExecutionState};
     use mosdns_upstream_core::Transport;
@@ -2647,9 +2645,13 @@ plugins:
 
         let overflow =
             compile_yaml(&yaml.replace("always_standby: true", "threshold: 18446744073709551615"));
-        assert!(
+        let absolute_overflow = Instant::now()
+            .checked_add(Duration::from_millis(u64::MAX))
+            .is_none();
+        assert_eq!(
             overflow.is_err(),
-            "absolute threshold overflow must fail load"
+            absolute_overflow,
+            "load validation must mirror platform monotonic deadline arithmetic"
         );
     }
 

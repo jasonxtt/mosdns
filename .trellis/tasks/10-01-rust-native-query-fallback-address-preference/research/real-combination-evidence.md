@@ -9,8 +9,8 @@ task-owned isolated directory:
 
 ## Remote resource and ownership checks
 
-- Preflight and final checks reported approximately 1.7 GiB free on `/root`
-  and 16% inode use.
+- Preflight and final checks reported approximately 3.1 GiB free on `/root`
+  and 16% inode use after each exact task-owned Cargo target was removed.
 - One earlier monolithic workspace test attempt filled the task-owned Cargo
   target filesystem. Its exact task-owned test processes were stopped and its
   exact task-owned target directory was removed. That attempt is not counted
@@ -46,6 +46,17 @@ failure and is not counted as green.
 The split workspace commands cover the same workspace packages while keeping
 the task-owned remote target below the available disk budget. The monolithic
 workspace attempt is retained as a resource limitation, not reported as green.
+
+After the final dedicated-review repair, the clean rerun passed the complete
+native-host integration package again (82 unit tests plus all native
+integration suites), the complete non-native workspace split again (including
+the long DoQ/DoH3 composition tests and doctests), and final fmt/clippy. The
+repair specifically removed the extra threshold cap, made cache guards
+branch-local, preserved nested factual supplier selection, used the
+primary-first standby poll, closed policy failures with the already-driven
+successor state, and allowed a named sequence target with no response to feed
+the common successor. The transient full-target disk failures were retained
+as evidence but are not counted as green.
 
 ## Real fallback DNS + HTTP + Vue proof
 
