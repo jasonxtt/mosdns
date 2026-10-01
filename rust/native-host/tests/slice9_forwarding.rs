@@ -618,6 +618,47 @@ async fn serve_dot(listener: std::net::TcpListener, config: std::sync::Arc<rustl
     stream.write_all(&response).await.unwrap();
 }
 
+async fn serve_dot_busy(
+    listener: std::net::TcpListener,
+    config: std::sync::Arc<rustls::ServerConfig>,
+    first_arrived: std::sync::Arc<tokio::sync::Notify>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio_rustls::TlsAcceptor;
+
+    let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+    let (stream, _) = listener.accept().await.unwrap();
+    let mut first = TlsAcceptor::from(config.clone())
+        .accept(stream)
+        .await
+        .unwrap();
+    let length = first.read_u16().await.unwrap() as usize;
+    let mut first_packet = vec![0; length];
+    first.read_exact(&mut first_packet).await.unwrap();
+    first_arrived.notify_one();
+
+    let (stream, _) = listener.accept().await.unwrap();
+    let mut second = TlsAcceptor::from(config).accept(stream).await.unwrap();
+    let length = second.read_u16().await.unwrap() as usize;
+    let mut second_packet = vec![0; length];
+    second.read_exact(&mut second_packet).await.unwrap();
+    let response = answer_ip(first_packet, [192, 0, 2, 57]);
+    first
+        .write_u16(u16::try_from(response.len()).unwrap())
+        .await
+        .unwrap();
+    first.write_all(&response).await.unwrap();
+    first.flush().await.unwrap();
+
+    let response = answer_ip(second_packet, [192, 0, 2, 56]);
+    second
+        .write_u16(u16::try_from(response.len()).unwrap())
+        .await
+        .unwrap();
+    second.write_all(&response).await.unwrap();
+    second.flush().await.unwrap();
+}
+
 fn doh_query(target: &str) -> Vec<u8> {
     use base64::Engine as _;
 
@@ -671,6 +712,76 @@ async fn serve_doh_h1(
         tokio::time::timeout(std::time::Duration::from_secs(3), stream.read(&mut scratch)).await;
 }
 
+async fn serve_doh_h1_busy(
+    listener: std::net::TcpListener,
+    config: std::sync::Arc<rustls::ServerConfig>,
+    first_arrived: std::sync::Arc<tokio::sync::Notify>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio_rustls::TlsAcceptor;
+
+    let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+    let (stream, _) = listener.accept().await.unwrap();
+    let mut first = TlsAcceptor::from(config.clone())
+        .accept(stream)
+        .await
+        .unwrap();
+    let mut buffer = Vec::new();
+    let mut chunk = [0; 512];
+    while !buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+        let length = first.read(&mut chunk).await.unwrap();
+        assert_ne!(length, 0);
+        buffer.extend_from_slice(&chunk[..length]);
+    }
+    let first_target = String::from_utf8(buffer)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .to_owned();
+    first_arrived.notify_one();
+
+    let (stream, _) = listener.accept().await.unwrap();
+    let mut second = TlsAcceptor::from(config).accept(stream).await.unwrap();
+    let mut buffer = Vec::new();
+    while !buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+        let length = second.read(&mut chunk).await.unwrap();
+        assert_ne!(length, 0);
+        buffer.extend_from_slice(&chunk[..length]);
+    }
+    let second_target = String::from_utf8(buffer)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .to_owned();
+    let response = answer_ip(doh_query(&first_target), [192, 0, 2, 59]);
+    let header = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/dns-message\r\ncontent-length: {}\r\n\r\n",
+        response.len()
+    );
+    first.write_all(header.as_bytes()).await.unwrap();
+    first.write_all(&response).await.unwrap();
+    first.flush().await.unwrap();
+
+    let response = answer_ip(doh_query(&second_target), [192, 0, 2, 58]);
+    let header = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/dns-message\r\ncontent-length: {}\r\n\r\n",
+        response.len()
+    );
+    second.write_all(header.as_bytes()).await.unwrap();
+    second.write_all(&response).await.unwrap();
+    second.flush().await.unwrap();
+    let mut scratch = [0; 64];
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), first.read(&mut scratch)).await;
+}
+
 async fn serve_doh_h2(
     listener: std::net::TcpListener,
     config: std::sync::Arc<rustls::ServerConfig>,
@@ -696,6 +807,59 @@ async fn serve_doh_h2(
     let mut send = respond.send_response(head, false).unwrap();
     send.send_data(Bytes::from(response), true).unwrap();
     let _ = connection.accept().await;
+}
+
+async fn serve_doh_h2_busy(
+    listener: std::net::TcpListener,
+    config: std::sync::Arc<rustls::ServerConfig>,
+    first_arrived: std::sync::Arc<tokio::sync::Notify>,
+) {
+    use bytes::Bytes;
+    use h2::server;
+    use tokio_rustls::TlsAcceptor;
+
+    let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+    let (stream, _) = listener.accept().await.unwrap();
+    let tls = TlsAcceptor::from(config.clone())
+        .accept(stream)
+        .await
+        .unwrap();
+    let mut first_connection = server::handshake(tls).await.unwrap();
+    let Some(Ok((first_request, mut first_respond))) = first_connection.accept().await else {
+        panic!("first DoH H2 request was not received")
+    };
+    let _first_target = first_request
+        .uri()
+        .path_and_query()
+        .unwrap()
+        .as_str()
+        .to_owned();
+    first_arrived.notify_one();
+
+    let (stream, _) = listener.accept().await.unwrap();
+    let tls = TlsAcceptor::from(config).accept(stream).await.unwrap();
+    let mut second_connection = server::handshake(tls).await.unwrap();
+    let Some(Ok((_second_request, mut second_respond))) = second_connection.accept().await else {
+        panic!("second DoH H2 request was not received")
+    };
+    let response = answer_ip(query(), [192, 0, 2, 61]);
+    let head = http::Response::builder()
+        .status(200)
+        .header("content-type", "application/dns-message")
+        .body(())
+        .unwrap();
+    let mut send = first_respond.send_response(head, false).unwrap();
+    send.send_data(Bytes::from(response), true).unwrap();
+
+    let response = answer_ip(query(), [192, 0, 2, 60]);
+    let head = http::Response::builder()
+        .status(200)
+        .header("content-type", "application/dns-message")
+        .body(())
+        .unwrap();
+    let mut send = second_respond.send_response(head, false).unwrap();
+    send.send_data(Bytes::from(response), true).unwrap();
+    let _ = tokio::join!(first_connection.accept(), second_connection.accept());
 }
 
 #[test]
@@ -757,5 +921,90 @@ fn native_secure_forwarding_proves_dot_and_doh_h1_h2_with_synthetic_ca() {
             diagnostics.attempts[0].outcome,
             mosdns_native_host::UpstreamAttemptOutcome::Response
         );
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn secure_busy_admission_uses_a_fresh_connection_for_dot_and_doh() {
+    use mosdns_native_host::{HostAssembly, HostOptions};
+    use mosdns_upstream_core::TransportCancellation;
+    use std::time::{Duration, Instant};
+
+    let fixture = std::sync::Arc::new(secure_fixture());
+    let cases = [("tls", "dot"), ("https", "h1"), ("https", "h2")];
+    for (scheme, protocol) in cases {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dial = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let config = match protocol {
+            "dot" => secure_server_config(&fixture, &[]),
+            "h1" => secure_server_config(&fixture, &[b"http/1.1"]),
+            "h2" => secure_server_config(&fixture, &[b"h2"]),
+            _ => unreachable!(),
+        };
+        let host = HostAssembly::with_options(
+            mosdns_native_host::compile_yaml(&secure_yaml(scheme, dial)).unwrap(),
+            HostOptions::default().with_tls_roots(root_store(&fixture)),
+        )
+        .unwrap();
+        let first_arrived = std::sync::Arc::new(tokio::sync::Notify::new());
+        host.block_on(async {
+            let fixture_task = match protocol {
+                "dot" => tokio::task::spawn_local(serve_dot_busy(
+                    listener,
+                    config,
+                    first_arrived.clone(),
+                )),
+                "h1" => tokio::task::spawn_local(serve_doh_h1_busy(
+                    listener,
+                    config,
+                    first_arrived.clone(),
+                )),
+                "h2" => tokio::task::spawn_local(serve_doh_h2_busy(
+                    listener,
+                    config,
+                    first_arrived.clone(),
+                )),
+                _ => unreachable!(),
+            };
+            let owner = host.forward().expect("one secure forward");
+            let first_cancellation = TransportCancellation::new();
+            let second_cancellation = TransportCancellation::new();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let first_query = query();
+            let second_query = query();
+            let first_wait = first_arrived.notified();
+            let first = owner.exchange(&first_query, deadline, first_cancellation.clone());
+            let second = async {
+                first_wait.await;
+                let result = owner
+                    .exchange(&second_query, deadline, second_cancellation)
+                    .await;
+                first_cancellation.cancel();
+                result
+            };
+            let (_first, second) = Box::pin(tokio::time::timeout(Duration::from_secs(3), async {
+                tokio::join!(first, second)
+            }))
+            .await
+            .expect("busy admission must not hang");
+            assert!(
+                second.is_ok(),
+                "protocol={protocol}, second={:?}",
+                second.as_ref().err()
+            );
+            fixture_task.await.unwrap();
+
+            let bound = host.bind_host().await.unwrap();
+            let shutdown = TransportCancellation::new();
+            let service = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+            shutdown.cancel();
+            tokio::time::timeout(Duration::from_secs(3), service)
+                .await
+                .expect("secure owner close must drain")
+                .unwrap()
+                .unwrap();
+        });
     }
 }

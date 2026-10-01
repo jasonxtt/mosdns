@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::cache::{CacheAdapterError, CacheClock, NativeCacheAdapter};
 use mosdns_dns_core::parse_query;
+use mosdns_upstream_core::secure::{DohUpstream, DotUpstream};
 use mosdns_upstream_core::{
     AddressFamily, BootstrapEndpoint, BootstrapResolver, DohEndpoint, DohReuseOwner, DotEndpoint,
     Endpoint, ExchangeContext, ExchangeRequest, ExchangeResponse, ResolutionMode, ResolutionPolicy,
@@ -607,8 +608,14 @@ enum ForwardOwner {
         reuse: ReuseOwner,
         fallback: Upstream,
     },
-    Dot(SecureReuseOwner),
-    Doh(DohReuseOwner),
+    Dot {
+        reuse: SecureReuseOwner,
+        fallback: DotUpstream,
+    },
+    Doh {
+        reuse: DohReuseOwner,
+        fallback: DohUpstream,
+    },
 }
 
 impl ForwardOwner {
@@ -639,16 +646,40 @@ impl ForwardOwner {
                 }
                 result => result,
             },
-            Self::Dot(owner) => owner
-                .exchange(request, context)
-                .await
-                .map(secure_response)
-                .map_err(secure_error),
-            Self::Doh(owner) => owner
-                .exchange(request, context)
-                .await
-                .map(secure_response)
-                .map_err(secure_error),
+            Self::Dot { reuse, fallback } => {
+                // A serial secure lease reports typed pre-send busy admission;
+                // only that case may use the owner-managed fresh connection.
+                let result = reuse
+                    .exchange(request, context.clone())
+                    .await
+                    .map(secure_response)
+                    .map_err(secure_error);
+                match result {
+                    Err(UpstreamError::Backpressure(SideEffectState::NotSent)) => fallback
+                        .exchange(request, context)
+                        .await
+                        .map(secure_response)
+                        .map_err(secure_error),
+                    result => result,
+                }
+            }
+            Self::Doh { reuse, fallback } => {
+                // Keep secure busy admission identical to the plain TCP rule:
+                // no retry is permitted after any request-side effect.
+                let result = reuse
+                    .exchange(request, context.clone())
+                    .await
+                    .map(secure_response)
+                    .map_err(secure_error);
+                match result {
+                    Err(UpstreamError::Backpressure(SideEffectState::NotSent)) => fallback
+                        .exchange(request, context)
+                        .await
+                        .map(secure_response)
+                        .map_err(secure_error),
+                    result => result,
+                }
+            }
         }
     }
 
@@ -660,11 +691,11 @@ impl ForwardOwner {
             Self::Tcp { reuse, fallback } => {
                 let _ = tokio::join!(reuse.close(), fallback.close());
             }
-            Self::Dot(owner) => {
-                let _ = owner.close().await;
+            Self::Dot { reuse, fallback } => {
+                let _ = tokio::join!(reuse.close(), fallback.close());
             }
-            Self::Doh(owner) => {
-                let _ = owner.close().await;
+            Self::Doh { reuse, fallback } => {
+                let _ = tokio::join!(reuse.close(), fallback.close());
             }
         }
     }
@@ -1325,17 +1356,20 @@ fn build_owner(
             let identity = ServerIdentity::new(&target.host).map_err(|error| error.to_string())?;
             let endpoint = DotEndpoint::new(dial, identity).map_err(|error| error.to_string())?;
             let policy = tls_policy(target.insecure_skip_verify, tls_roots)?;
-            SecureReuseOwner::new(endpoint, policy)
-                .map(ForwardOwner::Dot)
-                .map_err(|error| error.to_string())
+            let fallback = DotUpstream::new(endpoint.clone(), policy.clone())
+                .map_err(|error| error.to_string())?;
+            let reuse =
+                SecureReuseOwner::new(endpoint, policy).map_err(|error| error.to_string())?;
+            Ok(ForwardOwner::Dot { reuse, fallback })
         }
         ForwardScheme::Https => {
             let endpoint =
                 DohEndpoint::new(&target.service, dial).map_err(|error| error.to_string())?;
             let policy = tls_policy(target.insecure_skip_verify, tls_roots)?;
-            DohReuseOwner::new(endpoint, policy)
-                .map(ForwardOwner::Doh)
-                .map_err(|error| error.to_string())
+            let fallback = DohUpstream::new(endpoint.clone(), policy.clone())
+                .map_err(|error| error.to_string())?;
+            let reuse = DohReuseOwner::new(endpoint, policy).map_err(|error| error.to_string())?;
+            Ok(ForwardOwner::Doh { reuse, fallback })
         }
     }
 }
