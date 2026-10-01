@@ -252,3 +252,20 @@ coverage. Fmt, workspace clippy with warnings denied, and serial
 `cargo build --workspace --all-features` passed. The task-owned Cargo targets
 were removed afterward; disk and inode checks again reported about 3.1 GiB
 free and 16% inode use.
+
+## Final fallback-terminal aggregation rerun
+
+The dedicated reviewer then found the remaining root-terminal downgrade in
+fallback's four no-usable-response aggregation points. When both child paths
+ended because the shared root was canceled or its deadline expired, those
+points still manufactured a recoverable ExecutorError. The repair centralizes
+aggregation in `fallback_failure`: root cancellation and root deadline retain
+typed Cancelled and BudgetExceeded respectively, while loser-specific branch
+cancellation still produces the ordinary fallback ExecutorError.
+
+The isolated SSH rerun passed all 85 native-host unit tests, including the new
+root-terminal aggregation regression, and all native integration suites.
+Fmt, workspace clippy with warnings denied, and serial
+`cargo build --workspace --all-features` passed. The task-owned Cargo targets
+were removed afterward; disk and inode checks again reported about 3.1 GiB
+free and 16% inode use.
