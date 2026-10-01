@@ -153,3 +153,9 @@ renderer.
 The follow-up root-cache synchronization commit was then rebuilt and the
 complete native package was rerun once more; all 82 unit tests and native
 integration suites passed again.
+
+The final policy-trace repair was then rebuilt and the complete native
+package was rerun again with the same result. Root recovery ledger entries
+now register directly into the live schema-2 trace after policy branches,
+and a caller/try-absorbed policy error clears its temporary local failure
+provenance before a later successful response is terminalized.
