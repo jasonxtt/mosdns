@@ -476,6 +476,25 @@ fn trace_outcome(
     }
 }
 
+fn trace_committed_outcome(
+    context: &BranchContext<'_, impl ExchangeExecutor + ?Sized>,
+    branch_id: Option<usize>,
+    child_succeeded: bool,
+    committed: &BranchOutcome,
+) {
+    let commit_rejected = matches!(
+        committed.error.as_ref(),
+        Some(error) if matches!(error, ExecutionError::Cancelled | ExecutionError::BudgetExceeded)
+    );
+    if child_succeeded && commit_rejected {
+        if let Some(trace) = &context.trace {
+            trace.borrow_mut().mark(branch_id, "completed");
+        }
+    } else {
+        trace_outcome(context, branch_id, committed, committed.is_success());
+    }
+}
+
 struct BranchOutcome {
     state: ExecutionState,
     source: Option<String>,
@@ -2150,8 +2169,9 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                         if secondary_result.is_none() {
                             let _ = secondary.as_mut().await;
                         }
+                        let child_succeeded = result.is_success();
                         let committed = commit_branch_winner(result, &context, successor.state());
-                        trace_outcome(&context, primary_id, &committed, committed.is_success());
+                        trace_committed_outcome(&context, primary_id, child_succeeded, &committed);
                         if let Some(secondary_result) = secondary_result.as_ref() {
                             trace_outcome(&context, secondary_id, secondary_result, false);
                         } else if secondary_id.is_some() {
@@ -2173,8 +2193,14 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                         if primary_result.is_none() {
                             let _ = primary.as_mut().await;
                         }
+                        let child_succeeded = result.is_success();
                         let committed = commit_branch_winner(result, &context, successor.state());
-                        trace_outcome(&context, secondary_id, &committed, committed.is_success());
+                        trace_committed_outcome(
+                            &context,
+                            secondary_id,
+                            child_succeeded,
+                            &committed,
+                        );
                         if let Some(primary_result) = primary_result.as_ref() {
                             trace_outcome(&context, primary_id, primary_result, false);
                         } else if primary_id.is_some() {
@@ -2219,8 +2245,14 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                 if result.is_success() {
                     secondary_cancel.cancel();
                     secondary_core_cancel.cancel();
+                    let child_succeeded = result.is_success();
                     let committed = commit_branch_winner(result, &context, successor.state());
-                    trace_outcome(&context, primary_id, &committed, committed.is_success());
+                    trace_committed_outcome(
+                        &context,
+                        primary_id,
+                        child_succeeded,
+                        &committed,
+                    );
                     return committed;
                 }
                 trace_outcome(&context, primary_id, &result, false);
@@ -2236,8 +2268,14 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                 let secondary = Box::pin(secondary);
                 let result = secondary.await;
                 if result.is_success() {
+                    let child_succeeded = result.is_success();
                     let committed = commit_branch_winner(result, &context, successor.state());
-                    trace_outcome(&context, secondary_id, &committed, committed.is_success());
+                    trace_committed_outcome(
+                        &context,
+                        secondary_id,
+                        child_succeeded,
+                        &committed,
+                    );
                     return committed;
                 }
                 trace_outcome(&context, secondary_id, &result, false);
@@ -2266,9 +2304,15 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                             secondary_cancel.cancel();
                             secondary_core_cancel.cancel();
                             let _ = secondary.as_mut().await;
+                            let child_succeeded = result.is_success();
                             let committed =
                                 commit_branch_winner(result, &context, successor.state());
-                            trace_outcome(&context, primary_id, &committed, committed.is_success());
+                            trace_committed_outcome(
+                                &context,
+                                primary_id,
+                                child_succeeded,
+                                &committed,
+                            );
                             if secondary_id.is_some() {
                                 if let Some(trace) = &context.trace {
                                     trace.borrow_mut().mark(secondary_id, "canceled");
@@ -2279,13 +2323,14 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                             trace_outcome(&context, primary_id, &result, false);
                             let result = secondary.await;
                             if result.is_success() {
+                                let child_succeeded = result.is_success();
                                 let committed =
                                     commit_branch_winner(result, &context, successor.state());
-                                trace_outcome(
+                                trace_committed_outcome(
                                     &context,
                                     secondary_id,
+                                    child_succeeded,
                                     &committed,
-                                    committed.is_success(),
                                 );
                                 committed
                             } else {
@@ -2299,9 +2344,15 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                             primary_cancel.cancel();
                             primary_core_cancel.cancel();
                             let _ = primary.as_mut().await;
+                            let child_succeeded = result.is_success();
                             let committed =
                                 commit_branch_winner(result, &context, successor.state());
-                            trace_outcome(&context, secondary_id, &committed, committed.is_success());
+                            trace_committed_outcome(
+                                &context,
+                                secondary_id,
+                                child_succeeded,
+                                &committed,
+                            );
                             if primary_id.is_some() {
                                 if let Some(trace) = &context.trace {
                                     trace.borrow_mut().mark(primary_id, "canceled");
@@ -2312,13 +2363,14 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                             trace_outcome(&context, secondary_id, &result, false);
                             let result = primary.await;
                             if result.is_success() {
+                                let child_succeeded = result.is_success();
                                 let committed =
                                     commit_branch_winner(result, &context, successor.state());
-                                trace_outcome(
+                                trace_committed_outcome(
                                     &context,
                                     primary_id,
+                                    child_succeeded,
                                     &committed,
-                                    committed.is_success(),
                                 );
                                 committed
                             } else {
@@ -2403,9 +2455,10 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                 id
             });
             let result = drive_branch(successor, context.with_branch(branch_id), source).await;
+            let child_succeeded = result.is_success();
             let fallback_state = result.state.clone();
             let committed = commit_branch_winner(result, &context, &fallback_state);
-            trace_outcome(&context, branch_id, &committed, committed.is_success());
+            trace_committed_outcome(&context, branch_id, child_succeeded, &committed);
             if committed.is_success()
                 && response_raw(&committed.state.response)
                     .is_some_and(|wire| response_has_type(wire, preferred_qtype))
@@ -2506,9 +2559,10 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
             }
             if let Some(original_value) = original_result.take() {
                 if reference_result.is_some() {
+                    let child_succeeded = original_value.is_success();
                     let committed =
                         commit_branch_winner(original_value, &context, successor.state());
-                    trace_outcome(&context, original_id, &committed, committed.is_success());
+                    trace_committed_outcome(&context, original_id, child_succeeded, &committed);
                     if let Some(reference_value) = reference_result.as_ref() {
                         trace_outcome(&context, reference_id, reference_value, false);
                     }
@@ -2525,8 +2579,9 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                         )),
                     )
                 });
+                let child_succeeded = original_value.is_success();
                 let committed = commit_branch_winner(original_value, &context, successor.state());
-                trace_outcome(&context, original_id, &committed, committed.is_success());
+                trace_committed_outcome(&context, original_id, child_succeeded, &committed);
                 if let Some(reference_value) = reference_result.as_ref() {
                     trace_outcome(&context, reference_id, reference_value, false);
                 }
@@ -2553,9 +2608,10 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                         successor.state().clone(),
                         ExecutionError::BudgetExceeded,
                     ));
+                    let child_succeeded = original_value.is_success();
                     let committed =
                         commit_branch_winner(original_value, &context, successor.state());
-                    trace_outcome(&context, original_id, &committed, committed.is_success());
+                    trace_committed_outcome(&context, original_id, child_succeeded, &committed);
                     if reference_id.is_some() {
                         if let Some(trace) = &context.trace {
                             trace.borrow_mut().mark(reference_id, "canceled");
