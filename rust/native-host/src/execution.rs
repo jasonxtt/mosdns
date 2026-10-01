@@ -785,7 +785,9 @@ impl ExecutionFacts<'_> {
                     upstream: upstream.clone(),
                     outcome,
                 });
-                if let Some(diagnostics) = &mut self.upstream_diagnostics {
+                if self.policy_trace.is_none()
+                    && let Some(diagnostics) = &mut self.upstream_diagnostics
+                {
                     diagnostics.attempts.push(UpstreamDiagnosticAttempt {
                         ordinal: diagnostics.attempts.len(),
                         branch_id: None,
@@ -821,6 +823,10 @@ impl ExecutionFacts<'_> {
         peer: Option<SocketAddr>,
         transport: Option<UpstreamTransport>,
     ) {
+        self.selected_peer = self.selected_peer.or(peer);
+        if self.policy_trace.is_some() {
+            return;
+        }
         if let (Some(peer), Some(transport), Some(diagnostics)) =
             (peer, transport, &mut self.upstream_diagnostics)
         {
@@ -862,9 +868,11 @@ impl Drop for ExecutionFacts<'_> {
         // Absorb the shared collector before taking the terminal checkpoint so
         // forced-drop evidence is not lost with the branch driver.
         self.absorb_branch_metrics();
-        self.finalize_policy_trace();
         if self.completed {
             return;
+        }
+        if let Some(trace) = &self.policy_trace {
+            trace.borrow_mut().selected = None;
         }
         let ledger = self.checkpoint.attempt_ledger_snapshot();
         let mut ledger_had_entries = false;
@@ -888,12 +896,43 @@ impl Drop for ExecutionFacts<'_> {
                     outcome,
                 });
                 if self.capture_audit_details {
+                    let trace_entry = upstream.clone().unwrap_or_else(|| {
+                        format!("executable:{:?}:{}", executable, slot.entry_index)
+                    });
+                    if let Some(trace) = &self.policy_trace {
+                        let mut trace = trace.borrow_mut();
+                        if let Some(trace_slot) = slot.trace_slot {
+                            trace.complete_attempt(
+                                trace_slot,
+                                trace_entry,
+                                slot.peer,
+                                slot.transport,
+                                outcome,
+                            );
+                        } else {
+                            let qtype = trace
+                                .branches
+                                .first()
+                                .map(|branch| branch.qtype)
+                                .unwrap_or_default();
+                            trace.record_attempt(
+                                Some(0),
+                                qtype,
+                                trace_entry,
+                                slot.peer,
+                                slot.transport,
+                                outcome,
+                            );
+                        }
+                    }
                     if let Some(upstream) = upstream {
                         self.upstream_attempts.push(UpstreamAttemptRecord {
                             upstream: upstream.clone(),
                             outcome,
                         });
-                        if let Some(diagnostics) = &mut self.upstream_diagnostics {
+                        if self.policy_trace.is_none()
+                            && let Some(diagnostics) = &mut self.upstream_diagnostics
+                        {
                             diagnostics.attempts.push(UpstreamDiagnosticAttempt {
                                 ordinal: diagnostics.attempts.len(),
                                 branch_id: None,
@@ -911,6 +950,7 @@ impl Drop for ExecutionFacts<'_> {
                 }
             }
         }
+        self.finalize_policy_trace();
         self.checkpoint.capture_partial(
             &TerminalObservation {
                 outcome: QueryTerminalOutcome::NoResponse,
@@ -1171,14 +1211,19 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     absorb_branch_cache(&context, &outcome);
                     cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
-                        let core_error = policy_failure_for_core(&error);
-                        facts.record_policy_failure(error);
+                        facts.record_policy_failure(error.clone());
                         // The captured successor has already been driven by
                         // the branch. Commit its state, then return the typed
                         // policy failure through the pending dispatch. The
                         // sequence core, rather than a synthetic Accept,
                         // owns the caller/try failure boundary.
                         *machine.state_mut() = outcome.state;
+                        let core_error = match policy_failure_for_core(&error) {
+                            Ok(core_error) => core_error,
+                            Err(terminal) => {
+                                return terminal_policy_failure(terminal, facts);
+                            }
+                        };
                         match machine.resume(dispatch.executable(), Err(core_error)) {
                             Ok(next) => {
                                 facts.clear_policy_failure();
@@ -1255,9 +1300,14 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     absorb_branch_cache(&context, &outcome);
                     cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
-                        let core_error = policy_failure_for_core(&error);
-                        facts.record_policy_failure(error);
+                        facts.record_policy_failure(error.clone());
                         *machine.state_mut() = outcome.state;
+                        let core_error = match policy_failure_for_core(&error) {
+                            Ok(core_error) => core_error,
+                            Err(terminal) => {
+                                return terminal_policy_failure(terminal, facts);
+                            }
+                        };
                         match machine.resume(dispatch.executable(), Err(core_error)) {
                             Ok(next) => {
                                 facts.clear_policy_failure();
@@ -1608,8 +1658,13 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                             .await;
                     absorb_branch_cache(&context, &outcome);
                     if let Some(error) = outcome.error {
-                        let core_error = policy_failure_for_core(&error);
                         *machine.state_mut() = outcome.state;
+                        let core_error = match policy_failure_for_core(&error) {
+                            Ok(core_error) => core_error,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
                         match machine.resume(dispatch.executable(), Err(core_error)) {
                             Ok(next) => {
                                 step = next;
@@ -1652,8 +1707,13 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     .await;
                     absorb_branch_cache(&context, &outcome);
                     if let Some(error) = outcome.error {
-                        let core_error = policy_failure_for_core(&error);
                         *machine.state_mut() = outcome.state;
+                        let core_error = match policy_failure_for_core(&error) {
+                            Ok(core_error) => core_error,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
                         match machine.resume(dispatch.executable(), Err(core_error)) {
                             Ok(next) => {
                                 step = next;
@@ -2604,50 +2664,34 @@ fn record_invocation_ledger(
                 UpstreamAttemptOutcome::Canceled
             }
         });
+        facts.record_invocation_attempt(
+            executable,
+            slot.entry_index,
+            upstream.clone(),
+            slot.peer,
+            slot.transport,
+            outcome,
+        );
         if let Some(trace) = &facts.policy_trace {
             let mut trace = trace.borrow_mut();
+            let entry = upstream
+                .clone()
+                .unwrap_or_else(|| format!("executable:{:?}:{}", executable, slot.entry_index));
             if let Some(trace_slot) = slot.trace_slot {
-                trace.complete_attempt(
-                    trace_slot,
-                    upstream.clone().unwrap_or_else(|| {
-                        format!("executable:{:?}:{}", executable, slot.entry_index)
-                    }),
-                    slot.peer,
-                    slot.transport,
-                    outcome,
-                );
+                trace.complete_attempt(trace_slot, entry, slot.peer, slot.transport, outcome);
             } else {
-                trace.record_attempt(
-                    Some(0),
-                    qtype,
-                    upstream.clone().unwrap_or_else(|| {
-                        format!("executable:{:?}:{}", executable, slot.entry_index)
-                    }),
-                    slot.peer,
-                    slot.transport,
-                    outcome,
-                );
+                trace.record_attempt(Some(0), qtype, entry, slot.peer, slot.transport, outcome);
             }
-        } else {
-            facts.record_invocation_attempt(
-                executable,
-                slot.entry_index,
-                upstream.clone(),
-                slot.peer,
-                slot.transport,
-                outcome,
-            );
         }
         if selected_entry == Some(slot.entry_index) && outcome == UpstreamAttemptOutcome::Response {
             if let Some(upstream) = upstream {
                 facts.response_source = Some(ResponseSource::Upstream(upstream.clone()));
                 if let Some(trace) = &facts.policy_trace {
                     let mut trace = trace.borrow_mut();
-                    trace.candidate(Some(0), upstream, slot.peer, slot.transport);
+                    trace.candidate(Some(0), upstream.clone(), slot.peer, slot.transport);
                     trace.select(Some(0), true);
-                } else {
-                    facts.select_invocation_attempt(upstream, slot.peer, slot.transport);
                 }
+                facts.select_invocation_attempt(upstream, slot.peer, slot.transport);
             }
         } else if outcome != UpstreamAttemptOutcome::Response {
             if let Some(upstream) = upstream {
@@ -2774,6 +2818,18 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
 }
 
 fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
+    facts.response_source = None;
+    if let Some(diagnostics) = &mut facts.upstream_diagnostics {
+        diagnostics.selected = None;
+    }
+    result_from_wire(Vec::new(), facts)
+}
+
+fn terminal_policy_failure(error: ExecutionError, mut facts: ExecutionFacts) -> ExecutionResult {
+    debug_assert!(matches!(
+        error,
+        ExecutionError::Cancelled | ExecutionError::BudgetExceeded
+    ));
     facts.response_source = None;
     if let Some(diagnostics) = &mut facts.upstream_diagnostics {
         diagnostics.selected = None;
@@ -3161,10 +3217,13 @@ fn set_servfail(machine: &mut ExecutionMachine<'_>) {
         .set_synthesized_response(u16::from(SERVFAIL));
 }
 
-fn policy_failure_for_core(error: &ExecutionError) -> ExecutorError {
+fn policy_failure_for_core(error: &ExecutionError) -> Result<ExecutorError, ExecutionError> {
     match error {
-        ExecutionError::Executor(error) => error.clone(),
-        other => ExecutorError::new(format!("native policy failed: {other:?}")),
+        ExecutionError::Executor(error) => Ok(error.clone()),
+        ExecutionError::Cancelled | ExecutionError::BudgetExceeded => Err(error.clone()),
+        other => Ok(ExecutorError::new(format!(
+            "native policy failed: {other:?}"
+        ))),
     }
 }
 
