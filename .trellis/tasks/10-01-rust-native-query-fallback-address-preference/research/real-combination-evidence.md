@@ -180,3 +180,11 @@ removed afterward; final resource checks again reported approximately 3.1
 GiB free and 16% inode use. The non-native workspace/integration/doctest
 split and the real DNS/HTTP/Vue and secure proofs remain unchanged because
 this repair is confined to `rust/native-host/src/execution.rs`.
+
+The final regression-test addition raised the native unit count to 83. A
+fresh isolated rerun passed all 83 unit tests and all native integration
+suites, the terminal-error regression, fmt, workspace clippy with
+`-D warnings`, and the native-host build. The first clippy attempt during
+this rerun exhausted the task-owned filesystem while a second target was
+present; both exact task-owned targets were removed before the successful
+clean rerun and the resource check passed.
