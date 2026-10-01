@@ -701,6 +701,81 @@ let prepared = upstream.prepare_exchange(request, context)?;
 // Slice0 has performed only pure validation; later slices own socket I/O.
 ```
 
+## Scenario: native secure reuse busy admission
+
+### 1. Scope / Trigger
+
+Use this contract when the native host composes serial DoT/DoH reuse owners
+with the secure one-shot transports. It records the regression guard for
+concurrent requests sharing one configured secure entry.
+
+### 2. Signatures
+
+- `ForwardOwner::exchange(query, deadline, cancellation, tracker)` delegates
+  to `SecureReuseOwner` or `DohReuseOwner` first.
+- `DotUpstream::exchange(ExchangeRequest<'_>, ExchangeContext)` and
+  `DohUpstream::exchange(ExchangeRequest<'_>, ExchangeContext)` are the scoped
+  fresh-connection paths for one request.
+- `ForwardOwner::close() -> Future` closes and drains both the reuse owner and
+  its secure one-shot owner.
+
+### 3. Contracts
+
+- A reuse result of exactly `Backpressure(NotSent)` means the serial lease was
+  busy before request-side effects; the host may use the matching one-shot
+  owner with the same endpoint, TLS/service identity, deadline, and caller
+  cancellation.
+- `Runtime`, `MaybeSent`, `Sent`, response, TLS, and arbitrary connect/receive
+  failures never select the fresh path and are returned unchanged after the
+  existing secure error mapping.
+- The one-shot owner is stable per configured entry and is closed by the same
+  parent owner as the pooled reuse owner; no detached retry task or queue is
+  introduced.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| secure reuse lease busy before send | one matching fresh DoT/DoH exchange |
+| reuse failure after any side effect | original typed failure; no second connection |
+| fresh exchange failure | original fresh typed failure; no additional retry |
+| native owner close | pooled and fresh exchanges drain before close completes |
+
+### 5. Good/Base/Bad Cases
+
+- Good: hold the first secure request at a controlled peer barrier, admit the
+  second through a different connection, and close the parent owner afterward.
+- Base: preserve the configured numeric dial and secure identity on both legs.
+- Bad: treat every reuse error as retryable, change the deadline, or queue the
+  second caller on the serial connection.
+
+### 6. Tests Required
+
+- Native-host loopback tests must cover DoT, DoH HTTP/1.1, and DoH HTTP/2 with
+  a synthetic CA, prove two accepted secure connections under a barrier, and
+  complete a parent listener close/drain.
+- Focused tests must assert the second request succeeds only through the
+  one-shot path; existing side-effect/error tests must retain no-retry
+  behavior for non-`NotSent` failures.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+owner.exchange(request, context).await.map_err(secure_error)
+// A typed busy admission fails the concurrent caller locally.
+```
+
+#### Correct
+
+```rust
+match reuse.exchange(request, context.clone()).await {
+    Err(Backpressure(NotSent)) => fresh.exchange(request, context).await,
+    result => result,
+}
+```
+
 ## Scenario: Phase 4 DoQ post-open cancellation and response-FIN contract
 
 ### 1. Scope / Trigger
