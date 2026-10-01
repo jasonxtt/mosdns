@@ -1145,6 +1145,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         run_fallback(policy.clone(), successor, context.clone(), inherited_source)
                             .await;
                     absorb_branch_cache(&context, &outcome);
+                    cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
                         let core_error = policy_failure_for_core(&error);
                         facts.record_policy_failure(error);
@@ -1227,6 +1228,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     )
                     .await;
                     absorb_branch_cache(&context, &outcome);
+                    cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
                         let core_error = policy_failure_for_core(&error);
                         facts.record_policy_failure(error);
