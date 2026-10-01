@@ -135,8 +135,9 @@ The dedicated review's last scoped FAIL identified three remaining ownership
 gaps. The final repair sends fallback/preference policy failure through
 `ExecutionMachine::resume(..., Err(ExecutorError))` with the already-driven
 successor state, keeps cache access in a path-local shared cell while
-resetting it only for policy siblings, and commits an eligible primary
-success immediately even when an always-standby secondary is still pending.
+resetting it only for policy siblings, synchronizes the root cache wrapper
+after a winning branch, and commits an eligible primary success immediately
+even when an always-standby secondary is still pending.
 
 After that repair, over SSH alias `mosdns-rust`, the complete native package
 passed again: `cargo test -p mosdns-native-host --tests -j 1` (82 unit tests
