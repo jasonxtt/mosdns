@@ -235,3 +235,20 @@ workspace clippy with `-D warnings`, and serial
 `cargo build --workspace --all-features` passed; exact task-owned Cargo
 targets were removed afterward and resource checks again reported about 3.1
 GiB free and 16% inode use.
+
+## Final commit-gate fact-status rerun
+
+The final reviewer found one remaining distinction: when a valid child
+response completes but the parent commit gate is rejected by root cancellation
+or deadline, the child execution fact must remain `completed`, not become
+`failed` merely because the parent returned a terminal error. The repair adds
+a committed-outcome trace helper that preserves completed child status for
+that terminal gate case while leaving final selected supplier and root
+terminal provenance cleared.
+
+The isolated SSH rerun then passed all 84 native-host unit tests and all
+native integration suites, including the secure DoT/DoH and stream/close
+coverage. Fmt, workspace clippy with warnings denied, and serial
+`cargo build --workspace --all-features` passed. The task-owned Cargo targets
+were removed afterward; disk and inode checks again reported about 3.1 GiB
+free and 16% inode use.
