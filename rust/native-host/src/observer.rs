@@ -317,12 +317,36 @@ pub struct UpstreamDiagnostics {
 /// terminal checkpoint. It deliberately carries entry IDs and enums rather
 /// than display strings so cancellation/drop paths do not need an audit-only
 /// allocation.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Default)]
 pub(crate) struct UpstreamAttemptLedger {
     slots: Vec<UpstreamAttemptSlot>,
+    registration_hook: Option<AttemptRegistrationHook>,
 }
 
+impl std::fmt::Debug for UpstreamAttemptLedger {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("UpstreamAttemptLedger")
+            .field("slots", &self.slots)
+            .finish()
+    }
+}
+
+impl PartialEq for UpstreamAttemptLedger {
+    fn eq(&self, other: &Self) -> bool {
+        self.slots == other.slots
+    }
+}
+
+impl Eq for UpstreamAttemptLedger {}
+
 pub(crate) type UpstreamAttemptLedgerHandle = Rc<RefCell<UpstreamAttemptLedger>>;
+
+/// Hook invoked synchronously when a forward invocation registers an entry.
+/// The returned trace slot is retained on the ledger slot so completion can
+/// fill the already-ordered diagnostic placeholder rather than append by
+/// completion order.
+pub(crate) type AttemptRegistrationHook = Rc<RefCell<dyn FnMut(usize) -> u64>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct UpstreamAttemptSlot {
@@ -330,6 +354,7 @@ pub(crate) struct UpstreamAttemptSlot {
     pub peer: Option<SocketAddr>,
     pub transport: Option<UpstreamTransport>,
     pub outcome: Option<UpstreamAttemptOutcome>,
+    pub trace_slot: Option<u64>,
 }
 
 impl UpstreamAttemptLedger {
@@ -339,13 +364,22 @@ impl UpstreamAttemptLedger {
 
     pub(crate) fn start(&mut self, entry_index: usize) -> usize {
         let slot = self.slots.len();
+        let trace_slot = self
+            .registration_hook
+            .as_ref()
+            .map(|hook| (hook.borrow_mut())(entry_index));
         self.slots.push(UpstreamAttemptSlot {
             entry_index,
             peer: None,
             transport: None,
             outcome: None,
+            trace_slot,
         });
         slot
+    }
+
+    pub(crate) fn set_registration_hook(&mut self, hook: AttemptRegistrationHook) {
+        self.registration_hook = Some(hook);
     }
 
     pub(crate) fn finish(

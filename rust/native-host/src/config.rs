@@ -24,6 +24,8 @@ use crate::matchers::{
 };
 use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 
+const MAX_FALLBACK_THRESHOLD: Duration = Duration::from_secs(100 * 365 * 24 * 60 * 60);
+
 /// The only accepted log level in the native host subset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogLevel {
@@ -293,11 +295,40 @@ pub enum PreferenceFamily {
     Ipv6,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct PreferenceConfig {
     pub executable: ExecutableId,
     pub family: PreferenceFamily,
     pub(crate) evidence: Rc<RefCell<BTreeMap<String, Instant>>>,
+    pub(crate) clock: PreferenceClock,
+}
+
+/// Monotonic time seam for positive preference evidence. Production uses the
+/// process monotonic clock; tests may inject a deterministic source without
+/// changing DNS/cache wall-clock behavior.
+#[derive(Clone)]
+pub(crate) struct PreferenceClock {
+    now: Rc<dyn Fn() -> Instant>,
+}
+
+impl PreferenceClock {
+    pub(crate) fn system() -> Self {
+        Self {
+            now: Rc::new(Instant::now),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn from_fn<F>(now: F) -> Self
+    where
+        F: Fn() -> Instant + 'static,
+    {
+        Self { now: Rc::new(now) }
+    }
+
+    pub(crate) fn now(&self) -> Instant {
+        (self.now)()
+    }
 }
 
 struct FallbackDefinition {
@@ -967,6 +998,7 @@ fn compile_definitions(
                 executable: external_id(&program, &name, "$.plugins.sequence.args")?,
                 family,
                 evidence: Rc::new(RefCell::new(BTreeMap::new())),
+                clock: PreferenceClock::system(),
             })
         })
         .collect::<Result<Vec<_>, ConfigError>>()?;
@@ -1331,6 +1363,12 @@ fn compile_fallback(plugin: &RawPlugin) -> Result<FallbackDefinition, ConfigErro
             ));
         }
     };
+    if threshold > MAX_FALLBACK_THRESHOLD || Instant::now().checked_add(threshold).is_none() {
+        return Err(ConfigError::new(
+            format!("{path}.threshold"),
+            "threshold is too large for monotonic deadline arithmetic",
+        ));
+    }
     let always_standby = args
         .get("always_standby")
         .map(|value| expect_bool(value, &format!("{path}.always_standby")))
@@ -2606,6 +2644,13 @@ plugins:
         ))
         .expect("negative compatibility threshold");
         assert_eq!(negative.fallbacks[0].threshold, Duration::from_millis(500));
+
+        let overflow =
+            compile_yaml(&yaml.replace("always_standby: true", "threshold: 18446744073709551615"));
+        assert!(
+            overflow.is_err(),
+            "absolute threshold overflow must fail load"
+        );
     }
 
     #[test]

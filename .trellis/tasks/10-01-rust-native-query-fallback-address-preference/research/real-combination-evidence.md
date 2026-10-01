@@ -38,7 +38,10 @@ After the dedicated review's scoped FAIL, the repair round repeated the
 native-host test package and the non-native workspace split. Both passed
 again, including integrations and doctests. The repair round also repeated
 format check, workspace clippy, the fallback/preference unit tests, and the
-native-host binary build.
+native-host binary build. A later clean-target rerun passed the complete
+native-host integration package again after the final caller/cache/diagnostic
+repairs; the first rerun attempt is retained as an unresolved disk/linker
+failure and is not counted as green.
 
 The split workspace commands cover the same workspace packages while keeping
 the task-owned remote target below the available disk budget. The monolithic
@@ -63,18 +66,33 @@ secondary. The HTTP audit response showed:
 The repaired run additionally showed the primary attempt's peer and preserved
 registration order: ordinal 0 primary/canceled, ordinal 1 secondary/response.
 
-The built Vue bundle was served from a task-owned static HTTP process on port
-18082 and returned `HTTP/1.0 200 OK` for `/index.html`. All four task-owned
-processes were killed by their exact PIDs after capture.
+The built Vue bundle was served through a task-owned HTTP proxy on port 18082
+and returned `HTTP/1.0 200 OK` for `/index.html`. The in-app browser then
+opened the actual QueryManager record and its existing detail renderer. The
+accessibility snapshot showed the schema-2 branch table with `root/primary/
+secondary`, numeric QTYPE `1`, `selected/canceled`, and the attempt table with
+`primary_forward` ordinal 0 and `secondary_forward` ordinal 1. This is the
+browser rendering proof, not only a static bundle fetch.
+
+The same final binary was restarted with a real preference config. A real
+`dig @127.0.0.1 -p 18553 example.com AAAA` produced empty `NOERROR` after the
+loopback peer received both the original AAAA and rewritten A queries. The
+HTTP record contained schema 2 branches `original` QTYPE 28 `suppressed` and
+`reference` QTYPE 1 `completed`, attempts 0/1 with QTYPE 28/1, and omitted
+`selected` because the final wire was local suppression. The browser detail
+renderer displayed those same rows and the text `未选中最终网络上游`.
+
+All task-owned DNS, API, proxy, upstream, and SSH-forward processes were
+killed by their exact PIDs after capture.
 
 ## Real preference proof
 
-The native-host policy test and live native DNS/API proof captured the
-AAAA-to-A reference rewrite: the original AAAA branch was suppressed and the
-reference A branch completed, while the final wire response preserved the
-original AAAA question and returned empty `NOERROR` when the test peer did
-not provide a valid AAAA answer. The corresponding audit response carried
-schema 2 branch and attempt `qtype` fields.
+The native-host policy test and the final live native DNS/API/browser proof
+captured the AAAA-to-A reference rewrite: the original AAAA branch was
+suppressed and the reference A branch completed, while the final wire
+response preserved the original AAAA question and returned empty `NOERROR`.
+The corresponding audit response and existing detail renderer carried schema
+2 branch and attempt `qtype` fields.
 
 The live preference peer used for this proof was intentionally A-only, so its
 original AAAA response was malformed and the proof does not claim a valid
@@ -90,3 +108,12 @@ QTYPE rewrite, branch correlation, suppression, and final-question behavior.
 
 Vite emitted only the existing large-chunk warnings. No production service,
 public DNS, port 53, or installed deployment was touched.
+
+## Secure and stream composition evidence
+
+The final remote native integration run passed the real TCP listener suites
+(`w1_tcp`, `slice2_tcp`, `slice3_composition`) and
+`slice9_forwarding::native_secure_forwarding_proves_dot_and_doh_h1_h2_with_synthetic_ca`,
+which exercises native DoT and DoH HTTP/1.1/HTTP/2 peers with actual TLS and
+DNS wire exchanges. The same run passed the secure busy-admission and close
+drain test `slice9_forwarding::secure_busy_admission_uses_a_fresh_connection_for_dot_and_doh`.
