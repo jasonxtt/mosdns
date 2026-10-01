@@ -3262,8 +3262,8 @@ mod tests {
 
     use mosdns_dns_core::{parse_query, validate_response};
     use mosdns_sequence_core::{
-        DispatchMetadata, ExecutableId, ExecutableSpec, ExternalRef, ExternalSpec,
-        MatcherSpecInput, ProgramSpec, RuleSpec, SequenceRef, SequenceSpec,
+        DispatchMetadata, ExecutableId, ExecutableSpec, ExecutionError, ExecutorError, ExternalRef,
+        ExternalSpec, MatcherSpecInput, ProgramSpec, RuleSpec, SequenceRef, SequenceSpec,
     };
     use mosdns_upstream_core::{
         Endpoint, ExchangeResponse, SideEffectState, Transport, TransportCancellation,
@@ -3273,6 +3273,7 @@ mod tests {
     use super::{
         ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, compute_effective_tag,
         diagnose_response_wire, execute_request_with_executor, execute_request_with_observation,
+        policy_failure_for_core,
     };
     use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
@@ -6139,6 +6140,11 @@ plugins:
         let calls = calls.borrow();
         assert_eq!(calls.len(), 2, "threshold zero must start both forwards");
         assert_eq!(calls[0].0, primary, "threshold ties poll primary first");
+        assert_eq!(
+            result.upstream_attempts.metric_attempts().len(),
+            2,
+            "schema-2 tracing must retain canonical upstream metrics"
+        );
         let diagnostics = result.upstream_diagnostics.expect("schema-2 diagnostics");
         assert_eq!(diagnostics.schema_version, 2);
         assert!(
@@ -6218,6 +6224,24 @@ plugins:
             diagnostics.selected.is_none(),
             "probe must not be selected supplier"
         );
+    }
+
+    #[test]
+    fn policy_root_terminals_are_not_recoverable_executor_errors() {
+        assert!(matches!(
+            policy_failure_for_core(&ExecutionError::Cancelled),
+            Err(ExecutionError::Cancelled)
+        ));
+        assert!(matches!(
+            policy_failure_for_core(&ExecutionError::BudgetExceeded),
+            Err(ExecutionError::BudgetExceeded)
+        ));
+        assert!(matches!(
+            policy_failure_for_core(&ExecutionError::Executor(ExecutorError::new(
+                "ordinary policy failure",
+            ))),
+            Ok(ExecutorError::Failed(message)) if message == "ordinary policy failure"
+        ));
     }
 
     fn futures_like_block_on<F: std::future::Future>(future: F) -> F::Output {
