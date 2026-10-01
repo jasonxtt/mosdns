@@ -149,3 +149,7 @@ integration suites and doctests. `cargo fmt --all -- --check`,
 HTTP, and in-app Vue detail proof remains on the same final product paths;
 the repair changed only policy/control ownership and does not add a route or
 renderer.
+
+The follow-up root-cache synchronization commit was then rebuilt and the
+complete native package was rerun once more; all 82 unit tests and native
+integration suites passed again.
