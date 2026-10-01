@@ -550,6 +550,22 @@ fn commit_branch_winner<E: ExchangeExecutor + ?Sized>(
     outcome
 }
 
+fn fallback_failure<E: ExchangeExecutor + ?Sized>(
+    context: &BranchContext<'_, E>,
+    state: ExecutionState,
+) -> BranchOutcome {
+    let error = if context.root_cancellation.is_cancelled() {
+        ExecutionError::Cancelled
+    } else if Instant::now() >= context.deadline {
+        ExecutionError::BudgetExceeded
+    } else {
+        ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+            "fallback branches produced no usable response",
+        ))
+    };
+    BranchOutcome::failure(state, error)
+}
+
 fn ensure_branch_alive<E: ExchangeExecutor + ?Sized>(
     machine: &ExecutionMachine<'_>,
     context: &BranchContext<'_, E>,
@@ -2219,12 +2235,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                     if let Some(result) = secondary_result.as_ref() {
                         trace_outcome(&context, secondary_id, result, false);
                     }
-                    return BranchOutcome::failure(
-                        successor.state().clone(),
-                        ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
-                            "fallback branches produced no usable response",
-                        )),
-                    );
+                    return fallback_failure(&context, successor.state().clone());
                 }
                 // Poll primary first so synchronously-ready ties retain the
                 // frozen primary-first contract. If primary is pending,
@@ -2279,12 +2290,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                     return committed;
                 }
                 trace_outcome(&context, secondary_id, &result, false);
-                BranchOutcome::failure(
-                    successor.state().clone(),
-                    ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
-                        "fallback branches produced no usable response",
-                    )),
-                )
+                fallback_failure(&context, successor.state().clone())
             }
             _ = &mut release => {
                 trace_start(&context, secondary_id);
@@ -2335,7 +2341,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                                 committed
                             } else {
                                 trace_outcome(&context, secondary_id, &result, false);
-                                BranchOutcome::failure(successor.state().clone(), ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new("fallback branches produced no usable response")))
+                                fallback_failure(&context, successor.state().clone())
                             }
                         }
                     }
@@ -2375,7 +2381,7 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                                 committed
                             } else {
                                 trace_outcome(&context, primary_id, &result, false);
-                                BranchOutcome::failure(successor.state().clone(), ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new("fallback branches produced no usable response")))
+                                fallback_failure(&context, successor.state().clone())
                             }
                         }
                     }
@@ -3371,12 +3377,13 @@ mod tests {
     use std::net::SocketAddr;
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use mosdns_dns_core::{parse_query, validate_response};
     use mosdns_sequence_core::{
-        DispatchMetadata, ExecutableId, ExecutableSpec, ExecutionError, ExecutorError, ExternalRef,
-        ExternalSpec, MatcherSpecInput, ProgramSpec, RuleSpec, SequenceRef, SequenceSpec,
+        DispatchMetadata, ExecutableId, ExecutableSpec, ExecutionError, ExecutionState,
+        ExecutorError, ExternalRef, ExternalSpec, MatcherSpecInput, ProgramSpec, RuleSpec,
+        SequenceRef, SequenceSpec,
     };
     use mosdns_upstream_core::{
         Endpoint, ExchangeResponse, SideEffectState, Transport, TransportCancellation,
@@ -3384,9 +3391,10 @@ mod tests {
     };
 
     use super::{
-        BranchTrace, ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest, UpstreamTransport,
-        compute_effective_tag, diagnose_response_wire, execute_request_with_executor,
-        execute_request_with_observation, policy_failure_for_core,
+        BranchContext, BranchTrace, ExchangeExecutor, ExecutionCheckpoint, ExecutionRequest,
+        UpstreamTransport, compute_effective_tag, diagnose_response_wire,
+        execute_request_with_executor, execute_request_with_observation, fallback_failure,
+        policy_failure_for_core,
     };
     use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
@@ -3396,7 +3404,7 @@ mod tests {
     };
     use crate::observer::{
         CacheStatus, FailureProvenance, LocalFailureKind, QueryObserver, QueryTerminalOutcome,
-        QueryTransport, ResponseSource, ResponseState, TerminalObservation,
+        QueryTransport, ResponseSource, ResponseState, TerminalObservation, UpstreamAttemptList,
     };
 
     struct MockExchange {
@@ -6355,6 +6363,40 @@ plugins:
             ))),
             Ok(ExecutorError::Failed(message)) if message == "ordinary policy failure"
         ));
+    }
+
+    #[test]
+    fn fallback_aggregation_preserves_root_terminal_error() {
+        let config = config();
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let request = query(403);
+        let (header, question) = parse_query(&request).expect("query");
+        let exchange = MockExchange {
+            calls: Rc::new(Cell::new(0)),
+            response: response(&request),
+            fail: false,
+        };
+        let root_cancellation = TransportCancellation::new();
+        root_cancellation.cancel();
+        let context = BranchContext {
+            config: &config,
+            cache: &cache,
+            executor: &exchange,
+            raw: Rc::new(request),
+            header,
+            question: question.clone(),
+            deadline: Instant::now() + Duration::from_secs(1),
+            root_cancellation: root_cancellation.clone(),
+            branch_cancellation: root_cancellation.child_token(),
+            trace: None,
+            branch_metrics: Rc::new(RefCell::new(UpstreamAttemptList::default())),
+            cache_accessed: Rc::new(Cell::new(false)),
+            allow_empty_response: false,
+            branch_id: None,
+        };
+        let outcome = fallback_failure(&context, ExecutionState::new(header, question));
+
+        assert!(matches!(outcome.error, Some(ExecutionError::Cancelled)));
     }
 
     #[test]
