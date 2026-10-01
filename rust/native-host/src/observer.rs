@@ -272,6 +272,7 @@ impl UpstreamTransport {
 /// The selected network leg in the optional schema-versioned diagnostics.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpstreamDiagnosticSelected {
+    pub branch_id: Option<usize>,
     pub entry: String,
     pub peer: SocketAddr,
     pub transport: UpstreamTransport,
@@ -281,10 +282,24 @@ pub struct UpstreamDiagnosticSelected {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpstreamDiagnosticAttempt {
     pub ordinal: usize,
+    pub branch_id: Option<usize>,
+    pub qtype: Option<u16>,
     pub entry: String,
     pub peer: Option<SocketAddr>,
     pub transport: Option<UpstreamTransport>,
     pub outcome: UpstreamAttemptOutcome,
+}
+
+/// One query-local branch in schema-2 diagnostics. The root branch is id 0;
+/// child policy branches point to their creating branch through parent_id.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpstreamDiagnosticBranch {
+    pub id: usize,
+    pub parent_id: Option<usize>,
+    pub role: String,
+    pub policy: Option<String>,
+    pub qtype: u16,
+    pub decision: String,
 }
 
 /// Native-only schema 1 supplier diagnostics. Old supplier fields remain the
@@ -293,6 +308,7 @@ pub struct UpstreamDiagnosticAttempt {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpstreamDiagnostics {
     pub schema_version: u8,
+    pub branches: Vec<UpstreamDiagnosticBranch>,
     pub selected: Option<UpstreamDiagnosticSelected>,
     pub attempts: Vec<UpstreamDiagnosticAttempt>,
 }

@@ -986,8 +986,26 @@ onBeforeUnmount(() => {
             <div><strong>最终上游组:</strong> {{ selectedLog.final_upstream || '-' }}</div>
             <div><strong>上游目标:</strong> {{ selectedLog.upstream_targets || '-' }}</div>
             <div><strong>最终上游:</strong> {{ selectedLog.selected_upstream || '-' }}</div>
-            <div v-if="selectedLog.upstream_diagnostics?.schema_version === 1" class="detail-wide">
+            <div v-if="selectedLog.upstream_diagnostics && ![1, 2].includes(selectedLog.upstream_diagnostics.schema_version)" class="detail-wide muted">
+              原生上游诊断版本暂不支持（{{ selectedLog.upstream_diagnostics.schema_version ?? '-' }}）；普通响应与路由信息仍可用。
+            </div>
+            <div v-if="[1, 2].includes(selectedLog.upstream_diagnostics?.schema_version)" class="detail-wide">
               <strong>原生上游诊断:</strong>
+              <div v-if="selectedLog.upstream_diagnostics.schema_version === 2 && selectedLog.upstream_diagnostics.branches?.length" class="table-wrap upstream-diagnostics-table">
+                <table>
+                  <thead><tr><th>ID</th><th>父级</th><th>角色</th><th>策略</th><th>QTYPE</th><th>决定</th></tr></thead>
+                  <tbody>
+                    <tr v-for="branch in selectedLog.upstream_diagnostics.branches" :key="`branch-${branch.id}`">
+                      <td>{{ branch.id ?? '-' }}</td>
+                      <td>{{ branch.parent_id ?? '-' }}</td>
+                      <td>{{ branch.role || '-' }}</td>
+                      <td class="mono">{{ branch.policy || '-' }}</td>
+                      <td>{{ branch.qtype ?? '-' }}</td>
+                      <td>{{ branch.decision || '-' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
               <span v-if="selectedLog.upstream_diagnostics.selected">
                 选中 {{ selectedLog.upstream_diagnostics.selected.entry || '-' }} ·
                 {{ selectedLog.upstream_diagnostics.selected.peer || '-' }} ·
@@ -996,11 +1014,13 @@ onBeforeUnmount(() => {
               <span v-else>未选中最终网络上游</span>
               <div class="table-wrap upstream-diagnostics-table">
                 <table>
-                  <thead><tr><th>序号</th><th>Entry</th><th>Peer</th><th>传输</th><th>结果</th></tr></thead>
+                    <thead><tr><th>序号</th><th v-if="selectedLog.upstream_diagnostics.schema_version === 2">分支</th><th v-if="selectedLog.upstream_diagnostics.schema_version === 2">QTYPE</th><th>Entry</th><th>Peer</th><th>传输</th><th>结果</th></tr></thead>
                   <tbody>
-                    <tr v-if="!selectedLog.upstream_diagnostics.attempts?.length"><td colspan="5" class="empty">无已启动上游</td></tr>
+                    <tr v-if="!selectedLog.upstream_diagnostics.attempts?.length"><td :colspan="selectedLog.upstream_diagnostics.schema_version === 2 ? 7 : 5" class="empty">无已启动上游</td></tr>
                     <tr v-for="attempt in (selectedLog.upstream_diagnostics.attempts || [])" :key="`diagnostic-${attempt.ordinal}`">
                       <td>{{ attempt.ordinal ?? '-' }}</td>
+                      <td v-if="selectedLog.upstream_diagnostics.schema_version === 2">{{ attempt.branch_id ?? '-' }}</td>
+                      <td v-if="selectedLog.upstream_diagnostics.schema_version === 2">{{ attempt.qtype ?? '-' }}</td>
                       <td class="mono">{{ attempt.entry || '-' }}</td>
                       <td class="mono">{{ attempt.peer || '-' }}</td>
                       <td>{{ attempt.transport || '-' }}</td>
