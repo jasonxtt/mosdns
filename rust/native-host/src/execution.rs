@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::time::Instant;
 
 use mosdns_dns_core::{
@@ -9,21 +11,22 @@ use mosdns_dns_core::{
     patch_response_id_ra, synthesize_response, validate_response,
 };
 use mosdns_sequence_core::{
-    ExecutableId, ExecutionControl, ExecutionMachine, ExecutionState, ExecutorOutcome, MachineStep,
-    ResponseState as MachineResponseState, RoutingState, SequenceId,
+    CancellationToken, ExecutableId, ExecutionControl, ExecutionError, ExecutionMachine,
+    ExecutionState, ExecutorOutcome, MachineStep, ResponseState as MachineResponseState,
+    RootFuelHandle, RoutingState, SequenceId,
 };
 use mosdns_upstream_core::{ExchangeResponse, TransportCancellation, UpstreamError};
 
 use crate::assembly::{ForwardAdapter, ForwardCatalog, HostOptions};
 use crate::cache::{NativeCacheAdapter, PendingStore};
-use crate::config::CompiledConfig;
+use crate::config::{CompiledConfig, FallbackConfig, NativeTarget, PreferenceConfig};
 use crate::observer::{
     AnswerDetailsStatus, AuditAnswer, CacheStatus, ExecutionCheckpoint, FailureProvenance,
     LocalFailureKind, QueryTerminalOutcome, ResponseDetails, ResponseFlags, ResponseSource,
     ResponseState as ObservedResponseState, TerminalObservation, UpstreamAttemptLedger,
     UpstreamAttemptLedgerHandle, UpstreamAttemptList, UpstreamAttemptOutcome,
-    UpstreamAttemptRecord, UpstreamDiagnosticAttempt, UpstreamDiagnosticSelected,
-    UpstreamDiagnostics, UpstreamMetricAttempt, UpstreamTransport,
+    UpstreamAttemptRecord, UpstreamDiagnosticAttempt, UpstreamDiagnosticBranch,
+    UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamMetricAttempt, UpstreamTransport,
 };
 
 const DEFAULT_FUEL: u64 = 64;
@@ -89,6 +92,305 @@ pub(crate) struct ExecutionRequest<'a> {
     pub question: QuestionInfo,
 }
 
+struct BranchContext<'a, E: ExchangeExecutor + ?Sized> {
+    config: &'a CompiledConfig,
+    cache: &'a NativeCacheAdapter,
+    executor: &'a E,
+    raw: Rc<Vec<u8>>,
+    header: QueryHeader,
+    question: QuestionInfo,
+    deadline: Instant,
+    root_cancellation: TransportCancellation,
+    branch_cancellation: TransportCancellation,
+    trace: Option<Rc<RefCell<BranchTrace>>>,
+    branch_id: Option<usize>,
+}
+
+impl<E: ExchangeExecutor + ?Sized> Clone for BranchContext<'_, E> {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config,
+            cache: self.cache,
+            executor: self.executor,
+            raw: Rc::clone(&self.raw),
+            header: self.header,
+            question: self.question.clone(),
+            deadline: self.deadline,
+            root_cancellation: self.root_cancellation.clone(),
+            branch_cancellation: self.branch_cancellation.clone(),
+            trace: self.trace.clone(),
+            branch_id: self.branch_id,
+        }
+    }
+}
+
+impl<E: ExchangeExecutor + ?Sized> BranchContext<'_, E> {
+    fn raw(&self) -> &[u8] {
+        self.raw.as_slice()
+    }
+
+    fn with_query(&self, raw: Vec<u8>, question: QuestionInfo) -> Self {
+        Self {
+            raw: Rc::new(raw),
+            question,
+            ..self.clone()
+        }
+    }
+
+    fn with_transport_cancellation(&self, branch_cancellation: TransportCancellation) -> Self {
+        Self {
+            branch_cancellation,
+            ..self.clone()
+        }
+    }
+
+    fn with_branch(&self, branch_id: Option<usize>) -> Self {
+        Self {
+            branch_id,
+            ..self.clone()
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct BranchTrace {
+    branches: Vec<UpstreamDiagnosticBranch>,
+    attempts: Vec<UpstreamDiagnosticAttempt>,
+    candidates: std::collections::BTreeMap<usize, UpstreamDiagnosticSelected>,
+    selected: Option<UpstreamDiagnosticSelected>,
+    pending_attempts: std::collections::BTreeMap<u64, usize>,
+    next_pending_attempt: u64,
+}
+
+impl BranchTrace {
+    fn new(qtype: u16) -> Self {
+        Self {
+            branches: vec![UpstreamDiagnosticBranch {
+                id: 0,
+                parent_id: None,
+                role: "root".to_owned(),
+                policy: None,
+                qtype,
+                decision: "completed".to_owned(),
+            }],
+            attempts: Vec::new(),
+            candidates: std::collections::BTreeMap::new(),
+            selected: None,
+            pending_attempts: std::collections::BTreeMap::new(),
+            next_pending_attempt: 1,
+        }
+    }
+
+    fn add_branch(
+        &mut self,
+        parent_id: Option<usize>,
+        role: &str,
+        policy: &str,
+        qtype: u16,
+    ) -> usize {
+        let id = self.branches.len();
+        self.branches.push(UpstreamDiagnosticBranch {
+            id,
+            parent_id,
+            role: role.to_owned(),
+            policy: Some(policy.to_owned()),
+            qtype,
+            decision: "skipped".to_owned(),
+        });
+        id
+    }
+
+    fn mark(&mut self, id: Option<usize>, decision: &str) {
+        if let Some(id) = id {
+            if let Some(branch) = self.branches.get_mut(id) {
+                branch.decision = decision.to_owned();
+            }
+        }
+    }
+
+    fn start(&mut self, id: Option<usize>) {
+        if let Some(id) = id {
+            if let Some(branch) = self.branches.get_mut(id) {
+                branch.decision = "completed".to_owned();
+            }
+        }
+    }
+
+    fn record_attempt(
+        &mut self,
+        branch_id: Option<usize>,
+        qtype: u16,
+        entry: String,
+        peer: Option<SocketAddr>,
+        transport: Option<UpstreamTransport>,
+        outcome: UpstreamAttemptOutcome,
+    ) {
+        self.attempts.push(UpstreamDiagnosticAttempt {
+            ordinal: self.attempts.len(),
+            branch_id,
+            qtype: Some(qtype),
+            entry,
+            peer,
+            transport,
+            outcome,
+        });
+    }
+
+    fn begin_attempt(&mut self, branch_id: Option<usize>, qtype: u16, entry: String) -> u64 {
+        let token = self.next_pending_attempt;
+        self.next_pending_attempt = self.next_pending_attempt.saturating_add(1);
+        let index = self.attempts.len();
+        self.attempts.push(UpstreamDiagnosticAttempt {
+            ordinal: index,
+            branch_id,
+            qtype: Some(qtype),
+            entry,
+            peer: None,
+            transport: None,
+            outcome: UpstreamAttemptOutcome::Interrupted,
+        });
+        self.pending_attempts.insert(token, index);
+        token
+    }
+
+    fn finish_attempt(&mut self, token: u64) {
+        let Some(index) = self.pending_attempts.remove(&token) else {
+            return;
+        };
+        self.attempts.remove(index);
+        for pending in self.pending_attempts.values_mut() {
+            if *pending > index {
+                *pending -= 1;
+            }
+        }
+    }
+
+    fn candidate(
+        &mut self,
+        branch_id: Option<usize>,
+        entry: String,
+        peer: Option<SocketAddr>,
+        transport: Option<UpstreamTransport>,
+    ) {
+        if let Some(branch_id) = branch_id {
+            if let (Some(peer), Some(transport)) = (peer, transport) {
+                self.candidates.insert(
+                    branch_id,
+                    UpstreamDiagnosticSelected {
+                        branch_id: Some(branch_id),
+                        entry,
+                        peer,
+                        transport,
+                    },
+                );
+            }
+        }
+    }
+
+    fn select(&mut self, branch_id: Option<usize>) {
+        self.selected = branch_id.and_then(|id| self.candidates.get(&id).cloned());
+    }
+}
+
+struct TraceAttemptGuard {
+    trace: Rc<RefCell<BranchTrace>>,
+    token: u64,
+}
+
+impl TraceAttemptGuard {
+    fn finish(self) {
+        self.trace.borrow_mut().finish_attempt(self.token);
+    }
+}
+
+fn begin_branch_attempt<E: ExchangeExecutor + ?Sized>(
+    context: &BranchContext<'_, E>,
+    executable: ExecutableId,
+) -> Option<TraceAttemptGuard> {
+    let trace = context.trace.clone()?;
+    let entry = upstream_identity(context.config, executable)
+        .unwrap_or_else(|| format!("executable:{:?}", executable));
+    let token = trace
+        .borrow_mut()
+        .begin_attempt(context.branch_id, context.question.qtype, entry);
+    Some(TraceAttemptGuard { trace, token })
+}
+
+fn trace_start(
+    context: &BranchContext<'_, impl ExchangeExecutor + ?Sized>,
+    branch_id: Option<usize>,
+) {
+    if let Some(trace) = &context.trace {
+        trace.borrow_mut().start(branch_id);
+    }
+}
+
+fn trace_outcome(
+    context: &BranchContext<'_, impl ExchangeExecutor + ?Sized>,
+    branch_id: Option<usize>,
+    outcome: &BranchOutcome,
+    selected: bool,
+) {
+    if let Some(trace) = &context.trace {
+        let mut trace = trace.borrow_mut();
+        trace.mark(
+            branch_id,
+            if selected {
+                "selected"
+            } else if outcome.is_success() {
+                "completed"
+            } else {
+                "failed"
+            },
+        );
+        if selected {
+            trace.select(branch_id);
+        }
+    }
+}
+
+struct BranchOutcome {
+    state: ExecutionState,
+    source: Option<String>,
+    error: Option<ExecutionError>,
+}
+
+impl BranchOutcome {
+    fn success(state: ExecutionState, source: Option<String>) -> Self {
+        Self {
+            state,
+            source,
+            error: None,
+        }
+    }
+
+    fn failure(state: ExecutionState, error: ExecutionError) -> Self {
+        Self {
+            state,
+            source: None,
+            error: Some(error),
+        }
+    }
+
+    fn is_success(&self) -> bool {
+        self.error.is_none() && !matches!(self.state.response, MachineResponseState::None)
+    }
+}
+
+fn commit_branch_winner<E: ExchangeExecutor + ?Sized>(
+    outcome: BranchOutcome,
+    context: &BranchContext<'_, E>,
+    fallback_state: &ExecutionState,
+) -> BranchOutcome {
+    if context.root_cancellation.is_cancelled() {
+        return BranchOutcome::failure(fallback_state.clone(), ExecutionError::Cancelled);
+    }
+    if Instant::now() >= context.deadline {
+        return BranchOutcome::failure(fallback_state.clone(), ExecutionError::BudgetExceeded);
+    }
+    outcome
+}
+
 /// Facts produced by the canonical execution path for one parsed query.
 /// Listener-owned framing and terminal transport outcome are added later.
 #[derive(Clone, Debug)]
@@ -117,6 +419,7 @@ struct ExecutionFacts<'a> {
     upstream_attempts: UpstreamAttemptList,
     selected_peer: Option<SocketAddr>,
     upstream_diagnostics: Option<UpstreamDiagnostics>,
+    policy_trace: Option<Rc<RefCell<BranchTrace>>>,
     failure_provenance: Option<FailureProvenance>,
     /// The real named-sequence execution position, materialized only when
     /// detailed audit capture is enabled.
@@ -139,6 +442,33 @@ struct ExecutionFacts<'a> {
 }
 
 impl ExecutionFacts<'_> {
+    fn enable_policy_trace(&mut self, qtype: u16) -> Option<Rc<RefCell<BranchTrace>>> {
+        if !self.capture_audit_details {
+            return None;
+        }
+        if self.policy_trace.is_none() {
+            self.policy_trace = Some(Rc::new(RefCell::new(BranchTrace::new(qtype))));
+        }
+        self.policy_trace.clone()
+    }
+
+    fn finalize_policy_trace(&mut self) {
+        let Some(trace) = self.policy_trace.as_ref() else {
+            return;
+        };
+        let trace = trace.borrow();
+        let Some(diagnostics) = self.upstream_diagnostics.as_mut() else {
+            return;
+        };
+        diagnostics.schema_version = 2;
+        diagnostics.branches = trace.branches.clone();
+        diagnostics.attempts.extend(trace.attempts.clone());
+        for (ordinal, attempt) in diagnostics.attempts.iter_mut().enumerate() {
+            attempt.ordinal = ordinal;
+        }
+        diagnostics.selected = trace.selected.clone();
+    }
+
     fn set_response_source(&mut self, source: ResponseSource) {
         if self.capture_audit_details {
             self.response_source = Some(source);
@@ -239,6 +569,8 @@ impl ExecutionFacts<'_> {
                 if let Some(diagnostics) = &mut self.upstream_diagnostics {
                     diagnostics.attempts.push(UpstreamDiagnosticAttempt {
                         ordinal: diagnostics.attempts.len(),
+                        branch_id: None,
+                        qtype: None,
                         entry: upstream,
                         peer,
                         transport,
@@ -274,6 +606,7 @@ impl ExecutionFacts<'_> {
             (peer, transport, &mut self.upstream_diagnostics)
         {
             diagnostics.selected = Some(UpstreamDiagnosticSelected {
+                branch_id: None,
                 entry: upstream,
                 peer,
                 transport,
@@ -306,6 +639,7 @@ impl ExecutionFacts<'_> {
 
 impl Drop for ExecutionFacts<'_> {
     fn drop(&mut self) {
+        self.finalize_policy_trace();
         if self.completed {
             return;
         }
@@ -339,6 +673,8 @@ impl Drop for ExecutionFacts<'_> {
                         if let Some(diagnostics) = &mut self.upstream_diagnostics {
                             diagnostics.attempts.push(UpstreamDiagnosticAttempt {
                                 ordinal: diagnostics.attempts.len(),
+                                branch_id: None,
+                                qtype: None,
                                 entry: upstream,
                                 peer: slot.peer,
                                 transport: slot.transport,
@@ -460,9 +796,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         selected_peer: None,
         upstream_diagnostics: capture_audit_details.then(|| UpstreamDiagnostics {
             schema_version: 1,
+            branches: Vec::new(),
             selected: None,
             attempts: Vec::new(),
         }),
+        policy_trace: None,
         failure_provenance: None,
         // No entry-tag backfill: the field carries the real executing position
         // recorded during execution, or nothing when none was observed.
@@ -484,7 +822,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     let request_deadline = options
         .admission_deadline
         .unwrap_or_else(|| Instant::now() + options.request_deadline);
-    let mut machine = match config.new_machine(state, ExecutionControl::with_fuel(DEFAULT_FUEL)) {
+    let root_control = ExecutionControl::with_shared_budget(
+        RootFuelHandle::new(DEFAULT_FUEL),
+        CancellationToken::new(),
+    );
+    let mut machine = match config.new_machine(state, root_control) {
         Ok(machine) => machine,
         Err(_) => {
             facts.cache_status = CacheStatus::NotApplicable;
@@ -555,6 +897,123 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 };
             }
             MachineStep::Dispatch(dispatch) => {
+                if let Some(policy) = config
+                    .fallbacks
+                    .iter()
+                    .find(|policy| policy.executable == dispatch.executable())
+                {
+                    let trace = facts.enable_policy_trace(question.qtype);
+                    let context = BranchContext {
+                        config,
+                        cache,
+                        executor,
+                        raw: Rc::new(raw.to_vec()),
+                        header,
+                        question: question.clone(),
+                        deadline: request_deadline,
+                        root_cancellation: request_shutdown.clone(),
+                        branch_cancellation: request_shutdown.child_token(),
+                        trace,
+                        branch_id: Some(0),
+                    };
+                    let successor = match machine.fork_successor(CancellationToken::new()) {
+                        Ok(successor) => successor,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            set_servfail(&mut machine);
+                            facts.set_response_source(ResponseSource::Local);
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    let outcome = run_fallback(policy.clone(), successor, context, None).await;
+                    if let Some(error) = outcome.error {
+                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                            LocalFailureKind::NoUsableUpstreamResponse,
+                        ));
+                        set_servfail(&mut machine);
+                        facts.set_response_source(ResponseSource::Local);
+                        let _ = error;
+                        return result_from_state(&machine, &header, &question, facts);
+                    }
+                    if let Some(source) = outcome.source.clone() {
+                        facts.set_response_source(ResponseSource::Upstream(source));
+                    } else {
+                        facts.set_response_source(ResponseSource::Local);
+                    }
+                    *machine.state_mut() = outcome.state;
+                    step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
+                    {
+                        Ok(step) => step,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    continue;
+                }
+                if let Some(preference) = config
+                    .preferences
+                    .iter()
+                    .find(|preference| preference.executable == dispatch.executable())
+                {
+                    let trace = facts.enable_policy_trace(question.qtype);
+                    let context = BranchContext {
+                        config,
+                        cache,
+                        executor,
+                        raw: Rc::new(raw.to_vec()),
+                        header,
+                        question: question.clone(),
+                        deadline: request_deadline,
+                        root_cancellation: request_shutdown.clone(),
+                        branch_cancellation: request_shutdown.child_token(),
+                        trace,
+                        branch_id: Some(0),
+                    };
+                    let successor = match machine.fork_successor(CancellationToken::new()) {
+                        Ok(successor) => successor,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            set_servfail(&mut machine);
+                            facts.set_response_source(ResponseSource::Local);
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    let outcome =
+                        run_preference(preference.clone(), successor, context, None).await;
+                    if let Some(error) = outcome.error {
+                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                            LocalFailureKind::NoUsableUpstreamResponse,
+                        ));
+                        set_servfail(&mut machine);
+                        facts.set_response_source(ResponseSource::Local);
+                        let _ = error;
+                        return result_from_state(&machine, &header, &question, facts);
+                    }
+                    if let Some(source) = outcome.source.clone() {
+                        facts.set_response_source(ResponseSource::Upstream(source));
+                    } else {
+                        facts.set_response_source(ResponseSource::Local);
+                    }
+                    *machine.state_mut() = outcome.state;
+                    step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
+                    {
+                        Ok(step) => step,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    continue;
+                }
                 if config
                     .cache
                     .as_ref()
@@ -793,6 +1252,894 @@ fn publish_successor(
     });
 }
 
+fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
+    mut machine: ExecutionMachine<'a>,
+    context: BranchContext<'a, E>,
+    mut source: Option<String>,
+) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
+    Box::pin(async move {
+        let mut pending_store = None;
+        let mut cache_accessed = false;
+        let mut publication_deadline = None;
+        let mut step = match machine.step() {
+            Ok(step) => step,
+            Err(error) => return BranchOutcome::failure(machine.state().clone(), error),
+        };
+        loop {
+            match step {
+                MachineStep::Complete(_) => {
+                    if matches!(machine.state().response, MachineResponseState::None) {
+                        return BranchOutcome::failure(
+                            machine.state().clone(),
+                            ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                                "branch completed without a response",
+                            )),
+                        );
+                    }
+                    return BranchOutcome::success(machine.state().clone(), source);
+                }
+                MachineStep::ScopeComplete(completion) => {
+                    publish_successor(
+                        &mut pending_store,
+                        &machine,
+                        context.root_cancellation.is_cancelled(),
+                        publication_deadline,
+                    );
+                    step = match machine.resume_scope_completion(completion.executable()) {
+                        Ok(step) => step,
+                        Err(error) => {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                    };
+                }
+                MachineStep::Dispatch(dispatch) => {
+                    if let Some(policy) = context
+                        .config
+                        .fallbacks
+                        .iter()
+                        .find(|policy| policy.executable == dispatch.executable())
+                    {
+                        let successor = match machine.fork_successor(CancellationToken::new()) {
+                            Ok(successor) => successor,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
+                        let outcome = run_fallback(
+                            policy.clone(),
+                            successor,
+                            context.clone(),
+                            source.clone(),
+                        )
+                        .await;
+                        if let Some(error) = outcome.error {
+                            return BranchOutcome::failure(outcome.state, error);
+                        }
+                        source = outcome.source;
+                        *machine.state_mut() = outcome.state;
+                        step = match machine
+                            .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
+                        {
+                            Ok(step) => step,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
+                        continue;
+                    }
+                    if let Some(preference) = context
+                        .config
+                        .preferences
+                        .iter()
+                        .find(|preference| preference.executable == dispatch.executable())
+                    {
+                        let successor = match machine.fork_successor(CancellationToken::new()) {
+                            Ok(successor) => successor,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
+                        let outcome = run_preference(
+                            preference.clone(),
+                            successor,
+                            context.clone(),
+                            source.clone(),
+                        )
+                        .await;
+                        if let Some(error) = outcome.error {
+                            return BranchOutcome::failure(outcome.state, error);
+                        }
+                        source = outcome.source;
+                        *machine.state_mut() = outcome.state;
+                        step = match machine
+                            .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
+                        {
+                            Ok(step) => step,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
+                        continue;
+                    }
+                    if context
+                        .config
+                        .cache
+                        .as_ref()
+                        .is_some_and(|cache| cache.executable == dispatch.executable())
+                    {
+                        if cache_accessed {
+                            return BranchOutcome::failure(
+                                machine.state().clone(),
+                                ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                                    "duplicate cache access in one branch",
+                                )),
+                            );
+                        }
+                        cache_accessed = true;
+                        if let Ok(Some(wire)) = context.cache.lookup(context.raw()) {
+                            machine.state_mut().set_raw_response(wire);
+                            source = None;
+                            step = match machine
+                                .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
+                            {
+                                Ok(step) => step,
+                                Err(error) => {
+                                    return BranchOutcome::failure(machine.state().clone(), error);
+                                }
+                            };
+                            continue;
+                        }
+                        pending_store = context.cache.begin_store(context.raw()).ok().flatten();
+                        publication_deadline = Some(context.deadline);
+                        if let Err(error) = machine.watch_enclosing_scope(dispatch.executable()) {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                        step = match machine
+                            .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+                        {
+                            Ok(step) => step,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
+                        continue;
+                    }
+                    if context.root_cancellation.is_cancelled() {
+                        return BranchOutcome::failure(
+                            machine.state().clone(),
+                            ExecutionError::Cancelled,
+                        );
+                    }
+                    if Instant::now() >= context.deadline {
+                        return BranchOutcome::failure(
+                            machine.state().clone(),
+                            ExecutionError::BudgetExceeded,
+                        );
+                    }
+                    let branch_cancellation = context.branch_cancellation.child_token();
+                    let ledger = UpstreamAttemptLedger::default().into_shared();
+                    let trace_attempt = begin_branch_attempt(&context, dispatch.executable());
+                    let exchange = context
+                        .executor
+                        .exchange_invocation(
+                            dispatch.executable(),
+                            context.raw(),
+                            context.deadline,
+                            branch_cancellation,
+                            ledger.clone(),
+                        )
+                        .await;
+                    if let Some(trace_attempt) = trace_attempt {
+                        trace_attempt.finish();
+                    }
+                    let selected_entry = exchange
+                        .as_ref()
+                        .ok()
+                        .and_then(|batch| batch.selected_entry);
+                    let response_transport = exchange
+                        .as_ref()
+                        .ok()
+                        .map(|batch| branch_transport(batch.response.transport()));
+                    let response = match &exchange {
+                        Ok(batch) => qualify_response(
+                            batch.response.wire(),
+                            context.header.id,
+                            &context.question,
+                        )
+                        .map(|wire| {
+                            let identity = batch
+                                .selected_entry
+                                .and_then(|entry| {
+                                    invocation_identity(
+                                        context.config,
+                                        dispatch.executable(),
+                                        entry,
+                                    )
+                                })
+                                .or_else(|| {
+                                    upstream_identity(context.config, dispatch.executable())
+                                });
+                            (wire, identity)
+                        }),
+                        Err(_) => None,
+                    };
+                    record_branch_ledger(
+                        &context,
+                        dispatch.executable(),
+                        &ledger,
+                        selected_entry,
+                        response_transport,
+                        if response.is_some() {
+                            UpstreamAttemptOutcome::Response
+                        } else {
+                            UpstreamAttemptOutcome::Failed
+                        },
+                    );
+                    let Some((wire, identity)) = response else {
+                        return BranchOutcome::failure(
+                            machine.state().clone(),
+                            ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                                "branch upstream exchange failed",
+                            )),
+                        );
+                    };
+                    machine.state_mut().set_raw_response(wire);
+                    source = identity;
+                    step = match machine
+                        .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+                    {
+                        Ok(step) => step,
+                        Err(error) => {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                    };
+                }
+            }
+        }
+    })
+}
+
+fn run_target<'a, E: ExchangeExecutor + ?Sized>(
+    target: NativeTarget,
+    mut successor: ExecutionMachine<'a>,
+    context: BranchContext<'a, E>,
+    source: Option<String>,
+) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
+    Box::pin(async move {
+        match target {
+            NativeTarget::Sequence(sequence) => {
+                let control = successor.control().fork_child(CancellationToken::new());
+                let target_machine = match ExecutionMachine::new(
+                    &context.config.program,
+                    sequence,
+                    successor.state().clone(),
+                    control,
+                ) {
+                    Ok(machine) => machine,
+                    Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
+                };
+                let result = drive_branch(target_machine, context.clone(), source).await;
+                if let Some(error) = result.error {
+                    return BranchOutcome::failure(result.state, error);
+                }
+                *successor.state_mut() = result.state;
+                drive_branch(successor, context, result.source).await
+            }
+            NativeTarget::Fixture(fixture) => {
+                let outcome = match context.config.program.fixture(fixture) {
+                    Some(fixture) => fixture.executable.execute(successor.state_mut()),
+                    None => Err(mosdns_sequence_core::ExecutorError::new(
+                        "branch fixture is missing",
+                    )),
+                };
+                match outcome {
+                    Ok(ExecutorOutcome::Continue | ExecutorOutcome::Return) => {
+                        drive_branch(successor, context, source).await
+                    }
+                    Ok(ExecutorOutcome::Accept) => {
+                        BranchOutcome::success(successor.state().clone(), source)
+                    }
+                    Ok(ExecutorOutcome::Reject { rcode }) => {
+                        if successor
+                            .state_mut()
+                            .set_synthesized_response(rcode)
+                            .is_err()
+                        {
+                            return BranchOutcome::failure(
+                                successor.state().clone(),
+                                ExecutionError::Executor(
+                                    mosdns_sequence_core::ExecutorError::InvalidRcode(rcode),
+                                ),
+                            );
+                        }
+                        BranchOutcome::success(successor.state().clone(), None)
+                    }
+                    Ok(ExecutorOutcome::Exit) => {
+                        if matches!(successor.state().response, MachineResponseState::None) {
+                            BranchOutcome::failure(
+                                successor.state().clone(),
+                                ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                                    "branch exited without a response",
+                                )),
+                            )
+                        } else {
+                            BranchOutcome::success(successor.state().clone(), source)
+                        }
+                    }
+                    Err(error) => BranchOutcome::failure(
+                        successor.state().clone(),
+                        ExecutionError::Executor(error),
+                    ),
+                }
+            }
+            NativeTarget::External(executable) => {
+                if let Some(policy) = context
+                    .config
+                    .fallbacks
+                    .iter()
+                    .find(|policy| policy.executable == executable)
+                {
+                    return run_fallback(policy.clone(), successor, context, source).await;
+                }
+                if let Some(preference) = context
+                    .config
+                    .preferences
+                    .iter()
+                    .find(|preference| preference.executable == executable)
+                {
+                    return run_preference(preference.clone(), successor, context, source).await;
+                }
+                if context
+                    .config
+                    .cache
+                    .as_ref()
+                    .is_some_and(|cache| cache.executable == executable)
+                {
+                    let Some(wire) = context.cache.lookup(context.raw()).ok().flatten() else {
+                        return BranchOutcome::failure(
+                            successor.state().clone(),
+                            ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                                "fallback cache branch missed",
+                            )),
+                        );
+                    };
+                    successor.state_mut().set_raw_response(wire);
+                    return drive_branch(successor, context, None).await;
+                }
+                let cancellation = context.branch_cancellation.child_token();
+                let ledger = UpstreamAttemptLedger::default().into_shared();
+                let trace_attempt = begin_branch_attempt(&context, executable);
+                let exchange = context
+                    .executor
+                    .exchange_invocation(
+                        executable,
+                        context.raw(),
+                        context.deadline,
+                        cancellation,
+                        ledger.clone(),
+                    )
+                    .await;
+                if let Some(trace_attempt) = trace_attempt {
+                    trace_attempt.finish();
+                }
+                let selected_entry = exchange
+                    .as_ref()
+                    .ok()
+                    .and_then(|batch| batch.selected_entry);
+                let response_transport = exchange
+                    .as_ref()
+                    .ok()
+                    .map(|batch| branch_transport(batch.response.transport()));
+                let wire = exchange.as_ref().ok().and_then(|batch| {
+                    qualify_response(batch.response.wire(), context.header.id, &context.question)
+                });
+                record_branch_ledger(
+                    &context,
+                    executable,
+                    &ledger,
+                    selected_entry,
+                    response_transport,
+                    if wire.is_some() {
+                        UpstreamAttemptOutcome::Response
+                    } else {
+                        UpstreamAttemptOutcome::Failed
+                    },
+                );
+                let Some(wire) = wire else {
+                    return BranchOutcome::failure(
+                        successor.state().clone(),
+                        ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                            "branch external exchange failed",
+                        )),
+                    );
+                };
+                let source = exchange.ok().and_then(|batch| {
+                    batch
+                        .selected_entry
+                        .and_then(|entry| invocation_identity(context.config, executable, entry))
+                        .or_else(|| upstream_identity(context.config, executable))
+                });
+                successor.state_mut().set_raw_response(wire);
+                drive_branch(successor, context, source).await
+            }
+        }
+    })
+}
+
+fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
+    policy: FallbackConfig,
+    successor: ExecutionMachine<'a>,
+    context: BranchContext<'a, E>,
+    source: Option<String>,
+) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
+    Box::pin(async move {
+        let started = Instant::now();
+        let remaining = context.deadline.saturating_duration_since(started);
+        let threshold = policy.threshold.min(remaining);
+        let primary_cancel = context.branch_cancellation.child_token();
+        let secondary_cancel = context.branch_cancellation.child_token();
+        let primary_core = CancellationToken::new();
+        let secondary_core = CancellationToken::new();
+        let primary_machine = match successor.fork_branch(primary_core) {
+            Ok(machine) => machine,
+            Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
+        };
+        let secondary_machine = match successor.fork_branch(secondary_core) {
+            Ok(machine) => machine,
+            Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
+        };
+        let (primary_id, secondary_id) = if let Some(trace) = &context.trace {
+            let mut trace = trace.borrow_mut();
+            let primary_id = trace.add_branch(
+                context.branch_id,
+                "primary",
+                "fallback",
+                context.question.qtype,
+            );
+            let secondary_id = trace.add_branch(
+                context.branch_id,
+                "secondary",
+                "fallback",
+                context.question.qtype,
+            );
+            trace.start(Some(primary_id));
+            (Some(primary_id), Some(secondary_id))
+        } else {
+            (None, None)
+        };
+        let primary_context = context
+            .with_branch(primary_id)
+            .with_transport_cancellation(primary_cancel.clone());
+        let primary_future = run_target(
+            policy.primary,
+            primary_machine,
+            primary_context,
+            source.clone(),
+        );
+        if policy.always_standby || threshold.is_zero() {
+            let secondary_future = run_target(
+                policy.secondary,
+                secondary_machine,
+                context
+                    .with_branch(secondary_id)
+                    .with_transport_cancellation(secondary_cancel.clone()),
+                source.clone(),
+            );
+            let mut primary = Box::pin(primary_future);
+            let mut secondary = Box::pin(secondary_future);
+            let mut release = Box::pin(tokio::time::sleep(threshold));
+            let mut primary_result: Option<BranchOutcome> = None;
+            let mut secondary_result: Option<BranchOutcome> = None;
+            let mut released = threshold.is_zero();
+            loop {
+                if let Some(result) = primary_result.take() {
+                    if result.is_success() && (released || secondary_result.is_some()) {
+                        secondary_cancel.cancel();
+                        trace_outcome(&context, primary_id, &result, true);
+                        if let Some(secondary_result) = secondary_result.as_ref() {
+                            trace_outcome(&context, secondary_id, secondary_result, false);
+                        } else if secondary_id.is_some() {
+                            if let Some(trace) = &context.trace {
+                                trace.borrow_mut().mark(secondary_id, "canceled");
+                            }
+                        }
+                        return commit_branch_winner(result, &context, successor.state());
+                    }
+                    primary_result = Some(result);
+                }
+                if let Some(result) = secondary_result.take() {
+                    if result.is_success() && (released || primary_result.is_some()) {
+                        primary_cancel.cancel();
+                        trace_outcome(&context, secondary_id, &result, true);
+                        if let Some(primary_result) = primary_result.as_ref() {
+                            trace_outcome(&context, primary_id, primary_result, false);
+                        } else if primary_id.is_some() {
+                            if let Some(trace) = &context.trace {
+                                trace.borrow_mut().mark(primary_id, "canceled");
+                            }
+                        }
+                        return commit_branch_winner(result, &context, successor.state());
+                    }
+                    secondary_result = Some(result);
+                }
+                if primary_result.is_some() && secondary_result.is_some() {
+                    if let Some(result) = primary_result.as_ref() {
+                        trace_outcome(&context, primary_id, result, false);
+                    }
+                    if let Some(result) = secondary_result.as_ref() {
+                        trace_outcome(&context, secondary_id, result, false);
+                    }
+                    return BranchOutcome::failure(
+                        successor.state().clone(),
+                        ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                            "fallback branches produced no usable response",
+                        )),
+                    );
+                }
+                tokio::select! {
+                    biased;
+                    result = &mut primary, if primary_result.is_none() => primary_result = Some(result),
+                    result = &mut secondary, if secondary_result.is_none() => secondary_result = Some(result),
+                    _ = &mut release, if !released => released = true,
+                }
+            }
+        }
+        let mut primary = Box::pin(primary_future);
+        let mut release = Box::pin(tokio::time::sleep(threshold));
+        tokio::select! {
+            biased;
+            result = &mut primary => {
+                if result.is_success() {
+                    secondary_cancel.cancel();
+                    trace_outcome(&context, primary_id, &result, true);
+                    return commit_branch_winner(result, &context, successor.state());
+                }
+                trace_outcome(&context, primary_id, &result, false);
+                trace_start(&context, secondary_id);
+                let secondary = run_target(
+                    policy.secondary,
+                    secondary_machine,
+                    context
+                        .with_branch(secondary_id)
+                        .with_transport_cancellation(secondary_cancel.clone()),
+                    result.source.clone(),
+                );
+                let secondary = Box::pin(secondary);
+                let result = secondary.await;
+                if result.is_success() {
+                    trace_outcome(&context, secondary_id, &result, true);
+                    return commit_branch_winner(result, &context, successor.state());
+                }
+                trace_outcome(&context, secondary_id, &result, false);
+                BranchOutcome::failure(
+                    successor.state().clone(),
+                    ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                        "fallback branches produced no usable response",
+                    )),
+                )
+            }
+            _ = &mut release => {
+                trace_start(&context, secondary_id);
+                let secondary_future = run_target(
+                    policy.secondary,
+                    secondary_machine,
+                    context
+                        .with_branch(secondary_id)
+                        .with_transport_cancellation(secondary_cancel.clone()),
+                    source,
+                );
+                let mut secondary = Box::pin(secondary_future);
+                tokio::select! {
+                    biased;
+                    result = &mut primary => {
+                        if result.is_success() {
+                            secondary_cancel.cancel();
+                            trace_outcome(&context, primary_id, &result, true);
+                            if secondary_id.is_some() {
+                                if let Some(trace) = &context.trace {
+                                    trace.borrow_mut().mark(secondary_id, "canceled");
+                                }
+                            }
+                            commit_branch_winner(result, &context, successor.state())
+                        } else {
+                            trace_outcome(&context, primary_id, &result, false);
+                            let result = secondary.await;
+                            if result.is_success() {
+                                trace_outcome(&context, secondary_id, &result, true);
+                                commit_branch_winner(result, &context, successor.state())
+                            } else {
+                                trace_outcome(&context, secondary_id, &result, false);
+                                BranchOutcome::failure(successor.state().clone(), ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new("fallback branches produced no usable response")))
+                            }
+                        }
+                    }
+                    result = &mut secondary => {
+                        if result.is_success() {
+                            primary_cancel.cancel();
+                            trace_outcome(&context, secondary_id, &result, true);
+                            if primary_id.is_some() {
+                                if let Some(trace) = &context.trace {
+                                    trace.borrow_mut().mark(primary_id, "canceled");
+                                }
+                            }
+                            commit_branch_winner(result, &context, successor.state())
+                        } else {
+                            trace_outcome(&context, secondary_id, &result, false);
+                            let result = primary.await;
+                            if result.is_success() {
+                                trace_outcome(&context, primary_id, &result, true);
+                                commit_branch_winner(result, &context, successor.state())
+                            } else {
+                                trace_outcome(&context, primary_id, &result, false);
+                                BranchOutcome::failure(successor.state().clone(), ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new("fallback branches produced no usable response")))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
+    policy: PreferenceConfig,
+    mut successor: ExecutionMachine<'a>,
+    context: BranchContext<'a, E>,
+    source: Option<String>,
+) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
+    Box::pin(async move {
+        let preferred_qtype = match policy.family {
+            crate::config::PreferenceFamily::Ipv4 => 1,
+            crate::config::PreferenceFamily::Ipv6 => 28,
+        };
+        let policy_name = match policy.family {
+            crate::config::PreferenceFamily::Ipv4 => "prefer_ipv4",
+            crate::config::PreferenceFamily::Ipv6 => "prefer_ipv6",
+        };
+        if context.question.qtype != 1 && context.question.qtype != 28 {
+            return drive_branch(successor, context, source).await;
+        }
+        let key = preference_cache_key(&context.question);
+        let now = Instant::now();
+        {
+            let mut evidence = policy.evidence.borrow_mut();
+            evidence.retain(|_, expiry| *expiry > now);
+            if context.question.qtype != preferred_qtype
+                && evidence.get(&key).is_some_and(|expiry| *expiry > now)
+            {
+                if successor.state_mut().set_synthesized_response(0).is_err() {
+                    return BranchOutcome::failure(
+                        successor.state().clone(),
+                        ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                            "preference suppression response could not be built",
+                        )),
+                    );
+                }
+                return commit_branch_winner(
+                    BranchOutcome::success(successor.state().clone(), None),
+                    &context,
+                    successor.state(),
+                );
+            }
+        }
+        if context.question.qtype == preferred_qtype {
+            let branch_id = context.trace.as_ref().map(|trace| {
+                let id = trace.borrow_mut().add_branch(
+                    context.branch_id,
+                    "original",
+                    policy_name,
+                    context.question.qtype,
+                );
+                trace.borrow_mut().start(Some(id));
+                id
+            });
+            let result = drive_branch(successor, context.with_branch(branch_id), source).await;
+            trace_outcome(&context, branch_id, &result, result.is_success());
+            if result.is_success()
+                && response_raw(&result.state.response)
+                    .is_some_and(|wire| response_has_type(wire, preferred_qtype))
+            {
+                remember_preference(&policy, key);
+            }
+            return result;
+        }
+
+        let original_machine = match successor.fork_branch(CancellationToken::new()) {
+            Ok(machine) => machine,
+            Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
+        };
+        let reference_machine = match successor.fork_branch(CancellationToken::new()) {
+            Ok(machine) => machine,
+            Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
+        };
+        let mut reference_question = context.question.clone();
+        reference_question.qtype = preferred_qtype;
+        let reference_raw = rewrite_query_qtype(context.raw(), preferred_qtype).ok_or_else(|| {
+            ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                "preference query rewrite failed",
+            ))
+        });
+        let reference_raw = match reference_raw {
+            Ok(raw) => raw,
+            Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
+        };
+        let reference_context = context.with_query(reference_raw, reference_question);
+        let original_transport = context.branch_cancellation.child_token();
+        let reference_transport = context.branch_cancellation.child_token();
+        let original_context = context.with_transport_cancellation(original_transport.clone());
+        let reference_context =
+            reference_context.with_transport_cancellation(reference_transport.clone());
+        let (original_id, reference_id) = if let Some(trace) = &context.trace {
+            let mut trace = trace.borrow_mut();
+            let original_id = trace.add_branch(
+                context.branch_id,
+                "original",
+                policy_name,
+                context.question.qtype,
+            );
+            let reference_id =
+                trace.add_branch(context.branch_id, "reference", policy_name, preferred_qtype);
+            trace.start(Some(original_id));
+            (Some(original_id), Some(reference_id))
+        } else {
+            (None, None)
+        };
+        trace_start(&context, reference_id);
+        let wait = context
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .min(std::time::Duration::from_millis(500));
+        let original_context = original_context.with_branch(original_id);
+        let reference_context = reference_context.with_branch(reference_id);
+        let mut original = Box::pin(drive_branch(original_machine, original_context, source));
+        let mut reference = Box::pin(drive_branch(reference_machine, reference_context, None));
+        let mut original_result: Option<BranchOutcome> = None;
+        let mut reference_result: Option<BranchOutcome> = None;
+        let mut wait_timer = Box::pin(tokio::time::sleep(wait));
+        loop {
+            if let Some(reference_value) = reference_result.as_ref() {
+                if reference_value.is_success()
+                    && response_raw(&reference_value.state.response)
+                        .is_some_and(|wire| response_has_type(wire, preferred_qtype))
+                {
+                    if successor.state_mut().set_synthesized_response(0).is_err() {
+                        return BranchOutcome::failure(
+                            successor.state().clone(),
+                            ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                                "preference suppression response could not be built",
+                            )),
+                        );
+                    }
+                    original_transport.cancel();
+                    if let Some(reference_value) = reference_result.as_ref() {
+                        trace_outcome(&context, reference_id, reference_value, false);
+                    }
+                    if let Some(trace) = &context.trace {
+                        trace.borrow_mut().mark(original_id, "suppressed");
+                    }
+                    remember_preference(&policy, key);
+                    return commit_branch_winner(
+                        BranchOutcome::success(successor.state().clone(), None),
+                        &context,
+                        successor.state(),
+                    );
+                }
+            }
+            if let Some(original_value) = original_result.take() {
+                if reference_result.is_some() {
+                    let selected = original_value.is_success();
+                    trace_outcome(&context, original_id, &original_value, selected);
+                    if let Some(reference_value) = reference_result.as_ref() {
+                        trace_outcome(&context, reference_id, reference_value, false);
+                    }
+                    return original_value;
+                }
+                original_result = Some(original_value);
+            }
+            if original_result.is_some() && reference_result.is_some() {
+                let original_value = original_result.take().unwrap_or_else(|| {
+                    BranchOutcome::failure(
+                        successor.state().clone(),
+                        ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
+                            "preference branches completed without an original result",
+                        )),
+                    )
+                });
+                let selected = original_value.is_success();
+                trace_outcome(&context, original_id, &original_value, selected);
+                if let Some(reference_value) = reference_result.as_ref() {
+                    trace_outcome(&context, reference_id, reference_value, false);
+                }
+                return original_value;
+            }
+            tokio::select! {
+                biased;
+                result = &mut original, if original_result.is_none() => original_result = Some(result),
+                result = &mut reference, if reference_result.is_none() => reference_result = Some(result),
+                _ = &mut wait_timer, if original_result.is_some() && reference_result.is_none() => {
+                    reference_transport.cancel();
+                    let original_value = original_result.take().unwrap_or_else(|| BranchOutcome::failure(
+                        successor.state().clone(),
+                        ExecutionError::BudgetExceeded,
+                    ));
+                    trace_outcome(&context, original_id, &original_value, original_value.is_success());
+                    if reference_id.is_some() {
+                        if let Some(trace) = &context.trace {
+                            trace.borrow_mut().mark(reference_id, "canceled");
+                        }
+                    }
+                    return original_value;
+                }
+            }
+        }
+    })
+}
+
+fn response_has_type(wire: &[u8], qtype: u16) -> bool {
+    observe_answer_records(wire)
+        .map(|answers| answers.into_iter().any(|answer| answer.rrtype == qtype))
+        .unwrap_or(false)
+}
+
+fn response_raw(response: &MachineResponseState) -> Option<&[u8]> {
+    match response {
+        MachineResponseState::Raw(wire) => Some(wire.as_bytes()),
+        MachineResponseState::None | MachineResponseState::Synthesized(_) => None,
+    }
+}
+
+fn preference_cache_key(question: &QuestionInfo) -> String {
+    question
+        .qname_wire
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn remember_preference(policy: &PreferenceConfig, key: String) {
+    let now = Instant::now();
+    let mut evidence = policy.evidence.borrow_mut();
+    if evidence.len() >= 65_536 && !evidence.contains_key(&key) {
+        if let Some(oldest) = evidence
+            .iter()
+            .min_by_key(|(_, expiry)| **expiry)
+            .map(|(key, _)| key.clone())
+        {
+            evidence.remove(&oldest);
+        }
+    }
+    evidence.insert(key, now + std::time::Duration::from_secs(60 * 60));
+}
+
+fn rewrite_query_qtype(raw: &[u8], qtype: u16) -> Option<Vec<u8>> {
+    if raw.len() < 12 {
+        return None;
+    }
+    let mut offset = 12;
+    loop {
+        let length = *raw.get(offset)?;
+        if length == 0 {
+            offset = offset.checked_add(1)?;
+            break;
+        }
+        if length & 0xc0 == 0xc0 {
+            offset = offset.checked_add(2)?;
+            break;
+        }
+        if length & 0xc0 != 0 || length > 63 {
+            return None;
+        }
+        offset = offset.checked_add(1 + usize::from(length))?;
+    }
+    let end = offset.checked_add(4)?;
+    let mut rewritten = raw.to_vec();
+    if end > rewritten.len() {
+        return None;
+    }
+    rewritten[offset..offset + 2].copy_from_slice(&qtype.to_be_bytes());
+    Some(rewritten)
+}
+
 fn upstream_identity(config: &CompiledConfig, executable: ExecutableId) -> Option<String> {
     config
         .forwards
@@ -892,6 +2239,67 @@ fn record_invocation_ledger(
     }
 }
 
+fn branch_transport(transport: mosdns_upstream_core::Transport) -> UpstreamTransport {
+    match transport {
+        mosdns_upstream_core::Transport::Udp => UpstreamTransport::Udp,
+        mosdns_upstream_core::Transport::Tcp => UpstreamTransport::Tcp,
+        mosdns_upstream_core::Transport::Quic => UpstreamTransport::Https,
+    }
+}
+
+fn record_branch_ledger<E: ExchangeExecutor + ?Sized>(
+    context: &BranchContext<'_, E>,
+    executable: ExecutableId,
+    ledger: &UpstreamAttemptLedgerHandle,
+    selected_entry: Option<usize>,
+    fallback_transport: Option<UpstreamTransport>,
+    fallback_outcome: UpstreamAttemptOutcome,
+) {
+    let Some(trace) = &context.trace else {
+        return;
+    };
+    let slots = ledger.borrow().slots().to_vec();
+    let mut trace = trace.borrow_mut();
+    if slots.is_empty() {
+        let entry = upstream_identity(context.config, executable)
+            .unwrap_or_else(|| format!("executable:{:?}", executable));
+        trace.record_attempt(
+            context.branch_id,
+            context.question.qtype,
+            entry.clone(),
+            None,
+            fallback_transport,
+            fallback_outcome,
+        );
+        if fallback_outcome == UpstreamAttemptOutcome::Response {
+            trace.candidate(context.branch_id, entry, None, fallback_transport);
+        }
+        return;
+    }
+    for slot in slots {
+        let entry = invocation_identity(context.config, executable, slot.entry_index)
+            .unwrap_or_else(|| format!("executable:{:?}:{}", executable, slot.entry_index));
+        let outcome = slot.outcome.unwrap_or_else(|| {
+            if context.root_cancellation.is_cancelled() {
+                UpstreamAttemptOutcome::Canceled
+            } else {
+                UpstreamAttemptOutcome::Interrupted
+            }
+        });
+        trace.record_attempt(
+            context.branch_id,
+            context.question.qtype,
+            entry.clone(),
+            slot.peer,
+            slot.transport,
+            outcome,
+        );
+        if selected_entry == Some(slot.entry_index) && outcome == UpstreamAttemptOutcome::Response {
+            trace.candidate(context.branch_id, entry, slot.peer, slot.transport);
+        }
+    }
+}
+
 fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
     facts.response_source = None;
     if let Some(diagnostics) = &mut facts.upstream_diagnostics {
@@ -916,6 +2324,7 @@ fn result_from_state(
 }
 
 fn result_from_wire(response_wire: Vec<u8>, mut facts: ExecutionFacts) -> ExecutionResult {
+    facts.finalize_policy_trace();
     let routing = if response_wire.is_empty() {
         RoutingState::default()
     } else {
@@ -1337,6 +2746,14 @@ mod tests {
         fail: bool,
     }
 
+    struct PolicyExchange {
+        calls: Rc<RefCell<Vec<(ExecutableId, u16)>>>,
+        primary: ExecutableId,
+        secondary: ExecutableId,
+        primary_delay: Duration,
+        secondary_delay: Duration,
+    }
+
     struct RecordingExchange {
         calls: Rc<RefCell<Vec<(ExecutableId, std::time::Instant)>>>,
         response: Vec<u8>,
@@ -1642,6 +3059,43 @@ mod tests {
         }
     }
 
+    impl ExchangeExecutor for PolicyExchange {
+        fn exchange<'a>(
+            &'a self,
+            executable: ExecutableId,
+            query: &'a [u8],
+            _deadline: std::time::Instant,
+            _cancellation: TransportCancellation,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<ExchangeResponse, super::ExchangeError>>
+                    + 'a,
+            >,
+        > {
+            let (_, question) = parse_query(query).expect("policy query");
+            self.calls.borrow_mut().push((executable, question.qtype));
+            let delay = if executable == self.primary {
+                self.primary_delay
+            } else if executable == self.secondary {
+                self.secondary_delay
+            } else {
+                Duration::ZERO
+            };
+            let response = response_for_qtype(query, question.qtype, [192, 0, 2, 55]);
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                let id = u16::from_be_bytes([response[0], response[1]]);
+                Ok(ExchangeResponse::new(
+                    response,
+                    id,
+                    id,
+                    Transport::Udp,
+                    false,
+                ))
+            })
+        }
+    }
+
     fn query(id: u16) -> Vec<u8> {
         vec![
             (id >> 8) as u8,
@@ -1698,6 +3152,37 @@ mod tests {
         let mut response = response(query);
         let address_offset = response.len() - address.len();
         response[address_offset..].copy_from_slice(&address);
+        response
+    }
+
+    fn response_for_qtype(query: &[u8], qtype: u16, address: [u8; 4]) -> Vec<u8> {
+        if qtype == 1 {
+            return response_with_ip(query, address);
+        }
+        let (header, question) = parse_query(query).expect("query");
+        let mut response = vec![
+            (header.id >> 8) as u8,
+            header.id as u8,
+            0x81,
+            0x80,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+        ];
+        response.extend_from_slice(&question.qname_wire);
+        response.extend_from_slice(&qtype.to_be_bytes());
+        response.extend_from_slice(&[0, 1]);
+        response.extend_from_slice(&[0xc0, 0x0c]);
+        response.extend_from_slice(&qtype.to_be_bytes());
+        response.extend_from_slice(&[0, 1, 0, 0, 0, 10, 0, 16]);
+        response.extend_from_slice(&[
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, address[0], address[1], address[2], address[3],
+        ]);
         response
     }
 
@@ -2415,6 +3900,8 @@ plugins:
                 executable: cache_id,
                 capacity: 64,
             }),
+            fallbacks: Vec::new(),
+            preferences: Vec::new(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -2508,6 +3995,8 @@ plugins:
                 forward_definitions: Vec::new(),
                 forward_invocations: Vec::new(),
                 cache: None,
+                fallbacks: Vec::new(),
+                preferences: Vec::new(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -3032,6 +4521,8 @@ plugins:
                     executable: cache_id,
                     capacity: 64,
                 }),
+                fallbacks: Vec::new(),
+                preferences: Vec::new(),
                 sequence: SequenceConfig {
                     tag: "root".to_owned(),
                     sequence: program.sequence_id("root").expect("root"),
@@ -3819,6 +5310,8 @@ plugins:
                 executable: cache_id,
                 capacity: 64,
             }),
+            fallbacks: Vec::new(),
+            preferences: Vec::new(),
             sequence: SequenceConfig {
                 tag: "root".to_owned(),
                 sequence: program.sequence_id("root").expect("root"),
@@ -4025,6 +5518,159 @@ plugins:
         assert_eq!(
             compute_effective_tag("foo|foo|bar|foo", None, None, None),
             "foo|bar"
+        );
+    }
+
+    #[test]
+    fn fallback_zero_starts_both_branches_and_reports_schema_two() {
+        let config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args: [ { exec: "$fallback" } ]
+  - tag: primary
+    type: sequence
+    args: [ { exec: "$primary_forward" } ]
+  - tag: secondary
+    type: sequence
+    args: [ { exec: "$secondary_forward" } ]
+  - tag: fallback
+    type: fallback
+    args: { primary: "$primary", secondary: "$secondary", threshold: 0 }
+  - tag: primary_forward
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:15453" } ] }
+  - tag: secondary_forward
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:15454" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:15353", enable_audit: true }
+"#,
+        )
+        .expect("fallback config");
+        let primary_definition = config
+            .forward_definitions
+            .iter()
+            .position(|definition| definition.tag == "primary_forward")
+            .expect("primary definition");
+        let secondary_definition = config
+            .forward_definitions
+            .iter()
+            .position(|definition| definition.tag == "secondary_forward")
+            .expect("secondary definition");
+        let primary = config
+            .forward_invocations
+            .iter()
+            .find(|invocation| invocation.definition == primary_definition)
+            .expect("primary invocation")
+            .executable;
+        let secondary = config
+            .forward_invocations
+            .iter()
+            .find(|invocation| invocation.definition == secondary_definition)
+            .expect("secondary invocation")
+            .executable;
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = PolicyExchange {
+            calls: Rc::clone(&calls),
+            primary,
+            secondary,
+            primary_delay: Duration::from_millis(20),
+            secondary_delay: Duration::from_millis(5),
+        };
+        let request = query_name(401, "fallback.test");
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let result = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::with_deadline(Duration::from_secs(2)),
+            &request,
+            &executor,
+        );
+        validate_response(&result.response_wire).expect("fallback response");
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 2, "threshold zero must start both forwards");
+        let diagnostics = result.upstream_diagnostics.expect("schema-2 diagnostics");
+        assert_eq!(diagnostics.schema_version, 2);
+        assert!(
+            diagnostics
+                .branches
+                .iter()
+                .any(|branch| branch.role == "primary")
+        );
+        assert!(
+            diagnostics
+                .branches
+                .iter()
+                .any(|branch| branch.role == "secondary")
+        );
+        assert!(
+            diagnostics
+                .attempts
+                .iter()
+                .all(|attempt| attempt.branch_id.is_some())
+        );
+    }
+
+    #[test]
+    fn prefer_ipv4_rewrites_reference_qtype_and_suppresses_original_answer() {
+        let config = compile_yaml(
+            r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args: [ { exec: prefer_ipv4 }, { exec: "$forward" } ]
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:15453" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:15353", enable_audit: true }
+"#,
+        )
+        .expect("preference config");
+        let forward = config.forward_invocations[0].executable;
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = PolicyExchange {
+            calls: Rc::clone(&calls),
+            primary: forward,
+            secondary: forward,
+            primary_delay: Duration::ZERO,
+            secondary_delay: Duration::ZERO,
+        };
+        let request = query_type(402, "preference.test", 28);
+        let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
+        let result = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::with_deadline(Duration::from_secs(2)),
+            &request,
+            &executor,
+        );
+        let details = diagnose_response_wire(&result.response_wire);
+        assert_eq!(details.rcode, 0);
+        assert!(
+            details.answers.is_empty(),
+            "preferred evidence suppresses AAAA wire"
+        );
+        let calls = calls.borrow();
+        assert!(calls.iter().any(|(_, qtype)| *qtype == 28));
+        assert!(calls.iter().any(|(_, qtype)| *qtype == 1));
+        let diagnostics = result.upstream_diagnostics.expect("schema-2 diagnostics");
+        assert_eq!(diagnostics.schema_version, 2);
+        assert!(
+            diagnostics
+                .branches
+                .iter()
+                .any(|branch| branch.decision == "suppressed")
+        );
+        assert!(
+            diagnostics.selected.is_none(),
+            "probe must not be selected supplier"
         );
     }
 

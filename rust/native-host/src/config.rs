@@ -4,7 +4,7 @@ use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mosdns_matcher_core::MixMatcher;
 use mosdns_sequence_core::{
@@ -260,6 +260,64 @@ pub struct CachePluginConfig {
     pub capacity: u64,
 }
 
+/// A target that a native branch policy can execute without exposing policy
+/// internals to sequence-core. The name is resolved only after the complete
+/// program catalog has been validated.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PolicyTargetName {
+    Sequence(String),
+    Fixture(String),
+    External(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FallbackConfig {
+    pub tag: String,
+    pub executable: ExecutableId,
+    pub primary: NativeTarget,
+    pub secondary: NativeTarget,
+    pub threshold: Duration,
+    pub always_standby: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeTarget {
+    Sequence(SequenceId),
+    Fixture(ExecutableId),
+    External(ExecutableId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PreferenceFamily {
+    Ipv4,
+    Ipv6,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreferenceConfig {
+    pub executable: ExecutableId,
+    pub family: PreferenceFamily,
+    pub(crate) evidence: Rc<RefCell<BTreeMap<String, Instant>>>,
+}
+
+struct FallbackDefinition {
+    tag: String,
+    source_path: String,
+    primary: String,
+    secondary: String,
+    threshold: Duration,
+    always_standby: bool,
+}
+
+struct ResolvedFallbackDefinition {
+    tag: String,
+    source_path: String,
+    primary: PolicyTargetName,
+    secondary: PolicyTargetName,
+    threshold: Duration,
+    always_standby: bool,
+}
+
 /// A compiled UDP or TCP listener declaration. No socket is owned here.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListenerConfig {
@@ -318,6 +376,8 @@ pub struct CompiledConfig {
     pub forward_definitions: Vec<ForwardDefinitionConfig>,
     pub forward_invocations: Vec<ForwardInvocationConfig>,
     pub cache: Option<CachePluginConfig>,
+    pub fallbacks: Vec<FallbackConfig>,
+    pub preferences: Vec<PreferenceConfig>,
     pub sequence: SequenceConfig,
     pub listener: ListenerConfig,
     /// Every compiled `domain_set` with its management eligibility.
@@ -510,6 +570,7 @@ enum PluginKind {
     Listener,
     FastMark,
     FlowSetter,
+    Fallback,
 }
 
 /// The collected definition catalog used to resolve named references. It is
@@ -519,6 +580,7 @@ struct PluginCatalog<'a> {
     domain_sets: &'a [(String, DomainSetHandle)],
     fast_marks: &'a [(String, FastMarkConfig)],
     forwards: &'a RefCell<ForwardCompiler>,
+    preferences: &'a RefCell<Vec<(String, PreferenceFamily)>>,
 }
 
 impl PluginCatalog<'_> {
@@ -559,6 +621,7 @@ fn compile_definitions(
             "udp_server" | "tcp_server" => PluginKind::Listener,
             "fast_mark" => PluginKind::FastMark,
             "flow_setter" => PluginKind::FlowSetter,
+            "fallback" => PluginKind::Fallback,
             other => {
                 return Err(ConfigError::new(
                     format!("{}.type", plugin.source_path),
@@ -650,6 +713,7 @@ fn compile_definitions(
     let mut forwards = Vec::new();
     let mut fast_marks = Vec::new();
     let mut flow_setters = Vec::new();
+    let mut fallback_definitions = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
     let mut cache = None;
     let mut listener = None;
@@ -663,6 +727,9 @@ fn compile_definitions(
             PluginKind::FlowSetter => {
                 let config = compile_flow_setter(plugin)?;
                 flow_setters.push((plugin.tag.clone(), config));
+            }
+            PluginKind::Fallback => {
+                fallback_definitions.push(compile_fallback(plugin)?);
             }
             PluginKind::Forward => {
                 let forward = compile_forward(plugin)?;
@@ -714,11 +781,13 @@ fn compile_definitions(
         definitions: forwards,
         invocations: Vec::new(),
     });
+    let preference_invocations = RefCell::new(Vec::new());
     let catalog = PluginCatalog {
         kinds: &kinds,
         domain_sets: &domain_sets,
         fast_marks: &fast_marks,
         forwards: &forward_compiler,
+        preferences: &preference_invocations,
     };
     let mut sequences = Vec::new();
     let mut fixtures = Vec::new();
@@ -734,6 +803,25 @@ fn compile_definitions(
             config.executor(),
         ));
     }
+    let resolved_fallback_definitions = fallback_definitions
+        .into_iter()
+        .map(|definition| {
+            let primary_path = format!("{}.args.primary", definition.source_path);
+            let secondary_path = format!("{}.args.secondary", definition.source_path);
+            Ok(ResolvedFallbackDefinition {
+                tag: definition.tag,
+                source_path: definition.source_path,
+                primary: resolve_policy_target_name(&definition.primary, &primary_path, &catalog)?,
+                secondary: resolve_policy_target_name(
+                    &definition.secondary,
+                    &secondary_path,
+                    &catalog,
+                )?,
+                threshold: definition.threshold,
+                always_standby: definition.always_standby,
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
     for (index, plugin) in definitions.iter().enumerate() {
         if kinds[index].1 == PluginKind::Sequence {
             sequences.push(compile_sequence(plugin, &catalog, &mut fixtures)?);
@@ -773,6 +861,7 @@ fn compile_definitions(
             ));
         }
     }
+    let preference_invocations = preference_invocations.into_inner();
     let externals: Vec<ExternalSpec> = forward_compiler
         .invocations
         .iter()
@@ -781,6 +870,16 @@ fn compile_definitions(
             cache
                 .as_ref()
                 .map(|(tag, _, _)| ExternalSpec::new(tag.clone())),
+        )
+        .chain(
+            resolved_fallback_definitions
+                .iter()
+                .map(|definition| ExternalSpec::new(definition.tag.clone())),
+        )
+        .chain(
+            preference_invocations
+                .iter()
+                .map(|(name, _)| ExternalSpec::new(name.clone())),
         )
         .collect();
     let program = ProgramSpec::new(sequences, fixtures)
@@ -839,6 +938,39 @@ fn compile_definitions(
         })
         .transpose()?;
 
+    let fallbacks = resolved_fallback_definitions
+        .into_iter()
+        .map(|definition| {
+            let executable = external_id(&program, &definition.tag, &definition.source_path)?;
+            Ok(FallbackConfig {
+                tag: definition.tag,
+                executable,
+                primary: resolve_policy_target(
+                    &program,
+                    definition.primary,
+                    &definition.source_path,
+                )?,
+                secondary: resolve_policy_target(
+                    &program,
+                    definition.secondary,
+                    &definition.source_path,
+                )?,
+                threshold: definition.threshold,
+                always_standby: definition.always_standby,
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
+    let preferences = preference_invocations
+        .into_iter()
+        .map(|(name, family)| {
+            Ok(PreferenceConfig {
+                executable: external_id(&program, &name, "$.plugins.sequence.args")?,
+                family,
+                evidence: Rc::new(RefCell::new(BTreeMap::new())),
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
+
     let entry_sequence = program.sequence_id(&listener.entry).ok_or_else(|| {
         ConfigError::new(
             format!("{listener_source_path}.args.entry"),
@@ -854,6 +986,8 @@ fn compile_definitions(
         forward_definitions: forward_compiler.definitions,
         forward_invocations,
         cache: compiled_cache,
+        fallbacks,
+        preferences,
         sequence: SequenceConfig {
             tag: listener.entry.clone(),
             sequence: entry_sequence,
@@ -868,6 +1002,42 @@ fn compile_definitions(
 
 /// Finds one reachable forward for legacy convenience accessors. This scan is
 /// not used to validate configuration or drive runtime dispatch.
+fn external_id(
+    program: &ValidatedProgram,
+    name: &str,
+    path: &str,
+) -> Result<ExecutableId, ConfigError> {
+    program
+        .externals
+        .iter()
+        .find_map(|(id, external)| (external.name == name).then_some(*id))
+        .ok_or_else(|| ConfigError::new(path, format!("compiled external `{name}` is missing")))
+}
+
+fn resolve_policy_target(
+    program: &ValidatedProgram,
+    target: PolicyTargetName,
+    path: &str,
+) -> Result<NativeTarget, ConfigError> {
+    match target {
+        PolicyTargetName::Sequence(name) => program
+            .sequence_id(&name)
+            .map(NativeTarget::Sequence)
+            .ok_or_else(|| {
+                ConfigError::new(path, format!("compiled sequence `${name}` is missing"))
+            }),
+        PolicyTargetName::Fixture(name) => program
+            .fixtures
+            .iter()
+            .find_map(|(id, fixture)| (fixture.name == name).then_some(*id))
+            .map(NativeTarget::Fixture)
+            .ok_or_else(|| ConfigError::new(path, format!("compiled fixture `{name}` is missing"))),
+        PolicyTargetName::External(name) => {
+            external_id(program, &name, path).map(NativeTarget::External)
+        }
+    }
+}
+
 fn primary_forward(
     program: &ValidatedProgram,
     entry: SequenceId,
@@ -1115,6 +1285,99 @@ fn compile_flow_setter(plugin: &RawPlugin) -> Result<FlowSetterConfig, ConfigErr
         .ensure_nonempty()
         .map_err(|reason| ConfigError::new(path, reason))?;
     Ok(config)
+}
+
+fn compile_fallback(plugin: &RawPlugin) -> Result<FallbackDefinition, ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "fallback args must be a mapping")?;
+    args.reject_unknown(
+        &["primary", "secondary", "threshold", "always_standby"],
+        &path,
+    )?;
+    let target = |key: &str| -> Result<String, ConfigError> {
+        let value = expect_string(args.required(key, &path)?, &format!("{path}.{key}"))?;
+        let tag = value.strip_prefix('$').ok_or_else(|| {
+            ConfigError::new(
+                format!("{path}.{key}"),
+                "fallback targets must be exactly a `$plugin` reference",
+            )
+        })?;
+        if tag.is_empty() || tag.contains(char::is_whitespace) {
+            return Err(ConfigError::new(
+                format!("{path}.{key}"),
+                "fallback targets must be exactly one `$plugin` reference",
+            ));
+        }
+        Ok(tag.to_owned())
+    };
+    let threshold = match args.get("threshold") {
+        None => Duration::from_millis(500),
+        Some(RawValue::Number(RawNumber::Signed(value))) if *value < 0 => {
+            Duration::from_millis(500)
+        }
+        Some(RawValue::Number(RawNumber::Signed(value))) => {
+            Duration::from_millis(u64::try_from(*value).map_err(|_| {
+                ConfigError::new(
+                    format!("{path}.threshold"),
+                    "threshold is outside the supported range",
+                )
+            })?)
+        }
+        Some(RawValue::Number(RawNumber::Unsigned(value))) => Duration::from_millis(*value),
+        Some(_) => {
+            return Err(ConfigError::new(
+                format!("{path}.threshold"),
+                "threshold must be an integer number of milliseconds",
+            ));
+        }
+    };
+    let always_standby = args
+        .get("always_standby")
+        .map(|value| expect_bool(value, &format!("{path}.always_standby")))
+        .transpose()?
+        .unwrap_or(false);
+    Ok(FallbackDefinition {
+        tag: plugin.tag.clone(),
+        source_path: plugin.source_path.clone(),
+        primary: target("primary")?,
+        secondary: target("secondary")?,
+        threshold,
+        always_standby,
+    })
+}
+
+fn resolve_policy_target_name(
+    tag: &str,
+    path: &str,
+    catalog: &PluginCatalog<'_>,
+) -> Result<PolicyTargetName, ConfigError> {
+    match catalog.kind_of(tag) {
+        Some(PluginKind::Sequence) => Ok(PolicyTargetName::Sequence(tag.to_owned())),
+        Some(PluginKind::Forward) => {
+            let executable = catalog.forwards.borrow_mut().invocation(tag, "", path)?;
+            let ExecutableSpec::External { target } = executable else {
+                return Err(ConfigError::new(
+                    path,
+                    "forward target did not compile as external",
+                ));
+            };
+            Ok(PolicyTargetName::External(target.name))
+        }
+        Some(PluginKind::Cache | PluginKind::Fallback) => {
+            Ok(PolicyTargetName::External(tag.to_owned()))
+        }
+        Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
+            Ok(PolicyTargetName::Fixture(plugin_fixture_name(tag)))
+        }
+        Some(PluginKind::DomainSet | PluginKind::Listener) => Err(ConfigError::new(
+            path,
+            format!("`${tag}` is not executable"),
+        )),
+        None => Err(ConfigError::new(
+            path,
+            format!("unknown executable reference `${tag}`"),
+        )),
+    }
 }
 
 fn plugin_fixture_name(tag: &str) -> String {
@@ -1520,6 +1783,30 @@ fn compile_exec_item(
         None => (expression, ""),
     };
     match name {
+        "prefer_ipv4" | "prefer_ipv6" => {
+            if !args.is_empty() {
+                return Err(ConfigError::new(path, format!("{name} takes no arguments")));
+            }
+            let family = if name == "prefer_ipv4" {
+                PreferenceFamily::Ipv4
+            } else {
+                PreferenceFamily::Ipv6
+            };
+            let internal_name = format!(
+                "@native-{}:{}:{}:{}",
+                name,
+                hex_identity(sequence_tag),
+                rule_index,
+                exec_index
+            );
+            catalog
+                .preferences
+                .borrow_mut()
+                .push((internal_name.clone(), family));
+            Ok(ExecutableSpec::External {
+                target: ExternalRef::new(internal_name),
+            })
+        }
         "forward" => {
             catalog
                 .forwards
@@ -1614,7 +1901,10 @@ fn compile_exec_item(
                 Some(PluginKind::Sequence) => Ok(ExecutableSpec::Call {
                     target: SequenceRef::new(tag),
                 }),
-                Some(PluginKind::Forward | PluginKind::Cache) => Ok(ExecutableSpec::External {
+                Some(PluginKind::Forward) => {
+                    catalog.forwards.borrow_mut().invocation(tag, args, path)
+                }
+                Some(PluginKind::Cache | PluginKind::Fallback) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),
                 Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
@@ -2242,7 +2532,7 @@ mod tests {
     use mosdns_sequence_core::{ExecutionControl, ExecutionState};
     use mosdns_upstream_core::Transport;
 
-    use super::{ListenerKind, LogLevel, compile_yaml};
+    use super::{ListenerKind, LogLevel, PreferenceFamily, compile_yaml};
 
     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
     const TCP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
@@ -2270,6 +2560,82 @@ mod tests {
         assert_eq!(tcp_forward.endpoint.transport(), Transport::Tcp);
         assert_eq!(tcp_forward.endpoint.address().port(), 15454);
         assert_eq!(tcp.listener.idle_timeout, Some(Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn compiles_fallback_defaults_and_preserves_explicit_zero() {
+        let yaml = r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args: [ { exec: "$fb" } ]
+  - tag: primary
+    type: sequence
+    args: [ { exec: "$forward" } ]
+  - tag: secondary
+    type: sequence
+    args: [ { exec: "$forward" } ]
+  - tag: fb
+    type: fallback
+    args: { primary: "$primary", secondary: "$secondary", always_standby: true }
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:15453" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:15353", enable_audit: false }
+"#;
+        let config = compile_yaml(yaml).expect("fallback config");
+        let fallback = config.fallbacks.first().expect("fallback descriptor");
+        assert_eq!(fallback.threshold, Duration::from_millis(500));
+        assert!(fallback.always_standby);
+
+        let explicit_zero = compile_yaml(
+            &yaml.replace("always_standby: true", "threshold: 0, always_standby: true"),
+        )
+        .expect("explicit zero fallback");
+        assert_eq!(
+            explicit_zero.fallbacks[0].threshold,
+            Duration::from_millis(0)
+        );
+
+        let negative = compile_yaml(&yaml.replace(
+            "always_standby: true",
+            "threshold: -1, always_standby: true",
+        ))
+        .expect("negative compatibility threshold");
+        assert_eq!(negative.fallbacks[0].threshold, Duration::from_millis(500));
+    }
+
+    #[test]
+    fn compiles_both_preference_quick_forms_and_rejects_arguments() {
+        let yaml = r#"
+log: { level: error }
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - exec: prefer_ipv4
+      - exec: prefer_ipv6
+      - exec: $forward
+  - tag: forward
+    type: forward
+    args: { upstreams: [ { addr: "udp://127.0.0.1:15453" } ] }
+  - tag: listener
+    type: udp_server
+    args: { entry: entry, listen: "127.0.0.1:15353", enable_audit: false }
+"#;
+        let config = compile_yaml(yaml).expect("preference config");
+        assert_eq!(config.preferences.len(), 2);
+        assert_eq!(config.preferences[0].family, PreferenceFamily::Ipv4);
+        assert_eq!(config.preferences[1].family, PreferenceFamily::Ipv6);
+
+        let error = match compile_yaml(&yaml.replace("prefer_ipv4", "prefer_ipv4 extra")) {
+            Ok(_) => panic!("preference args must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.reason.contains("takes no arguments"));
     }
 
     #[test]

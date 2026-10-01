@@ -69,13 +69,24 @@ export interface DashboardAuditLog {
   selected_upstream?: string
   upstream_diagnostics?: {
     schema_version?: number
+    branches?: Array<{
+      id?: number
+      parent_id?: number
+      role?: string
+      policy?: string
+      qtype?: number
+      decision?: string
+    }>
     selected?: {
+      branch_id?: number
       entry?: string
       peer?: string
       transport?: string
     }
     attempts?: Array<{
       ordinal?: number
+      branch_id?: number
+      qtype?: number
       entry?: string
       peer?: string
       transport?: string

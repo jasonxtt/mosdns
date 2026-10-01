@@ -1,3 +1,5 @@
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -25,32 +27,84 @@ pub enum CancellationState {
 /// its nested scopes. Cancellation is observed at the next matcher or
 /// executable dispatch boundary; it does not interrupt a fixture in the
 /// middle of one pure call.
+#[derive(Debug)]
+struct CancellationInner {
+    cancelled: AtomicBool,
+    parents: Vec<Arc<CancellationInner>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct CancellationToken {
-    cancelled: Arc<AtomicBool>,
+    inner: Arc<CancellationInner>,
 }
 
 impl CancellationToken {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
+            inner: Arc::new(CancellationInner {
+                cancelled: AtomicBool::new(false),
+                parents: Vec::new(),
+            }),
         }
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        self.inner.cancelled.store(true, Ordering::SeqCst);
     }
 
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.inner.cancelled.load(Ordering::SeqCst)
+            || self
+                .inner
+                .parents
+                .iter()
+                .any(|parent| cancellation_inner_is_cancelled(parent))
     }
+
+    fn with_parents(local: Self, parent: Self) -> Self {
+        Self {
+            inner: Arc::new(CancellationInner {
+                cancelled: AtomicBool::new(false),
+                parents: vec![local.inner, parent.inner],
+            }),
+        }
+    }
+}
+
+fn cancellation_inner_is_cancelled(inner: &CancellationInner) -> bool {
+    inner.cancelled.load(Ordering::SeqCst)
+        || inner
+            .parents
+            .iter()
+            .any(|parent| cancellation_inner_is_cancelled(parent))
 }
 
 impl Default for CancellationToken {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A current-thread root fuel counter shared by all native branch controls.
+/// Cloning this handle shares the counter; it never copies the allowance.
+#[derive(Clone, Debug)]
+pub struct RootFuelHandle {
+    remaining: Rc<Cell<u64>>,
+}
+
+impl RootFuelHandle {
+    #[must_use]
+    pub fn new(remaining: u64) -> Self {
+        Self {
+            remaining: Rc::new(Cell::new(remaining)),
+        }
+    }
+
+    #[must_use]
+    pub fn remaining(&self) -> u64 {
+        self.remaining.get()
     }
 }
 
@@ -62,6 +116,7 @@ pub struct ExecutionControl {
     pub remaining_fuel: u64,
     pub cancellation: CancellationState,
     cancellation_token: CancellationToken,
+    shared_budget: Option<RootFuelHandle>,
 }
 
 impl ExecutionControl {
@@ -71,6 +126,7 @@ impl ExecutionControl {
             remaining_fuel,
             cancellation: CancellationState::Active,
             cancellation_token: CancellationToken::new(),
+            shared_budget: None,
         }
     }
 
@@ -83,7 +139,72 @@ impl ExecutionControl {
             remaining_fuel,
             cancellation: CancellationState::Active,
             cancellation_token,
+            shared_budget: None,
         }
+    }
+
+    /// Creates a control backed by a root-owned shared fuel allowance.
+    /// Native branch drivers must use this constructor instead of cloning a
+    /// legacy control, which would duplicate its local numeric field.
+    #[must_use]
+    pub fn with_shared_budget(
+        shared_budget: RootFuelHandle,
+        cancellation_token: CancellationToken,
+    ) -> Self {
+        Self {
+            remaining_fuel: shared_budget.remaining(),
+            cancellation: CancellationState::Active,
+            cancellation_token,
+            shared_budget: Some(shared_budget),
+        }
+    }
+
+    /// Forks a child control with the same root budget and an independent
+    /// cancellation source that remains subordinate to this control.
+    #[must_use]
+    pub fn fork_child(&self, child_cancellation: CancellationToken) -> Self {
+        let shared_budget = self
+            .shared_budget
+            .clone()
+            .unwrap_or_else(|| RootFuelHandle::new(self.remaining_fuel));
+        Self::with_shared_budget(
+            shared_budget,
+            CancellationToken::with_parents(child_cancellation, self.cancellation_token.clone()),
+        )
+    }
+
+    /// Returns the live shared allowance, or the legacy local field.
+    #[must_use]
+    pub fn remaining_budget(&self) -> u64 {
+        self.shared_budget
+            .as_ref()
+            .map_or(self.remaining_fuel, RootFuelHandle::remaining)
+    }
+
+    /// Charges exactly one canonical matcher/executable dispatch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExecutionError::Cancelled`] when this control or one of its
+    /// parents is cancelled, or [`ExecutionError::BudgetExceeded`] when the
+    /// root shared allowance is exhausted.
+    pub fn try_consume(&mut self) -> Result<(), ExecutionError> {
+        if self.is_cancelled() {
+            return Err(ExecutionError::Cancelled);
+        }
+        if let Some(shared_budget) = &self.shared_budget {
+            let remaining = shared_budget.remaining();
+            if remaining == 0 {
+                return Err(ExecutionError::BudgetExceeded);
+            }
+            shared_budget.remaining.set(remaining - 1);
+            return Ok(());
+        }
+        if self.remaining_fuel == 0 {
+            return Err(ExecutionError::BudgetExceeded);
+        }
+        self.remaining_fuel -= 1;
+        Ok(())
     }
 
     #[must_use]
@@ -236,7 +357,7 @@ struct ScopeId(usize);
 
 /// The machine's live scope stack plus the identity counter that makes
 /// per-scope observations unambiguous.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct ScopeStack {
     scopes: Vec<Scope>,
     next_id: usize,
@@ -437,6 +558,71 @@ impl<'a> ExecutionMachine<'a> {
             status: MachineStatus::Running,
             watch: None,
             last_origin: None,
+            pending_dispatch_executable: None,
+            pending_completion: None,
+        })
+    }
+
+    /// Captures the remaining rules in the currently enclosing scope as an
+    /// owned child machine. The pending executable that caused the capture is
+    /// excluded: its owner supplies the result exactly once through the
+    /// original machine. The child has no enclosing watch, so a parent cache
+    /// token can never be consumed by a policy branch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExecutionError::ResumeNotPending`] unless the machine is
+    /// waiting for a completion, or [`ExecutionError::InvalidEntry`] when it
+    /// has no enclosing scope.
+    pub fn fork_successor(&self, cancellation: CancellationToken) -> Result<Self, ExecutionError> {
+        if !matches!(self.status, MachineStatus::Waiting(_)) {
+            return Err(ExecutionError::ResumeNotPending(
+                self.pending_dispatch_executable
+                    .unwrap_or(ExecutableId(usize::MAX)),
+            ));
+        }
+        let Some(scope) = self.scopes.scopes.last().cloned() else {
+            return Err(ExecutionError::InvalidEntry(SequenceId(usize::MAX)));
+        };
+        self.fork_with_scopes(vec![scope], cancellation)
+    }
+
+    /// Forks a running branch at its current continuation. This is private to
+    /// the native current-thread branch driver in spirit, but remains typed so
+    /// the host never clones a local fuel field by accident.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExecutionError::Finished`] unless the machine is running, or
+    /// [`ExecutionError::InvalidEntry`] when the machine has no scopes.
+    pub fn fork_branch(&self, cancellation: CancellationToken) -> Result<Self, ExecutionError> {
+        if !matches!(self.status, MachineStatus::Running) {
+            return Err(ExecutionError::Finished);
+        }
+        self.fork_with_scopes(self.scopes.scopes.clone(), cancellation)
+    }
+
+    fn fork_with_scopes(
+        &self,
+        scope_values: Vec<Scope>,
+        cancellation: CancellationToken,
+    ) -> Result<Self, ExecutionError> {
+        if scope_values.is_empty() {
+            return Err(ExecutionError::InvalidEntry(SequenceId(usize::MAX)));
+        }
+        let mut scopes = ScopeStack::default();
+        scopes.scopes = scope_values;
+        scopes.next_id = self.scopes.next_id;
+        let state = self.state.as_ref().clone();
+        let control = self.control.as_ref().fork_child(cancellation);
+        Ok(Self {
+            program: self.program,
+            scopes,
+            state: StateSlot::Owned(Box::new(state)),
+            control: ControlSlot::Owned(control),
+            status: MachineStatus::Running,
+            watch: None,
+            last_origin: self.last_origin,
             pending_dispatch_executable: None,
             pending_completion: None,
         })
@@ -655,6 +841,7 @@ struct Frame {
     pc: usize,
 }
 
+#[derive(Clone)]
 struct Scope {
     id: ScopeId,
     kind: ScopeKind,
@@ -951,14 +1138,7 @@ fn executor_outcome_to_step(
 }
 
 fn consume_dispatch(control: &mut ExecutionControl) -> Result<(), ExecutionError> {
-    if control.is_cancelled() {
-        return Err(ExecutionError::Cancelled);
-    }
-    if control.remaining_fuel == 0 {
-        return Err(ExecutionError::BudgetExceeded);
-    }
-    control.remaining_fuel -= 1;
-    Ok(())
+    control.try_consume()
 }
 
 fn finish_scope(scopes: &mut ScopeStack, signal: ScopeSignal) -> Option<ExecutionCompletion> {

@@ -6,7 +6,7 @@ mod state;
 
 pub use engine::{
     CancellationState, CancellationToken, ExecutionCompletion, ExecutionControl, ExecutionError,
-    ExecutionMachine, ExternalDispatch, MachineStep, ScopeCompletion, execute,
+    ExecutionMachine, ExternalDispatch, MachineStep, RootFuelHandle, ScopeCompletion, execute,
 };
 pub use program::{
     DispatchMetadata, ExecutableId, ExecutableSpec, ExecutableTarget, ExecutableTargetSpec,
@@ -1709,5 +1709,54 @@ mod slice4_safety_tests {
             Err(ExecutionError::InvalidEntry(crate::SequenceId(999)))
         );
         assert_eq!(state.snapshot(), before);
+    }
+}
+
+#[cfg(test)]
+mod slice5_shared_control_tests {
+    use crate::{CancellationToken, ExecutionControl, RootFuelHandle};
+
+    #[test]
+    fn child_forks_debit_one_root_budget_without_replenishing_siblings() {
+        let root = RootFuelHandle::new(3);
+        let mut parent =
+            ExecutionControl::with_shared_budget(root.clone(), CancellationToken::new());
+        let mut child = parent.fork_child(CancellationToken::new());
+        assert_eq!(parent.remaining_budget(), 3);
+        assert!(child.try_consume().is_ok());
+        assert_eq!(root.remaining(), 2);
+        assert!(parent.try_consume().is_ok());
+        assert_eq!(root.remaining(), 1);
+        assert!(child.try_consume().is_ok());
+        assert_eq!(root.remaining(), 0);
+        assert!(parent.try_consume().is_err());
+        assert!(child.try_consume().is_err());
+    }
+
+    #[test]
+    fn child_cancellation_does_not_cancel_root_or_sibling() {
+        let root = RootFuelHandle::new(4);
+        let parent = ExecutionControl::with_shared_budget(root, CancellationToken::new());
+        let child_cancel = CancellationToken::new();
+        let mut sibling = parent.fork_child(CancellationToken::new());
+        let child = parent.fork_child(child_cancel.clone());
+        child_cancel.cancel();
+        assert!(child.is_cancelled());
+        assert!(!parent.is_cancelled());
+        assert!(!sibling.is_cancelled());
+        assert!(sibling.try_consume().is_ok());
+    }
+
+    #[test]
+    fn shared_mode_is_distinct_from_legacy_local_control() {
+        let legacy = ExecutionControl::with_fuel(1);
+        let clone = legacy.clone();
+        assert_eq!(legacy.remaining_budget(), 1);
+        assert_eq!(clone.remaining_budget(), 1);
+        let root = RootFuelHandle::new(1);
+        let mut shared =
+            ExecutionControl::with_shared_budget(root.clone(), CancellationToken::new());
+        assert!(shared.try_consume().is_ok());
+        assert_eq!(root.remaining(), 0);
     }
 }

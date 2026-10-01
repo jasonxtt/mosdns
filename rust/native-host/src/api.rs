@@ -846,6 +846,8 @@ struct AuditLogResponse {
 #[derive(Serialize)]
 struct AuditUpstreamDiagnostics {
     schema_version: u8,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    branches: Vec<AuditUpstreamBranch>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selected: Option<AuditUpstreamSelected>,
     attempts: Vec<AuditUpstreamAttempt>,
@@ -853,6 +855,8 @@ struct AuditUpstreamDiagnostics {
 
 #[derive(Serialize)]
 struct AuditUpstreamSelected {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch_id: Option<usize>,
     entry: String,
     peer: String,
     transport: &'static str,
@@ -861,12 +865,28 @@ struct AuditUpstreamSelected {
 #[derive(Serialize)]
 struct AuditUpstreamAttempt {
     ordinal: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch_id: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    qtype: Option<u16>,
     entry: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     peer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     transport: Option<&'static str>,
     outcome: &'static str,
+}
+
+#[derive(Serialize)]
+struct AuditUpstreamBranch {
+    id: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_id: Option<usize>,
+    role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    policy: Option<String>,
+    qtype: u16,
+    decision: String,
 }
 
 #[derive(Serialize)]
@@ -1129,10 +1149,23 @@ fn project_log(record: &AuditRecord) -> AuditLogResponse {
 fn project_upstream_diagnostics(diagnostics: &UpstreamDiagnostics) -> AuditUpstreamDiagnostics {
     AuditUpstreamDiagnostics {
         schema_version: diagnostics.schema_version,
+        branches: diagnostics
+            .branches
+            .iter()
+            .map(|branch| AuditUpstreamBranch {
+                id: branch.id,
+                parent_id: branch.parent_id,
+                role: branch.role.clone(),
+                policy: branch.policy.clone(),
+                qtype: branch.qtype,
+                decision: branch.decision.clone(),
+            })
+            .collect(),
         selected: diagnostics
             .selected
             .as_ref()
             .map(|selected| AuditUpstreamSelected {
+                branch_id: selected.branch_id,
                 entry: selected.entry.clone(),
                 peer: selected.peer.to_string(),
                 transport: selected.transport.as_str(),
@@ -1142,6 +1175,8 @@ fn project_upstream_diagnostics(diagnostics: &UpstreamDiagnostics) -> AuditUpstr
             .iter()
             .map(|attempt| AuditUpstreamAttempt {
                 ordinal: attempt.ordinal,
+                branch_id: attempt.branch_id,
+                qtype: attempt.qtype,
                 entry: attempt.entry.clone(),
                 peer: attempt.peer.map(|peer| peer.to_string()),
                 transport: attempt.transport.map(|transport| transport.as_str()),
