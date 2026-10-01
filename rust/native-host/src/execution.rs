@@ -623,6 +623,18 @@ impl ExecutionFacts<'_> {
         self.policy_trace.clone()
     }
 
+    fn install_root_attempt_trace(&mut self, executable: ExecutableId, qtype: u16) {
+        let Some(trace) = &self.policy_trace else {
+            return;
+        };
+        let hook =
+            BranchTrace::registration_hook(trace.clone(), self.config, executable, Some(0), qtype);
+        self.checkpoint
+            .attempt_ledger_handle()
+            .borrow_mut()
+            .set_registration_hook(hook);
+    }
+
     fn finalize_policy_trace(&mut self) {
         let Some(trace) = self.policy_trace.as_ref() else {
             return;
@@ -721,6 +733,18 @@ impl ExecutionFacts<'_> {
         self.set_failure_provenance(FailureProvenance::LocalFailure(
             LocalFailureKind::NoUsableUpstreamResponse,
         ));
+    }
+
+    fn clear_policy_failure(&mut self) {
+        self.policy_failure = None;
+        if matches!(
+            self.failure_provenance,
+            Some(FailureProvenance::LocalFailure(
+                LocalFailureKind::NoUsableUpstreamResponse
+            ))
+        ) {
+            self.failure_provenance = None;
+        }
     }
 
     fn record_upstream_response(&mut self, upstream: String) {
@@ -1157,6 +1181,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         *machine.state_mut() = outcome.state;
                         match machine.resume(dispatch.executable(), Err(core_error)) {
                             Ok(next) => {
+                                facts.clear_policy_failure();
                                 step = next;
                                 continue;
                             }
@@ -1235,6 +1260,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         *machine.state_mut() = outcome.state;
                         match machine.resume(dispatch.executable(), Err(core_error)) {
                             Ok(next) => {
+                                facts.clear_policy_failure();
                                 step = next;
                                 continue;
                             }
@@ -1344,6 +1370,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 attempted = true;
                 facts.in_flight_executable = Some(dispatch.executable());
                 facts.checkpoint.begin_attempt_ledger();
+                facts.install_root_attempt_trace(dispatch.executable(), question.qtype);
                 let exchange = executor
                     .exchange_invocation(
                         dispatch.executable(),
@@ -1361,6 +1388,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         in_flight_executable,
                         &attempt_ledger,
                         None,
+                        question.qtype,
                         &mut facts,
                     );
                     return canceled_execution(facts);
@@ -1378,6 +1406,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                         Some(dispatch.executable()),
                                         &attempt_ledger,
                                         Some(selected_entry),
+                                        question.qtype,
                                         &mut facts,
                                     );
                                 } else if let Some(upstream) = in_flight_executable
@@ -1396,6 +1425,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                         Some(dispatch.executable()),
                                         &attempt_ledger,
                                         None,
+                                        question.qtype,
                                         &mut facts,
                                     );
                                 } else if let Some(upstream) = in_flight_executable
@@ -1432,6 +1462,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 in_flight_executable,
                                 &attempt_ledger,
                                 None,
+                                question.qtype,
                                 &mut facts,
                             );
                         } else if let Some(upstream) = in_flight_executable
@@ -2555,6 +2586,7 @@ fn record_invocation_ledger(
     executable: Option<ExecutableId>,
     ledger: &UpstreamAttemptLedger,
     selected_entry: Option<usize>,
+    qtype: u16,
     facts: &mut ExecutionFacts,
 ) {
     let Some(executable) = executable else {
@@ -2572,18 +2604,50 @@ fn record_invocation_ledger(
                 UpstreamAttemptOutcome::Canceled
             }
         });
-        facts.record_invocation_attempt(
-            executable,
-            slot.entry_index,
-            upstream.clone(),
-            slot.peer,
-            slot.transport,
-            outcome,
-        );
+        if let Some(trace) = &facts.policy_trace {
+            let mut trace = trace.borrow_mut();
+            if let Some(trace_slot) = slot.trace_slot {
+                trace.complete_attempt(
+                    trace_slot,
+                    upstream.clone().unwrap_or_else(|| {
+                        format!("executable:{:?}:{}", executable, slot.entry_index)
+                    }),
+                    slot.peer,
+                    slot.transport,
+                    outcome,
+                );
+            } else {
+                trace.record_attempt(
+                    Some(0),
+                    qtype,
+                    upstream.clone().unwrap_or_else(|| {
+                        format!("executable:{:?}:{}", executable, slot.entry_index)
+                    }),
+                    slot.peer,
+                    slot.transport,
+                    outcome,
+                );
+            }
+        } else {
+            facts.record_invocation_attempt(
+                executable,
+                slot.entry_index,
+                upstream.clone(),
+                slot.peer,
+                slot.transport,
+                outcome,
+            );
+        }
         if selected_entry == Some(slot.entry_index) && outcome == UpstreamAttemptOutcome::Response {
             if let Some(upstream) = upstream {
                 facts.response_source = Some(ResponseSource::Upstream(upstream.clone()));
-                facts.select_invocation_attempt(upstream, slot.peer, slot.transport);
+                if let Some(trace) = &facts.policy_trace {
+                    let mut trace = trace.borrow_mut();
+                    trace.candidate(Some(0), upstream, slot.peer, slot.transport);
+                    trace.select(Some(0), true);
+                } else {
+                    facts.select_invocation_attempt(upstream, slot.peer, slot.transport);
+                }
             }
         } else if outcome != UpstreamAttemptOutcome::Response {
             if let Some(upstream) = upstream {
