@@ -159,3 +159,24 @@ package was rerun again with the same result. Root recovery ledger entries
 now register directly into the live schema-2 trace after policy branches,
 and a caller/try-absorbed policy error clears its temporary local failure
 provenance before a later successful response is terminalized.
+
+## Dedicated-review repair rerun
+
+The dedicated reviewer then identified three additional in-scope ownership
+gaps. The repair keeps every traced root invocation on the canonical metric
+and legacy summary/selected bookkeeping path while suppressing only its
+duplicate schema-1 diagnostic append; it terminalizes a registered root trace
+slot before finalizing a forced-drop snapshot, so a dropped policy recovery
+has one branch/qtype-complete attempt; and it leaves root `Cancelled` and
+`BudgetExceeded` policy failures as terminal native results instead of
+converting them to recoverable `ExecutorError` values.
+
+After this repair, the isolated SSH run passed `cargo test
+-p mosdns-native-host --tests -j 1` (82 unit tests plus all native integration
+suites, including secure DoT/DoH and stream/close coverage),
+`cargo fmt --all -- --check`, workspace clippy with `-D warnings`, and
+`cargo build -p mosdns-native-host -j 1`. The task-owned remote target was
+removed afterward; final resource checks again reported approximately 3.1
+GiB free and 16% inode use. The non-native workspace/integration/doctest
+split and the real DNS/HTTP/Vue and secure proofs remain unchanged because
+this repair is confined to `rust/native-host/src/execution.rs`.
