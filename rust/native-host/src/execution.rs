@@ -320,6 +320,17 @@ impl BranchTrace {
         }
     }
 
+    fn clear_selection(&mut self, terminal_decision: Option<&str>) {
+        self.selected = None;
+        if let Some(decision) = terminal_decision {
+            for branch in &mut self.branches {
+                if branch.decision == "selected" {
+                    branch.decision = decision.to_owned();
+                }
+            }
+        }
+    }
+
     fn registration_hook(
         trace: Rc<RefCell<Self>>,
         config: &CompiledConfig,
@@ -662,15 +673,28 @@ impl ExecutionFacts<'_> {
     }
 
     fn set_response_source(&mut self, source: ResponseSource) {
-        if self.capture_audit_details {
-            if !matches!(&source, ResponseSource::Upstream(_)) {
+        if !matches!(&source, ResponseSource::Upstream(_)) {
+            self.selected_peer = None;
+            if self.capture_audit_details {
                 if let Some(diagnostics) = &mut self.upstream_diagnostics {
                     diagnostics.selected = None;
                 }
                 if let Some(trace) = &self.policy_trace {
-                    trace.borrow_mut().selected = None;
+                    trace.borrow_mut().clear_selection(None);
                 }
             }
+        } else if self.capture_audit_details {
+            if let Some(peer) = self.policy_trace.as_ref().and_then(|trace| {
+                trace
+                    .borrow()
+                    .selected
+                    .as_ref()
+                    .map(|selected| selected.peer)
+            }) {
+                self.selected_peer = Some(peer);
+            }
+        }
+        if self.capture_audit_details {
             self.response_source = Some(source);
         }
     }
@@ -823,7 +847,7 @@ impl ExecutionFacts<'_> {
         peer: Option<SocketAddr>,
         transport: Option<UpstreamTransport>,
     ) {
-        self.selected_peer = self.selected_peer.or(peer);
+        self.selected_peer = peer;
         if self.policy_trace.is_some() {
             return;
         }
@@ -2461,12 +2485,13 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
             }
             if let Some(original_value) = original_result.take() {
                 if reference_result.is_some() {
-                    let selected = original_value.is_success();
-                    trace_outcome(&context, original_id, &original_value, selected);
+                    let committed =
+                        commit_branch_winner(original_value, &context, successor.state());
+                    trace_outcome(&context, original_id, &committed, committed.is_success());
                     if let Some(reference_value) = reference_result.as_ref() {
                         trace_outcome(&context, reference_id, reference_value, false);
                     }
-                    return original_value;
+                    return committed;
                 }
                 original_result = Some(original_value);
             }
@@ -2479,12 +2504,12 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                         )),
                     )
                 });
-                let selected = original_value.is_success();
-                trace_outcome(&context, original_id, &original_value, selected);
+                let committed = commit_branch_winner(original_value, &context, successor.state());
+                trace_outcome(&context, original_id, &committed, committed.is_success());
                 if let Some(reference_value) = reference_result.as_ref() {
                     trace_outcome(&context, reference_id, reference_value, false);
                 }
-                return original_value;
+                return committed;
             }
             tokio::select! {
                 biased;
@@ -2507,13 +2532,15 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                         successor.state().clone(),
                         ExecutionError::BudgetExceeded,
                     ));
-                    trace_outcome(&context, original_id, &original_value, original_value.is_success());
+                    let committed =
+                        commit_branch_winner(original_value, &context, successor.state());
+                    trace_outcome(&context, original_id, &committed, committed.is_success());
                     if reference_id.is_some() {
                         if let Some(trace) = &context.trace {
                             trace.borrow_mut().mark(reference_id, "canceled");
                         }
                     }
-                    return original_value;
+                    return committed;
                 }
             }
         }
@@ -2819,8 +2846,12 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
 
 fn canceled_execution(mut facts: ExecutionFacts) -> ExecutionResult {
     facts.response_source = None;
+    facts.selected_peer = None;
     if let Some(diagnostics) = &mut facts.upstream_diagnostics {
         diagnostics.selected = None;
+    }
+    if let Some(trace) = &facts.policy_trace {
+        trace.borrow_mut().clear_selection(Some("canceled"));
     }
     result_from_wire(Vec::new(), facts)
 }
@@ -2831,8 +2862,17 @@ fn terminal_policy_failure(error: ExecutionError, mut facts: ExecutionFacts) -> 
         ExecutionError::Cancelled | ExecutionError::BudgetExceeded
     ));
     facts.response_source = None;
+    facts.selected_peer = None;
     if let Some(diagnostics) = &mut facts.upstream_diagnostics {
         diagnostics.selected = None;
+    }
+    let terminal_decision = if matches!(&error, ExecutionError::Cancelled) {
+        "canceled"
+    } else {
+        "interrupted"
+    };
+    if let Some(trace) = &facts.policy_trace {
+        trace.borrow_mut().clear_selection(Some(terminal_decision));
     }
     result_from_wire(Vec::new(), facts)
 }
