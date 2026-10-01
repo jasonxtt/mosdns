@@ -128,3 +128,23 @@ The final remote native integration run passed the real TCP listener suites
 which exercises native DoT and DoH HTTP/1.1/HTTP/2 peers with actual TLS and
 DNS wire exchanges. The same run passed the secure busy-admission and close
 drain test `slice9_forwarding::secure_busy_admission_uses_a_fresh_connection_for_dot_and_doh`.
+
+## Final scoped repair validation
+
+The dedicated review's last scoped FAIL identified three remaining ownership
+gaps. The final repair sends fallback/preference policy failure through
+`ExecutionMachine::resume(..., Err(ExecutorError))` with the already-driven
+successor state, keeps cache access in a path-local shared cell while
+resetting it only for policy siblings, and commits an eligible primary
+success immediately even when an always-standby secondary is still pending.
+
+After that repair, over SSH alias `mosdns-rust`, the complete native package
+passed again: `cargo test -p mosdns-native-host --tests -j 1` (82 unit tests
+plus all integration suites). The complete non-native split passed again with
+`cargo test --workspace --exclude mosdns-native-host -j 1`, including
+integration suites and doctests. `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and
+`cargo build -p mosdns-native-host -j 1` also passed. The earlier live DNS,
+HTTP, and in-app Vue detail proof remains on the same final product paths;
+the repair changed only policy/control ownership and does not add a route or
+renderer.
