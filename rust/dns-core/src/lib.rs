@@ -56,6 +56,6 @@ pub use resolver::{
 };
 pub use response::{
     AnswerRecord, ResponseError, ResponseMetadata, ResponseQuestion, ResponseSection, TtlInfo,
-    age_response_ttls, observe_answer_addresses, observe_answer_records, observe_response_metadata,
-    observe_response_ttl, replace_response_ttls, validate_response,
+    age_response_ttls, clamp_response_ttls, observe_answer_addresses, observe_answer_records,
+    observe_response_metadata, observe_response_ttl, replace_response_ttls, validate_response,
 };
