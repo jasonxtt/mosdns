@@ -7,6 +7,7 @@ mod cache;
 mod cache_dump;
 mod cli;
 mod config;
+mod ecs;
 mod execution;
 mod managed;
 mod matchers;

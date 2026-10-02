@@ -45,3 +45,34 @@ query identity preserved by scope/snapshot/refresh recipe copying. Actual forged
 ECS does not select client branches. Real UDP multiple loopback origins, IPv6
 UDP, IPv6 and mapped IPv4 TCP, audit on/off tested. ECS policy, cache partition,
 dump and S6 proof remain pending. S1 C2C verdict pending.
+
+C2C S1 verdict: explicit FINAL: PASS, no P0/P1/P2/P3 findings for exact
+ aa32270aacf054af5b6cf668b77c9cdc990c6532..fad847ec73639a619b1b64502ba52a1e9055c4ff.
+Reviewer separately confirmed trusted propagation, unknown, mapped normalization,
+forged ECS independence, audit-off and grammar reuse. S2–S6 excluded.
+
+## S2 — handler / outgoing wire
+
+Exact source manifest s2-source-sha256.json: 125 local/remote Rust sources and
+manifests equal. Named ecs_handler + quick ecs compile to scoped External
+policies; immutable admission QueryView, current policy provenance, strict
+native ECS profile and local outbound OPT reconstruction. No supplier echo or
+cache/dump acceptance is claimed yet. Real UDP upstream captures IPv4/IPv6,
+forward/preset/send/default/legacy/masks, original other OPT/DO, noOPT creation,
+non-IN preservation, later handler retention and malformed-local SERVFAIL.
+
+Remote cargo fmt --all --check and clippy native-host --all-targets -D warnings
+passed (s2-clippy2.log). Full native-host regression passed (s2-tests3.log).
+Retained failures: s2-red unsupported handler; unused field warning removed;
+renamed private runner unit fixture fixed; full test compile OOM s2-tests.log;
+task-owned binaries moved off memory disk before successful rebuild. The extra
+retention test initially placed upstream outside its exec-list boundary and
+expected policy leakage; corrected to consecutive rules within one successor.
+s2-tests2.log retains this failed test. No unrelated resource cleanup.
+
+Automation helper has a multi-unit defect: it chooses global rereview after
+S1 bootstrap but requires a previous head for the new S2 unit. First submission
+of each later unit is pinned as a first unit review with the same verified
+reviewer; only the bootstrap flag is locally reset during helper validation,
+then restored. No approval/PASS is inferred or skipped; actual C2C response is
+required before advancing, and follow-up findings use normal remediation.

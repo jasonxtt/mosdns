@@ -117,9 +117,7 @@ impl RefreshEnvironment {
         self: &Rc<Self>,
         id: crate::config::CacheId,
         recipe: mosdns_sequence_core::SuccessorRecipe,
-        raw: Vec<u8>,
-        header: QueryHeader,
-        question: QuestionInfo,
+        view: QueryView,
     ) {
         let Some(catalog) = self.cache.upgrade() else {
             return;
@@ -128,7 +126,7 @@ impl RefreshEnvironment {
             return;
         };
         let environment = self.clone();
-        let query = raw.clone();
+        let query = view.raw.as_ref().clone();
         let _ = store.start_refresh(&query, move |token, cancellation, deadline| async move {
             let metrics = Rc::new(RefCell::new(UpstreamAttemptList::default()));
             let _metrics_guard = RefreshMetricsGuard {
@@ -146,7 +144,7 @@ impl RefreshEnvironment {
                 config: &environment.config,
                 cache: &catalog,
                 executor: environment.forwards.as_ref(),
-                view: QueryView::new(raw, header, question),
+                view,
                 deadline,
                 root_cancellation: cancellation.clone(),
                 branch_cancellation: cancellation.clone(),
@@ -177,13 +175,17 @@ impl RefreshEnvironment {
 #[derive(Clone)]
 struct QueryView {
     raw: Rc<Vec<u8>>,
+    incoming: Rc<Vec<u8>>,
+    policy_ecs: bool,
     header: QueryHeader,
     question: QuestionInfo,
 }
 impl QueryView {
     fn new(raw: Vec<u8>, header: QueryHeader, question: QuestionInfo) -> Self {
         Self {
+            incoming: Rc::new(raw.clone()),
             raw: Rc::new(raw),
+            policy_ecs: false,
             header,
             question,
         }
@@ -203,7 +205,12 @@ impl QueryView {
         let (header, question) = mosdns_dns_core::parse_query(&raw).map_err(|error| {
             ExecutorError::new(format!("redirect query validation failed: {error:?}"))
         })?;
-        Ok(Self::new(raw, header, question))
+        Ok(Self {
+            raw: Rc::new(raw),
+            header,
+            question,
+            ..self.clone()
+        })
     }
 }
 
@@ -248,7 +255,11 @@ impl<E: ExchangeExecutor + ?Sized> BranchContext<'_, E> {
 
     fn with_query(&self, raw: Vec<u8>, question: QuestionInfo) -> Self {
         Self {
-            view: QueryView::new(raw, self.view.header, question),
+            view: QueryView {
+                raw: Rc::new(raw),
+                question,
+                ..self.view.clone()
+            },
             ..self.clone()
         }
     }
@@ -1369,7 +1380,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     .iter()
                     .find(|policy| policy.executable == dispatch.executable())
                 {
-                    if let Some(target) = redirect_target(&policy.policy, machine.state()) {
+                    if let Some(target) = query_policy_target(&policy.policy, machine.state()) {
                         let context = BranchContext {
                             config,
                             cache,
@@ -1393,7 +1404,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             }
                         };
                         let source = facts.response_source.clone();
-                        let outcome = run_redirect(successor, context, source, target).await;
+                        let outcome = run_query_policy(successor, context, source, target).await;
                         *machine.state_mut() = outcome.state;
                         if let Some(error) = outcome.error {
                             if matches!(
@@ -1646,9 +1657,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                                 environment.start(
                                     cache_id,
                                     recipe,
-                                    raw.to_vec(),
-                                    header,
-                                    question.clone(),
+                                    QueryView::new(raw.to_vec(), header, question.clone()),
                                 );
                             }
                         }
@@ -2013,7 +2022,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     .iter()
                     .find(|policy| policy.executable == dispatch.executable())
                 {
-                    if let Some(target) = redirect_target(&policy.policy, machine.state()) {
+                    if let Some(target) = query_policy_target(&policy.policy, machine.state()) {
                         let successor = match machine.fork_successor(CancellationToken::new()) {
                             Ok(successor) => successor,
                             Err(error) => {
@@ -2021,7 +2030,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                             }
                         };
                         let outcome =
-                            run_redirect(successor, context.clone(), source, target).await;
+                            run_query_policy(successor, context.clone(), source, target).await;
                         *machine.state_mut() = outcome.state;
                         if let Some(error) = outcome.error {
                             return BranchOutcome::failure(machine.state().clone(), error);
@@ -2190,13 +2199,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                             if let (Some(environment), Ok(recipe)) =
                                 (&context.refresh_environment, machine.capture_successor())
                             {
-                                environment.start(
-                                    cache_config.id,
-                                    recipe,
-                                    context.raw().to_vec(),
-                                    context.view.header,
-                                    context.view.question.clone(),
-                                );
+                                environment.start(cache_config.id, recipe, context.view.clone());
                             }
                         }
                         if !hit.domain_set.is_empty() {
@@ -2414,8 +2417,8 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                     .iter()
                     .find(|policy| policy.executable == executable)
                 {
-                    if let Some(target) = redirect_target(&policy.policy, successor.state()) {
-                        return run_redirect(successor, context, source, target).await;
+                    if let Some(target) = query_policy_target(&policy.policy, successor.state()) {
+                        return run_query_policy(successor, context, source, target).await;
                     }
                     let result = crate::policy::apply_wire_policy(
                         &policy.policy,
@@ -2481,13 +2484,7 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                                 &context.refresh_environment,
                                 successor.capture_branch_successor(),
                             ) {
-                                environment.start(
-                                    cache_config.id,
-                                    recipe,
-                                    context.raw().to_vec(),
-                                    context.view.header,
-                                    context.view.question.clone(),
-                                );
+                                environment.start(cache_config.id, recipe, context.view.clone());
                             }
                         }
                         if !hit.domain_set.is_empty() {
@@ -2586,29 +2583,86 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
     })
 }
 
-fn redirect_target(
+enum ScopedQueryPolicy {
+    Redirect(String),
+    Ecs(crate::ecs::EcsPolicy),
+}
+fn query_policy_target(
     policy: &crate::policy::ResponsePolicy,
     state: &ExecutionState,
-) -> Option<String> {
-    let crate::policy::ResponsePolicy::Redirect(rules) = policy else {
-        return None;
-    };
+) -> Option<ScopedQueryPolicy> {
     if state.query.question.qclass != 1 {
         return None;
     }
-    let name = crate::matchers::wire_name_to_ascii_domain(&state.query.question.qname_wire)?;
-    rules.lookup(&name).cloned()
+    match policy {
+        crate::policy::ResponsePolicy::Redirect(rules) => {
+            let name =
+                crate::matchers::wire_name_to_ascii_domain(&state.query.question.qname_wire)?;
+            rules
+                .lookup(&name)
+                .cloned()
+                .map(ScopedQueryPolicy::Redirect)
+        }
+        crate::policy::ResponsePolicy::Ecs(policy) if policy.active => {
+            Some(ScopedQueryPolicy::Ecs(policy.clone()))
+        }
+        _ => None,
+    }
+}
+impl QueryView {
+    fn with_ecs(
+        &self,
+        policy: &crate::ecs::EcsPolicy,
+        client: mosdns_sequence_core::ClientContext,
+    ) -> Result<Self, ExecutorError> {
+        if self.policy_ecs {
+            return Ok(self.clone());
+        }
+        let incoming = crate::ecs::query_opt(&self.incoming)?.and_then(|opt| opt.ecs);
+        // Validate the current wire even when no incoming selection is used.
+        let _ = crate::ecs::query_opt(&self.raw)?;
+        let forwarded = policy.forward.then_some(incoming).flatten();
+        let selected = forwarded
+            .clone()
+            .or_else(|| {
+                policy
+                    .preset
+                    .map(|ip| crate::ecs::Subnet::from_ip(ip, policy.mask4, policy.mask6))
+            })
+            .or_else(|| {
+                policy
+                    .send
+                    .then(|| client.peer_ip())
+                    .flatten()
+                    .map(|ip| crate::ecs::Subnet::from_ip(ip, policy.mask4, policy.mask6))
+            });
+        let raw = crate::ecs::replace_query_ecs(&self.raw, selected.as_ref())?;
+        let (header, question) = mosdns_dns_core::parse_query(&raw)
+            .map_err(|_| ExecutorError::new("invalid policy query"))?;
+        Ok(Self {
+            raw: Rc::new(raw),
+            header,
+            question,
+            policy_ecs: selected.is_some(),
+            ..self.clone()
+        })
+    }
 }
 
-fn run_redirect<'a, E: ExchangeExecutor + ?Sized>(
+fn run_query_policy<'a, E: ExchangeExecutor + ?Sized>(
     mut successor: ExecutionMachine<'a>,
     context: BranchContext<'a, E>,
     source: Option<ResponseSource>,
-    target: String,
+    target: ScopedQueryPolicy,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
     Box::pin(async move {
         let original_state = successor.state().clone();
-        let view = match context.view.redirect(&target) {
+        let view = match match &target {
+            ScopedQueryPolicy::Redirect(target) => context.view.redirect(target),
+            ScopedQueryPolicy::Ecs(policy) => {
+                context.view.with_ecs(policy, original_state.query.client)
+            }
+        } {
             Ok(view) => view,
             Err(error) => {
                 return BranchOutcome::failure(original_state, ExecutionError::Executor(error));
@@ -2623,10 +2677,19 @@ fn run_redirect<'a, E: ExchangeExecutor + ?Sized>(
         let mut outcome = drive_branch(successor, child_context, source).await;
         if outcome.error.is_none() && !matches!(outcome.state.response, MachineResponseState::None)
         {
-            match decorate_redirect(&outcome.state, &context.view, &target) {
-                Ok(wire) => outcome.state.set_raw_response(wire),
-                Err(error) => {
-                    outcome = BranchOutcome::failure(outcome.state, ExecutionError::Executor(error))
+            let decorated = match &target {
+                ScopedQueryPolicy::Redirect(target) => {
+                    Some(decorate_redirect(&outcome.state, &context.view, target))
+                }
+                ScopedQueryPolicy::Ecs(_) => None,
+            };
+            if let Some(decorated) = decorated {
+                match decorated {
+                    Ok(wire) => outcome.state.set_raw_response(wire),
+                    Err(error) => {
+                        outcome =
+                            BranchOutcome::failure(outcome.state, ExecutionError::Executor(error))
+                    }
                 }
             }
         }
@@ -7352,11 +7415,11 @@ plugins:
                 allow_empty_response: true,
                 branch_id: None,
             };
-            let result = futures_like_block_on(super::run_redirect(
+            let result = futures_like_block_on(super::run_query_policy(
                 successor,
                 context,
                 None,
-                "target.example.".into(),
+                super::ScopedQueryPolicy::Redirect("target.example.".into()),
             ));
             assert!(match mode {
                 "cancel" => matches!(result.error, Some(ExecutionError::Cancelled)),
