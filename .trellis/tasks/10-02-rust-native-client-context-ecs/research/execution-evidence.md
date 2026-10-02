@@ -170,3 +170,38 @@ compared randomized DNS IDs; corrected to parsed answer/timestamps/domain_set.
 Final check summaries and exact source manifest follow after completion.
 
 Final S5: native297 passes across26 targets (s5-native5.log); lib97, strict all-target clippy passed (s5-clippy.log), fmt remote. All128 Rust source/manifests equal in s5-source-sha256.json. Actual enhanced Go reader passed (s5-go-read-native-semantic.log). Go fixture SHA256 aef1657db5082cb51565637e86e80d1aaf5db7984c8b110e717df9771df9de61.
+
+C2C S5 FINAL: PASS on 6ac4570d..d05e8937, no findings; S6 authorized next.
+
+## S6 — first-refresh and composed runtime proof
+
+Added public actual-listener ECS lazy-refresh scenarios for UDP and TCP. A
+client_ip branch before the safe cache boundary sets peer-derived fast marks;
+identical forwarded ECS produces one full key. The first stale request's mark
+and EDNS marker42 remain selected after a different peer follower with marker99.
+Controlled upstream receives exactly cold+refresh requests; follower upstream
+receives none. Refreshed192.0.2.21 replaces stale192.0.2.20. TCP initiator drops
+its socket before reading, and owner-managed refresh still publishes. Existing
+lifecycle tests cover256/noqueue,5s deadline, stop/drain and management generations;
+refresh still binds an independent64 fuel budget. No further production changes
+were needed: the owned snapshot machinery implemented across S1/S3/S4 satisfies
+these composition proofs. New S6 tests initially failed on an assertion about
+option order, not product behavior; no S6 product RED is claimed. Corrected to
+verify the actual preserved option content.
+
+Real isolated binary UDP/TCP proof, controlled upstream, actual wire/API results,
+Vue current detail observations and persisted restart evidence are in
+research/browser-proof/README.md and associated JSON/logs/scripts. UI54 current
+source/manifests matched an existing built bundle; no frontend changes/build.
+Both peers got distinct correct answers and actual controlled supplier on cold
+records. Hit records intentionally have no fabricated supplier/echo. SIGTERM,
+restart partitioned hits and all task-owned services/ports closure verified.
+
+Retained S6 failures: option-order assertion (second attempt still used original
+unformatted search pattern, then fixed); TCP proof startup required idle_timeout,
+then corrected and retried; extracted peer helper clippy requested borrowed
+arguments, fixed with owned thread closure borrowing its own captured fields.
+Workspace tests all passed, including long existing22-code QUIC context loop.
+Final strict checks, counts and source revision are recorded below after completion.
+
+Final S6: {"s6-workspace-tests": {"passed": 801, "targets": 49}, "s6-final-native-tests": {"passed": 299, "targets": 27}}. Total1100 tests passed. All129 Rust source/manifests equal in s6-source-sha256.json. Whole-workspace all-target strict clippy(s6-workspace-clippy2.log), fmt check, split workspace/native builds PASS. s6-final-binary.json proves the final built binary byte-identical to the real DNS/API/Vue/restart proof. No additional source changes after checks.

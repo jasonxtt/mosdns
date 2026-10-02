@@ -1,0 +1,10 @@
+   Compiling mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.75s
+     Running tests/ecs_refresh.rs (/dev/shm/mosdns-rust-client-ecs-20261002/target/debug/deps/ecs_refresh-8e93ce0129585234)
+
+running 2 tests
+test first_refresh_keeps_peer_derived_state_and_current_query_options ... ok
+test tcp_disconnect_does_not_replace_first_refresh_with_followers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
