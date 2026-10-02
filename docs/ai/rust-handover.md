@@ -167,3 +167,7 @@ authorized by this closure. Read the stage plan before choosing subsequent work.
   reference, not a drop-in.
 - Validate locally, then on isolated `mos-test`, and promote to production only
   with explicit user approval.
+
+## 2026-10-02 cache lifecycle continuation
+
+The completed 10-01-rust-native-cache-lifecycle-management task implements its native non-ECS named/quick cache, owner refresh, v2 persistence, cache HTTP/metrics and existing Vue workflow in the reviewed task delivery. S1-S7 passed the same C2C review; iteration 11 returned full-task FINAL: PASS / DONE. This supersedes earlier single-cache/lazy=0 descriptions only for that frozen scope. SIGTERM/SIGINT now run supervisor drain/final save; all owner failures aggregate through the existing exit2 entrypoint. See task research evidence and .trellis/spec/backend/native-cache-lifecycle.md. This is not a production/default release or the full native cutover gate.

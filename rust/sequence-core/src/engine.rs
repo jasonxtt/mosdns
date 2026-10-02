@@ -249,8 +249,15 @@ pub enum ExecutionError {
         received: ExecutableId,
     },
     ResumeNotPending(ExecutableId),
-    /// A second enclosing-scope watch was requested while one was armed.
+    /// An enclosing-scope watch was requested with no live enclosing scope.
     ScopeWatchConflict(ExecutableId),
+    /// A scope completion was resumed with a token other than the pending one.
+    InvalidScopeResume {
+        expected: WatchToken,
+        received: WatchToken,
+    },
+    /// A scope completion was resumed while no watch notification was pending.
+    NoPendingScopeCompletion,
     Finished,
 }
 
@@ -280,6 +287,7 @@ impl ExternalDispatch {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScopeCompletion {
     executable: ExecutableId,
+    token: WatchToken,
 }
 
 impl ScopeCompletion {
@@ -288,13 +296,41 @@ impl ScopeCompletion {
     pub const fn executable(self) -> ExecutableId {
         self.executable
     }
+
+    /// The exact watch this notification belongs to.
+    ///
+    /// A notification is only ever consumed by the owner that armed this token,
+    /// so two frames for the same executable can never be confused even when
+    /// their boundaries complete out of order.
+    #[must_use]
+    pub const fn token(self) -> WatchToken {
+        self.token
+    }
 }
+
+/// The opaque identity of one armed enclosing-scope watch.
+///
+/// Tokens are unique per machine and never reused, so an owner that arms
+/// several watches for the same executable can still tell their notifications
+/// apart. They are deliberately not derivable from an [`ExecutableId`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct WatchToken(u64);
 
 /// The externally observable progress of one canonical sequence machine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MachineStep {
     Dispatch(ExternalDispatch),
+    /// The watched scope finished naturally. Its successor result is publishable.
     ScopeComplete(ScopeCompletion),
+    /// The watched scope was unwound by `exit` while the machine kept running.
+    /// The owner must invalidate the matching frame and must not publish it.
+    ///
+    /// This is *not* how cancellation, fuel exhaustion or a terminal executor
+    /// error are reported. Those stop the machine: `step`/`resume` return
+    /// [`ExecutionError`], every armed watch is dropped without a notification,
+    /// and the owner must invalidate the frames it still holds when the drive
+    /// ends in an error rather than wait for an abort notification.
+    ScopeAborted(ScopeCompletion),
     Complete(ExecutionCompletion),
 }
 
@@ -302,7 +338,7 @@ pub enum MachineStep {
 enum MachineStatus {
     Running,
     Waiting(ExecutableId),
-    ScopeCompleted(ExecutableId),
+    ScopeCompleted(WatchToken, ExecutableId),
     Complete(ExecutionCompletion),
     Failed,
 }
@@ -413,7 +449,16 @@ pub struct ExecutionMachine<'a> {
     state: StateSlot<'a>,
     control: ControlSlot<'a>,
     status: MachineStatus,
-    watch: Option<ScopeWatch>,
+    /// Armed enclosing-scope watches in registration order. A machine may hold
+    /// several at once so that nested caches each observe their own enclosing
+    /// boundary; entries are consumed from the back (LIFO), which is the order
+    /// in which their scopes finished.
+    watches: Vec<ScopeWatch>,
+    /// Watch notifications whose scope already stopped running and which have
+    /// not been consumed yet, LIFO.
+    pending_scope_completions: Vec<PendingWatchEvent>,
+    /// Allocates watch tokens. Tokens are never reused inside one machine.
+    next_watch_token: u64,
     last_origin: Option<SequenceId>,
     pending_dispatch_executable: Option<ExecutableId>,
     pending_completion: Option<ExecutionCompletion>,
@@ -425,6 +470,43 @@ pub struct ExecutionMachine<'a> {
 struct ScopeWatch {
     scope: ScopeId,
     executable: ExecutableId,
+    token: WatchToken,
+}
+
+/// One watch notification waiting to be delivered, in LIFO order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PendingWatchEvent {
+    completion: ScopeCompletion,
+    publishable: bool,
+}
+
+/// A request-independent continuation. Bind it to its owning program snapshot
+/// and a new control root inside the refresh task; it never borrows request state.
+pub struct SuccessorRecipe {
+    scope: Scope,
+    next_scope_id: usize,
+    state: ExecutionState,
+    origin: Option<SequenceId>,
+}
+
+impl SuccessorRecipe {
+    /// # Errors
+    /// Returns an invalid-entry error if the owning program no longer contains the sequence.
+    pub fn bind(
+        self,
+        program: &ValidatedProgram,
+        control: ExecutionControl,
+    ) -> Result<ExecutionMachine<'_>, ExecutionError> {
+        let entry = self
+            .origin
+            .or_else(|| self.scope.frame.as_ref().map(|frame| frame.sequence))
+            .ok_or(ExecutionError::Finished)?;
+        let mut machine = ExecutionMachine::new(program, entry, self.state, control)?;
+        machine.scopes.scopes = vec![self.scope];
+        machine.scopes.next_id = self.next_scope_id;
+        machine.last_origin = self.origin;
+        Ok(machine)
+    }
 }
 
 impl<'a> ExecutionMachine<'a> {
@@ -444,58 +526,84 @@ impl<'a> ExecutionMachine<'a> {
     /// The watch is a boundary notification, not a re-run: the caller resumes
     /// with [`ExecutionMachine::resume_scope_completion`].
     ///
+    /// A machine may hold several watches at once, so nested cache dispatches
+    /// can each observe their own enclosing boundary. When scopes stop running
+    /// while several watches are bound to them, the notifications are reported
+    /// in reverse registration order (LIFO): the innermost, most recently armed
+    /// frame first.
+    ///
+    /// The returned token identifies this exact watch in every later
+    /// [`ScopeCompletion`], so an owner can pair a notification with the frame
+    /// it armed without guessing from the executable.
+    ///
     /// # Errors
     ///
-    /// Returns [`ExecutionError::ScopeWatchConflict`] when another watch is
-    /// already armed, and [`ExecutionError::ResumeNotPending`] when
-    /// `executable` is not the executable of the most recent dispatch.
+    /// Returns [`ExecutionError::ResumeNotPending`] when `executable` is not the
+    /// executable of the most recent dispatch, and
+    /// [`ExecutionError::ScopeWatchConflict`] when the machine has no live
+    /// enclosing scope to watch.
     pub fn watch_enclosing_scope(
         &mut self,
         executable: ExecutableId,
-    ) -> Result<(), ExecutionError> {
-        if self.watch.is_some() {
-            return Err(ExecutionError::ScopeWatchConflict(executable));
-        }
+    ) -> Result<WatchToken, ExecutionError> {
         if self.pending_dispatch_executable != Some(executable) {
             return Err(ExecutionError::ResumeNotPending(executable));
         }
         let Some(scope) = self.scopes.top() else {
             return Err(ExecutionError::ScopeWatchConflict(executable));
         };
-        self.watch = Some(ScopeWatch { scope, executable });
-        Ok(())
+        let token = WatchToken(self.next_watch_token);
+        self.next_watch_token = self.next_watch_token.wrapping_add(1);
+        self.watches.push(ScopeWatch {
+            scope,
+            executable,
+            token,
+        });
+        // Consume the dispatch token so one dispatch cannot arm twice.
+        self.pending_dispatch_executable = None;
+        Ok(token)
     }
 
-    /// Continues an execution that paused on a watched scope completion.
+    /// The number of armed enclosing-scope watches that have not fired yet.
+    #[must_use]
+    pub fn armed_watch_count(&self) -> usize {
+        self.watches.len()
+    }
+
+    /// Continues an execution that paused on a watch notification.
+    ///
+    /// The token must be the one carried by the pending notification; a stale
+    /// or foreign token is rejected instead of silently releasing the pause.
     ///
     /// # Errors
     ///
-    /// Returns [`ExecutionError::InvalidResume`] when `executable` is not the
-    /// watched executable and [`ExecutionError::Finished`] when the machine is
-    /// already terminal.
+    /// Returns [`ExecutionError::InvalidScopeResume`] when `token` is not the
+    /// pending watch token, [`ExecutionError::NoPendingScopeCompletion`] when no
+    /// watch notification is pending, and [`ExecutionError::Finished`] when the
+    /// machine is already terminal.
     pub fn resume_scope_completion(
         &mut self,
-        executable: ExecutableId,
+        token: WatchToken,
     ) -> Result<MachineStep, ExecutionError> {
         let expected = match self.status {
-            MachineStatus::ScopeCompleted(expected) => expected,
+            MachineStatus::ScopeCompleted(expected, _) => expected,
             MachineStatus::Complete(_) | MachineStatus::Failed => {
                 return Err(ExecutionError::Finished);
             }
             MachineStatus::Running | MachineStatus::Waiting(_) => {
-                return Err(ExecutionError::ResumeNotPending(executable));
+                return Err(ExecutionError::NoPendingScopeCompletion);
             }
         };
-        if expected != executable {
-            return Err(ExecutionError::InvalidResume {
+        if expected != token {
+            return Err(ExecutionError::InvalidScopeResume {
                 expected,
-                received: executable,
+                received: token,
             });
         }
         self.status = MachineStatus::Running;
         let result = self.drive(None);
         if result.is_err() {
-            self.status = MachineStatus::Failed;
+            self.fail_in_place();
         }
         result
     }
@@ -525,7 +633,9 @@ impl<'a> ExecutionMachine<'a> {
             state: StateSlot::Owned(Box::new(state)),
             control: ControlSlot::Owned(control),
             status: MachineStatus::Running,
-            watch: None,
+            watches: Vec::new(),
+            pending_scope_completions: Vec::new(),
+            next_watch_token: 0,
             last_origin: None,
             pending_dispatch_executable: None,
             pending_completion: None,
@@ -556,7 +666,9 @@ impl<'a> ExecutionMachine<'a> {
             state: StateSlot::Borrowed(state),
             control: ControlSlot::Borrowed(control),
             status: MachineStatus::Running,
-            watch: None,
+            watches: Vec::new(),
+            pending_scope_completions: Vec::new(),
+            next_watch_token: 0,
             last_origin: None,
             pending_dispatch_executable: None,
             pending_completion: None,
@@ -585,6 +697,41 @@ impl<'a> ExecutionMachine<'a> {
             return Err(ExecutionError::InvalidEntry(SequenceId(usize::MAX)));
         };
         self.fork_with_scopes(vec![scope], cancellation)
+    }
+
+    /// Captures only this enclosing successor as owned data, with no client control.
+    /// # Errors
+    /// Returns `Finished` unless an external dispatch is pending in a live scope.
+    pub fn capture_successor(&self) -> Result<SuccessorRecipe, ExecutionError> {
+        if !matches!(self.status, MachineStatus::Waiting(_)) {
+            return Err(ExecutionError::Finished);
+        }
+        self.capture_scope()
+    }
+
+    /// Captures a branch successor before executing a direct policy target.
+    /// # Errors
+    /// Returns `Finished` unless the branch is running in a live scope.
+    pub fn capture_branch_successor(&self) -> Result<SuccessorRecipe, ExecutionError> {
+        if !matches!(self.status, MachineStatus::Running) {
+            return Err(ExecutionError::Finished);
+        }
+        self.capture_scope()
+    }
+
+    fn capture_scope(&self) -> Result<SuccessorRecipe, ExecutionError> {
+        let scope = self
+            .scopes
+            .scopes
+            .last()
+            .cloned()
+            .ok_or(ExecutionError::Finished)?;
+        Ok(SuccessorRecipe {
+            scope,
+            next_scope_id: self.scopes.next_id,
+            state: self.state.as_ref().clone(),
+            origin: self.last_origin,
+        })
     }
 
     /// Forks a running branch at its current continuation. This is private to
@@ -621,7 +768,9 @@ impl<'a> ExecutionMachine<'a> {
             state: StateSlot::Owned(Box::new(state)),
             control: ControlSlot::Owned(control),
             status: MachineStatus::Running,
-            watch: None,
+            watches: Vec::new(),
+            pending_scope_completions: Vec::new(),
+            next_watch_token: 0,
             last_origin: self.last_origin,
             pending_dispatch_executable: None,
             pending_completion: None,
@@ -666,7 +815,11 @@ impl<'a> ExecutionMachine<'a> {
             MachineStatus::Running => {}
             // Both pause states must be released by their owning resume call
             // rather than by another `step`, so they report the same reason.
-            MachineStatus::Waiting(executable) | MachineStatus::ScopeCompleted(executable) => {
+            // Both pause states must be released by their owning resume call
+            // rather than by another `step`: a pending external by `resume`, a
+            // pending watch notification by `resume_scope_completion` with its
+            // own token.
+            MachineStatus::Waiting(executable) | MachineStatus::ScopeCompleted(_, executable) => {
                 return Err(ExecutionError::WaitingForExternal(executable));
             }
             MachineStatus::Complete(_) | MachineStatus::Failed => {
@@ -675,7 +828,7 @@ impl<'a> ExecutionMachine<'a> {
         }
         let result = self.drive(None);
         if result.is_err() {
-            self.status = MachineStatus::Failed;
+            self.fail_in_place();
         }
         result
     }
@@ -695,7 +848,7 @@ impl<'a> ExecutionMachine<'a> {
     ) -> Result<MachineStep, ExecutionError> {
         let expected = match self.status {
             MachineStatus::Waiting(expected) => expected,
-            MachineStatus::Running | MachineStatus::ScopeCompleted(_) => {
+            MachineStatus::Running | MachineStatus::ScopeCompleted(..) => {
                 return Err(ExecutionError::ResumeNotPending(executable));
             }
             MachineStatus::Complete(_) | MachineStatus::Failed => {
@@ -720,19 +873,50 @@ impl<'a> ExecutionMachine<'a> {
         let ready = match ready {
             Ok(ready) => ready,
             Err(error) => {
-                self.status = MachineStatus::Failed;
+                self.fail_in_place();
                 return Err(error);
             }
         };
         let result = self.drive(Some(ready));
         if result.is_err() {
-            self.status = MachineStatus::Failed;
+            self.fail_in_place();
         }
         result
     }
 
+    /// Marks the machine terminally failed and invalidates every armed watch.
+    ///
+    /// A failed machine has no boundary left that could complete, so leaving a
+    /// watch armed would let an owner wait forever for a notification that can
+    /// never arrive. The invalidation is silent: the caller receives `Err` and
+    /// must drop the frames it holds.
+    fn fail(&mut self, error: ExecutionError) -> Result<MachineStep, ExecutionError> {
+        self.fail_in_place();
+        Err(error)
+    }
+
+    fn fail_in_place(&mut self) {
+        self.watches.clear();
+        self.pending_scope_completions.clear();
+        self.pending_completion = None;
+        self.pending_dispatch_executable = None;
+        self.status = MachineStatus::Failed;
+    }
+
     fn drive(&mut self, mut ready: Option<Step>) -> Result<MachineStep, ExecutionError> {
         loop {
+            if let Some(event) = self.pending_scope_completions.pop() {
+                self.pending_dispatch_executable = None;
+                self.status = MachineStatus::ScopeCompleted(
+                    event.completion.token,
+                    event.completion.executable,
+                );
+                return Ok(if event.publishable {
+                    MachineStep::ScopeComplete(event.completion)
+                } else {
+                    MachineStep::ScopeAborted(event.completion)
+                });
+            }
             if let Some(completion) = self.pending_completion.take() {
                 self.pending_dispatch_executable = None;
                 self.status = MachineStatus::Complete(completion);
@@ -743,7 +927,15 @@ impl<'a> ExecutionMachine<'a> {
             } else {
                 let state = self.state.as_mut();
                 let control = self.control.as_mut();
-                next_step(self.program, &mut self.scopes, state, control)?
+                match next_step(self.program, &mut self.scopes, state, control) {
+                    Ok(step) => step,
+                    // A terminal stop (cancellation, exhausted budget, a
+                    // matcher or executor error) ends the machine. No boundary
+                    // can publish afterwards, so every armed watch is
+                    // invalidated rather than left pointing at a scope that
+                    // will never complete.
+                    Err(error) => return self.fail(error),
+                }
             };
             if let Some(origin) = self.scopes.rule_origin.take() {
                 self.last_origin = Some(origin);
@@ -758,22 +950,50 @@ impl<'a> ExecutionMachine<'a> {
                 Step::Complete(signal) => {
                     let leaving_scope = self.scopes.top();
                     let completion = finish_scope(&mut self.scopes, signal);
-                    if let (Some(watch), Some(leaving)) = (self.watch, leaving_scope) {
-                        if watch.scope == leaving && !self.scopes.contains(leaving) {
-                            // The watched enclosure stopped running. An `exit`
-                            // is reported here too so the owner never keeps a
-                            // token past its boundary, but only a natural
-                            // completion is a publishable successor result.
-                            self.watch = None;
-                            if matches!(signal, ScopeSignal::Completed) {
-                                self.pending_completion = completion;
-                                self.pending_dispatch_executable = None;
-                                self.status = MachineStatus::ScopeCompleted(watch.executable);
-                                return Ok(MachineStep::ScopeComplete(ScopeCompletion {
-                                    executable: watch.executable,
-                                }));
-                            }
+                    // `finish_scope` may unwind several scopes at once when an
+                    // `exit` propagates, so every watch whose scope is no longer
+                    // live must be retired here; otherwise it would keep a dead
+                    // scope identity and could never be notified or invalidated.
+                    // Watches are visited from the back, i.e. LIFO.
+                    //
+                    // This loop only runs when `next_step` produced a step. A
+                    // cancellation, budget or executor error propagates out of
+                    // `drive` and fails the machine, so the owner must drop its
+                    // own frames on that path; no notification is emitted.
+                    let mut fired: Vec<PendingWatchEvent> = Vec::new();
+                    let mut index = self.watches.len();
+                    while index > 0 {
+                        index -= 1;
+                        let watch = self.watches[index];
+                        if self.scopes.contains(watch.scope) {
+                            continue;
                         }
+                        self.watches.remove(index);
+                        // Only the scope that produced a natural completion made
+                        // a publishable successor result. Every other vanished
+                        // scope was unwound by `exit` or a terminal stop, and its
+                        // frame must be invalidated instead of published.
+                        let publishable = matches!(signal, ScopeSignal::Completed)
+                            && leaving_scope == Some(watch.scope);
+                        fired.push(PendingWatchEvent {
+                            completion: ScopeCompletion {
+                                executable: watch.executable,
+                                token: watch.token,
+                            },
+                            publishable,
+                        });
+                    }
+                    if !fired.is_empty() {
+                        // `fired` is in reverse registration order and the LIFO
+                        // pop below delivers the last element first, so push it
+                        // reversed to keep the most recent frame first.
+                        for event in fired.into_iter().rev() {
+                            self.pending_scope_completions.push(event);
+                        }
+                        self.pending_completion = completion;
+                        self.pending_dispatch_executable = None;
+                        self.status = MachineStatus::Running;
+                        continue;
                     }
                     if let Some(completion) = completion {
                         self.pending_dispatch_executable = None;
@@ -819,7 +1039,11 @@ pub fn execute(
             MachineStep::ScopeComplete(completion) => {
                 // The synchronous adapter never arms a watch, so this boundary
                 // is unreachable here; continue as the owner would.
-                machine.resume_scope_completion(completion.executable())?;
+                machine.resume_scope_completion(completion.token())?;
+            }
+            MachineStep::ScopeAborted(completion) => {
+                // Same as above: this adapter never arms a watch.
+                machine.resume_scope_completion(completion.token())?;
             }
         }
     }

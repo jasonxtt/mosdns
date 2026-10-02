@@ -311,6 +311,7 @@ struct CacheEntry {
     stored_at_unix: i64,
     message_expires_at_unix: i64,
     cache_expires_at_unix: i64,
+    wall_times: Option<[i64; 3]>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -320,6 +321,44 @@ pub struct NativeLookup {
     pub message_expires_at_unix: i64,
     pub response: Vec<u8>,
     pub domain_set: Vec<u8>,
+}
+
+/// An owned native snapshot; runtime timestamps use the caller's monotonic epoch.
+#[derive(Clone, Debug)]
+pub struct NativeSnapshotEntry {
+    pub key: Vec<u8>,
+    pub response: Vec<u8>,
+    pub domain_set: Vec<u8>,
+    pub times: [i64; 3],
+    pub wall_times: Option<[i64; 3]>,
+}
+
+/// Fully validated, owned native insertion prepared before a management commit.
+pub struct PreparedNativeEntry {
+    key: Bytes,
+    entry: Arc<CacheEntry>,
+}
+impl PreparedNativeEntry {
+    pub fn new(item: NativeSnapshotEntry) -> Result<Self, CacheError> {
+        validate_store(
+            &item.key,
+            &item.response,
+            item.times[0],
+            item.times[1],
+            item.times[2],
+        )?;
+        Ok(Self {
+            key: Bytes::from(item.key),
+            entry: Arc::new(CacheEntry {
+                response: Bytes::from(item.response),
+                domain_set: Bytes::from(item.domain_set),
+                stored_at_unix: item.times[0],
+                message_expires_at_unix: item.times[1],
+                cache_expires_at_unix: item.times[2],
+                wall_times: item.wall_times,
+            }),
+        })
+    }
 }
 
 fn validate_store(
@@ -401,6 +440,33 @@ impl NativeCache {
         message_expires_at_unix: i64,
         cache_expires_at_unix: i64,
     ) -> Result<(), CacheError> {
+        self.store_timed(
+            key,
+            response,
+            domain_set,
+            [
+                stored_at_unix,
+                message_expires_at_unix,
+                cache_expires_at_unix,
+            ],
+            None,
+        )
+    }
+
+    /// Native-only dual-clock insertion; the transitional ABI remains unchanged.
+    pub fn store_timed(
+        &self,
+        key: &[u8],
+        response: &[u8],
+        domain_set: &[u8],
+        times: [i64; 3],
+        wall_times: Option<[i64; 3]>,
+    ) -> Result<(), CacheError> {
+        let [
+            stored_at_unix,
+            message_expires_at_unix,
+            cache_expires_at_unix,
+        ] = times;
         validate_store(
             key,
             response,
@@ -416,9 +482,77 @@ impl NativeCache {
                 stored_at_unix,
                 message_expires_at_unix,
                 cache_expires_at_unix,
+                wall_times,
             }),
         );
         Ok(())
+    }
+
+    /// Commits prevalidated entries without a recoverable partial-merge error.
+    pub fn merge_prepared(&self, entries: Vec<PreparedNativeEntry>) {
+        for item in entries {
+            self.state.entries.insert(item.key, item.entry);
+        }
+    }
+
+    /// Captures only entries whose complete retention window is still live.
+    #[must_use]
+    pub fn snapshot(&self, now: i64) -> Vec<NativeSnapshotEntry> {
+        self.state.entries.run_pending_tasks();
+        self.state
+            .entries
+            .iter()
+            .filter_map(|(key, entry)| {
+                (entry.cache_expires_at_unix > now).then(|| NativeSnapshotEntry {
+                    key: key.to_vec(),
+                    response: entry.response.to_vec(),
+                    domain_set: entry.domain_set.to_vec(),
+                    times: [
+                        entry.stored_at_unix,
+                        entry.message_expires_at_unix,
+                        entry.cache_expires_at_unix,
+                    ],
+                    wall_times: entry.wall_times,
+                })
+            })
+            .collect()
+    }
+
+    /// Rejects oversized snapshots before duplicating live entry payloads.
+    pub fn snapshot_bounded(
+        &self,
+        now: i64,
+        max_entries: usize,
+        max_bytes: usize,
+    ) -> Result<Vec<NativeSnapshotEntry>, CacheError> {
+        self.state.entries.run_pending_tasks();
+        let mut snapshot = Vec::new();
+        let mut bytes = 0_usize;
+        for (key, entry) in &self.state.entries {
+            if entry.cache_expires_at_unix <= now {
+                continue;
+            }
+            bytes = bytes
+                .checked_add(key.len())
+                .and_then(|n| n.checked_add(entry.response.len()))
+                .and_then(|n| n.checked_add(entry.domain_set.len()))
+                .ok_or(CacheError::InvalidConfig)?;
+            if snapshot.len() >= max_entries || bytes > max_bytes {
+                return Err(CacheError::InvalidConfig);
+            }
+            snapshot.push(NativeSnapshotEntry {
+                key: key.to_vec(),
+                response: entry.response.to_vec(),
+                domain_set: entry.domain_set.to_vec(),
+                times: [
+                    entry.stored_at_unix,
+                    entry.message_expires_at_unix,
+                    entry.cache_expires_at_unix,
+                ],
+                wall_times: entry.wall_times,
+            });
+        }
+        Ok(snapshot)
     }
 
     pub fn lookup(&self, key: &[u8], now_unix: i64) -> Result<Option<NativeLookup>, CacheError> {
@@ -437,6 +571,16 @@ impl NativeCache {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    #[must_use]
+    pub fn live_len(&self, now: i64) -> usize {
+        self.state.entries.run_pending_tasks();
+        self.state
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.cache_expires_at_unix > now)
+            .count()
     }
 
     pub fn flush(&self) {

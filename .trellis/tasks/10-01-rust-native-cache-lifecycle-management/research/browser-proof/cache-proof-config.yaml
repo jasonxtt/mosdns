@@ -1,0 +1,25 @@
+log: {level: error}
+api: {http: '127.0.0.1:20880'}
+plugins:
+  - tag: alpha
+    type: cache
+    args: {size: 1024, lazy_cache_ttl: 900, dump_file: '/root/mosdns-rust-cache-lifecycle-20261001/proof/alpha.gz'}
+  - tag: beta
+    type: cache
+    args: {size: 1024, lazy_cache_ttl: 900, dump_file: '/root/mosdns-rust-cache-lifecycle-20261001/proof/missing/beta.gz'}
+  - tag: group
+    type: domain_set
+    args: {exps: ['full:Case.example']}
+  - tag: forward
+    type: forward
+    args: {upstreams: [{addr: 'udp://127.0.0.1:20554'}]}
+  - tag: main
+    type: sequence
+    args:
+      - exec: $alpha
+      - exec: $beta
+      - matches: qname $group
+        exec: $forward
+  - tag: dns
+    type: udp_server
+    args: {listen: '127.0.0.1:20553', entry: main, enable_audit: true}

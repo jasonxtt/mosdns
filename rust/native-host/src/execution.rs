@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -11,14 +11,14 @@ use mosdns_dns_core::{
     patch_response_id_ra, synthesize_response, validate_response,
 };
 use mosdns_sequence_core::{
-    CancellationToken, ExecutableId, ExecutionControl, ExecutionError, ExecutionMachine,
-    ExecutionState, ExecutorError, ExecutorOutcome, MachineStep,
-    ResponseState as MachineResponseState, RootFuelHandle, RoutingState, SequenceId,
+    CancellationToken, ExecutableId, ExecutionCompletion, ExecutionControl, ExecutionError,
+    ExecutionMachine, ExecutionState, ExecutorError, ExecutorOutcome, MachineStep,
+    ResponseState as MachineResponseState, RootFuelHandle, RoutingState, SequenceId, WatchToken,
 };
 use mosdns_upstream_core::{ExchangeResponse, TransportCancellation, UpstreamError};
 
 use crate::assembly::{ForwardAdapter, ForwardCatalog, HostOptions};
-use crate::cache::{NativeCacheAdapter, PendingStore};
+use crate::cache::{CacheCatalog, PendingStore};
 use crate::config::{CompiledConfig, FallbackConfig, NativeTarget, PreferenceConfig};
 use crate::observer::{
     AnswerDetailsStatus, AttemptRegistrationHook, AuditAnswer, CacheStatus, ExecutionCheckpoint,
@@ -86,16 +86,96 @@ pub(crate) enum ExchangeError {
 
 pub(crate) struct ExecutionRequest<'a> {
     pub config: &'a CompiledConfig,
-    pub cache: &'a NativeCacheAdapter,
+    pub cache: &'a CacheCatalog,
     pub options: &'a HostOptions,
     pub raw: &'a [u8],
     pub header: QueryHeader,
     pub question: QuestionInfo,
 }
 
+pub(crate) struct RefreshEnvironment {
+    pub config: Rc<CompiledConfig>,
+    pub cache: std::rc::Weak<CacheCatalog>,
+    pub forwards: Rc<ForwardCatalog>,
+    pub observer: std::sync::Arc<crate::observer::QueryObserver>,
+}
+
+struct RefreshMetricsGuard {
+    attempts: Rc<RefCell<UpstreamAttemptList>>,
+    observer: std::sync::Arc<crate::observer::QueryObserver>,
+}
+impl Drop for RefreshMetricsGuard {
+    fn drop(&mut self) {
+        self.observer
+            .record_background_attempts(&self.attempts.borrow());
+    }
+}
+
+impl RefreshEnvironment {
+    fn start(
+        self: &Rc<Self>,
+        id: crate::config::CacheId,
+        recipe: mosdns_sequence_core::SuccessorRecipe,
+        raw: Vec<u8>,
+        header: QueryHeader,
+        question: QuestionInfo,
+    ) {
+        let Some(catalog) = self.cache.upgrade() else {
+            return;
+        };
+        let Some(store) = catalog.get(id).cloned() else {
+            return;
+        };
+        let environment = self.clone();
+        let query = raw.clone();
+        let _ = store.start_refresh(&query, move |token, cancellation, deadline| async move {
+            let metrics = Rc::new(RefCell::new(UpstreamAttemptList::default()));
+            let _metrics_guard = RefreshMetricsGuard {
+                attempts: metrics.clone(),
+                observer: environment.observer.clone(),
+            };
+            let control = ExecutionControl::with_shared_budget(
+                RootFuelHandle::new(DEFAULT_FUEL),
+                CancellationToken::new(),
+            );
+            let Ok(machine) = recipe.bind(&environment.config.program, control) else {
+                return;
+            };
+            let context = BranchContext {
+                config: &environment.config,
+                cache: &catalog,
+                executor: environment.forwards.as_ref(),
+                raw: Rc::new(raw),
+                header,
+                question,
+                deadline,
+                root_cancellation: cancellation.clone(),
+                branch_cancellation: cancellation.clone(),
+                trace: None,
+                branch_metrics: metrics,
+                refresh_environment: None,
+                allow_empty_response: false,
+                branch_id: None,
+            };
+            let result = drive_branch(machine, context, None).await;
+            if result.completed_naturally()
+                && !cancellation.is_cancelled()
+                && Instant::now() < deadline
+            {
+                if let MachineResponseState::Raw(wire) = result.state.response {
+                    let _ = token.publish_with_domain(
+                        wire.as_bytes(),
+                        result.state.routing.domain_set.as_deref().unwrap_or(""),
+                    );
+                }
+            }
+        });
+    }
+}
+
 struct BranchContext<'a, E: ExchangeExecutor + ?Sized> {
     config: &'a CompiledConfig,
-    cache: &'a NativeCacheAdapter,
+    cache: &'a CacheCatalog,
     executor: &'a E,
     raw: Rc<Vec<u8>>,
     header: QueryHeader,
@@ -105,7 +185,7 @@ struct BranchContext<'a, E: ExchangeExecutor + ?Sized> {
     branch_cancellation: TransportCancellation,
     trace: Option<Rc<RefCell<BranchTrace>>>,
     branch_metrics: Rc<RefCell<UpstreamAttemptList>>,
-    cache_accessed: Rc<Cell<bool>>,
+    refresh_environment: Option<Rc<RefreshEnvironment>>,
     allow_empty_response: bool,
     branch_id: Option<usize>,
 }
@@ -124,7 +204,7 @@ impl<E: ExchangeExecutor + ?Sized> Clone for BranchContext<'_, E> {
             branch_cancellation: self.branch_cancellation.clone(),
             trace: self.trace.clone(),
             branch_metrics: self.branch_metrics.clone(),
-            cache_accessed: Rc::clone(&self.cache_accessed),
+            refresh_environment: self.refresh_environment.clone(),
             allow_empty_response: self.allow_empty_response,
             branch_id: self.branch_id,
         }
@@ -154,10 +234,6 @@ impl<E: ExchangeExecutor + ?Sized> BranchContext<'_, E> {
     fn with_branch(&self, branch_id: Option<usize>) -> Self {
         Self {
             branch_id,
-            // A policy sibling is a new branch path. Its cache access budget
-            // must not inherit a sibling's dynamic access, while all clones
-            // of this new context continue to share the same path-local cell.
-            cache_accessed: Rc::new(Cell::new(false)),
             ..self.clone()
         }
     }
@@ -499,7 +575,13 @@ struct BranchOutcome {
     state: ExecutionState,
     source: Option<String>,
     error: Option<ExecutionError>,
-    cache_accessed: bool,
+    /// How the branch machine reached its terminal state.
+    ///
+    /// A branch that stopped by `exit` still carries whatever response it had
+    /// already produced, but it did not complete naturally, so an owner must not
+    /// treat that response as a successor result. `None` means the branch did
+    /// not reach a terminal completion at all (it failed or was abandoned).
+    completion: Option<ExecutionCompletion>,
 }
 
 impl BranchOutcome {
@@ -508,7 +590,7 @@ impl BranchOutcome {
             state,
             source,
             error: None,
-            cache_accessed: false,
+            completion: Some(ExecutionCompletion::Completed),
         }
     }
 
@@ -517,21 +599,23 @@ impl BranchOutcome {
             state,
             source: None,
             error: Some(error),
-            cache_accessed: false,
+            completion: None,
         }
     }
 
     fn is_success(&self) -> bool {
         self.error.is_none() && !matches!(self.state.response, MachineResponseState::None)
     }
-}
 
-fn absorb_branch_cache<E: ExchangeExecutor + ?Sized>(
-    context: &BranchContext<'_, E>,
-    outcome: &BranchOutcome,
-) {
-    if outcome.error.is_none() && outcome.cache_accessed {
-        context.cache_accessed.set(true);
+    /// True only when the branch reached its terminal state by completing
+    /// naturally, which is the sole condition under which its response is a
+    /// publishable successor result.
+    ///
+    /// This mirrors [`MachineStep::ScopeComplete`] versus
+    /// [`MachineStep::ScopeAborted`] on the boundary path: an `exit` carries the
+    /// response it had, but it is not a completion.
+    fn completed_naturally(&self) -> bool {
+        matches!(self.completion, Some(ExecutionCompletion::Completed))
     }
 }
 
@@ -546,7 +630,6 @@ fn commit_branch_winner<E: ExchangeExecutor + ?Sized>(
     if Instant::now() >= context.deadline {
         return BranchOutcome::failure(fallback_state.clone(), ExecutionError::BudgetExceeded);
     }
-    absorb_branch_cache(context, &outcome);
     outcome
 }
 
@@ -1094,13 +1177,13 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         question,
     } = request;
     let capture_audit_details = checkpoint.capture_audit_details();
-    let multi_forward = config.program.externals.len() > usize::from(config.cache.is_some()) + 1;
+    let multi_forward = config.program.externals.len() > config.caches.len() + 1;
     let mut facts = ExecutionFacts {
         capture_audit_details,
-        cache_status: if config.cache.is_some() {
-            CacheStatus::Undetermined
-        } else {
+        cache_status: if config.caches.is_empty() {
             CacheStatus::NotApplicable
+        } else {
+            CacheStatus::Undetermined
         },
         response_source: None,
         upstream_attempts: UpstreamAttemptList::with_capacity_hint(if multi_forward {
@@ -1160,11 +1243,11 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         }
     };
 
-    // One request-owned cache access and publication token. A second dynamic
-    // dispatch fails closed even if the first access hit or its miss was
-    // already published at a child-scope boundary.
-    let mut cache_accessed = false;
-    let mut pending_store: Option<PendingStore> = None;
+    // One request-owned publication frame per cache dispatch. A request may
+    // dispatch several caches, and may dispatch the same cache more than once
+    // in different scopes; every frame is consumed exactly once, at its own
+    // successor boundary, innermost boundary first.
+    let mut pending_stores: Vec<PendingFrame> = Vec::new();
     let mut upstream_response = false;
     let mut attempted = false;
     let mut publication_deadline = None;
@@ -1195,8 +1278,9 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 // what that successor produced, before the caller's remaining
                 // rules can rewrite it.
                 facts.note_response(machine.state());
-                publish_successor(
-                    &mut pending_store,
+                publish_frame(
+                    &mut pending_stores,
+                    completion.token(),
                     &machine,
                     request_shutdown.is_cancelled(),
                     publication_deadline,
@@ -1209,7 +1293,26 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                 machine.state_mut().routing = RoutingState::default();
                 facts.routing = RoutingState::default();
                 facts.routing_changed_since_response = false;
-                step = match machine.resume_scope_completion(completion.executable()) {
+                step = match machine.resume_scope_completion(completion.token()) {
+                    Ok(step) => step,
+                    Err(_) => {
+                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                            LocalFailureKind::InternalExecution,
+                        ));
+                        return result_from_state(&machine, &header, &question, facts);
+                    }
+                };
+            }
+            MachineStep::ScopeAborted(completion) => {
+                // The watched scope was unwound by `exit`. Its frame is
+                // invalidated here and must never publish, and it must not
+                // survive to be consumed by a later, unrelated boundary.
+                // Cancellation, exhausted fuel and terminal executor errors do
+                // not reach this arm: they fail the machine drive, and every
+                // frame held by this request is then dropped without publishing
+                // when this function returns.
+                abandon_frame(&mut pending_stores, completion.token());
+                step = match machine.resume_scope_completion(completion.token()) {
                     Ok(step) => step,
                     Err(_) => {
                         facts.set_failure_provenance(FailureProvenance::LocalFailure(
@@ -1238,7 +1341,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         branch_cancellation: request_shutdown.child_token(),
                         trace,
                         branch_metrics: facts.branch_metrics.clone(),
-                        cache_accessed: Rc::new(Cell::new(false)),
+                        refresh_environment: options.refresh_environment.clone(),
                         allow_empty_response: false,
                         branch_id: Some(0),
                     };
@@ -1260,8 +1363,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     let outcome =
                         run_fallback(policy.clone(), successor, context.clone(), inherited_source)
                             .await;
-                    absorb_branch_cache(&context, &outcome);
-                    cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
                         // The captured successor has already been driven by
                         // the branch. Commit its state, then return the typed
@@ -1325,7 +1426,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         branch_cancellation: request_shutdown.child_token(),
                         trace,
                         branch_metrics: facts.branch_metrics.clone(),
-                        cache_accessed: Rc::new(Cell::new(false)),
+                        refresh_environment: options.refresh_environment.clone(),
                         allow_empty_response: false,
                         branch_id: Some(0),
                     };
@@ -1351,8 +1452,6 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         inherited_source,
                     )
                     .await;
-                    absorb_branch_cache(&context, &outcome);
-                    cache_accessed |= context.cache_accessed.get();
                     if let Some(error) = outcome.error {
                         *machine.state_mut() = outcome.state;
                         let core_error = match policy_failure_for_core(&error) {
@@ -1393,28 +1492,49 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     };
                     continue;
                 }
-                if config
-                    .cache
-                    .as_ref()
-                    .is_some_and(|cache_config| cache_config.executable == dispatch.executable())
-                {
-                    if cache_accessed {
+                if let Some(cache_config) = config.cache_for_executable(dispatch.executable()) {
+                    let cache_id = cache_config.id;
+                    let Some(store) = cache.get(cache_id) else {
                         facts.set_failure_provenance(FailureProvenance::LocalFailure(
                             LocalFailureKind::InternalExecution,
                         ));
                         set_servfail(&mut machine);
                         facts.set_response_source(ResponseSource::Local);
                         return result_from_state(&machine, &header, &question, facts);
-                    }
-                    cache_accessed = true;
-                    let lookup = cache.lookup(raw).ok().flatten();
-                    if let Some(wire) = lookup {
+                    };
+                    let lookup =
+                        store
+                            .lookup_entry_counted(raw, true)
+                            .ok()
+                            .flatten()
+                            .filter(|hit| {
+                                hit.state == mosdns_cache_core::LookupState::Fresh
+                                    || options.refresh_environment.is_some()
+                            });
+                    if let Some(hit) = lookup {
+                        if hit.state == mosdns_cache_core::LookupState::Lazy {
+                            if let (Some(environment), Ok(recipe)) =
+                                (&options.refresh_environment, machine.capture_successor())
+                            {
+                                environment.start(
+                                    cache_id,
+                                    recipe,
+                                    raw.to_vec(),
+                                    header,
+                                    question.clone(),
+                                );
+                            }
+                        }
                         facts.cache_status = CacheStatus::Hit;
                         facts.set_response_source(ResponseSource::Cache);
                         facts.failure_provenance = None;
-                        machine.state_mut().set_raw_response(wire);
+                        if !hit.domain_set.is_empty() {
+                            machine.state_mut().routing.domain_set = Some(hit.domain_set);
+                        }
+                        machine.state_mut().set_raw_response(hit.response);
                         // A hit completes the successor chain that contains the
-                        // cache; the caller's later rules still run.
+                        // cache; the caller's later rules still run. A nested
+                        // cache inside that successor therefore never runs.
                         step = match machine
                             .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
                         {
@@ -1429,19 +1549,24 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         continue;
                     }
                     facts.cache_status = CacheStatus::Miss;
-                    pending_store = cache.begin_store(raw).ok().flatten();
-                    // The miss is published when the cache's own successor
-                    // chain completes, not by the query's final state.
-                    if machine
-                        .watch_enclosing_scope(dispatch.executable())
-                        .is_err()
-                    {
-                        facts.set_failure_provenance(FailureProvenance::LocalFailure(
-                            LocalFailureKind::InternalExecution,
-                        ));
-                        set_servfail(&mut machine);
-                        facts.set_response_source(ResponseSource::Local);
-                        return result_from_state(&machine, &header, &question, facts);
+                    // Arm the boundary and take the publication token before the
+                    // successor runs, so a nested dispatch may arm its own frame
+                    // on top of this one. Duplicate dispatches of the same cache
+                    // are deliberately allowed: each arms its own watch token and
+                    // publishes at its own scope completion, innermost first.
+                    let watch = match machine.watch_enclosing_scope(dispatch.executable()) {
+                        Ok(watch) => watch,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            set_servfail(&mut machine);
+                            facts.set_response_source(ResponseSource::Local);
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    if let Some(store_token) = store.begin_store(raw).ok().flatten() {
+                        pending_stores.push(PendingFrame { watch, store_token });
                     }
                     step = match machine
                         .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
@@ -1608,15 +1733,31 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     }
 }
 
-/// Publishes the response that the cache's own successor chain produced.
+/// One armed cache publication frame.
 ///
-/// The token is consumed only at this boundary, so the caller's later rules
-/// cannot pollute an already-completed successor result. Cancellation, an
-/// expired publication budget, or a response the cache declines to store
-/// leaves the token to drop without publishing; none of those is a host
-/// failure, so no failure provenance is recorded here.
-fn publish_successor(
-    pending_store: &mut Option<PendingStore>,
+/// The frame is paired with the exact watch token that its dispatch armed, so a
+/// notification can only ever consume the frame that belongs to it. Two frames
+/// for the same executable (a repeated dispatch, or one dispatch inside another)
+/// therefore stay independent even when their boundaries complete out of order.
+struct PendingFrame {
+    watch: WatchToken,
+    store_token: PendingStore,
+}
+
+/// Publishes the response that one cache's own successor chain produced.
+///
+/// The frame is consumed only at its registered boundary, so the caller's later
+/// rules cannot pollute an already-completed successor result. A nested cache
+/// keeps its own separate frame; nested boundaries complete innermost first, so
+/// each cache publishes its own successor's result rather than the request's
+/// final wire.
+///
+/// Cancellation, an expired publication budget, or a response the cache
+/// declines to store leaves the frame to drop without publishing; none of those
+/// is a host failure, so no failure provenance is recorded here.
+fn publish_frame(
+    pending_stores: &mut Vec<PendingFrame>,
+    watch: WatchToken,
     machine: &ExecutionMachine<'_>,
     canceled: bool,
     publication_deadline: Option<Instant>,
@@ -1627,13 +1768,33 @@ fn publish_successor(
     if publication_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
         return;
     }
-    let Some(token) = pending_store.take() else {
+    // Only the frame armed by this exact watch may be consumed. Matching by
+    // executable alone would let a boundary publish a sibling frame that a
+    // different (possibly exited) scope had armed.
+    let Some(index) = pending_stores.iter().position(|frame| frame.watch == watch) else {
         return;
     };
-    let _ = token.publish(match &machine.state().response {
-        MachineResponseState::Raw(wire) => wire.as_bytes(),
-        MachineResponseState::None | MachineResponseState::Synthesized(_) => &[],
-    });
+    let frame = pending_stores.remove(index);
+    let _ = frame.store_token.publish_with_domain(
+        match &machine.state().response {
+            MachineResponseState::Raw(wire) => wire.as_bytes(),
+            MachineResponseState::None | MachineResponseState::Synthesized(_) => &[],
+        },
+        machine.state().routing.domain_set.as_deref().unwrap_or(""),
+    );
+}
+
+/// Invalidates the frame armed by one watch without publishing it.
+///
+/// This is reached only from the `MachineStep::ScopeAborted` arm, i.e. when a
+/// scope was unwound by `exit`. A machine that fails on cancellation, an
+/// exhausted budget or a terminal executor error never gets here: the drive
+/// returns `Err` and the owner's frame vector is dropped unpublished when the
+/// request returns.
+fn abandon_frame(pending_stores: &mut Vec<PendingFrame>, watch: WatchToken) {
+    if let Some(index) = pending_stores.iter().position(|frame| frame.watch == watch) {
+        pending_stores.remove(index);
+    }
 }
 
 fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
@@ -1641,12 +1802,7 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
     context: BranchContext<'a, E>,
     source: Option<String>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
-    let cache_accessed = Rc::clone(&context.cache_accessed);
-    Box::pin(async move {
-        let mut outcome = drive_branch_inner(machine, context, source).await;
-        outcome.cache_accessed = cache_accessed.get();
-        outcome
-    })
+    Box::pin(drive_branch_inner(machine, context, source))
 }
 
 async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
@@ -1657,7 +1813,9 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
     if let Err(error) = ensure_branch_alive(&machine, &context) {
         return BranchOutcome::failure(machine.state().clone(), error);
     }
-    let mut pending_store = None;
+    // A branch is its own machine, so it owns its own publication frames; a
+    // nested cache inside the branch publishes at its own inner boundary.
+    let mut pending_stores: Vec<PendingFrame> = Vec::new();
     let mut publication_deadline = None;
     let mut step = match machine.step() {
         Ok(step) => step,
@@ -1668,11 +1826,17 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
             return BranchOutcome::failure(machine.state().clone(), error);
         }
         match step {
-            MachineStep::Complete(_) => {
-                if matches!(machine.state().response, MachineResponseState::None) {
-                    if context.allow_empty_response {
-                        return BranchOutcome::success(machine.state().clone(), source);
-                    }
+            MachineStep::Complete(completion) => {
+                // `Exited` is reported as a successful *branch* result, because
+                // the fallback/preference driver must still see the response the
+                // branch produced. It is not a natural completion, so the
+                // terminal state is carried through unchanged on every arm here
+                // and each publication site checks `completed_naturally()`
+                // before storing anything. Never synthesise `Completed` on this
+                // path: an empty-response branch that exited is still an exit.
+                if matches!(machine.state().response, MachineResponseState::None)
+                    && !context.allow_empty_response
+                {
                     return BranchOutcome::failure(
                         machine.state().clone(),
                         ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
@@ -1680,16 +1844,35 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                         )),
                     );
                 }
-                return BranchOutcome::success(machine.state().clone(), source);
+                return BranchOutcome {
+                    state: machine.state().clone(),
+                    source,
+                    error: None,
+                    completion: Some(completion),
+                };
             }
             MachineStep::ScopeComplete(completion) => {
-                publish_successor(
-                    &mut pending_store,
+                publish_frame(
+                    &mut pending_stores,
+                    completion.token(),
                     &machine,
                     context.root_cancellation.is_cancelled(),
                     publication_deadline,
                 );
-                step = match machine.resume_scope_completion(completion.executable()) {
+                step = match machine.resume_scope_completion(completion.token()) {
+                    Ok(step) => step,
+                    Err(error) => {
+                        return BranchOutcome::failure(machine.state().clone(), error);
+                    }
+                };
+            }
+            MachineStep::ScopeAborted(completion) => {
+                // An `exit`-unwound scope must invalidate its frame instead of
+                // leaving it to be consumed by whichever boundary finishes next.
+                // A machine error never reaches this arm; it returns early and
+                // the branch's frames drop unpublished with the local vec.
+                abandon_frame(&mut pending_stores, completion.token());
+                step = match machine.resume_scope_completion(completion.token()) {
                     Ok(step) => step,
                     Err(error) => {
                         return BranchOutcome::failure(machine.state().clone(), error);
@@ -1712,7 +1895,6 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     let outcome =
                         run_fallback(policy.clone(), successor, context.clone(), source.clone())
                             .await;
-                    absorb_branch_cache(&context, &outcome);
                     if let Some(error) = outcome.error {
                         *machine.state_mut() = outcome.state;
                         let core_error = match policy_failure_for_core(&error) {
@@ -1761,7 +1943,6 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                         source.clone(),
                     )
                     .await;
-                    absorb_branch_cache(&context, &outcome);
                     if let Some(error) = outcome.error {
                         *machine.state_mut() = outcome.state;
                         let core_error = match policy_failure_for_core(&error) {
@@ -1791,23 +1972,43 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     };
                     continue;
                 }
-                if context
-                    .config
-                    .cache
-                    .as_ref()
-                    .is_some_and(|cache| cache.executable == dispatch.executable())
+                if let Some(cache_config) =
+                    context.config.cache_for_executable(dispatch.executable())
                 {
-                    if context.cache_accessed.get() {
+                    let Some(store) = context.cache.get(cache_config.id) else {
                         return BranchOutcome::failure(
                             machine.state().clone(),
                             ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
-                                "duplicate cache access in one branch",
+                                "compiled cache has no store",
                             )),
                         );
-                    }
-                    context.cache_accessed.set(true);
-                    if let Ok(Some(wire)) = context.cache.lookup(context.raw()) {
-                        machine.state_mut().set_raw_response(wire);
+                    };
+                    if let Some(hit) = store
+                        .lookup_entry_counted(context.raw(), context.refresh_environment.is_some())
+                        .ok()
+                        .flatten()
+                        .filter(|hit| {
+                            hit.state == mosdns_cache_core::LookupState::Fresh
+                                || context.refresh_environment.is_some()
+                        })
+                    {
+                        if hit.state == mosdns_cache_core::LookupState::Lazy {
+                            if let (Some(environment), Ok(recipe)) =
+                                (&context.refresh_environment, machine.capture_successor())
+                            {
+                                environment.start(
+                                    cache_config.id,
+                                    recipe,
+                                    context.raw().to_vec(),
+                                    context.header,
+                                    context.question.clone(),
+                                );
+                            }
+                        }
+                        if !hit.domain_set.is_empty() {
+                            machine.state_mut().routing.domain_set = Some(hit.domain_set);
+                        }
+                        machine.state_mut().set_raw_response(hit.response);
                         source = None;
                         step = match machine
                             .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
@@ -1819,10 +2020,15 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                         };
                         continue;
                     }
-                    pending_store = context.cache.begin_store(context.raw()).ok().flatten();
                     publication_deadline = Some(context.deadline);
-                    if let Err(error) = machine.watch_enclosing_scope(dispatch.executable()) {
-                        return BranchOutcome::failure(machine.state().clone(), error);
+                    let watch = match machine.watch_enclosing_scope(dispatch.executable()) {
+                        Ok(watch) => watch,
+                        Err(error) => {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                    };
+                    if let Some(store_token) = store.begin_store(context.raw()).ok().flatten() {
+                        pending_stores.push(PendingFrame { watch, store_token });
                     }
                     step = match machine
                         .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
@@ -1921,9 +2127,8 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
     context: BranchContext<'a, E>,
     source: Option<String>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
-    let cache_accessed = Rc::clone(&context.cache_accessed);
     Box::pin(async move {
-        let mut outcome = match target {
+        match target {
             NativeTarget::Sequence(sequence) => {
                 let control = successor.control().fork_child(CancellationToken::new());
                 let target_machine = match ExecutionMachine::new(
@@ -2017,33 +2222,62 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                 {
                     return run_preference(preference.clone(), successor, context, source).await;
                 }
-                if context
-                    .config
-                    .cache
-                    .as_ref()
-                    .is_some_and(|cache| cache.executable == executable)
-                {
-                    if context.cache_accessed.replace(true) {
+                if let Some(cache_config) = context.config.cache_for_executable(executable) {
+                    let Some(store) = context.cache.get(cache_config.id) else {
                         return BranchOutcome::failure(
                             successor.state().clone(),
                             ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
-                                "duplicate cache access in one branch",
+                                "compiled cache has no store",
                             )),
                         );
-                    }
-                    if let Ok(Some(wire)) = context.cache.lookup(context.raw()) {
-                        successor.state_mut().set_raw_response(wire);
+                    };
+                    if let Some(hit) = store
+                        .lookup_entry_counted(context.raw(), context.refresh_environment.is_some())
+                        .ok()
+                        .flatten()
+                        .filter(|hit| {
+                            hit.state == mosdns_cache_core::LookupState::Fresh
+                                || context.refresh_environment.is_some()
+                        })
+                    {
+                        if hit.state == mosdns_cache_core::LookupState::Lazy {
+                            if let (Some(environment), Ok(recipe)) = (
+                                &context.refresh_environment,
+                                successor.capture_branch_successor(),
+                            ) {
+                                environment.start(
+                                    cache_config.id,
+                                    recipe,
+                                    context.raw().to_vec(),
+                                    context.header,
+                                    context.question.clone(),
+                                );
+                            }
+                        }
+                        if !hit.domain_set.is_empty() {
+                            successor.state_mut().routing.domain_set = Some(hit.domain_set);
+                        }
+                        successor.state_mut().set_raw_response(hit.response);
                         return BranchOutcome::success(successor.state().clone(), None);
                     }
-                    let pending_store = context.cache.begin_store(context.raw()).ok().flatten();
+                    let pending_store = store.begin_store(context.raw()).ok().flatten();
                     let result = drive_branch(successor, context.clone(), source).await;
+                    // Only a natural completion is a publishable successor
+                    // result. A successor that produced a response and then
+                    // exited must drop its token, exactly as the boundary path
+                    // does when it receives `MachineStep::ScopeAborted` instead
+                    // of `MachineStep::ScopeComplete`.
                     if result.is_success()
+                        && result.completed_naturally()
                         && !context.root_cancellation.is_cancelled()
                         && Instant::now() < context.deadline
                     {
                         if let Some(token) = pending_store {
                             if let MachineResponseState::Raw(wire) = &result.state.response {
-                                let _ = token.publish(wire.as_bytes());
+                                let _ = token.publish_with_domain(
+                                    wire.as_bytes(),
+                                    result.state.routing.domain_set.as_deref().unwrap_or(""),
+                                );
                             }
                         }
                     }
@@ -2100,9 +2334,7 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                 successor.state_mut().set_raw_response(wire);
                 drive_branch(successor, context, source).await
             }
-        };
-        outcome.cache_accessed |= cache_accessed.get();
-        outcome
+        }
     })
 }
 
@@ -3399,12 +3631,12 @@ mod tests {
     use crate::assembly::{ForwardAdapter, HostOptions};
     use crate::cache::{CacheTestClock, NativeCacheAdapter};
     use crate::config::{
-        CachePluginConfig, CompiledConfig, ForwardConfig, ListenerConfig, ListenerKind, LogLevel,
-        SequenceConfig, compile_yaml, compile_yaml_with_base,
+        CacheId, CacheKind, CachePluginConfig, CompiledConfig, ForwardConfig, ListenerConfig,
+        ListenerKind, LogLevel, SequenceConfig, compile_yaml, compile_yaml_with_base,
     };
     use crate::observer::{
-        CacheStatus, FailureProvenance, LocalFailureKind, QueryObserver, QueryTerminalOutcome,
-        QueryTransport, ResponseSource, ResponseState, TerminalObservation, UpstreamAttemptList,
+        CacheStatus, FailureProvenance, QueryObserver, QueryTerminalOutcome, QueryTransport,
+        ResponseSource, ResponseState, TerminalObservation, UpstreamAttemptList,
     };
 
     struct MockExchange {
@@ -3895,7 +4127,7 @@ mod tests {
         futures_like_block_on(super::execute_request_with_observation(
             super::ExecutionRequest {
                 config,
-                cache,
+                cache: &cache.catalog(),
                 options,
                 raw: request,
                 header,
@@ -3933,7 +4165,7 @@ mod tests {
         let result = futures_like_block_on(execute_request_with_observation(
             ExecutionRequest {
                 config: &config,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &HostOptions::default(),
                 raw: &request,
                 header,
@@ -4129,7 +4361,7 @@ mod tests {
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
                         config: &config,
-                        cache: &cache,
+                        cache: &cache.catalog(),
                         options: &options,
                         raw: &raw,
                         header,
@@ -4227,7 +4459,7 @@ plugins:
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
                         config: &config,
-                        cache: &cache,
+                        cache: &cache.catalog(),
                         options: &options,
                         raw: &raw,
                         header,
@@ -4305,7 +4537,7 @@ plugins:
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
                         config: &config,
-                        cache: &cache,
+                        cache: &cache.catalog(),
                         options: &options,
                         raw: &raw,
                         header,
@@ -4562,11 +4794,17 @@ plugins:
             }],
             forward_definitions: Vec::new(),
             forward_invocations: Vec::new(),
-            cache: Some(CachePluginConfig {
+            caches: vec![CachePluginConfig {
+                id: CacheId(0),
                 tag: cache,
                 executable: cache_id,
+                kind: CacheKind::Named,
                 capacity: 64,
-            }),
+                lazy_cache_ttl_secs: 0,
+                dump_file: None,
+                dump_interval_secs: 600,
+                exclude_ip: Vec::new(),
+            }],
             fallbacks: Vec::new(),
             preferences: Vec::new(),
             sequence: SequenceConfig {
@@ -4661,7 +4899,7 @@ plugins:
                 ],
                 forward_definitions: Vec::new(),
                 forward_invocations: Vec::new(),
-                cache: None,
+                caches: Vec::new(),
                 fallbacks: Vec::new(),
                 preferences: Vec::new(),
                 sequence: SequenceConfig {
@@ -4701,7 +4939,7 @@ plugins:
         let result = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &config,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &options,
                 raw: &request,
                 header,
@@ -4777,7 +5015,7 @@ plugins:
         let response = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &config,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &options,
                 raw: &request,
                 header,
@@ -4807,7 +5045,7 @@ plugins:
         let response = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &config,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &HostOptions::default(),
                 raw: &request,
                 header,
@@ -4887,12 +5125,13 @@ plugins:
         let (live_header, live_question) = parse_query(&live_request).expect("live query");
         let cancelled_cancellation = TransportCancellation::new();
         let live_cancellation = TransportCancellation::new();
+        let cache_catalog = cache.catalog();
         let (cancelled_response, live_response) = futures_like_block_on(async {
             tokio::join!(
                 execute_request_with_executor(
                     super::ExecutionRequest {
                         config: &config,
-                        cache: &cache,
+                        cache: &cache_catalog,
                         options: &cancelled_options,
                         raw: &cancelled_request,
                         header: cancelled_header,
@@ -4904,7 +5143,7 @@ plugins:
                 execute_request_with_executor(
                     super::ExecutionRequest {
                         config: &config,
-                        cache: &cache,
+                        cache: &cache_catalog,
                         options: &live_options,
                         raw: &live_request,
                         header: live_header,
@@ -4951,7 +5190,7 @@ plugins:
         let first_result = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &first_options,
                 raw: &first,
                 header: first_header,
@@ -4968,7 +5207,7 @@ plugins:
         let second_result = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &second_options,
                 raw: &second,
                 header: second_header,
@@ -5004,7 +5243,7 @@ plugins:
         let response = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &config,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &options,
                 raw: &request,
                 header,
@@ -5035,7 +5274,7 @@ plugins:
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &options,
                 raw: &first,
                 header,
@@ -5049,7 +5288,7 @@ plugins:
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &options,
                 raw: &second,
                 header,
@@ -5074,7 +5313,7 @@ plugins:
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &local_cache,
+                cache: &local_cache.catalog(),
                 options: &options,
                 raw: &first,
                 header,
@@ -5088,7 +5327,7 @@ plugins:
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &local_cache,
+                cache: &local_cache.catalog(),
                 options: &options,
                 raw: &second,
                 header,
@@ -5105,10 +5344,95 @@ plugins:
         assert!(local_cache.is_empty());
     }
 
-    /// A child sequence that runs the cache and then the given forward, and a
-    /// parent that calls it and can overwrite the response afterwards. This is
-    /// the shape R3 must keep separate: the child's completed successor result
-    /// is cacheable even when the parent later replaces the final response.
+    /// The root rule list that reaches the same cache twice around one forward,
+    /// so the second dispatch happens inside the first one's successor scope.
+    fn repeated_cache_config() -> (CompiledConfig, ExecutableId, CacheId) {
+        let cache_tag = "cache".to_owned();
+        let forward = "forward".to_owned();
+        let program = ProgramSpec::new(
+            vec![SequenceSpec::new(
+                "root",
+                vec![RuleSpec::unconditional(Some(vec![
+                    ExecutableSpec::External {
+                        target: ExternalRef::new(cache_tag.clone()),
+                    },
+                    ExecutableSpec::External {
+                        target: ExternalRef::new(forward.clone()),
+                    },
+                    ExecutableSpec::External {
+                        target: ExternalRef::new(cache_tag.clone()),
+                    },
+                ]))],
+            )],
+            Vec::new(),
+        )
+        .with_externals(vec![
+            ExternalSpec::new(cache_tag.clone()),
+            ExternalSpec::new(forward.clone()),
+        ])
+        .validate()
+        .expect("program");
+        let cache_id = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == cache_tag).then_some(*id))
+            .expect("cache id");
+        let forward_id = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == forward).then_some(*id))
+            .expect("forward id");
+        let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
+            .expect("endpoint");
+        let config = CompiledConfig {
+            log_level: LogLevel::Error,
+            forward: Some(ForwardConfig {
+                tag: forward.clone(),
+                upstream_tag: None,
+                endpoint,
+                executable: forward_id,
+            }),
+            forwards: vec![ForwardConfig {
+                tag: forward,
+                upstream_tag: None,
+                endpoint,
+                executable: forward_id,
+            }],
+            forward_definitions: Vec::new(),
+            forward_invocations: Vec::new(),
+            caches: vec![CachePluginConfig {
+                id: CacheId(0),
+                tag: cache_tag,
+                executable: cache_id,
+                kind: CacheKind::Named,
+                capacity: 64,
+                lazy_cache_ttl_secs: 0,
+                dump_file: None,
+                dump_interval_secs: 600,
+                exclude_ip: Vec::new(),
+            }],
+            fallbacks: Vec::new(),
+            preferences: Vec::new(),
+            sequence: SequenceConfig {
+                tag: "root".to_owned(),
+                sequence: program.sequence_id("root").expect("root"),
+                forward_executable: Some(forward_id),
+            },
+            listener: ListenerConfig {
+                tag: "listener".to_owned(),
+                kind: ListenerKind::Udp,
+                entry: "root".to_owned(),
+                listen: "127.0.0.1:1".parse().expect("listen"),
+                enable_audit: false,
+                idle_timeout: None,
+            },
+            api: None,
+            domain_sets: Vec::new(),
+            program,
+        };
+        (config, forward_id, CacheId(0))
+    }
+
     fn cache_child_then_parent_config(
         parent_tail: Vec<ExecutableSpec>,
     ) -> (CompiledConfig, ExecutableId, ExecutableId) {
@@ -5183,11 +5507,17 @@ plugins:
                 ],
                 forward_definitions: Vec::new(),
                 forward_invocations: Vec::new(),
-                cache: Some(CachePluginConfig {
+                caches: vec![CachePluginConfig {
+                    id: CacheId(0),
                     tag: cache,
                     executable: cache_id,
+                    kind: CacheKind::Named,
                     capacity: 64,
-                }),
+                    lazy_cache_ttl_secs: 0,
+                    dump_file: None,
+                    dump_interval_secs: 600,
+                    exclude_ip: Vec::new(),
+                }],
                 fallbacks: Vec::new(),
                 preferences: Vec::new(),
                 sequence: SequenceConfig {
@@ -5250,6 +5580,187 @@ plugins:
                 ))
             })
         }
+    }
+
+    /// Builds `root = [cache_a, Call(child), forward_c]` and
+    /// `child = [cache_b, forward_b]`, so the two caches have different
+    /// successor boundaries with different results.
+    fn two_nested_caches_config() -> (CompiledConfig, ExecutableId, ExecutableId, ExecutableId) {
+        let cache_a = "cache_a".to_owned();
+        let cache_b = "cache_b".to_owned();
+        let forward_b = "forward_b".to_owned();
+        let forward_c = "forward_c".to_owned();
+        let program = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "root",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: ExternalRef::new(cache_a.clone()),
+                        },
+                        ExecutableSpec::Call {
+                            target: SequenceRef::new("child"),
+                        },
+                        ExecutableSpec::External {
+                            target: ExternalRef::new(forward_c.clone()),
+                        },
+                    ]))],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: ExternalRef::new(cache_b.clone()),
+                        },
+                        ExecutableSpec::External {
+                            target: ExternalRef::new(forward_b.clone()),
+                        },
+                    ]))],
+                ),
+            ],
+            Vec::new(),
+        )
+        .with_externals(vec![
+            ExternalSpec::new(cache_a.clone()),
+            ExternalSpec::new(cache_b.clone()),
+            ExternalSpec::new(forward_b.clone()),
+            ExternalSpec::new(forward_c.clone()),
+        ])
+        .validate()
+        .expect("program");
+        let external = |name: &str| {
+            program
+                .externals
+                .iter()
+                .find_map(|(id, external)| (external.name == name).then_some(*id))
+                .expect("external id")
+        };
+        let cache_a_id = external(&cache_a);
+        let cache_b_id = external(&cache_b);
+        let forward_b_id = external(&forward_b);
+        let forward_c_id = external(&forward_c);
+        let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
+            .expect("endpoint");
+        let forward_config = |tag: &str, executable| ForwardConfig {
+            tag: tag.to_owned(),
+            upstream_tag: None,
+            endpoint,
+            executable,
+        };
+        let cache_config = |id: usize, tag: &str, executable| CachePluginConfig {
+            id: CacheId(id),
+            tag: tag.to_owned(),
+            executable,
+            kind: CacheKind::Named,
+            capacity: 64,
+            lazy_cache_ttl_secs: 0,
+            dump_file: None,
+            dump_interval_secs: 600,
+            exclude_ip: Vec::new(),
+        };
+        let config = CompiledConfig {
+            log_level: LogLevel::Error,
+            forward: Some(forward_config(&forward_b, forward_b_id)),
+            forwards: vec![
+                forward_config(&forward_b, forward_b_id),
+                forward_config(&forward_c, forward_c_id),
+            ],
+            forward_definitions: Vec::new(),
+            forward_invocations: Vec::new(),
+            caches: vec![
+                cache_config(0, &cache_a, cache_a_id),
+                cache_config(1, &cache_b, cache_b_id),
+            ],
+            fallbacks: Vec::new(),
+            preferences: Vec::new(),
+            sequence: SequenceConfig {
+                tag: "root".to_owned(),
+                sequence: program.sequence_id("root").expect("root"),
+                forward_executable: Some(forward_b_id),
+            },
+            listener: ListenerConfig {
+                tag: "listener".to_owned(),
+                kind: ListenerKind::Udp,
+                entry: "root".to_owned(),
+                listen: "127.0.0.1:1".parse().expect("listen"),
+                enable_audit: false,
+                idle_timeout: None,
+            },
+            api: None,
+            domain_sets: Vec::new(),
+            program,
+        };
+        (config, forward_b_id, forward_c_id, forward_b_id)
+    }
+
+    #[test]
+    fn two_nested_caches_each_store_their_own_successors_result() {
+        // cache_a is dispatched in the root scope and cache_b inside the child
+        // sequence. The child's own forward answers 192.0.2.71 and the parent's
+        // trailing forward overwrites it with 192.0.2.81. A boundary that
+        // published the wrong frame, or published both caches from one final
+        // wire, would put the same address in both stores.
+        let (config, forward_b_id, forward_c_id, _) = two_nested_caches_config();
+        let catalog = crate::cache::CacheCatalog::from_adapters(vec![
+            NativeCacheAdapter::for_test(CacheTestClock::new(100)).expect("cache a"),
+            NativeCacheAdapter::for_test(CacheTestClock::new(100)).expect("cache b"),
+        ]);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let executor = PerExecutableExchange {
+            calls: Rc::clone(&calls),
+            answers: vec![
+                (forward_b_id, [192, 0, 2, 71]),
+                (forward_c_id, [192, 0, 2, 81]),
+            ],
+        };
+        let request = query(29);
+        let (header, question) = parse_query(&request).expect("query");
+        let mut checkpoint = ExecutionCheckpoint::new(true);
+        let result = futures_like_block_on(execute_request_with_observation(
+            ExecutionRequest {
+                config: &config,
+                cache: &catalog,
+                options: &HostOptions::default(),
+                raw: &request,
+                header,
+                question,
+            },
+            &executor,
+            TransportCancellation::new(),
+            &mut checkpoint,
+        ));
+        assert_eq!(
+            calls.borrow().as_slice(),
+            &[forward_b_id, forward_c_id],
+            "the child leg runs before the parent's trailing leg"
+        );
+        assert_eq!(
+            result.response_wire[3] & 0x0f,
+            0,
+            "the request must answer normally"
+        );
+
+        let store_b = catalog.get(CacheId(1)).expect("cache b");
+        let stored_b = store_b
+            .lookup(&request)
+            .expect("lookup b")
+            .expect("cache_b must hold its own successor result");
+        assert_eq!(
+            mosdns_dns_core::observe_answer_addresses(&stored_b).expect("addresses"),
+            vec![std::net::IpAddr::V4("192.0.2.71".parse().expect("address"))],
+            "cache_b's boundary is the child scope, so it must hold the child's answer"
+        );
+
+        let store_a = catalog.get(CacheId(0)).expect("cache a");
+        let stored_a = store_a
+            .lookup(&request)
+            .expect("lookup a")
+            .expect("cache_a must hold its own successor result");
+        assert_eq!(
+            mosdns_dns_core::observe_answer_addresses(&stored_a).expect("addresses"),
+            vec![std::net::IpAddr::V4("192.0.2.81".parse().expect("address"))],
+            "cache_a's boundary is the root scope, so it must hold the overwritten answer"
+        );
     }
 
     #[test]
@@ -5890,7 +6401,7 @@ plugins:
         let result = futures_like_block_on(execute_request_with_observation(
             super::ExecutionRequest {
                 config: &config,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &HostOptions::default(),
                 raw: &request,
                 header,
@@ -5911,91 +6422,13 @@ plugins:
     }
 
     #[test]
-    fn a_second_dynamic_cache_access_fails_closed_without_overwriting_the_token() {
-        // A query that reaches the same cache twice cannot hand it two tokens.
-        // The second visit is a controlled failure, and the first token must
-        // not publish as if the second visit had succeeded.
+    fn a_repeated_dynamic_cache_dispatch_builds_its_own_frame_and_answers_normally() {
+        // The same cache reached twice in one branch no longer fails closed.
+        // Each dispatch builds an independent publication frame; the response
+        // is the ordinary forwarded answer and the first frame publishes.
         let clock = CacheTestClock::new(100);
         let cache = NativeCacheAdapter::for_test(clock).expect("cache");
-        let forward = "forward".to_owned();
-        let cache_tag = "cache".to_owned();
-        // The cache is reached on both a first rule and, after a miss, the
-        // forward, then a second rule that reaches it again.
-        let program = ProgramSpec::new(
-            vec![SequenceSpec::new(
-                "root",
-                vec![RuleSpec::unconditional(Some(vec![
-                    ExecutableSpec::External {
-                        target: ExternalRef::new(cache_tag.clone()),
-                    },
-                    ExecutableSpec::External {
-                        target: ExternalRef::new(forward.clone()),
-                    },
-                    ExecutableSpec::External {
-                        target: ExternalRef::new(cache_tag.clone()),
-                    },
-                ]))],
-            )],
-            Vec::new(),
-        )
-        .with_externals(vec![
-            ExternalSpec::new(cache_tag.clone()),
-            ExternalSpec::new(forward.clone()),
-        ])
-        .validate()
-        .expect("program");
-        let cache_id = program
-            .externals
-            .iter()
-            .find_map(|(id, external)| (external.name == cache_tag).then_some(*id))
-            .expect("cache id");
-        let forward_id = program
-            .externals
-            .iter()
-            .find_map(|(id, external)| (external.name == forward).then_some(*id))
-            .expect("forward id");
-        let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
-            .expect("endpoint");
-        let config = CompiledConfig {
-            log_level: LogLevel::Error,
-            forward: Some(ForwardConfig {
-                tag: forward.clone(),
-                upstream_tag: None,
-                endpoint,
-                executable: forward_id,
-            }),
-            forwards: vec![ForwardConfig {
-                tag: forward,
-                upstream_tag: None,
-                endpoint,
-                executable: forward_id,
-            }],
-            forward_definitions: Vec::new(),
-            forward_invocations: Vec::new(),
-            cache: Some(CachePluginConfig {
-                tag: cache_tag,
-                executable: cache_id,
-                capacity: 64,
-            }),
-            fallbacks: Vec::new(),
-            preferences: Vec::new(),
-            sequence: SequenceConfig {
-                tag: "root".to_owned(),
-                sequence: program.sequence_id("root").expect("root"),
-                forward_executable: Some(forward_id),
-            },
-            listener: ListenerConfig {
-                tag: "listener".to_owned(),
-                kind: ListenerKind::Udp,
-                entry: "root".to_owned(),
-                listen: "127.0.0.1:1".parse().expect("listen"),
-                enable_audit: false,
-                idle_timeout: None,
-            },
-            api: None,
-            domain_sets: Vec::new(),
-            program,
-        };
+        let (config, _forward_id, cache_id) = repeated_cache_config();
         let request = query(26);
         let calls = Rc::new(Cell::new(0));
         let mock = MockExchange {
@@ -6006,28 +6439,32 @@ plugins:
         let execution = execute_observed(&config, &cache, &HostOptions::default(), &request, &mock);
         assert_eq!(
             execution.response_wire[3] & 0x0f,
-            super::SERVFAIL,
-            "a repeated dynamic cache access must fail closed"
+            0,
+            "a repeated cache dispatch must answer normally, not fail closed"
         );
-        assert_eq!(
-            execution.failure_provenance,
-            Some(FailureProvenance::LocalFailure(
-                LocalFailureKind::InternalExecution
-            ))
+        assert_eq!(execution.cache_status, CacheStatus::Miss);
+        assert_eq!(execution.failure_provenance, None);
+        assert_eq!(calls.get(), 1, "only the first miss reaches the forward");
+        let catalog = cache.catalog();
+        assert!(
+            catalog
+                .get(cache_id)
+                .expect("cache store")
+                .lookup(&request)
+                .expect("lookup")
+                .is_some(),
+            "the published successor result must be readable afterwards"
         );
-        assert_eq!(calls.get(), 1, "the first miss still reaches its forward");
-        assert!(cache.is_empty(), "no token may publish after the failure");
     }
 
     #[test]
-    fn a_second_cache_access_after_a_hit_fails_closed() {
+    fn a_nested_cache_hit_short_circuits_the_inner_cache() {
+        // root -> child(cache, child_forward). The first request misses and the
+        // inner successor publishes; the second request is a cache hit and must
+        // not run the inner forward again.
         let clock = CacheTestClock::new(100);
         let cache = NativeCacheAdapter::for_test(clock).expect("cache");
-        let (prime_config, _child_id, _parent_id) = cache_child_then_parent_config(Vec::new());
-        let (repeat_config, _child_id, _parent_id) =
-            cache_child_then_parent_config(vec![ExecutableSpec::Call {
-                target: SequenceRef::new("child"),
-            }]);
+        let (config, _child_id, _parent_id) = cache_child_then_parent_config(Vec::new());
         let request = query(27);
         let prime_calls = Rc::new(Cell::new(0));
         let prime_exchange = MockExchange {
@@ -6036,7 +6473,7 @@ plugins:
             fail: false,
         };
         let primed = execute_observed(
-            &prime_config,
+            &config,
             &cache,
             &HostOptions::default(),
             &request,
@@ -6044,7 +6481,7 @@ plugins:
         );
         assert_eq!(primed.cache_status, CacheStatus::Miss);
         assert_eq!(prime_calls.get(), 1);
-        assert!(cache.lookup(&request).expect("lookup").is_some());
+        assert_eq!(primed.response_wire[3] & 0x0f, 0);
 
         let calls = Rc::new(Cell::new(0));
         let exchange = MockExchange {
@@ -6052,31 +6489,74 @@ plugins:
             response: response(&request),
             fail: false,
         };
-        let repeated = execute_observed(
-            &repeat_config,
+        let warmed = execute_observed(
+            &config,
             &cache,
             &HostOptions::default(),
             &request,
             &exchange,
         );
-        assert_eq!(repeated.response_wire[3] & 0x0f, super::SERVFAIL);
-        assert_eq!(repeated.cache_status, CacheStatus::Hit);
-        assert_eq!(
-            repeated.failure_provenance,
-            Some(FailureProvenance::LocalFailure(
-                LocalFailureKind::InternalExecution
-            ))
-        );
-        assert_eq!(calls.get(), 0, "a hit and repeat must skip the forward");
+        assert_eq!(warmed.response_wire[3] & 0x0f, 0);
+        assert_eq!(warmed.cache_status, CacheStatus::Hit);
+        assert_eq!(warmed.failure_provenance, None);
+        assert_eq!(calls.get(), 0, "a nested hit must skip the inner forward");
     }
 
     #[test]
-    fn a_second_cache_access_after_miss_publication_fails_closed() {
+    fn two_calls_to_one_child_dispatch_the_shared_cache_again_after_a_hit() {
+        // root = [Call child, Call child] with child = [cache, forward]. The
+        // first call misses and publishes; the second call dispatches the same
+        // cache again and is a hit. This is the shape the removed
+        // `a_second_cache_access_after_a_hit_fails_closed` test covered, and it
+        // must now answer normally instead of failing closed.
         let clock = CacheTestClock::new(100);
         let cache = NativeCacheAdapter::for_test(clock).expect("cache");
         let (config, _child_id, _parent_id) =
             cache_child_then_parent_config(vec![ExecutableSpec::Call {
                 target: SequenceRef::new("child"),
+            }]);
+        let request = query(30);
+        let calls = Rc::new(Cell::new(0));
+        let exchange = MockExchange {
+            calls: Rc::clone(&calls),
+            response: response(&request),
+            fail: false,
+        };
+        let executed = execute_observed(
+            &config,
+            &cache,
+            &HostOptions::default(),
+            &request,
+            &exchange,
+        );
+        assert_eq!(
+            executed.response_wire[3] & 0x0f,
+            0,
+            "a repeated dispatch through a second child call must answer normally"
+        );
+        assert_eq!(executed.failure_provenance, None);
+        assert_eq!(
+            calls.get(),
+            1,
+            "the second call must be served by the cache hit, not the child forward"
+        );
+        assert!(
+            cache.lookup(&request).expect("lookup").is_some(),
+            "the first call's successor result must be cached"
+        );
+    }
+
+    #[test]
+    fn one_cache_dispatched_in_two_scopes_publishes_at_both_boundaries() {
+        // root child(cache, child_forward) then a second dispatch of the same
+        // cache in the parent. Both scopes arm a frame; the inner boundary
+        // publishes first and the outer boundary publishes from the request's
+        // final state. Nothing fails closed and the answer stays normal.
+        let clock = CacheTestClock::new(100);
+        let cache = NativeCacheAdapter::for_test(clock).expect("cache");
+        let (config, _child_id, _parent_id) =
+            cache_child_then_parent_config(vec![ExecutableSpec::External {
+                target: ExternalRef::new("cache"),
             }]);
         let request = query(28);
         let calls = Rc::new(Cell::new(0));
@@ -6085,25 +6565,23 @@ plugins:
             response: response(&request),
             fail: false,
         };
-        let repeated = execute_observed(
+        let executed = execute_observed(
             &config,
             &cache,
             &HostOptions::default(),
             &request,
             &exchange,
         );
-        assert_eq!(repeated.response_wire[3] & 0x0f, super::SERVFAIL);
-        assert_eq!(repeated.cache_status, CacheStatus::Miss);
         assert_eq!(
-            repeated.failure_provenance,
-            Some(FailureProvenance::LocalFailure(
-                LocalFailureKind::InternalExecution
-            ))
+            executed.response_wire[3] & 0x0f,
+            0,
+            "two scopes sharing one cache must not fail closed"
         );
-        assert_eq!(calls.get(), 1, "only the first miss reaches its forward");
+        assert_eq!(executed.failure_provenance, None);
+        assert_eq!(calls.get(), 1, "only the first miss reaches the forward");
         assert!(
             cache.lookup(&request).expect("lookup").is_some(),
-            "the first successor had already published before the repeated dispatch"
+            "the frame armed by the inner boundary must publish"
         );
     }
 
@@ -6125,7 +6603,7 @@ plugins:
         let first = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &options,
                 raw: &first_query,
                 header,
@@ -6142,7 +6620,7 @@ plugins:
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
                 config: &assembly,
-                cache: &cache,
+                cache: &cache.catalog(),
                 options: &second_options,
                 raw: &second_query,
                 header,
@@ -6380,7 +6858,7 @@ plugins:
         root_cancellation.cancel();
         let context = BranchContext {
             config: &config,
-            cache: &cache,
+            cache: &cache.catalog(),
             executor: &exchange,
             raw: Rc::new(request),
             header,
@@ -6390,7 +6868,7 @@ plugins:
             branch_cancellation: root_cancellation.child_token(),
             trace: None,
             branch_metrics: Rc::new(RefCell::new(UpstreamAttemptList::default())),
-            cache_accessed: Rc::new(Cell::new(false)),
+            refresh_environment: None,
             allow_empty_response: false,
             branch_id: None,
         };
