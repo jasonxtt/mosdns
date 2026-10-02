@@ -21,7 +21,7 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "User authorized S1–S6 on 2026-10-02. Verified fresh C2C reviewer and froze pre-start snapshot. S1 validated; review pending; S2–S6 pending. See research/activation.md and execution-evidence.md.",
+  "notes": "User authorized S1–S6 on 2026-10-02. S1–S5 exact-source C2C PASS. S6 checks and actual DNS/API/Vue/restart proof complete; S6 and final whole-task C2C reviews pending. No push/deployment; unrelated dirty paths preserved. See research/execution-evidence.md.",
   "meta": {
     "automation_required": "true"
   }

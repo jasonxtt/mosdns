@@ -1,9 +1,9 @@
-# Native client identity and outgoing ECS (S1–S2)
+# Native client identity, ECS and cache isolation
 
 ## 1. Scope / trigger
 
 Native UDP/TCP execution and client_ip compilation for task
-10-02-rust-native-client-context-ecs. Outgoing ecs_handler/quick ecs are included; supplier echo/cache/dump proof remain pending.
+10-02-rust-native-client-context-ecs. Outgoing ecs_handler/quick ecs, scoped supplier echo, cache/dump isolation and refresh are included.
 
 ## 2. Signatures
 
@@ -140,3 +140,21 @@ Cache show splits the product-name length before rendering `[ecs:...]`, preservi
 DNS text and the existing flags suffix. Real Go getMsgKeyBytes/writeDump fixtures,
 Go readDump/Get of native export, native restart, invalid last-entry HTTP import,
 and expired suffix validation prove this boundary without a new persistence format.
+
+## S6 refresh and composed proof
+
+The first start_refresh callback owns both the successor recipe's state (including
+trusted peer and routing state) and the complete QueryView (immutable admission,
+current ECS, other OPT options and echo token). A same-key follower does not build
+or replace work. Refresh retains its independent64 fuel,5s deadline,256 active
+no-queue limit, cancellation/owner drain and generation-gated publication.
+
+ecs_refresh.rs drives actual UDP and TCP listeners: client_ip before the cache
+sets distinct marks; forwarded identical ECS gives one cache key. The first stale
+request's EDNS marker42 and marked upstream remain selected after a different
+peer follower with marker99. TCP initiator disconnects before reading; refresh
+still completes, and both peers observe the refreshed answer. The second upstream
+receives nothing. Existing lifecycle tests verify caps/deadline/flush/stop gates.
+Controlled process proof verifies UDP/TCP, partitioned persisted keys, API/Vue
+current details with distinct answers and actual supplier, SIGTERM/restart hits,
+and all task-owned listener/proxy resources released. No API/UI schema changes.

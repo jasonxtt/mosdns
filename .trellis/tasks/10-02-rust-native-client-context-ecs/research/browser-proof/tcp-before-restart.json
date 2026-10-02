@@ -1,0 +1,443 @@
+{
+  "dns": [
+    {
+      "protocol": "tcp",
+      "peer": "127.0.0.2",
+      "answer": "192.0.2.20",
+      "wire": "00c881800001000100000000036563730762726f77736572076578616d706c650000010001c00c000100010000003c0004c0000214"
+    },
+    {
+      "protocol": "tcp",
+      "peer": "127.0.0.3",
+      "answer": "192.0.2.30",
+      "wire": "00c981800001000100000000036563730762726f77736572076578616d706c650000010001c00c000100010000003c0004c000021e"
+    },
+    {
+      "protocol": "tcp",
+      "peer": "127.0.0.2",
+      "answer": "192.0.2.20",
+      "wire": "00ca81800001000100000000036563730762726f77736572076578616d706c650000010001c00c000100010000003c0004c0000214"
+    }
+  ],
+  "logs": {
+    "pagination": {
+      "total_items": 9,
+      "total_pages": 1,
+      "current_page": 1,
+      "items_per_page": 20
+    },
+    "logs": [
+      {
+        "query_time": "2026-10-02T14:35:35.870493084Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.2",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000009",
+        "duration_ms": 0.13886500000000002,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.20"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "attempts": []
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:35:35.869739556Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.3",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000008",
+        "duration_ms": 0.6223869999999999,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.30"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "final_upstream": "controlled",
+        "upstream_targets": "127.0.0.1:21954",
+        "selected_upstream": "127.0.0.1:21954",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "selected": {
+            "branch_id": 0,
+            "entry": "controlled",
+            "peer": "127.0.0.1:21954",
+            "transport": "udp"
+          },
+          "attempts": [
+            {
+              "ordinal": 0,
+              "branch_id": 0,
+              "qtype": 1,
+              "entry": "controlled",
+              "peer": "127.0.0.1:21954",
+              "transport": "udp",
+              "outcome": "response"
+            }
+          ]
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:35:35.868395409Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.2",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000007",
+        "duration_ms": 1.127196,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.20"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "final_upstream": "controlled",
+        "upstream_targets": "127.0.0.1:21954",
+        "selected_upstream": "127.0.0.1:21954",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "selected": {
+            "branch_id": 0,
+            "entry": "controlled",
+            "peer": "127.0.0.1:21954",
+            "transport": "udp"
+          },
+          "attempts": [
+            {
+              "ordinal": 0,
+              "branch_id": 0,
+              "qtype": 1,
+              "entry": "controlled",
+              "peer": "127.0.0.1:21954",
+              "transport": "udp",
+              "outcome": "response"
+            }
+          ]
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:33:12.264279697Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.2",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000006",
+        "duration_ms": 0.19265800000000002,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.20"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "attempts": []
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:33:12.263198027Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.3",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000005",
+        "duration_ms": 0.882552,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.30"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "final_upstream": "controlled",
+        "upstream_targets": "127.0.0.1:21954",
+        "selected_upstream": "127.0.0.1:21954",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "selected": {
+            "branch_id": 0,
+            "entry": "controlled",
+            "peer": "127.0.0.1:21954",
+            "transport": "udp"
+          },
+          "attempts": [
+            {
+              "ordinal": 0,
+              "branch_id": 0,
+              "qtype": 1,
+              "entry": "controlled",
+              "peer": "127.0.0.1:21954",
+              "transport": "udp",
+              "outcome": "response"
+            }
+          ]
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:33:12.261737051Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.2",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000004",
+        "duration_ms": 1.128102,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 60,
+            "data": "192.0.2.20"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "final_upstream": "controlled",
+        "upstream_targets": "127.0.0.1:21954",
+        "selected_upstream": "127.0.0.1:21954",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "selected": {
+            "branch_id": 0,
+            "entry": "controlled",
+            "peer": "127.0.0.1:21954",
+            "transport": "udp"
+          },
+          "attempts": [
+            {
+              "ordinal": 0,
+              "branch_id": 0,
+              "qtype": 1,
+              "entry": "controlled",
+              "peer": "127.0.0.1:21954",
+              "transport": "udp",
+              "outcome": "response"
+            }
+          ]
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:32:20.594464787Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.2",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000003",
+        "duration_ms": 0.16417600000000002,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 18,
+            "data": "192.0.2.20"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "attempts": []
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:32:20.594104063Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.3",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000002",
+        "duration_ms": 0.188267,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 18,
+            "data": "192.0.2.30"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "attempts": []
+        }
+      },
+      {
+        "query_time": "2026-10-02T14:32:20.593475952Z",
+        "query_name": "ecs.browser.example",
+        "query_type": "A",
+        "query_class": "IN",
+        "client_ip": "127.0.0.2",
+        "trace_id": "n-b7a728f762b906b5af72fba98a29770a-0000000000000001",
+        "duration_ms": 0.39998300000000003,
+        "response_code": "NOERROR",
+        "response_flags": {
+          "AA": false,
+          "TC": false,
+          "RA": true
+        },
+        "answers": [
+          {
+            "type": "A",
+            "ttl": 18,
+            "data": "192.0.2.20"
+          }
+        ],
+        "answer_details_status": "complete",
+        "effective_tag": "unmatched_rule",
+        "final_sequence": "main",
+        "upstream_diagnostics": {
+          "schema_version": 2,
+          "branches": [
+            {
+              "id": 0,
+              "role": "root",
+              "qtype": 1,
+              "decision": "selected"
+            }
+          ],
+          "attempts": []
+        }
+      }
+    ]
+  },
+  "cache_show": "----- Cache Entry -----\nKey:           ecs.browser.example. A IN [ecs:127.0.0.2/32/0]\nStoredTime:    2026-10-02T14:35:35Z\nMsgExpire:     2026-10-02T14:36:35Z\nCacheExpire:   2026-10-02T14:50:35Z\nDNS Message:\n;; ->>HEADER<<- opcode: QUERY, status: No Error, id: 200\n;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0\n\n;; QUESTION SECTION:\n;ecs.browser.example.\tIN\tA\n\n;; ANSWER SECTION:\necs.browser.example. 60 IN A 192.0.2.20\n\n----- Cache Entry -----\nKey:           ecs.browser.example. A IN [ecs:127.0.0.3/32/0]\nStoredTime:    2026-10-02T14:35:35Z\nMsgExpire:     2026-10-02T14:36:35Z\nCacheExpire:   2026-10-02T14:50:35Z\nDNS Message:\n;; ->>HEADER<<- opcode: QUERY, status: No Error, id: 201\n;; flags: qr rd ra; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0\n\n;; QUESTION SECTION:\n;ecs.browser.example.\tIN\tA\n\n;; ANSWER SECTION:\necs.browser.example. 60 IN A 192.0.2.30\n\n",
+  "metrics": "# TYPE mosdns_cache_query_total counter\nmosdns_cache_query_total{tag=\"cache\"} 9\n# TYPE mosdns_cache_hit_total counter\nmosdns_cache_hit_total{tag=\"cache\"} 5\n# TYPE mosdns_cache_lazy_hit_total counter\nmosdns_cache_lazy_hit_total{tag=\"cache\"} 0\n# TYPE mosdns_cache_size_current gauge\nmosdns_cache_size_current{tag=\"cache\"} 2\n"
+}

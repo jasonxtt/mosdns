@@ -4,6 +4,19 @@ Last verified: `2026-09-27`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
+## Native client/ECS task (2026-10-02)
+
+Task `.trellis/tasks/10-02-rust-native-client-context-ecs/` owns trusted UDP/TCP
+client context/client_ip, scoped ecs_handler/legacy ecs, supplier-only echo,
+opt-in full ECS cache keys, conservative unsafe-placement rejection, and canonical
+v2 Go/native dump interoperability. S1–S5 have exact-source C2C PASS; S6 adds
+real first-refresh/disconnect, DNS/API/Vue, shutdown/restart and workspace proof.
+Final whole-task review and closure evidence are recorded in that task's research,
+which takes precedence over this concise handover. Default/quick ECS cache bypass
+remains; no scope-covering lookup or byte-identical noncanonical Go key promise.
+All validation uses the isolated SSH mosdns-rust environment. No push/deployment
+or production/default cutover is authorized by this task.
+
 ## Source of truth (precedence)
 
 1. **Live execution** — `python3 ./.trellis/scripts/task.py current` and
