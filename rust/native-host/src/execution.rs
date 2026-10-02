@@ -4779,6 +4779,9 @@ plugins:
         let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
             .expect("endpoint");
         CompiledConfig {
+            response_policies: Vec::new(),
+            ip_sets: Vec::new(),
+            response_ip_rules: Vec::new(),
             log_level: LogLevel::Error,
             forward: Some(ForwardConfig {
                 tag: forward,
@@ -4876,6 +4879,9 @@ plugins:
             .expect("endpoint");
         (
             CompiledConfig {
+                response_policies: Vec::new(),
+                ip_sets: Vec::new(),
+                response_ip_rules: Vec::new(),
                 log_level: LogLevel::Error,
                 forward: Some(ForwardConfig {
                     tag: a,
@@ -5385,6 +5391,9 @@ plugins:
         let endpoint = Endpoint::new("127.0.0.1:1".parse().expect("endpoint"), Transport::Udp)
             .expect("endpoint");
         let config = CompiledConfig {
+            response_policies: Vec::new(),
+            ip_sets: Vec::new(),
+            response_ip_rules: Vec::new(),
             log_level: LogLevel::Error,
             forward: Some(ForwardConfig {
                 tag: forward.clone(),
@@ -5484,6 +5493,9 @@ plugins:
             .expect("endpoint");
         (
             CompiledConfig {
+                response_policies: Vec::new(),
+                ip_sets: Vec::new(),
+                response_ip_rules: Vec::new(),
                 log_level: LogLevel::Error,
                 forward: Some(ForwardConfig {
                     tag: child_forward.clone(),
@@ -5659,6 +5671,9 @@ plugins:
             exclude_ip: Vec::new(),
         };
         let config = CompiledConfig {
+            response_policies: Vec::new(),
+            ip_sets: Vec::new(),
+            response_ip_rules: Vec::new(),
             log_level: LogLevel::Error,
             forward: Some(forward_config(&forward_b, forward_b_id)),
             forwards: vec![

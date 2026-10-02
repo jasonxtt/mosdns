@@ -13,6 +13,7 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Quality](./quality-guidelines.md) | Tests, builds, deployment order, and surgical changes |
 | [Rust migration](./rust-migration.md) | Architecture, reuse policy, ABI, and phase gates |
 | [Native audit control](./native-audit-control.md) | Runtime capture, settings, v1/v2 API and Vue audit proof |
+| [Native response policy](./native-response-policy.md) | Immutable hosts/redirect/IP snapshots and TTL compilation |
 | [Native cache lifecycle](./native-cache-lifecycle.md) | Cache publication/refresh, v2 persistence, management HTTP and Vue workflow |
 
 ## Before development

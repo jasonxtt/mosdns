@@ -494,8 +494,8 @@ fn w3_negative_cases() -> Vec<(&'static str, String)> {
             ROUTING.replace("qname $phase5a_route_domains", "qname $missing_domains"),
         ),
         (
-            "IPv6 response matcher",
-            ROUTING.replace("resp_ip 192.0.2.10", "resp_ip ::1"),
+            "invalid IPv6 prefix width",
+            ROUTING.replace("resp_ip 192.0.2.10", "resp_ip ::1/129"),
         ),
         (
             "duplicate upstream identity",
