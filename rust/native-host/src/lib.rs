@@ -5,6 +5,7 @@ mod api;
 mod assembly;
 mod cache;
 mod cache_dump;
+mod cache_placement;
 mod cli;
 mod config;
 mod ecs;

@@ -1,0 +1,24 @@
+   Compiling mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.45s
+     Running tests/ecs_cache.rs (/dev/shm/mosdns-rust-client-ecs-20261002/target/debug/deps/ecs_cache-992a5ce1d985d9d3)
+
+running 1 test
+test ecs_cache_is_explicitly_opt_in_and_rejects_unsafe_placement ... FAILED
+
+failures:
+
+---- ecs_cache_is_explicitly_opt_in_and_rejects_unsafe_placement stdout ----
+
+thread 'ecs_cache_is_explicitly_opt_in_and_rejects_unsafe_placement' (1151445) panicked at native-host/tests/ecs_cache.rs:7:5:
+assertion failed: compile_yaml(&config(true,
+                "      - exec: $ecs\n      - exec: $cache\n      - exec: $up",
+                "")).is_ok()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    ecs_cache_is_explicitly_opt_in_and_rejects_unsafe_placement
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test ecs_cache`

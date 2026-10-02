@@ -89,3 +89,36 @@ Existing root fuel/deadline/cancellation and terminal exit provenance are retain
 Real UDP tests cover legal/mismatching/invalid/duplicate supplier ECS, generated
 and noOPT suppression, nested redirect/handler, fallback winner versus loser,
 preference local suppression, cache-hit no invented scope and terminal exit.
+
+## S4 cache identity and placement
+
+Named enable_ecs is a boolean opt-in; absent/null/false and every quick cache
+retain ECS bypass. True uses base AD/CD/DO/QTYPE/product-name bytes, then one
+length byte and canonical Go ECS.String: IPv4 network/mask/0 or bracketed IPv6
+network/mask/0. No ECS keeps exactly the old base key. Strict profile failure
+bypasses cache; no scope covering or peer-IP-only partition is introduced.
+Network forwarding and key formation both read the current scoped query view.
+Full keys also govern refresh singleflight. Stored wire still removes OPT.
+
+Configuration assembly builds monotone suffix summaries over the validated
+program (including synthetic exec-list scopes), naming ECS/client_ip effects
+and reachable cache owners. Every named/quick cache rejects unsafe own
+successors, regardless of enable_ecs. Call/goto/jump/try, fallback targets,
+preference successors and recursive graphs are covered. Unconditional terminal
+flow stops reachability; conditional rules remain possibly reachable. Jump's
+same-scope inherited continuation is included; ordinary child/inline publication
+boundaries remain separate. Fallback targets also conservatively check inherited
+successors. Invalid references already fail program validation. Diagnostics name
+cache and offending ECS policy or client_ip rule; no runtime policy reordering.
+
+Tests ecs_cache.rs cover literal wire full-key partition, noECS old key,
+false bypass, invalid-profile bypass, full-key refresh singleflight, recursive
+and every control-flow placement shape, safe terminal/no-op/own-boundary cases.
+ecs_wire.rs proves actual forward-handler -> enabled cache cold/hit flow with
+one upstream request and no fabricated hit echo. Dump import extensions are S5.
+
+Go ECS.String selects net.IP.To4 even for family2 mapped addresses; native keys
+match that unbracketed text with the original >=96 source prefix, preserving
+family2 wire identity and separation from family1. Other IPv6 networks remain
+bracketed. A noOPT compressed query may reference trailing name storage: retain
+its existing base key and rebuild the expanded question before adding new OPT.

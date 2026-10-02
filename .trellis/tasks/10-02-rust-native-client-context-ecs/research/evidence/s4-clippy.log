@@ -1,0 +1,14 @@
+    Checking mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
+error: found call to `str::trim_start` before `str::split_whitespace`
+    --> native-host/src/config.rs:1268:34
+     |
+1268 |   ...                   .trim_start()
+     |  ________________________^
+1269 | | ...                   .split_whitespace()
+     | |_______________________^ help: remove `trim_start()`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#trim_split_whitespace
+     = note: `-D clippy::trim-split-whitespace` implied by `-D clippy::all`
+     = help: to override `-D clippy::all` add `#[allow(clippy::trim_split_whitespace)]`
+
+error: could not compile `mosdns-native-host` (lib) due to 1 previous error

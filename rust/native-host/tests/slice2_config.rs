@@ -111,6 +111,7 @@ fn cache_parameters_and_composition_are_configurable_where_the_contract_allows_i
     // The entry capacity is a configured positive integer, not one frozen
     // value, and the cache's position in the graph is a composition choice.
     let accepts = [
+        ("an explicitly enabled ECS flag", CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      enable_ecs: true\n")),
         ("scalar CIDR exclusions", CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      exclude_ip: \"127.0.0.0/8 10.0.0.0/8\"\n")),
         ("CIDR list with invalid item", CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      exclude_ip: [\"127.0.0.0/8\", \"not-a-cidr\"]\n")),
         ("a smaller capacity", CACHE.replace("size: 64", "size: 63")),
@@ -192,10 +193,6 @@ fn unsupported_cache_configuration_is_rejected_before_io() {
         (
             "a negative lazy TTL",
             CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: -1\n"),
-        ),
-        (
-            "an enabled ECS flag",
-            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      enable_ecs: true\n"),
         ),
         (
             "a non-boolean ECS flag",

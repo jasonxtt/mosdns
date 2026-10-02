@@ -699,3 +699,49 @@ fn forwarded_ipv6_supplier_has_legal_echo() {
     assert_eq!(subnet.scope_prefix(), 32);
     assert_eq!(subnet.source_prefix(), 48);
 }
+
+#[test]
+fn enabled_cache_uses_current_policy_ecs_and_hit_has_no_echo_scope() {
+    use hickory_proto::rr::rdata::opt::EdnsCode;
+    let (response, wire) = run_scenario_requests(
+        "{forward: true}",
+        None,
+        query(Some(&[0, 1, 24, 0, 203, 0, 113]), true),
+        Some(supplier_ecs(&[0, 1, 24, 20, 203, 0, 113])),
+        Duration::ZERO,
+        (1, 2),
+        |yaml| {
+            yaml.replace(
+                "  - tag: main",
+                "  - tag: cache\n    type: cache\n    args: {enable_ecs: true}\n  - tag: main",
+            )
+            .replace(
+                "      - exec: $upstream",
+                "      - exec: $cache\n      - exec: $upstream",
+            )
+        },
+    );
+    assert_eq!(ecs(&wire.unwrap()).unwrap().address, vec![203, 0, 113, 0]);
+    assert_eq!(response.answers()[0].data().to_string(), "192.0.2.1");
+    assert!(
+        response
+            .extensions()
+            .as_ref()
+            .unwrap()
+            .options()
+            .get(EdnsCode::Subnet)
+            .is_none()
+    );
+}
+
+#[test]
+fn compressed_noopt_query_can_receive_generated_ecs() {
+    let plain = query(None, false);
+    let (_, question) = mosdns_dns_core::parse_query(&plain).unwrap();
+    let mut compressed = plain[..12].to_vec();
+    compressed.extend_from_slice(&[0xc0, 18, 0, 1, 0, 1]);
+    compressed.extend_from_slice(&question.qname_wire);
+    let wire = run("{preset: '192.0.2.99'}", None, compressed);
+    assert_eq!(mosdns_dns_core::parse_query(&wire).unwrap().1, question);
+    assert_eq!(ecs(&wire).unwrap().address, vec![192, 0, 2, 0]);
+}
