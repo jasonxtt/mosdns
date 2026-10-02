@@ -76,3 +76,30 @@ of each later unit is pinned as a first unit review with the same verified
 reviewer; only the bootstrap flag is locally reset during helper validation,
 then restored. No approval/PASS is inferred or skipped; actual C2C response is
 required before advancing, and follow-up findings use normal remediation.
+
+C2C S2 explicit FINAL: PASS on fad847ec..90e75e25, no findings. Automation
+record-review advanced to Slice3; an unnecessary subsequent complete --unit
+command was rejected as unsupported, with no state mutation.
+
+## S3 — scoped supplier response
+
+QueryView explicit forwarded ECS token, inherited only with existing policy.
+Returned network supplier is the only echo input; generated/cache/local has no
+invented scope. Strict response validation removes unsupported/mismatching or
+duplicate ECS without rejecting valid DNS. Compression offsets are retained
+while temporarily renaming option codes, then rebuilt by decoding/re-encoding.
+Original client OPT size/DO is reconstructed, absent original OPT suppresses it.
+
+Remote s3-tests.log passed full native-host regression (12 ECS tests at that
+point); after adding shutdown and legal IPv6 cases, s3-final-wire.log passed all
+14 ECS wire tests on the final test source. Product source unchanged between
+those runs. s3-lib.log passed96; s3-clippy3.log strict all-targets passed.
+Fmt applied remotely; s3-source-sha256.json confirms all125 source/manifests equal.
+Real UDP: IPv4/IPv6 legal echo and invalid family/mask/scope/length/hostbits,
+duplicate stripping, generated/no-clientOPT, nested handler+redirect restored
+question, fallback winning scope12 versus losing scope20, preference local
+suppression, cache-hit OPT/no fakeECS, exit/reject terminal and active upstream
+shutdown with NoResponse. Existing fallback/secure/cache/cancellation regressions
+passed. Retained RED generated echo; earlier testcompile missing getter and
+wrong Cookie enum expectation; clippy test helper argument count/borrow fixed.
+S4–S6 and whole-task PASS remain pending.

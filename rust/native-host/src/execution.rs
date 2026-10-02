@@ -177,6 +177,7 @@ struct QueryView {
     raw: Rc<Vec<u8>>,
     incoming: Rc<Vec<u8>>,
     policy_ecs: bool,
+    echo_ecs: Option<crate::ecs::Subnet>,
     header: QueryHeader,
     question: QuestionInfo,
 }
@@ -186,6 +187,7 @@ impl QueryView {
             incoming: Rc::new(raw.clone()),
             raw: Rc::new(raw),
             policy_ecs: false,
+            echo_ecs: None,
             header,
             question,
         }
@@ -2644,6 +2646,7 @@ impl QueryView {
             header,
             question,
             policy_ecs: selected.is_some(),
+            echo_ecs: forwarded,
             ..self.clone()
         })
     }
@@ -2674,6 +2677,7 @@ fn run_query_policy<'a, E: ExchangeExecutor + ?Sized>(
             view,
             ..context.clone()
         };
+        let applied_view = child_context.view.clone();
         let mut outcome = drive_branch(successor, child_context, source).await;
         if outcome.error.is_none() && !matches!(outcome.state.response, MachineResponseState::None)
         {
@@ -2681,7 +2685,26 @@ fn run_query_policy<'a, E: ExchangeExecutor + ?Sized>(
                 ScopedQueryPolicy::Redirect(target) => {
                     Some(decorate_redirect(&outcome.state, &context.view, target))
                 }
-                ScopedQueryPolicy::Ecs(_) => None,
+                ScopedQueryPolicy::Ecs(_) => match &outcome.state.response {
+                    MachineResponseState::Raw(wire) => Some(crate::ecs::response_wire(
+                        wire.as_bytes(),
+                        &applied_view.incoming,
+                        applied_view.echo_ecs.as_ref(),
+                        matches!(outcome.source, Some(ResponseSource::Upstream(_))),
+                    )),
+                    MachineResponseState::Synthesized(response) => Some(
+                        mosdns_dns_core::synthesize_response(
+                            &original_state.query.header,
+                            &original_state.query.question,
+                            u8::try_from(response.rcode()).unwrap_or(2),
+                        )
+                        .map_err(|_| ExecutorError::new("ECS local response construction failed"))
+                        .and_then(|wire| {
+                            crate::ecs::response_wire(&wire, &applied_view.incoming, None, false)
+                        }),
+                    ),
+                    MachineResponseState::None => None,
+                },
             };
             if let Some(decorated) = decorated {
                 match decorated {

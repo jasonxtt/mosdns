@@ -67,3 +67,25 @@ Tests: native-host/tests/ecs_wire.rs uses real listener and controlled upstream
 wire capture for selection, IPv4/IPv6 masks, noOPT, invalid input/configuration,
 current policy retention and legacy behavior. Supplier response adaptation is
 S3 acceptance; do not infer its PASS from outgoing-wire tests.
+
+## S3 response ownership
+
+QueryView echo_ecs is an explicit optional token granted only by forwarded
+admission ECS. Existing policy views inherit it; presets/peer generation do not
+grant one. Redirect/reference clones retain immutable admission and current
+policy/token. After the own successor completes, consume only its returned
+network supplier's response ECS: one supported exact family/source/network and
+legal scope. Cache/local response never fabricates an ECS scope. No original
+client OPT means no final OPT; an EDNS client receives original size/DO and
+otherwise permitted supplier options even when supplier/cache wire lacks OPT.
+
+Response validation treats malformed/mismatching ECS independently of valid DNS.
+Rename its wire option codes without moving bytes, decode/re-encode all names,
+remove the renamed options, and conditionally add the sole authorized supplier
+ECS. This avoids passing invalid ECS through a permissive foundational parser
+or breaking compression pointers when removing bytes. Duplicate ECS is stripped.
+Existing root fuel/deadline/cancellation and terminal exit provenance are retained.
+
+Real UDP tests cover legal/mismatching/invalid/duplicate supplier ECS, generated
+and noOPT suppression, nested redirect/handler, fallback winner versus loser,
+preference local suppression, cache-hit no invented scope and terminal exit.
