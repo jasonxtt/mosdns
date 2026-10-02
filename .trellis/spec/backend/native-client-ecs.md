@@ -122,3 +122,21 @@ match that unbracketed text with the original >=96 source prefix, preserving
 family2 wire identity and separation from family1. Other IPv6 networks remain
 bracketed. A noOPT compressed query may reference trailing name storage: retain
 its existing base key and rebuild the expanded question before adding new OPT.
+
+## S5 persistence
+
+The existing gzip/protobuf mosdns_cache_v2 schema and timestamp/size/owner gates
+remain unchanged. Disabled owners reject every ECS suffix. Enabled owners first
+validate the response-derived base key, then exactly one nonempty length-prefixed
+UTF-8 Go ECS.String suffix: full address, bounded family mask, scope zero, no
+extra bytes. Bracketed IPv6 retains family2; unbracketed mapped family2 uses its
+96..128 source prefix. Import masks legacy host bits and exports canonical keys.
+All entries, including expired entries, validate before any merge. Canonical-key
+collisions use the last entry. A noncanonical Go prepack host-bit lookup may miss
+canonical native export and requires refill; byte-identical legacy keys are not
+promised. Invalid manual imports return HTTP400 without partial mutation.
+
+Cache show splits the product-name length before rendering `[ecs:...]`, preserving
+DNS text and the existing flags suffix. Real Go getMsgKeyBytes/writeDump fixtures,
+Go readDump/Get of native export, native restart, invalid last-entry HTTP import,
+and expired suffix validation prove this boundary without a new persistence format.

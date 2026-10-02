@@ -441,3 +441,75 @@ fn inventory_tags_roundtrip_through_encoded_plugin_urls_and_prometheus_labels() 
         serving.await.unwrap().unwrap();
     });
 }
+
+#[test]
+fn ecs_dump_http_rejects_invalid_last_entry_without_partial_merge() {
+    use std::io::{Read, Write};
+    let upstream = Upstream::new();
+    let up_addr = upstream.address;
+    let dns_port = free_port();
+    let api_port = free_port();
+    let yaml = format!(
+        "log: {{level: error}}\napi: {{http: '127.0.0.1:{api_port}'}}\nplugins:\n  - tag: alpha\n    type: cache\n    args: {{enable_ecs: true}}\n  - tag: beta\n    type: cache\n    args: {{}}\n  - tag: up\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://{up_addr}'}}]}}\n  - tag: main\n    type: sequence\n    args: [{{exec: $alpha}}, {{exec: reject 0}}]\n  - tag: dns\n    type: udp_server\n    args: {{listen: '127.0.0.1:{dns_port}', entry: main, enable_audit: false}}\n"
+    );
+    let clock = CacheTestClock::new(100);
+    clock.set_wall(2_000_000_000);
+    let host = HostAssembly::with_options(
+        compile_yaml_with_base(&yaml, &std::env::temp_dir()).unwrap(),
+        HostOptions::default().with_cache_clock(Rc::new(clock)),
+    )
+    .unwrap();
+    host.block_on(async {
+        let bound = host.bind_host().await.unwrap();
+        let api = bound.api_addr().unwrap();
+        let stop = TransportCancellation::new();
+        let scope = stop.clone();
+        let serving = tokio::task::spawn_local(async move { bound.serve(scope).await });
+        let fixture = include_bytes!("fixtures/cache-go-ecs-v2.gz");
+        assert_eq!(
+            http(api, "POST", "/plugins/beta/load_dump", fixture)
+                .await
+                .0,
+            400
+        );
+        assert!(
+            http(api, "GET", "/plugins/beta/show", &[])
+                .await
+                .1
+                .is_empty()
+        );
+        assert_eq!(
+            http(api, "POST", "/plugins/alpha/load_dump", fixture)
+                .await
+                .0,
+            200
+        );
+        let before = http(api, "GET", "/plugins/alpha/show", &[]).await.1;
+        let text = String::from_utf8(before.clone()).unwrap();
+        assert!(text.contains("a. A IN [ecs:192.0.2.0/24/0]"), "{text}");
+        let mut raw = Vec::new();
+        flate2::read::GzDecoder::new(&fixture[..])
+            .read_to_end(&mut raw)
+            .unwrap();
+        let suffix = b"192.0.2.199/120/0";
+        let at = raw
+            .windows(suffix.len())
+            .rposition(|s| s == suffix)
+            .unwrap();
+        raw[at + suffix.len() - 1] = b'1';
+        let mut writer = flate2::GzBuilder::new()
+            .filename("mosdns_cache_v2")
+            .write(Vec::new(), flate2::Compression::default());
+        writer.write_all(&raw).unwrap();
+        let invalid = writer.finish().unwrap();
+        assert_eq!(
+            http(api, "POST", "/plugins/alpha/load_dump", &invalid)
+                .await
+                .0,
+            400
+        );
+        assert_eq!(http(api, "GET", "/plugins/alpha/show", &[]).await.1, before);
+        stop.cancel();
+        serving.await.unwrap().unwrap();
+    });
+}

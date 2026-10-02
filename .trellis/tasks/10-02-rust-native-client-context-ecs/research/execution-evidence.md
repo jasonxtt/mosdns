@@ -138,3 +138,35 @@ Removed that invalid rejection; added real UDP generated-OPT re-encode proof.
 s4-tests2.log passed, followed by focused and final full runs after mapped-string
 coverage. Only task-owned binaries relocated as earlier for memory headroom.
 Dump/management normalization and final proof remain S5/S6, not claimed here.
+
+C2C S4 FINAL: PASS on 5f86b382..6ac4570d, no findings; S5 authorized next.
+
+## S5 — canonical v2 semantic interoperability
+
+Actual Go cache-package task-only generator uses getMsgKeyBytes and writeDump
+for family1, family2, mapped family2 and ordered noncanonical host-bit collisions.
+Go gzip block payloads are concatenated in controlled order using the unchanged
+v2 header/schema. Native import canonicalizes to four keys; last IPv4 collision
+retains answer192.0.2.12, domain_set and original wall timestamps. Disabled owner
+rejects all ECS entries. Native dump reimport proves restart semantics; actual
+Go readDump/Get verifies exported canonical keys and explicit legacy-host-bit
+refill boundary. Source for the task-only Go proof is research/go-proof/.
+
+Strict suffix parsing validates full base/suffix lengths, UTF8, supported IP
+family/masks, scope0 and no trailing components; hostbits are masked only after
+validation. Entire decoded dump validates including expired entries before
+existing atomic owner merge. Public HTTP test loads real Go fixture, rejects
+malformed final suffix with400 and observes unchanged show output. API renders
+name and ECS separately, preserving DNS/flags syntax. Generation and expired
+suffix rejection covered through actual public management entrypoints.
+
+Retained failures: isolated Go source copy initially omitted existing embedded
+UI assets (copied existing bundle; no frontend build); initial Rust test imported
+private module (fixed public reexports); genuine behavior RED shows old native
+adapter rejecting real ECS fixture. VM rustc/linker OOM required relocation of
+only task-owned linked test executables; no unrelated cleanup. New HTTP fixture
+needed required args and a forward plugin. Enhanced Go semantic assertion first
+compared randomized DNS IDs; corrected to parsed answer/timestamps/domain_set.
+Final check summaries and exact source manifest follow after completion.
+
+Final S5: native297 passes across26 targets (s5-native5.log); lib97, strict all-target clippy passed (s5-clippy.log), fmt remote. All128 Rust source/manifests equal in s5-source-sha256.json. Actual enhanced Go reader passed (s5-go-read-native-semantic.log). Go fixture SHA256 aef1657db5082cb51565637e86e80d1aaf5db7984c8b110e717df9771df9de61.

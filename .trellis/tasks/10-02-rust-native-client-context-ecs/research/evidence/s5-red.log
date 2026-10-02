@@ -1,0 +1,15 @@
+   Compiling mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
+error[E0603]: module `cache` is private
+ --> native-host/tests/ecs_dump.rs:1:25
+  |
+1 | use mosdns_native_host::cache::{CacheTestClock, NativeCacheAdapter};
+  |                         ^^^^^ private module
+  |
+note: the module `cache` is defined here
+ --> native-host/src/lib.rs:6:1
+  |
+6 | mod cache;
+  | ^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0603`.
+error: could not compile `mosdns-native-host` (test "ecs_dump") due to 1 previous error

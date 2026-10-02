@@ -326,6 +326,47 @@ fn name_end(raw: &[u8], mut pos: usize) -> Result<usize, ExecutorError> {
 }
 
 impl Subnet {
+    /// Parse the Go ECS.String dump suffix, retaining family2 mapped masks.
+    /// Dump addresses may contain legacy host bits; runtime keys never do.
+    pub(crate) fn dump_string(text: &str) -> Option<Self> {
+        let mut parts = text.split('/');
+        let address = parts.next()?;
+        let mask = parts.next()?;
+        if mask.is_empty()
+            || !mask.bytes().all(|b| b.is_ascii_digit())
+            || parts.next()? != "0"
+            || parts.next().is_some()
+        {
+            return None;
+        }
+        let source = mask.parse::<u8>().ok()?;
+        let (family, mut address) =
+            if let Some(ip) = address.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                if source > 128 {
+                    return None;
+                }
+                (2, ip.parse::<std::net::Ipv6Addr>().ok()?.octets().to_vec())
+            } else {
+                let ip = address.parse::<std::net::Ipv4Addr>().ok()?;
+                if source <= 32 {
+                    (1, ip.octets().to_vec())
+                } else if (96..=128).contains(&source) {
+                    (2, ip.to_ipv6_mapped().octets().to_vec())
+                } else {
+                    return None;
+                }
+            };
+        for (i, byte) in address.iter_mut().enumerate() {
+            let bits = usize::from(source).saturating_sub(i * 8).min(8);
+            *byte &= if bits == 0 { 0 } else { u8::MAX << (8 - bits) };
+        }
+        Some(Self {
+            family,
+            source,
+            scope: 0,
+            address,
+        })
+    }
     pub(crate) fn key_string(&self) -> String {
         if self.family == 1 {
             let ip = std::net::Ipv4Addr::new(
