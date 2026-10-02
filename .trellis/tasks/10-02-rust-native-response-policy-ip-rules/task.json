@@ -21,7 +21,7 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "S1/S2 exact-commit C2C reviews FINAL PASS. S3 scoped QueryView/redirect candidate undergoing validation; S4-S6 pending.",
+  "notes": "S3 initial PASS; executor identified jump continuation duplicate execution before S4. Scoped correction and 259-test validation complete; supplemental C2C review pending.",
   "meta": {
     "planning_decision": "approved_implementation_active",
     "ip_scope": "inline and plain text only; SRS/binary/compressed/provider-sets/management reload deferred, approved 2026-10-02",
@@ -42,6 +42,11 @@
       "base": "e7e8a651ef3e5734d5bb3529775a96e3fc4f13b9",
       "head": "8ce75e1257bc8989207a720f97a29af86d745064",
       "iteration": 2
+    },
+    "s3_initial_review": {
+      "result": "PASS",
+      "head": "fa561080d6c8b74d93da133c5323c8c113db6d2f",
+      "iteration": 3
     }
   }
 }
