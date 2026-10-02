@@ -664,6 +664,7 @@ fn resolve_relative(value: &str, base_dir: &Path) -> PathBuf {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PluginKind {
     Hosts,
+    Ecs,
     Redirect,
     IpSet,
     Forward,
@@ -733,6 +734,7 @@ fn compile_definitions(
     for (index, plugin) in definitions.iter().enumerate() {
         let kind = match plugin.kind.as_str() {
             "hosts" => PluginKind::Hosts,
+            "ecs_handler" => PluginKind::Ecs,
             "redirect" => PluginKind::Redirect,
             "ip_set" => PluginKind::IpSet,
             "forward" => PluginKind::Forward,
@@ -844,6 +846,12 @@ fn compile_definitions(
     let mut listener = None;
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
+            PluginKind::Ecs => {
+                policies.borrow_mut().push((
+                    plugin.tag.clone(),
+                    ResponsePolicy::Ecs(compile_ecs(plugin)?),
+                ));
+            }
             PluginKind::Hosts | PluginKind::Redirect => {
                 let (inline, files) = policy_sources(
                     plugin,
@@ -1362,8 +1370,10 @@ fn decode_plugin(value: &RawValue, path: &str, base_dir: &Path) -> Result<RawPlu
         ));
     }
     let kind = expect_string(map.required("type", path)?, &format!("{path}.type"))?;
-    let args = if matches!(kind.as_str(), "hosts" | "redirect" | "ip_set")
-        && matches!(map.get("args"), None | Some(RawValue::Null))
+    let args = if matches!(
+        kind.as_str(),
+        "hosts" | "redirect" | "ip_set" | "ecs_handler"
+    ) && matches!(map.get("args"), None | Some(RawValue::Null))
     {
         RawValue::Map(RawMap {
             entries: Vec::new(),
@@ -1619,7 +1629,11 @@ fn resolve_policy_target_name(
             Ok(PolicyTargetName::External(target.name))
         }
         Some(
-            PluginKind::Cache | PluginKind::Fallback | PluginKind::Hosts | PluginKind::Redirect,
+            PluginKind::Cache
+            | PluginKind::Fallback
+            | PluginKind::Hosts
+            | PluginKind::Redirect
+            | PluginKind::Ecs,
         ) => Ok(PolicyTargetName::External(tag.to_owned())),
         Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
             Ok(PolicyTargetName::Fixture(plugin_fixture_name(tag)))
@@ -1890,6 +1904,53 @@ struct CompiledCacheArgs {
     dump_file: Option<PathBuf>,
     dump_interval_secs: u64,
     exclude_ip: Vec<String>,
+}
+
+fn compile_ecs(plugin: &RawPlugin) -> Result<crate::ecs::EcsPolicy, ConfigError> {
+    let mut policy = crate::ecs::EcsPolicy::default();
+    let path = format!("{}.args", plugin.source_path);
+    if matches!(plugin.args, RawValue::Null) {
+        return Ok(policy);
+    }
+    let args = expect_map(&plugin.args, &path, "ecs_handler args must be a mapping")?;
+    args.reject_unknown(&["forward", "send", "preset", "mask4", "mask6"], &path)?;
+    if let Some(value) = args.get("forward") {
+        policy.forward = expect_bool(value, &format!("{path}.forward"))?;
+    }
+    if let Some(value) = args.get("send") {
+        policy.send = expect_bool(value, &format!("{path}.send"))?;
+    }
+    if let Some(value) = args.get("preset") {
+        let value = expect_string(value, &format!("{path}.preset"))?;
+        if !value.is_empty() {
+            policy.preset =
+                Some(crate::ecs::unmap(value.parse().map_err(|_| {
+                    ConfigError::new(&path, "preset must be an IP address")
+                })?));
+        }
+    }
+    for (key, max, default) in [("mask4", 32, 24), ("mask6", 128, 48)] {
+        if let Some(value) = args.get(key) {
+            let n = expect_integer(value, &format!("{path}.{key}"))?;
+            if n < 0 || n > max {
+                return Err(ConfigError::new(
+                    format!("{path}.{key}"),
+                    "ECS mask out of range",
+                ));
+            }
+            let n = if n == 0 {
+                default
+            } else {
+                u8::try_from(n).map_err(|_| ConfigError::new(&path, "ECS mask out of range"))?
+            };
+            if key == "mask4" {
+                policy.mask4 = n;
+            } else {
+                policy.mask6 = n;
+            }
+        }
+    }
+    Ok(policy)
 }
 
 fn compile_sequence(
@@ -2184,6 +2245,38 @@ fn compile_exec_item(
         None => (expression, ""),
     };
     match name {
+        "ecs" => {
+            let mut policy = crate::ecs::EcsPolicy::default();
+            let mut tokens = args.split_whitespace();
+            if let Some(first) = tokens.next() {
+                let (ip, mask) = first
+                    .split_once('/')
+                    .map_or((first, None), |(ip, mask)| (ip, Some(mask)));
+                policy.preset =
+                    Some(crate::ecs::unmap(ip.parse().map_err(|_| {
+                        ConfigError::new(path, "legacy ecs requires an IP")
+                    })?));
+                if mask.is_some() {
+                    eprintln!("native {path}: legacy ecs mask is ignored");
+                }
+                if tokens.next().is_some() {
+                    eprintln!("native {path}: trailing legacy ecs arguments are ignored");
+                }
+            } else {
+                policy.active = false;
+            }
+            let tag = format!(
+                "@native-ecs:{}:{rule_index}:{exec_index}",
+                hex_identity(sequence_tag)
+            );
+            catalog
+                .policies
+                .borrow_mut()
+                .push((tag.clone(), ResponsePolicy::Ecs(policy)));
+            Ok(ExecutableSpec::External {
+                target: ExternalRef::new(tag),
+            })
+        }
         "prefer_ipv4" | "prefer_ipv6" => {
             if !args.is_empty() {
                 return Err(ConfigError::new(path, format!("{name} takes no arguments")));
@@ -2373,6 +2466,7 @@ fn compile_exec_item(
                     PluginKind::Cache
                     | PluginKind::Fallback
                     | PluginKind::Hosts
+                    | PluginKind::Ecs
                     | PluginKind::Redirect,
                 ) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),

@@ -41,6 +41,7 @@ pub enum ResponsePolicy {
     Hosts(Rc<DomainPayload<HostAddresses>>),
     Redirect(Rc<DomainPayload<String>>),
     Ttl(TtlPolicy),
+    Ecs(crate::ecs::EcsPolicy),
 }
 pub struct ResponsePolicyConfig {
     pub tag: String,
@@ -394,7 +395,7 @@ pub(crate) fn apply_wire_policy(
             state.set_raw_response(patched);
             Ok(false)
         }
-        ResponsePolicy::Redirect(_) => Ok(false),
+        ResponsePolicy::Redirect(_) | ResponsePolicy::Ecs(_) => Ok(false),
     }
 }
 fn encode_name(name: &str) -> Vec<u8> {
