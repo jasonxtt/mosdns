@@ -79,3 +79,7 @@ S1 exact commit e7e8a651ef3e5734d5bb3529775a96e3fc4f13b9 received FINAL: PASS in
 ## S2 → S3 execution checkpoint
 
 S2 commit 8ce75e1257bc8989207a720f97a29af86d745064 received FINAL: PASS in iteration 2. S3 introduces scoped QueryView/redirect with safe wire rebuilding and supplier inheritance. A new RED test exposed exit conversion through named fallback targets; correction retains Exited across wrappers and prevents outer cache publication. S4–S6 remain pending.
+
+## S4 → S5 execution checkpoint
+
+S4 commit 7937a8f6879fbad7b2a15ebbe092335a739d5ab9 received FINAL: PASS in iteration 5. S5 adds seven real composition tests; no product source change was required by their passing behavior. Bound-file owner reconstruction/flush is tested here; actual process restart and public API/Vue remain S6.
