@@ -19,7 +19,11 @@ impl ExecutionState {
     #[must_use]
     pub fn new(header: QueryHeader, question: QuestionInfo) -> Self {
         Self {
-            query: QueryState { header, question },
+            query: QueryState {
+                header,
+                question,
+                client: ClientContext::default(),
+            },
             marks: BTreeSet::new(),
             fast_flags: 0,
             response: ResponseState::None,
@@ -116,9 +120,49 @@ impl ExecutionState {
     }
 }
 
+/// Trusted listener identity; unknown embedders never acquire a guessed peer.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ClientContext {
+    peer_ip: Option<std::net::IpAddr>,
+    transport: ClientTransport,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ClientTransport {
+    #[default]
+    Unknown,
+    Udp,
+    Tcp,
+}
+
+impl ClientContext {
+    #[must_use]
+    pub fn from_peer(peer: std::net::IpAddr, transport: ClientTransport) -> Self {
+        let peer = match peer {
+            std::net::IpAddr::V6(ip) => ip.to_ipv4_mapped().map_or(peer, std::net::IpAddr::V4),
+            std::net::IpAddr::V4(_) => peer,
+        };
+        Self {
+            peer_ip: Some(peer),
+            transport,
+        }
+    }
+
+    #[must_use]
+    pub fn peer_ip(self) -> Option<std::net::IpAddr> {
+        self.peer_ip
+    }
+
+    #[must_use]
+    pub fn transport(self) -> ClientTransport {
+        self.transport
+    }
+}
+
 /// The owned query/question portion of [`ExecutionState`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryState {
+    pub client: ClientContext,
     pub header: QueryHeader,
     pub question: QuestionInfo,
 }

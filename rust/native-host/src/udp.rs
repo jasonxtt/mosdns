@@ -175,6 +175,10 @@ async fn process_request(task: RequestTask) {
     };
     let mut execution = execute_request(
         ExecutionRequest {
+            client: mosdns_sequence_core::ClientContext::from_peer(
+                peer.ip(),
+                mosdns_sequence_core::ClientTransport::Udp,
+            ),
             config: &config,
             cache: &cache,
             options: &options,

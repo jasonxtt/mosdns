@@ -17,9 +17,9 @@ pub use program::{
     ValidatedFixture, ValidatedProgram, ValidatedRule, ValidatedSequence,
 };
 pub use state::{
-    DnsResponseInspector, ExecutionState, OwnedResponseWire, QueryState, ResponseError,
-    ResponseInspection, ResponseInspector, ResponseState, RoutingField, RoutingState,
-    StateMutation, StateSnapshot, SynthesizedResponse,
+    ClientContext, ClientTransport, DnsResponseInspector, ExecutionState, OwnedResponseWire,
+    QueryState, ResponseError, ResponseInspection, ResponseInspector, ResponseState, RoutingField,
+    RoutingState, StateMutation, StateSnapshot, SynthesizedResponse,
 };
 
 #[cfg(test)]

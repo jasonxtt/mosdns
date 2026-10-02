@@ -1,0 +1,28 @@
+{
+  "id": "rust-native-client-context-ecs",
+  "name": "rust-native-client-context-ecs",
+  "title": "Rust-native client context and ECS cache isolation",
+  "description": "Implement approved S1–S6 trusted client context, ECS policy, cache isolation and proof.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "tom",
+  "assignee": "tom",
+  "createdAt": "2026-10-02",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "rust",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "User authorized S1–S6 on 2026-10-02. Verified fresh C2C reviewer and froze pre-start snapshot. S1 validated; review pending; S2–S6 pending. See research/activation.md and execution-evidence.md.",
+  "meta": {
+    "automation_required": "true"
+  }
+}

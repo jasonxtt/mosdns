@@ -110,6 +110,28 @@ impl Matcher for HasResponseMatcher {
     }
 }
 
+/// Read-only peer matcher, independent of ECS and audit capture.
+pub(crate) struct ClientIpMatcher {
+    prefixes: Vec<Rc<IpPrefixList>>,
+}
+impl ClientIpMatcher {
+    pub(crate) fn new(prefixes: Vec<Rc<IpPrefixList>>) -> Self {
+        Self { prefixes }
+    }
+}
+impl Matcher for ClientIpMatcher {
+    fn evaluate(&self, state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
+        Ok(MatchOutcome::new(
+            state
+                .query
+                .client
+                .peer_ip()
+                .is_some_and(|peer| self.prefixes.iter().any(|list| list.contains(peer))),
+            None,
+        ))
+    }
+}
+
 /// Answer-only response-IP matcher over immutable startup prefix snapshots.
 #[allow(dead_code)]
 pub(crate) struct ResponseIpMatcher {
