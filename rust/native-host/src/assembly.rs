@@ -208,15 +208,11 @@ impl HostAssembly {
         mut options: HostOptions,
         state_root: Option<PathBuf>,
     ) -> Result<Self, AssemblyError> {
-        // S1 exposes validated descriptors without serving incomplete policy behavior.
+        // Expanded IP evaluation remains gated until S4.
         if config
-            .response_policies
+            .response_ip_rules
             .iter()
-            .any(|entry| matches!(entry.policy, crate::policy::ResponsePolicy::Redirect(_)))
-            || config
-                .response_ip_rules
-                .iter()
-                .any(|rule| !rule.runtime_ready)
+            .any(|rule| !rule.runtime_ready)
         {
             return Err(AssemblyError::Config(crate::config::ConfigError::new(
                 "$.plugins",

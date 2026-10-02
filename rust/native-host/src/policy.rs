@@ -407,7 +407,7 @@ pub(crate) fn apply_wire_policy(
             state.set_raw_response(patched);
             Ok(false)
         }
-        ResponsePolicy::Redirect(_) => Err(ExecutorError::new("scoped redirect runtime pending")),
+        ResponsePolicy::Redirect(_) => Ok(false),
     }
 }
 fn encode_name(name: &str) -> Vec<u8> {

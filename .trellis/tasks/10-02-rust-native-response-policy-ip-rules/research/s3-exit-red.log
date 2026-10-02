@@ -1,0 +1,24 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-response-policy-20261002/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.80s
+     Running tests/policy_wire.rs (target/debug/deps/policy_wire-1e6714e4a355cad2)
+
+running 1 test
+test redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail ... FAILED
+
+failures:
+
+---- redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail stdout ----
+
+thread 'redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail' (1125681) panicked at native-host/tests/policy_wire.rs:448:5:
+assertion `left == right` failed
+  left: 42
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test policy_wire`
