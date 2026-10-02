@@ -2220,7 +2220,11 @@ fn cache_key_text(key: &[u8]) -> String {
     if key.len() < 4 {
         return "invalid key".into();
     }
-    let name = String::from_utf8_lossy(&key[4..]);
+    let end = 4 + usize::from(key[3]);
+    let Some(name) = key.get(4..end) else {
+        return "invalid key".into();
+    };
+    let name = String::from_utf8_lossy(name);
     let kind = hickory_proto::rr::RecordType::from(u16::from_be_bytes([key[1], key[2]]));
     let mut text = format!("{name} {kind} IN");
     let flags: Vec<_> = [(1, "AD"), (2, "CD"), (4, "DO")]
@@ -2229,6 +2233,11 @@ fn cache_key_text(key: &[u8]) -> String {
         .collect();
     if !flags.is_empty() {
         text.push_str(&format!(" [flags:{}]", flags.join(",")));
+    }
+    if let Some((&length, suffix)) = key.get(end..).and_then(|s| s.split_first()) {
+        if usize::from(length) == suffix.len() {
+            text.push_str(&format!(" [ecs:{}]", String::from_utf8_lossy(suffix)));
+        }
     }
     text
 }

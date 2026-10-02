@@ -424,19 +424,20 @@ impl NativeCacheAdapter {
             let flags = *entry.key.first().ok_or(CacheAdapterError::InvalidQuery)?;
             let mut flags_wire = vec![0; 4];
             flags_wire[3] = ((flags & 1) << 5) | ((flags & 2) << 3);
+            let base = encode_key(
+                &flags_wire,
+                &question.qname_wire,
+                question.qtype,
+                flags & 4 != 0,
+            )
+            .ok_or(CacheAdapterError::InvalidQuery)?;
+            let normalized = normalize_dump_key(&entry.key, &base, self.enable_ecs);
             if flags & !7 != 0
                 || question.qclass != CLASS_IN
                 || metadata.opcode != 0
                 || metadata.truncated
                 || metadata.has_opt
-                || encode_key(
-                    &flags_wire,
-                    &question.qname_wire,
-                    question.qtype,
-                    flags & 4 != 0,
-                )
-                .as_ref()
-                    != Some(&entry.key)
+                || normalized.is_none()
                 || validate_response(&entry.response).is_err()
                 || std::str::from_utf8(&entry.domain_set).is_err()
             {
@@ -444,6 +445,7 @@ impl NativeCacheAdapter {
                     "ineligible key, response or domain_set".into(),
                 ));
             }
+            entry.key = normalized.ok_or(CacheAdapterError::InvalidQuery)?;
             // Validate even expired entries: malformed data never hides behind expiry.
             let convert = |at: i64| {
                 now.checked_add(
@@ -677,6 +679,26 @@ impl NativeCacheAdapter {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+fn normalize_dump_key(key: &[u8], base: &[u8], enable_ecs: bool) -> Option<Vec<u8>> {
+    if key == base {
+        return Some(base.to_vec());
+    }
+    if !enable_ecs {
+        return None;
+    }
+    let suffix = key.strip_prefix(base)?;
+    let (&length, text) = suffix.split_first()?;
+    if length == 0 || usize::from(length) != text.len() {
+        return None;
+    }
+    let subnet = crate::ecs::Subnet::dump_string(std::str::from_utf8(text).ok()?)?;
+    let text = subnet.key_string();
+    let mut normalized = base.to_vec();
+    normalized.push(u8::try_from(text.len()).ok()?);
+    normalized.extend_from_slice(text.as_bytes());
+    Some(normalized)
 }
 
 /// One owner for native publication and refresh lifetime. No client token is
@@ -1108,6 +1130,59 @@ mod persistence_tests {
         response[7] = 1;
         response.extend_from_slice(&[0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 1]);
         (query, response)
+    }
+    #[test]
+    fn ecs_suffix_validation_is_atomic_even_for_expired_last_entries() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let clock = CacheTestClock::new(1000);
+            let cache = NativeCacheAdapter::for_test(clock).unwrap().with_ecs(true);
+            let (query, response) = query_response();
+            cache
+                .begin_store(&query)
+                .unwrap()
+                .unwrap()
+                .publish_with_domain(&response, "unchanged")
+                .unwrap();
+            let original = cache.snapshot().unwrap().pop().unwrap();
+            for text in [
+                "192.0.2.1/33/0",
+                "192.0.2.1/24/1",
+                "[::1]/129/0",
+                "::1/64/0",
+                "192.0.2.1/24/0/junk",
+                "192.0.2.1/+24/0",
+                "[invalid]/64/0",
+                "",
+                "192.0.2.1/95/0",
+            ] {
+                let mut bad = original.clone();
+                bad.wall_times = Some([1, 2, 3]);
+                bad.key.push(u8::try_from(text.len()).unwrap());
+                bad.key.extend_from_slice(text.as_bytes());
+                let bytes = crate::cache_dump::encode(&[original.clone(), bad]).unwrap();
+                assert!(cache.import_dump(bytes).await.is_err(), "{text}");
+                assert_eq!(cache.snapshot().unwrap()[0].domain_set, b"unchanged");
+            }
+            for length in [0, 1, 255] {
+                let mut bad = original.clone();
+                bad.key.push(length);
+                bad.key.extend_from_slice(b"192.0.2.1/24/0");
+                assert!(
+                    cache
+                        .import_dump(crate::cache_dump::encode(&[original.clone(), bad]).unwrap())
+                        .await
+                        .is_err()
+                );
+            }
+            let old = cache.begin_store(&query).unwrap().unwrap();
+            cache.flush().await.unwrap();
+            assert!(!old.publish(&response).unwrap());
+            assert!(cache.snapshot().unwrap().is_empty());
+        });
     }
     #[test]
     fn all_entry_validation_precedes_merge_including_expired_and_ecs_keys() {
