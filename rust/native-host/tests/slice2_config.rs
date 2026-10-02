@@ -40,7 +40,7 @@ fn assembly_owns_one_upstream_and_no_listener_socket() {
 #[test]
 fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
     let config = compile_yaml(CACHE).expect("frozen W2 graph must compile");
-    assert!(config.cache.is_some());
+    assert_eq!(config.caches.len(), 1);
     assert_eq!(config.listener.kind, ListenerKind::Udp);
     assert_eq!(config.listener.entry, "phase5a_entry");
     assert_eq!(
@@ -54,7 +54,7 @@ fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
         15455
     );
     assert_eq!(config.listener.listen.port(), 15355);
-    let cache = config.cache.as_ref().expect("compiled cache identity");
+    let cache = &config.caches[0];
     let mut machine = config
         .new_machine(
             ExecutionState::new(
@@ -81,6 +81,9 @@ fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
         MachineStep::ScopeComplete(completion) => {
             panic!("unwatched machine yielded {completion:?}")
         }
+        MachineStep::ScopeAborted(completion) => {
+            panic!("unwatched machine aborted {completion:?}")
+        }
         MachineStep::Complete(_) => panic!("W2 cache must dispatch first"),
     };
     assert_eq!(first.executable(), cache.executable);
@@ -91,6 +94,9 @@ fn frozen_w2_cache_configuration_compiles_to_udp_graph() {
         MachineStep::Dispatch(dispatch) => dispatch,
         MachineStep::ScopeComplete(completion) => {
             panic!("unwatched machine yielded {completion:?}")
+        }
+        MachineStep::ScopeAborted(completion) => {
+            panic!("unwatched machine aborted {completion:?}")
         }
         MachineStep::Complete(_) => panic!("W2 forward must dispatch second"),
     };
@@ -105,7 +111,45 @@ fn cache_parameters_and_composition_are_configurable_where_the_contract_allows_i
     // The entry capacity is a configured positive integer, not one frozen
     // value, and the cache's position in the graph is a composition choice.
     let accepts = [
+        ("scalar CIDR exclusions", CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      exclude_ip: \"127.0.0.0/8 10.0.0.0/8\"\n")),
+        ("CIDR list with invalid item", CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      exclude_ip: [\"127.0.0.0/8\", \"not-a-cidr\"]\n")),
         ("a smaller capacity", CACHE.replace("size: 64", "size: 63")),
+        // Absent or non-positive values fall back to the product default
+        // instead of being refused, and a second named cache is a supported
+        // configuration rather than a conflict.
+        ("a missing capacity", CACHE.replace("      size: 64\n", "")),
+        (
+            "a zero capacity",
+            CACHE.replace("      size: 64\n", "      size: 0\n"),
+        ),
+        (
+            "a negative capacity",
+            CACHE.replace("      size: 64\n", "      size: -7\n"),
+        ),
+        ("a missing lazy TTL", CACHE.replace("      lazy_cache_ttl: 0\n", "")),
+        (
+            "a second named cache",
+            CACHE.replace("- tag: phase5a_forward", "- tag: phase5a_cache_2\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n\n  - tag: phase5a_forward"),
+        ),
+        (
+            "an explicitly disabled ECS flag",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      enable_ecs: false\n"),
+        ),
+        (
+            "an explicit null capacity",
+            CACHE.replace("size: 64", "size: null"),
+        ),
+        (
+            "explicit null optional options",
+            CACHE.replace(
+                "      lazy_cache_ttl: 0\n",
+                "      lazy_cache_ttl: null\n      dump_interval: null\n      enable_ecs: null\n      exclude_ip: null\n      dump_file: null\n",
+            ),
+        ),
+        (
+            "a dump interval without a dump file",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      dump_interval: 600\n"),
+        ),
         ("a larger capacity", CACHE.replace("size: 64", "size: 65")),
         (
             "a TCP listener over the same cache",
@@ -139,32 +183,46 @@ fn cache_parameters_and_composition_are_configurable_where_the_contract_allows_i
     for (name, yaml) in accepts {
         compile_yaml(&yaml).unwrap_or_else(|error| panic!("{name} must compile: {error}"));
     }
+}
 
+#[test]
+fn unsupported_cache_configuration_is_rejected_before_io() {
     let rejects = [
         ("a quoted capacity", CACHE.replace("size: 64", "size: \"64\"")),
         (
-            "a missing capacity",
-            CACHE.replace("      size: 64\n", ""),
+            "a negative lazy TTL",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: -1\n"),
         ),
         (
-            "a nonzero lazy TTL",
-            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 1\n"),
+            "an enabled ECS flag",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      enable_ecs: true\n"),
+        ),
+        (
+            "a non-boolean ECS flag",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      enable_ecs: \"true\"\n"),
+        ),
+        (
+            "an exclude_ip that is neither a string nor a list",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      exclude_ip: { a: 1 }\n"),
+        ),
+        (
+            "an exclude_ip list with a non-string entry",
+            CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      exclude_ip: [1]\n"),
+        ),
+        (
+            "an empty dump file path",
+            CACHE.replace(
+                "      lazy_cache_ttl: 0\n",
+                "      lazy_cache_ttl: 0\n      dump_file: \"\"\n",
+            ),
         ),
         (
             "a quoted lazy TTL",
             CACHE.replace("lazy_cache_ttl: 0", "lazy_cache_ttl: \"0\""),
         ),
         (
-            "a missing lazy TTL",
-            CACHE.replace("      lazy_cache_ttl: 0\n", ""),
-        ),
-        (
             "an unknown cache field",
             CACHE.replace("      lazy_cache_ttl: 0\n", "      lazy_cache_ttl: 0\n      extra: true\n"),
-        ),
-        (
-            "a second cache instance",
-            CACHE.replace("- tag: phase5a_forward", "- tag: phase5a_cache_2\n    type: cache\n    args:\n      size: 64\n      lazy_cache_ttl: 0\n\n  - tag: phase5a_forward"),
         ),
         (
             "a removed but still referenced cache",
@@ -199,7 +257,7 @@ fn cache_parameters_and_composition_are_configurable_where_the_contract_allows_i
 #[test]
 fn w1_graph_remains_accepted_and_cache_is_not_implicit() {
     let config = compile_yaml(UDP).expect("frozen W1 graph must compile");
-    assert!(config.cache.is_none());
+    assert!(config.caches.is_empty());
 }
 
 #[test]
@@ -291,7 +349,7 @@ plugins:
 #[test]
 fn frozen_w3_graph_compiles_to_three_owned_udp_routes_and_four_rules() {
     let config = compile_yaml(ROUTING).expect("frozen W3 graph must compile");
-    assert!(config.cache.is_none());
+    assert!(config.caches.is_empty());
     assert_eq!(config.listener.kind, ListenerKind::Udp);
     assert_eq!(config.listener.entry, "phase5a_entry");
     assert_eq!(config.forwards.len(), 3);

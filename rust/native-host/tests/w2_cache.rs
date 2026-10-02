@@ -431,7 +431,7 @@ fn cold_concurrent_misses_are_independent_and_warm_concurrency_is_free() {
 }
 
 #[test]
-fn edns_and_non_in_queries_bypass_lookup_and_publication() {
+fn basic_edns_reuses_the_plain_key_while_non_in_queries_bypass() {
     let mock = MockUpstream::start(false);
     let assembly = assembly_for(mock.address, HostOptions::default());
     let server = assembly
@@ -459,12 +459,16 @@ fn edns_and_non_in_queries_bypass_lookup_and_publication() {
         task.await.expect("server task")
     });
     result.expect("server shutdown");
-    assert_eq!(mock.requests(), 5, "EDNS and non-IN must not publish");
+    assert_eq!(
+        mock.requests(),
+        3,
+        "basic EDNS reuses the cached answer; non-IN always forwards"
+    );
     mock.stop();
 }
 
 #[test]
-fn expiry_and_invalid_or_opt_responses_never_publish() {
+fn expiry_and_invalid_responses_do_not_publish_and_opt_is_removed() {
     let mock = MockUpstream::start(false);
     let clock = CacheTestClock::new(500);
     let assembly = assembly_for(
@@ -538,7 +542,11 @@ fn expiry_and_invalid_or_opt_responses_never_publish() {
     let (second, server_result) = result;
     server_result.expect("server shutdown");
     assert_eq!(response_id(&second), 0x4302);
-    assert_eq!(mock.requests(), 2 + 8 + 1, "only valid SERVFAIL is cached");
+    assert_eq!(
+        mock.requests(),
+        2 + 7 + 1,
+        "valid OPT and SERVFAIL responses are cached"
+    );
     mock.stop();
 }
 
@@ -580,8 +588,9 @@ fn shutdown_cancels_w2_request_without_publication_and_allows_rebind() {
     });
     assert!(!received, "shutdown must suppress late response");
     server_result.expect("server shutdown");
-    assert!(
-        assembly.cache().is_empty(),
+    assert_eq!(
+        assembly.cache().raw_entry_count(),
+        0,
         "cancelled request must not publish"
     );
     let rebound = assembly

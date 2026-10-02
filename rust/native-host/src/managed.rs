@@ -72,7 +72,7 @@ impl PersistGate {
         condvar.notify_all();
     }
 
-    fn wait(&self) {
+    pub(crate) fn wait(&self) {
         self.arrived.fetch_add(1, Ordering::SeqCst);
         let (lock, condvar) = &*self.state;
         let mut released = lock.lock().unwrap_or_else(|error| error.into_inner());

@@ -26,7 +26,8 @@ use tokio::task::JoinSet;
 
 use mosdns_upstream_core::TransportCancellation;
 
-use crate::config::CompiledConfig;
+use crate::cache::{CacheCatalog, NativeCacheAdapter};
+use crate::config::{CacheKind, CompiledConfig};
 use crate::managed::ManagedDomainSet;
 use crate::observer::{
     AnswerDetailsStatus, AuditClock, AuditReadSnapshot, AuditRecord, AuditStatsSnapshot,
@@ -251,6 +252,7 @@ const MAX_BODY_BYTES: usize = 1024 * 1024;
 pub struct ApiServer {
     listener: TcpListener,
     config: Rc<CompiledConfig>,
+    cache: Rc<CacheCatalog>,
     observer: Arc<QueryObserver>,
     state_root: Option<PathBuf>,
     audit_persist_lock: Arc<AsyncMutex<()>>,
@@ -266,6 +268,7 @@ impl ApiServer {
     /// starts accepting.
     pub(crate) async fn bind(
         config: Rc<CompiledConfig>,
+        cache: Rc<CacheCatalog>,
         observer: Arc<QueryObserver>,
         state_root: Option<PathBuf>,
         audit_persistence_faults: AuditPersistenceFaults,
@@ -278,6 +281,7 @@ impl ApiServer {
         Ok(Self {
             listener,
             config,
+            cache,
             observer,
             state_root,
             audit_persist_lock: Arc::new(AsyncMutex::new(())),
@@ -334,6 +338,7 @@ impl ApiServer {
                                 break;
                             }
                             let config = Rc::clone(&self.config);
+                            let cache = Rc::clone(&self.cache);
                             let observer = Arc::clone(&self.observer);
                             let state_root = self.state_root.clone();
                             let audit_persist_lock = Arc::clone(&self.audit_persist_lock);
@@ -345,6 +350,7 @@ impl ApiServer {
                                 let _ = process_connection(
                                     stream,
                                     config,
+                                    cache,
                                     observer,
                                     state_root,
                                     audit_persist_lock,
@@ -502,6 +508,7 @@ impl Response {
 async fn process_connection(
     mut stream: TcpStream,
     config: Rc<CompiledConfig>,
+    cache: Rc<CacheCatalog>,
     observer: Arc<QueryObserver>,
     state_root: Option<PathBuf>,
     audit_persist_lock: Arc<AsyncMutex<()>>,
@@ -528,6 +535,7 @@ async fn process_connection(
     let request_shutdown = shutdown.child_token();
     let dispatch = dispatch(
         &config,
+        &cache,
         &observer,
         state_root.as_deref(),
         &audit_persist_lock,
@@ -628,7 +636,18 @@ async fn read_request(stream: &mut TcpStream) -> io::Result<Option<Request>> {
         }
         (method.to_owned(), target.to_owned(), content_length)
     };
-    if content_length > MAX_BODY_BYTES {
+    let body_limit = if matches!(
+        route(&target),
+        Route::Plugin {
+            action: "load_dump",
+            ..
+        }
+    ) {
+        crate::cache_dump::MAX_COMPRESSED
+    } else {
+        MAX_BODY_BYTES
+    };
+    if content_length > body_limit {
         return Err(io::Error::other("request body too large"));
     }
 
@@ -692,12 +711,14 @@ const fn reason_phrase(status: u16) -> &'static str {
 enum Route<'a> {
     /// A registered plugin route shape: `/plugins/{tag}/{show|save|post}`.
     Plugin {
-        tag: &'a str,
+        tag: std::borrow::Cow<'a, str>,
         action: &'a str,
     },
     Audit(AuditRoute),
     AuditV2(AuditV2Route),
     SpecialGroups,
+    CacheInventory,
+    Metrics,
     Unknown,
 }
 
@@ -723,9 +744,36 @@ enum AuditV2Route {
     RankSlowest,
 }
 
+fn decode_plugin_tag(tag: &str) -> Option<std::borrow::Cow<'_, str>> {
+    if !tag.contains('%') {
+        return Some(std::borrow::Cow::Borrowed(tag));
+    }
+    let mut bytes = Vec::with_capacity(tag.len());
+    let mut position = 0;
+    while position < tag.len() {
+        if tag.as_bytes()[position] == b'%' {
+            let pair = tag.as_bytes().get(position + 1..position + 3)?;
+            let high = char::from(pair[0]).to_digit(16)?;
+            let low = char::from(pair[1]).to_digit(16)?;
+            bytes.push((high * 16 + low) as u8);
+            position += 3;
+        } else {
+            bytes.push(tag.as_bytes()[position]);
+            position += 1;
+        }
+    }
+    String::from_utf8(bytes).ok().map(std::borrow::Cow::Owned)
+}
+
 fn route(target: &str) -> Route<'_> {
     // Go's `/show` ignores the query string; the UI sends `?limit=10000`.
     let path = target.split_once('?').map_or(target, |(path, _query)| path);
+    if path == "/api/v1/cache/inventory" {
+        return Route::CacheInventory;
+    }
+    if path == "/metrics" {
+        return Route::Metrics;
+    }
     if path == "/api/v1/special-groups" {
         return Route::SpecialGroups;
     }
@@ -763,7 +811,10 @@ fn route(target: &str) -> Route<'_> {
         return Route::Unknown;
     }
     match action {
-        "show" | "save" | "post" => Route::Plugin { tag, action },
+        "show" | "save" | "post" | "flush" | "dump" | "load_dump" => match decode_plugin_tag(tag) {
+            Some(tag) => Route::Plugin { tag, action },
+            None => Route::Unknown,
+        },
         _ => Route::Unknown,
     }
 }
@@ -1822,6 +1873,7 @@ async fn dispatch_audit_read(
 #[allow(clippy::too_many_arguments)]
 async fn dispatch(
     config: &CompiledConfig,
+    cache: &CacheCatalog,
     observer: &Arc<QueryObserver>,
     state_root: Option<&Path>,
     audit_persist_lock: &Arc<AsyncMutex<()>>,
@@ -1832,6 +1884,78 @@ async fn dispatch(
     request: &Request,
 ) -> Response {
     match route(&request.target) {
+        Route::CacheInventory => {
+            if request.method != "GET" {
+                return Response::method_not_allowed();
+            }
+            let caches: Vec<_> = config
+                .caches
+                .iter()
+                .filter(|item| item.kind == CacheKind::Named)
+                .map(|item| serde_json::json!({"tag":item.tag}))
+                .collect();
+            Response::json(&serde_json::json!({"schema_version":1,"caches":caches}))
+        }
+        Route::Metrics => {
+            if request.method != "GET" {
+                return Response::method_not_allowed();
+            }
+            let mut text = String::new();
+            let names = ["query_total", "hit_total", "lazy_hit_total", "size_current"];
+            for (index, name) in names.iter().enumerate() {
+                use std::fmt::Write;
+                let kind = if index == 3 { "gauge" } else { "counter" };
+                let _ = writeln!(text, "# TYPE mosdns_cache_{name} {kind}");
+                for item in config
+                    .caches
+                    .iter()
+                    .filter(|item| item.kind == CacheKind::Named)
+                {
+                    let Some(store) = cache.get(item.id) else {
+                        return Response::error(500, "cache owner missing");
+                    };
+                    let values = match store.metrics() {
+                        Ok(values) => values,
+                        Err(error) => return Response::error(500, &error.to_string()),
+                    };
+                    let tag = item
+                        .tag
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .replace('\n', "\\n");
+                    let _ = writeln!(
+                        text,
+                        "mosdns_cache_{name}{{tag=\"{tag}\"}} {}",
+                        values[index]
+                    );
+                }
+            }
+            Response {
+                status: 200,
+                content_type: Some("text/plain; version=0.0.4; charset=utf-8"),
+                body: text.into_bytes(),
+            }
+        }
+        Route::Plugin { tag, action }
+            if config
+                .caches
+                .iter()
+                .any(|item| item.kind == CacheKind::Named && item.tag == tag.as_ref()) =>
+        {
+            let item = config
+                .caches
+                .iter()
+                .find(|item| item.kind == CacheKind::Named && item.tag == tag.as_ref())
+                .expect("matching cache");
+            let Some(store) = cache.get(item.id) else {
+                return Response::error(500, "cache owner missing");
+            };
+            dispatch_cache(store, action, request).await
+        }
+        Route::Plugin {
+            action: "flush" | "dump" | "load_dump",
+            ..
+        } => Response::error(404, "404 page not found"),
         Route::AuditV2(AuditV2Route::Stats) => match request.method.as_str() {
             "GET" => {
                 let snapshot = observer.audit_stats_snapshot();
@@ -1965,11 +2089,11 @@ async fn dispatch(
         },
         // Go mounts handlers per existing plugin tag, so a tag that is not
         // mounted has no route: 404 before any method or eligibility decision.
-        Route::Plugin { tag, .. } if config.domain_set(tag).is_none() => {
+        Route::Plugin { tag, .. } if config.domain_set(tag.as_ref()).is_none() => {
             Response::error(404, "404 page not found")
         }
         Route::Plugin { tag, action } => match (request.method.as_str(), action) {
-            ("GET", "show") => match eligible(config, tag) {
+            ("GET", "show") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => {
                     let mut body = String::new();
@@ -1980,14 +2104,14 @@ async fn dispatch(
                     Response::text(body)
                 }
             },
-            ("GET", "save") => match eligible(config, tag) {
+            ("GET", "save") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => match provider.save().await {
                     Ok(()) => Response::empty(200),
                     Err(error) => Response::error(500, &error.to_string()),
                 },
             },
-            ("POST", "post") => match eligible(config, tag) {
+            ("POST", "post") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => {
                     let payload: PostPayload = match serde_json::from_slice(&request.body) {
@@ -2045,6 +2169,207 @@ fn eligible<'a>(config: &'a CompiledConfig, tag: &str) -> Result<&'a ManagedDoma
 struct PostPayload {
     #[serde(default)]
     values: Vec<String>,
+}
+
+async fn dispatch_cache(store: &NativeCacheAdapter, action: &str, request: &Request) -> Response {
+    let expected = match action {
+        "show" | "dump" | "save" | "flush" => "GET",
+        "load_dump" => "POST",
+        _ => return Response::error(404, "404 page not found"),
+    };
+    if request.method != expected {
+        return Response::method_not_allowed();
+    }
+    match action {
+        "show" => match cache_show(store, &request.target) {
+            Ok(text) => Response::text(text),
+            Err(error) => Response::error(500, &error.to_string()),
+        },
+        "dump" => match store.dump() {
+            Ok(body) => Response {
+                status: 200,
+                content_type: Some("application/octet-stream"),
+                body,
+            },
+            Err(error) => Response::error(500, &error.to_string()),
+        },
+        "save" => {
+            if !store.has_dump_file() {
+                return Response::error(400, "no dump_file configured");
+            }
+            match store.save().await {
+                Ok(()) => Response::empty(200),
+                Err(error) => Response::error(500, &error.to_string()),
+            }
+        }
+        "flush" => match store.flush().await {
+            Ok(()) => Response::empty(200),
+            Err(error) => Response::error(500, &error.to_string()),
+        },
+        "load_dump" => match store.import_dump(request.body.clone()).await {
+            Ok(()) => Response::empty(200),
+            Err(crate::cache::CacheAdapterError::Closed) => {
+                Response::error(500, "cache owner closed")
+            }
+            Err(error) => Response::error(400, &format!("invalid cache dump: {error}")),
+        },
+        _ => unreachable!(),
+    }
+}
+fn cache_key_text(key: &[u8]) -> String {
+    if key.len() < 4 {
+        return "invalid key".into();
+    }
+    let name = String::from_utf8_lossy(&key[4..]);
+    let kind = hickory_proto::rr::RecordType::from(u16::from_be_bytes([key[1], key[2]]));
+    let mut text = format!("{name} {kind} IN");
+    let flags: Vec<_> = [(1, "AD"), (2, "CD"), (4, "DO")]
+        .into_iter()
+        .filter_map(|(bit, name)| (key[0] & bit != 0).then_some(name))
+        .collect();
+    if !flags.is_empty() {
+        text.push_str(&format!(" [flags:{}]", flags.join(",")));
+    }
+    text
+}
+fn cache_dns_text(wire: &[u8]) -> Result<(String, String), crate::cache::CacheAdapterError> {
+    use std::fmt::Write;
+    let message = hickory_proto::op::Message::from_vec(wire)
+        .map_err(|_| crate::cache::CacheAdapterError::InvalidQuery)?;
+    let mut text = format!(
+        ";; ->>HEADER<<- opcode: {}, status: {}, id: {}\n",
+        message.op_code(),
+        message.response_code(),
+        message.id()
+    );
+    let flags: Vec<_> = [
+        (
+            message.message_type() == hickory_proto::op::MessageType::Response,
+            "qr",
+        ),
+        (message.authoritative(), "aa"),
+        (message.truncated(), "tc"),
+        (message.recursion_desired(), "rd"),
+        (message.recursion_available(), "ra"),
+        (message.authentic_data(), "ad"),
+        (message.checking_disabled(), "cd"),
+    ]
+    .into_iter()
+    .filter_map(|(set, name)| set.then_some(name))
+    .collect();
+    let _ = writeln!(
+        text,
+        ";; flags: {}; QUERY: {}, ANSWER: {}, AUTHORITY: {}, ADDITIONAL: {}\n",
+        flags.join(" "),
+        message.queries().len(),
+        message.answers().len(),
+        message.name_servers().len(),
+        message.additionals().len()
+    );
+    text.push_str(";; QUESTION SECTION:\n");
+    for query in message.queries() {
+        let _ = writeln!(
+            text,
+            ";{}\t{}\t{}",
+            query.name(),
+            query.query_class(),
+            query.query_type()
+        );
+    }
+    for (title, records) in [
+        ("ANSWER", message.answers()),
+        ("AUTHORITY", message.name_servers()),
+        ("ADDITIONAL", message.additionals()),
+    ] {
+        if !records.is_empty() {
+            let _ = writeln!(text, "\n;; {title} SECTION:");
+            for record in records {
+                let _ = writeln!(text, "{record}");
+            }
+        }
+    }
+    let answers = message
+        .answers()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok((text, answers))
+}
+fn cache_show(
+    store: &NativeCacheAdapter,
+    target: &str,
+) -> Result<String, crate::cache::CacheAdapterError> {
+    use std::fmt::Write;
+    let mut q = String::new();
+    let mut offset = 0;
+    let mut limit = 100;
+    if let Some((_, query)) = target.split_once('?') {
+        for (name, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            match name.as_ref() {
+                "q" => q = value.to_lowercase(),
+                "offset" => offset = value.parse::<i64>().unwrap_or(0).max(0) as usize,
+                "limit" => {
+                    let parsed = value.parse::<i64>().unwrap_or(100);
+                    limit = if parsed <= 0 {
+                        100
+                    } else {
+                        usize::try_from(parsed).unwrap_or(usize::MAX)
+                    };
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut entries = store.snapshot()?;
+    entries.sort_by(|a, b| a.key.cmp(&b.key));
+    let mut body = String::new();
+    let mut matched = 0;
+    let mut sent = 0;
+    for entry in entries {
+        let key = cache_key_text(&entry.key);
+        let (dns, answers) = cache_dns_text(&entry.response)?;
+        if !q.is_empty() && !key.to_lowercase().contains(&q) && !answers.to_lowercase().contains(&q)
+        {
+            continue;
+        }
+        if matched < offset {
+            matched += 1;
+            continue;
+        }
+        if sent >= limit {
+            break;
+        }
+        let times = entry
+            .wall_times
+            .ok_or(crate::cache::CacheAdapterError::InvalidQuery)?;
+        let timestamp = |seconds| {
+            time::OffsetDateTime::from_unix_timestamp(seconds)
+                .ok()
+                .and_then(|time| {
+                    time.format(&time::format_description::well_known::Rfc3339)
+                        .ok()
+                })
+                .unwrap_or_else(|| seconds.to_string())
+        };
+        let _ = writeln!(body, "----- Cache Entry -----\nKey:           {key}");
+        if !entry.domain_set.is_empty() {
+            let _ = writeln!(
+                body,
+                "DomainSet:     {}",
+                String::from_utf8_lossy(&entry.domain_set)
+            );
+        }
+        let _ = writeln!(
+            body,
+            "StoredTime:    {}\nMsgExpire:     {}\nCacheExpire:   {}\nDNS Message:\n{dns}",
+            timestamp(times[0]),
+            timestamp(times[1]),
+            timestamp(times[2])
+        );
+        sent += 1;
+    }
+    Ok(body)
 }
 
 #[cfg(test)]

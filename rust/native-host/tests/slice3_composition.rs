@@ -167,8 +167,11 @@ fn the_representative_chain_loads_from_file_with_include_and_rule_files() {
     assert_eq!(config.listener.entry, "sequence_main");
     assert!(config.listener.enable_audit);
     assert_eq!(config.forwards.len(), 2);
-    let cache = config.cache.as_ref().expect("one cache");
+    let cache = config.caches.first().expect("one cache");
     assert_eq!(cache.capacity, 64);
+    assert_eq!(cache.kind, mosdns_native_host::CacheKind::Named);
+    assert_eq!(cache.dump_interval_secs, 600);
+    assert_eq!(cache.dump_file, None);
     let tags = config
         .forwards
         .iter()

@@ -4,6 +4,7 @@
 mod api;
 mod assembly;
 mod cache;
+mod cache_dump;
 mod cli;
 mod config;
 mod execution;
@@ -19,13 +20,15 @@ pub use assembly::{
     AssemblyError, BoundHost, DnsServer, ForwardAdapter, HostAssembly, HostOptions, HostRunError,
     HostRuntime,
 };
-pub use cache::{CacheAdapterError, CacheClock, CacheTestClock, NativeCacheAdapter, PendingStore};
+pub use cache::{
+    CacheAdapterError, CacheCatalog, CacheClock, CacheTestClock, NativeCacheAdapter, PendingStore,
+};
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
-    ApiConfig, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig, ForwardConfig,
-    ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig, ForwardScheme,
-    ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel, SequenceConfig, compile_yaml,
-    compile_yaml_with_base, load_and_compile, load_yaml,
+    ApiConfig, CacheId, CacheKind, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig,
+    ForwardConfig, ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig,
+    ForwardScheme, ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel, SequenceConfig,
+    compile_yaml, compile_yaml_with_base, load_and_compile, load_yaml,
 };
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{

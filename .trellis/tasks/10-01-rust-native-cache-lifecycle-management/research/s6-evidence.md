@@ -1,0 +1,9 @@
+# S6 execution evidence — 2026-10-02
+
+GET /api/v1/cache/inventory schema_version=1 and named declaration order; GET /metrics four existing mosdns_cache names, escaped tag, dispatch/hit/lazy foreground counts and live size. Main and both branch/direct lookup paths use counted lookup; detached refresh nested caches explicitly do not increment metrics. Quick instances have no inventory/routes/metrics.
+
+GET show/dump/save/flush and POST load_dump use actual owners. Unknown/non-cache/cache post/quick paths 404 before method; known mounted actions wrong method 405. Existing domain_set show/save/post remains routed as before. load_dump accepts up to 16MiB, all other bodies retain 1MiB. show stable key sort, live entries, case-insensitive key/answer query, nonpositive limit100/negative offset0, original wall metadata and actual DNS text with Go-compatible section markers. No mock JSON or static cache content.
+
+Real cache_http scenario first failed inventory404 as expected (/tmp/cache-s6-red.log). Native DNS miss/fresh/lazy triggers actual local UDP upstream; nested background refresh does not add foreground cache/client audit counts. API inventory/metrics, search/pagination, method404/405 matrix, quick invisibility, save400/500, dump bytes, flush, import and malformed import preservation pass; body >1MiB reaches cache codec. Restart DNS hits saved native dump without another upstream request; expired show/gauge becomes empty/0.
+
+Remote SSH mosdns-rust exclusive directory only. Final1 output /tmp/cache-s6-final.log: fmt/clippy and 37 tests (cache_catalog14 + cache_http1 + management HTTP10 + management publication12) passed. Final2 added quick routes/save fault/live expiry and reran full clippy/fmt plus cache_http1, passed. Intermediate items-after-test-module Clippy failure retained /tmp/cache-s6-check.log; helpers moved before test module. No commit/push/deploy/local build. S7 Vue pending.

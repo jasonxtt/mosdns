@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinSet;
 
 use crate::assembly::{ForwardCatalog, HostAssembly, HostOptions};
-use crate::cache::NativeCacheAdapter;
+use crate::cache::CacheCatalog;
 use crate::config::{CompiledConfig, ListenerKind};
 use crate::execution::{ExecutionRequest, execute_request};
 use crate::observer::{
@@ -28,7 +28,7 @@ const MAX_TCP_FRAME: usize = u16::MAX as usize;
 pub struct TcpServer {
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
-    cache: Rc<NativeCacheAdapter>,
+    cache: Rc<CacheCatalog>,
     options: HostOptions,
     listener: Arc<TcpListener>,
     idle_timeout: Duration,
@@ -126,7 +126,11 @@ impl TcpServer {
         }
 
         shutdown.cancel();
+        self.cache.stop_admission();
         drain_tasks(&mut tasks, &mut task_error).await;
+        if let Err(error) = self.cache.stop_refreshes().await {
+            task_error = Some(error.to_string());
+        }
         self.forwards.close_all().await;
         if let Some(error) = task_error {
             return Err(TcpServerError::Task(error));
@@ -142,7 +146,7 @@ struct ConnectionTask {
     stream: TcpStream,
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
-    cache: Rc<NativeCacheAdapter>,
+    cache: Rc<CacheCatalog>,
     observer: Arc<QueryObserver>,
     client_addr: SocketAddr,
     options: HostOptions,

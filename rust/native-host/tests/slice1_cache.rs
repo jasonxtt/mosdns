@@ -184,7 +184,7 @@ fn cache_key_separates_security_bits_type_class_and_non_in_queries() {
 }
 
 #[test]
-fn edns_queries_bypass_lookup_and_publication() {
+fn basic_edns_queries_share_the_plain_key_and_allow_publication() {
     let clock = CacheTestClock::new(100);
     let adapter = NativeCacheAdapter::for_test(clock).expect("adapter");
     let plain = query(1, 0x0100, &name(&["edns", "example"]), 1, 1, 0);
@@ -194,8 +194,8 @@ fn edns_queries_bypass_lookup_and_publication() {
         .expect("begin")
         .expect("eligible");
     assert!(token.publish(&answer(&plain, 60, 0)).expect("publish"));
-    assert!(adapter.lookup(&edns).expect("EDNS lookup").is_none());
-    assert!(adapter.begin_store(&edns).expect("EDNS begin").is_none());
+    assert!(adapter.lookup(&edns).expect("EDNS lookup").is_some());
+    assert!(adapter.begin_store(&edns).expect("EDNS begin").is_some());
 }
 
 #[test]
@@ -316,16 +316,21 @@ fn malformed_tc_opt_and_mismatched_questions_never_publish() {
     assert!(!token.publish(&tc).expect("TC admission"));
     assert!(adapter.lookup(&primary).expect("TC lookup").is_none());
 
-    let token = adapter
+    let opt_adapter = NativeCacheAdapter::for_test(CacheTestClock::new(100)).expect("adapter");
+    let token = opt_adapter
         .begin_store(&primary)
         .expect("OPT begin")
         .expect("eligible");
     assert!(
-        !token
+        token
             .publish(&response_with_opt(&primary))
             .expect("OPT admission")
     );
-    assert!(adapter.lookup(&primary).expect("OPT lookup").is_none());
+    let cached = opt_adapter
+        .lookup(&primary)
+        .expect("OPT lookup")
+        .expect("hit");
+    assert_eq!(cached[11], 0, "OPT is removed from the cache copy");
 
     let other_query = query(0x5001, 0x0100, &name(&["other", "example"]), 1, 1, 0);
     let token = adapter

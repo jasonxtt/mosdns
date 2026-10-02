@@ -1523,6 +1523,15 @@ impl QueryObserver {
             .expect("test request ID allocation")
     }
 
+    pub(crate) fn record_background_attempts(&self, attempts: &UpstreamAttemptList) {
+        let mut state = self.lock();
+        for attempt in attempts.metric_attempts() {
+            state
+                .metrics
+                .record_metric_key((attempt.executable, attempt.entry_index), attempt.outcome);
+        }
+    }
+
     pub(crate) fn metrics_snapshot(&self) -> MetricsSnapshot {
         let state = self.lock();
         state

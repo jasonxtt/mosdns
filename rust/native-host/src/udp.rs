@@ -12,7 +12,7 @@ use tokio::net::UdpSocket;
 use tokio::task::JoinSet;
 
 use crate::assembly::{ForwardCatalog, HostAssembly, HostOptions};
-use crate::cache::NativeCacheAdapter;
+use crate::cache::CacheCatalog;
 use crate::config::{CompiledConfig, ListenerKind};
 use crate::execution::{ExecutionRequest, execute_request};
 use crate::observer::{QueryObserver, QueryTerminalOutcome, QueryTransport, TerminalObservation};
@@ -27,7 +27,7 @@ const REFUSED: u8 = 5;
 pub struct UdpServer {
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
-    cache: Rc<NativeCacheAdapter>,
+    cache: Rc<CacheCatalog>,
     options: HostOptions,
     socket: Arc<UdpSocket>,
     observer: Arc<QueryObserver>,
@@ -121,6 +121,11 @@ impl UdpServer {
         }
 
         shutdown.cancel();
+        self.cache.stop_admission();
+        drain_tasks(&mut tasks, &mut task_error).await;
+        if let Err(error) = self.cache.stop_refreshes().await {
+            task_error = Some(error.to_string());
+        }
         finish_server(&self.forwards, &mut tasks, &mut task_error, receive_error).await
     }
 }
@@ -129,7 +134,7 @@ struct RequestTask {
     socket: Arc<UdpSocket>,
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
-    cache: Rc<NativeCacheAdapter>,
+    cache: Rc<CacheCatalog>,
     observer: Arc<QueryObserver>,
     options: HostOptions,
     raw: Vec<u8>,
@@ -396,6 +401,9 @@ mod tests {
             MachineStep::Dispatch(dispatch) => dispatch,
             MachineStep::ScopeComplete(completion) => {
                 panic!("unwatched machine yielded {completion:?}")
+            }
+            MachineStep::ScopeAborted(completion) => {
+                panic!("unwatched machine aborted {completion:?}")
             }
             MachineStep::Complete(_) => panic!("forward must dispatch"),
         };

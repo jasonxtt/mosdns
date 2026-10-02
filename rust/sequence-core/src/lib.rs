@@ -6,7 +6,8 @@ mod state;
 
 pub use engine::{
     CancellationState, CancellationToken, ExecutionCompletion, ExecutionControl, ExecutionError,
-    ExecutionMachine, ExternalDispatch, MachineStep, RootFuelHandle, ScopeCompletion, execute,
+    ExecutionMachine, ExternalDispatch, MachineStep, RootFuelHandle, ScopeCompletion,
+    SuccessorRecipe, WatchToken, execute,
 };
 pub use program::{
     DispatchMetadata, ExecutableId, ExecutableSpec, ExecutableTarget, ExecutableTargetSpec,
@@ -1421,7 +1422,7 @@ mod slice3_control_tests {
             "the caller's next rule must not run before the owner resumes"
         );
         let step = machine
-            .resume_scope_completion(completion.executable())
+            .resume_scope_completion(completion.token())
             .expect("scope resume");
         assert!(matches!(step, MachineStep::Complete(_)));
         assert_eq!(&*calls.borrow(), &["after"]);
@@ -1474,12 +1475,477 @@ mod slice3_control_tests {
         );
         assert!(
             machine.watch_enclosing_scope(dispatch.executable()).is_ok(),
-            "a single watch may arm"
+            "a watch may arm on the observed dispatch"
         );
         assert_eq!(
             machine.watch_enclosing_scope(dispatch.executable()),
-            Err(ExecutionError::ScopeWatchConflict(dispatch.executable()))
+            Err(ExecutionError::ResumeNotPending(dispatch.executable())),
+            "one dispatch may not arm twice"
         );
+    }
+
+    #[test]
+    fn a_terminal_machine_error_invalidates_every_armed_watch_without_a_notification() {
+        // Cancellation, exhausted budget and terminal executor errors stop the
+        // machine instead of unwinding a scope, so they produce no
+        // `ScopeAborted`. The contract they must still honour is that no armed
+        // watch survives a failed machine: an owner can never be left waiting
+        // for a boundary that will not complete.
+        let program = ProgramSpec::new(
+            vec![SequenceSpec::new(
+                "main",
+                vec![RuleSpec::unconditional(Some(vec![
+                    ExecutableSpec::External {
+                        target: crate::ExternalRef::new("a"),
+                    },
+                    ExecutableSpec::External {
+                        target: crate::ExternalRef::new("b"),
+                    },
+                    ExecutableSpec::External {
+                        target: crate::ExternalRef::new("c"),
+                    },
+                ]))],
+            )],
+            Vec::new(),
+        )
+        .with_externals(vec![
+            crate::ExternalSpec::new("a"),
+            crate::ExternalSpec::new("b"),
+            crate::ExternalSpec::new("c"),
+        ])
+        .validate()
+        .expect("valid three-leg program");
+        // Two fuel units: the first two dispatches consume them and the third
+        // rule fails on an exhausted shared budget.
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(3),
+        )
+        .expect("machine");
+        let MachineStep::Dispatch(first) = machine.step().expect("first dispatch") else {
+            panic!("the first external must dispatch");
+        };
+        machine
+            .watch_enclosing_scope(first.executable())
+            .expect("first watch arms");
+        let MachineStep::Dispatch(second) = machine
+            .resume(first.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("first resume")
+        else {
+            panic!("the second external must dispatch");
+        };
+        machine
+            .watch_enclosing_scope(second.executable())
+            .expect("second watch arms");
+        assert_eq!(machine.armed_watch_count(), 2);
+
+        let error = machine
+            .resume(second.executable(), Ok(ExecutorOutcome::Continue))
+            .expect_err("the exhausted budget must stop the machine");
+        assert_eq!(error, ExecutionError::BudgetExceeded);
+        assert!(machine.is_finished(), "a failed machine is terminal");
+        assert_eq!(
+            machine.armed_watch_count(),
+            0,
+            "no watch may outlive a failed machine"
+        );
+    }
+
+    #[test]
+    fn a_resumed_external_error_also_invalidates_every_armed_watch() {
+        // The other terminal transition: the owner supplies an executor error
+        // through `resume` instead of the machine discovering a stop while
+        // driving. It must invalidate watches exactly like the drive-time path.
+        let program = ProgramSpec::new(
+            vec![SequenceSpec::new(
+                "main",
+                vec![RuleSpec::unconditional(Some(vec![
+                    ExecutableSpec::External {
+                        target: crate::ExternalRef::new("a"),
+                    },
+                    ExecutableSpec::External {
+                        target: crate::ExternalRef::new("b"),
+                    },
+                ]))],
+            )],
+            Vec::new(),
+        )
+        .with_externals(vec![
+            crate::ExternalSpec::new("a"),
+            crate::ExternalSpec::new("b"),
+        ])
+        .validate()
+        .expect("valid two-leg program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(8),
+        )
+        .expect("machine");
+        let MachineStep::Dispatch(first) = machine.step().expect("first dispatch") else {
+            panic!("the first external must dispatch");
+        };
+        machine
+            .watch_enclosing_scope(first.executable())
+            .expect("first watch arms");
+        let MachineStep::Dispatch(second) = machine
+            .resume(first.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("first resume")
+        else {
+            panic!("the second external must dispatch");
+        };
+        machine
+            .watch_enclosing_scope(second.executable())
+            .expect("second watch arms");
+        assert_eq!(machine.armed_watch_count(), 2);
+
+        let error = machine
+            .resume(
+                second.executable(),
+                Err(ExecutorError::new("terminal executor failure")),
+            )
+            .expect_err("an executor error must stop the machine");
+        assert!(matches!(error, ExecutionError::Executor(_)), "{error:?}");
+        assert!(machine.is_finished(), "a failed machine is terminal");
+        assert_eq!(
+            machine.armed_watch_count(),
+            0,
+            "no watch may outlive a machine that failed through `resume`"
+        );
+    }
+
+    #[test]
+    fn an_exited_scope_aborts_only_its_own_watch_and_the_surviving_scope_keeps_its_token() {
+        // main(cache, try(child)) with child(cache, exit). Two watches are armed
+        // for the *same* executable in two scopes; only the child scope exits.
+        // The exit must invalidate exactly the child's watch, and the surviving
+        // root watch must still be reported later with its own token.
+        let program = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![
+                        RuleSpec::unconditional(Some(vec![ExecutableSpec::External {
+                            target: crate::ExternalRef::new("cache"),
+                        }])),
+                        RuleSpec::unconditional(Some(vec![ExecutableSpec::Try {
+                            target: ExecutableTargetSpec::Sequence(SequenceRef::new("child")),
+                        }])),
+                    ],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: crate::ExternalRef::new("cache"),
+                        },
+                        ExecutableSpec::Exit,
+                    ]))],
+                ),
+            ],
+            Vec::new(),
+        )
+        .with_externals(vec![crate::ExternalSpec::new("cache")])
+        .validate()
+        .expect("valid try program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(20),
+        )
+        .expect("machine");
+
+        let MachineStep::Dispatch(root_dispatch) = machine.step().expect("root dispatch") else {
+            panic!("the root cache must dispatch first");
+        };
+        let root_token = machine
+            .watch_enclosing_scope(root_dispatch.executable())
+            .expect("root watch arms");
+        let MachineStep::Dispatch(child_dispatch) = machine
+            .resume(root_dispatch.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("root resume")
+        else {
+            panic!("the child cache must dispatch next");
+        };
+        let child_token = machine
+            .watch_enclosing_scope(child_dispatch.executable())
+            .expect("child watch arms");
+        assert_ne!(root_token, child_token, "each watch has its own identity");
+        assert_eq!(machine.armed_watch_count(), 2);
+
+        // The child scope exits. Only its watch may be aborted.
+        let step = machine
+            .resume(child_dispatch.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("exit resume");
+        let MachineStep::ScopeAborted(aborted) = step else {
+            panic!("an exited scope must abort, not complete: {step:?}");
+        };
+        assert_eq!(
+            aborted.token(),
+            child_token,
+            "the aborted notification belongs to the exited scope's own watch"
+        );
+        assert_eq!(aborted.executable(), child_dispatch.executable());
+        assert_eq!(
+            machine.armed_watch_count(),
+            1,
+            "only the root watch survives"
+        );
+
+        // The surviving root boundary is still reported, with the root token.
+        let step = machine
+            .resume_scope_completion(child_token)
+            .expect("abort resume");
+        assert!(
+            !matches!(step, MachineStep::ScopeAborted(_)),
+            "the root scope has not stopped running yet: {step:?}"
+        );
+        let step = match step {
+            MachineStep::Dispatch(dispatch) => machine
+                .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+                .expect("main resume"),
+            other => other,
+        };
+        let MachineStep::ScopeComplete(completion) = step else {
+            panic!("the surviving root boundary must complete: {step:?}");
+        };
+        assert_eq!(
+            completion.token(),
+            root_token,
+            "the publishable boundary must be the root watch, never the exited one"
+        );
+    }
+
+    #[test]
+    fn watches_on_scopes_unwound_by_exit_propagation_are_never_orphaned() {
+        // main(try(child)) with child(cache, call(grandchild)) and
+        // grandchild(cache, exit). `exit` propagates through both the call scope
+        // and the try scope, so two scopes vanish in one step. Both watches must
+        // be retired; neither may survive against a dead scope identity.
+        let program = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![RuleSpec::unconditional(Some(vec![ExecutableSpec::Try {
+                        target: ExecutableTargetSpec::Sequence(SequenceRef::new("child")),
+                    }]))],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: crate::ExternalRef::new("cache"),
+                        },
+                        ExecutableSpec::Call {
+                            target: SequenceRef::new("grandchild"),
+                        },
+                    ]))],
+                ),
+                SequenceSpec::new(
+                    "grandchild",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: crate::ExternalRef::new("cache"),
+                        },
+                        ExecutableSpec::Exit,
+                    ]))],
+                ),
+            ],
+            Vec::new(),
+        )
+        .with_externals(vec![crate::ExternalSpec::new("cache")])
+        .validate()
+        .expect("valid propagation program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(20),
+        )
+        .expect("machine");
+        let MachineStep::Dispatch(first) = machine.step().expect("first dispatch") else {
+            panic!("the first cache must dispatch");
+        };
+        machine
+            .watch_enclosing_scope(first.executable())
+            .expect("first watch arms");
+        let MachineStep::Dispatch(second) = machine
+            .resume(first.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("first resume")
+        else {
+            panic!("the second cache must dispatch");
+        };
+        machine
+            .watch_enclosing_scope(second.executable())
+            .expect("second watch arms");
+        assert_eq!(machine.armed_watch_count(), 2);
+
+        let mut step = machine
+            .resume(second.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("exit resume");
+        let mut aborted = 0_usize;
+        while let MachineStep::ScopeAborted(completion) = step {
+            aborted += 1;
+            step = machine
+                .resume_scope_completion(completion.token())
+                .expect("abort resume");
+        }
+        assert_eq!(
+            aborted, 2,
+            "both unwound scopes must be reported, or a watch would be orphaned"
+        );
+        assert_eq!(machine.armed_watch_count(), 0, "no watch may survive");
+    }
+
+    #[test]
+    fn nested_watches_are_reported_in_lifo_order_at_their_own_boundaries() {
+        // main -> outer(cache_a, inner(cache_b)). Two cache dispatches live in
+        // two different enclosing scopes; both arm a watch, and the inner
+        // boundary must be reported before the outer one, each before the
+        // caller's next rule runs.
+        let program = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![RuleSpec::unconditional(Some(vec![ExecutableSpec::Call {
+                        target: SequenceRef::new("outer"),
+                    }]))],
+                ),
+                SequenceSpec::new(
+                    "outer",
+                    vec![
+                        RuleSpec::unconditional(Some(vec![ExecutableSpec::External {
+                            target: crate::ExternalRef::new("cache_a"),
+                        }])),
+                        RuleSpec::unconditional(Some(vec![ExecutableSpec::Call {
+                            target: SequenceRef::new("inner"),
+                        }])),
+                    ],
+                ),
+                SequenceSpec::new(
+                    "inner",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: crate::ExternalRef::new("cache_b"),
+                        },
+                    ]))],
+                ),
+            ],
+            Vec::new(),
+        )
+        .with_externals(vec![
+            crate::ExternalSpec::new("cache_a"),
+            crate::ExternalSpec::new("cache_b"),
+        ])
+        .validate()
+        .expect("valid nested program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(20),
+        )
+        .expect("machine");
+
+        let MachineStep::Dispatch(outer_dispatch) = machine.step().expect("outer dispatch") else {
+            panic!("the outer cache must dispatch first");
+        };
+        machine
+            .watch_enclosing_scope(outer_dispatch.executable())
+            .expect("outer watch arms");
+
+        let MachineStep::Dispatch(inner_dispatch) = machine
+            .resume(outer_dispatch.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("outer resume")
+        else {
+            panic!("the inner cache must dispatch next");
+        };
+        assert_ne!(inner_dispatch.executable(), outer_dispatch.executable());
+        machine
+            .watch_enclosing_scope(inner_dispatch.executable())
+            .expect("inner watch arms on its own enclosing scope");
+        assert_eq!(machine.armed_watch_count(), 2);
+
+        let step = machine
+            .resume(inner_dispatch.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("inner resume");
+        let MachineStep::ScopeComplete(completion) = step else {
+            panic!("the innermost watched scope must report first: {step:?}");
+        };
+        assert_eq!(
+            completion.executable(),
+            inner_dispatch.executable(),
+            "LIFO: the inner frame completes before the outer frame"
+        );
+        assert_eq!(machine.armed_watch_count(), 1);
+
+        let step = machine
+            .resume_scope_completion(completion.token())
+            .expect("inner scope resume");
+        let MachineStep::ScopeComplete(completion) = step else {
+            panic!("the outer watched scope must report second: {step:?}");
+        };
+        assert_eq!(completion.executable(), outer_dispatch.executable());
+        assert_eq!(machine.armed_watch_count(), 0);
+
+        assert!(matches!(
+            machine
+                .resume_scope_completion(completion.token())
+                .expect("outer scope resume"),
+            MachineStep::Complete(_)
+        ));
+    }
+
+    #[test]
+    fn a_watch_dropped_by_exit_never_reports_a_publishable_completion() {
+        let program = ProgramSpec::new(
+            vec![
+                SequenceSpec::new(
+                    "main",
+                    vec![RuleSpec::unconditional(Some(vec![ExecutableSpec::Call {
+                        target: SequenceRef::new("child"),
+                    }]))],
+                ),
+                SequenceSpec::new(
+                    "child",
+                    vec![RuleSpec::unconditional(Some(vec![
+                        ExecutableSpec::External {
+                            target: crate::ExternalRef::new("upstream"),
+                        },
+                        ExecutableSpec::Exit,
+                    ]))],
+                ),
+            ],
+            Vec::new(),
+        )
+        .with_externals(vec![crate::ExternalSpec::new("upstream")])
+        .validate()
+        .expect("valid exit program");
+        let mut machine = ExecutionMachine::new(
+            &program,
+            entry(&program),
+            state(),
+            ExecutionControl::with_fuel(20),
+        )
+        .expect("machine");
+        let MachineStep::Dispatch(dispatch) = machine.step().expect("dispatch") else {
+            panic!("the external must dispatch");
+        };
+        machine
+            .watch_enclosing_scope(dispatch.executable())
+            .expect("watch arms");
+        let step = machine
+            .resume(dispatch.executable(), Ok(ExecutorOutcome::Continue))
+            .expect("resume");
+        assert!(
+            !matches!(step, MachineStep::ScopeComplete(_)),
+            "an exited scope must not report a publishable completion: {step:?}"
+        );
+        assert_eq!(machine.armed_watch_count(), 0, "the dead watch was dropped");
     }
 
     #[test]

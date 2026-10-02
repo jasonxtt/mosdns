@@ -124,6 +124,9 @@ fn run_owned_sync(
         MachineStep::ScopeComplete(completion) => {
             panic!("unwatched machine unexpectedly yielded {completion:?}")
         }
+        MachineStep::ScopeAborted(completion) => {
+            panic!("unwatched machine unexpectedly aborted {completion:?}")
+        }
         MachineStep::Dispatch(dispatch) => {
             panic!("sync fixture machine unexpectedly yielded {dispatch:?}")
         }
@@ -148,7 +151,8 @@ fn run_owned_external(
                 .resume(dispatch.executable(), outcome)
                 .map(|step| match step {
                     MachineStep::Complete(completion) => completion,
-                    MachineStep::ScopeComplete(completion) => {
+                    MachineStep::ScopeComplete(completion)
+                    | MachineStep::ScopeAborted(completion) => {
                         panic!("unwatched machine yielded {completion:?}")
                     }
                     MachineStep::Dispatch(next) => {
@@ -157,7 +161,7 @@ fn run_owned_external(
                 })
         }
         MachineStep::Complete(completion) => Ok(completion),
-        MachineStep::ScopeComplete(completion) => {
+        MachineStep::ScopeComplete(completion) | MachineStep::ScopeAborted(completion) => {
             panic!("unwatched machine yielded {completion:?}")
         }
     };

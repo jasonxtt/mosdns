@@ -10,6 +10,8 @@ name = "mosdns"
 path = "src/main.rs"
 
 [dependencies]
+flate2 = "=1.1.9"
+hickory-proto = { version = "0.25.2", default-features = false }
 mosdns-cache-core = { path = "../cache-core" }
 mosdns-dns-core = { path = "../dns-core" }
 mosdns-matcher-core = { path = "../matcher-core" }
@@ -21,7 +23,7 @@ getrandom = { version = "0.4.3", default-features = false, features = ["std"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 time = { version = "0.3", features = ["formatting"] }
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "signal"] }
 url = "2"
 yaml_serde = "=0.10.7"
 

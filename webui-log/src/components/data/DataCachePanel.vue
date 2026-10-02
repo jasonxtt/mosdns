@@ -8,6 +8,10 @@ defineProps({
     type: Object,
     required: true
   },
+  cacheError: {
+    type: String,
+    default: ''
+  },
   cacheRows: {
     type: Array,
     default: () => []
@@ -15,6 +19,10 @@ defineProps({
 })
 
 defineEmits(['clear-all', 'open-cache', 'clear-cache'])
+
+function metricValue(value) {
+  return value === null || value === undefined ? '—' : Number(value).toLocaleString()
+}
 </script>
 
 <template>
@@ -29,6 +37,8 @@ defineEmits(['clear-all', 'open-cache', 'clear-cache'])
         </button>
       </div>
     </header>
+
+    <p v-if="cacheError" role="alert">缓存列表加载失败：{{ cacheError }}</p>
 
     <div class="table-wrap cache-table-wrap data-scroll-wrap">
       <table class="cache-adaptive-table">
@@ -46,18 +56,18 @@ defineEmits(['clear-all', 'open-cache', 'clear-cache'])
         </thead>
         <tbody>
           <tr v-if="cacheRows.length === 0">
-            <td colspan="8" class="empty">暂无缓存数据</td>
+            <td colspan="8" class="empty">{{ cacheError ? '缓存数据加载失败' : '暂无缓存数据' }}</td>
           </tr>
           <tr v-for="cache in cacheRows" :key="cache.key">
             <td>{{ cache.name }}</td>
-            <td>{{ Number(cache.query_total || 0).toLocaleString() }}</td>
-            <td>{{ Number(cache.hit_total || 0).toLocaleString() }}</td>
-            <td>{{ Number(cache.lazy_hit_total || 0).toLocaleString() }}</td>
+            <td>{{ metricValue(cache.query_total) }}</td>
+            <td>{{ metricValue(cache.hit_total) }}</td>
+            <td>{{ metricValue(cache.lazy_hit_total) }}</td>
             <td>{{ cache.hit_rate }}</td>
             <td>{{ cache.lazy_hit_rate }}</td>
             <td>
               <button class="btn-link" type="button" @click="$emit('open-cache', cache)">
-                {{ Number(cache.size_current || 0).toLocaleString() }}
+                {{ metricValue(cache.size_current) }}
               </button>
             </td>
             <td>

@@ -8,6 +8,7 @@ import DataViewModal from './data/DataViewModal.vue'
 import { openConfirm } from '../utils/confirm'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 import { formatRelativeTime, isZeroTime } from '../utils/time'
+import { loadCacheInventory, parseCacheMetrics, summarizeCacheFlush } from '../utils/cacheInventory'
 
 const props = defineProps({
   mode: {
@@ -20,7 +21,9 @@ const loading = ref(false)
 
 const specialGroups = ref([])
 const cacheRows = ref([])
+const nativeCacheInventory = ref(undefined)
 const cacheRefreshing = ref(false)
+const cacheLoadError = ref('')
 const cacheClearingAll = ref(false)
 const cacheClearingByTag = reactive({})
 const coreMode = ref('')
@@ -119,6 +122,8 @@ const requeryTriggerPending = ref(false)
 const requeryTriggerRequestedAt = ref(0)
 
 const cacheConfig = computed(() => {
+  if (Array.isArray(nativeCacheInventory.value)) return nativeCacheInventory.value
+  if (nativeCacheInventory.value === undefined) return []
   const dynamic = [...specialGroups.value]
     .sort((a, b) => Number(a.slot) - Number(b.slot))
     .map((group) => ({
@@ -130,6 +135,7 @@ const cacheConfig = computed(() => {
 })
 
 const visibleCacheConfig = computed(() => {
+  if (Array.isArray(nativeCacheInventory.value)) return cacheConfig.value
   const mode = String(coreMode.value || '').trim().toUpperCase()
   if (mode !== 'A' && mode !== 'B') {
     return cacheConfig.value
@@ -235,39 +241,16 @@ function toUtcISOString(localDatetime) {
   return date.toISOString()
 }
 
-function parseMetrics(metricsText, cacheTag) {
-  const lines = String(metricsText || '').split('\n')
-  const stats = { query_total: 0, hit_total: 0, lazy_hit_total: 0, size_current: 0 }
-  const queryKey = `mosdns_cache_query_total{tag="${cacheTag}"}`
-  const hitKey = `mosdns_cache_hit_total{tag="${cacheTag}"}`
-  const lazyKey = `mosdns_cache_lazy_hit_total{tag="${cacheTag}"}`
-  const sizeKey = `mosdns_cache_size_current{tag="${cacheTag}"}`
-
-  lines.forEach((line) => {
-    if (line.startsWith(queryKey)) {
-      stats.query_total = Number.parseFloat(line.split(' ')[1] || '0') || 0
-    } else if (line.startsWith(hitKey)) {
-      stats.hit_total = Number.parseFloat(line.split(' ')[1] || '0') || 0
-    } else if (line.startsWith(lazyKey)) {
-      stats.lazy_hit_total = Number.parseFloat(line.split(' ')[1] || '0') || 0
-    } else if (line.startsWith(sizeKey)) {
-      stats.size_current = Number.parseFloat(line.split(' ')[1] || '0') || 0
-    }
-  })
-
-  return stats
-}
-
 function buildCacheRows(metricsText) {
   cacheRows.value = visibleCacheConfig.value.map((cache) => {
-    const stats = parseMetrics(metricsText, cache.tag)
-    const hitRate = stats.query_total > 0 ? ((stats.hit_total / stats.query_total) * 100).toFixed(2) : '0.00'
-    const lazyRate = stats.query_total > 0 ? ((stats.lazy_hit_total / stats.query_total) * 100).toFixed(2) : '0.00'
+    const stats = parseCacheMetrics(metricsText, cache.tag)
+    const hitRate = stats.query_total === null || stats.hit_total === null ? null : stats.query_total > 0 ? ((stats.hit_total / stats.query_total) * 100).toFixed(2) : '0.00'
+    const lazyRate = stats.query_total === null || stats.lazy_hit_total === null ? null : stats.query_total > 0 ? ((stats.lazy_hit_total / stats.query_total) * 100).toFixed(2) : '0.00'
     return {
       ...cache,
       ...stats,
-      hit_rate: `${hitRate}%`,
-      lazy_hit_rate: `${lazyRate}%`
+      hit_rate: hitRate === null ? '—' : `${hitRate}%`,
+      lazy_hit_rate: lazyRate === null ? '—' : `${lazyRate}%`
     }
   })
 }
@@ -310,18 +293,24 @@ async function postEmpty(url) {
 
 async function refreshCacheStats(showMessage = false) {
   cacheRefreshing.value = true
+  cacheLoadError.value = ''
   try {
-    const [groupsRes, metricsText] = await Promise.all([
-      getJSON('/api/v1/special-groups').catch(() => []),
-      getText('/metrics')
-    ])
-    specialGroups.value = Array.isArray(groupsRes) ? groupsRes : []
-    await loadCoreMode()
+    const inventory = await loadCacheInventory(getJSON)
+    nativeCacheInventory.value = inventory
+    if (inventory === null) {
+      const groupsRes = await getJSON('/api/v1/special-groups').catch(() => [])
+      specialGroups.value = Array.isArray(groupsRes) ? groupsRes : []
+      await loadCoreMode()
+    }
+    const metricsText = await getText('/metrics')
     buildCacheRows(metricsText)
     if (showMessage) {
       setSuccess('缓存统计已刷新')
     }
   } catch (error) {
+    nativeCacheInventory.value = undefined
+    cacheRows.value = []
+    cacheLoadError.value = error.message
     setError(`刷新缓存统计失败: ${error.message}`)
   } finally {
     cacheRefreshing.value = false
@@ -334,7 +323,7 @@ async function clearSingleCache(cacheTag, cacheName) {
   }
   cacheClearingByTag[cacheTag] = true
   try {
-    await requestResponse(`/plugins/${cacheTag}/flush`)
+    await requestResponse(`/plugins/${encodeURIComponent(cacheTag)}/flush`)
     await refreshCacheStats()
     setSuccess(`缓存“${cacheName}”已清空`)
   } catch (error) {
@@ -350,13 +339,14 @@ async function clearAllCaches() {
   }
   cacheClearingAll.value = true
   try {
+    const targets = [...visibleCacheConfig.value]
     const results = await Promise.allSettled(
-      visibleCacheConfig.value.map((cache) => requestResponse(`/plugins/${cache.tag}/flush`))
+      targets.map((cache) => requestResponse(`/plugins/${encodeURIComponent(cache.tag)}/flush`))
     )
-    const failed = results.filter((item) => item.status === 'rejected').length
+    const summary = summarizeCacheFlush(targets, results)
     await refreshCacheStats()
-    if (failed > 0) {
-      setError(`全部缓存已执行清空，失败 ${failed} 个`)
+    if (summary.failed.length > 0) {
+      setError(`已清空 ${summary.succeeded} 个缓存；失败：${summary.failed.join('、')}`)
       return
     }
     setSuccess('全部缓存已清空')
@@ -470,7 +460,7 @@ function parseCacheEntries(text, startOffset = 0) {
 async function fetchDataView(append = false) {
   const endpoint = dataView.mode === 'domain'
     ? dataViewListEndpointMap[dataView.listType]
-    : `/plugins/${dataView.cacheTag}/show`
+    : `/plugins/${encodeURIComponent(dataView.cacheTag)}/show`
 
   if (!endpoint) {
     dataView.error = '无效的数据来源'
@@ -880,6 +870,7 @@ onBeforeUnmount(() => {
       :cache-clearing-all="cacheClearingAll"
       :cache-clearing-by-tag="cacheClearingByTag"
       :cache-rows="cacheRows"
+      :cache-error="cacheLoadError"
       @clear-all="clearAllCaches"
       @open-cache="openDataViewForCache"
       @clear-cache="clearCacheRow"

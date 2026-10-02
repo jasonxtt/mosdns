@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::cache::{CacheAdapterError, CacheClock, NativeCacheAdapter};
+use crate::cache::{CacheAdapterError, CacheCatalog, CacheClock};
 use mosdns_dns_core::parse_query;
 use mosdns_upstream_core::secure::{DohUpstream, DotUpstream};
 use mosdns_upstream_core::{
@@ -35,6 +35,7 @@ pub(crate) const DEFAULT_AUDIT_CAPACITY: usize = 100_000;
 /// Configuration files cannot override these values in this task.
 #[derive(Clone)]
 pub struct HostOptions {
+    pub(crate) refresh_environment: Option<Rc<crate::execution::RefreshEnvironment>>,
     pub request_deadline: Duration,
     pub cancellation: Option<TransportCancellation>,
     pub cache_clock: Rc<dyn CacheClock>,
@@ -47,6 +48,7 @@ pub struct HostOptions {
 impl Default for HostOptions {
     fn default() -> Self {
         Self {
+            refresh_environment: None,
             request_deadline: Duration::from_secs(5),
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
@@ -64,6 +66,7 @@ impl HostOptions {
     #[must_use]
     pub fn with_deadline(request_deadline: Duration) -> Self {
         Self {
+            refresh_environment: None,
             request_deadline,
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
@@ -148,7 +151,7 @@ impl HostRuntime {
 pub struct HostAssembly {
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
-    cache: Rc<NativeCacheAdapter>,
+    cache: Rc<CacheCatalog>,
     observer: Arc<QueryObserver>,
     runtime: HostRuntime,
     options: HostOptions,
@@ -202,7 +205,7 @@ impl HostAssembly {
 
     fn with_options_and_optional_state_root(
         config: CompiledConfig,
-        options: HostOptions,
+        mut options: HostOptions,
         state_root: Option<PathBuf>,
     ) -> Result<Self, AssemblyError> {
         let config = Rc::new(config);
@@ -210,13 +213,30 @@ impl HostAssembly {
             ForwardCatalog::from_compiled_config(&config, options.tls_roots.clone())
                 .map_err(AssemblyError::Catalog)?,
         );
-        let cache = Rc::new(
-            NativeCacheAdapter::with_capacity_and_clock(
-                config.cache.as_ref().map_or(1, |cache| cache.capacity),
-                options.cache_clock.clone(),
-            )
-            .map_err(AssemblyError::Cache)?,
-        );
+        // One store per compiled cache. Named caches and inline callsites alike
+        // get a private instance, so nothing is shared between dispatches.
+        let cache = Rc::new(CacheCatalog::from_adapters(
+            config
+                .caches
+                .iter()
+                .map(|compiled| {
+                    crate::cache::NativeCacheAdapter::with_options_and_clock(
+                        compiled.capacity,
+                        compiled.lazy_cache_ttl_secs,
+                        options.cache_clock.clone(),
+                    )
+                    .map(|adapter| {
+                        adapter
+                            .with_exclusions(&compiled.exclude_ip)
+                            .with_persistence(
+                                compiled.dump_file.clone(),
+                                compiled.dump_interval_secs,
+                            )
+                    })
+                })
+                .collect::<Result<Vec<_>, CacheAdapterError>>()
+                .map_err(AssemblyError::Cache)?,
+        ));
         let upstream_identities = config
             .forwards
             .iter()
@@ -259,6 +279,12 @@ impl HostAssembly {
             )
             .map_err(|error| AssemblyError::Runtime(error.to_string()))?,
         );
+        options.refresh_environment = Some(Rc::new(crate::execution::RefreshEnvironment {
+            config: config.clone(),
+            cache: Rc::downgrade(&cache),
+            forwards: forwards.clone(),
+            observer: observer.clone(),
+        }));
         Ok(Self {
             config,
             forwards,
@@ -283,7 +309,7 @@ impl HostAssembly {
     }
 
     #[must_use]
-    pub fn cache(&self) -> &NativeCacheAdapter {
+    pub fn cache(&self) -> &CacheCatalog {
         &self.cache
     }
 
@@ -376,7 +402,7 @@ impl HostAssembly {
         Rc::clone(&self.forwards)
     }
 
-    pub(crate) fn cache_handle(&self) -> Rc<NativeCacheAdapter> {
+    pub(crate) fn cache_handle(&self) -> Rc<CacheCatalog> {
         Rc::clone(&self.cache)
     }
 
@@ -388,6 +414,7 @@ impl HostAssembly {
     /// bind drops the listeners that already succeeded, so no socket survives a
     /// failed startup.
     pub async fn bind_host(&self) -> Result<BoundHost, HostRunError> {
+        self.cache.load_startup().await;
         let dns = match self.config.listener.kind {
             crate::config::ListenerKind::Udp => {
                 let server = UdpServer::bind_configured(self)
@@ -407,6 +434,7 @@ impl HostAssembly {
             Some(config) => {
                 let server = ApiServer::bind(
                     self.config_handle(),
+                    self.cache_handle(),
                     self.observer_handle(),
                     self.state_root.clone(),
                     self.audit_persistence_faults.clone(),
@@ -425,6 +453,7 @@ impl HostAssembly {
             None => (None, None),
         };
         Ok(BoundHost {
+            cache: self.cache_handle(),
             dns,
             dns_addr,
             api,
@@ -436,10 +465,19 @@ impl HostAssembly {
     /// management listener, then serves both under one shutdown scope. A
     /// failure on either side cancels and joins the other before returning.
     pub async fn serve_host(&self) -> Result<(), HostRunError> {
-        self.bind_host()
-            .await?
-            .serve(TransportCancellation::new())
-            .await
+        let bound = self.bind_host().await?;
+        let shutdown = TransportCancellation::new();
+        let serving = bound.serve(shutdown.clone());
+        tokio::pin!(serving);
+        tokio::select! {
+            result = &mut serving => result,
+            signal = shutdown_signal() => {
+                shutdown.cancel();
+                let drained = serving.await;
+                drained?;
+                signal.map_err(|error| HostRunError::Task(format!("shutdown signal: {error}")))
+            },
+        }
     }
 
     /// Binds and serves the configured UDP listener without opening any
@@ -459,6 +497,22 @@ impl HostAssembly {
     /// management listener, owned by one shutdown scope.
     pub fn run(&self) -> Result<(), HostRunError> {
         self.block_on(self.serve_host())
+    }
+}
+
+async fn shutdown_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        let mut interrupt =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+        tokio::select! { _ = terminate.recv() => {}, _ = interrupt.recv() => {} }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await
     }
 }
 
@@ -487,6 +541,7 @@ impl DnsServer {
 /// Every listener the supervisor bound, before any of them started serving.
 /// The sockets are released when this value is dropped or its `serve` returns.
 pub struct BoundHost {
+    cache: Rc<CacheCatalog>,
     dns: DnsServer,
     dns_addr: std::net::SocketAddr,
     api: Option<ApiServer>,
@@ -519,11 +574,13 @@ impl BoundHost {
     /// upstream-catalog close, so the management side never closes it.
     pub async fn serve(self, shutdown: TransportCancellation) -> Result<(), HostRunError> {
         let Self {
+            cache,
             dns,
             dns_addr: _,
             api,
             api_addr: _,
         } = self;
+        cache.start_periodic(&shutdown);
         let mut tasks: JoinSet<Result<(), HostRunError>> = JoinSet::new();
         {
             let scope = shutdown.child_token();
@@ -553,6 +610,12 @@ impl BoundHost {
                     shutdown.cancel();
                 }
             }
+        }
+        if let Err(error) = cache.stop_refreshes().await {
+            failure.get_or_insert(HostRunError::Task(error.to_string()));
+        }
+        if let Err(error) = cache.finish_persistence().await {
+            failure.get_or_insert(HostRunError::Task(error.to_string()));
         }
         match failure {
             Some(error) => Err(error),

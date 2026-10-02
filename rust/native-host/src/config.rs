@@ -251,13 +251,57 @@ pub struct SequenceConfig {
     pub forward_executable: Option<ExecutableId>,
 }
 
-/// The one native cache dispatch accepted by this host.
+/// A compile-time cache identity. One id owns exactly one cache store and one
+/// lifecycle owner; a named cache keeps its configured tag, while a quick cache
+/// owns a synthetic tag that is never exposed through the management catalog.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct CacheId(pub usize);
+
+/// How one compiled cache was declared.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheKind {
+    /// A `type: cache` plugin definition. It is managed: catalog listing, dump
+    /// persistence and the plugin management actions apply to it.
+    Named,
+    /// An inline `exec: cache` callsite. It is owned and drained by the host
+    /// like a named cache but has no tag, no dump and no public metrics.
+    Quick,
+}
+
+/// One native cache dispatch accepted by this host. Several named caches may
+/// coexist; every callsite that uses the inline form owns a private instance.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CachePluginConfig {
+    pub id: CacheId,
+    /// The configured tag for a named cache, or a synthetic stable identity for
+    /// a quick callsite. Only [`CacheKind::Named`] identities are public.
     pub tag: String,
     pub executable: ExecutableId,
+    pub kind: CacheKind,
     /// The configured entry capacity, passed to the bounded cache store.
     pub capacity: u64,
+    /// Milliseconds-free retention window for a stale-but-usable response. Zero
+    /// disables lazy retention entirely.
+    pub lazy_cache_ttl_secs: u32,
+    /// The resolved absolute dump target, when one was configured.
+    pub dump_file: Option<PathBuf>,
+    /// The periodic dump interval. It is accepted even without a dump file.
+    pub dump_interval_secs: u64,
+    /// Declared `exclude_ip` entries, verbatim, including ones that fail to
+    /// parse. Invalid entries are warned and skipped at store time, matching
+    /// the product behavior, so they must survive compilation.
+    pub exclude_ip: Vec<String>,
+}
+
+impl CachePluginConfig {
+    /// The management identity of this cache, when it has one.
+    #[must_use]
+    pub fn public_tag(&self) -> Option<&str> {
+        match self.kind {
+            CacheKind::Named => Some(self.tag.as_str()),
+            CacheKind::Quick => None,
+        }
+    }
 }
 
 /// A target that a native branch policy can execute without exposing policy
@@ -404,7 +448,9 @@ pub struct CompiledConfig {
     pub forwards: Vec<ForwardConfig>,
     pub forward_definitions: Vec<ForwardDefinitionConfig>,
     pub forward_invocations: Vec<ForwardInvocationConfig>,
-    pub cache: Option<CachePluginConfig>,
+    /// Every compiled cache, named definitions first in declaration order and
+    /// then quick callsites in compile order. `CacheId(i)` indexes this vector.
+    pub caches: Vec<CachePluginConfig>,
     pub fallbacks: Vec<FallbackConfig>,
     pub preferences: Vec<PreferenceConfig>,
     pub sequence: SequenceConfig,
@@ -421,6 +467,22 @@ impl CompiledConfig {
     #[must_use]
     pub fn domain_set(&self, tag: &str) -> Option<&DomainSetConfig> {
         self.domain_sets.iter().find(|set| set.tag == tag)
+    }
+
+    /// Resolves the cache a dispatch executable belongs to, when it is one.
+    #[must_use]
+    pub fn cache_for_executable(&self, executable: ExecutableId) -> Option<&CachePluginConfig> {
+        self.caches
+            .iter()
+            .find(|cache| cache.executable == executable)
+    }
+
+    /// The named caches in configuration order. Quick callsites are private
+    /// implementation identities and are deliberately absent.
+    pub fn named_caches(&self) -> impl Iterator<Item = &CachePluginConfig> {
+        self.caches
+            .iter()
+            .filter(|cache| cache.kind == CacheKind::Named)
     }
 
     /// Creates the canonical resumable sequence machine for one parsed query.
@@ -610,6 +672,17 @@ struct PluginCatalog<'a> {
     fast_marks: &'a [(String, FastMarkConfig)],
     forwards: &'a RefCell<ForwardCompiler>,
     preferences: &'a RefCell<Vec<(String, PreferenceFamily)>>,
+    /// Inline `exec: cache` callsites discovered while sequences compile. Each
+    /// entry owns a private cache instance keyed by its synthetic external name.
+    quick_caches: &'a RefCell<Vec<QuickCacheSpec>>,
+}
+
+/// One inline cache callsite: the synthetic external the sequence dispatches
+/// and the validated options that instance owns.
+struct QuickCacheSpec {
+    external: String,
+    tag: String,
+    args: CompiledCacheArgs,
 }
 
 impl PluginCatalog<'_> {
@@ -744,7 +817,7 @@ fn compile_definitions(
     let mut flow_setters = Vec::new();
     let mut fallback_definitions = Vec::new();
     let mut upstream_identities: BTreeMap<String, String> = BTreeMap::new();
-    let mut cache = None;
+    let mut caches: Vec<(String, CompiledCacheArgs, String)> = Vec::new();
     let mut listener = None;
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
@@ -783,13 +856,7 @@ fn compile_definitions(
                 forwards.push(forward);
             }
             PluginKind::Cache => {
-                if cache.is_some() {
-                    return Err(ConfigError::new(
-                        format!("{}.tag", plugin.source_path),
-                        "exactly one cache plugin is supported",
-                    ));
-                }
-                cache = Some((
+                caches.push((
                     plugin.tag.clone(),
                     compile_cache(plugin)?,
                     plugin.source_path.clone(),
@@ -811,12 +878,14 @@ fn compile_definitions(
         invocations: Vec::new(),
     });
     let preference_invocations = RefCell::new(Vec::new());
+    let quick_caches = RefCell::new(Vec::new());
     let catalog = PluginCatalog {
         kinds: &kinds,
         domain_sets: &domain_sets,
         fast_marks: &fast_marks,
         forwards: &forward_compiler,
         preferences: &preference_invocations,
+        quick_caches: &quick_caches,
     };
     let mut sequences = Vec::new();
     let mut fixtures = Vec::new();
@@ -891,14 +960,20 @@ fn compile_definitions(
         }
     }
     let preference_invocations = preference_invocations.into_inner();
+    let quick_cache_specs = quick_caches.into_inner();
     let externals: Vec<ExternalSpec> = forward_compiler
         .invocations
         .iter()
         .map(|(name, _, _)| ExternalSpec::new(name.clone()))
         .chain(
-            cache
-                .as_ref()
+            caches
+                .iter()
                 .map(|(tag, _, _)| ExternalSpec::new(tag.clone())),
+        )
+        .chain(
+            quick_cache_specs
+                .iter()
+                .map(|spec| ExternalSpec::new(spec.external.clone())),
         )
         .chain(
             resolved_fallback_definitions
@@ -952,20 +1027,62 @@ fn compile_definitions(
             entries,
         });
     }
-    let compiled_cache = cache
-        .map(|(tag, capacity, path)| {
-            let executable = program
-                .externals
-                .iter()
-                .find_map(|(id, external)| (external.name == tag).then_some(*id))
-                .ok_or_else(|| ConfigError::new(path, "compiled cache external is missing"))?;
-            Ok(CachePluginConfig {
-                tag,
-                executable,
-                capacity,
-            })
-        })
-        .transpose()?;
+    // Named caches keep their declaration order; quick callsites follow in
+    // compile order. `CacheId(i)` is a stable index into this vector, so the
+    // order must be deterministic and identical for every compile.
+    let mut compiled_caches: Vec<CachePluginConfig> = Vec::new();
+    for (tag, args, path) in caches {
+        let executable = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == tag).then_some(*id))
+            .ok_or_else(|| ConfigError::new(path, "compiled cache external is missing"))?;
+        compiled_caches.push(CachePluginConfig {
+            id: CacheId(compiled_caches.len()),
+            tag,
+            executable,
+            kind: CacheKind::Named,
+            capacity: args.capacity,
+            lazy_cache_ttl_secs: args.lazy_cache_ttl_secs,
+            dump_file: args.dump_file,
+            dump_interval_secs: args.dump_interval_secs,
+            exclude_ip: args.exclude_ip,
+        });
+    }
+    let mut dump_targets = std::collections::BTreeSet::new();
+    for cache in &compiled_caches {
+        if let Some(path) = &cache.dump_file {
+            if !dump_targets.insert(path.clone()) {
+                return Err(ConfigError::new(
+                    "$.plugins[cache].args.dump_file",
+                    "duplicate resolved dump_file target",
+                ));
+            }
+        }
+    }
+    for spec in quick_cache_specs {
+        let executable = program
+            .externals
+            .iter()
+            .find_map(|(id, external)| (external.name == spec.external).then_some(*id))
+            .ok_or_else(|| {
+                ConfigError::new(
+                    "$.plugins[sequence].args",
+                    "compiled quick cache is missing",
+                )
+            })?;
+        compiled_caches.push(CachePluginConfig {
+            id: CacheId(compiled_caches.len()),
+            tag: spec.tag,
+            executable,
+            kind: CacheKind::Quick,
+            capacity: spec.args.capacity,
+            lazy_cache_ttl_secs: spec.args.lazy_cache_ttl_secs,
+            dump_file: spec.args.dump_file,
+            dump_interval_secs: spec.args.dump_interval_secs,
+            exclude_ip: spec.args.exclude_ip,
+        });
+    }
 
     let fallbacks = resolved_fallback_definitions
         .into_iter()
@@ -1015,7 +1132,7 @@ fn compile_definitions(
         forwards: compiled_forwards,
         forward_definitions: forward_compiler.definitions,
         forward_invocations,
-        cache: compiled_cache,
+        caches: compiled_caches,
         fallbacks,
         preferences,
         sequence: SequenceConfig {
@@ -1519,22 +1636,159 @@ fn string_list(value: Option<&RawValue>, path: &str) -> Result<Vec<String>, Conf
         .collect()
 }
 
-fn compile_cache(plugin: &RawPlugin) -> Result<u64, ConfigError> {
+/// The product default entry capacity for a cache whose `size` is absent or
+/// non-positive.
+const DEFAULT_CACHE_SIZE: u64 = 1024;
+
+/// The product default periodic dump interval, in seconds.
+const DEFAULT_CACHE_DUMP_INTERVAL_SECS: u64 = 600;
+
+fn compile_cache(plugin: &RawPlugin) -> Result<CompiledCacheArgs, ConfigError> {
     let path = format!("{}.args", plugin.source_path);
     let args = expect_map(&plugin.args, &path, "cache args must be a mapping")?;
-    args.reject_unknown(&["size", "lazy_cache_ttl"], &path)?;
-    let size = expect_positive_integer(args.required("size", &path)?, &format!("{path}.size"))?;
-    let lazy_cache_ttl = expect_nonnegative_integer(
-        args.required("lazy_cache_ttl", &path)?,
-        &format!("{path}.lazy_cache_ttl"),
+    args.reject_unknown(
+        &[
+            "size",
+            "lazy_cache_ttl",
+            "dump_file",
+            "dump_interval",
+            "exclude_ip",
+            "enable_ecs",
+        ],
+        &path,
     )?;
-    if lazy_cache_ttl != 0 {
-        return Err(ConfigError::new(
-            format!("{path}.lazy_cache_ttl"),
-            "lazy_cache_ttl must be exactly 0",
-        ));
+    // Absent or non-positive values fall back to the product defaults instead
+    // of being rejected, matching the reference cache plugin's `init`.
+    let capacity = match args.get("size") {
+        None | Some(RawValue::Null) => DEFAULT_CACHE_SIZE,
+        Some(value) => {
+            let size = expect_integer(value, &format!("{path}.size"))?;
+            if size <= 0 {
+                DEFAULT_CACHE_SIZE
+            } else {
+                u64::try_from(size)
+                    .map_err(|_| ConfigError::new(format!("{path}.size"), "size is out of range"))?
+            }
+        }
+    };
+    let lazy_cache_ttl_secs = match args.get("lazy_cache_ttl") {
+        None | Some(RawValue::Null) => 0,
+        Some(value) => {
+            let ttl = expect_integer(value, &format!("{path}.lazy_cache_ttl"))?;
+            if ttl < 0 {
+                return Err(ConfigError::new(
+                    format!("{path}.lazy_cache_ttl"),
+                    "lazy_cache_ttl must not be negative",
+                ));
+            }
+            u32::try_from(ttl).map_err(|_| {
+                ConfigError::new(
+                    format!("{path}.lazy_cache_ttl"),
+                    "lazy_cache_ttl is out of range",
+                )
+            })?
+        }
+    };
+    let dump_interval_secs = match args.get("dump_interval") {
+        None | Some(RawValue::Null) => DEFAULT_CACHE_DUMP_INTERVAL_SECS,
+        Some(value) => {
+            let interval = expect_integer(value, &format!("{path}.dump_interval"))?;
+            if interval <= 0 {
+                DEFAULT_CACHE_DUMP_INTERVAL_SECS
+            } else {
+                u64::try_from(interval).map_err(|_| {
+                    ConfigError::new(
+                        format!("{path}.dump_interval"),
+                        "dump_interval is out of range",
+                    )
+                })?
+            }
+        }
+    };
+    let dump_file = match args.get("dump_file") {
+        None | Some(RawValue::Null) => None,
+        Some(value) => {
+            let declared = expect_string(value, &format!("{path}.dump_file"))?;
+            if declared.is_empty() {
+                return Err(ConfigError::new(
+                    format!("{path}.dump_file"),
+                    "dump_file must not be empty",
+                ));
+            }
+            let resolved = resolve_relative(&declared, &plugin.base_dir);
+            let absolute = if resolved.is_absolute() {
+                resolved
+            } else {
+                std::env::current_dir()
+                    .map_err(|e| ConfigError::new(&path, e.to_string()))?
+                    .join(resolved)
+            };
+            let mut normalized = PathBuf::new();
+            for component in absolute.components() {
+                match component {
+                    std::path::Component::CurDir => {}
+                    std::path::Component::ParentDir => {
+                        normalized.pop();
+                    }
+                    part => normalized.push(part.as_os_str()),
+                }
+            }
+            Some(normalized)
+        }
+    };
+    match args.get("enable_ecs") {
+        None | Some(RawValue::Null) => {}
+        Some(value) => {
+            let enabled = expect_bool(value, &format!("{path}.enable_ecs"))?;
+            if enabled {
+                return Err(ConfigError::new(
+                    format!("{path}.enable_ecs"),
+                    "enable_ecs=true is not supported by the native cache: ECS queries bypass the cache and ECS key isolation is not implemented",
+                ));
+            }
+        }
     }
-    Ok(size)
+    // The shape is still validated the way the product does, so a malformed
+    // declaration reports the same reason it always did; a well-formed one is
+    // refused because answer filtering is not implemented yet.
+    let exclude_ip = match args.get("exclude_ip") {
+        None | Some(RawValue::Null) => Vec::new(),
+        Some(value) => match value {
+            RawValue::String(value) => value.split_whitespace().map(str::to_owned).collect(),
+            RawValue::Sequence(values) => {
+                let mut entries = Vec::with_capacity(values.len());
+                for (index, value) in values.iter().enumerate() {
+                    entries.push(expect_string(
+                        value,
+                        &format!("{path}.exclude_ip[{index}]"),
+                    )?);
+                }
+                entries
+            }
+            _ => {
+                return Err(ConfigError::new(
+                    format!("{path}.exclude_ip"),
+                    "exclude_ip must be a whitespace-separated string or a list of strings",
+                ));
+            }
+        },
+    };
+    Ok(CompiledCacheArgs {
+        capacity,
+        lazy_cache_ttl_secs,
+        dump_file,
+        dump_interval_secs,
+        exclude_ip,
+    })
+}
+
+/// The validated cache arguments before an executable identity is known.
+struct CompiledCacheArgs {
+    capacity: u64,
+    lazy_cache_ttl_secs: u32,
+    dump_file: Option<PathBuf>,
+    dump_interval_secs: u64,
+    exclude_ip: Vec<String>,
 }
 
 fn compile_sequence(
@@ -1848,6 +2102,56 @@ fn compile_exec_item(
                 .forwards
                 .borrow_mut()
                 .quick(sequence_tag, rule_index, exec_index, args, path)
+        }
+        "cache" => {
+            // The inline cache form keeps the reference product's `cache [size]`
+            // spelling: it takes at most one non-negative size and never a
+            // `lazy_cache_ttl`, so inline use cannot silently enable lazy
+            // retention. Each callsite owns a private instance.
+            if args.split_whitespace().count() > 1 {
+                return Err(ConfigError::new(
+                    path,
+                    "inline cache accepts at most one size argument",
+                ));
+            }
+            let capacity = if args.trim().is_empty() {
+                DEFAULT_CACHE_SIZE
+            } else {
+                let size: i64 = args
+                    .trim()
+                    .parse()
+                    .map_err(|_| ConfigError::new(path, "inline cache size must be an integer"))?;
+                if size <= 0 {
+                    DEFAULT_CACHE_SIZE
+                } else {
+                    u64::try_from(size)
+                        .map_err(|_| ConfigError::new(path, "inline cache size is out of range"))?
+                }
+            };
+            let external = format!(
+                "@native-quick-cache:{}:{}:{}",
+                hex_identity(sequence_tag),
+                rule_index,
+                exec_index
+            );
+            let tag = format!(
+                "quick-cache:{}:{rule_index}:{exec_index}",
+                hex_identity(sequence_tag)
+            );
+            catalog.quick_caches.borrow_mut().push(QuickCacheSpec {
+                external: external.clone(),
+                tag,
+                args: CompiledCacheArgs {
+                    capacity,
+                    lazy_cache_ttl_secs: 0,
+                    dump_file: None,
+                    dump_interval_secs: DEFAULT_CACHE_DUMP_INTERVAL_SECS,
+                    exclude_ip: Vec::new(),
+                },
+            });
+            Ok(ExecutableSpec::External {
+                target: ExternalRef::new(external),
+            })
         }
         "fast_mark" => {
             let config =
@@ -2375,6 +2679,18 @@ fn expect_nonnegative_integer(value: &RawValue, path: &str) -> Result<u64, Confi
         RawValue::Number(RawNumber::Unsigned(value)) => Ok(*value),
         RawValue::Number(RawNumber::Signed(value)) if *value >= 0 => Ok(*value as u64),
         _ => Err(ConfigError::new(path, "expected a nonnegative integer")),
+    }
+}
+
+/// Reads one signed integer. Cache options accept non-positive values and clamp
+/// them to their documented default, so the raw sign must survive parsing.
+fn expect_integer(value: &RawValue, path: &str) -> Result<i64, ConfigError> {
+    match value {
+        RawValue::Number(RawNumber::Unsigned(value)) => {
+            i64::try_from(*value).map_err(|_| ConfigError::new(path, "integer is out of range"))
+        }
+        RawValue::Number(RawNumber::Signed(value)) => Ok(*value),
+        _ => Err(ConfigError::new(path, "expected an integer")),
     }
 }
 

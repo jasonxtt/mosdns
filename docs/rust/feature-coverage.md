@@ -247,3 +247,9 @@ reviewer gate 尚待实际返回，且没有启用 production/default wiring。
 `条目 ID -> 参数/操作契约 -> task -> Rust 路径 -> 原生集成测试 -> 性能/故障/恢复报告 -> 验收状态`
 
 同一条目由多个阶段负责时，各阶段交接列出未完成子项及接收任务/阶段，不能因某个子任务归档而关闭整行。5B 关闭全部查询条目，5C 关闭管理/状态条目；5D 汇总完整 E2E 和性能证据，Phase 6 删除桥接后再确认所有条目有效。未映射、未测或只测 hybrid 的条目保持待验收。
+
+### 2026-10-02 native cache lifecycle scope (P26/C10/C11/C13 subitems)
+
+The [cache task](../../.trellis/tasks/archive/2026-10/10-01-rust-native-cache-lifecycle-management/prd.md) reviewed delivery implements multiple named/quick stores, tokenized successor publication, basic EDNS0/DO product keys, wall/monotonic metadata, CIDR exclusion, domain_set, owner lazy refresh, v2 dump/import/atomic save/durable-first empty flush, SIGTERM/SIGINT drain/final save, four cache metrics, named inventory and existing Vue list/details/partial failure. S1-S7 passed the same C2C review; iteration 11 returned full-task FINAL: PASS / DONE.
+
+Stable tests: native-host cache_catalog/cache_lifecycle/cache_http, owner/codec unit tests and webui-log/tests/cacheInventory.test.mjs; actual Go-Rust dump, DNS/API/restart/browser evidence lives in the task research directory. This does not close ECS, full Prometheus/other plugin APIs, native static UI serving, full-system performance or production cutover; the overall ledger rows remain pending.
