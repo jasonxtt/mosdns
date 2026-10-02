@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/config-compatibility.md", "reason": "Review audit API and webinfo persistence against product compatibility boundaries."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review behavioral tests, VM validation, exact scope and evidence."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check DNS observation through API projection and Vue state transitions end to end."}
-{"file": ".trellis/tasks/09-30-rust-native-next-bundled-delivery/research/observability-option.md", "reason": "Verify source-grounded contracts and reject false full-page/full-audit claims."}
-{"file": ".trellis/tasks/09-30-rust-native-next-bundled-delivery/research/api-contract.md", "reason": "Check exact route, schema, error, pagination and projection compatibility against the reviewed scope."}

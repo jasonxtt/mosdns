@@ -1,5 +1,0 @@
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review real public-interface tests, Linux validation and exact evidence."}
-{"file":".trellis/spec/backend/error-handling.md","reason":"Check HTTP error/status contract and failure rollback."}
-{"file":".trellis/spec/backend/config-compatibility.md","reason":"Check unsupported config rejection and persistent-file boundaries."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check Vue→API→file→matcher→DNS flow and lifecycle consistency."}
-{"file":".trellis/tasks/09-28-rust-native-domain-set-management/research/planning-evidence.md","reason":"Verify implementation against source-discovery anchors and scoped deferrals."}

@@ -34,7 +34,7 @@ canary 已获用户授权，四项默认输入已冻结。用户随后指定 `mo
 
 ## 当前 5B 任务和第一小目标
 
-沿用 [09-27 config/sequence 任务](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5b-config-sequence-composition/prd.md)，revision 2。实现已获单独授权并完成；本地 workspace 验证及指定 Linux 上 UDP/audit-on 集成 E2E、TCP/audit-off CLI E2E 已通过。C2C 对 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` 的精确范围 review 返回 `FINAL: PASS`；短诊断不作性能 PASS。用户指定的 C2C 对 A6 更正范围 `098b4c5e2bc3427f591456d6725a04a8cb8bcc23..146849c042bfa90a5d61cc6fbe9712b78d562e94` 返回 `FINAL: PASS`；用户于 2026-09-28 授权归档已接受的 5B 任务范围。专门远端 fault/cancel/close E2E 仍延期，未声称通过；详细记录见归档任务的 `implement.md`。
+沿用 [09-27 config/sequence 任务](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md)，revision 2。实现已获单独授权并完成；本地 workspace 验证及指定 Linux 上 UDP/audit-on 集成 E2E、TCP/audit-off CLI E2E 已通过。C2C 对 `11bd56c40d255d6ae93b0a2eba1c85214300b149..016103f3c21ed2d659694ce10e64aaf24b5c2767` 的精确范围 review 返回 `FINAL: PASS`；短诊断不作性能 PASS。用户指定的 C2C 对 A6 更正范围 `098b4c5e2bc3427f591456d6725a04a8cb8bcc23..146849c042bfa90a5d61cc6fbe9712b78d562e94` 返回 `FINAL: PASS`；用户于 2026-09-28 授权归档已接受的 5B 任务范围。专门远端 fault/cancel/close E2E 仍延期，未声称通过；详细记录见归档任务的 `implement.md`。
 
 本批支持 direct $sequence、一个 cache 在 entry/child 后继上的组合、reject 0..15（含常用 0/3）、顶层 include、provider 多规则/files，以及 qtype/has_resp。代表配置从本地 config_lite_all 裁剪，公网 aliapi 用已有受控 forward 替代；未支持部分有明确延期，不能声称原配置整体兼容。
 
@@ -42,14 +42,14 @@ canary 已获用户授权，四项默认输入已冻结。用户随后指定 `mo
 
 ## 下一项已规划工作：isolated mosdns-rust sidecar canary
 
-[09-28 Rust-native isolated mosdns-rust sidecar canary](../../.trellis/tasks/09-28-rust-mos-test-native-sidecar-canary/prd.md) 是独立的纯验证规划任务，固定候选 SHA `016103f3c21ed2d659694ce10e64aaf24b5c2767`。计划覆盖由 `config_lite_all` 只读快照裁剪的 include/relative-rules/sequence/cache/route 链，在 `mosdns-rust` 上顺序验证 UDP/audit-on 与 TCP/audit-off 两个 loopback 高端口 sidecar；controlled peers 作为功能、路由和 cache oracle，并要求每次都回收自有 PID/socket、保持原服务基线不变。
+[09-28 Rust-native isolated mosdns-rust sidecar canary](validation-records/09-28-rust-mos-test-native-sidecar-canary/prd.md) 是独立的纯验证规划任务，固定候选 SHA `016103f3c21ed2d659694ce10e64aaf24b5c2767`。计划覆盖由 `config_lite_all` 只读快照裁剪的 include/relative-rules/sequence/cache/route 链，在 `mosdns-rust` 上顺序验证 UDP/audit-on 与 TCP/audit-off 两个 loopback 高端口 sidecar；controlled peers 作为功能、路由和 cache oracle，并要求每次都回收自有 PID/socket、保持原服务基线不变。
 
 原始 canary 计划经过三轮修订，C2C 对固定范围 `016103f3c21ed2d659694ce10e64aaf24b5c2767..82953751bdde89fa3fc2244cea2a86be4f6a3d06` 返回 `FINAL: PASS`。该审核覆盖原计划范围，不覆盖当前 `mosdns-rust` 目标变更。用户已授权 canary 并冻结四项默认值；配置源七个文件哈希与记录一致。`mosdns-rust` 只读预检已确认服务和工具链，但所有观察仍须在执行时刷新。目标变更已由 bootstrap reviewer 返回 `FINAL: PASS`（工作树补丁 SHA-256 `9ea51551398c804dbf76c1a7d4dd58ded1a5b9468244b4de52c0bdc78f1a88e6`）。第一次尝试在 Rust sidecar 启动前因过严的监听行比较器停止并安全清理。第二次尝试的 12 个逐条 DNS/peer oracle 全部通过，但 final aggregate assertion 写错；同一 C2C 对话第 8 轮审核认定为 `STOP / harness invalid` 并批准修正为 `local_udp=2, default_tcp=1`。第三次重跑在 `mosdns-rust` 上返回 `PASS`：UDP/audit-on 与 TCP/audit-off 各 6 个查询通过，peer、PID/socket 和服务基线均核验，临时目录在证据捕获后删除。Canary 不要求外部读取 audit records，不包含 Go 构建，不覆盖完整 config package，不做性能 PASS，也不改变生产门禁。相同 C2C 对话的 host-level 最终审核仍待完成；计划与门槛见 task 的 `design.md`、`implement.md`、`research/canary-inputs.md`。
 
 ### 已建但未启动的后续子任务
 
-- [09-28 Rust-native fast_mark and flow_setter sequence integration](../../.trellis/tasks/09-28-rust-native-fast-mark-flow-setter/prd.md)：第一批 5B 运行链。仅关闭实际交付的 `fast_mark` 与 `flow_setter` 子项，不声称整个 P11/P33/P44 或完整 5B。须保留 bit 48/49 约定、每查询标志隔离，并先冻结配置 metadata 与 host terminal metadata 的优先级。依赖 canary PASS；只有用户明确延期 canary 且允许忽略远端结果时才能提前。
-- [09-28 Rust-native domain_set management save and query closure](../../.trellis/tasks/09-28-rust-native-domain-set-management/prd.md)：第一条 5C 管理闭环，限一个规则文件语义明确的 file-backed `domain_set`，以真实 HTTP、文件、DNS query 验证 `/show`、`/save`、`/post`、失败回滚、整代发布、重启和 listener 回收。默认在 5B 任务获得同一 C2C 对话 `FINAL: PASS` 后启动；若 5B 明确延期或阻塞，须另取得用户明确的重排决定。这里是计划顺序而非架构依赖；不声称全 P02/C04/C10/C11/C17 或完整 5C。
+- [09-28 Rust-native fast_mark and flow_setter sequence integration](validation-records/09-28-rust-native-fast-mark-flow-setter/prd.md)：第一批 5B 运行链。仅关闭实际交付的 `fast_mark` 与 `flow_setter` 子项，不声称整个 P11/P33/P44 或完整 5B。须保留 bit 48/49 约定、每查询标志隔离，并先冻结配置 metadata 与 host terminal metadata 的优先级。依赖 canary PASS；只有用户明确延期 canary 且允许忽略远端结果时才能提前。
+- [09-28 Rust-native domain_set management save and query closure](validation-records/09-28-rust-native-domain-set-management/prd.md)：第一条 5C 管理闭环，限一个规则文件语义明确的 file-backed `domain_set`，以真实 HTTP、文件、DNS query 验证 `/show`、`/save`、`/post`、失败回滚、整代发布、重启和 listener 回收。默认在 5B 任务获得同一 C2C 对话 `FINAL: PASS` 后启动；若 5B 明确延期或阻塞，须另取得用户明确的重排决定。这里是计划顺序而非架构依赖；不声称全 P02/C04/C10/C11/C17 或完整 5C。
 
 这两个子任务均处于 `planning`，只允许在本路线图精确范围 review PASS 后依门槛启动。它们不触碰 Go/cgo scaffold，不更改 Vue UI，不扩充 feature-coverage 整行状态。
 
@@ -66,4 +66,4 @@ canary 已获用户授权，四项默认输入已冻结。用户随后指定 `mo
 
 ## 2026-10-02 response-policy/IP bounded increment
 
-The approved [response-policy/IP task](../../.trellis/tasks/archive/2026-10/10-02-rust-native-response-policy-ip-rules/prd.md) implements hosts, scoped redirect, TTL and multi-value IPv4/IPv6/CIDR response predicates directly in the native host. S1–S5 exact-commit C2C PASS; S6 real DNS/API/Vue/process-restart and full workspace checks pass, final cumulative review FINAL: PASS (2c059b0e..13d60d3e, iteration 7); task archived. Plain text/inline rules only; provider sets, SRS/compression and rule-management reload remain future work. Cache dumps are not policy-versioned, requiring quiescent live-owner Flush before shutdown for immediate changed-rule behavior. This increment does not close 5D/Phase 6 or authorize a default/production release.
+The approved [response-policy/IP task](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) implements hosts, scoped redirect, TTL and multi-value IPv4/IPv6/CIDR response predicates directly in the native host. S1–S5 exact-commit C2C PASS; S6 real DNS/API/Vue/process-restart and full workspace checks pass, final cumulative review FINAL: PASS (2c059b0e..13d60d3e, iteration 7); task archived. Plain text/inline rules only; provider sets, SRS/compression and rule-management reload remain future work. Cache dumps are not policy-versioned, requiring quiescent live-owner Flush before shutdown for immediate changed-rule behavior. This increment does not close 5D/Phase 6 or authorize a default/production release.

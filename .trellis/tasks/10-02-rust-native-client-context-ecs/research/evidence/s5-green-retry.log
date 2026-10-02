@@ -1,9 +1,0 @@
-   Compiling mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
-    Finished `test` profile [unoptimized] target(s) in 6.18s
-     Running tests/ecs_dump.rs (/dev/shm/mosdns-rust-client-ecs-20261002/target/debug/deps/ecs_dump-97fd9c5d62a70e16)
-
-running 1 test
-test actual_go_ecs_dump_normalizes_collisions_and_roundtrips ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-

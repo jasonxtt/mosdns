@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Contains the current Host-aware Codex routing contract to be replaced; also defines check/review expectations"}
-{"file": ".trellis/tasks/09-21-trellis-automation-simplification/research/current-routing-audit.md", "reason": "Current-state audit of routing imports, hooks, workflow tags, config, and tests at baseline 1489ebf"}

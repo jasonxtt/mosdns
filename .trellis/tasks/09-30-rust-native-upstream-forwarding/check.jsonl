@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/rust-migration.md", "reason": "Native ownership and migration guardrails"}
-{"file": ".trellis/spec/backend/config-compatibility.md", "reason": "YAML/API compatibility and explicit unsupported behavior"}
-{"file": ".trellis/spec/backend/native-audit-control.md", "reason": "Preserve audit retention and existing UI workflow"}
-{"file": ".trellis/tasks/09-30-rust-native-upstream-forwarding/research/forward-contracts.md", "reason": "Forward parameter/identity/error matrix and test seams"}
-{"file": ".trellis/tasks/09-30-rust-native-upstream-forwarding/research/source-contracts.md", "reason": "Current source anchors and historical native decisions"}
-{"file": ".trellis/tasks/09-30-rust-native-upstream-forwarding/research/planning-review.md", "reason": "Five source-verified planning gaps and user-approved schema migration"}

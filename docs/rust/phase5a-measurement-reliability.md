@@ -1,6 +1,6 @@
 # Phase 5A measurement reliability — closed, incomplete matrix
 
-收口日期：2026-09-27。任务生命周期已关闭，实验结论为 **incomplete matrix**，不代表原定 A1–A6 全部验收通过。证据位于 [归档任务](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5a-measurement-reliability/)。
+收口日期：2026-09-27。任务生命周期已关闭，实验结论为 **incomplete matrix**，不代表原定 A1–A6 全部验收通过。证据位于 [归档任务](validation-summary.md)。
 
 ## 交付与停止原因
 
@@ -8,7 +8,7 @@
 
 official-r3 的 W1-TCP 顺序为 Go/Rust、Rust/Go、Go/Rust。前四个 attempt 构成两个有效 pair。Go r3 完成五个阶段，但末段 dispatch-to-finish p95/p99 为 1231/2478µs，对应冻结门槛 1200/2500µs；仅 p95 越界 31µs（约 2.6%）。该 attempt 保留为 invalid，配对 Rust r3 未启动。W2 正式矩阵、独立 profiling 均未执行。
 
-原始 [失败记录](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5a-measurement-reliability/research/official-r3-control-failure.md) 和 [C2C 停止裁决](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5a-measurement-reliability/research/c2c-official-r3-control-review.md) 已在 `b4c0edb64b17a6648e4e951254326c6a7f3fffa3` 推送。official-r2 后的一次 reviewed retry 已由 r3 消耗，按冻结预算停止，不改阈值、不继续 W2、不追加正式重跑。
+原始 [失败记录](validation-records/09-27-rust-phase5a-measurement-reliability/research/official-r3-control-failure.md) 和 [C2C 停止裁决](validation-records/09-27-rust-phase5a-measurement-reliability/research/c2c-official-r3-control-review.md) 已在 `b4c0edb64b17a6648e4e951254326c6a7f3fffa3` 推送。official-r2 后的一次 reviewed retry 已由 r3 消耗，按冻结预算停止，不改阈值、不继续 W2、不追加正式重跑。
 
 阶段名 `recovery` 的末段是回落后的健康检查。各 attempt 的 service-recovery-assessment 明确写为 `indeterminate-no-overload-evidence`；本轮冻结 ladder 未提供客观过载证据判据。因此健康门槛失败不能升级为已证明的服务恢复失败，也不能据此归因 Rust runtime。两对 W1 数据仅作有限观察，不产生容量、稳定胜负、多核伸缩或热点结论。
 

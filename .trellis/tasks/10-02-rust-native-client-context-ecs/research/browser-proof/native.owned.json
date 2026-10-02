@@ -1,1 +1,0 @@
-{"pid": 1167566, "start": "76979088", "args": ["/dev/shm/mosdns-rust-client-ecs-20261002/target/debug/mosdns", "start", "-c", "config.yaml"], "binary_sha256": "be1fb08ee0184010ada232ea8c3170f7db392f90ab6f85cb4c10b81e8d23b22c"}

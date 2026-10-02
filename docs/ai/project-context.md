@@ -24,7 +24,9 @@ Phase 3B+ modules.
 - `pkg/`: shared DNS and query-context utilities
 - `webui-log/`: active Vue frontend workspace; `src/` builds the maintained UI and `src-log1/` builds the compatibility UI
 - `rust/`: experimental Rust cores, runtime, ABI, and adapters
-- `.trellis/`: migration tasks, specs, and task runtime; use only within the active Trellis workflow
+- `docs/rust/contracts/`: public product and migration contracts
+- `docs/rust/validation-summary.md`: accepted scope, validation evidence and limitations
+- `.trellis/`, `.agents/`, `.codex/`: optional local-only development tools, not tracked or required for builds
 - `docs/`: fork notes, release documentation, and Rust migration evidence
 
 ## UI topology

@@ -1,1 +1,0 @@
-indeterminate: W2 warm stages use independent prefilled SUT sessions; no same-process recovery claim

@@ -1,7 +1,0 @@
-    Checking mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
-    Checking mosdns-runtime v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/runtime)
-    Checking mosdns-matcher-core v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/matcher-core)
-    Checking mosdns-dns-core v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/dns-core)
-    Checking mosdns-cache-core v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/cache-core)
-    Checking mosdns-upstream-core v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/upstream-core)
-    Finished `dev` profile [unoptimized] target(s) in 9.52s

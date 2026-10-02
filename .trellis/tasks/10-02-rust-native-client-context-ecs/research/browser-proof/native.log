@@ -1,5 +1,0 @@
-native audit settings diagnostic: using default: settings file is missing (webinfo/audit_settings.json)
-cache startup /dev/shm/mosdns-rust-client-ecs-20261002/proof/cache.gz: cache persistence: No such file or directory (os error 2); starting empty
-mosdns: $.plugins[4].args.idle_timeout: required field is missing
-native audit settings diagnostic: using default: settings file is missing (webinfo/audit_settings.json)
-native audit settings diagnostic: using default: settings file is missing (webinfo/audit_settings.json)

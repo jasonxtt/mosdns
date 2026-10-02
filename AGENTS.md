@@ -12,7 +12,8 @@ When working on the Rust branch or Rust migration, also read:
 
 4. `docs/ai/rust-handover.md`
 5. `docs/ai/rust-rewrite-plan.md`
-6. `.trellis/workflow.md` when a Trellis task is active
+6. `docs/rust/contracts/index.md`
+7. `.trellis/workflow.md` when optional local Trellis tooling is installed and a task is active
 
 This repository is a maintained fork of `yyysuo/mosdns`. The current worktree
 is the dedicated `rust` branch at `/Users/tom/github/mosdns-rust`; do not infer
@@ -29,7 +30,7 @@ name is similar.
 ## Working rules
 
 - Use `rg` for normal code, config, YAML, documentation, and UI-copy searches. Verify cross-module assumptions against current source.
-- Rust migration work is governed by `.trellis/tasks/`: use each task's `prd.md`, `design.md`, and `implement.md` as its implementation gate. Keep Trellis auto-commit disabled and preserve unrelated dirty-worktree changes.
+- Product contracts and public validation summaries live in `docs/rust/contracts/` and `docs/rust/validation-summary.md`. Optional Trellis/AI tooling (`.trellis/`, `.agents/`, `.codex/`) is local-only and is not required to build a fresh clone. When a local Trellis task is active, use its `prd.md`, `design.md`, and `implement.md` as implementation gates. Keep Trellis auto-commit disabled and preserve unrelated dirty-worktree changes.
 - Preserve the MosDNS product contract: YAML/config and sequence/plugin semantics, final DNS/routing/audit behavior, WebUI/API workflows, metrics/persistent formats, and other explicitly frozen user-visible behavior. Current Go code is a discovery reference, not the normative Rust implementation. Do not reproduce Go internals or accidental quirks unless they are explicitly classified as product contract.
 - Phase 1/2/3A cgo adapters, `MOSDNS_*_BACKEND` selectors, Go mirrors/fallback, and paired-generation logic are temporary migration scaffolding. Keep existing paths safe until retirement, but do not extend this hybrid pattern into Phase 3B+ without explicit approval.
 - Treat WebUI changes as configuration workflow changes, not just frontend styling.
