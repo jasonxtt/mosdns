@@ -103,3 +103,38 @@ shutdown with NoResponse. Existing fallback/secure/cache/cancellation regression
 passed. Retained RED generated echo; earlier testcompile missing getter and
 wrong Cookie enum expectation; clippy test helper argument count/borrow fixed.
 S4–S6 and whole-task PASS remain pending.
+
+C2C S3 FINAL: PASS on 90e75e25..5f86b382, no findings; S4 authorized next.
+
+## S4 — full ECS key / placement gate
+
+Boolean named enable_ecs opt-in, quick false, current scoped wire base+ECS key;
+canonical masked Go string (including family2 mapped To4 formatting with original
+>=96 prefix). Ordinary noECS keys unchanged; strict invalid-profile bypass.
+Full-key refresh singleflight: separate ECS networks build separate futures,
+same-key follower never constructs one. No broader response-scope reuse.
+
+Monotone validated-program suffix effect/cache summaries reject unsafe named,
+quick, true and false placements through calls/jump/goto/try/fallback/preference,
+recursion and inherited successors. Client matcher origins are gathered from
+compiled configuration sources; invalid targets already fail program validation.
+Actual child/inline boundaries differ from jump continuation. Diagnostics name
+cache and offending policy/rule. Safe terminal and empty quick ECS tested.
+
+Final native regression s4-final-tests.log passed; native lib96 passed,
+all-target strict clippy s4-clippy4.log passed; fmt applied remotely;
+s4-source-sha256.json confirms all127 local/remote source/manifests equal.
+Public ECS tests: ecs_cache6 and ecs_wire16 pass; ordinary slice1_cache8 pass.
+Real UDP forward->truecache uses one upstream request for cold/hit and hit has
+no fabricated ECS. Existing config test now accepts true instead of asserting
+obsolete unsupported behavior. Full native regressions retain secure/fallback/
+audit/cache/TCP/UDP/management behavior.
+
+Retained failures: initial new fixture omitted required enable_audit and had
+wrong expected suffix length; executable target enum is Fixture, not External;
+clippy redundant trim fixed. First full s4-tests.log found compressed query
+regression in strict noOPT handling: noOPT can point into trailing name storage.
+Removed that invalid rejection; added real UDP generated-OPT re-encode proof.
+s4-tests2.log passed, followed by focused and final full runs after mapped-string
+coverage. Only task-owned binaries relocated as earlier for memory headroom.
+Dump/management normalization and final proof remain S5/S6, not claimed here.

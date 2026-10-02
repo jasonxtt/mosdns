@@ -281,6 +281,7 @@ pub struct CachePluginConfig {
     pub kind: CacheKind,
     /// The configured entry capacity, passed to the bounded cache store.
     pub capacity: u64,
+    pub enable_ecs: bool,
     /// Milliseconds-free retention window for a stale-but-usable response. Zero
     /// disables lazy retention entirely.
     pub lazy_cache_ttl_secs: u32,
@@ -1132,6 +1133,7 @@ fn compile_definitions(
             executable,
             kind: CacheKind::Named,
             capacity: args.capacity,
+            enable_ecs: args.enable_ecs,
             lazy_cache_ttl_secs: args.lazy_cache_ttl_secs,
             dump_file: args.dump_file,
             dump_interval_secs: args.dump_interval_secs,
@@ -1166,6 +1168,7 @@ fn compile_definitions(
             executable,
             kind: CacheKind::Quick,
             capacity: spec.args.capacity,
+            enable_ecs: false,
             lazy_cache_ttl_secs: spec.args.lazy_cache_ttl_secs,
             dump_file: spec.args.dump_file,
             dump_interval_secs: spec.args.dump_interval_secs,
@@ -1225,7 +1228,7 @@ fn compile_definitions(
             })
         })
         .collect::<Result<Vec<_>, ConfigError>>()?;
-    Ok(CompiledConfig {
+    let compiled = CompiledConfig {
         response_policies,
         ip_sets,
         response_ip_rules: response_ip_rules.into_inner(),
@@ -1246,7 +1249,35 @@ fn compile_definitions(
         domain_sets: domain_set_configs,
         api,
         program,
-    })
+    };
+    let mut client_rules = BTreeSet::new();
+    for plugin in &definitions {
+        if plugin.kind == "sequence" {
+            for (index, rule) in expect_sequence(&plugin.args, &plugin.source_path)?
+                .iter()
+                .enumerate()
+            {
+                let rule = expect_map(rule, &plugin.source_path, "rule")?;
+                if let Some(matches) = rule.get("matches") {
+                    if match_expressions(matches, &plugin.source_path)?
+                        .iter()
+                        .any(|value| {
+                            value
+                                .trim_start()
+                                .trim_start_matches('!')
+                                .split_whitespace()
+                                .next()
+                                == Some("client_ip")
+                        })
+                    {
+                        client_rules.insert(format!("inline:{}#{index}", plugin.tag));
+                    }
+                }
+            }
+        }
+    }
+    crate::cache_placement::validate(&compiled, &client_rules)?;
+    Ok(compiled)
 }
 
 /// Finds one reachable forward for legacy convenience accessors. This scan is
@@ -1851,18 +1882,10 @@ fn compile_cache(plugin: &RawPlugin) -> Result<CompiledCacheArgs, ConfigError> {
             Some(normalized)
         }
     };
-    match args.get("enable_ecs") {
-        None | Some(RawValue::Null) => {}
-        Some(value) => {
-            let enabled = expect_bool(value, &format!("{path}.enable_ecs"))?;
-            if enabled {
-                return Err(ConfigError::new(
-                    format!("{path}.enable_ecs"),
-                    "enable_ecs=true is not supported by the native cache: ECS queries bypass the cache and ECS key isolation is not implemented",
-                ));
-            }
-        }
-    }
+    let enable_ecs = match args.get("enable_ecs") {
+        None | Some(RawValue::Null) => false,
+        Some(value) => expect_bool(value, &format!("{path}.enable_ecs"))?,
+    };
     // The shape is still validated the way the product does, so a malformed
     // declaration reports the same reason it always did; a well-formed one is
     // refused because answer filtering is not implemented yet.
@@ -1890,6 +1913,7 @@ fn compile_cache(plugin: &RawPlugin) -> Result<CompiledCacheArgs, ConfigError> {
     };
     Ok(CompiledCacheArgs {
         capacity,
+        enable_ecs,
         lazy_cache_ttl_secs,
         dump_file,
         dump_interval_secs,
@@ -1900,6 +1924,7 @@ fn compile_cache(plugin: &RawPlugin) -> Result<CompiledCacheArgs, ConfigError> {
 /// The validated cache arguments before an executable identity is known.
 struct CompiledCacheArgs {
     capacity: u64,
+    enable_ecs: bool,
     lazy_cache_ttl_secs: u32,
     dump_file: Option<PathBuf>,
     dump_interval_secs: u64,
@@ -2347,6 +2372,7 @@ fn compile_exec_item(
                 tag,
                 args: CompiledCacheArgs {
                     capacity,
+                    enable_ecs: false,
                     lazy_cache_ttl_secs: 0,
                     dump_file: None,
                     dump_interval_secs: DEFAULT_CACHE_DUMP_INTERVAL_SECS,

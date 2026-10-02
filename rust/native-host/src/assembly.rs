@@ -227,6 +227,7 @@ impl HostAssembly {
                     )
                     .map(|adapter| {
                         adapter
+                            .with_ecs(compiled.enable_ecs)
                             .with_exclusions(&compiled.exclude_ip)
                             .with_persistence(
                                 compiled.dump_file.clone(),

@@ -137,6 +137,7 @@ pub struct NativeCacheAdapter {
     cache: Rc<NativeCache>,
     clock: Rc<dyn CacheClock>,
     lazy_ttl: u32,
+    enable_ecs: bool,
     exclusions: Rc<IpPrefixList>,
     owner: Rc<CacheOwner>,
     dump_file: Option<std::path::PathBuf>,
@@ -170,6 +171,7 @@ impl NativeCacheAdapter {
             cache: Rc::new(cache),
             clock,
             lazy_ttl: lazy_cache_ttl_secs,
+            enable_ecs: false,
             owner: Rc::new(CacheOwner::new()),
             dump_file: None,
             dump_interval: 600,
@@ -191,6 +193,11 @@ impl NativeCacheAdapter {
         Self::with_options_and_clock(capacity, CACHE_LAZY_TTL_SECS, clock)
     }
 
+    #[must_use]
+    pub fn with_ecs(mut self, enabled: bool) -> Self {
+        self.enable_ecs = enabled;
+        self
+    }
     pub fn with_exclusions(mut self, prefixes: &[String]) -> Self {
         let mut list = IpPrefixList::new();
         for prefix in prefixes {
@@ -227,7 +234,7 @@ impl NativeCacheAdapter {
 
     /// Returns the key bytes used by the in-memory native cache.
     pub fn key_for_query(&self, query: &[u8]) -> Result<Option<Vec<u8>>, CacheAdapterError> {
-        key_for_query(query)
+        key_for_query(query, self.enable_ecs)
     }
 
     /// Looks up an eligible query and patches the response copy for its ID.
@@ -252,7 +259,7 @@ impl NativeCacheAdapter {
         if self.owner.failed.get() {
             return Err(CacheAdapterError::Closed);
         }
-        let Some((key, request_id)) = query_key_and_id(query)? else {
+        let Some((key, request_id)) = query_key_and_id(query, self.enable_ecs)? else {
             return Ok(None);
         };
         let now = self.clock.now_seconds()?;
@@ -279,7 +286,7 @@ impl NativeCacheAdapter {
 
     /// Arms one request-local publication token after an eligible query miss.
     pub fn begin_store(&self, query: &[u8]) -> Result<Option<PendingStore>, CacheAdapterError> {
-        let Some((key, _, question)) = query_key_question(query)? else {
+        let Some((key, _, question)) = query_key_question(query, self.enable_ecs)? else {
             return Ok(None);
         };
         Ok(Some(PendingStore {
@@ -968,8 +975,11 @@ impl PendingStore {
     }
 }
 
-fn query_key_and_id(query: &[u8]) -> Result<Option<(Vec<u8>, u16)>, CacheAdapterError> {
-    let Some((key, header, _)) = query_key_question(query)? else {
+fn query_key_and_id(
+    query: &[u8],
+    enabled: bool,
+) -> Result<Option<(Vec<u8>, u16)>, CacheAdapterError> {
+    let Some((key, header, _)) = query_key_question(query, enabled)? else {
         return Ok(None);
     };
     Ok(Some((key, header.id)))
@@ -977,6 +987,7 @@ fn query_key_and_id(query: &[u8]) -> Result<Option<(Vec<u8>, u16)>, CacheAdapter
 
 fn query_key_question(
     query: &[u8],
+    enabled: bool,
 ) -> Result<Option<(Vec<u8>, mosdns_dns_core::QueryHeader, ResponseQuestion)>, CacheAdapterError> {
     let (header, question) = mosdns_dns_core::parse_query(query).map_err(|error| match error {
         QueryError::Parse(_) | QueryError::Unsupported(_) => CacheAdapterError::InvalidQuery,
@@ -984,12 +995,22 @@ fn query_key_question(
     if question.qclass != CLASS_IN {
         return Ok(None);
     }
-    let Some(do_bit) = query_edns(query, header.arcount)? else {
+    let opt = match crate::ecs::query_opt(query) {
+        Ok(opt) => opt,
+        Err(_) => return Ok(None),
+    };
+    if !enabled && opt.as_ref().is_some_and(|opt| opt.ecs.is_some()) {
+        return Ok(None);
+    }
+    let do_bit = opt.as_ref().is_some_and(|opt| opt.fixed[7] & 0x80 != 0);
+    let Some(mut key) = encode_key(query, &question.qname_wire, question.qtype, do_bit) else {
         return Ok(None);
     };
-    let Some(key) = encode_key(query, &question.qname_wire, question.qtype, do_bit) else {
-        return Ok(None);
-    };
+    if let Some(ecs) = opt.and_then(|opt| opt.ecs) {
+        let suffix = ecs.key_string();
+        key.push(u8::try_from(suffix.len()).map_err(|_| CacheAdapterError::InvalidQuery)?);
+        key.extend_from_slice(suffix.as_bytes());
+    }
     Ok(Some((
         key,
         header,
@@ -1001,8 +1022,8 @@ fn query_key_question(
     )))
 }
 
-fn key_for_query(query: &[u8]) -> Result<Option<Vec<u8>>, CacheAdapterError> {
-    Ok(query_key_question(query)?.map(|(key, _, _)| key))
+fn key_for_query(query: &[u8], enabled: bool) -> Result<Option<Vec<u8>>, CacheAdapterError> {
+    Ok(query_key_question(query, enabled)?.map(|(key, _, _)| key))
 }
 
 /// Product text form follows miekg/dns label escaping, retaining case and root dot.
@@ -1045,59 +1066,6 @@ fn encode_key(query: &[u8], qname_wire: &[u8], qtype: u16, do_bit: bool) -> Opti
     key.push(length);
     key.extend_from_slice(name.as_bytes());
     Some(key)
-}
-
-fn query_edns(query: &[u8], arcount: u16) -> Result<Option<bool>, CacheAdapterError> {
-    // parse_query has already verified compression and the expanded question.
-    let mut pos = 12;
-    loop {
-        let byte = *query.get(pos).ok_or(CacheAdapterError::InvalidQuery)?;
-        pos += 1;
-        if byte == 0 {
-            break;
-        }
-        if byte & 0xc0 == 0xc0 {
-            pos += 1;
-            break;
-        }
-        pos += usize::from(byte);
-    }
-    pos += 4;
-    if arcount == 0 {
-        return Ok(Some(false));
-    }
-    // A supported OPT has a root owner, version/extended rcode zero, and no
-    // reserved flags. Validate every option, including ECS after unknown ones.
-    let Some(opt) = query.get(pos..) else {
-        return Ok(None);
-    };
-    if opt.len() < 11
-        || opt[0..3] != [0, 0, 41]
-        || opt[5] != 0
-        || opt[6] != 0
-        || opt[7] & 0x7f != 0
-        || opt[8] != 0
-    {
-        return Ok(None);
-    }
-    let length = usize::from(u16::from_be_bytes([opt[9], opt[10]]));
-    if opt.len() != 11 + length {
-        return Ok(None);
-    }
-    let mut p = 11;
-    while p < opt.len() {
-        if p + 4 > opt.len() {
-            return Ok(None);
-        }
-        let code = u16::from_be_bytes([opt[p], opt[p + 1]]);
-        let len = usize::from(u16::from_be_bytes([opt[p + 2], opt[p + 3]]));
-        p += 4;
-        if p + len > opt.len() || code == 8 {
-            return Ok(None);
-        }
-        p += len;
-    }
-    Ok(Some(opt[7] & 0x80 != 0))
 }
 
 fn response_metadata(response: &[u8]) -> Option<ResponseMetadata> {

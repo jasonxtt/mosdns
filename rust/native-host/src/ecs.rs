@@ -123,9 +123,8 @@ pub(crate) fn query_opt(raw: &[u8]) -> Result<Option<QueryOpt>, ExecutorError> {
     }
     pos += 4;
     if header.arcount == 0 {
-        if pos != raw.len() {
-            return Err(error("trailing query bytes"));
-        }
+        // parse_query permits compressed question names whose target is in
+        // trailing name storage. No OPT means no ECS/options to interpret.
         return Ok(None);
     }
     let opt = raw.get(pos..).ok_or_else(|| error("missing OPT"))?;
@@ -178,6 +177,14 @@ pub(crate) fn replace_query_ecs(
     let opt = query_opt(raw)?;
     let offset = opt.as_ref().map_or(raw.len(), |o| o.offset);
     let mut wire = raw[..offset].to_vec();
+    if opt.is_none() && selected.is_some() {
+        let (_, question) =
+            mosdns_dns_core::parse_query(raw).map_err(|_| error("invalid ECS query"))?;
+        wire.truncate(12);
+        wire.extend_from_slice(&question.qname_wire);
+        wire.extend_from_slice(&question.qtype.to_be_bytes());
+        wire.extend_from_slice(&question.qclass.to_be_bytes());
+    }
     if opt.is_none() && selected.is_none() {
         return Ok(wire);
     }
@@ -315,5 +322,30 @@ fn name_end(raw: &[u8], mut pos: usize) -> Result<usize, ExecutorError> {
             return Err(error("invalid DNS label"));
         }
         pos += usize::from(byte);
+    }
+}
+
+impl Subnet {
+    pub(crate) fn key_string(&self) -> String {
+        if self.family == 1 {
+            let ip = std::net::Ipv4Addr::new(
+                self.address[0],
+                self.address[1],
+                self.address[2],
+                self.address[3],
+            );
+            format!("{ip}/{}/0", self.source)
+        } else {
+            let mut bytes = [0; 16];
+            bytes.copy_from_slice(&self.address);
+            let ip = std::net::Ipv6Addr::from(bytes);
+            // Go ECS.String uses net.IP.To4 for mapped addresses even when
+            // the wire family remains 2. The >=96 source mask keeps its key
+            // distinct from family1; do not change the wire family.
+            ip.to_ipv4_mapped().map_or_else(
+                || format!("[{ip}]/{}/0", self.source),
+                |v4| format!("{v4}/{}/0", self.source),
+            )
+        }
     }
 }
