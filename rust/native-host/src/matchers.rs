@@ -1,4 +1,6 @@
+#[cfg(test)]
 use std::net::{IpAddr, Ipv4Addr};
+use std::rc::Rc;
 
 use mosdns_dns_core::observe_answer_addresses;
 use mosdns_matcher_core::{IpPrefixList, MixMatcher};
@@ -108,19 +110,24 @@ impl Matcher for HasResponseMatcher {
     }
 }
 
-/// Answer-only response-IP matcher for the narrow native W3 grammar.
+/// Answer-only response-IP matcher over immutable startup prefix snapshots.
 #[allow(dead_code)]
 pub(crate) struct ResponseIpMatcher {
-    prefixes: IpPrefixList,
+    prefixes: Vec<Rc<IpPrefixList>>,
 }
 
 impl ResponseIpMatcher {
-    #[allow(dead_code)]
+    pub(crate) fn new(prefixes: Vec<Rc<IpPrefixList>>) -> Self {
+        Self { prefixes }
+    }
+    #[cfg(test)]
     pub(crate) fn ipv4(address: Ipv4Addr) -> Self {
         let mut prefixes = IpPrefixList::new();
         prefixes.append(IpAddr::V4(address), 32);
         prefixes.rebuild();
-        Self { prefixes }
+        Self {
+            prefixes: vec![Rc::new(prefixes)],
+        }
     }
 }
 
@@ -135,7 +142,7 @@ impl Matcher for ResponseIpMatcher {
         Ok(MatchOutcome::new(
             addresses
                 .into_iter()
-                .any(|address| self.prefixes.contains(address)),
+                .any(|address| self.prefixes.iter().any(|list| list.contains(address))),
             None,
         ))
     }
@@ -409,5 +416,57 @@ mod tests {
                 .matched
         );
         assert!(TrueMatcher.evaluate(&state).expect("true").matched);
+    }
+    #[test]
+    fn expanded_response_ip_ignores_non_answer_addresses_and_cname_without_mutation() {
+        let prefixes = crate::policy::ip_list(
+            &["192.0.2.0/24".into(), "2001:db8::/32".into()],
+            &[],
+            "fixture",
+        )
+        .unwrap();
+        let matcher = ResponseIpMatcher::new(vec![prefixes]);
+        let mut state = state(&query(&[7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0]));
+        let mut message =
+            hickory_proto::op::Message::from_vec(&response_without_answers()).unwrap();
+        let owner = hickory_proto::rr::Name::from_ascii("example.").unwrap();
+        message.add_name_server(hickory_proto::rr::Record::from_rdata(
+            owner.clone(),
+            60,
+            hickory_proto::rr::RData::AAAA(hickory_proto::rr::rdata::AAAA(
+                "2001:db8::1".parse().unwrap(),
+            )),
+        ));
+        message.add_additional(hickory_proto::rr::Record::from_rdata(
+            owner.clone(),
+            60,
+            hickory_proto::rr::RData::A(hickory_proto::rr::rdata::A("192.0.2.1".parse().unwrap())),
+        ));
+        message.add_answer(hickory_proto::rr::Record::from_rdata(
+            owner.clone(),
+            1,
+            hickory_proto::rr::RData::CNAME(hickory_proto::rr::rdata::CNAME(owner.clone())),
+        ));
+        state.set_raw_response(message.to_vec().unwrap());
+        let before = state.clone();
+        assert!(!matcher.evaluate(&state).unwrap().matched);
+        assert_eq!(state, before);
+        message.add_answer(hickory_proto::rr::Record::from_rdata(
+            owner,
+            60,
+            hickory_proto::rr::RData::AAAA(hickory_proto::rr::rdata::AAAA(
+                "2001:db8::1".parse().unwrap(),
+            )),
+        ));
+        state.set_raw_response(message.to_vec().unwrap());
+        let before = state.clone();
+        assert!(matcher.evaluate(&state).unwrap().matched);
+        assert_eq!(state, before);
+        let mut broken = response_with_answer([192, 0, 2, 1]);
+        broken.pop();
+        state.set_raw_response(broken);
+        let before = state.clone();
+        assert!(matcher.evaluate(&state).is_err());
+        assert_eq!(state, before);
     }
 }

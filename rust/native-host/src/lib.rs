@@ -28,8 +28,9 @@ pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
     ApiConfig, CacheId, CacheKind, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig,
     ForwardConfig, ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig,
-    ForwardScheme, ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel, SequenceConfig,
-    compile_yaml, compile_yaml_with_base, load_and_compile, load_yaml,
+    ForwardScheme, ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel,
+    ResponseIpRuleConfig, SequenceConfig, compile_yaml, compile_yaml_with_base, load_and_compile,
+    load_yaml,
 };
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{

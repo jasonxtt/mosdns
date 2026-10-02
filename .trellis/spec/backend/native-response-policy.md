@@ -103,3 +103,33 @@ Good: a→b, peer b→d CNAME + d A yields original Question and a→b→d chain
 ## 7. Wrong vs Correct
 
 Wrong: changing display qname while sending admission wire, patching compressed DNS question bytes in place, or reconstructing successful completion after exit. Correct: current owned QueryView; safe full message decode/encode; frame-local restoration and the original typed completion.
+
+# Immutable response-IP matcher (S4)
+
+## 1. Scope / Trigger
+
+All compiled response-IP expressions now execute natively. The S1 placeholder and runtime_ready assembly restriction are removed; no legacy/special case path remains for single IPv4.
+
+## 2. Signatures
+
+`ResponseIpMatcher::new(Vec<Rc<IpPrefixList>>)` receives ready immutable provider/anonymous snapshots; `Matcher::evaluate(&ExecutionState)` returns a read-only `MatchOutcome`.
+
+## 3. Contracts
+
+Missing/Synthesized response is false. Raw response scans only Answer A/AAAA and applies OR across observed addresses and referenced prefix lists. Authority/Additional addresses and CNAME alone do not match. IPv4, IPv6 and mapped IPv6 share matcher-core's normalized 16-byte prefix contract; no string matching. Literal/CIDR, `$ip_set` and `&text-file` all use the same evaluator and startup resource/path/error contracts.
+
+## 4. Validation & Error Matrix
+
+Malformed raw wire returns MatcherError, with no state/routing/response mutation. Empty snapshots cannot match but may be ORed with other lists. No request-time file reads: file modification/removal after assembly does not alter results.
+
+## 5. Good/Base/Bad Cases
+
+Good: AAAA ::ffff:192.0.2.1 matches 192.0.2.0/24. Base: valid response with CNAME and only additional/authority addresses returns false. Bad: truncated Answer returns error rather than publishing a partial match.
+
+## 6. Tests Required
+
+Real UDP sequence cases in policy_wire verify dual-stack subnet inclusion/exclusion, named/anonymous OR, mapped/zero-prefix behavior and text-file immutability. Matcher unit test proves Answer-only semantics, malformed error and unchanged state. Existing matcher-core prefix golden tests cover exact and boundary/mapped contracts. Regress full native-host and matcher-core suites plus workspace clippy/fmt remotely.
+
+## 7. Wrong vs Correct
+
+Wrong: accepting expanded syntax but serving a pending matcher or reading rules during requests. Correct: execute the already-built immutable prefix snapshots through one matcher for every expression shape.

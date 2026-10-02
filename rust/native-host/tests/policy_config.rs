@@ -255,15 +255,15 @@ fn text_loader_limits_are_enforced_before_snapshot_publication() {
 }
 
 #[test]
-fn descriptors_cannot_start_an_incomplete_runtime() {
+fn expanded_ip_descriptors_assemble_with_real_runtime() {
     let yaml = config(
         "  - tag: networks\n    type: ip_set\n    args: {ips: ['::1']}",
         "      - matches: resp_ip $networks\n        exec: accept\n      - exec: $upstream",
     );
     let compiled = compile_yaml(&yaml).expect("typed compile supported in S1");
     assert!(
-        mosdns_native_host::HostAssembly::from_config(compiled).is_err(),
-        "pending expanded IP evaluator fails closed before listener bind"
+        mosdns_native_host::HostAssembly::from_config(compiled).is_ok(),
+        "expanded IP matcher now executes immutable snapshots"
     );
 }
 

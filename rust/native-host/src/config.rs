@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -467,7 +467,6 @@ pub struct CompiledConfig {
 }
 
 pub struct ResponseIpRuleConfig {
-    pub(crate) runtime_ready: bool,
     pub source_path: String,
     pub prefixes: Vec<Rc<mosdns_matcher_core::IpPrefixList>>,
 }
@@ -2029,15 +2028,10 @@ fn compile_matcher(
                 .response_ip_rules
                 .borrow_mut()
                 .push(ResponseIpRuleConfig {
-                    runtime_ready: args.parse::<Ipv4Addr>().is_ok(),
                     source_path: path.to_owned(),
-                    prefixes,
+                    prefixes: prefixes.clone(),
                 });
-            if let Ok(address) = args.parse::<Ipv4Addr>() {
-                Box::new(ResponseIpMatcher::ipv4(address))
-            } else {
-                Box::new(policy::PendingIpMatcher)
-            }
+            Box::new(ResponseIpMatcher::new(prefixes))
         }
         "_true" => {
             if !args.is_empty() {

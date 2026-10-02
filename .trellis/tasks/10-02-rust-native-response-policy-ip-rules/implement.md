@@ -1,6 +1,6 @@
-# Implementation plan — final planning review
+# Implementation plan — approved execution
 
-一个任务按以下可独立验证切片实现，不拆child/派发agent。用户已确认IP文本范围；完整规划尚待审批，禁止task.py start。
+一个任务按以下可独立验证切片实现，不拆child/派发agent。用户已确认IP文本范围；完整规划已于2026-10-02获用户批准，task已激活。
 
 | 切片 | 依赖 | 可观察行为 | 公开接口测试 | 模拟边界 |
 | --- | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ Human explicitly approved the latest complete planning summary with “批准”
 
 ## Current execution status — 2026-10-02
 
-The final plan was explicitly approved by the human. Task activation succeeded after correcting the conditional planning breadcrumb; historical planning-only notes above describe earlier sessions. S1 config/loaders candidate is implemented and awaiting final checks and exact-commit C2C review. S2–S6 remain pending, each gated by the preceding slice PASS. No push or deployment.
+The final plan was explicitly approved by the human. Task activation succeeded after correcting the conditional planning breadcrumb; historical planning-only notes above describe earlier sessions. S1/S2/S3 (including jump-continuation supplemental correction) have independently passed exact-commit C2C review. S4 real response-IP matcher is undergoing final validation/review; S5/S6 remain pending. Every next slice stays gated by the preceding PASS. No push or deployment.
 
 ## S1 → S2 execution checkpoint
 

@@ -1,9 +1,7 @@
 //! Immutable startup response-policy descriptors; no request-time file I/O.
 use crate::config::ConfigError;
 use mosdns_matcher_core::{IpPrefixList, MixMatcher, normalize};
-use mosdns_sequence_core::{
-    ExecutableId, ExecutionState, ExecutorError, MatchOutcome, Matcher, MatcherError,
-};
+use mosdns_sequence_core::{ExecutableId, ExecutionState, ExecutorError};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read};
 use std::net::IpAddr;
@@ -306,17 +304,6 @@ pub(crate) fn ip_list(
     prefixes.rebuild();
     Ok(Rc::new(prefixes))
 }
-/// S1 validates new IP expressions but defers their runtime evaluation to S4.
-/// The existing single-IPv4 path remains unchanged until then.
-pub(crate) struct PendingIpMatcher;
-impl Matcher for PendingIpMatcher {
-    fn evaluate(&self, _state: &ExecutionState) -> Result<MatchOutcome, MatcherError> {
-        Err(MatcherError::new(
-            "response IP policy runtime is not implemented yet",
-        ))
-    }
-}
-
 /// Applies one non-scoped policy atomically. True means hosts replaced the
 /// response; TTL transforms preserve the existing supplier identity.
 pub(crate) fn apply_wire_policy(
