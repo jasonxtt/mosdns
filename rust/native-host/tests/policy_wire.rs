@@ -530,3 +530,72 @@ fn redirect_consumes_jump_continuation_exactly_once_before_restoration() {
     );
     assert_eq!(response.answers()[1].ttl(), 42);
 }
+
+#[test]
+fn response_ip_named_cidr_or_ipv6_and_mapped_addresses_drive_real_sequence() {
+    for (address, kind, expression, hit) in [
+        ("192.0.2.1", RecordType::A, "$networks", true),
+        ("192.0.3.1", RecordType::A, "$networks", false),
+        (
+            "2001:db8::1",
+            RecordType::AAAA,
+            "$networks 198.51.100.0/24",
+            true,
+        ),
+        (
+            "2001:db9::1",
+            RecordType::AAAA,
+            "$networks 198.51.100.0/24",
+            false,
+        ),
+        ("::ffff:192.0.2.1", RecordType::AAAA, "192.0.2.0/24", true),
+        ("2001:db9::1", RecordType::AAAA, "::/0", true),
+        ("198.51.100.1", RecordType::A, "$empty 198.51.100.1", true),
+    ] {
+        let rules = format!(
+            "      - exec: $local\n      - matches: resp_ip {expression}\n        exec: ttl 99\n      - exec: accept"
+        );
+        let entries = format!("['a.example {address}']");
+        let host = assembly_extra(
+            &rules,
+            &entries,
+            "127.0.0.1:19000",
+            "  - tag: networks\n    type: ip_set\n    args: {ips: ['192.0.2.0/24', '2001:db8::/32']}\n  - tag: empty\n    type: ip_set\n",
+        );
+        let response = request(&host, query(kind, DNSClass::IN, "a.example."));
+        assert_eq!(
+            response.answers()[0].ttl(),
+            if hit { 99 } else { 10 },
+            "{address} / {expression}"
+        );
+    }
+}
+
+#[test]
+fn response_ip_text_file_is_or_snapshot_not_request_time_io() {
+    let path = std::env::temp_dir().join(format!(
+        "mosdns-ip-wire-{}-{}.txt",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, "# fixture\n192.0.2.0/24 trailing columns\n").unwrap();
+    let rules = format!(
+        "      - exec: $local\n      - matches: resp_ip $empty &{} 2001:db8::/32\n        exec: ttl 99\n      - exec: accept",
+        path.display()
+    );
+    let host = assembly_extra(
+        &rules,
+        "['a.example 192.0.2.1']",
+        "127.0.0.1:19000",
+        "  - tag: empty\n    type: ip_set\n",
+    );
+    let original = query(RecordType::A, DNSClass::IN, "a.example.");
+    assert_eq!(request(&host, original.clone()).answers()[0].ttl(), 99);
+    std::fs::write(&path, "198.51.100.0/24\n").unwrap();
+    assert_eq!(request(&host, original.clone()).answers()[0].ttl(), 99);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(request(&host, original).answers()[0].ttl(), 99);
+}

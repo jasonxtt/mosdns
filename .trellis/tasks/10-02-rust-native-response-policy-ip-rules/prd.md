@@ -2,7 +2,7 @@
 
 ## Goal
 
-在一个 PRD 中补齐本地应答、域名重定向、TTL 调整和 IP 结果判断，形成可与 cache/fallback/forward 组合的原生查询链。用户已确认IP规则限定范围；当前只规划，未授权实施。
+在一个 PRD 中补齐本地应答、域名重定向、TTL 调整和 IP 结果判断，形成可与 cache/fallback/forward 组合的原生查询链。用户已确认IP规则限定范围；完整规划已于2026-10-02获用户批准，正在按S1–S6实施。
 
 ## Confirmed baseline
 
@@ -53,4 +53,4 @@ Human explicitly approved the latest complete planning summary with “批准”
 
 ## Current execution status — 2026-10-02
 
-The final plan was explicitly approved by the human. Task activation succeeded after correcting the conditional planning breadcrumb; historical planning-only notes above describe earlier sessions. S1 config/loaders candidate is implemented and awaiting final checks and exact-commit C2C review. S2–S6 remain pending, each gated by the preceding slice PASS. No push or deployment.
+The final plan was explicitly approved by the human. Task activation succeeded after correcting the conditional planning breadcrumb; historical planning-only notes above describe earlier sessions. S1/S2/S3 (including jump-continuation supplemental correction) have independently passed exact-commit C2C review. S4 real response-IP matcher is undergoing final validation/review; S5/S6 remain pending. Every next slice stays gated by the preceding PASS. No push or deployment.
