@@ -510,3 +510,23 @@ fn redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail
             .is_none()
     );
 }
+
+#[test]
+fn redirect_consumes_jump_continuation_exactly_once_before_restoration() {
+    let host = assembly_extra(
+        "      - exec: jump $inner\n      - exec: ttl 42\n      - exec: accept",
+        "['target.example 192.0.2.1']",
+        "127.0.0.1:19000",
+        "  - tag: rewrite\n    type: redirect\n    args: {rules: ['original.example target.example']}\n  - tag: inner\n    type: sequence\n    args:\n      - exec: $rewrite\n      - exec: $local\n",
+    );
+    let response = request(
+        &host,
+        query(RecordType::A, DNSClass::IN, "original.example."),
+    );
+    assert_eq!(
+        response.answers()[0].ttl(),
+        1,
+        "caller tail runs once in captured target scope, before CNAME restoration"
+    );
+    assert_eq!(response.answers()[1].ttl(), 42);
+}

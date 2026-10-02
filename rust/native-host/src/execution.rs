@@ -1414,7 +1414,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         let terminal = if outcome.completion == Some(ExecutionCompletion::Exited) {
                             ExecutorOutcome::Exit
                         } else {
-                            ExecutorOutcome::Return
+                            ExecutorOutcome::Accept
                         };
                         step = match machine.resume(dispatch.executable(), Ok(terminal)) {
                             Ok(step) => step,
@@ -2027,7 +2027,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                         let terminal = if outcome.completion == Some(ExecutionCompletion::Exited) {
                             ExecutorOutcome::Exit
                         } else {
-                            ExecutorOutcome::Return
+                            ExecutorOutcome::Accept
                         };
                         step = match machine.resume(dispatch.executable(), Ok(terminal)) {
                             Ok(step) => step,
