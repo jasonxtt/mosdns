@@ -155,7 +155,7 @@ impl Matcher for TrueMatcher {
 /// by the bounded W3 matcher. Unsupported labels intentionally become a
 /// non-match instead of receiving a lossy string conversion.
 #[allow(dead_code)]
-fn wire_name_to_ascii_domain(wire: &[u8]) -> Option<String> {
+pub(crate) fn wire_name_to_ascii_domain(wire: &[u8]) -> Option<String> {
     let mut position = 0;
     let mut labels = Vec::new();
     loop {

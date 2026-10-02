@@ -71,3 +71,7 @@ Human explicitly approved the latest complete planning summary with “批准”
 ## Current execution status — 2026-10-02
 
 The final plan was explicitly approved by the human. Task activation succeeded after correcting the conditional planning breadcrumb; historical planning-only notes above describe earlier sessions. S1 config/loaders candidate is implemented and awaiting final checks and exact-commit C2C review. S2–S6 remain pending, each gated by the preceding slice PASS. No push or deployment.
+
+## S1 → S2 execution checkpoint
+
+S1 exact commit e7e8a651ef3e5734d5bb3529775a96e3fc4f13b9 received FINAL: PASS in dedicated C2C iteration 1. S2 implements hosts/TTL in root/branch/direct fallback target paths and validates actual UDP behavior. Final S2 quality/review pending; S3-S6 not started.

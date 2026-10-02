@@ -209,7 +209,10 @@ impl HostAssembly {
         state_root: Option<PathBuf>,
     ) -> Result<Self, AssemblyError> {
         // S1 exposes validated descriptors without serving incomplete policy behavior.
-        if !config.response_policies.is_empty()
+        if config
+            .response_policies
+            .iter()
+            .any(|entry| matches!(entry.policy, crate::policy::ResponsePolicy::Redirect(_)))
             || config
                 .response_ip_rules
                 .iter()

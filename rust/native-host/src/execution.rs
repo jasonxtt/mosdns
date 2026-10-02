@@ -1324,6 +1324,32 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
             }
             MachineStep::Dispatch(dispatch) => {
                 if let Some(policy) = config
+                    .response_policies
+                    .iter()
+                    .find(|policy| policy.executable == dispatch.executable())
+                {
+                    let result =
+                        crate::policy::apply_wire_policy(&policy.policy, machine.state_mut(), raw);
+                    if matches!(result, Ok(true)) {
+                        facts.set_response_source(ResponseSource::Local);
+                    }
+                    step = match machine.resume(
+                        dispatch.executable(),
+                        result.map(|_| ExecutorOutcome::Continue),
+                    ) {
+                        Ok(step) => step,
+                        Err(_) => {
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            set_servfail(&mut machine);
+                            facts.set_response_source(ResponseSource::Local);
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                    };
+                    continue;
+                }
+                if let Some(policy) = config
                     .fallbacks
                     .iter()
                     .find(|policy| policy.executable == dispatch.executable())
@@ -1882,6 +1908,34 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
             MachineStep::Dispatch(dispatch) => {
                 if let Some(policy) = context
                     .config
+                    .response_policies
+                    .iter()
+                    .find(|policy| policy.executable == dispatch.executable())
+                {
+                    let result = crate::policy::apply_wire_policy(
+                        &policy.policy,
+                        machine.state_mut(),
+                        &context.raw,
+                    );
+                    if matches!(result, Ok(true)) {
+                        source = None;
+                        if let Some(trace) = &context.trace {
+                            trace.borrow_mut().clear_selection();
+                        }
+                    }
+                    step = match machine.resume(
+                        dispatch.executable(),
+                        result.map(|_| ExecutorOutcome::Continue),
+                    ) {
+                        Ok(step) => step,
+                        Err(error) => {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                    };
+                    continue;
+                }
+                if let Some(policy) = context
+                    .config
                     .fallbacks
                     .iter()
                     .find(|policy| policy.executable == dispatch.executable())
@@ -2205,6 +2259,37 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
             NativeTarget::External(executable) => {
                 if let Err(error) = consume_external_target(&mut successor, &context) {
                     return BranchOutcome::failure(successor.state().clone(), error);
+                }
+                if let Some(policy) = context
+                    .config
+                    .response_policies
+                    .iter()
+                    .find(|policy| policy.executable == executable)
+                {
+                    let result = crate::policy::apply_wire_policy(
+                        &policy.policy,
+                        successor.state_mut(),
+                        context.raw(),
+                    );
+                    match result {
+                        Ok(replaced) => {
+                            let source = if replaced {
+                                if let Some(trace) = &context.trace {
+                                    trace.borrow_mut().clear_selection();
+                                }
+                                None
+                            } else {
+                                source
+                            };
+                            return drive_branch(successor, context, source).await;
+                        }
+                        Err(error) => {
+                            return BranchOutcome::failure(
+                                successor.state().clone(),
+                                ExecutionError::Executor(error),
+                            );
+                        }
+                    }
                 }
                 if let Some(policy) = context
                     .config

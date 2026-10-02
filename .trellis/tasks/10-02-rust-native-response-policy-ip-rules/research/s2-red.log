@@ -1,0 +1,43 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-response-policy-20261002/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.63s
+     Running tests/policy_wire.rs (target/debug/deps/policy_wire-1e6714e4a355cad2)
+
+running 4 tests
+test hosts_dual_stack_order_ttl_and_continue_into_quick_ttl ... FAILED
+test hosts_empty_family_has_complete_fake_soa ... FAILED
+test hosts_no_hit_no_addresses_non_in_and_non_address_continue ... FAILED
+test ttl_fixed_zero_is_noop_and_range_zero_is_unbounded ... FAILED
+
+failures:
+
+---- hosts_dual_stack_order_ttl_and_continue_into_quick_ttl stdout ----
+
+thread 'hosts_dual_stack_order_ttl_and_continue_into_quick_ttl' (1119515) panicked at native-host/tests/policy_wire.rs:10:70:
+policy runtime: Config(ConfigError { path: "$.plugins", reason: "response-policy runtime is not implemented yet" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- hosts_empty_family_has_complete_fake_soa stdout ----
+
+thread 'hosts_empty_family_has_complete_fake_soa' (1119516) panicked at native-host/tests/policy_wire.rs:10:70:
+policy runtime: Config(ConfigError { path: "$.plugins", reason: "response-policy runtime is not implemented yet" })
+
+---- hosts_no_hit_no_addresses_non_in_and_non_address_continue stdout ----
+
+thread 'hosts_no_hit_no_addresses_non_in_and_non_address_continue' (1119517) panicked at native-host/tests/policy_wire.rs:10:70:
+policy runtime: Config(ConfigError { path: "$.plugins", reason: "response-policy runtime is not implemented yet" })
+
+---- ttl_fixed_zero_is_noop_and_range_zero_is_unbounded stdout ----
+
+thread 'ttl_fixed_zero_is_noop_and_range_zero_is_unbounded' (1119518) panicked at native-host/tests/policy_wire.rs:10:70:
+policy runtime: Config(ConfigError { path: "$.plugins", reason: "response-policy runtime is not implemented yet" })
+
+
+failures:
+    hosts_dual_stack_order_ttl_and_continue_into_quick_ttl
+    hosts_empty_family_has_complete_fake_soa
+    hosts_no_hit_no_addresses_non_in_and_non_address_continue
+    ttl_fixed_zero_is_noop_and_range_zero_is_unbounded
+
+test result: FAILED. 0 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test policy_wire`

@@ -360,6 +360,18 @@ pub fn replace_response_ttls(packet: &[u8], ttl: u32) -> Result<Vec<u8>, Respons
     patch_ttls(packet, |_| ttl)
 }
 
+/// Applies lower then upper bounds to every non-OPT TTL. Zero is unbounded.
+/// Inverted bounds deliberately apply the upper bound last.
+///
+/// # Errors
+/// Returns an error on malformed wire, without mutating the input.
+pub fn clamp_response_ttls(packet: &[u8], min: u32, max: u32) -> Result<Vec<u8>, ResponseError> {
+    patch_ttls(packet, |ttl| {
+        let ttl = if min > 0 { ttl.max(min) } else { ttl };
+        if max > 0 { ttl.min(max) } else { ttl }
+    })
+}
+
 fn patch_ttls(packet: &[u8], transform: impl Fn(u32) -> u32) -> Result<Vec<u8>, ResponseError> {
     let mut patched = packet.to_vec();
     walk_records(packet, |record| {
@@ -922,6 +934,41 @@ mod tests {
 
         // Zero elapsed is a no-op.
         assert_eq!(age_response_ttls(&wire, 0).unwrap(), wire);
+    }
+
+    #[test]
+    fn policy_clamp_all_sections_preserves_opt_and_fails_atomically() {
+        let wire = resp_wire(
+            &[a_rr(2, &[192, 0, 2, 1]), a_rr(60, &[192, 0, 2, 2])],
+            &[a_rr(200, &[198, 51, 100, 1])],
+            &[a_rr(7, &[203, 0, 113, 1]), opt(1232, 0x8000, &[])],
+        );
+        for (min, max, expected) in [
+            (10, 100, vec![10, 60, 100, 10]),
+            (0, 0, vec![2, 60, 200, 7]),
+            (300, 10, vec![10, 10, 10, 10]),
+        ] {
+            let output = super::clamp_response_ttls(&wire, min, max).unwrap();
+            let actual: Vec<u32> = ttl_offsets(&output)
+                .into_iter()
+                .filter(|(_, is_opt)| !is_opt)
+                .map(|(offset, _)| {
+                    u32::from_be_bytes(output[offset..offset + 4].try_into().unwrap())
+                })
+                .collect();
+            assert_eq!(actual, expected);
+            let offset = ttl_offsets(&wire)
+                .into_iter()
+                .find(|(_, opt)| *opt)
+                .unwrap()
+                .0;
+            assert_eq!(&output[offset..], &wire[offset..]);
+        }
+        let mut broken = wire.clone();
+        broken.pop();
+        let original = broken.clone();
+        assert!(super::clamp_response_ttls(&broken, 10, 100).is_err());
+        assert_eq!(broken, original);
     }
 
     #[test]

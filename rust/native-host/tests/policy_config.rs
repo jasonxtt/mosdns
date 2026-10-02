@@ -257,13 +257,13 @@ fn text_loader_limits_are_enforced_before_snapshot_publication() {
 #[test]
 fn descriptors_cannot_start_an_incomplete_runtime() {
     let yaml = config(
-        "  - tag: local\n    type: hosts\n    args: {entries: ['x 192.0.2.1']}",
+        "  - tag: local\n    type: redirect\n    args: {rules: ['x y']}",
         "      - exec: $local\n      - exec: $upstream",
     );
     let compiled = compile_yaml(&yaml).expect("typed compile supported in S1");
     assert!(
         mosdns_native_host::HostAssembly::from_config(compiled).is_err(),
-        "S1 fails closed before listener bind rather than ignoring policy"
+        "pending redirect fails closed before listener bind"
     );
 }
 
