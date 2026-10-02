@@ -1,0 +1,28 @@
+    Checking mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
+error: this function has too many arguments (8/7)
+  --> native-host/tests/ecs_wire.rs:78:1
+   |
+78 | / fn run_scenario_requests(
+79 | |     args: &str,
+80 | |     quick: Option<&str>,
+81 | |     raw: Vec<u8>,
+...  |
+86 | |     rewrite: impl FnOnce(String) -> String,
+87 | | ) -> (Message, Option<Vec<u8>>) {
+   | |_______________________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#too_many_arguments
+   = note: `-D clippy::too-many-arguments` implied by `-D clippy::all`
+   = help: to override `-D clippy::all` add `#[allow(clippy::too_many_arguments)]`
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+   --> native-host/tests/ecs_wire.rs:124:49
+    |
+124 |                 response_wire.extend_from_slice(&options);
+    |                                                 ^^^^^^^^ help: change this to: `options`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#needless_borrow
+    = note: `-D clippy::needless-borrow` implied by `-D clippy::all`
+    = help: to override `-D clippy::all` add `#[allow(clippy::needless_borrow)]`
+
+error: could not compile `mosdns-native-host` (test "ecs_wire") due to 2 previous errors

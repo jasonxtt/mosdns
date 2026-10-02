@@ -201,3 +201,119 @@ pub(crate) fn replace_query_ecs(
     }
     Ok(wire)
 }
+
+/// Consume only the returned supplier's ECS. Temporarily rename ECS option codes
+/// before decoding, preserving offsets while rejecting malformed ECS independently
+/// of the DNS answer. Re-encoding rebuilds every name compression pointer.
+pub(crate) fn response_wire(
+    raw: &[u8],
+    incoming: &[u8],
+    echo: Option<&Subnet>,
+    network_supplier: bool,
+) -> Result<Vec<u8>, ExecutorError> {
+    use hickory_proto::rr::rdata::opt::{EdnsCode, EdnsOption};
+    mosdns_dns_core::validate_response(raw).map_err(|_| error("invalid ECS response DNS"))?;
+    let mut pos = 12;
+    for _ in 0..u16::from_be_bytes([raw[4], raw[5]]) {
+        pos = name_end(raw, pos)? + 4;
+    }
+    let records = [6, 8, 10]
+        .into_iter()
+        .map(|i| usize::from(u16::from_be_bytes([raw[i], raw[i + 1]])))
+        .sum::<usize>();
+    let mut ecs_offsets = Vec::new();
+    let mut codes = std::collections::BTreeSet::new();
+    let mut subnet = None;
+    let mut valid = true;
+    let mut opt_count = 0;
+    for _ in 0..records {
+        pos = name_end(raw, pos)?;
+        let fields = raw
+            .get(pos..pos + 10)
+            .ok_or_else(|| error("short response RR"))?;
+        let kind = u16::from_be_bytes([fields[0], fields[1]]);
+        let len = usize::from(u16::from_be_bytes([fields[8], fields[9]]));
+        pos += 10;
+        let end = pos + len;
+        if kind == 41 {
+            opt_count += 1;
+            while pos < end {
+                let fixed = raw
+                    .get(pos..pos + 4)
+                    .filter(|_| pos + 4 <= end)
+                    .ok_or_else(|| error("short response option"))?;
+                let code = u16::from_be_bytes([fixed[0], fixed[1]]);
+                let len = usize::from(u16::from_be_bytes([fixed[2], fixed[3]]));
+                codes.insert(code);
+                let data = raw
+                    .get(pos + 4..pos + 4 + len)
+                    .filter(|_| pos + 4 + len <= end)
+                    .ok_or_else(|| error("short response option data"))?;
+                if code == 8 {
+                    ecs_offsets.push(pos);
+                    match Subnet::decode(data, false) {
+                        Ok(value) if subnet.is_none() => subnet = Some(value),
+                        _ => valid = false,
+                    }
+                }
+                pos += 4 + len;
+            }
+        }
+        pos = end;
+    }
+    let temporary = (65000..=u16::MAX)
+        .rev()
+        .find(|code| !codes.contains(code))
+        .ok_or_else(|| error("no temporary EDNS code"))?;
+    let mut sanitized = raw.to_vec();
+    for offset in &ecs_offsets {
+        sanitized[*offset..*offset + 2].copy_from_slice(&temporary.to_be_bytes());
+    }
+    let mut message = hickory_proto::op::Message::from_vec(&sanitized)
+        .map_err(|_| error("invalid response decode"))?;
+    if let Some(opt) = message.extensions_mut().as_mut() {
+        opt.options_mut().remove(EdnsCode::Unknown(temporary));
+    }
+    let original = query_opt(incoming)?;
+    if let Some(original) = original {
+        let opt = message
+            .extensions_mut()
+            .get_or_insert_with(hickory_proto::op::Edns::new);
+        opt.set_max_payload(u16::from_be_bytes([original.fixed[3], original.fixed[4]]));
+        opt.set_dnssec_ok(original.fixed[7] & 0x80 != 0);
+        if network_supplier && valid && opt_count == 1 && ecs_offsets.len() == 1 {
+            if let (Some(expected), Some(actual)) = (echo, subnet) {
+                if actual.family == expected.family
+                    && actual.source == expected.source
+                    && actual.address == expected.address
+                {
+                    let option = actual.option();
+                    opt.options_mut()
+                        .insert(EdnsOption::Unknown(8, option[4..].to_vec()));
+                }
+            }
+        }
+    } else {
+        *message.extensions_mut() = None;
+    }
+    message
+        .to_vec()
+        .map_err(|_| error("response ECS encode failed"))
+}
+fn name_end(raw: &[u8], mut pos: usize) -> Result<usize, ExecutorError> {
+    loop {
+        let byte = *raw.get(pos).ok_or_else(|| error("short DNS name"))?;
+        pos += 1;
+        if byte == 0 {
+            return Ok(pos);
+        }
+        if byte & 0xc0 == 0xc0 {
+            raw.get(pos).ok_or_else(|| error("short DNS pointer"))?;
+            return Ok(pos + 1);
+        }
+        if byte & 0xc0 != 0 {
+            return Err(error("invalid DNS label"));
+        }
+        pos += usize::from(byte);
+    }
+}
