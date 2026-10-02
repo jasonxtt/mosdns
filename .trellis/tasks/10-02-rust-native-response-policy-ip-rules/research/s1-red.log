@@ -1,0 +1,30 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-response-policy-20261002/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 5.39s
+     Running tests/policy_red_valid.rs (target/debug/deps/policy_red_valid-d318898ea211cd95)
+
+running 3 tests
+test named_response_policies_and_ttl_compile_through_public_yaml ... FAILED
+test text_ip_references_and_or_expression_compile_before_execution ... FAILED
+test unchanged_forward_config_remains_valid ... ok
+
+failures:
+
+---- named_response_policies_and_ttl_compile_through_public_yaml stdout ----
+
+thread 'named_response_policies_and_ttl_compile_through_public_yaml' (1114799) panicked at native-host/tests/policy_red_valid.rs:8:42:
+approved named/quick policy grammar must compile: Some(ConfigError { path: "$.plugins[0].type", reason: "unsupported plugin type `hosts`" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- text_ip_references_and_or_expression_compile_before_execution stdout ----
+
+thread 'text_ip_references_and_or_expression_compile_before_execution' (1114800) panicked at native-host/tests/policy_red_valid.rs:13:42:
+typed IP expression must compile without runtime file reads: Some(ConfigError { path: "$.plugins[0].type", reason: "unsupported plugin type `ip_set`" })
+
+
+failures:
+    named_response_policies_and_ttl_compile_through_public_yaml
+    text_ip_references_and_or_expression_compile_before_execution
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test policy_red_valid`

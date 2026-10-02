@@ -208,6 +208,19 @@ impl HostAssembly {
         mut options: HostOptions,
         state_root: Option<PathBuf>,
     ) -> Result<Self, AssemblyError> {
+        // S1 exposes validated descriptors without serving incomplete policy behavior.
+        if !config.response_policies.is_empty()
+            || config
+                .response_ip_rules
+                .iter()
+                .any(|rule| !rule.runtime_ready)
+        {
+            return Err(AssemblyError::Config(crate::config::ConfigError::new(
+                "$.plugins",
+                "response-policy runtime is not implemented yet",
+            )));
+        }
+
         let config = Rc::new(config);
         let forwards = Rc::new(
             ForwardCatalog::from_compiled_config(&config, options.tls_roots.clone())

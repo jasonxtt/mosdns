@@ -23,6 +23,7 @@ use crate::matchers::{
     build_domain_set, resolve_rule_path,
 };
 use crate::plugins::{FastMarkConfig, FlowSetterConfig};
+use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
 
 /// The only accepted log level in the native host subset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -439,6 +440,9 @@ impl DomainSetConfig {
 
 /// The typed, validated graph consumed by pre-I/O host assembly.
 pub struct CompiledConfig {
+    pub response_policies: Vec<ResponsePolicyConfig>,
+    pub ip_sets: Vec<IpSetConfig>,
+    pub response_ip_rules: Vec<ResponseIpRuleConfig>,
     pub log_level: LogLevel,
     /// Legacy convenience view of one reachable forward. This value does not
     /// determine configuration validity or runtime dispatch behavior.
@@ -460,6 +464,12 @@ pub struct CompiledConfig {
     /// The scoped management HTTP listener, when one is configured.
     pub api: Option<ApiConfig>,
     pub program: ValidatedProgram,
+}
+
+pub struct ResponseIpRuleConfig {
+    pub(crate) runtime_ready: bool,
+    pub source_path: String,
+    pub prefixes: Vec<Rc<mosdns_matcher_core::IpPrefixList>>,
 }
 
 impl CompiledConfig {
@@ -506,7 +516,7 @@ pub struct ConfigError {
 }
 
 impl ConfigError {
-    fn new(path: impl Into<String>, reason: impl Into<String>) -> Self {
+    pub(crate) fn new(path: impl Into<String>, reason: impl Into<String>) -> Self {
         Self {
             path: path.into(),
             reason: reason.into(),
@@ -654,6 +664,9 @@ fn resolve_relative(value: &str, base_dir: &Path) -> PathBuf {
 /// external executables; listeners are collected separately.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PluginKind {
+    Hosts,
+    Redirect,
+    IpSet,
     Forward,
     Cache,
     Sequence,
@@ -667,6 +680,10 @@ enum PluginKind {
 /// The collected definition catalog used to resolve named references. It is
 /// built before any definition is compiled, so a reference order-independent.
 struct PluginCatalog<'a> {
+    policies: &'a RefCell<Vec<(String, ResponsePolicy)>>,
+    ip_sets: &'a [IpSetConfig],
+    response_ip_rules: &'a RefCell<Vec<ResponseIpRuleConfig>>,
+    ip_budgets: &'a RefCell<BTreeMap<String, policy::RuleBudget>>,
     kinds: &'a [(String, PluginKind, usize)],
     domain_sets: &'a [(String, DomainSetHandle)],
     fast_marks: &'a [(String, FastMarkConfig)],
@@ -716,6 +733,9 @@ fn compile_definitions(
     let mut kinds: Vec<(String, PluginKind, usize)> = Vec::with_capacity(definitions.len());
     for (index, plugin) in definitions.iter().enumerate() {
         let kind = match plugin.kind.as_str() {
+            "hosts" => PluginKind::Hosts,
+            "redirect" => PluginKind::Redirect,
+            "ip_set" => PluginKind::IpSet,
             "forward" => PluginKind::Forward,
             "cache" => PluginKind::Cache,
             "sequence" => PluginKind::Sequence,
@@ -812,6 +832,10 @@ fn compile_definitions(
             handle,
         });
     }
+    let policies = RefCell::new(Vec::new());
+    let mut ip_sets = Vec::new();
+    let response_ip_rules = RefCell::new(Vec::new());
+    let ip_budgets = RefCell::new(BTreeMap::new());
     let mut forwards = Vec::new();
     let mut fast_marks = Vec::new();
     let mut flow_setters = Vec::new();
@@ -821,6 +845,54 @@ fn compile_definitions(
     let mut listener = None;
     for (index, plugin) in definitions.iter().enumerate() {
         match kinds[index].1 {
+            PluginKind::Hosts | PluginKind::Redirect => {
+                let (inline, files) = policy_sources(
+                    plugin,
+                    if kinds[index].1 == PluginKind::Hosts {
+                        "entries"
+                    } else {
+                        "rules"
+                    },
+                    &["entries", "files"],
+                    &["rules", "files"],
+                )?;
+                let path = format!("{}.args", plugin.source_path);
+                let policy = if kinds[index].1 == PluginKind::Hosts {
+                    ResponsePolicy::Hosts(Rc::new(policy::hosts(&inline, &files, &path)?))
+                } else {
+                    ResponsePolicy::Redirect(Rc::new(policy::redirects(&inline, &files, &path)?))
+                };
+                policies.borrow_mut().push((plugin.tag.clone(), policy));
+            }
+            PluginKind::IpSet => {
+                let args = expect_map(
+                    &plugin.args,
+                    &format!("{}.args", plugin.source_path),
+                    "ip_set args must be a mapping",
+                )?;
+                args.reject_unknown(&["ips", "files", "sets"], &plugin.source_path)?;
+                if !policy_strings(
+                    args.get("sets"),
+                    &format!("{}.args.sets", plugin.source_path),
+                )?
+                .is_empty()
+                {
+                    return Err(ConfigError::new(
+                        &plugin.source_path,
+                        "non-empty ip_set sets are unsupported",
+                    ));
+                }
+                let (inline, files) =
+                    policy_sources(plugin, "ips", &["ips", "files", "sets"], &[])?;
+                ip_sets.push(IpSetConfig {
+                    tag: plugin.tag.clone(),
+                    prefixes: policy::ip_list(
+                        &inline,
+                        &files,
+                        &format!("{}.args", plugin.source_path),
+                    )?,
+                });
+            }
             PluginKind::DomainSet | PluginKind::Sequence => {}
             PluginKind::FastMark => {
                 let config = compile_fast_mark(plugin)?;
@@ -880,6 +952,10 @@ fn compile_definitions(
     let preference_invocations = RefCell::new(Vec::new());
     let quick_caches = RefCell::new(Vec::new());
     let catalog = PluginCatalog {
+        policies: &policies,
+        ip_sets: &ip_sets,
+        response_ip_rules: &response_ip_rules,
+        ip_budgets: &ip_budgets,
         kinds: &kinds,
         domain_sets: &domain_sets,
         fast_marks: &fast_marks,
@@ -961,10 +1037,16 @@ fn compile_definitions(
     }
     let preference_invocations = preference_invocations.into_inner();
     let quick_cache_specs = quick_caches.into_inner();
+    let policies = policies.into_inner();
     let externals: Vec<ExternalSpec> = forward_compiler
         .invocations
         .iter()
         .map(|(name, _, _)| ExternalSpec::new(name.clone()))
+        .chain(
+            policies
+                .iter()
+                .map(|(name, _)| ExternalSpec::new(name.clone())),
+        )
         .chain(
             caches
                 .iter()
@@ -1126,7 +1208,20 @@ fn compile_definitions(
     })?;
     let primary = primary_forward(&program, entry_sequence, &compiled_forwards);
 
+    let response_policies = policies
+        .into_iter()
+        .map(|(tag, policy)| {
+            Ok(ResponsePolicyConfig {
+                executable: external_id(&program, &tag, "$.plugins")?,
+                tag,
+                policy,
+            })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
     Ok(CompiledConfig {
+        response_policies,
+        ip_sets,
+        response_ip_rules: response_ip_rules.into_inner(),
         log_level: log,
         forward: primary.clone(),
         forwards: compiled_forwards,
@@ -1268,7 +1363,15 @@ fn decode_plugin(value: &RawValue, path: &str, base_dir: &Path) -> Result<RawPlu
         ));
     }
     let kind = expect_string(map.required("type", path)?, &format!("{path}.type"))?;
-    let args = map.required("args", path)?.clone();
+    let args = if matches!(kind.as_str(), "hosts" | "redirect" | "ip_set")
+        && matches!(map.get("args"), None | Some(RawValue::Null))
+    {
+        RawValue::Map(RawMap {
+            entries: Vec::new(),
+        })
+    } else {
+        map.required("args", path)?.clone()
+    };
     if let RawValue::Null = args {
         return Err(ConfigError::new(
             format!("{path}.args"),
@@ -1516,16 +1619,15 @@ fn resolve_policy_target_name(
             };
             Ok(PolicyTargetName::External(target.name))
         }
-        Some(PluginKind::Cache | PluginKind::Fallback) => {
-            Ok(PolicyTargetName::External(tag.to_owned()))
-        }
+        Some(
+            PluginKind::Cache | PluginKind::Fallback | PluginKind::Hosts | PluginKind::Redirect,
+        ) => Ok(PolicyTargetName::External(tag.to_owned())),
         Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
             Ok(PolicyTargetName::Fixture(plugin_fixture_name(tag)))
         }
-        Some(PluginKind::DomainSet | PluginKind::Listener) => Err(ConfigError::new(
-            path,
-            format!("`${tag}` is not executable"),
-        )),
+        Some(PluginKind::DomainSet | PluginKind::Listener | PluginKind::IpSet) => Err(
+            ConfigError::new(path, format!("`${tag}` is not executable")),
+        ),
         None => Err(ConfigError::new(
             path,
             format!("unknown executable reference `${tag}`"),
@@ -1814,6 +1916,7 @@ fn compile_sequence(
                     &expression,
                     &format!("{matches_path}[{match_index}]"),
                     catalog,
+                    &plugin.base_dir,
                 )?);
             }
         }
@@ -1864,6 +1967,7 @@ fn compile_matcher(
     expression: &str,
     path: &str,
     catalog: &PluginCatalog<'_>,
+    base: &Path,
 ) -> Result<MatcherSpecInput, ConfigError> {
     let (expression, reverse) = match expression.strip_prefix('!') {
         Some(rest) => (rest.trim(), true),
@@ -1920,10 +2024,20 @@ fn compile_matcher(
             Box::new(HasResponseMatcher)
         }
         "resp_ip" => {
-            let address = args
-                .parse::<Ipv4Addr>()
-                .map_err(|_| ConfigError::new(path, "resp_ip requires one IPv4 literal"))?;
-            Box::new(ResponseIpMatcher::ipv4(address))
+            let prefixes = compile_response_ip(args, path, catalog, base)?;
+            catalog
+                .response_ip_rules
+                .borrow_mut()
+                .push(ResponseIpRuleConfig {
+                    runtime_ready: args.parse::<Ipv4Addr>().is_ok(),
+                    source_path: path.to_owned(),
+                    prefixes,
+                });
+            if let Ok(address) = args.parse::<Ipv4Addr>() {
+                Box::new(ResponseIpMatcher::ipv4(address))
+            } else {
+                Box::new(policy::PendingIpMatcher)
+            }
         }
         "_true" => {
             if !args.is_empty() {
@@ -2153,6 +2267,20 @@ fn compile_exec_item(
                 target: ExternalRef::new(external),
             })
         }
+        "ttl" => {
+            let policy = TtlPolicy::parse(args, path)?;
+            let name = format!(
+                "@native-ttl:{}:{rule_index}:{exec_index}",
+                hex_identity(sequence_tag)
+            );
+            catalog
+                .policies
+                .borrow_mut()
+                .push((name.clone(), ResponsePolicy::Ttl(policy)));
+            Ok(ExecutableSpec::External {
+                target: ExternalRef::new(name),
+            })
+        }
         "fast_mark" => {
             let config =
                 FastMarkConfig::parse(args).map_err(|reason| ConfigError::new(path, reason))?;
@@ -2244,7 +2372,12 @@ fn compile_exec_item(
                 Some(PluginKind::Forward) => {
                     catalog.forwards.borrow_mut().invocation(tag, args, path)
                 }
-                Some(PluginKind::Cache | PluginKind::Fallback) => Ok(ExecutableSpec::External {
+                Some(
+                    PluginKind::Cache
+                    | PluginKind::Fallback
+                    | PluginKind::Hosts
+                    | PluginKind::Redirect,
+                ) => Ok(ExecutableSpec::External {
                     target: ExternalRef::new(tag),
                 }),
                 Some(PluginKind::FastMark | PluginKind::FlowSetter) => {
@@ -2252,10 +2385,9 @@ fn compile_exec_item(
                         target: mosdns_sequence_core::FixtureRef::new(plugin_fixture_name(tag)),
                     })
                 }
-                Some(PluginKind::DomainSet | PluginKind::Listener) => Err(ConfigError::new(
-                    path,
-                    format!("`{name}` is not executable"),
-                )),
+                Some(PluginKind::DomainSet | PluginKind::Listener | PluginKind::IpSet) => Err(
+                    ConfigError::new(path, format!("`{name}` is not executable")),
+                ),
                 None => Err(ConfigError::new(
                     path,
                     format!("unknown executable reference `{name}`"),
@@ -2877,6 +3009,87 @@ impl<'de> Deserialize<'de> for RawValue {
     }
 }
 
+fn policy_strings(value: Option<&RawValue>, path: &str) -> Result<Vec<String>, ConfigError> {
+    if matches!(value, None | Some(RawValue::Null)) {
+        Ok(Vec::new())
+    } else {
+        string_list(value, path)
+    }
+}
+fn policy_sources(
+    plugin: &RawPlugin,
+    field: &str,
+    hosts_allowed: &[&str],
+    redirect_allowed: &[&str],
+) -> Result<(Vec<String>, Vec<PathBuf>), ConfigError> {
+    let path = format!("{}.args", plugin.source_path);
+    let args = expect_map(&plugin.args, &path, "policy args must be a mapping")?;
+    args.reject_unknown(
+        if field == "rules" {
+            redirect_allowed
+        } else {
+            hosts_allowed
+        },
+        &path,
+    )?;
+    let inline = policy_strings(args.get(field), &format!("{path}.{field}"))?;
+    let files = policy_strings(args.get("files"), &format!("{path}.files"))?
+        .into_iter()
+        .map(|file| resolve_rule_path(&file, &plugin.base_dir))
+        .collect();
+    Ok((inline, files))
+}
+fn compile_response_ip(
+    args: &str,
+    path: &str,
+    catalog: &PluginCatalog<'_>,
+    base: &Path,
+) -> Result<Vec<Rc<mosdns_matcher_core::IpPrefixList>>, ConfigError> {
+    if args.is_empty() {
+        return Err(ConfigError::new(
+            path,
+            "resp_ip requires at least one IP/CIDR/provider/file",
+        ));
+    }
+    let mut lists = Vec::new();
+    let mut inline = Vec::new();
+    let mut files = Vec::new();
+    for token in args.split_whitespace() {
+        if let Some(tag) = token.strip_prefix('$') {
+            let set = catalog
+                .ip_sets
+                .iter()
+                .find(|set| set.tag == tag)
+                .ok_or_else(|| {
+                    ConfigError::new(path, format!("unknown or wrong-type ip_set `{tag}`"))
+                })?;
+            lists.push(Rc::clone(&set.prefixes));
+        } else if let Some(file) = token.strip_prefix('&') {
+            if file.is_empty() {
+                return Err(ConfigError::new(path, "empty IP file reference"));
+            }
+            files.push(resolve_rule_path(file, base));
+        } else {
+            inline.push(token.to_owned());
+        }
+    }
+    let mut prefixes = mosdns_matcher_core::IpPrefixList::new();
+    let mut budgets = catalog.ip_budgets.borrow_mut();
+    let key = path.split(".args[").next().unwrap_or(path).to_owned();
+    budgets
+        .entry(key)
+        .or_default()
+        .load(&inline, &files, true, path, |line, location| {
+            let (ip, bits) =
+                policy::ip_prefix(line.split_whitespace().next().unwrap_or(""), location)?;
+            prefixes.append(ip, bits);
+            Ok(())
+        })?;
+    prefixes.rebuild();
+    lists.push(Rc::new(prefixes));
+    Ok(lists)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
@@ -3239,8 +3452,8 @@ plugins:
             "qtype",
             "qtype notanumber",
             "has_resp extra",
-            "resp_ip ::1",
-            "resp_ip 192.0.2.1/24",
+            "resp_ip ::1/129",
+            "resp_ip 192.0.2.1/33",
             "qname $missing_set",
             "qname &file.txt",
             "_true extra",

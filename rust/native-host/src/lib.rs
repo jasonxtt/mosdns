@@ -12,6 +12,7 @@ mod managed;
 mod matchers;
 mod observer;
 mod plugins;
+mod policy;
 mod tcp;
 mod udp;
 
@@ -76,3 +77,8 @@ impl std::fmt::Display for HostError {
 }
 
 impl std::error::Error for HostError {}
+
+pub use policy::{
+    DomainPayload, HostAddresses, IpSetConfig, POLICY_BYTES_LIMIT, POLICY_LINE_LIMIT,
+    POLICY_RULE_LIMIT, ResponsePolicy, ResponsePolicyConfig, TtlPolicy,
+};
