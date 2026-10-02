@@ -1,3 +1,0 @@
-User explicitly authorized frozen S1–S6 and fresh C2C reviews on 2026-10-02. Verified chat: https://chatgpt.com/c/6abf8d5c-9fb8-83e8-9fa8-dc220e52f750; workspace mosdns-rust, branch rust, baseline aa32270a.
-
-Initial activation setup failed because c2c is not on PATH. An erroneously sequenced start changed status before snapshot; no product edits or builds occurred. Restored planning, set automation_required, resolved binding with explicit node CLI path, and froze authorization before retrying start. Numeric headings map unchanged slices to parser. No earlier valid activation or code PASS is claimed.

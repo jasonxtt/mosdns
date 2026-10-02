@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/native-audit-control.md", "reason": "Preserve existing capture/control/settings and bounded read contracts"}
-{"file": "docs/ai/rust-rewrite-plan.md", "reason": "Native-only ownership and final phase gates"}
-{"file": ".trellis/spec/backend/config-compatibility.md", "reason": "Preserve YAML/API/Vue product workflow"}
-{"file": ".trellis/tasks/09-30-rust-native-query-diagnostics-overview/research/contracts.md", "reason": "Final proposed API/provenance/read contracts"}
-{"file": ".trellis/tasks/09-30-rust-native-query-diagnostics-overview/design.md", "reason": "Shared final-wire/read ownership and scheduling"}

@@ -1,5 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"Locate backend spec contracts and quality gate for the native host."}
-{"file":".trellis/spec/backend/config-compatibility.md","reason":"Preserve YAML/config and managed-file behavior while adding scoped API configuration."}
-{"file":".trellis/spec/backend/rust-migration.md","reason":"Keep pure Rust-native ownership and migration gates; do not extend hybrid scaffolding."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace Vue request through API, persistence, matcher publication and DNS result."}
-{"file":".trellis/tasks/09-28-rust-native-domain-set-management/research/planning-evidence.md","reason":"Current source anchors and bounded UI/API/host evidence for Slice 0."}

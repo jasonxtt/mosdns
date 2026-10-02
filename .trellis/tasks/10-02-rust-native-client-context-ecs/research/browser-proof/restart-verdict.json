@@ -1,7 +1,0 @@
-{
-  "restart_hits": 3,
-  "network_attempts_after_restart": 0,
-  "total_controlled_supplier_requests": 6,
-  "expected_udp_and_two_tcp_cold_cycles": true,
-  "verdict": "PASS"
-}

@@ -389,7 +389,7 @@ Linux amd64 是首要构建、基准和发布验收平台。arm64、OpenWrt、li
 
 截至 2026-09-27，原生 W1/W2/W3 与基础观测已交付；最新测量任务以 incomplete matrix 关闭，容量/恢复/热点仍未知。不恢复该实验，不由其结果推断 runtime 改造。
 
-5B 修订后的 [代表查询链任务](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5b-config-sequence-composition/prd.md) 已按用户授权归档：代表链实现、选定 Linux E2E 子项及 A6 证据 review 已通过。专门远端 fault/cancel/close E2E 仍延期，不计入已通过项。后续按共享机制补全查询功能，并尽早接入一个管理闭环；剩余 Phase 4 跟随真实依赖；完整功能的 5D、Phase 6 和生产确认保留。具体顺序见 [后续安排](../rust/next-stage-plan.md)。
+5B 修订后的 [代表查询链任务](../rust/validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) 已按用户授权归档：代表链实现、选定 Linux E2E 子项及 A6 证据 review 已通过。专门远端 fault/cancel/close E2E 仍延期，不计入已通过项。后续按共享机制补全查询功能，并尽早接入一个管理闭环；剩余 Phase 4 跟随真实依赖；完整功能的 5D、Phase 6 和生产确认保留。具体顺序见 [后续安排](../rust/next-stage-plan.md)。
 
 常规任务以简明 PRD/design/清单、一次规划审查、一次最终完整审查为主；中间只为重大契约/范围变化或实际高风险问题追加审查。记录新增可运行配置行为，保留必要测试、失败和可复现命令，不按每次编辑生成规划 digest。
 

@@ -1,7 +1,0 @@
-# Activation diagnosis — 2026-10-02
-
-No task.py start command was attempted or rejected before this diagnosis. CLI cmd_start resolves the task/session, rejects terminal tasks, and enforces an authorization snapshot only when task.json.meta.automation_required is true. This task is planning, has complete PRD/design/implement with observable slices/public interfaces/mock boundaries, independent C2C planning PASS, explicit human final approval, and available Codex session identity. Missing reviewer in the informational automation banner is not itself a cmd_start rejection.
-
-The per-turn hook reads the planning block verbatim from .trellis/workflow.md and selects it by task status. The old block said unconditionally “stay in planning”, while status could only move through task.py start. This created an instruction-level activation deadlock after approval. Corrected the local source-of-truth block to retain all planning/review/human approval gates but explicitly allow the approved transition. No hook/script/global installation/approval bypass or task status hand-edit. Existing dirty workflow changes preserved.
-
-Current conversation received the old unconditional developer-level block before the local correction. Changing a local template does not retroactively replace that already-issued instruction. The corrected block is emitted on the next user turn; that turn may activate using the approval already recorded, without another scope approval.

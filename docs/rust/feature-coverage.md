@@ -29,7 +29,7 @@
 
 ### 第一条 5C 管理闭环子项：本地规则编辑（规划中任务的已交付切片；整行仍“待验收”）
 
-任务 [09-28-rust-native-domain-set-management](../../.trellis/tasks/09-28-rust-native-domain-set-management/prd.md) 交付一条限定闭环：file-backed `domain_set` 的原生 HTTP 管理、安全持久化与下一 DNS 查询生效，加维护中 Vue `/` 本地规则页的隔离端到端编辑。以下只登记本批实际交付的子项与明确延期；P02/C10/C11 整行仍是“待验收”。
+任务 [09-28-rust-native-domain-set-management](validation-records/09-28-rust-native-domain-set-management/prd.md) 交付一条限定闭环：file-backed `domain_set` 的原生 HTTP 管理、安全持久化与下一 DNS 查询生效，加维护中 Vue `/` 本地规则页的隔离端到端编辑。以下只登记本批实际交付的子项与明确延期；P02/C10/C11 整行仍是“待验收”。
 
 | 条目 | 本批实际交付 | 仍延期 |
 | --- | --- | --- |
@@ -43,7 +43,7 @@
 
 ### 5B 代表链实现子项（本地与指定 Linux E2E 通过；用户指定 C2C review PASS；专门远端 fault E2E 延期；已归档）
 
-任务 [09-27-rust-phase5b-config-sequence-composition](../../.trellis/tasks/archive/2026-09/09-27-rust-phase5b-config-sequence-composition/prd.md) 把原生配置从固定 W1/W2/W3 图改为收集后解析的通用编译器，并让一条从本地配置包裁剪的代表链在 native host 上运行。以下只登记本批实际交付的子项与明确延期；整行仍是“待验收”。
+任务 [09-27-rust-phase5b-config-sequence-composition](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) 把原生配置从固定 W1/W2/W3 图改为收集后解析的通用编译器，并让一条从本地配置包裁剪的代表链在 native host 上运行。以下只登记本批实际交付的子项与明确延期；整行仍是“待验收”。
 
 | 条目 | 本批实际交付 | 仍延期 |
 | --- | --- | --- |
@@ -174,14 +174,14 @@ switch1–17 逐项保留配置和持久化语义；位号必须遵守 [config-n
 
 ### 5A 基础观测的有界证据（2026-09-26）
 
-已归档任务 [native query observability](../../.trellis/tasks/archive/2026-09/09-24-rust-phase5a-native-query-observability/prd.md)
+已归档任务 [native query observability](validation-records/09-24-rust-phase5a-native-query-observability/prd.md)
 已在严格 W1 UDP/TCP、W2/W3 单 listener 子集中接入审计开关、终态记录、
 基本指标和有界快照，Linux 功能回归通过。M8 W1 与 M9 W2 暖缓存仅通过
 100QPS 筛查；冷缓存只验证正确性。M9 错误夹具 W3 仍无效。另行授权的
 M10 九场 W3 完成 27000 个正确查询，45000 条路由事件离线核对通过，四项
 配对中位数门槛通过。原始驱动 FAIL 和退出竞态日志保留；独立 DNS ID 路由
 证明及完整退出回执获 M10-FINAL-001 明确 PASS，有限基本可观测性 A1–A6
-验收通过；2026-09-26 经用户授权完成归档，完整 5A 和生产部署尚未验收。见 [当前验收报告](../../.trellis/tasks/archive/2026-09/09-24-rust-phase5a-native-query-observability/research/m10-w3-assessment.md)。
+验收通过；2026-09-26 经用户授权完成归档，完整 5A 和生产部署尚未验收。见 [当前验收报告](validation-records/09-24-rust-phase5a-native-query-observability/research/m10-w3-assessment.md)。
 这不将 C08、P37/P38 或任何完整产品验收条目改为完成；完整审计 API、
 Prometheus、WebUI、持久化仍归5C，容量和整机验收仍待后续阶段。
 
@@ -217,7 +217,7 @@ C16 是未来对应任务需完成的兼容分类，不是本轮删减批准；�
 `b558d153cad9ad8e3ffaf18a6e2dde82329e32e0` 上完成了 Linux amd64 的
 strict-W2 correctness gate：单一 host-owned cache、plain UDP hit/miss/
 expiry、W1 UDP/TCP forwarding preservation，以及 Go cgo regression。证据
-与精确命令见 [task execution state](../../.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-cache/research/execution-state.md)。
+与精确命令见 [task execution state](validation-records/09-22-rust-phase5a-native-cache/research/execution-state.md)。
 最终 reviewer 已对 `c6b7f80226a13fa9ab81945fe782fe2c7c6bb5d0` 返回 PASS，任务已获用户授权归档。
 这只关闭表中 P26/C01/C02 的受限 5A 子集；完整 lazy/EDNS 产品语义、cache
 dump/持久化、API/WebUI/metrics、完整插件与跨模块组合仍保持“待验收”，归
@@ -231,7 +231,7 @@ W3 YAML、真实 UDP A/B/C 路由、冻结 `routing.jsonl` 三行语料、W1/W2 
 关闭/取消/rebind 以及 sequence/runtime ABI tests 均通过。W3 事件 oracle
 验证了 `A`、`B -> A`、`B -> C` 的精确顺序和 forbidden-leg 计数；完整命令、
 远端环境、输入 digest 和实际限制见该任务的
-[implement.md](../../.trellis/tasks/archive/2026-09/09-22-rust-phase5a-native-routing/implement.md)。
+[implement.md](validation-records/09-22-rust-phase5a-native-routing/implement.md)。
 这只增加 P26/P27 与 C01/C02 的受限 5A native-routing evidence，不表示
 完整 matcher/plugin、观测、性能或生产就绪。Linux tagged cgo cache/query/
 matcher 组及 race 证据通过；未修改的 `matcher_adapter` typed-nil interface
@@ -250,7 +250,7 @@ reviewer gate 尚待实际返回，且没有启用 production/default wiring。
 
 ### 2026-10-02 native cache lifecycle scope (P26/C10/C11/C13 subitems)
 
-The [cache task](../../.trellis/tasks/archive/2026-10/10-01-rust-native-cache-lifecycle-management/prd.md) reviewed delivery implements multiple named/quick stores, tokenized successor publication, basic EDNS0/DO product keys, wall/monotonic metadata, CIDR exclusion, domain_set, owner lazy refresh, v2 dump/import/atomic save/durable-first empty flush, SIGTERM/SIGINT drain/final save, four cache metrics, named inventory and existing Vue list/details/partial failure. S1-S7 passed the same C2C review; iteration 11 returned full-task FINAL: PASS / DONE.
+The [cache task](validation-records/10-01-rust-native-cache-lifecycle-management/prd.md) reviewed delivery implements multiple named/quick stores, tokenized successor publication, basic EDNS0/DO product keys, wall/monotonic metadata, CIDR exclusion, domain_set, owner lazy refresh, v2 dump/import/atomic save/durable-first empty flush, SIGTERM/SIGINT drain/final save, four cache metrics, named inventory and existing Vue list/details/partial failure. S1-S7 passed the same C2C review; iteration 11 returned full-task FINAL: PASS / DONE.
 
 Stable tests: native-host cache_catalog/cache_lifecycle/cache_http, owner/codec unit tests and webui-log/tests/cacheInventory.test.mjs; actual Go-Rust dump, DNS/API/restart/browser evidence lives in the task research directory. This does not close ECS, full Prometheus/other plugin APIs, native static UI serving, full-system performance or production cutover; the overall ledger rows remain pending.
 
@@ -258,4 +258,4 @@ Stable tests: native-host cache_catalog/cache_lifecycle/cache_http, owner/codec 
 
 P36 hosts, P40 redirect, P65 TTL and P20 resp_ip now have bounded native integration: immutable full/suffix/regexp/keyword hosts/redirect inline+text loaders; hosts A/AAAA and empty-family FakeSOA; scoped redirect/CNAME restoration and inherited actual supplier; fixed/range uint32 TTL across non-OPT records; multi-value IPv4/IPv6/CIDR OR predicates with $ip_set and &text-file references. ip_set sets/binary/SRS/compression and management reload remain unsupported. P26 composition covers cache boundary/aging/lazy refresh and v2 retained dump: rule changes alone do not invalidate old entries, so immediate replacement requires quiescent live-owner Flush before shutdown/restart. Full-item acceptance and production gates remain open.
 
-Evidence: [response-policy task](../../.trellis/tasks/archive/2026-10/10-02-rust-native-response-policy-ip-rules/prd.md), native-host policy_config/policy_wire tests, [actual DNS/API/Vue/restart proof](../../.trellis/tasks/archive/2026-10/10-02-rust-native-response-policy-ip-rules/research/public-proof/README.md). Final workspace 1,070 tests pass, zero ignored; fmt/clippy pass. S1–S6 and cumulative exact range 2c059b0e..13d60d3e C2C FINAL: PASS (iteration 7); task archived. Historical narrower P20 rows below describe their earlier delivery, not the current approved grammar.
+Evidence: [response-policy task](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md), native-host policy_config/policy_wire tests, [actual DNS/API/Vue/restart proof](validation-records/10-02-rust-native-response-policy-ip-rules/research/public-proof/README.md). Final workspace 1,070 tests pass, zero ignored; fmt/clippy pass. S1–S6 and cumulative exact range 2c059b0e..13d60d3e C2C FINAL: PASS (iteration 7); task archived. Historical narrower P20 rows below describe their earlier delivery, not the current approved grammar.

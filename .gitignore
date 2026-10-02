@@ -33,3 +33,13 @@ demo/
 
 # macOS metadata
 .DS_Store
+
+# Optional local AI development tools and retired design drafts
+/.trellis/
+/.agents/
+/.codex/
+/.superpowers/
+/docs/superpowers/
+
+# Retired root eBPF build artifact
+/proxy.o
