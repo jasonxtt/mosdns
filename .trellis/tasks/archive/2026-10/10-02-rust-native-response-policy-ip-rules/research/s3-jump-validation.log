@@ -1,10 +1,10 @@
     Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-response-policy-20261002/rust/native-host)
-    Finished `dev` profile [unoptimized] target(s) in 0.29s
+    Finished `dev` profile [unoptimized] target(s) in 7.93s
    Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-response-policy-20261002/rust/native-host)
-    Finished `test` profile [unoptimized] target(s) in 0.95s
+    Finished `test` profile [unoptimized] target(s) in 28.67s
      Running unittests src/lib.rs (target/debug/deps/mosdns_native_host-29f85c786ae9292d)
 
-running 96 tests
+running 95 tests
 test api::tests::audit_query_decoding_is_form_strict_and_rank_limits_are_bounded ... ok
 test api::tests::canonical_settings_win_before_legacy_and_clamp_saved_values ... ok
 test api::tests::known_dns_types_keep_mnemonics_and_unknown_types_are_empty ... ok
@@ -67,7 +67,6 @@ test execution::tests::two_calls_to_one_child_dispatch_the_shared_cache_again_af
 test execution::tests::two_nested_caches_each_store_their_own_successors_result ... ok
 test execution::tests::unknown_executable_id_fails_closed_without_selecting_the_only_forward ... ok
 test execution::tests::upstream_servfail_is_cacheable_but_local_servfail_is_not ... ok
-test matchers::tests::expanded_response_ip_ignores_non_answer_addresses_and_cname_without_mutation ... ok
 test matchers::tests::qname_is_exact_case_insensitive_and_requires_plain_wire_labels ... ok
 test matchers::tests::response_ip_matches_only_a_raw_answer_without_mutating_state ... ok
 test observer::tests::audit_admission_renders_escaped_question_in_exact_sized_buffer ... ok
@@ -102,7 +101,7 @@ test udp::tests::udp_listener_records_one_terminal_audit_for_the_actual_request 
 test udp::tests::udp_send_failure_and_pending_send_cancellation_are_distinct ... ok
 test cache::persistence_tests::startup_periodic_shutdown_snapshot_and_all_owner_errors_are_observable ... ok
 
-test result: ok. 96 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+test result: ok. 95 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
 
      Running unittests src/main.rs (target/debug/deps/mosdns-bc9e048d7dfaa293)
 
@@ -113,8 +112,8 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/cache_catalog.rs (target/debug/deps/cache_catalog-f3f6f97cf182b204)
 
 running 14 tests
-test a_fallback_cache_target_never_publishes_a_successor_that_exited ... ok
 test a_fallback_cache_target_publishes_only_after_a_natural_successor_completion ... ok
+test a_fallback_cache_target_never_publishes_a_successor_that_exited ... ok
 test a_quick_cache_and_a_named_cache_coexist_and_stay_distinguishable ... ok
 test an_inline_cache_callsite_owns_a_private_instance_without_a_public_identity ... ok
 test detached_successor_owns_its_state_and_rebinds_exactly_one_64_fuel_root ... ok
@@ -122,13 +121,13 @@ test cache_hit_restores_the_successor_domain_set_in_the_final_query_audit ... ok
 test distinct_names_do_not_share_a_cache_entry ... ok
 test every_configured_named_cache_is_listed_in_configuration_order ... ok
 test each_inline_cache_callsite_is_a_separate_instance ... ok
-test nested_named_caches_publish_independently_and_the_outer_hit_short_circuits ... ok
 test lazy_refresh_outlives_the_client_merges_followers_and_leaves_audit_unchanged ... ok
 test positive_lazy_retention_is_accepted_for_named_caches_only ... ok
+test nested_named_caches_publish_independently_and_the_outer_hit_short_circuits ... ok
 test the_same_cache_dispatched_twice_in_one_scope_answers_normally ... ok
 test two_named_caches_compile_to_two_distinct_stores_with_stable_ids ... ok
 
-test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
 
      Running tests/cache_http.rs (target/debug/deps/cache_http-d2b68bcf7418c7a6)
 
@@ -137,7 +136,7 @@ test inventory_tags_roundtrip_through_encoded_plugin_urls_and_prometheus_labels 
 test native_process_sigterm_drains_owners_and_reports_all_final_save_failures_with_exit_two ... ok
 test named_inventory_metrics_management_and_restart_use_real_owners ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
 
      Running tests/cache_lifecycle.rs (target/debug/deps/cache_lifecycle-f9ca98454c621705)
 
@@ -148,15 +147,15 @@ test ecs_malformed_options_and_unsupported_versions_bypass_without_key_aliasing 
 test import_invalidates_old_publications_and_save_keeps_concurrent_mutations_dirty ... ok
 test lazy_retention_is_from_storage_and_excluded_answers_do_not_replace_entries ... ok
 test opt_is_removed_from_cache_copy_and_domain_set_survives_wall_rollback ... ok
+test original_wall_timestamps_are_preserved_and_opt_removal_rebuilds_later_pointers ... ok
 test durable_flush_failure_keeps_file_memory_generation_and_commit_survives_request_cancellation ... ok
 test oversized_text_keys_bypass_and_checked_wall_expiry_overflow_does_not_store ... ok
 test product_key_preserves_case_and_escaped_labels_with_independent_flags ... ok
-test original_wall_timestamps_are_preserved_and_opt_removal_rebuilds_later_pointers ... ok
 test real_go_v2_fixture_import_and_native_export_preserve_product_key_and_dns_wire ... ok
 test refresh_owner_merges_keys_limits_concurrency_and_cancels_drains_on_stop ... ok
 test refresh_deadline_releases_ownership_without_overwriting_the_old_lazy_value ... ok
 
-test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.12s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.11s
 
      Running tests/observability.rs (target/debug/deps/observability-3708d4958593f2d7)
 
@@ -169,61 +168,52 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/policy_config.rs (target/debug/deps/policy_config-524325cc356ef4a7)
 
 running 9 tests
+test descriptors_cannot_start_an_incomplete_runtime ... ok
 test empty_policy_defaults_and_mapped_hosts_keep_typed_family ... ok
-test expanded_ip_descriptors_assemble_with_real_runtime ... ok
 test included_policy_file_paths_belong_to_declaring_yaml ... ok
+test ip_files_have_empty_missing_bad_and_binary_startup_outcomes ... ok
 test domain_payload_precedence_replacement_and_startup_snapshot_are_observable ... ok
 test named_response_policies_and_ttl_compile_through_public_yaml ... ok
-test ip_files_have_empty_missing_bad_and_binary_startup_outcomes ... ok
 test text_ip_references_and_or_expression_compile_before_execution ... ok
 test unsupported_shapes_and_ttl_bounds_fail_at_config_boundary ... ok
 test text_loader_limits_are_enforced_before_snapshot_publication ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
 
      Running tests/policy_wire.rs (target/debug/deps/policy_wire-1e6714e4a355cad2)
 
-running 24 tests
-test cache_before_and_inside_redirect_owns_correct_wire_and_key ... ok
-test composition_ip_condition_selects_fallback_supplier_and_keeps_both_attempts ... ok
-test composition_ip_matchers_see_target_and_restored_cached_answers_at_their_own_boundaries ... ok
-test composition_lazy_refresh_uses_same_immutable_hosts_snapshot ... ok
-test composition_redirect_preference_probe_uses_current_question_and_qtype_matchers ... ok
-test composition_retained_dump_can_hit_old_policy_until_quiescent_durable_flush ... ok
-test composition_ttl_inside_and_outside_cache_keep_distinct_stored_ttls ... ok
+running 15 tests
 test direct_fallback_hosts_target_continues_into_branch_ttl ... ok
 test hosts_dual_stack_order_ttl_and_continue_into_quick_ttl ... ok
 test hosts_empty_family_has_complete_fake_soa ... ok
+test cache_before_and_inside_redirect_owns_correct_wire_and_key ... ok
 test hosts_no_hit_no_addresses_non_in_and_non_address_continue ... ok
 test hosts_replaces_upstream_supplier_but_preserves_actual_attempts ... ok
-test nested_redirect_restores_each_question_and_negative_soa ... ok
 test redirect_consumes_jump_continuation_exactly_once_before_restoration ... ok
-test composition_fallback_redirect_siblings_are_isolated_and_cancelled_supplier_never_wins ... ok
+test nested_redirect_restores_each_question_and_negative_soa ... ok
 test redirect_exit_decorates_response_but_never_publishes_outer_cache ... ok
 test redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail ... ok
 test redirect_non_in_is_noop_and_direct_fallback_redirect_uses_current_target ... ok
 test redirect_query_view_preserves_flags_qtype_and_opt ... ok
 test redirect_sends_actual_target_preserves_existing_chain_and_admission_audit ... ok
-test response_ip_named_cidr_or_ipv6_and_mapped_addresses_drive_real_sequence ... ok
-test response_ip_text_file_is_or_snapshot_not_request_time_io ... ok
 test ttl_fixed_zero_is_noop_and_range_zero_is_unbounded ... ok
 test redirect_cycle_shares_root_fuel_and_cannot_manufacture_success ... ok
 
-test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.06s
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s
 
      Running tests/slice1_cache.rs (target/debug/deps/slice1_cache-34f729cca15c03ac)
 
 running 8 tests
 test basic_edns_queries_share_the_plain_key_and_allow_publication ... ok
 test cache_key_separates_security_bits_type_class_and_non_in_queries ... ok
-test compressed_response_question_is_eligible_after_decoding ... ok
 test compressed_query_name_reuses_the_decoded_key ... ok
+test compressed_response_question_is_eligible_after_decoding ... ok
 test native_adapter_ages_owned_hits_without_mutating_the_entry ... ok
 test malformed_tc_opt_and_mismatched_questions_never_publish ... ok
 test ordinary_authority_and_additional_ttls_set_the_minimum_retention ... ok
 test retention_is_separate_from_answer_ttl_and_expires_at_exact_boundaries ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
      Running tests/slice2_config.rs (target/debug/deps/slice2_config-d68c66c1dc772c69)
 
@@ -242,21 +232,21 @@ test w3_names_order_and_data_are_not_fixture_constants ... ok
 test the_composed_grammar_accepts_the_bounded_w3_shapes_it_used_to_forbid ... ok
 test w3_negative_grammar_and_graph_matrix_fails_closed ... ok
 
-test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
      Running tests/slice3_composition.rs (target/debug/deps/slice3_composition-0241ff616ee445f9)
 
 running 11 tests
 test a_missing_include_or_rule_file_fails_before_assembly_with_its_path ... ok
-test a_relative_include_resolves_against_the_declaring_file_not_the_cwd ... ok
 test definition_order_and_multi_exec_do_not_constrain_the_graph ... ok
+test a_relative_include_resolves_against_the_declaring_file_not_the_cwd ... ok
 test duplicate_tags_and_cross_type_references_fail_before_bind ... ok
 test included_definitions_keep_their_relative_path_and_source_context ... ok
 test nested_includes_and_deferred_shapes_are_rejected_before_bind ... ok
 test reject_beyond_the_supported_wire_range_fails_at_load_time ... ok
 test goto_and_try_only_forward_paths_compile_and_execute ... ok
-test the_representative_chain_loads_from_file_with_include_and_rule_files ... ok
 test the_representative_chain_also_serves_tcp_with_audit_off ... ok
+test the_representative_chain_loads_from_file_with_include_and_rule_files ... ok
 test the_representative_chain_routes_blocks_and_falls_through_to_default ... ok
 
 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
@@ -275,39 +265,39 @@ running 12 tests
 test a_managed_file_inside_an_include_resolves_from_the_included_directory ... ok
 test a_query_only_tag_reading_the_candidate_file_makes_it_ineligible ... ok
 test a_rule_file_that_is_not_utf8_fails_with_its_path ... ok
+test api_listen_address_is_optional_and_strictly_validated ... ok
 test domain_set_sets_remains_an_unsupported_load_error ... ok
 test duplicate_domain_set_tags_are_rejected ... ok
-test api_listen_address_is_optional_and_strictly_validated ... ok
 test invalid_exps_remain_a_strict_load_error ... ok
-test missing_rule_file_fails_with_its_source_path ... ok
 test managed_profile_requires_exactly_one_txt_file ... ok
-test two_managed_tags_keep_independent_rules ... ok
+test missing_rule_file_fails_with_its_source_path ... ok
 test text_file_rules_follow_go_acceptance_and_skip_invalid_lines ... ok
+test two_managed_tags_keep_independent_rules ... ok
 test two_tags_sharing_one_rule_file_still_load_and_are_management_ineligible ... ok
 
-test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
      Running tests/slice6_management_http.rs (target/debug/deps/slice6_management_http-d8349b486f310a72)
 
 running 10 tests
 test a_dns_only_configuration_has_no_management_listener ... ok
-test a_failed_management_bind_releases_the_dns_listener ... ok
 test a_failed_dns_bind_releases_the_management_listener ... ok
+test a_failed_management_bind_releases_the_dns_listener ... ok
 test a_running_side_failure_cancels_and_joins_the_other_listener ... ok
 test a_tag_that_is_not_mounted_is_404_before_any_method_decision ... ok
 test a_writable_file_shared_by_two_tags_is_never_managed ... ok
 test audit_capacity_without_state_root_and_failed_replace_keep_old_runtime_state ... ok
-test audit_v1_controls_use_real_http_and_dns_and_persist_capacity ... ok
 test management_routes_match_the_go_visible_contract ... ok
 test one_shutdown_scope_releases_both_listeners_for_rebind ... ok
+test audit_v1_controls_use_real_http_and_dns_and_persist_capacity ... ok
 
 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
      Running tests/slice7_management_publication.rs (target/debug/deps/slice7_management_publication-0aae92d3e400ef21)
 
 running 12 tests
-test a_failed_final_replace_keeps_the_old_file_and_generation ... ok
 test a_failed_temporary_write_keeps_the_old_file_and_generation ... ok
+test a_failed_final_replace_keeps_the_old_file_and_generation ... ok
 test a_managed_candidate_sharing_a_file_with_a_query_only_tag_cannot_be_written ... ok
 test a_post_changes_the_next_udp_query_the_file_and_the_show_output ... ok
 test a_slow_persistence_step_does_not_block_dns_readers ... ok
@@ -330,7 +320,7 @@ test udp_real_listener_audits_parent_ownership_after_identical_child_response ..
 test tcp_real_listener_preserves_positive_cname_and_audit_projection ... ok
 test v2_stats_windows_and_logs_use_retained_real_dns_records ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.64s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 43.41s
 
      Running tests/slice9_forwarding.rs (target/debug/deps/slice9_forwarding-3081645b1d25a6af)
 
@@ -368,10 +358,10 @@ test malformed_datagram_is_dropped_and_listener_stays_available ... ok
 test stalled_upstream_maps_to_servfail_and_shutdown_allows_rebind ... ok
 test udp_answers_positive_nxdomain_and_concurrent_distinct_queries ... ok
 test udp_real_listener_samples_start_stop_at_an_in_flight_terminal_barrier ... ok
-test cancellation_stops_pending_request_without_a_late_response ... ok
 test udp_runtime_audit_controls_sample_at_terminal_time_without_resetting_metrics ... ok
+test cancellation_stops_pending_request_without_a_late_response ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
 
      Running tests/w2_cache.rs (target/debug/deps/w2_cache-96ab240b929f1162)
 
@@ -389,17 +379,16 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 running 6 tests
 test tampered_route_evidence_fails_even_with_the_expected_final_answers ... ok
-test valid_negative_b_answer_falls_through_to_c_without_a ... ok
 test frozen_w3_corpus_routes_over_real_udp_and_preserves_order ... ok
+test valid_negative_b_answer_falls_through_to_c_without_a ... ok
 test w3_malformed_mismatch_and_leg_failures_stop_without_stale_or_extra_routes ... ok
 test w3_shutdown_after_b_is_observed_prevents_late_response_and_rebinds ... ok
 test w3_shutdown_cancels_a_and_c_in_flight_without_late_responses ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
 
    Doc-tests mosdns_native_host
 
 running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-

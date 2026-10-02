@@ -58,3 +58,7 @@ The final plan was explicitly approved by the human. Task activation succeeded a
 ## S6 final evidence candidate
 
 S1–S5 independently passed C2C before the next slice. S6 has actual UDP/TCP, public API, maintained Vue details, real SIGTERM/process restart and retained-dump/Flush proof; Linux workspace 1,070 tests pass with no ignored tests, fmt/clippy pass. See research/public-proof/README.md. Whole-task exact-commit final review remains pending. No new product behavior, production promotion or push.
+
+## Final accepted closure
+
+S1–S6 and cumulative exact range 2c059b0e..13d60d3e received independent C2C FINAL: PASS (iteration 7). All approved task gates are complete; see research/s6-final-review.md. Earlier pending/planning notes are chronological evidence, superseded by this closure. No production cutover or push.
