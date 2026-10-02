@@ -63,3 +63,7 @@ canary 已获用户授权，四项默认输入已冻结。用户随后指定 `mo
 - 进度记录“新增哪些配置/链路和行为”，并更新覆盖子项；不以 slice/PASS/归档数量替代产品进展。
 
 基础 DNS/cache 语义、取消/资源回收、TLS、持久化与最终独立审查保留。已冻结的旧实验和最终 5D/Phase 6/生产门禁不改。2026-09-27 的规划修订本身未启动实现；用户随后授权该 5B 任务，当前实作及交付状态以其任务记录为准。
+
+## 2026-10-02 response-policy/IP bounded increment
+
+The approved [response-policy/IP task](../../.trellis/tasks/10-02-rust-native-response-policy-ip-rules/prd.md) implements hosts, scoped redirect, TTL and multi-value IPv4/IPv6/CIDR response predicates directly in the native host. S1–S5 exact-commit C2C PASS; S6 real DNS/API/Vue/process-restart and full workspace checks pass, final cumulative review pending. Plain text/inline rules only; provider sets, SRS/compression and rule-management reload remain future work. Cache dumps are not policy-versioned, requiring quiescent live-owner Flush before shutdown for immediate changed-rule behavior. This increment does not close 5D/Phase 6 or authorize a default/production release.

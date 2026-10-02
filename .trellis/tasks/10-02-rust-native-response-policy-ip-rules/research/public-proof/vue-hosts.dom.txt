@@ -1,0 +1,139 @@
+- banner:
+  - heading "MosDNS 仪表盘" [level=1]
+- navigation:
+  - button "概览"
+  - button "查询日志"
+  - button "规则管理"
+  - button "数据管理"
+  - button "上游设置"
+  - button "系统设置"
+  - button "⟳"
+- main:
+  - navigation:
+    - button "实时查询"
+    - button "诊断抓取"
+  - heading "实时查询" [level=3]
+  - paragraph: 支持分页与关键字过滤。输入带双引号表示精确匹配；支持按客户端别名搜索。
+  - button "客户端别名"
+  - textbox "全局搜索，使用 \"引号\" 精确匹配"
+  - button "搜索"
+  - button "清空"
+  - paragraph: 当前第 1 / 1 页， 共 4 条
+  - table:
+    - rowgroup:
+      - row "时间 域名 / 响应 类型 耗时(ms) 客户端":
+        - columnheader "时间"
+        - columnheader "域名 / 响应"
+        - columnheader "类型"
+        - columnheader "耗时(ms)"
+        - columnheader "客户端"
+    - rowgroup:
+      - row "1分钟前 nx.original.example NXDOMAIN A 0.48 127.0.0.1":
+        - cell "1分钟前"
+        - cell "nx.original.example NXDOMAIN":
+          - strong: nx.original.example
+          - generic: NXDOMAIN
+        - cell "A"
+        - cell "0.48"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+      - row "1分钟前 fallback.example final.example. (+1) A 0.66 127.0.0.1":
+        - cell "1分钟前"
+        - cell "fallback.example final.example. (+1)":
+          - strong: fallback.example
+          - generic: final.example. (+1)
+        - cell "A"
+        - cell "0.66"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+      - row "1分钟前 original.example target.example. (+2) A 0.77 127.0.0.1":
+        - cell "1分钟前"
+        - cell "original.example target.example. (+2)":
+          - strong: original.example
+          - generic: target.example. (+2)
+        - cell "A"
+        - cell "0.77"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+      - row "1分钟前 host.example 192.0.2.99 A 0.35 127.0.0.1":
+        - cell "1分钟前"
+        - cell "host.example 192.0.2.99":
+          - strong: host.example
+          - generic: 192.0.2.99
+        - cell "A"
+        - cell "0.35"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+  - button "加载更多" [disabled]
+- heading "查询详情" [level=3]
+- button "关闭"
+- strong: "时间:"
+- text: 2026/10/2 18:07:55
+- strong: "客户端:"
+- text: 127.0.0.1
+- button "复制"
+- button "筛选"
+- strong: "域名:"
+- text: host.example
+- button "复制"
+- button "筛选"
+- strong: "类型:"
+- text: A
+- strong: "类别:"
+- text: IN
+- strong: "Trace ID:"
+- text: n-b7dcdc4f824349830b60110972e54341-0000000000000001
+- button "复制"
+- button "筛选"
+- strong: "生效标签:"
+- text: "-"
+- strong: "命中标签:"
+- text: "-"
+- strong: "匹配来源:"
+- text: inline:main#2
+- strong: "分流规则:"
+- text: "-"
+- button "复制" [disabled]
+- button "筛选" [disabled]
+- strong: "专属分流组:"
+- text: "-"
+- strong: "最终序列:"
+- text: main
+- strong: "最终上游组:"
+- text: "-"
+- strong: "上游目标:"
+- text: "-"
+- strong: "最终上游:"
+- text: "-"
+- strong: "原生上游诊断:"
+- text: 未选中最终网络上游
+- table:
+  - rowgroup:
+    - row "序号 Entry Peer 传输 结果":
+      - columnheader "序号"
+      - columnheader "Entry"
+      - columnheader "Peer"
+      - columnheader "传输"
+      - columnheader "结果"
+  - rowgroup:
+    - row "无已启动上游":
+      - cell "无已启动上游"
+- strong: "响应码:"
+- text: NOERROR
+- strong: "响应标志:"
+- text: RA
+- strong: "应答详情:"
+- text: complete
+- strong: "耗时:"
+- text: 0.35 ms
+- table:
+  - rowgroup:
+    - row "应答类型 数据 TTL":
+      - columnheader "应答类型"
+      - columnheader "数据"
+      - columnheader "TTL"
+  - rowgroup:
+    - row "A 192.0.2.99 10s":
+      - cell "A"
+      - cell "192.0.2.99"
+      - cell "10s"

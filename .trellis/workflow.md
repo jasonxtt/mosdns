@@ -190,8 +190,9 @@ Complex task: ask the user if you can create a Trellis task and enter the planni
 <!-- Per-turn breadcrumb: shown throughout Phase 1 (status='planning') -->
 
 [workflow-state:planning]
-Load `trellis-brainstorm`; stay in planning.
-Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
+Load `trellis-brainstorm`. Stay in planning only while required artifacts, review, or explicit approval of the latest final planning summary are missing.
+Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; obtain final planning review and subsequent explicit human approval before `task.py start`.
+When those gates are satisfied, run `task.py start` to transition planning -> in_progress, then load `trellis-before-dev` and begin only the approved implementation scope. A planning status is the pre-start state, not a permanent prohibition on activation. Preserve existing approval; do not ask again for an unchanged approved summary. Task creation consent or reviewer PASS alone is not human implementation approval.
 TDD planning gate: record observable behavior slices, the public interface under test, and mock boundaries before `task.py start`.
 Multi-deliverable scope: consider a parent task plus independently verifiable child tasks; dependencies must be written in child artifacts, not implied by tree position.
 Sub-agent mode: curate `implement.jsonl` and `check.jsonl` as spec/research manifests before start.

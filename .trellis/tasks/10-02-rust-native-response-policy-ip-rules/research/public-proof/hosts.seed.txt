@@ -1,0 +1,2 @@
+host.example 192.0.2.1 2001:db8::1
+empty-family.example 192.0.2.2

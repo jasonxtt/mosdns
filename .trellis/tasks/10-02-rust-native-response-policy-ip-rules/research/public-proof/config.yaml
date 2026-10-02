@@ -1,0 +1,41 @@
+log: {level: error}
+api: {http: '127.0.0.1:21880'}
+plugins:
+  - tag: stored
+    type: cache
+    args: {size: 1024, lazy_cache_ttl: 900, dump_file: '/root/mosdns-rust-response-policy-20261002/proof/stored.gz'}
+  - tag: local
+    type: hosts
+    args: {files: ['/root/mosdns-rust-response-policy-20261002/proof/hosts.txt']}
+  - tag: rewrite
+    type: redirect
+    args: {rules: ['original.example target.example', 'nx.original.example nx.target.example']}
+  - tag: bad
+    type: ip_set
+    args: {ips: ['192.0.2.0/24', '2001:db8::/32']}
+  - tag: primary
+    type: forward
+    args: {upstreams: [{addr: 'udp://127.0.0.1:21554'}]}
+  - tag: backup
+    type: forward
+    args: {upstreams: [{addr: 'udp://127.0.0.1:21555'}]}
+  - tag: choice
+    type: fallback
+    args: {primary: '$backup', secondary: '$local', threshold: 100}
+  - tag: main
+    type: sequence
+    args:
+      - exec: $stored
+      - exec: $local
+      - matches: has_resp
+        exec: accept
+      - matches: qname original.example nx.original.example
+        exec: $rewrite
+      - exec: $primary
+      - matches: resp_ip $bad
+        exec: $choice
+      - exec: ttl 30
+      - exec: accept
+  - tag: udp
+    type: udp_server
+    args: {listen: '127.0.0.1:21553', entry: main, enable_audit: true}
