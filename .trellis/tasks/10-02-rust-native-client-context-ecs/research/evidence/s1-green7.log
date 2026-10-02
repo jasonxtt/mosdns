@@ -1,0 +1,11 @@
+   Compiling mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.79s
+     Running tests/client_context.rs (/dev/shm/mosdns-rust-client-ecs-20261002/target/debug/deps/client_context-5fd4f1f0046b3851)
+
+running 3 tests
+test real_udp_trusted_peers_forged_ecs_and_audit_off ... ok
+test unknown_and_mapped_embedding_identity_with_file_or_and_negation ... ok
+test real_ipv6_udp_and_tcp_context ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

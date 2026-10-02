@@ -19,8 +19,8 @@ use url::Url;
 
 use crate::managed::{DomainSetHandle, ManagedDomainSet};
 use crate::matchers::{
-    DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher, ResponseIpMatcher, TrueMatcher,
-    build_domain_set, resolve_rule_path,
+    ClientIpMatcher, DomainSetError, HasResponseMatcher, QnameMatcher, QtypeMatcher,
+    ResponseIpMatcher, TrueMatcher, build_domain_set, resolve_rule_path,
 };
 use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
@@ -2022,6 +2022,9 @@ fn compile_matcher(
             }
             Box::new(HasResponseMatcher)
         }
+        "client_ip" => Box::new(ClientIpMatcher::new(compile_response_ip(
+            args, path, catalog, base,
+        )?)),
         "resp_ip" => {
             let prefixes = compile_response_ip(args, path, catalog, base)?;
             catalog

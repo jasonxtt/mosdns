@@ -85,6 +85,7 @@ pub(crate) enum ExchangeError {
 }
 
 pub(crate) struct ExecutionRequest<'a> {
+    pub client: mosdns_sequence_core::ClientContext,
     pub config: &'a CompiledConfig,
     pub cache: &'a CacheCatalog,
     pub options: &'a HostOptions,
@@ -1207,6 +1208,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
     checkpoint: &mut ExecutionCheckpoint,
 ) -> ExecutionResult {
     let ExecutionRequest {
+        client,
         config,
         cache,
         options,
@@ -1261,7 +1263,8 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
         in_flight_executable: None,
         completed: false,
     };
-    let state = ExecutionState::new(header, question.clone());
+    let mut state = ExecutionState::new(header, question.clone());
+    state.query.client = client;
     // Every external leg shares this one request-owned absolute budget.
     let request_deadline = options
         .admission_deadline
@@ -4491,6 +4494,7 @@ mod tests {
         let mut checkpoint = ExecutionCheckpoint::new(true);
         futures_like_block_on(super::execute_request_with_observation(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config,
                 cache: &cache.catalog(),
                 options,
@@ -4529,6 +4533,7 @@ mod tests {
         let (header, question) = parse_query(&request).expect("query");
         let result = futures_like_block_on(execute_request_with_observation(
             ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &config,
                 cache: &cache.catalog(),
                 options: &HostOptions::default(),
@@ -4725,6 +4730,7 @@ mod tests {
                 );
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
+                        client: mosdns_sequence_core::ClientContext::default(),
                         config: &config,
                         cache: &cache.catalog(),
                         options: &options,
@@ -4823,6 +4829,7 @@ plugins:
                 );
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
+                        client: mosdns_sequence_core::ClientContext::default(),
                         config: &config,
                         cache: &cache.catalog(),
                         options: &options,
@@ -4901,6 +4908,7 @@ plugins:
                 );
                 let _ = execute_request_with_observation(
                     ExecutionRequest {
+                        client: mosdns_sequence_core::ClientContext::default(),
                         config: &config,
                         cache: &cache.catalog(),
                         options: &options,
@@ -5309,6 +5317,7 @@ plugins:
         let options = HostOptions::with_deadline(Duration::from_secs(1));
         let result = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &config,
                 cache: &cache.catalog(),
                 options: &options,
@@ -5385,6 +5394,7 @@ plugins:
         let options = HostOptions::default();
         let response = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &config,
                 cache: &cache.catalog(),
                 options: &options,
@@ -5415,6 +5425,7 @@ plugins:
         let cache = NativeCacheAdapter::for_test(CacheTestClock::new(0)).expect("cache");
         let response = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &config,
                 cache: &cache.catalog(),
                 options: &HostOptions::default(),
@@ -5501,6 +5512,7 @@ plugins:
             tokio::join!(
                 execute_request_with_executor(
                     super::ExecutionRequest {
+                        client: mosdns_sequence_core::ClientContext::default(),
                         config: &config,
                         cache: &cache_catalog,
                         options: &cancelled_options,
@@ -5513,6 +5525,7 @@ plugins:
                 ),
                 execute_request_with_executor(
                     super::ExecutionRequest {
+                        client: mosdns_sequence_core::ClientContext::default(),
                         config: &config,
                         cache: &cache_catalog,
                         options: &live_options,
@@ -5560,6 +5573,7 @@ plugins:
         let (first_header, first_question) = parse_query(&first).expect("query");
         let first_result = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &cache.catalog(),
                 options: &first_options,
@@ -5577,6 +5591,7 @@ plugins:
         let (second_header, second_question) = parse_query(&second).expect("query");
         let second_result = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &cache.catalog(),
                 options: &second_options,
@@ -5613,6 +5628,7 @@ plugins:
         let options = HostOptions::default();
         let response = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &config,
                 cache: &cache.catalog(),
                 options: &options,
@@ -5644,6 +5660,7 @@ plugins:
         let cancellation = mosdns_upstream_core::TransportCancellation::new();
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &cache.catalog(),
                 options: &options,
@@ -5658,6 +5675,7 @@ plugins:
         let (header, question) = parse_query(&second).expect("query");
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &cache.catalog(),
                 options: &options,
@@ -5683,6 +5701,7 @@ plugins:
         let cancellation = mosdns_upstream_core::TransportCancellation::new();
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &local_cache.catalog(),
                 options: &options,
@@ -5697,6 +5716,7 @@ plugins:
         let (header, question) = parse_query(&second).expect("query");
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &local_cache.catalog(),
                 options: &options,
@@ -6098,6 +6118,7 @@ plugins:
         let mut checkpoint = ExecutionCheckpoint::new(true);
         let result = futures_like_block_on(execute_request_with_observation(
             ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &config,
                 cache: &catalog,
                 options: &HostOptions::default(),
@@ -6780,6 +6801,7 @@ plugins:
         cancellation.cancel();
         let result = futures_like_block_on(execute_request_with_observation(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &config,
                 cache: &cache.catalog(),
                 options: &HostOptions::default(),
@@ -6982,6 +7004,7 @@ plugins:
         let cancellation = mosdns_upstream_core::TransportCancellation::new();
         let first = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &cache.catalog(),
                 options: &options,
@@ -6999,6 +7022,7 @@ plugins:
         let (header, question) = parse_query(&second_query).expect("query");
         let _ = futures_like_block_on(execute_request_with_executor(
             super::ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::default(),
                 config: &assembly,
                 cache: &cache.catalog(),
                 options: &second_options,

@@ -202,6 +202,10 @@ async fn process_connection(task: ConnectionTask) {
         request_options.admission_deadline = Some(Instant::now() + options.request_deadline);
         let mut execution = execute_request(
             ExecutionRequest {
+                client: mosdns_sequence_core::ClientContext::from_peer(
+                    client_addr.ip(),
+                    mosdns_sequence_core::ClientTransport::Tcp,
+                ),
                 config: &config,
                 cache: &cache,
                 options: &request_options,

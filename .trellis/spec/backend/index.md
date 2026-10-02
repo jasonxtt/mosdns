@@ -14,6 +14,7 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Rust migration](./rust-migration.md) | Architecture, reuse policy, ABI, and phase gates |
 | [Native audit control](./native-audit-control.md) | Runtime capture, settings, v1/v2 API and Vue audit proof |
 | [Native response policy](./native-response-policy.md) | Immutable hosts/redirect/IP snapshots and TTL compilation |
+| [Native client/ECS](./native-client-ecs.md) | Trusted socket identity and client_ip; ECS slices tracked by owning task |
 | [Native cache lifecycle](./native-cache-lifecycle.md) | Cache publication/refresh, v2 persistence, management HTTP and Vue workflow |
 
 ## Before development

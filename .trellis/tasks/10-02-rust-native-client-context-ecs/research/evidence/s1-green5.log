@@ -1,0 +1,30 @@
+   Compiling mosdns-native-host v0.1.0 (/dev/shm/mosdns-rust-client-ecs-20261002/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.68s
+     Running tests/client_context.rs (/dev/shm/mosdns-rust-client-ecs-20261002/target/debug/deps/client_context-5fd4f1f0046b3851)
+
+running 3 tests
+test real_ipv6_udp_and_tcp_context ... FAILED
+test unknown_and_mapped_embedding_identity_with_file_or_and_negation ... FAILED
+test real_udp_trusted_peers_forged_ecs_and_audit_off ... ok
+
+failures:
+
+---- real_ipv6_udp_and_tcp_context stdout ----
+
+thread 'real_ipv6_udp_and_tcp_context' (1139693) panicked at native-host/tests/client_context.rs:108:10:
+called `Result::unwrap()` on an `Err` value: WrongListener(Udp)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- unknown_and_mapped_embedding_identity_with_file_or_and_negation stdout ----
+
+thread 'unknown_and_mapped_embedding_identity_with_file_or_and_negation' (1139696) panicked at native-host/tests/client_context.rs:163:74:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[3].args.enable_audit", reason: "required field is missing" }
+
+
+failures:
+    real_ipv6_udp_and_tcp_context
+    unknown_and_mapped_embedding_identity_with_file_or_and_negation
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test client_context`
