@@ -167,3 +167,7 @@ Seven composition cases in policy_wire prove TTL placement/aging, actual v2 boun
 ## 7. Wrong vs Correct
 
 Wrong: silently adding policy keys or excluding every Local response from caching. Correct: keep existing keys/admission and explicitly disclose retained-dump compatibility; verify quiescent durable flush and scoped publication.
+
+## Public proof and rule-change cache contract
+
+Public process proof belongs in the owning task's research/public-proof: real DNS wire, API supplier/attempt projection, maintained Vue, and actual SIGTERM/restart. Separate UDP/TCP runs honor the single-listener host contract. Query-cache v2 dump is not policy-versioned: immutable policy reload alone does not invalidate a retained old answer. To apply changed rules immediately, quiesce producers, Flush through the still-open owner API, then stop/drain/final-save and restart; do not stop owner admission before Flush, or permit refill between Flush and stop. Keep this limitation visible rather than adding unapproved hybrid generations or schema changes.

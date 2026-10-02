@@ -171,3 +171,7 @@ authorized by this closure. Read the stage plan before choosing subsequent work.
 ## 2026-10-02 cache lifecycle continuation
 
 The completed 10-01-rust-native-cache-lifecycle-management task implements its native non-ECS named/quick cache, owner refresh, v2 persistence, cache HTTP/metrics and existing Vue workflow in the reviewed task delivery. S1-S7 passed the same C2C review; iteration 11 returned full-task FINAL: PASS / DONE. This supersedes earlier single-cache/lazy=0 descriptions only for that frozen scope. SIGTERM/SIGINT now run supervisor drain/final save; all owner failures aggregate through the existing exit2 entrypoint. See task research evidence and .trellis/spec/backend/native-cache-lifecycle.md. This is not a production/default release or the full native cutover gate.
+
+## 2026-10-02 response-policy/IP increment
+
+The [response-policy task](../../.trellis/tasks/10-02-rust-native-response-policy-ip-rules/prd.md) has S1–S5 independently reviewed PASS and S6 real UDP/TCP/API/Vue/SIGTERM-restart proof plus Linux workspace 1,070 tests/fmt/clippy PASS; final cumulative review is pending. Native hosts/redirect/TTL and Answer-IP IPv4/IPv6/CIDR composition are implemented, with immutable inline/plain-text loaders. Binary/SRS/compression/provider sets and management reload remain deferred. Existing cache v2 retained dumps are not policy-versioned: quiesce query producers, Flush while cache owner/API remains open, then stop/drain/restart to avoid old-policy resurrection. No source branch switch, production cutover, push, or default release.

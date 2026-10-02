@@ -83,3 +83,7 @@ Human explicitly approved the latest complete planning summary with “批准”
 ## Current execution status — 2026-10-02
 
 The final plan was explicitly approved by the human. Task activation succeeded after correcting the conditional planning breadcrumb; historical planning-only notes above describe earlier sessions. S1/S2/S3 (including jump-continuation supplemental correction) have independently passed exact-commit C2C review. S4 real response-IP matcher is undergoing final validation/review; S5/S6 remain pending. Every next slice stays gated by the preceding PASS. No push or deployment.
+
+## S6 final evidence candidate
+
+S1–S5 independently passed C2C before the next slice. S6 has actual UDP/TCP, public API, maintained Vue details, real SIGTERM/process restart and retained-dump/Flush proof; Linux workspace 1,070 tests pass with no ignored tests, fmt/clippy pass. See research/public-proof/README.md. Whole-task exact-commit final review remains pending. No new product behavior, production promotion or push.

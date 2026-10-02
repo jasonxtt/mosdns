@@ -83,3 +83,7 @@ S2 commit 8ce75e1257bc8989207a720f97a29af86d745064 received FINAL: PASS in itera
 ## S4 → S5 execution checkpoint
 
 S4 commit 7937a8f6879fbad7b2a15ebbe092335a739d5ab9 received FINAL: PASS in iteration 5. S5 adds seven real composition tests; no product source change was required by their passing behavior. Bound-file owner reconstruction/flush is tested here; actual process restart and public API/Vue remain S6.
+
+## S6 final evidence candidate
+
+S1–S5 independently passed C2C before the next slice. S6 has actual UDP/TCP, public API, maintained Vue details, real SIGTERM/process restart and retained-dump/Flush proof; Linux workspace 1,070 tests pass with no ignored tests, fmt/clippy pass. See research/public-proof/README.md. Whole-task exact-commit final review remains pending. No new product behavior, production promotion or push.

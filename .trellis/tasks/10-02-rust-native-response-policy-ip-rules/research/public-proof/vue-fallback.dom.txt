@@ -1,0 +1,190 @@
+- banner:
+  - heading "MosDNS 仪表盘" [level=1]
+- navigation:
+  - button "概览"
+  - button "查询日志"
+  - button "规则管理"
+  - button "数据管理"
+  - button "上游设置"
+  - button "系统设置"
+  - button "⟳"
+- main:
+  - navigation:
+    - button "实时查询"
+    - button "诊断抓取"
+  - heading "实时查询" [level=3]
+  - paragraph: 支持分页与关键字过滤。输入带双引号表示精确匹配；支持按客户端别名搜索。
+  - button "客户端别名"
+  - textbox "全局搜索，使用 \"引号\" 精确匹配"
+  - button "搜索"
+  - button "清空"
+  - paragraph: 当前第 1 / 1 页， 共 4 条
+  - table:
+    - rowgroup:
+      - row "时间 域名 / 响应 类型 耗时(ms) 客户端":
+        - columnheader "时间"
+        - columnheader "域名 / 响应"
+        - columnheader "类型"
+        - columnheader "耗时(ms)"
+        - columnheader "客户端"
+    - rowgroup:
+      - row "1分钟前 nx.original.example NXDOMAIN A 0.48 127.0.0.1":
+        - cell "1分钟前"
+        - cell "nx.original.example NXDOMAIN":
+          - strong: nx.original.example
+          - generic: NXDOMAIN
+        - cell "A"
+        - cell "0.48"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+      - row "1分钟前 fallback.example final.example. (+1) A 0.66 127.0.0.1":
+        - cell "1分钟前"
+        - cell "fallback.example final.example. (+1)":
+          - strong: fallback.example
+          - generic: final.example. (+1)
+        - cell "A"
+        - cell "0.66"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+      - row "1分钟前 original.example target.example. (+2) A 0.77 127.0.0.1":
+        - cell "1分钟前"
+        - cell "original.example target.example. (+2)":
+          - strong: original.example
+          - generic: target.example. (+2)
+        - cell "A"
+        - cell "0.77"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+      - row "1分钟前 host.example 192.0.2.99 A 0.35 127.0.0.1":
+        - cell "1分钟前"
+        - cell "host.example 192.0.2.99":
+          - strong: host.example
+          - generic: 192.0.2.99
+        - cell "A"
+        - cell "0.35"
+        - cell "127.0.0.1":
+          - strong: 127.0.0.1
+  - button "加载更多" [disabled]
+- heading "查询详情" [level=3]
+- button "关闭"
+- strong: "时间:"
+- text: 2026/10/2 18:07:55
+- strong: "客户端:"
+- text: 127.0.0.1
+- button "复制"
+- button "筛选"
+- strong: "域名:"
+- text: fallback.example
+- button "复制"
+- button "筛选"
+- strong: "类型:"
+- text: A
+- strong: "类别:"
+- text: IN
+- strong: "Trace ID:"
+- text: n-b7dcdc4f824349830b60110972e54341-0000000000000003
+- button "复制"
+- button "筛选"
+- strong: "生效标签:"
+- text: unmatched_rule
+- strong: "命中标签:"
+- text: "-"
+- strong: "匹配来源:"
+- text: "-"
+- strong: "分流规则:"
+- text: "-"
+- button "复制" [disabled]
+- button "筛选" [disabled]
+- strong: "专属分流组:"
+- text: "-"
+- strong: "最终序列:"
+- text: main
+- strong: "最终上游组:"
+- text: backup
+- strong: "上游目标:"
+- text: 127.0.0.1:21555
+- strong: "最终上游:"
+- text: 127.0.0.1:21555
+- strong: "原生上游诊断:"
+- table:
+  - rowgroup:
+    - row "ID 父级 角色 策略 QTYPE 决定":
+      - columnheader "ID"
+      - columnheader "父级"
+      - columnheader "角色"
+      - columnheader "策略"
+      - columnheader "QTYPE"
+      - columnheader "决定"
+  - rowgroup:
+    - row "0 - root - 1 completed":
+      - cell "0"
+      - cell "-"
+      - cell "root"
+      - cell "-"
+      - cell "1"
+      - cell "completed"
+    - row "1 0 primary fallback 1 selected":
+      - cell "1"
+      - cell "0"
+      - cell "primary"
+      - cell "fallback"
+      - cell "1"
+      - cell "selected"
+    - row "2 0 secondary fallback 1 skipped":
+      - cell "2"
+      - cell "0"
+      - cell "secondary"
+      - cell "fallback"
+      - cell "1"
+      - cell "skipped"
+- text: 选中 backup · 127.0.0.1:21555 · udp
+- table:
+  - rowgroup:
+    - row "序号 分支 QTYPE Entry Peer 传输 结果":
+      - columnheader "序号"
+      - columnheader "分支"
+      - columnheader "QTYPE"
+      - columnheader "Entry"
+      - columnheader "Peer"
+      - columnheader "传输"
+      - columnheader "结果"
+  - rowgroup:
+    - row "0 0 1 primary 127.0.0.1:21554 udp response":
+      - cell "0"
+      - cell "0"
+      - cell "1"
+      - cell "primary"
+      - cell "127.0.0.1:21554"
+      - cell "udp"
+      - cell "response"
+    - row "1 1 1 backup 127.0.0.1:21555 udp response":
+      - cell "1"
+      - cell "1"
+      - cell "1"
+      - cell "backup"
+      - cell "127.0.0.1:21555"
+      - cell "udp"
+      - cell "response"
+- strong: "响应码:"
+- text: NOERROR
+- strong: "响应标志:"
+- text: RA, AA
+- strong: "应答详情:"
+- text: complete
+- strong: "耗时:"
+- text: 0.66 ms
+- table:
+  - rowgroup:
+    - row "应答类型 数据 TTL":
+      - columnheader "应答类型"
+      - columnheader "数据"
+      - columnheader "TTL"
+  - rowgroup:
+    - row "CNAME final.example. 30s":
+      - cell "CNAME"
+      - cell "final.example."
+      - cell "30s"
+    - row "A 198.51.100.42 30s":
+      - cell "A"
+      - cell "198.51.100.42"
+      - cell "30s"
