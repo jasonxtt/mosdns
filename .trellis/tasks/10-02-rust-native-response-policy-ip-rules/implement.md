@@ -75,3 +75,7 @@ The final plan was explicitly approved by the human. Task activation succeeded a
 ## S1 → S2 execution checkpoint
 
 S1 exact commit e7e8a651ef3e5734d5bb3529775a96e3fc4f13b9 received FINAL: PASS in dedicated C2C iteration 1. S2 implements hosts/TTL in root/branch/direct fallback target paths and validates actual UDP behavior. Final S2 quality/review pending; S3-S6 not started.
+
+## S2 → S3 execution checkpoint
+
+S2 commit 8ce75e1257bc8989207a720f97a29af86d745064 received FINAL: PASS in iteration 2. S3 introduces scoped QueryView/redirect with safe wire rebuilding and supplier inheritance. A new RED test exposed exit conversion through named fallback targets; correction retains Exited across wrappers and prevents outer cache publication. S4–S6 remain pending.

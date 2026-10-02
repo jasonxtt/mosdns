@@ -145,9 +145,7 @@ impl RefreshEnvironment {
                 config: &environment.config,
                 cache: &catalog,
                 executor: environment.forwards.as_ref(),
-                raw: Rc::new(raw),
-                header,
-                question,
+                view: QueryView::new(raw, header, question),
                 deadline,
                 root_cancellation: cancellation.clone(),
                 branch_cancellation: cancellation.clone(),
@@ -173,13 +171,46 @@ impl RefreshEnvironment {
     }
 }
 
+/// Current request wire and its parsed view. Admission remains immutable in
+/// ExecutionRequest/checkpoint; each scoped branch owns its own query view.
+#[derive(Clone)]
+struct QueryView {
+    raw: Rc<Vec<u8>>,
+    header: QueryHeader,
+    question: QuestionInfo,
+}
+impl QueryView {
+    fn new(raw: Vec<u8>, header: QueryHeader, question: QuestionInfo) -> Self {
+        Self {
+            raw: Rc::new(raw),
+            header,
+            question,
+        }
+    }
+    fn redirect(&self, target: &str) -> Result<Self, ExecutorError> {
+        let mut message = hickory_proto::op::Message::from_vec(&self.raw)
+            .map_err(|error| ExecutorError::new(format!("invalid redirect query: {error}")))?;
+        let name = hickory_proto::rr::Name::from_ascii(target)
+            .map_err(|error| ExecutorError::new(format!("invalid redirect name: {error}")))?;
+        let Some(question) = message.queries_mut().first_mut() else {
+            return Err(ExecutorError::new("missing redirect question"));
+        };
+        question.set_name(name);
+        let raw = message
+            .to_vec()
+            .map_err(|error| ExecutorError::new(format!("redirect encoding failed: {error}")))?;
+        let (header, question) = mosdns_dns_core::parse_query(&raw).map_err(|error| {
+            ExecutorError::new(format!("redirect query validation failed: {error:?}"))
+        })?;
+        Ok(Self::new(raw, header, question))
+    }
+}
+
 struct BranchContext<'a, E: ExchangeExecutor + ?Sized> {
     config: &'a CompiledConfig,
     cache: &'a CacheCatalog,
     executor: &'a E,
-    raw: Rc<Vec<u8>>,
-    header: QueryHeader,
-    question: QuestionInfo,
+    view: QueryView,
     deadline: Instant,
     root_cancellation: TransportCancellation,
     branch_cancellation: TransportCancellation,
@@ -196,9 +227,7 @@ impl<E: ExchangeExecutor + ?Sized> Clone for BranchContext<'_, E> {
             config: self.config,
             cache: self.cache,
             executor: self.executor,
-            raw: Rc::clone(&self.raw),
-            header: self.header,
-            question: self.question.clone(),
+            view: self.view.clone(),
             deadline: self.deadline,
             root_cancellation: self.root_cancellation.clone(),
             branch_cancellation: self.branch_cancellation.clone(),
@@ -213,13 +242,12 @@ impl<E: ExchangeExecutor + ?Sized> Clone for BranchContext<'_, E> {
 
 impl<E: ExchangeExecutor + ?Sized> BranchContext<'_, E> {
     fn raw(&self) -> &[u8] {
-        self.raw.as_slice()
+        self.view.raw.as_slice()
     }
 
     fn with_query(&self, raw: Vec<u8>, question: QuestionInfo) -> Self {
         Self {
-            raw: Rc::new(raw),
-            question,
+            view: QueryView::new(raw, self.view.header, question),
             ..self.clone()
         }
     }
@@ -389,6 +417,10 @@ impl BranchTrace {
     }
 
     fn select(&mut self, branch_id: Option<usize>, inherited_network: bool) {
+        if !inherited_network {
+            self.selected = None;
+            return;
+        }
         if let Some(selected) = branch_id.and_then(|id| self.candidates.get(&id).cloned()) {
             self.selected = Some(selected);
         } else if !inherited_network {
@@ -454,7 +486,7 @@ impl<'a> BranchLedgerGuard<'a> {
             trace: context.trace.clone(),
             branch_metrics: context.branch_metrics.clone(),
             branch_id: context.branch_id,
-            qtype: context.question.qtype,
+            qtype: context.view.question.qtype,
             root_cancellation: context.root_cancellation.clone(),
             executable,
             ledger,
@@ -512,7 +544,7 @@ fn new_branch_ledger<E: ExchangeExecutor + ?Sized>(
             context.config,
             executable,
             context.branch_id,
-            context.question.qtype,
+            context.view.question.qtype,
         );
         ledger.borrow_mut().set_registration_hook(hook);
     }
@@ -547,7 +579,10 @@ fn trace_outcome(
             },
         );
         if selected {
-            trace.select(branch_id, outcome.source.is_some());
+            trace.select(
+                branch_id,
+                matches!(outcome.source, Some(ResponseSource::Upstream(_))),
+            );
         }
     }
 }
@@ -573,7 +608,7 @@ fn trace_committed_outcome(
 
 struct BranchOutcome {
     state: ExecutionState,
-    source: Option<String>,
+    source: Option<ResponseSource>,
     error: Option<ExecutionError>,
     /// How the branch machine reached its terminal state.
     ///
@@ -585,7 +620,7 @@ struct BranchOutcome {
 }
 
 impl BranchOutcome {
-    fn success(state: ExecutionState, source: Option<String>) -> Self {
+    fn success(state: ExecutionState, source: Option<ResponseSource>) -> Self {
         Self {
             state,
             source,
@@ -780,6 +815,9 @@ impl ExecutionFacts<'_> {
         let branch_metrics = std::mem::take(&mut *self.branch_metrics.borrow_mut());
         for attempt in branch_metrics.metric_attempts() {
             self.upstream_attempts.push_metric(*attempt);
+        }
+        for attempt in branch_metrics.as_slice() {
+            self.upstream_attempts.push(attempt.clone());
         }
     }
 
@@ -1328,6 +1366,64 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                     .iter()
                     .find(|policy| policy.executable == dispatch.executable())
                 {
+                    if let Some(target) = redirect_target(&policy.policy, machine.state()) {
+                        let context = BranchContext {
+                            config,
+                            cache,
+                            executor,
+                            view: QueryView::new(raw.to_vec(), header, question.clone()),
+                            deadline: request_deadline,
+                            root_cancellation: request_shutdown.clone(),
+                            branch_cancellation: request_shutdown.child_token(),
+                            trace: facts.enable_policy_trace(question.qtype),
+                            branch_metrics: facts.branch_metrics.clone(),
+                            refresh_environment: options.refresh_environment.clone(),
+                            allow_empty_response: true,
+                            branch_id: Some(0),
+                        };
+                        let successor = match machine.fork_successor(CancellationToken::new()) {
+                            Ok(successor) => successor,
+                            Err(_) => {
+                                set_servfail(&mut machine);
+                                facts.set_response_source(ResponseSource::Local);
+                                return result_from_state(&machine, &header, &question, facts);
+                            }
+                        };
+                        let source = facts.response_source.clone();
+                        let outcome = run_redirect(successor, context, source, target).await;
+                        *machine.state_mut() = outcome.state;
+                        if let Some(error) = outcome.error {
+                            if matches!(
+                                error,
+                                ExecutionError::Cancelled | ExecutionError::BudgetExceeded
+                            ) {
+                                return terminal_policy_failure(error, facts);
+                            }
+                            set_servfail(&mut machine);
+                            facts.set_response_source(ResponseSource::Local);
+                            facts.set_failure_provenance(FailureProvenance::LocalFailure(
+                                LocalFailureKind::InternalExecution,
+                            ));
+                            return result_from_state(&machine, &header, &question, facts);
+                        }
+                        if let Some(source) = outcome.source {
+                            facts.set_response_source(source);
+                        } else {
+                            facts.set_response_source(ResponseSource::Local);
+                        }
+                        let terminal = if outcome.completion == Some(ExecutionCompletion::Exited) {
+                            ExecutorOutcome::Exit
+                        } else {
+                            ExecutorOutcome::Return
+                        };
+                        step = match machine.resume(dispatch.executable(), Ok(terminal)) {
+                            Ok(step) => step,
+                            Err(_) => {
+                                return result_from_state(&machine, &header, &question, facts);
+                            }
+                        };
+                        continue;
+                    }
                     let result =
                         crate::policy::apply_wire_policy(&policy.policy, machine.state_mut(), raw);
                     if matches!(result, Ok(true)) {
@@ -1359,9 +1455,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         config,
                         cache,
                         executor,
-                        raw: Rc::new(raw.to_vec()),
-                        header,
-                        question: question.clone(),
+                        view: QueryView::new(raw.to_vec(), header, question.clone()),
                         deadline: request_deadline,
                         root_cancellation: request_shutdown.clone(),
                         branch_cancellation: request_shutdown.child_token(),
@@ -1382,10 +1476,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             return result_from_state(&machine, &header, &question, facts);
                         }
                     };
-                    let inherited_source = match facts.response_source.as_ref() {
-                        Some(ResponseSource::Upstream(source)) => Some(source.clone()),
-                        _ => None,
-                    };
+                    let inherited_source = facts.response_source.clone();
                     let outcome =
                         run_fallback(policy.clone(), successor, context.clone(), inherited_source)
                             .await;
@@ -1417,13 +1508,19 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         }
                     }
                     if let Some(source) = outcome.source.clone() {
-                        facts.set_response_source(ResponseSource::Upstream(source));
+                        facts.set_response_source(source);
                     } else {
                         facts.set_response_source(ResponseSource::Local);
                     }
                     *machine.state_mut() = outcome.state;
-                    step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
-                    {
+                    step = match machine.resume(
+                        dispatch.executable(),
+                        Ok(if outcome.completion == Some(ExecutionCompletion::Exited) {
+                            ExecutorOutcome::Exit
+                        } else {
+                            ExecutorOutcome::Accept
+                        }),
+                    ) {
                         Ok(step) => step,
                         Err(_) => {
                             facts.set_failure_provenance(FailureProvenance::LocalFailure(
@@ -1444,9 +1541,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         config,
                         cache,
                         executor,
-                        raw: Rc::new(raw.to_vec()),
-                        header,
-                        question: question.clone(),
+                        view: QueryView::new(raw.to_vec(), header, question.clone()),
                         deadline: request_deadline,
                         root_cancellation: request_shutdown.clone(),
                         branch_cancellation: request_shutdown.child_token(),
@@ -1467,10 +1562,7 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                             return result_from_state(&machine, &header, &question, facts);
                         }
                     };
-                    let inherited_source = match facts.response_source.as_ref() {
-                        Some(ResponseSource::Upstream(source)) => Some(source.clone()),
-                        _ => None,
-                    };
+                    let inherited_source = facts.response_source.clone();
                     let outcome = run_preference(
                         preference.clone(),
                         successor,
@@ -1501,13 +1593,19 @@ pub(crate) async fn execute_request_with_observation<E: ExchangeExecutor + ?Size
                         }
                     }
                     if let Some(source) = outcome.source.clone() {
-                        facts.set_response_source(ResponseSource::Upstream(source));
+                        facts.set_response_source(source);
                     } else {
                         facts.set_response_source(ResponseSource::Local);
                     }
                     *machine.state_mut() = outcome.state;
-                    step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
-                    {
+                    step = match machine.resume(
+                        dispatch.executable(),
+                        Ok(if outcome.completion == Some(ExecutionCompletion::Exited) {
+                            ExecutorOutcome::Exit
+                        } else {
+                            ExecutorOutcome::Accept
+                        }),
+                    ) {
                         Ok(step) => step,
                         Err(_) => {
                             facts.set_failure_provenance(FailureProvenance::LocalFailure(
@@ -1826,7 +1924,7 @@ fn abandon_frame(pending_stores: &mut Vec<PendingFrame>, watch: WatchToken) {
 fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
     machine: ExecutionMachine<'a>,
     context: BranchContext<'a, E>,
-    source: Option<String>,
+    source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
     Box::pin(drive_branch_inner(machine, context, source))
 }
@@ -1834,7 +1932,7 @@ fn drive_branch<'a, E: ExchangeExecutor + ?Sized>(
 async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
     mut machine: ExecutionMachine<'a>,
     context: BranchContext<'a, E>,
-    mut source: Option<String>,
+    mut source: Option<ResponseSource>,
 ) -> BranchOutcome {
     if let Err(error) = ensure_branch_alive(&machine, &context) {
         return BranchOutcome::failure(machine.state().clone(), error);
@@ -1912,10 +2010,37 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     .iter()
                     .find(|policy| policy.executable == dispatch.executable())
                 {
+                    if let Some(target) = redirect_target(&policy.policy, machine.state()) {
+                        let successor = match machine.fork_successor(CancellationToken::new()) {
+                            Ok(successor) => successor,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
+                        let outcome =
+                            run_redirect(successor, context.clone(), source, target).await;
+                        *machine.state_mut() = outcome.state;
+                        if let Some(error) = outcome.error {
+                            return BranchOutcome::failure(machine.state().clone(), error);
+                        }
+                        source = outcome.source;
+                        let terminal = if outcome.completion == Some(ExecutionCompletion::Exited) {
+                            ExecutorOutcome::Exit
+                        } else {
+                            ExecutorOutcome::Return
+                        };
+                        step = match machine.resume(dispatch.executable(), Ok(terminal)) {
+                            Ok(step) => step,
+                            Err(error) => {
+                                return BranchOutcome::failure(machine.state().clone(), error);
+                            }
+                        };
+                        continue;
+                    }
                     let result = crate::policy::apply_wire_policy(
                         &policy.policy,
                         machine.state_mut(),
-                        &context.raw,
+                        context.raw(),
                     );
                     if matches!(result, Ok(true)) {
                         source = None;
@@ -1969,8 +2094,14 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     }
                     source = outcome.source;
                     *machine.state_mut() = outcome.state;
-                    step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
-                    {
+                    step = match machine.resume(
+                        dispatch.executable(),
+                        Ok(if outcome.completion == Some(ExecutionCompletion::Exited) {
+                            ExecutorOutcome::Exit
+                        } else {
+                            ExecutorOutcome::Accept
+                        }),
+                    ) {
                         Ok(step) => step,
                         Err(error) => {
                             return BranchOutcome::failure(machine.state().clone(), error);
@@ -2017,8 +2148,14 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     }
                     source = outcome.source;
                     *machine.state_mut() = outcome.state;
-                    step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
-                    {
+                    step = match machine.resume(
+                        dispatch.executable(),
+                        Ok(if outcome.completion == Some(ExecutionCompletion::Exited) {
+                            ExecutorOutcome::Exit
+                        } else {
+                            ExecutorOutcome::Accept
+                        }),
+                    ) {
                         Ok(step) => step,
                         Err(error) => {
                             return BranchOutcome::failure(machine.state().clone(), error);
@@ -2054,8 +2191,8 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                                     cache_config.id,
                                     recipe,
                                     context.raw().to_vec(),
-                                    context.header,
-                                    context.question.clone(),
+                                    context.view.header,
+                                    context.view.question.clone(),
                                 );
                             }
                         }
@@ -2063,7 +2200,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                             machine.state_mut().routing.domain_set = Some(hit.domain_set);
                         }
                         machine.state_mut().set_raw_response(hit.response);
-                        source = None;
+                        source = Some(ResponseSource::Cache);
                         step = match machine
                             .resume(dispatch.executable(), Ok(ExecutorOutcome::Accept))
                         {
@@ -2131,8 +2268,8 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                 let response = match &exchange {
                     Ok(batch) => qualify_response(
                         batch.response.wire(),
-                        context.header.id,
-                        &context.question,
+                        context.view.header.id,
+                        &context.view.question,
                     )
                     .map(|wire| {
                         let identity = batch
@@ -2163,7 +2300,7 @@ async fn drive_branch_inner<'a, E: ExchangeExecutor + ?Sized>(
                     );
                 };
                 machine.state_mut().set_raw_response(wire);
-                source = identity;
+                source = identity.map(ResponseSource::Upstream);
                 step = match machine.resume(dispatch.executable(), Ok(ExecutorOutcome::Continue)) {
                     Ok(step) => step,
                     Err(error) => {
@@ -2179,7 +2316,7 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
     target: NativeTarget,
     mut successor: ExecutionMachine<'a>,
     context: BranchContext<'a, E>,
-    source: Option<String>,
+    source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
     Box::pin(async move {
         match target {
@@ -2202,6 +2339,9 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                 .await;
                 if let Some(error) = result.error {
                     return BranchOutcome::failure(result.state, error);
+                }
+                if result.completion == Some(ExecutionCompletion::Exited) {
+                    return result;
                 }
                 *successor.state_mut() = result.state;
                 drive_branch(successor, context, result.source).await
@@ -2247,7 +2387,12 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                                 )),
                             )
                         } else {
-                            BranchOutcome::success(successor.state().clone(), source)
+                            BranchOutcome {
+                                state: successor.state().clone(),
+                                source,
+                                error: None,
+                                completion: Some(ExecutionCompletion::Exited),
+                            }
                         }
                     }
                     Err(error) => BranchOutcome::failure(
@@ -2266,6 +2411,9 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                     .iter()
                     .find(|policy| policy.executable == executable)
                 {
+                    if let Some(target) = redirect_target(&policy.policy, successor.state()) {
+                        return run_redirect(successor, context, source, target).await;
+                    }
                     let result = crate::policy::apply_wire_policy(
                         &policy.policy,
                         successor.state_mut(),
@@ -2334,8 +2482,8 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                                     cache_config.id,
                                     recipe,
                                     context.raw().to_vec(),
-                                    context.header,
-                                    context.question.clone(),
+                                    context.view.header,
+                                    context.view.question.clone(),
                                 );
                             }
                         }
@@ -2343,7 +2491,10 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                             successor.state_mut().routing.domain_set = Some(hit.domain_set);
                         }
                         successor.state_mut().set_raw_response(hit.response);
-                        return BranchOutcome::success(successor.state().clone(), None);
+                        return BranchOutcome::success(
+                            successor.state().clone(),
+                            Some(ResponseSource::Cache),
+                        );
                     }
                     let pending_store = store.begin_store(context.raw()).ok().flatten();
                     let result = drive_branch(successor, context.clone(), source).await;
@@ -2391,7 +2542,11 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                     .ok()
                     .map(|batch| branch_transport(batch.response.transport()));
                 let wire = exchange.as_ref().ok().and_then(|batch| {
-                    qualify_response(batch.response.wire(), context.header.id, &context.question)
+                    qualify_response(
+                        batch.response.wire(),
+                        context.view.header.id,
+                        &context.view.question,
+                    )
                 });
                 ledger_guard.record(
                     selected_entry,
@@ -2410,12 +2565,17 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
                         )),
                     );
                 };
-                let source = exchange.ok().and_then(|batch| {
-                    batch
-                        .selected_entry
-                        .and_then(|entry| invocation_identity(context.config, executable, entry))
-                        .or_else(|| upstream_identity(context.config, executable))
-                });
+                let source = exchange
+                    .ok()
+                    .and_then(|batch| {
+                        batch
+                            .selected_entry
+                            .and_then(|entry| {
+                                invocation_identity(context.config, executable, entry)
+                            })
+                            .or_else(|| upstream_identity(context.config, executable))
+                    })
+                    .map(ResponseSource::Upstream);
                 successor.state_mut().set_raw_response(wire);
                 drive_branch(successor, context, source).await
             }
@@ -2423,11 +2583,118 @@ fn run_target<'a, E: ExchangeExecutor + ?Sized>(
     })
 }
 
+fn redirect_target(
+    policy: &crate::policy::ResponsePolicy,
+    state: &ExecutionState,
+) -> Option<String> {
+    let crate::policy::ResponsePolicy::Redirect(rules) = policy else {
+        return None;
+    };
+    if state.query.question.qclass != 1 {
+        return None;
+    }
+    let name = crate::matchers::wire_name_to_ascii_domain(&state.query.question.qname_wire)?;
+    rules.lookup(&name).cloned()
+}
+
+fn run_redirect<'a, E: ExchangeExecutor + ?Sized>(
+    mut successor: ExecutionMachine<'a>,
+    context: BranchContext<'a, E>,
+    source: Option<ResponseSource>,
+    target: String,
+) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
+    Box::pin(async move {
+        let original_state = successor.state().clone();
+        let view = match context.view.redirect(&target) {
+            Ok(view) => view,
+            Err(error) => {
+                return BranchOutcome::failure(original_state, ExecutionError::Executor(error));
+            }
+        };
+        successor.state_mut().query.header = view.header;
+        successor.state_mut().query.question = view.question.clone();
+        let child_context = BranchContext {
+            view,
+            ..context.clone()
+        };
+        let mut outcome = drive_branch(successor, child_context, source).await;
+        if outcome.error.is_none() && !matches!(outcome.state.response, MachineResponseState::None)
+        {
+            match decorate_redirect(&outcome.state, &context.view, &target) {
+                Ok(wire) => outcome.state.set_raw_response(wire),
+                Err(error) => {
+                    outcome = BranchOutcome::failure(outcome.state, ExecutionError::Executor(error))
+                }
+            }
+        }
+        outcome.state.query = original_state.query.clone();
+        let committed = commit_branch_winner(outcome, &context, &original_state);
+        trace_outcome(
+            &context,
+            context.branch_id,
+            &committed,
+            committed.is_success(),
+        );
+        committed
+    })
+}
+fn decorate_redirect(
+    state: &ExecutionState,
+    original: &QueryView,
+    target: &str,
+) -> Result<Vec<u8>, ExecutorError> {
+    let wire = match &state.response {
+        MachineResponseState::Raw(wire) => wire.as_bytes().to_vec(),
+        MachineResponseState::Synthesized(response) => mosdns_dns_core::synthesize_response(
+            &state.query.header,
+            &state.query.question,
+            u8::try_from(response.rcode())
+                .map_err(|_| ExecutorError::new("invalid redirect rcode"))?,
+        )
+        .map_err(|_| ExecutorError::new("redirect response construction failed"))?,
+        MachineResponseState::None => return Err(ExecutorError::new("redirect has no response")),
+    };
+    validate_response(&wire)
+        .map_err(|error| ExecutorError::new(format!("invalid redirect response: {error:?}")))?;
+    let mut response = hickory_proto::op::Message::from_vec(&wire)
+        .map_err(|error| ExecutorError::new(format!("redirect response decode failed: {error}")))?;
+    let query = hickory_proto::op::Message::from_vec(&original.raw).map_err(|error| {
+        ExecutorError::new(format!("redirect original query decode failed: {error}"))
+    })?;
+    let question = query
+        .queries()
+        .first()
+        .ok_or_else(|| ExecutorError::new("missing original question"))?
+        .clone();
+    response.queries_mut().clear();
+    response.add_query(question.clone());
+    let cname = hickory_proto::rr::Record::from_rdata(
+        question.name().clone(),
+        1,
+        hickory_proto::rr::RData::CNAME(hickory_proto::rr::rdata::CNAME(
+            hickory_proto::rr::Name::from_ascii(target)
+                .map_err(|_| ExecutorError::new("invalid target name"))?,
+        )),
+    );
+    response.answers_mut().insert(0, cname);
+    let wire = response
+        .to_vec()
+        .map_err(|error| ExecutorError::new(format!("redirect response encode failed: {error}")))?;
+    if wire.len() > 65535 {
+        return Err(ExecutorError::new(
+            "redirect response exceeds DNS wire limit",
+        ));
+    }
+    validate_response(&wire)
+        .map_err(|error| ExecutorError::new(format!("invalid restored response: {error:?}")))?;
+    Ok(wire)
+}
+
 fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
     policy: FallbackConfig,
     successor: ExecutionMachine<'a>,
     context: BranchContext<'a, E>,
-    source: Option<String>,
+    source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
     Box::pin(async move {
         let started = Instant::now();
@@ -2453,13 +2720,13 @@ fn run_fallback<'a, E: ExchangeExecutor + ?Sized>(
                 context.branch_id,
                 "primary",
                 "fallback",
-                context.question.qtype,
+                context.view.question.qtype,
             );
             let secondary_id = trace.add_branch(
                 context.branch_id,
                 "secondary",
                 "fallback",
-                context.question.qtype,
+                context.view.question.qtype,
             );
             trace.start(Some(primary_id));
             (Some(primary_id), Some(secondary_id))
@@ -2712,7 +2979,7 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
     policy: PreferenceConfig,
     mut successor: ExecutionMachine<'a>,
     context: BranchContext<'a, E>,
-    source: Option<String>,
+    source: Option<ResponseSource>,
 ) -> Pin<Box<dyn Future<Output = BranchOutcome> + 'a>> {
     Box::pin(async move {
         let preferred_qtype = match policy.family {
@@ -2723,15 +2990,15 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
             crate::config::PreferenceFamily::Ipv4 => "prefer_ipv4",
             crate::config::PreferenceFamily::Ipv6 => "prefer_ipv6",
         };
-        if context.question.qtype != 1 && context.question.qtype != 28 {
+        if context.view.question.qtype != 1 && context.view.question.qtype != 28 {
             return drive_branch(successor, context, source).await;
         }
-        let key = preference_cache_key(&context.question);
+        let key = preference_cache_key(&context.view.question);
         let now = policy.clock.now();
         {
             let mut evidence = policy.evidence.borrow_mut();
             evidence.retain(|_, expiry| *expiry > now);
-            if context.question.qtype != preferred_qtype
+            if context.view.question.qtype != preferred_qtype
                 && evidence.get(&key).is_some_and(|expiry| *expiry > now)
             {
                 if let Some(trace) = &context.trace {
@@ -2740,7 +3007,7 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                         context.branch_id,
                         "original",
                         policy_name,
-                        context.question.qtype,
+                        context.view.question.qtype,
                     );
                     let reference_id = trace.add_branch(
                         context.branch_id,
@@ -2766,13 +3033,13 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                 );
             }
         }
-        if context.question.qtype == preferred_qtype {
+        if context.view.question.qtype == preferred_qtype {
             let branch_id = context.trace.as_ref().map(|trace| {
                 let id = trace.borrow_mut().add_branch(
                     context.branch_id,
                     "original",
                     policy_name,
-                    context.question.qtype,
+                    context.view.question.qtype,
                 );
                 trace.borrow_mut().start(Some(id));
                 id
@@ -2805,7 +3072,7 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
         reference_machine
             .state_mut()
             .set_response(MachineResponseState::None);
-        let mut reference_question = context.question.clone();
+        let mut reference_question = context.view.question.clone();
         reference_question.qtype = preferred_qtype;
         let reference_raw = rewrite_query_qtype(context.raw(), preferred_qtype).ok_or_else(|| {
             ExecutionError::Executor(mosdns_sequence_core::ExecutorError::new(
@@ -2816,6 +3083,7 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
             Ok(raw) => raw,
             Err(error) => return BranchOutcome::failure(successor.state().clone(), error),
         };
+        reference_machine.state_mut().query.question = reference_question.clone();
         let reference_context = context.with_query(reference_raw, reference_question);
         let original_transport = context.branch_cancellation.child_token();
         let reference_transport = context.branch_cancellation.child_token();
@@ -2830,7 +3098,7 @@ fn run_preference<'a, E: ExchangeExecutor + ?Sized>(
                 context.branch_id,
                 "original",
                 policy_name,
-                context.question.qtype,
+                context.view.question.qtype,
             );
             let reference_id =
                 trace.add_branch(context.branch_id, "reference", policy_name, preferred_qtype);
@@ -3178,6 +3446,12 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
                 entry_index: 0,
                 outcome: fallback_outcome,
             });
+        if trace.is_some() {
+            branch_metrics.borrow_mut().push(UpstreamAttemptRecord {
+                upstream: entry.clone(),
+                outcome: fallback_outcome,
+            });
+        }
         if let Some(trace) = trace {
             let mut trace = trace.borrow_mut();
             if let Some(token) = trace_token {
@@ -3221,6 +3495,12 @@ fn record_branch_ledger_data(record: BranchLedgerRecord<'_>) {
                 entry_index: slot.entry_index,
                 outcome,
             });
+        if trace.is_some() {
+            branch_metrics.borrow_mut().push(UpstreamAttemptRecord {
+                upstream: entry.clone(),
+                outcome,
+            });
+        }
         if let Some(trace) = &trace {
             let mut trace = trace.borrow_mut();
             if let Some(token) = slot.trace_slot.or(trace_token) {
@@ -6960,9 +7240,7 @@ plugins:
             config: &config,
             cache: &cache.catalog(),
             executor: &exchange,
-            raw: Rc::new(request),
-            header,
-            question: question.clone(),
+            view: super::QueryView::new(request, header, question.clone()),
             deadline: Instant::now() + Duration::from_secs(1),
             root_cancellation: root_cancellation.clone(),
             branch_cancellation: root_cancellation.child_token(),
@@ -6994,6 +7272,80 @@ plugins:
 
         assert!(trace.selected.is_none());
         assert_eq!(trace.branches[branch_id].decision, "selected");
+    }
+
+    #[test]
+    fn redirect_error_cancel_and_shared_fuel_restore_without_decoration() {
+        for mode in ["error", "cancel", "fuel"] {
+            let next = if mode == "fuel" {
+                "goto $main"
+            } else {
+                "$upstream"
+            };
+            let yaml = format!(
+                "log: {{level: error}}\nplugins:\n  - tag: upstream\n    type: forward\n    args: {{upstreams: [{{addr: udp://127.0.0.1:19000}}]}}\n  - tag: rewrite\n    type: redirect\n    args: {{rules: ['original.example target.example', 'target.example original.example']}}\n  - tag: main\n    type: sequence\n    args:\n      - exec: $rewrite\n      - exec: {next}\n  - tag: listener\n    type: udp_server\n    args: {{entry: main, listen: '127.0.0.1:19100', enable_audit: false}}\n"
+            );
+            let config = compile_yaml(&yaml).unwrap();
+            let cache = NativeCacheAdapter::new().unwrap();
+            let catalog = cache.catalog();
+            let raw = query_name(42, "original.example");
+            let (header, question) = parse_query(&raw).unwrap();
+            let mut state = ExecutionState::new(header, question.clone());
+            let inherited = response(&raw);
+            state.set_raw_response(inherited.clone());
+            let control = super::ExecutionControl::with_shared_budget(
+                super::RootFuelHandle::new(if mode == "fuel" { 3 } else { 64 }),
+                super::CancellationToken::new(),
+            );
+            let mut machine = config.new_machine(state, control).unwrap();
+            assert!(matches!(
+                machine.step().unwrap(),
+                super::MachineStep::Dispatch(_)
+            ));
+            let successor = machine
+                .fork_successor(super::CancellationToken::new())
+                .unwrap();
+            let exchange = MockExchange {
+                calls: Rc::new(Cell::new(0)),
+                response: Vec::new(),
+                fail: true,
+            };
+            let cancellation = TransportCancellation::new();
+            if mode == "cancel" {
+                cancellation.cancel();
+            }
+            let context = BranchContext {
+                config: &config,
+                cache: &catalog,
+                executor: &exchange,
+                view: super::QueryView::new(raw, header, question.clone()),
+                deadline: Instant::now() + Duration::from_secs(1),
+                root_cancellation: cancellation.clone(),
+                branch_cancellation: cancellation.child_token(),
+                trace: None,
+                branch_metrics: Rc::new(RefCell::new(UpstreamAttemptList::default())),
+                refresh_environment: None,
+                allow_empty_response: true,
+                branch_id: None,
+            };
+            let result = futures_like_block_on(super::run_redirect(
+                successor,
+                context,
+                None,
+                "target.example.".into(),
+            ));
+            assert!(match mode {
+                "cancel" => matches!(result.error, Some(ExecutionError::Cancelled)),
+                "fuel" => matches!(result.error, Some(ExecutionError::BudgetExceeded)),
+                _ => matches!(result.error, Some(ExecutionError::Executor(_))),
+            });
+            assert_eq!(result.state.query.question, question);
+            assert_eq!(
+                super::response_raw(&result.state.response).unwrap(),
+                inherited
+            );
+            assert!(result.completion.is_none());
+        }
     }
 
     fn futures_like_block_on<F: std::future::Future>(future: F) -> F::Output {

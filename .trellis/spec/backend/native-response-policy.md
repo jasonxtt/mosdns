@@ -69,3 +69,37 @@ Good: hosts → ttl 42 → has_resp accept yields a Local TTL-42 answer. Base: e
 ## 7. Wrong vs Correct
 
 Wrong: treating hosts as implicit Accept or erasing all upstream attempts when it replaces a response. Correct: Continue through the canonical sequence machine; clear current selection and retain completed attempt history.
+
+# Scoped QueryView and redirect execution (S3)
+
+## 1. Scope / Trigger
+
+Redirect consumes only its enclosing successor under the same root fuel, absolute deadline and cancellation tree. Immutable admission remains owned by the request/checkpoint. Native branch contexts use one `QueryView` containing current owned/Rc wire, header and question; matchers use the corresponding machine query state.
+
+## 2. Signatures
+
+`QueryView::redirect(&str) -> Result<QueryView, ExecutorError>` safely decodes/re-encodes the actual outgoing query. `run_redirect` drives a captured successor and returns its typed `BranchOutcome`; restoration is local to that frame. Branch supplier state carries `Option<ResponseSource>`, including Cache rather than conflating every non-network response with Local.
+
+## 3. Contracts
+
+IN matching redirect changes qname while preserving ID/qtype/class/flags/allowed OPT. Forward, cache lookup/store, hosts, query matchers and preference probes consult the current view. Preference's alternate-QTYPE wire and machine question must agree. On successful response (including successful exit), rebuild Question to the original and prepend original→target IN CNAME TTL1; preserve target chain, SOA, rcode, flags and TTLs. Every nested frame restores one layer. Missing response/error/cancel/drop cannot synthesize a CNAME success.
+
+Outer cache captures the restored original wire/key; inner cache captures target wire/key before restoration. Completion remains `Exited` through named targets, fallback/preference wrappers and redirect; resume Exit so enclosing watches get ScopeAborted. No conversion to natural completion/publication. Natural scoped return resumes Return to allow only the caller's outside tail to continue.
+
+Supplier identity and actual historical attempts survive redirect; local/cache replacement clears current network selection. Branch collector transfers detail records only when audit capture is enabled, and transfers numeric metrics regardless. Trace selection must reject stale candidates when the selected outcome's source is Local/Cache.
+
+## 4. Validation & Error Matrix
+
+No match or non-IN: ordinary Continue, unchanged view. Malformed query/response or oversized restored wire: executor error, no partially installed wire. Error/cancel/fuel failure restores the frame's original machine question and propagates the typed error. Self/cross-plugin cycles exhaust shared root fuel; no new budget, no successful response manufacture. Assembly now gates only pending expanded IP execution.
+
+## 5. Good/Base/Bad Cases
+
+Good: a→b, peer b→d CNAME + d A yields original Question and a→b→d chain. Base: target NXDOMAIN retains its target-owned SOA and RCODE with a→b CNAME. Bad: converting exit through a named fallback target to Completed runs parent TTL and publishes outer cache; preserve Exited instead.
+
+## 6. Tests Required
+
+`policy_wire.rs`: actual target peer question, nested negative restoration, flags/QTYPE/OPT, cache before/inside redirect and warm hits, direct fallback target and non-IN no-op, exit/outer cache abort, named fallback exit skipping parent tail, bounded self-cycle. Native execution unit test verifies error/cancel/shared fuel typed results and unchanged inherited response without CNAME decoration. Regress full native-host suite and workspace clippy/fmt remotely.
+
+## 7. Wrong vs Correct
+
+Wrong: changing display qname while sending admission wire, patching compressed DNS question bytes in place, or reconstructing successful completion after exit. Correct: current owned QueryView; safe full message decode/encode; frame-local restoration and the original typed completion.
