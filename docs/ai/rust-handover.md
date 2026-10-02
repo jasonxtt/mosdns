@@ -9,7 +9,7 @@ Concise cross-session handover for the Rust migration on branch `rust`.
 Task `.trellis/tasks/10-02-rust-native-client-context-ecs/` owns trusted UDP/TCP
 client context/client_ip, scoped ecs_handler/legacy ecs, supplier-only echo,
 opt-in full ECS cache keys, conservative unsafe-placement rejection, and canonical
-v2 Go/native dump interoperability. S1–S5 have exact-source C2C PASS; S6 adds
+v2 Go/native dump interoperability. S1–S6 and cumulative whole-task C2C review PASS on source f9c523bb; S6 proves
 real first-refresh/disconnect, DNS/API/Vue, shutdown/restart and workspace proof.
 Final whole-task review and closure evidence are recorded in that task's research,
 which takes precedence over this concise handover. Default/quick ECS cache bypass
