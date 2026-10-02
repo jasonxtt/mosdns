@@ -133,3 +133,37 @@ Real UDP sequence cases in policy_wire verify dual-stack subnet inclusion/exclus
 ## 7. Wrong vs Correct
 
 Wrong: accepting expanded syntax but serving a pending matcher or reading rules during requests. Correct: execute the already-built immutable prefix snapshots through one matcher for every expression shape.
+
+# Policy composition and retained dumps (S5)
+
+## 1. Scope / Trigger
+
+Sequence order controls policy/cache/fallback/preference composition. Existing cache admission, v2 dump/key format and supplier schema remain unchanged.
+
+## 2. Signatures
+
+Existing `NativeCacheAdapter::{lookup_entry,dump,import_dump,save,flush}` and `HostOptions::with_cache_clock` provide lifecycle verification. No new management endpoints or policy generations.
+
+## 3. Contracts
+
+TTL inside a cache's successor is stored; TTL outside its named child scope modifies only the returned client wire. `resp_ip` can match target Answers before restoration or restored CNAME+A after cache/redirect; it remains read-only. Lazy DNS refresh reuses the owner-bound immutable startup hosts/rule snapshot. Prefer probes must consult the current redirected question and corresponding alternate QTYPE state.
+
+Fallback siblings hold independent QueryViews. A canceled branch cannot leak its target CNAME or selected supplier; actual attempt history retains both branches, including cancellation. Final source may be Cache/Local/Upstream according to the selected wire.
+
+Restart with changed policies and retained same-key v2 dump can hit old data. There is no policy identity/generation in key/dump. For immediate replacement, quiesce query producers while management remains available, complete durable Flush, then switch/restart without refill; alternatively stop/drain/final-save and remove the owned dump before restart. Closing the cache owner/listener before management makes Save/Flush return Closed and is not an executable flush sequence.
+
+## 4. Validation & Error Matrix
+
+Closed cache owner: Save/Flush/Import reject Closed. Preserved dump with changed rules: valid old hit within retention, not automatic invalidation. Flush commit followed by reload of its bound file: no old snapshot resurrection. Background rule-file changes/removal: no effect on current snapshot.
+
+## 5. Good/Base/Bad Cases
+
+Good: cache child hosts TTL10, caller ttl30 yields client TTL30 and stored TTL10. Base: retained dump still supplies old hosts address after owner reconstruction. Bad: assuming deleting a dump during a live owner's lifecycle prevents final-save resurrection, or promising automatic policy invalidation.
+
+## 6. Tests Required
+
+Seven composition cases in policy_wire prove TTL placement/aging, actual v2 bound-file Save/new-owner Import/Flush/re-import, lazy refresh with mutated hosts file, IP-selected fallback supplier/attempts, redirected prefer probe QTYPE, canceled sibling redirect isolation, and target/restored IP matching across cache boundaries. Unit-level owner reconstruction is not process restart proof; S6 supplies actual process/API/Vue/restart evidence.
+
+## 7. Wrong vs Correct
+
+Wrong: silently adding policy keys or excluding every Local response from caching. Correct: keep existing keys/admission and explicitly disclose retained-dump compatibility; verify quiescent durable flush and scoped publication.

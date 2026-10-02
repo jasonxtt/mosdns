@@ -1,6 +1,9 @@
 use hickory_proto::op::{Message, Query};
 use hickory_proto::rr::{DNSClass, Name, RData, RecordType};
-use mosdns_native_host::{HostAssembly, ResponseSource, ResponseState, UdpServer, compile_yaml};
+use mosdns_native_host::{
+    CacheTestClock, HostAssembly, HostOptions, ResponseSource, ResponseState, UdpServer,
+    compile_yaml,
+};
 use mosdns_upstream_core::TransportCancellation;
 use std::net::UdpSocket;
 use std::time::Duration;
@@ -12,10 +15,20 @@ fn assembly_for(rules: &str, entries: &str, upstream: &str) -> HostAssembly {
     assembly_extra(rules, entries, upstream, "")
 }
 fn assembly_extra(rules: &str, entries: &str, upstream: &str, extra: &str) -> HostAssembly {
+    assembly_options(rules, entries, upstream, extra, HostOptions::default())
+}
+fn assembly_options(
+    rules: &str,
+    entries: &str,
+    upstream: &str,
+    extra: &str,
+    options: HostOptions,
+) -> HostAssembly {
     let yaml = format!(
         "log: {{level: error}}\nplugins:\n  - tag: upstream\n    type: forward\n    args: {{upstreams: [{{addr: udp://{upstream}}}]}}\n  - tag: local\n    type: hosts\n    args:\n      entries: {entries}\n{extra}  - tag: main\n    type: sequence\n    args:\n{rules}\n  - tag: listener\n    type: udp_server\n    args:\n      entry: main\n      listen: 127.0.0.1:19100\n      enable_audit: true\n"
     );
-    HostAssembly::from_config(compile_yaml(&yaml).expect("compile")).expect("policy runtime")
+    HostAssembly::with_options(compile_yaml(&yaml).expect("compile"), options)
+        .expect("policy runtime")
 }
 fn query(kind: RecordType, class: DNSClass, name: &str) -> Vec<u8> {
     let mut message = Message::new();
@@ -33,38 +46,42 @@ fn request_optional(assembly: &HostAssembly, query: Vec<u8>) -> Option<Message> 
         .unwrap();
     let address = server.local_addr().unwrap();
     let shutdown = TransportCancellation::new();
-    let wire = assembly.block_on(async {
+    assembly.block_on(async {
         let task = tokio::task::spawn_local(server.serve(shutdown.clone()));
-        let response = tokio::task::spawn_blocking(move || {
-            let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            socket.send_to(&query, address).unwrap();
-            let mut wire = vec![0; 65535];
-            let len = match socket.recv(&mut wire) {
-                Ok(len) => len,
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                    ) =>
-                {
-                    return None;
-                }
-                Err(error) => panic!("{error}"),
-            };
-            wire.truncate(len);
-            Some(wire)
-        })
-        .await
-        .unwrap();
+        let response = ask(address, query).await;
         shutdown.cancel();
         task.await.unwrap().unwrap();
         response
-    });
-    wire.map(|wire| Message::from_vec(&wire).unwrap())
+    })
 }
+async fn ask(address: std::net::SocketAddr, query: Vec<u8>) -> Option<Message> {
+    let response = tokio::task::spawn_blocking(move || {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        socket.send_to(&query, address).unwrap();
+        let mut wire = vec![0; 65535];
+        let len = match socket.recv(&mut wire) {
+            Ok(len) => len,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                return None;
+            }
+            Err(error) => panic!("{error}"),
+        };
+        wire.truncate(len);
+        Some(wire)
+    })
+    .await
+    .unwrap();
+    response.map(|wire| Message::from_vec(&wire).unwrap())
+}
+
 #[test]
 fn hosts_dual_stack_order_ttl_and_continue_into_quick_ttl() {
     let host = assembly(
@@ -225,6 +242,10 @@ fn direct_fallback_hosts_target_continues_into_branch_ttl() {
 }
 
 fn redirect_peer(negative: bool) -> (String, std::thread::JoinHandle<Message>) {
+    redirect_peer_ip(negative, "192.0.2.1")
+}
+fn redirect_peer_ip(negative: bool, ip: &str) -> (String, std::thread::JoinHandle<Message>) {
+    let ip: std::net::Ipv4Addr = ip.parse().unwrap();
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(2)))
@@ -263,7 +284,7 @@ fn redirect_peer(negative: bool) -> (String, std::thread::JoinHandle<Message>) {
             response.add_answer(hickory_proto::rr::Record::from_rdata(
                 Name::from_ascii("final.example.").unwrap(),
                 70,
-                RData::A(hickory_proto::rr::rdata::A("192.0.2.1".parse().unwrap())),
+                RData::A(hickory_proto::rr::rdata::A(ip)),
             ));
         }
         socket.send_to(&response.to_vec().unwrap(), peer).unwrap();
@@ -598,4 +619,341 @@ fn response_ip_text_file_is_or_snapshot_not_request_time_io() {
     assert_eq!(request(&host, original.clone()).answers()[0].ttl(), 99);
     std::fs::remove_file(&path).unwrap();
     assert_eq!(request(&host, original).answers()[0].ttl(), 99);
+}
+
+#[test]
+fn composition_ttl_inside_and_outside_cache_keep_distinct_stored_ttls() {
+    for inside in [true, false] {
+        let clock = CacheTestClock::new(10);
+        let rules = if inside {
+            "      - exec: $stored\n      - exec: $local\n      - exec: ttl 30\n      - exec: accept"
+        } else {
+            "      - exec: $child\n      - exec: ttl 30\n      - exec: accept"
+        };
+        let host = assembly_options(
+            rules,
+            "['a.example 192.0.2.1']",
+            "127.0.0.1:19000",
+            "  - tag: stored\n    type: cache\n    args: {size: 64, lazy_cache_ttl: 0}\n  - tag: child\n    type: sequence\n    args:\n      - exec: $stored\n      - exec: $local\n      - exec: accept\n",
+            HostOptions::default().with_cache_clock(std::rc::Rc::new(clock.clone())),
+        );
+        let raw = query(RecordType::A, DNSClass::IN, "a.example.");
+        assert_eq!(request(&host, raw.clone()).answers()[0].ttl(), 30);
+        let cache = host.cache().get(mosdns_native_host::CacheId(0)).unwrap();
+        assert_eq!(
+            Message::from_vec(&cache.lookup(&raw).unwrap().unwrap())
+                .unwrap()
+                .answers()[0]
+                .ttl(),
+            if inside { 30 } else { 10 }
+        );
+        clock.advance(3);
+        assert_eq!(
+            request(&host, raw.clone()).answers()[0].ttl(),
+            if inside { 27 } else { 30 }
+        );
+        assert_eq!(
+            Message::from_vec(&cache.lookup(&raw).unwrap().unwrap())
+                .unwrap()
+                .answers()[0]
+                .ttl(),
+            if inside { 27 } else { 7 }
+        );
+    }
+}
+#[test]
+fn composition_retained_dump_can_hit_old_policy_until_quiescent_durable_flush() {
+    let path = std::env::temp_dir().join(format!(
+        "mosdns-policy-dump-{}-{}.gz",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let extra = format!(
+        "  - tag: stored\n    type: cache\n    args: {{size: 64, lazy_cache_ttl: 0, dump_file: '{}'}}\n",
+        path.display()
+    );
+    let rules = "      - exec: $stored\n      - exec: $local\n      - exec: accept";
+    let raw = query(RecordType::A, DNSClass::IN, "a.example.");
+    let old = assembly_extra(rules, "['a.example 192.0.2.1']", "127.0.0.1:19000", &extra);
+    let server = old
+        .block_on(UdpServer::bind(&old, "127.0.0.1:0".parse().unwrap()))
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    let stop = TransportCancellation::new();
+    old.block_on(async {
+        let task = tokio::task::spawn_local(server.serve(stop.clone()));
+        assert_eq!(
+            ask(addr, raw.clone()).await.unwrap().answers()[0]
+                .data()
+                .to_string(),
+            "192.0.2.1"
+        );
+        old.cache()
+            .get(mosdns_native_host::CacheId(0))
+            .unwrap()
+            .save()
+            .await
+            .unwrap();
+        stop.cancel();
+        task.await.unwrap().unwrap();
+    });
+    drop(old);
+    let changed = assembly_extra(rules, "['a.example 192.0.2.2']", "127.0.0.1:19000", &extra);
+    let cache = changed.cache().get(mosdns_native_host::CacheId(0)).unwrap();
+    changed
+        .block_on(cache.import_dump(std::fs::read(&path).unwrap()))
+        .unwrap();
+    let server = changed
+        .block_on(UdpServer::bind(&changed, "127.0.0.1:0".parse().unwrap()))
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    let stop = TransportCancellation::new();
+    changed.block_on(async {
+        let task = tokio::task::spawn_local(server.serve(stop.clone()));
+        assert_eq!(
+            ask(addr, raw.clone()).await.unwrap().answers()[0]
+                .data()
+                .to_string(),
+            "192.0.2.1",
+            "retained v2 dump has no policy generation"
+        );
+        // The only producer has completed. No query is submitted during flush.
+        cache.flush().await.unwrap();
+        stop.cancel();
+        task.await.unwrap().unwrap();
+    });
+    drop(changed);
+    let after_flush = assembly_extra(rules, "['a.example 192.0.2.2']", "127.0.0.1:19000", &extra);
+    after_flush
+        .block_on(
+            after_flush
+                .cache()
+                .get(mosdns_native_host::CacheId(0))
+                .unwrap()
+                .import_dump(std::fs::read(&path).unwrap()),
+        )
+        .unwrap();
+    assert_eq!(
+        request(&after_flush, raw).answers()[0].data().to_string(),
+        "192.0.2.2"
+    );
+    drop(after_flush);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn composition_lazy_refresh_uses_same_immutable_hosts_snapshot() {
+    let clock = CacheTestClock::new(10);
+    let path = std::env::temp_dir().join(format!("mosdns-hosts-lazy-{}.txt", std::process::id()));
+    std::fs::write(&path, "a.example 192.0.2.1\n").unwrap();
+    let extra = format!(
+        "  - tag: source_hosts\n    type: hosts\n    args: {{files: ['{}']}}\n  - tag: stored\n    type: cache\n    args: {{size: 64, lazy_cache_ttl: 90}}\n",
+        path.display()
+    );
+    let host = assembly_options(
+        "      - exec: $stored\n      - exec: $source_hosts\n      - exec: accept",
+        "[]",
+        "127.0.0.1:19000",
+        &extra,
+        HostOptions::default().with_cache_clock(std::rc::Rc::new(clock.clone())),
+    );
+    let raw = query(RecordType::A, DNSClass::IN, "a.example.");
+    let server = host
+        .block_on(UdpServer::bind(&host, "127.0.0.1:0".parse().unwrap()))
+        .unwrap();
+    let address = server.local_addr().unwrap();
+    let shutdown = TransportCancellation::new();
+    host.block_on(async {
+        let task = tokio::task::spawn_local(server.serve(shutdown.clone()));
+        assert_eq!(
+            ask(address, raw.clone()).await.unwrap().answers()[0].ttl(),
+            10
+        );
+        std::fs::write(&path, "a.example 192.0.2.2\n").unwrap();
+        clock.advance(11);
+        let lazy = ask(address, raw.clone()).await.unwrap();
+        assert_eq!(lazy.answers()[0].data().to_string(), "192.0.2.1");
+        let cache = host.cache().get(mosdns_native_host::CacheId(0)).unwrap();
+        let limit = std::time::Instant::now() + Duration::from_secs(1);
+        while cache.lookup_entry(&raw).unwrap().unwrap().state
+            != mosdns_cache_core::LookupState::Fresh
+            && std::time::Instant::now() < limit
+        {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            cache.lookup_entry(&raw).unwrap().unwrap().state,
+            mosdns_cache_core::LookupState::Fresh
+        );
+        assert_eq!(
+            ask(address, raw.clone()).await.unwrap().answers()[0].ttl(),
+            10
+        );
+        shutdown.cancel();
+        task.await.unwrap().unwrap();
+    });
+    drop(host);
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn composition_ip_condition_selects_fallback_supplier_and_keeps_both_attempts() {
+    let (primary, first) = redirect_peer_ip(false, "192.0.2.1");
+    let (backup, second) = redirect_peer_ip(false, "198.51.100.1");
+    let extra = format!(
+        "  - tag: backup\n    type: forward\n    args: {{upstreams: [{{addr: udp://{backup}}}]}}\n  - tag: choice\n    type: fallback\n    args: {{primary: '$backup', secondary: '$local', threshold: 100}}\n"
+    );
+    let host = assembly_extra(
+        "      - exec: $upstream\n      - matches: resp_ip 192.0.2.0/24\n        exec: $choice\n      - exec: accept",
+        "[]",
+        &primary,
+        &extra,
+    );
+    let response = request(&host, query(RecordType::A, DNSClass::IN, "a.example."));
+    first.join().unwrap();
+    second.join().unwrap();
+    assert_eq!(response.answers()[1].data().to_string(), "198.51.100.1");
+    let audit = host.audit_snapshot();
+    let record = &audit.records[0];
+    assert_eq!(record.upstream_attempts.len(), 2);
+    assert_eq!(record.selected_upstream.as_deref(), Some(backup.as_str()));
+    assert_eq!(
+        record
+            .upstream_diagnostics
+            .as_ref()
+            .unwrap()
+            .selected
+            .as_ref()
+            .unwrap()
+            .entry,
+        "backup"
+    );
+}
+#[test]
+fn composition_redirect_preference_probe_uses_current_question_and_qtype_matchers() {
+    let host = assembly_extra(
+        "      - exec: $rewrite\n      - exec: prefer_ipv4\n      - matches: qtype 1\n        exec: $local\n      - matches: qtype 28\n        exec: reject 0",
+        "['target.example 192.0.2.1']",
+        "127.0.0.1:19000",
+        "  - tag: rewrite\n    type: redirect\n    args: {rules: ['original.example target.example']}\n",
+    );
+    let response = request(
+        &host,
+        query(RecordType::AAAA, DNSClass::IN, "original.example."),
+    );
+    assert_eq!(response.queries()[0].query_type(), RecordType::AAAA);
+    assert_eq!(response.answers().len(), 1);
+    assert_eq!(response.answers()[0].data().to_string(), "target.example.");
+    let audit = host.audit_snapshot();
+    assert!(
+        audit.records[0]
+            .upstream_diagnostics
+            .as_ref()
+            .unwrap()
+            .branches
+            .iter()
+            .any(|branch| branch.decision == "suppressed")
+    );
+    assert!(audit.records[0].selected_upstream.is_none());
+}
+
+fn held_peer() -> (
+    String,
+    std::thread::JoinHandle<Message>,
+    std::sync::mpsc::Sender<()>,
+) {
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let address = socket.local_addr().unwrap().to_string();
+    let (stop, wait) = std::sync::mpsc::channel();
+    let task = std::thread::spawn(move || {
+        let mut wire = vec![0; 65535];
+        let (len, _) = socket.recv_from(&mut wire).unwrap();
+        let query = Message::from_vec(&wire[..len]).unwrap();
+        let _ = wait.recv_timeout(Duration::from_secs(2));
+        query
+    });
+    (address, task, stop)
+}
+#[test]
+fn composition_fallback_redirect_siblings_are_isolated_and_cancelled_supplier_never_wins() {
+    let (primary, first, release) = held_peer();
+    let (backup, second) = redirect_peer_ip(false, "198.51.100.1");
+    let extra = format!(
+        "  - tag: backup\n    type: forward\n    args: {{upstreams: [{{addr: udp://{backup}}}]}}\n  - tag: first_rewrite\n    type: redirect\n    args: {{rules: ['original.example primary.example']}}\n  - tag: second_rewrite\n    type: redirect\n    args: {{rules: ['original.example secondary.example']}}\n  - tag: first_path\n    type: sequence\n    args: [{{exec: '$first_rewrite'}}, {{exec: '$upstream'}}]\n  - tag: second_path\n    type: sequence\n    args: [{{exec: '$second_rewrite'}}, {{exec: '$backup'}}]\n  - tag: choice\n    type: fallback\n    args: {{primary: '$first_path', secondary: '$second_path', threshold: 100, always_standby: true}}\n"
+    );
+    let host = assembly_extra(
+        "      - exec: $choice\n      - exec: accept",
+        "[]",
+        &primary,
+        &extra,
+    );
+    let response = request(
+        &host,
+        query(RecordType::A, DNSClass::IN, "original.example."),
+    );
+    release.send(()).unwrap();
+    assert_eq!(
+        first.join().unwrap().queries()[0].name().to_ascii(),
+        "primary.example."
+    );
+    assert_eq!(
+        second.join().unwrap().queries()[0].name().to_ascii(),
+        "secondary.example."
+    );
+    assert_eq!(response.queries()[0].name().to_ascii(), "original.example.");
+    assert_eq!(
+        response.answers()[0].data().to_string(),
+        "secondary.example."
+    );
+    assert!(
+        response
+            .answers()
+            .iter()
+            .all(|answer| !answer.data().to_string().contains("primary.example"))
+    );
+    let audit = host.audit_snapshot();
+    let record = &audit.records[0];
+    assert_eq!(record.upstream_attempts.len(), 2);
+    assert_eq!(record.selected_upstream.as_deref(), Some(backup.as_str()));
+    let diagnostics = record.upstream_diagnostics.as_ref().unwrap();
+    assert_eq!(diagnostics.selected.as_ref().unwrap().entry, "backup");
+    assert!(
+        diagnostics
+            .attempts
+            .iter()
+            .any(|attempt| attempt.entry == "upstream"
+                && attempt.outcome == mosdns_native_host::UpstreamAttemptOutcome::Canceled)
+    );
+}
+#[test]
+fn composition_ip_matchers_see_target_and_restored_cached_answers_at_their_own_boundaries() {
+    let extra = "  - tag: rewrite\n    type: redirect\n    args: {rules: ['original.example target.example']}\n  - tag: stored\n    type: cache\n    args: {size: 64, lazy_cache_ttl: 0}\n  - tag: child\n    type: sequence\n    args:\n      - exec: $stored\n      - exec: $rewrite\n      - matches: qname target.example\n        exec: $local\n      - matches: resp_ip 192.0.2.0/24\n        exec: ttl 20\n      - exec: accept\n";
+    let host = assembly_extra(
+        "      - exec: $child\n      - matches: resp_ip 192.0.2.0/24\n        exec: ttl 30\n      - exec: accept",
+        "['target.example 192.0.2.1']",
+        "127.0.0.1:19000",
+        extra,
+    );
+    let raw = query(RecordType::A, DNSClass::IN, "original.example.");
+    for _ in 0..2 {
+        let response = request(&host, raw.clone());
+        assert_eq!(response.answers().len(), 2);
+        assert!(response.answers().iter().all(|answer| answer.ttl() == 30));
+    }
+    let stored = Message::from_vec(
+        &host
+            .cache()
+            .get(mosdns_native_host::CacheId(0))
+            .unwrap()
+            .lookup(&raw)
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored.answers()[0].ttl(), 1);
+    assert_eq!(stored.answers()[1].ttl(), 20);
 }
