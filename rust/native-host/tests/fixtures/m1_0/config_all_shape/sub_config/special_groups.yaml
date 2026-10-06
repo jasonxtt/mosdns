@@ -1,0 +1,5 @@
+plugins:
+  - tag: plain_included_sequence
+    type: sequence
+    args:
+      - exec: reject 3

@@ -206,8 +206,8 @@ pub(crate) fn wire_name_to_ascii_domain(wire: &[u8]) -> Option<String> {
     }
 }
 
-/// Resolves one configured rule-file path against the declaring YAML
-/// directory. An absolute path and an in-memory compile (empty base) are used
+/// Resolves one configured rule-file path against the configuration root.
+/// An absolute path and an in-memory compile (empty base) are used
 /// verbatim.
 pub(crate) fn resolve_rule_path(file: &str, base_dir: &std::path::Path) -> std::path::PathBuf {
     if base_dir.as_os_str().is_empty() || std::path::Path::new(file).is_absolute() {

@@ -61,7 +61,7 @@ C08/C11 整行仍未完成；capture、别名、上游管理/指标、兼容 UI/
 
 | 条目 | 本批实际交付 | 仍延期 |
 | --- | --- | --- |
-| P02 `domain_set` | `exps`（full/domain/regexp/keyword，复用 matcher-core MixMatcher）与 `files`（UTF-8 文本、跳过空行/`#` 注释、相对声明文件目录解析）；缺失规则文件在 bind 前报路径错误 | 管理端下载/修改/删除/热更新、SRS/geodata、`sets` 引用、provider API |
+| P02 `domain_set` | `exps`（full/domain/regexp/keyword，复用 matcher-core MixMatcher）与 `files`（UTF-8 文本、跳过空行/`#` 注释、相对路径按配置根目录解析，见 C01）；缺失规则文件在 bind 前报路径错误 | 管理端下载/修改/删除/热更新、SRS/geodata、`sets` 引用、provider API |
 | P15 `qclass` | 未纳入（本链不需要） | 整项 |
 | P16 `qname` | `qname $domain_set` 命名引用与内联规则；未知名在加载期报错 | `&file` 形式、`sets` 组合、其它 matcher 类别 |
 | P17 `qtype` | 多类型号匹配，非数字在加载期报错 | 整项参数冻结 |
@@ -72,7 +72,7 @@ C08/C11 整行仍未完成；capture、别名、上游管理/指标、兼容 UI/
 | P44 `sequence` | 任意数量具名 sequence；direct `$sequence` 为独立 child scope（自然结束/accept/reject 返回父，exit 越过父遇 try 才捕获）；`jump`/`goto`/`return`/`try`/`accept`/`reject`/`exit`；exec scalar 与 list（multi-exec 为 synthetic inline scope）；5B 代表子集接入 `fast_mark`/`flow_setter` quick 与命名 executable | 完整插件/quick setup、fallback/sleep、动态注册 |
 | L01 | `accept`/`reject`/`return`/`goto`/`jump`/`exit`/`try` 经 YAML → 异步请求 → 最终响应集成；`reject` 默认 REFUSED，`0..=15` 实际渲染，`>15` 在加载期报 unsupported（不截断） | 完整 12-bit reject/EDNS 渲染（顺序：5B 后续），以及序列内其它插件解析 |
 | L02 | `_true`/`_false`、单次 `!` 取反、`$tag` 命名引用、`matches` 单值或列表 | 完整 quick setup 集合、`&file` 引用 |
-| C01 | 顶层 `include` 按声明文件目录解析、有序加载 plugins-only 子文件、嵌套 include 明确拒绝；每个 included definition 保留其 YAML source path/base directory（含相对规则文件解析和错误定位）；定义先收集再解析（重排/前后引用不改变有效分支）；重复 key/tag、缺失或跨类型引用、未知字段、未支持参数、坏规则文件均在 bind/查询前失败并带文件与字段/规则路径 | 递归 include、热更新、完整配置包加载、`api`/其它顶层段、preset 插件 |
+| C01 | 顶层 `include` 按主配置文件目录解析、有序加载 plugins-only 子文件、嵌套 include 明确拒绝；插件参数中的相对路径（规则文件、switch 状态文件、cache dump、`log.file`）一律按**配置根目录**解析（`-d <dir>`，未给 `-d` 时为主配置文件目录；与 Go 的 `chdir` 语义一致，2026-10-06 M1-0 取代 5B 起“按声明文件目录”的旧规则）；每个 included definition 保留其 YAML source path（含错误定位）；定义先收集再解析（重排/前后引用不改变有效分支）；重复 key/tag、缺失或跨类型引用、未知字段、未支持参数、坏规则文件均在 bind/查询前失败并带文件与字段/规则路径 | 递归 include、热更新、完整配置包加载、`api`/其它顶层段、preset 插件 |
 
 本地证据入口：`rust/native-host/tests/slice3_composition.rs`（loader/include/规则路径/负例/重排和真实 listener 场景）与 `rust/native-host/src/execution.rs` 的 `the_representative_chain_blocks_rejects_and_routes_without_a_listener`（block/qtype-0/local miss/default 分支/child 后父继续/cache 后继不被父改写/entry cache/重复访问/取消）。首轮完整 workspace 回归为 891 passed；复审修复后的全量回归为 896 passed / 0 failed。
 

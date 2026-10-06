@@ -1,0 +1,53 @@
+log:
+  level: warn
+  file: logs/mosdns.log
+
+include:
+  - sub_config/rule_set.yaml
+  - sub_config/special_groups.yaml
+
+plugins:
+  - tag: fwd
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:15453"
+
+  - tag: cache_main
+    type: cache
+    args:
+      size: 1024
+      dump_file: cache/main.dump
+
+  - tag: switch1
+    type: switch1
+    args:
+      initial_value: rule/switch1.txt
+
+  - tag: main_seq
+    type: sequence
+    args:
+      - matches: qname $direct
+        exec: reject 3
+      - exec: $cache_main
+      - exec: $fwd
+
+  - tag: udp_in
+    type: udp_server
+    args:
+      entry: main_seq
+      listen: ":15353"
+
+  - tag: tcp_in
+    type: tcp_server
+    args:
+      entry: main_seq
+      listen: ":15353"
+      idle_timeout: 10
+
+  - tag: udp_alt
+    type: udp_server
+    args:
+      entry: main_seq
+      listen: ":15354"
+      enable_audit: true

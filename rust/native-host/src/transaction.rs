@@ -132,6 +132,9 @@ impl From<std::io::Error> for TransactionError {
 /// One process owns this guard until all runtime mutation/cleanup has ended.
 pub struct ManagedStore {
     root: PathBuf,
+    /// The configuration root (`-d`) candidate compilation resolves relative
+    /// plugin-argument paths against; the state root unless set otherwise.
+    plugin_root: PathBuf,
     _lock: File,
 }
 
@@ -304,9 +307,15 @@ impl ManagedStore {
         }
         let yaml = crate::config::load_yaml_with_inputs(&config_path, &mut inputs)
             .map_err(|error| TransactionError::Invalid(error.to_string()))?;
-        let config =
-            crate::config::compile_candidate_yaml(&yaml, &self.root, profile, &staged, &mut inputs)
-                .map_err(|error| TransactionError::Invalid(error.to_string()))?;
+        let config = crate::config::compile_candidate_yaml(
+            &yaml,
+            &self.root,
+            &self.plugin_root,
+            profile,
+            &staged,
+            &mut inputs,
+        )
+        .map_err(|error| TransactionError::Invalid(error.to_string()))?;
         let mut files = changes;
         if !files.iter().any(|(path, _)| *path == generated_path) {
             files.push((generated_path, Some(generated)));
@@ -870,11 +879,20 @@ impl ManagedStore {
                 TransactionError::Io(error)
             }
         })?;
-        Ok(Self { root, _lock: lock })
+        Ok(Self {
+            plugin_root: root.clone(),
+            root,
+            _lock: lock,
+        })
     }
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
+    }
+    /// Sets the configuration root for relative plugin-argument paths when it
+    /// differs from the state root (`-d`).
+    pub(crate) fn set_plugin_root(&mut self, plugin_root: PathBuf) {
+        self.plugin_root = plugin_root;
     }
 }
 
@@ -1220,11 +1238,11 @@ mod tests {
                 root.join("parts/extra.yaml"),
                 concat!(
                     "plugins:\n",
-                    "  - tag: query_only\n    type: domain_set\n    args: {files: [../rules/query_only.txt]}\n",
-                    "  - tag: policy_hosts\n    type: hosts\n    args: {files: [../rules/hosts.txt]}\n",
-                    "  - tag: policy_ips\n    type: ip_set\n    args: {files: [../rules/ip.txt]}\n",
-                    "  - tag: optional_policy_ips\n    type: ip_set\n    args: {files: [../rules/optional-ip.txt]}\n",
-                    "  - tag: response_probe\n    type: sequence\n    args:\n      - matches: 'resp_ip &../rules/response-ip.txt'\n        exec: accept\n",
+                    "  - tag: query_only\n    type: domain_set\n    args: {files: [rules/query_only.txt]}\n",
+                    "  - tag: policy_hosts\n    type: hosts\n    args: {files: [rules/hosts.txt]}\n",
+                    "  - tag: policy_ips\n    type: ip_set\n    args: {files: [rules/ip.txt]}\n",
+                    "  - tag: optional_policy_ips\n    type: ip_set\n    args: {files: [rules/optional-ip.txt]}\n",
+                    "  - tag: response_probe\n    type: sequence\n    args:\n      - matches: 'resp_ip &rules/response-ip.txt'\n        exec: accept\n",
                 ),
             )
             .unwrap();
@@ -1254,6 +1272,54 @@ mod tests {
                 "candidate must detect an external edit to {changed_path}"
             );
         }
+    }
+
+    #[test]
+    fn candidate_compilation_resolves_plugin_paths_from_the_configuration_root() {
+        let _process_gate = PROCESS_PROBE_GATE.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "native-candidate-plugin-root-{}",
+            std::process::id()
+        ));
+        let plugin_root = root.join("data");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("webinfo")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        std::fs::create_dir_all(plugin_root.join("rules")).unwrap();
+        let config = root.join("config.yaml");
+        let yaml = include_str!("../../../docs/rust/examples/native-managed-empty/config.yaml")
+            .replace("plugins:\n", "include:\n  - parts/extra.yaml\nplugins:\n");
+        std::fs::write(&config, yaml).unwrap();
+        std::fs::write(
+            root.join("parts/extra.yaml"),
+            "plugins:\n  - tag: query_only\n    type: domain_set\n    args: {files: [rules/query_only.txt]}\n",
+        )
+        .unwrap();
+        // The rule file exists only under the `-d` root; `include` still
+        // resolves beside the state root.
+        std::fs::write(
+            plugin_root.join("rules/query_only.txt"),
+            b"full:data.test\n",
+        )
+        .unwrap();
+        let groups = PathBuf::from("webinfo/special_upstream_groups.json");
+        std::fs::write(root.join(&groups), b"[]").unwrap();
+
+        let mut owner = ManagedStore::open(&root).unwrap();
+        owner.set_plugin_root(plugin_root);
+        let candidate = owner
+            .compile_candidate(&config, vec![(groups, Some(b"[]".to_vec()))])
+            .unwrap();
+        assert!(
+            candidate
+                .config()
+                .domain_set("query_only")
+                .unwrap()
+                .matches("data.test")
+        );
+        drop(candidate);
+        drop(owner);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1328,7 +1394,7 @@ mod tests {
         std::fs::write(&config, yaml).unwrap();
         std::fs::write(
             root.join("parts/extra.yaml"),
-            "plugins:\n  - tag: query_only\n    type: domain_set\n    args: {files: [../rules/query_only.txt]}\n",
+            "plugins:\n  - tag: query_only\n    type: domain_set\n    args: {files: [rules/query_only.txt]}\n",
         )
         .unwrap();
         let rule_path = root.join("rules/query_only.txt");

@@ -59,7 +59,7 @@ impl TcpServer {
             .find(|listener| listener.tag == declared.tag)
             .and_then(|listener| listener.idle_timeout)
             .ok_or(TcpServerError::MissingIdleTimeout)?;
-        let listener = TcpListener::bind(listen)
+        let listener = crate::bind::tcp(listen)
             .await
             .map_err(TcpServerError::Bind)?;
         Ok(Self {
@@ -81,7 +81,7 @@ impl TcpServer {
         observer: Arc<QueryObserver>,
         declared: &crate::config::ListenerConfig,
     ) -> Result<Self, TcpServerError> {
-        let bound = TcpListener::bind(declared.listen)
+        let bound = crate::bind::tcp(declared.listen)
             .await
             .map_err(TcpServerError::Bind)?;
         Ok(Self {
@@ -99,14 +99,12 @@ impl TcpServer {
         })
     }
 
-    pub(crate) fn binding_key(
-        &self,
-    ) -> Result<crate::runtime_snapshot::BindingKey, TcpServerError> {
-        Ok((
+    pub(crate) fn binding_key(&self) -> crate::runtime_snapshot::BindingKey {
+        (
             self.listener_tag.clone(),
             ListenerKind::Tcp,
-            self.local_addr()?,
-        ))
+            self.listener_addr,
+        )
     }
 
     /// Binds the listener address declared by the compiled W1 YAML.
@@ -154,7 +152,9 @@ impl TcpServer {
                                     listener_tag,
                                     listener_addr,
                                     observer,
-                                    client_addr: peer,
+                                    // A dual-stack socket reports IPv4 peers as
+                                    // IPv4-mapped IPv6.
+                                    client_addr: crate::bind::canonical_peer(peer),
                                     idle_timeout,
                                     connection_shutdown,
                                 }).await;
@@ -256,7 +256,7 @@ async fn process_connection(task: ConnectionTask) {
         ) {
             Ok(admitted) => admitted,
             Err(error) => {
-                eprintln!("native query admission failed: {error}");
+                crate::diag::error_line!("native query admission failed: {error}");
                 return;
             }
         };

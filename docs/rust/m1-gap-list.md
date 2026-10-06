@@ -6,7 +6,13 @@
 输入、构建与快照说明见该目录 README。本清单以 `check` 输出为准，取代
 [下一阶段安排](next-stage-plan.md)中 2026-10-06 按 YAML 文本统计的 M1 表。
 
-`SUMMARY gaps=86 cascades=80 globals=3 definitions=126`。读法：
+`SUMMARY gaps=86 cascades=80 globals=3 definitions=126`（M1-0 之前）。**M1-0 完成后**
+（`10-06-rust-native-m1-0-config-loading`）对 `config_all` 与生产快照重跑，原始输出见
+[validation-records/10-06-m1-0-config-loading](validation-records/10-06-m1-0-config-loading/README.md)：
+`SUMMARY gaps=64 cascades=80 globals=1 definitions=126`，两份逐字节相同，stderr 为空。唯一
+GLOBAL 是 `at least one forward plugin is required`（全部上游经 `aliapi`，属 M1-b）；其余
+64 个直接缺口全部是下文 M1-a/b/c 的插件类型或 sequence 项，已无加载/listener/路径类缺口。
+M1-0 之前的读法如下：
 
 - **直接缺口（GAP/GLOBAL）** 是要做的事；**连带错误（CASCADE）** 只因引用了被剔除的定义，
   对应插件补齐后自然消失，不单独排期。
@@ -47,16 +53,17 @@
 | 插件类型 `domain_output` | 8 | |
 | 插件类型 `requery` | 1 | |
 
-### M1-d 配置加载与 listener（新增，原 M1 表未列）
+### M1-d 配置加载与 listener（新增，原 M1 表未列；**M1-0 已全部关闭**）
 
-| 缺口 | 数量 | 说明 |
+| 缺口 | 数量 | 关闭方式 |
 | --- | --- | --- |
-| `log.file` 字段 | 1 | GLOBAL |
-| `log.level: warn` | 1 | 原生只接受 `error` |
-| `listen: ":port"` 形式 | 20 | 全部 udp/tcp listener；原生只接受数字 IP |
-| `enable_audit` 必填 | 10 | 探测层 2：子配置中的 10 个 listener 未写该字段；Go 为可选 |
-| 多个 listener 需 `native_management` | 9（探测可见） | 探测层 2：未开启托管时只允许一个 listener；补齐 `enable_audit` 后预计为 19 |
-| 相对路径基准 | 见 §3.1 | 原配置中 `domain_set` 2 处因此报文件缺失 |
+| `log.file` 字段 | 1 | `log.file` 追加写入（相对路径按配置根目录），其余 `log` 字段仍报不支持 |
+| `log.level: warn` | 1 | 接受 `debug`/`info`/`warn`/`error`，非法值回退 `info` 并警告 |
+| `listen: ":port"` 形式 | 20 | `:port` 绑定 IPv6 通配并清除 `IPV6_V6ONLY`（双栈；无 IPv6 时回退 `0.0.0.0` 并写诊断） |
+| `enable_audit` 必填 | 10 | 改为可选，默认 `false` |
+| 多个 listener 需 `native_management` | 9（探测可见） | 去掉单 listener 限制；同协议同地址重复仍拒绝 |
+| `tcp_server` 的 `idle_timeout` 必填 | 9 | M1-0 重跑 `check` 时才显现（此前被 `listen` 错误遮住）：改为可选，默认 10 秒（Go 默认值） |
+| 相对路径基准 | 见 §3.1 | 配置根目录规则，`-d`；见下 |
 
 ## 2. 原生已接受的 `config_all` 用法
 
@@ -64,14 +71,22 @@
 `try`、`$ref`）、`qtype`、`fast_mark`（matcher/exec）、`flow_setter`、`switch1`–`switch17`
 声明与 quick matcher、`client_ip`、`resp_ip`（字面量/文件形式）、`ttl`、`cname_remover`、
 `prefer_ipv4`、quick `ecs`、`cache`（7 个，含 `dump_file`）、`ip_set`（2 个）、`api.http`。
-`config_all` 的 2 个 `domain_set` 实例都因相对路径基准报直接缺口（§3.1），不在此列。
-`switch*`、`cache`、`ip_set` 虽被接受，其相对路径同样受 §3.1 影响。
+M1-0 之后还包括：2 个 `domain_set`（`gen/*.txt`）、全部 20 个 `udp_server`/`tcp_server`
+listener、`log.level`/`log.file`。`switch*`、`cache`、`ip_set`、`domain_set` 的相对路径现按
+配置根目录解析（§3.1）。
 
 原 M1 表列出的 `cname`、`mark` 在 `config_all` 中**未使用**；`cname_remover` 已原生接受。
 
 ## 3. 非插件差异（需决策）
 
-### 3.1 相对路径基准
+### 3.1 相对路径基准（**M1-0 已解决**）
+
+> 状态：已按下述用户决定实现。插件参数里的相对路径一律按配置根目录解析（`-d <dir>`，未给
+> `-d` 时为主配置文件目录——有意偏差：Go 此时用进程当前目录）；`include` 路径与
+> `webinfo`/托管状态根仍是主配置文件目录。`start` 与 `check` 共用同一规则，托管候选编译
+> 使用启动时的同一个根。逐点审计见
+> [research/path-audit.md](../../.trellis/tasks/10-06-rust-native-m1-0-config-loading/research/path-audit.md)（本地 Trellis）。
+> 以下为决策前的背景描述。
 
 原生按**声明文件所在目录**解析 include 文件里的相对路径（5B 设计，见
 [feature-coverage C01](feature-coverage.md)）；`config_all` 依赖 Go 以**配置根目录**
@@ -89,7 +104,13 @@
 根目录解析**；配置包不改。这推翻了 5B 起“按声明文件目录解析”的原生设计，需要同步更新
 C01 契约描述和相关测试。依赖路径的插件在该改动完成后再实现。
 
-### 3.2 `native_management`
+### 3.2 `native_management`（**M1-0 已解决**）
+
+> 状态：多 listener、`:port`、可选 `enable_audit`/`idle_timeout` 与 `sub_config/special_groups.yaml`
+> 作为普通 include 均已在不开启托管时可用；不开启时不读写 `webinfo`、不生成或改写
+> `special_groups.yaml`（测试对目录做前后快照）。`aliapi` 描述符规范化与 special_groups
+> 生成仍只在托管时执行；`aliapi` 的原生支持属 M1-b，`domain_mapper` 属 M1-a。
+> 以下为决策前的背景描述。
 
 `config_all` 未开启 `native_management`，而原生的多 listener、`aliapi` 描述符规范化与
 special_groups 生成都挂在该开关上。**用户决定（2026-10-06）：原生在不开启

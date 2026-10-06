@@ -184,14 +184,14 @@ fn unsupported_shapes_and_ttl_bounds_fail_at_config_boundary() {
     }
 }
 #[test]
-fn included_policy_file_paths_belong_to_declaring_yaml() {
+fn included_policy_file_paths_belong_to_the_configuration_root() {
     let dir = Scratch::new();
     std::fs::create_dir(dir.0.join("included")).unwrap();
     dir.write(
         "included/ips.txt",
         "192.0.2.0/24 comment ignored\n2001:db8::/32\n",
     );
-    dir.write("included/defs.yaml","plugins:\n  - tag: networks\n    type: ip_set\n    args: {files: ['ips.txt']}\n  - tag: local\n    type: hosts\n    args: {entries: ['x 192.0.2.1 ::1']}\n");
+    dir.write("included/defs.yaml","plugins:\n  - tag: networks\n    type: ip_set\n    args: {files: ['included/ips.txt']}\n  - tag: local\n    type: hosts\n    args: {entries: ['x 192.0.2.1 ::1']}\n");
     let yaml = format!(
         "include: ['included/defs.yaml']\n{}",
         config(
@@ -199,8 +199,8 @@ fn included_policy_file_paths_belong_to_declaring_yaml() {
             "      - exec: $local\n      - matches: resp_ip $networks\n        exec: accept\n      - exec: $upstream"
         )
     );
-    let cfg =
-        mosdns_native_host::compile_yaml_with_base(&yaml, &dir.0).expect("included source base");
+    let cfg = mosdns_native_host::compile_yaml_with_base(&yaml, &dir.0)
+        .expect("root-relative policy file");
     assert!(
         cfg.ip_sets[0]
             .prefixes

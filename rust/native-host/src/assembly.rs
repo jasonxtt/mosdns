@@ -20,7 +20,7 @@ use tokio::task::JoinSet;
 use crate::api::{ApiServer, ApiServerError, AuditPersistenceFaults};
 use crate::config::{
     CompiledConfig, ConfigError, ForwardScheme, ForwardTargetConfig, compile_yaml,
-    compile_yaml_with_base,
+    compile_yaml_with_roots,
 };
 use crate::execution::{ExchangeError, ExchangeExecutor, InvocationExchange};
 use crate::observer::{
@@ -172,13 +172,24 @@ impl HostAssembly {
     }
 
     /// Reads and compiles one configuration file, resolving relative include
-    /// and rule-file paths against that file's directory.
+    /// and plugin-argument paths against that file's directory.
     pub fn from_config_file(path: &std::path::Path) -> Result<Self, AssemblyError> {
-        Self::from_config_file_after_preflight(path, || {})
+        Self::from_config_file_in(path, None)
+    }
+
+    /// [`Self::from_config_file`] with the `-d` configuration root for relative
+    /// plugin-argument paths (rule, state, dump and log files). `include`
+    /// paths and the runtime state root stay with the configuration file.
+    pub fn from_config_file_in(
+        path: &std::path::Path,
+        root: Option<&std::path::Path>,
+    ) -> Result<Self, AssemblyError> {
+        Self::from_config_file_after_preflight(path, root, || {})
     }
 
     fn from_config_file_after_preflight(
         path: &std::path::Path,
+        root: Option<&std::path::Path>,
         after_preflight: impl FnOnce(),
     ) -> Result<Self, AssemblyError> {
         let yaml = crate::config::load_yaml(path).map_err(AssemblyError::Config)?;
@@ -186,6 +197,12 @@ impl HostAssembly {
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
+        let root_dir = root.unwrap_or(state_root);
+        // Installed first so every later startup failure, store recovery
+        // included, reaches `log.file` as well as stderr.
+        let log = crate::config::log_settings(&yaml, root_dir).map_err(AssemblyError::Config)?;
+        crate::diag::install(&log)
+            .map_err(|error| AssemblyError::Runtime(format!("cannot open log file: {error}")))?;
         let mut store = if crate::config::management_enabled(&yaml)
             .map_err(AssemblyError::Config)?
         {
@@ -206,6 +223,11 @@ impl HostAssembly {
                 .recover()
                 .map_err(|error| AssemblyError::Runtime(error.to_string()))?;
         }
+        // Without `-d` the candidate compiler keeps the store's canonical root,
+        // exactly as before; only an explicit root replaces it.
+        if let (Some(store), Some(root)) = (&mut store, root) {
+            store.set_plugin_root(root.to_path_buf());
+        }
         let canonical_config_path = if let Some(store) = &store {
             let config_path = path.to_path_buf();
             let config_path =
@@ -224,12 +246,8 @@ impl HostAssembly {
         after_preflight();
         // File-backed startup always has a base, including a bare basename.
         // An empty in-memory base intentionally does not mount external UI.
-        let config_base = path
-            .parent()
-            .filter(|base| !base.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
         let mut config =
-            compile_yaml_with_base(&yaml, config_base).map_err(AssemblyError::Config)?;
+            compile_yaml_with_roots(&yaml, state_root, root_dir).map_err(AssemblyError::Config)?;
         match (&mut config.managed_profile, canonical_config_path) {
             (Some(profile), Some(config_path)) => profile.config_path = Some(config_path),
             (None, None) => {}
@@ -629,10 +647,10 @@ impl DnsServer {
         }
     }
 
-    fn binding_key(&self) -> Result<crate::runtime_snapshot::BindingKey, HostRunError> {
+    fn binding_key(&self) -> crate::runtime_snapshot::BindingKey {
         match self {
-            Self::Udp(server) => server.binding_key().map_err(HostRunError::Udp),
-            Self::Tcp(server) => server.binding_key().map_err(HostRunError::Tcp),
+            Self::Udp(server) => server.binding_key(),
+            Self::Tcp(server) => server.binding_key(),
         }
     }
 
@@ -694,7 +712,7 @@ impl BoundHost {
             Result<(), HostRunError>,
         )> = JoinSet::new();
         for dns in dns {
-            let key = dns.binding_key()?;
+            let key = dns.binding_key();
             let scope = shutdown.child_token();
             scopes.insert(key.clone(), scope.clone());
             let task_key = key.clone();
@@ -1706,7 +1724,7 @@ mod tests {
             ));
         assert!(matches!(error, Err(UpstreamError::InvalidRequest(_))));
 
-        let invalid = UDP.replace("level: error", "level: info");
+        let invalid = UDP.replace("level: error", "level: 7");
         assert!(matches!(
             HostAssembly::from_yaml(&invalid),
             Err(AssemblyError::Config(ConfigError { .. }))
@@ -1724,7 +1742,7 @@ mod tests {
         let path = root.join("config.yaml");
         std::fs::write(&path, UDP).unwrap();
 
-        let host = HostAssembly::from_config_file_after_preflight(&path, || {
+        let host = HostAssembly::from_config_file_after_preflight(&path, None, || {
             std::fs::write(
                 &path,
                 include_str!("../../../docs/rust/examples/native-managed-empty/config.yaml"),

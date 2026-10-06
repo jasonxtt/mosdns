@@ -210,7 +210,7 @@ impl NativeCacheAdapter {
             if let Some((ip, bits)) = valid {
                 list.append(ip, bits);
             } else {
-                eprintln!("cache: skipping invalid exclude_ip CIDR {prefix:?}");
+                crate::diag::warn_line!("cache: skipping invalid exclude_ip CIDR {prefix:?}");
             }
         }
         list.rebuild();
@@ -618,7 +618,7 @@ impl NativeCacheAdapter {
             Err(error) => Err(CacheAdapterError::Io(error.to_string())),
         };
         if let Err(error) = result {
-            eprintln!("cache startup {display}: {error}; starting empty");
+            crate::diag::warn_line!("cache startup {display}: {error}; starting empty");
         }
     }
     fn start_periodic(&self) {
@@ -660,7 +660,7 @@ impl NativeCacheAdapter {
                     break;
                 }
                 if adapter.is_dirty() {
-                    if let Err(error) = adapter.commit_operation(ManagementOperation::Save).await { eprintln!("cache periodic save: {error}"); }
+                    if let Err(error) = adapter.commit_operation(ManagementOperation::Save).await { crate::diag::error_line!("cache periodic save: {error}"); }
                 }
             }
         });

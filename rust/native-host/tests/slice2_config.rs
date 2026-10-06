@@ -292,22 +292,16 @@ fn audit_enabled_is_accepted_for_every_supported_single_listener_graph() {
 }
 
 #[test]
-fn a_second_listener_with_a_mixed_audit_flag_is_rejected_before_assembly() {
+fn a_second_listener_with_a_mixed_audit_flag_assembles() {
     let yaml = format!(
         "{UDP}\n  - tag: phase5a_extra_listener\n    type: udp_server\n    args: {{ entry: phase5a_entry, listen: \"127.0.0.1:16553\", enable_audit: true }}\n"
     );
 
-    let Err(error) = compile_yaml(&yaml) else {
-        panic!("a second listener remains unsupported");
-    };
-    assert!(
-        error.reason.contains("exactly one listener"),
-        "unexpected rejection: {error}"
-    );
-    assert!(matches!(
-        HostAssembly::from_yaml(&yaml),
-        Err(AssemblyError::Config(_))
-    ));
+    let config = compile_yaml(&yaml).expect("several listeners need no native management");
+    assert_eq!(config.listeners.len(), 2);
+    assert!(!config.listeners[0].enable_audit);
+    assert!(config.listeners[1].enable_audit);
+    HostAssembly::from_yaml(&yaml).expect("several listeners assemble");
 }
 
 #[test]

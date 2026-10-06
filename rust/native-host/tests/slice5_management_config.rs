@@ -359,9 +359,11 @@ fn two_managed_tags_keep_independent_rules() {
 }
 
 #[test]
-fn a_managed_file_inside_an_include_resolves_from_the_included_directory() {
+fn a_managed_file_inside_an_include_resolves_from_the_configuration_root() {
     let fixture = Fixture::new("included-managed");
-    fixture.write("sub/rules/managed.txt", "included.example\n");
+    fixture.write("rules/managed.txt", "included.example\n");
+    // A decoy beside the include: the old per-declaring-file rule would pick it.
+    fixture.write("sub/rules/managed.txt", "decoy.example\n");
     fixture.write(
         "sub/routes.yaml",
         "plugins:\n  - tag: included_set\n    type: domain_set\n    args:\n      files:\n        - rules/managed.txt\n",
@@ -370,14 +372,15 @@ fn a_managed_file_inside_an_include_resolves_from_the_included_directory() {
         config_yaml("", "").replace("plugins:\n", "include:\n  - sub/routes.yaml\nplugins:\n");
     let config = expect_config(
         load_and_compile(&write_config(&fixture, &yaml)),
-        "an included managed rule file resolves from the included YAML directory",
+        "an included managed rule file resolves from the configuration root",
     );
     let set = config.domain_set("included_set").expect("included tag");
     let managed = set.managed.as_ref().expect("managed included profile");
     assert_eq!(managed.rules(), vec!["included.example".to_owned()]);
     assert!(
-        managed.file().ends_with("sub/rules/managed.txt"),
-        "the managed file must resolve beside the included YAML: {managed:?}"
+        managed.file().ends_with("rules/managed.txt")
+            && !managed.file().to_string_lossy().contains("/sub/"),
+        "the managed file must resolve from the configuration root: {managed:?}"
     );
 }
 

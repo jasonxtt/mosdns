@@ -3,12 +3,14 @@
 
 mod api;
 mod assembly;
+mod bind;
 pub mod build_identity;
 mod cache;
 mod cache_dump;
 mod cache_placement;
 mod cli;
 mod config;
+mod diag;
 mod ecs;
 mod execution;
 mod external_ui;
@@ -36,15 +38,16 @@ pub use assembly::{
 pub use cache::{
     CacheAdapterError, CacheCatalog, CacheClock, CacheTestClock, NativeCacheAdapter, PendingStore,
 };
-pub use cli::{CliCommand, CliError, parse_args};
+pub use cli::{CliCommand, CliError, parse_args, resolve_config_paths};
 pub use config::{
     ApiConfig, CacheId, CacheKind, CachePluginConfig, CheckFinding, CheckFindingKind, CheckReport,
     CompiledConfig, ConfigError, DomainSetConfig, ForwardConfig, ForwardDefinitionConfig,
     ForwardEntryConfig, ForwardInvocationConfig, ForwardScheme, ForwardTargetConfig,
     ListenerConfig, ListenerKind, LogLevel, ManagedRouterConfig, ManagedRouterGroup,
-    ResponseIpRuleConfig, SequenceConfig, check_config, compile_yaml, compile_yaml_with_base,
-    load_and_compile, load_yaml,
+    ResponseIpRuleConfig, SequenceConfig, check_config, check_config_in, compile_yaml,
+    compile_yaml_with_base, compile_yaml_with_roots, load_and_compile, load_yaml,
 };
+pub use diag::record_fatal;
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{
     AdmissionError, AnswerDetailsStatus, AuditAnswer, AuditClock, AuditRecord, AuditSnapshot,
@@ -74,8 +77,10 @@ where
         CliCommand::Check { .. } => Err(HostError::Cli(CliError::new(
             "check does not prepare a host",
         ))),
-        CliCommand::Start { config } => {
-            HostAssembly::from_config_file(&config).map_err(HostError::Assembly)
+        CliCommand::Start { config, dir } => {
+            let (config, root) =
+                resolve_config_paths(&config, dir.as_deref()).map_err(HostError::Cli)?;
+            HostAssembly::from_config_file_in(&config, root.as_deref()).map_err(HostError::Assembly)
         }
     }
 }

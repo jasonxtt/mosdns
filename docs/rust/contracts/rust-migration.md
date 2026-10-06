@@ -84,9 +84,12 @@ canonical and prevents a later parent rule from changing a cached child result.
 - A named call pushes an independent child scope. Natural completion,
   `accept`, and `reject` return to the caller; `exit` propagates through normal
   calls until a surrounding `try` catches it; ordinary errors remain errors.
-- Definition collection retains each plugin's source file, source path, and
-  declaring directory. Included plugin `files` paths resolve against the
-  included YAML directory, and later compile errors still identify that file.
+- Definition collection retains each plugin's source file and source path.
+  Relative plugin-argument paths (rule files, switch state files, cache dumps)
+  resolve against the configuration root: `-d <dir>`, else the main
+  configuration file's directory, whichever file declared the plugin. `include`
+  paths resolve against the main configuration file's directory. Later compile
+  errors still identify the declaring file.
 - The legacy primary-forward convenience view is optional and non-semantic:
   it cannot decide whether a validated graph is accepted or select runtime
   dispatch behavior. If a reachable forward exists, the view must traverse all
@@ -117,7 +120,7 @@ canonical and prevents a later parent rule from changing a cached child result.
 | Cache miss successor completes with an eligible raw response | Publish once at the successor boundary, before parent continuation |
 | Cache successor errors, response is malformed/ineligible, request cancels, or deadline expires | No cache publication |
 | Request reaches the same cache dispatch dynamically a second time | Fail closed; do not replace an outstanding token |
-| Included plugin uses a relative rule file | Resolve from the included YAML directory and retain the included file in compile errors |
+| Included plugin uses a relative rule file | Resolve from the configuration root (`-d`, else the main configuration's directory) and retain the included file in compile errors |
 | Different forwards resolve to the same effective upstream identity | Reject before assembly so metrics/audit preserve owner identity |
 
 ### 5. Good/Base/Bad Cases

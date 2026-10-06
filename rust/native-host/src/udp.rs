@@ -52,7 +52,7 @@ impl UdpServer {
         if declared.kind != ListenerKind::Udp {
             return Err(UdpServerError::WrongListener(declared.kind));
         }
-        let socket = UdpSocket::bind(listen)
+        let socket = crate::bind::udp(listen)
             .await
             .map_err(UdpServerError::Bind)?;
         Ok(Self {
@@ -73,7 +73,7 @@ impl UdpServer {
         observer: Arc<QueryObserver>,
         declared: &crate::config::ListenerConfig,
     ) -> Result<Self, UdpServerError> {
-        let bound = UdpSocket::bind(declared.listen)
+        let bound = crate::bind::udp(declared.listen)
             .await
             .map_err(UdpServerError::Bind)?;
         Ok(Self {
@@ -88,14 +88,12 @@ impl UdpServer {
         })
     }
 
-    pub(crate) fn binding_key(
-        &self,
-    ) -> Result<crate::runtime_snapshot::BindingKey, UdpServerError> {
-        Ok((
+    pub(crate) fn binding_key(&self) -> crate::runtime_snapshot::BindingKey {
+        (
             self.listener_tag.clone(),
             ListenerKind::Udp,
-            self.local_addr()?,
-        ))
+            self.listener_addr,
+        )
     }
 
     /// Binds the listener address declared by the compiled W1 YAML.
@@ -232,23 +230,26 @@ async fn process_request(task: RequestTask) {
         return;
     };
 
+    // A dual-stack wildcard socket reports IPv4 peers as IPv4-mapped IPv6;
+    // audit and client matching see the plain IPv4 address.
+    let client_addr = crate::bind::canonical_peer(peer);
     let mut admitted = match observer.try_admit_on_listener(
         enable_audit,
-        peer,
+        client_addr,
         QueryTransport::Udp,
         &question,
         request_shutdown.clone(),
     ) {
         Ok(admitted) => admitted,
         Err(error) => {
-            eprintln!("native query admission failed: {error}");
+            crate::diag::error_line!("native query admission failed: {error}");
             return;
         }
     };
     let mut execution = execute_request(
         ExecutionRequest {
             client: mosdns_sequence_core::ClientContext::from_peer(
-                peer.ip(),
+                client_addr.ip(),
                 mosdns_sequence_core::ClientTransport::Udp,
             ),
             config: &config,

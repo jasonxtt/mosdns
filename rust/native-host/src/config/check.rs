@@ -174,7 +174,14 @@ impl Checker {
 /// Checks one configuration file without side effects. `Err` means the
 /// configuration (or an include) cannot be read or is not valid YAML; every
 /// rejection of parsed content, structural ones included, is a finding.
+/// Relative plugin paths resolve against the configuration's directory.
 pub fn check_config(path: &Path) -> Result<CheckReport, ConfigError> {
+    check_config_in(path, None)
+}
+
+/// [`check_config`] with the `-d` configuration root for relative plugin
+/// paths; `None` means the configuration's directory, as `start` does.
+pub fn check_config_in(path: &Path, root: Option<&Path>) -> Result<CheckReport, ConfigError> {
     let yaml = load_yaml(path)?;
     let raw = parse_yaml(&yaml)?;
     // Same base as `start`: the parent, or `.` for a bare file name.
@@ -182,6 +189,7 @@ pub fn check_config(path: &Path) -> Result<CheckReport, ConfigError> {
         .parent()
         .filter(|base| !base.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
+    let root_dir = root.unwrap_or(base_dir);
     let mut checker = Checker {
         label: path.display().to_string(),
         findings: Vec::new(),
@@ -203,13 +211,13 @@ pub fn check_config(path: &Path) -> Result<CheckReport, ConfigError> {
     };
 
     let log = match root.required("log", "$") {
-        Ok(value) => checker.tolerate(value.clone(), "$.log", compile_log),
+        Ok(value) => checker.tolerate(value.clone(), "$.log", |value| compile_log(value, root_dir)),
         Err(error) => {
             checker.global(&error);
             None
         }
     }
-    .unwrap_or(LogLevel::Error);
+    .map_or(LogLevel::Error, |settings| settings.level);
     let api = root
         .get("api")
         .and_then(|value| checker.tolerate(value.clone(), "$.api", compile_api));
@@ -263,7 +271,7 @@ pub fn check_config(path: &Path) -> Result<CheckReport, ConfigError> {
                 &included.plugins,
                 &included.display,
                 &expression,
-                &included.base_dir,
+                root_dir,
             );
         }
     }
@@ -275,7 +283,7 @@ pub fn check_config(path: &Path) -> Result<CheckReport, ConfigError> {
             &[]
         });
     let label = checker.label.clone();
-    decoded.decode(&mut checker, main_plugins, "$", &label, base_dir);
+    decoded.decode(&mut checker, main_plugins, "$", &label, root_dir);
     let Decoded {
         mut plugins,
         mut origins,
@@ -397,12 +405,12 @@ impl Decoded {
         values: &[RawValue],
         display: &str,
         source: &str,
-        base_dir: &Path,
+        root_dir: &Path,
     ) {
         for (index, value) in values.iter().enumerate() {
             let source_path = format!("{display}.plugins[{index}]");
             let local = format!("plugins[{index}]");
-            match decode_plugin(value, &source_path, base_dir) {
+            match decode_plugin(value, &source_path, root_dir) {
                 Ok(plugin) => {
                     self.plugins.push(plugin);
                     self.origins.push(Origin {

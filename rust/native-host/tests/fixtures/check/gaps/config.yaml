@@ -1,6 +1,7 @@
 log:
   level: warn
-  file: "/tmp/mosdns.log"
+  production: true
+  encoding: json
 
 include:
   - "sub/rules.yaml"
@@ -47,7 +48,7 @@ plugins:
     type: udp_server
     args:
       entry: entry
-      listen: ":53"
+      listen: "localhost:53"
       enable_audit: false
 
   - tag: tcp_in

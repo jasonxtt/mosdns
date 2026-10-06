@@ -219,7 +219,7 @@ impl RuleBudget {
             let input = match open_result {
                 Ok(file) => file,
                 Err(error) if missing_ok && error.kind() == std::io::ErrorKind::NotFound => {
-                    eprintln!("{}: missing IP rule file, skipped", file.display());
+                    crate::diag::warn_line!("{}: missing IP rule file, skipped", file.display());
                     if let Some(inputs) = inputs.as_deref_mut() {
                         inputs.record_missing(file).map_err(|reason| {
                             ConfigError::new(file.display().to_string(), reason)
