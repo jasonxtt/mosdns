@@ -1,0 +1,6 @@
+plugins:
+  - tag: light_set
+    type: domain_set_light
+    args:
+      files:
+        - "rules.txt"

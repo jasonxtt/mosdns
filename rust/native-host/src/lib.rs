@@ -38,11 +38,12 @@ pub use cache::{
 };
 pub use cli::{CliCommand, CliError, parse_args};
 pub use config::{
-    ApiConfig, CacheId, CacheKind, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig,
-    ForwardConfig, ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig,
-    ForwardScheme, ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel,
-    ManagedRouterConfig, ManagedRouterGroup, ResponseIpRuleConfig, SequenceConfig, compile_yaml,
-    compile_yaml_with_base, load_and_compile, load_yaml,
+    ApiConfig, CacheId, CacheKind, CachePluginConfig, CheckFinding, CheckFindingKind, CheckReport,
+    CompiledConfig, ConfigError, DomainSetConfig, ForwardConfig, ForwardDefinitionConfig,
+    ForwardEntryConfig, ForwardInvocationConfig, ForwardScheme, ForwardTargetConfig,
+    ListenerConfig, ListenerKind, LogLevel, ManagedRouterConfig, ManagedRouterGroup,
+    ResponseIpRuleConfig, SequenceConfig, check_config, compile_yaml, compile_yaml_with_base,
+    load_and_compile, load_yaml,
 };
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{
@@ -69,6 +70,9 @@ where
     match command {
         CliCommand::Version => Err(HostError::Cli(CliError::new(
             "version does not prepare a host",
+        ))),
+        CliCommand::Check { .. } => Err(HostError::Cli(CliError::new(
+            "check does not prepare a host",
         ))),
         CliCommand::Start { config } => {
             HostAssembly::from_config_file(&config).map_err(HostError::Assembly)

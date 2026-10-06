@@ -25,6 +25,9 @@ use crate::matchers::{
 use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
 
+mod check;
+pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config};
+
 /// The only accepted log level in the native host subset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogLevel {
@@ -546,6 +549,19 @@ impl CompiledConfig {
 pub struct ConfigError {
     pub path: String,
     pub reason: String,
+    /// Structured classification used by `check`; never part of the text.
+    pub(crate) kind: ConfigErrorKind,
+}
+
+/// Rejection classes `check` must tell apart without matching error text.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) enum ConfigErrorKind {
+    #[default]
+    Other,
+    /// A reference names a tag that no definition declares.
+    UnknownReference { tag: String },
+    /// A mapping key outside the accepted field list.
+    UnsupportedField,
 }
 
 impl ConfigError {
@@ -553,6 +569,18 @@ impl ConfigError {
         Self {
             path: path.into(),
             reason: reason.into(),
+            kind: ConfigErrorKind::Other,
+        }
+    }
+
+    fn unknown_reference(
+        path: impl Into<String>,
+        reason: impl Into<String>,
+        tag: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: ConfigErrorKind::UnknownReference { tag: tag.into() },
+            ..Self::new(path, reason)
         }
     }
 }
@@ -704,6 +732,8 @@ fn managed_opt_in(raw: &RawValue) -> Result<bool, ConfigError> {
     )
 }
 
+const ROOT_FIELDS: &[&str] = &["log", "include", "plugins", "api", "native_management"];
+
 fn compile_raw(
     raw: &RawValue,
     base_dir: &Path,
@@ -713,10 +743,7 @@ fn compile_raw(
     config_origin: Option<&Path>,
 ) -> Result<CompiledConfig, ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
-    root.reject_unknown(
-        &["log", "include", "plugins", "api", "native_management"],
-        "$",
-    )?;
+    root.reject_unknown(ROOT_FIELDS, "$")?;
     let log = compile_log(root.required("log", "$")?)?;
     let api = root.get("api").map(compile_api).transpose()?;
     let managed = if managed_opt_in(raw)? {
@@ -746,17 +773,7 @@ fn compile_raw(
             let expression = expect_string(include, &format!("$.include[{index}]"))?;
             include_paths.push(resolve_relative(&expression, base_dir));
             if let Some(profile) = &managed {
-                let path = resolve_relative(&expression, &profile.base_dir);
-                let generated = profile.base_dir.join(crate::special_groups::GENERATED_PATH);
-                if crate::special_groups::lexical_path(&path) == generated
-                    || canonicalized_path(&path)
-                        .is_some_and(|path| canonicalized_path(&generated).as_ref() == Some(&path))
-                {
-                    return Err(ConfigError::new(
-                        "$.include",
-                        "generated special_groups input must not be explicitly included",
-                    ));
-                }
+                reject_generated_include(profile, &expression)?;
             }
             collect_included(
                 &expression,
@@ -776,70 +793,112 @@ fn compile_raw(
     }
 
     if let Some(profile) = &managed {
-        if let Some(plugin) = definitions
-            .iter()
-            .find(|plugin| crate::special_groups::reserved_tag(&plugin.tag))
-        {
-            return Err(ConfigError::new(
-                &plugin.source_path,
-                "reserved generated plugin tag collision",
-            ));
-        }
-        // `aliapi` is also the legacy wrapper name for ordinary DNS entries.
-        // Normalize only its descriptor to the native forward compiler. Signed
-        // API fields and protocols still fail that strict compiler; no fallback.
-        for plugin in &mut definitions {
-            if plugin.kind == "aliapi" {
-                plugin.kind = "forward".into();
-            }
-        }
-        for (tag, entries) in &profile.overrides {
-            if tag.starts_with("special_upstream_") {
-                continue;
-            }
-            let plugin = definitions
-                .iter_mut()
-                .find(|plugin| &plugin.tag == tag && plugin.kind == "forward")
-                .ok_or_else(|| {
-                    ConfigError::new(
-                        "webinfo/upstream_overrides.json",
-                        format!("unknown forward tag `{tag}`"),
-                    )
-                })?;
-            let translated = crate::special_groups::forward_entries(entries, tag)?;
-            let RawValue::Map(args) = &mut plugin.args else {
-                return Err(ConfigError::new(tag, "forward args must be a mapping"));
-            };
-            let raw = parse_yaml(
-                &serde_json::to_string(&translated)
-                    .map_err(|e| ConfigError::new(tag, e.to_string()))?,
-            )?;
-            args.entries.retain(|(key, _)| key != "upstreams");
-            args.entries.push(("upstreams".into(), raw));
-        }
-        let generated = parse_yaml(&profile.generated_yaml)?;
-        let generated = expect_map(
-            &generated,
-            crate::special_groups::GENERATED_PATH,
-            "generated input",
-        )?;
-        let plugins = expect_sequence(
-            generated.required("plugins", "generated")?,
-            "generated.plugins",
-        )?;
-        for (index, plugin) in plugins.iter().enumerate() {
-            definitions.push(decode_plugin(
-                plugin,
-                &format!("@managed-generated.plugins[{index}]"),
-                &profile.base_dir,
-            )?);
-        }
+        apply_managed_definitions(profile, &mut definitions)?;
     }
-    let dependency_definitions = definitions.clone();
     let sources = CompileSources {
         config_origin,
         include_paths: &include_paths,
     };
+    finish_compile(log, api, definitions, managed, staged, inputs, &sources)
+}
+
+/// Applies the managed opt-in to the collected definitions: reserved tag
+/// check, `aliapi` descriptor normalization, upstream overrides, and the
+/// generated special_groups plugins.
+fn apply_managed_definitions(
+    profile: &crate::special_groups::ManagedProfile,
+    definitions: &mut Vec<RawPlugin>,
+) -> Result<(), ConfigError> {
+    if let Some(plugin) = definitions
+        .iter()
+        .find(|plugin| crate::special_groups::reserved_tag(&plugin.tag))
+    {
+        return Err(ConfigError::new(
+            &plugin.source_path,
+            "reserved generated plugin tag collision",
+        ));
+    }
+    // `aliapi` is also the legacy wrapper name for ordinary DNS entries.
+    // Normalize only its descriptor to the native forward compiler. Signed
+    // API fields and protocols still fail that strict compiler; no fallback.
+    for plugin in definitions.iter_mut() {
+        if plugin.kind == "aliapi" {
+            plugin.kind = "forward".into();
+        }
+    }
+    for (tag, entries) in &profile.overrides {
+        if tag.starts_with("special_upstream_") {
+            continue;
+        }
+        let plugin = definitions
+            .iter_mut()
+            .find(|plugin| &plugin.tag == tag && plugin.kind == "forward")
+            .ok_or_else(|| {
+                ConfigError::new(
+                    "webinfo/upstream_overrides.json",
+                    format!("unknown forward tag `{tag}`"),
+                )
+            })?;
+        let translated = crate::special_groups::forward_entries(entries, tag)?;
+        let RawValue::Map(args) = &mut plugin.args else {
+            return Err(ConfigError::new(tag, "forward args must be a mapping"));
+        };
+        let raw = parse_yaml(
+            &serde_json::to_string(&translated)
+                .map_err(|e| ConfigError::new(tag, e.to_string()))?,
+        )?;
+        args.entries.retain(|(key, _)| key != "upstreams");
+        args.entries.push(("upstreams".into(), raw));
+    }
+    let generated = parse_yaml(&profile.generated_yaml)?;
+    let generated = expect_map(
+        &generated,
+        crate::special_groups::GENERATED_PATH,
+        "generated input",
+    )?;
+    let plugins = expect_sequence(
+        generated.required("plugins", "generated")?,
+        "generated.plugins",
+    )?;
+    for (index, plugin) in plugins.iter().enumerate() {
+        definitions.push(decode_plugin(
+            plugin,
+            &format!("@managed-generated.plugins[{index}]"),
+            &profile.base_dir,
+        )?);
+    }
+    Ok(())
+}
+
+fn reject_generated_include(
+    profile: &crate::special_groups::ManagedProfile,
+    expression: &str,
+) -> Result<(), ConfigError> {
+    let path = resolve_relative(expression, &profile.base_dir);
+    let generated = profile.base_dir.join(crate::special_groups::GENERATED_PATH);
+    if crate::special_groups::lexical_path(&path) == generated
+        || canonicalized_path(&path)
+            .is_some_and(|path| canonicalized_path(&generated).as_ref() == Some(&path))
+    {
+        return Err(ConfigError::new(
+            "$.include",
+            "generated special_groups input must not be explicitly included",
+        ));
+    }
+    Ok(())
+}
+
+/// Compiles fully collected definitions; shared by `start` and `check`.
+fn finish_compile(
+    log: LogLevel,
+    api: Option<ApiConfig>,
+    definitions: Vec<RawPlugin>,
+    managed: Option<crate::special_groups::ManagedProfile>,
+    staged: Option<&crate::special_groups::StagedFiles>,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+    sources: &CompileSources<'_>,
+) -> Result<CompiledConfig, ConfigError> {
+    let dependency_definitions = definitions.clone();
     let mut compiled = compile_definitions(
         log,
         api,
@@ -847,7 +906,7 @@ fn compile_raw(
         managed.is_some(),
         staged,
         inputs,
-        &sources,
+        sources,
     )?;
     if let Some(profile) = managed {
         let router = compiled
@@ -1618,6 +1677,39 @@ fn collect_included(
     definitions: &mut Vec<RawPlugin>,
     inputs: Option<&mut crate::special_groups::CandidateInputSet>,
 ) -> Result<(), ConfigError> {
+    let included = load_included(expression, base_dir, inputs)?;
+    for (index, plugin) in included.plugins.iter().enumerate() {
+        definitions.push(decode_plugin(
+            plugin,
+            &format!("{}.plugins[{index}]", included.display),
+            &included.base_dir,
+        )?);
+    }
+    Ok(())
+}
+
+/// One loaded plugins-only include, before its definitions are decoded.
+struct IncludedFile {
+    display: String,
+    plugins: Vec<RawValue>,
+    base_dir: PathBuf,
+}
+
+fn load_included(
+    expression: &str,
+    base_dir: &Path,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+) -> Result<IncludedFile, ConfigError> {
+    let (path, raw) = read_included(expression, base_dir, inputs)?;
+    included_plugins(&path, &raw)
+}
+
+/// Reads and parses one include: the I/O and YAML half of `load_included`.
+fn read_included(
+    expression: &str,
+    base_dir: &Path,
+    inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+) -> Result<(PathBuf, RawValue), ConfigError> {
     let path = resolve_relative(expression, base_dir);
     let display = path.display().to_string();
     let loaded = match inputs {
@@ -1636,21 +1728,23 @@ fn collect_included(
             format!("included file is not valid YAML: {}", error.reason),
         )
     })?;
-    let root = expect_map(&raw, &display, "included file must be a mapping")?;
+    Ok((path, raw))
+}
+
+/// Validates a parsed include's shape: the schema half of `load_included`.
+fn included_plugins(path: &Path, raw: &RawValue) -> Result<IncludedFile, ConfigError> {
+    let display = path.display().to_string();
+    let root = expect_map(raw, &display, "included file must be a mapping")?;
     root.reject_unknown(&["plugins"], &display)?;
     let plugins = expect_sequence(
         root.required("plugins", &display)?,
         &format!("{display}.plugins"),
     )?;
-    let included_base_dir = path.parent().unwrap_or_else(|| Path::new(""));
-    for (index, plugin) in plugins.iter().enumerate() {
-        definitions.push(decode_plugin(
-            plugin,
-            &format!("{display}.plugins[{index}]"),
-            included_base_dir,
-        )?);
-    }
-    Ok(())
+    Ok(IncludedFile {
+        plugins: plugins.to_vec(),
+        base_dir: path.parent().unwrap_or_else(|| Path::new("")).to_path_buf(),
+        display,
+    })
 }
 
 pub(crate) fn resolve_relative(value: &str, base_dir: &Path) -> PathBuf {
@@ -2153,10 +2247,18 @@ fn compile_definitions(
             .iter()
             .any(|(tag, kind, _)| *kind == PluginKind::Sequence && tag.as_str() == listener.entry)
         {
-            return Err(ConfigError::new(
-                format!("{listener_source_path}.args.entry"),
-                format!("unknown sequence reference `{}`", listener.entry),
-            ));
+            let path = format!("{listener_source_path}.args.entry");
+            let reason = format!("unknown sequence reference `{}`", listener.entry);
+            return Err(
+                if kinds
+                    .iter()
+                    .any(|(tag, _, _)| tag.as_str() == listener.entry)
+                {
+                    ConfigError::new(path, reason)
+                } else {
+                    ConfigError::unknown_reference(path, reason, &listener.entry)
+                },
+            );
         }
     }
     if forward_compiler.borrow().definitions.is_empty() {
@@ -2863,9 +2965,10 @@ fn resolve_policy_target_name(
         Some(PluginKind::DomainSet | PluginKind::Listener | PluginKind::IpSet) => Err(
             ConfigError::new(path, format!("`${tag}` is not executable")),
         ),
-        None => Err(ConfigError::new(
+        None => Err(ConfigError::unknown_reference(
             path,
             format!("unknown executable reference `${tag}`"),
+            tag,
         )),
     }
 }
@@ -3376,10 +3479,12 @@ fn compile_matcher(
                     ));
                 }
                 None => {
-                    return Err(ConfigError::new(
-                        path,
-                        format!("unknown matcher reference `${tag}`"),
-                    ));
+                    let reason = format!("unknown matcher reference `${tag}`");
+                    return Err(if catalog.kind_of(tag).is_none() {
+                        ConfigError::unknown_reference(path, reason, tag)
+                    } else {
+                        ConfigError::new(path, reason)
+                    });
                 }
             };
             config.matcher()
@@ -3487,7 +3592,12 @@ fn compile_qname(
     for field in args.split_whitespace() {
         if let Some(tag) = field.strip_prefix('$') {
             let set = catalog.domain_set(tag).ok_or_else(|| {
-                ConfigError::new(path, format!("unknown domain_set reference `${tag}`"))
+                let reason = format!("unknown domain_set reference `${tag}`");
+                if catalog.kind_of(tag).is_none() {
+                    ConfigError::unknown_reference(path, reason, tag)
+                } else {
+                    ConfigError::new(path, reason)
+                }
             })?;
             groups.push((format!("domain_set:{tag}"), set));
         } else if field.starts_with('&') {
@@ -3835,9 +3945,10 @@ fn compile_exec_item(
                 Some(PluginKind::DomainSet | PluginKind::Listener | PluginKind::IpSet) => Err(
                     ConfigError::new(path, format!("`{name}` is not executable")),
                 ),
-                None => Err(ConfigError::new(
+                None => Err(ConfigError::unknown_reference(
                     path,
                     format!("unknown executable reference `{name}`"),
+                    tag,
                 )),
             }
         }
@@ -3865,9 +3976,10 @@ fn named_sequence_target(
             path,
             format!("`{name} ${tag}` does not reference a sequence"),
         )),
-        None => Err(ConfigError::new(
+        None => Err(ConfigError::unknown_reference(
             path,
             format!("unknown sequence reference `${tag}`"),
+            tag,
         )),
     }
 }
@@ -4302,10 +4414,10 @@ impl RawMap {
     fn reject_unknown(&self, allowed: &[&str], path: &str) -> Result<(), ConfigError> {
         for (key, _) in &self.entries {
             if !allowed.contains(&key.as_str()) {
-                return Err(ConfigError::new(
-                    format!("{path}.{key}"),
-                    "unsupported field",
-                ));
+                return Err(ConfigError {
+                    kind: ConfigErrorKind::UnsupportedField,
+                    ..ConfigError::new(format!("{path}.{key}"), "unsupported field")
+                });
             }
         }
         Ok(())
@@ -4508,7 +4620,12 @@ fn compile_response_ip(
                 .iter()
                 .find(|set| set.tag == tag)
                 .ok_or_else(|| {
-                    ConfigError::new(path, format!("unknown or wrong-type ip_set `{tag}`"))
+                    let reason = format!("unknown or wrong-type ip_set `{tag}`");
+                    if catalog.kind_of(tag).is_none() {
+                        ConfigError::unknown_reference(path, reason, tag)
+                    } else {
+                        ConfigError::new(path, reason)
+                    }
                 })?;
             lists.push(Rc::clone(&set.prefixes));
         } else if let Some(file) = token.strip_prefix('&') {

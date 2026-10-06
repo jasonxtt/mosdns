@@ -1,0 +1,59 @@
+log:
+  level: warn
+  file: "/tmp/mosdns.log"
+
+include:
+  - "sub/rules.yaml"
+
+plugins:
+  - tag: fwd
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:15453"
+
+  - tag: rewrite_x
+    type: rewrite
+    args:
+      rules: []
+
+  - tag: two_bad_params
+    type: cache
+    args:
+      size: 1024
+      first_unknown: 1
+      second_unknown: 2
+
+  - tag: no_args
+    type: domain_output
+
+  - tag: entry
+    type: sequence
+    args:
+      - exec: $rewrite_x
+      - matches:
+          - qname $light_set
+          - rcode 2
+        exec: drop_resp
+      - exec:
+          - $rewrite_x
+          - tag_setter x
+          - $fwd
+      - matches: qtype 1
+        exec: $fwd
+      - exec: $no_args
+
+  - tag: udp_in
+    type: udp_server
+    args:
+      entry: entry
+      listen: ":53"
+      enable_audit: false
+
+  - tag: tcp_in
+    type: tcp_server
+    args:
+      entry: entry
+      listen: "127.0.0.1:15353"
+      enable_audit: false
+      idle_timeout: 10
