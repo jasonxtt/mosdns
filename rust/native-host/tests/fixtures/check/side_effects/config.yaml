@@ -1,0 +1,38 @@
+log:
+  level: error
+
+api:
+  http: "127.0.0.1:{API_PORT}"
+
+plugins:
+  - tag: fwd
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:15453"
+
+  - tag: cache_main
+    type: cache
+    args:
+      size: 1024
+      dump_file: "cache/cache.dump"
+      dump_interval: 60
+
+  - tag: switch_one
+    type: switch1
+    args:
+      initial_value: "state/switch1.txt"
+
+  - tag: entry
+    type: sequence
+    args:
+      - matches: switch1 'A'
+        exec: $cache_main
+      - exec: $fwd
+
+  - tag: udp_in
+    type: udp_server
+    args:
+      entry: entry
+      listen: "127.0.0.1:{DNS_PORT}"
+      enable_audit: false

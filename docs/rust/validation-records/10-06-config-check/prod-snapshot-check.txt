@@ -1,0 +1,173 @@
+GLOBAL config_custom.yaml:log.file  unsupported field
+GLOBAL config_custom.yaml:log.level  only the error level is supported
+GAP adguard adguard_rule sub_config/adguard.yaml:plugins[0].type  unsupported plugin type `adguard_rule`
+GAP my_sv4list domain_output sub_config/domain_output.yaml:plugins[0].type  unsupported plugin type `domain_output`
+GAP top_domains domain_output sub_config/domain_output.yaml:plugins[1].type  unsupported plugin type `domain_output`
+GAP my_realiplist domain_output sub_config/domain_output.yaml:plugins[2].type  unsupported plugin type `domain_output`
+GAP my_fakeiplist domain_output sub_config/domain_output.yaml:plugins[3].type  unsupported plugin type `domain_output`
+GAP my_nov6list domain_output sub_config/domain_output.yaml:plugins[4].type  unsupported plugin type `domain_output`
+GAP my_nov4list domain_output sub_config/domain_output.yaml:plugins[5].type  unsupported plugin type `domain_output`
+GAP my_nodenov6list domain_output sub_config/domain_output.yaml:plugins[6].type  unsupported plugin type `domain_output`
+GAP my_nodenov4list domain_output sub_config/domain_output.yaml:plugins[7].type  unsupported plugin type `domain_output`
+GAP rewrite rewrite sub_config/rule_set.yaml:plugins[1].type  unsupported plugin type `rewrite`
+GAP cusnocn sd_set_light sub_config/rule_set.yaml:plugins[2].type  unsupported plugin type `sd_set_light`
+GAP cuscn sd_set_light sub_config/rule_set.yaml:plugins[3].type  unsupported plugin type `sd_set_light`
+GAP my_realiprule domain_set_light sub_config/rule_set.yaml:plugins[4].type  unsupported plugin type `domain_set_light`
+GAP my_fakeiprule domain_set_light sub_config/rule_set.yaml:plugins[5].type  unsupported plugin type `domain_set_light`
+GAP my_sv4rule domain_set_light sub_config/rule_set.yaml:plugins[6].type  unsupported plugin type `domain_set_light`
+GAP my_nov6rule domain_set_light sub_config/rule_set.yaml:plugins[7].type  unsupported plugin type `domain_set_light`
+GAP my_nov4rule domain_set_light sub_config/rule_set.yaml:plugins[8].type  unsupported plugin type `domain_set_light`
+GAP geosite_cn sd_set_light sub_config/rule_set.yaml:plugins[11].type  unsupported plugin type `sd_set_light`
+GAP geoip_cn si_set sub_config/rule_set.yaml:plugins[12].type  unsupported plugin type `si_set`
+GAP geosite_no_cn sd_set_light sub_config/rule_set.yaml:plugins[14].type  unsupported plugin type `sd_set_light`
+GAP whitelist domain_set_light sub_config/rule_set.yaml:plugins[15].type  unsupported plugin type `domain_set_light`
+GAP cnfakeipfilter domain_set_light sub_config/rule_set.yaml:plugins[16].type  unsupported plugin type `domain_set_light`
+GAP blocklist domain_set_light sub_config/rule_set.yaml:plugins[17].type  unsupported plugin type `domain_set_light`
+GAP realiplist domain_set_light sub_config/rule_set.yaml:plugins[18].type  unsupported plugin type `domain_set_light`
+GAP greylist domain_set_light sub_config/rule_set.yaml:plugins[19].type  unsupported plugin type `domain_set_light`
+GAP ddnslist domain_set_light sub_config/rule_set.yaml:plugins[20].type  unsupported plugin type `domain_set_light`
+GAP unified_matcher1 domain_mapper sub_config/rule_set.yaml:plugins[21].type  unsupported plugin type `domain_mapper`
+GAP domestic aliapi sub_config/forward_local.yaml:plugins[0].type  unsupported plugin type `aliapi`
+GAP foreign aliapi sub_config/forward_nocn.yaml:plugins[0].type  unsupported plugin type `aliapi`
+GAP foreignecs aliapi sub_config/forward_nocn_ecs.yaml:plugins[0].type  unsupported plugin type `aliapi`
+GAP nocnfake aliapi sub_config/forward_1.yaml:plugins[0].type  unsupported plugin type `aliapi`
+GAP cnfake aliapi sub_config/forward_1.yaml:plugins[1].type  unsupported plugin type `aliapi`
+GAP special_upstream_matcher domain_mapper sub_config/special_groups.yaml:plugins[0].type  unsupported plugin type `domain_mapper`
+GAP clientname webinfo sub_config/webinfo.yaml:plugins[0].type  unsupported plugin type `webinfo`
+GAP requery requery sub_config/requery.yaml:plugins[0].type  unsupported plugin type `requery`
+GAP my_nodenov6rule domain_set sub_config/rule_set.yaml:plugins[9].args.files[0]  file 0 ./sub_config/gen/nodenov6rule.txt: No such file or directory (os error 2)
+GAP my_nodenov4rule domain_set sub_config/rule_set.yaml:plugins[10].args.files[0]  file 0 ./sub_config/gen/nodenov4rule.txt: No such file or directory (os error 2)
+GAP udp_google udp_server sub_config/forward_nocn.yaml:plugins[2].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_google tcp_server sub_config/forward_nocn.yaml:plugins[3].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP udp_google_ecs udp_server sub_config/forward_nocn_ecs.yaml:plugins[2].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_google_ecs tcp_server sub_config/forward_nocn_ecs.yaml:plugins[3].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP prefer_foreign_nocache fallback sub_config/forward_1.yaml:plugins[25].args.primary  fallback targets must be exactly a `$plugin` reference
+GAP udp_local udp_server sub_config/forward_1.yaml:plugins[26].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_local tcp_server sub_config/forward_1.yaml:plugins[27].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP sbnodefallback fallback sub_config/for_singbox.yaml:plugins[0].args.primary  fallback targets must be exactly a `$plugin` reference
+GAP sbnode_udp udp_server sub_config/for_singbox.yaml:plugins[2].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP sbnode_tcp tcp_server sub_config/for_singbox.yaml:plugins[3].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP sb_udp udp_server sub_config/for_singbox.yaml:plugins[4].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP sb_tcp tcp_server sub_config/for_singbox.yaml:plugins[5].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP udp_all udp_server config_custom.yaml:plugins[1].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_all tcp_server config_custom.yaml:plugins[2].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP udp_requery udp_server config_custom.yaml:plugins[4].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_requery tcp_server config_custom.yaml:plugins[5].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP udp_stash udp_server config_custom.yaml:plugins[7].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_stash tcp_server config_custom.yaml:plugins[8].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP udp_clashmi udp_server config_custom.yaml:plugins[10].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_clashmi tcp_server config_custom.yaml:plugins[11].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP udp_singbox udp_server config_custom.yaml:plugins[13].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+GAP tcp_singbox tcp_server config_custom.yaml:plugins[14].args.listen  only a numeric IP SocketAddr with a nonzero port is supported
+CASCADE sequence_google_in sequence sub_config/forward_nocn.yaml:plugins[1].args[2].exec  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_google_node sequence sub_config/forward_nocn_ecs.yaml:plugins[1].args[3].exec  references removed `foreignecs`; unknown executable reference `$foreignecs`
+CASCADE sequence_local_exit sequence sub_config/forward_1.yaml:plugins[2].args[2].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_local_exit_requery sequence sub_config/forward_1.yaml:plugins[3].args[2].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_local_exit_requery sequence sub_config/forward_1.yaml:plugins[3].args[4].exec[1]  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_local_exit_requery sequence sub_config/forward_1.yaml:plugins[3].args[5].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_local_exit_requery sequence sub_config/forward_1.yaml:plugins[3].args[6].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_local_addlist_exit sequence sub_config/forward_1.yaml:plugins[4].args[2].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_local_addlist_exit sequence sub_config/forward_1.yaml:plugins[4].args[4].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_local_addlist_exit_v6 sequence sub_config/forward_1.yaml:plugins[5].args[2].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_local_addlist_exit_v6 sequence sub_config/forward_1.yaml:plugins[5].args[4].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_local_addlist_exit_v6 sequence sub_config/forward_1.yaml:plugins[5].args[5].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[2].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[4].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[6].exec[1]  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[7].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[8].matches[2]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[8].exec[0]  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[8].exec[1]  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+GAP sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[8].exec[2]  unsupported executable `drop_resp`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[8].exec[4]  references removed `nocnfake`; unknown executable reference `$nocnfake`
+CASCADE sequence_local_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[6].args[9].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_local sequence sub_config/forward_1.yaml:plugins[7].args[2].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_addrealiplist_exit sequence sub_config/forward_1.yaml:plugins[8].args[0].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_local_fake sequence sub_config/forward_1.yaml:plugins[9].args[2].exec[1]  references removed `cnfake`; unknown executable reference `$cnfake`
+CASCADE sequence_local_fake_clashmi sequence sub_config/forward_1.yaml:plugins[10].args[2].exec[1]  references removed `cnfake`; unknown executable reference `$cnfake`
+CASCADE sequence_local_fake_pure sequence sub_config/forward_1.yaml:plugins[11].args[2].exec  references removed `cnfake`; unknown executable reference `$cnfake`
+CASCADE sequence_localfake_addlist_exit sequence sub_config/forward_1.yaml:plugins[12].args[2].exec  references removed `cnfake`; unknown executable reference `$cnfake`
+CASCADE sequence_localfake_addlist_exit sequence sub_config/forward_1.yaml:plugins[12].args[4].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[0].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[2].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[4].exec[1]  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[5].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[6].matches[2]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[6].exec[0]  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[6].exec[1]  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+GAP sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[6].exec[2]  unsupported executable `drop_resp`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[6].exec[4]  references removed `nocnfake`; unknown executable reference `$nocnfake`
+GAP sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[7].exec  unsupported executable `drop_resp`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[10].exec  references removed `cnfake`; unknown executable reference `$cnfake`
+CASCADE sequence_localfake_addlist_exit_requery sequence sub_config/forward_1.yaml:plugins[13].args[12].exec  references removed `my_realiplist`; unknown executable reference `$my_realiplist`
+CASCADE sequence_localfake_exit sequence sub_config/forward_1.yaml:plugins[14].args[2].exec  references removed `cnfake`; unknown executable reference `$cnfake`
+CASCADE sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[0].exec  references removed `domestic`; unknown executable reference `$domestic`
+CASCADE sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[2].exec[1]  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[3].exec  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+CASCADE sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[4].exec  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+GAP sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[5].exec  unsupported executable `drop_resp`
+CASCADE sequence_localfake_exit_requery sequence sub_config/forward_1.yaml:plugins[15].args[8].exec  references removed `cnfake`; unknown executable reference `$cnfake`
+CASCADE sequence_google sequence sub_config/forward_1.yaml:plugins[16].args[2].exec  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_google_exit sequence sub_config/forward_1.yaml:plugins[17].args[2].exec  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_proxy_fakeip_addlist_exit sequence sub_config/forward_1.yaml:plugins[18].args[1].exec  references removed `nocnfake`; unknown executable reference `$nocnfake`
+CASCADE sequence_proxy_fakeip_addlist_exit sequence sub_config/forward_1.yaml:plugins[18].args[2].exec  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_proxy_fakeip_exit sequence sub_config/forward_1.yaml:plugins[19].args[1].exec  references removed `nocnfake`; unknown executable reference `$nocnfake`
+CASCADE sequence_proxy_realip_addlist_exit sequence sub_config/forward_1.yaml:plugins[20].args[1].exec  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_proxy_realip_addlist_exit sequence sub_config/forward_1.yaml:plugins[20].args[3].exec  references removed `my_fakeiplist`; unknown executable reference `$my_fakeiplist`
+CASCADE sequence_proxy_realip_exit sequence sub_config/forward_1.yaml:plugins[21].args[1].exec  references removed `foreign`; unknown executable reference `$foreign`
+CASCADE sequence_ipv4_cnfakeoff sequence sub_config/process_v4.yaml:plugins[0].args[18].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+CASCADE sequence_ipv4_cnfakeon sequence sub_config/process_v4.yaml:plugins[1].args[22].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+CASCADE sequence_ipv4_cnfakeoff_requery sequence sub_config/process_v4.yaml:plugins[2].args[19].exec  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+GAP sequence_ipv4_cnfakeoff_requery sequence sub_config/process_v4.yaml:plugins[2].args[20].matches[0]  unsupported matcher `rcode`
+CASCADE sequence_ipv4_cnfakeoff_requery sequence sub_config/process_v4.yaml:plugins[2].args[21].exec[0]  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+GAP sequence_ipv4_cnfakeoff_requery sequence sub_config/process_v4.yaml:plugins[2].args[21].exec[1]  unsupported executable `drop_resp`
+CASCADE sequence_ipv4_cnfakeoff_requery sequence sub_config/process_v4.yaml:plugins[2].args[24].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+CASCADE sequence_ipv4_cnfakeon_requery sequence sub_config/process_v4.yaml:plugins[3].args[21].exec  references removed `my_sv4list`; unknown executable reference `$my_sv4list`
+GAP sequence_ipv4_cnfakeon_requery sequence sub_config/process_v4.yaml:plugins[3].args[22].matches[0]  unsupported matcher `rcode`
+CASCADE sequence_ipv4_cnfakeon_requery sequence sub_config/process_v4.yaml:plugins[3].args[23].exec[0]  references removed `my_nov4list`; unknown executable reference `$my_nov4list`
+GAP sequence_ipv4_cnfakeon_requery sequence sub_config/process_v4.yaml:plugins[3].args[23].exec[1]  unsupported executable `drop_resp`
+CASCADE sequence_ipv4_cnfakeon_requery sequence sub_config/process_v4.yaml:plugins[3].args[28].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+GAP sequence_ipv6_cnfakeoff sequence sub_config/process_v6.yaml:plugins[0].args[17].matches[0]  unsupported matcher `rcode`
+CASCADE sequence_ipv6_cnfakeoff sequence sub_config/process_v6.yaml:plugins[0].args[18].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+GAP sequence_ipv6_cnfakeoff sequence sub_config/process_v6.yaml:plugins[0].args[18].exec[1]  unsupported executable `drop_resp`
+CASCADE sequence_ipv6_cnfakeoff sequence sub_config/process_v6.yaml:plugins[0].args[21].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+GAP sequence_ipv6_cnfakeon sequence sub_config/process_v6.yaml:plugins[1].args[19].matches[0]  unsupported matcher `rcode`
+CASCADE sequence_ipv6_cnfakeon sequence sub_config/process_v6.yaml:plugins[1].args[20].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+GAP sequence_ipv6_cnfakeon sequence sub_config/process_v6.yaml:plugins[1].args[20].exec[1]  unsupported executable `drop_resp`
+CASCADE sequence_ipv6_cnfakeon sequence sub_config/process_v6.yaml:plugins[1].args[25].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+GAP sequence_ipv6_cnfakeoff_requery sequence sub_config/process_v6.yaml:plugins[2].args[17].matches[0]  unsupported matcher `rcode`
+CASCADE sequence_ipv6_cnfakeoff_requery sequence sub_config/process_v6.yaml:plugins[2].args[18].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+GAP sequence_ipv6_cnfakeoff_requery sequence sub_config/process_v6.yaml:plugins[2].args[18].exec[1]  unsupported executable `drop_resp`
+CASCADE sequence_ipv6_cnfakeoff_requery sequence sub_config/process_v6.yaml:plugins[2].args[21].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+GAP sequence_ipv6_cnfakeon_requery sequence sub_config/process_v6.yaml:plugins[3].args[19].matches[0]  unsupported matcher `rcode`
+CASCADE sequence_ipv6_cnfakeon_requery sequence sub_config/process_v6.yaml:plugins[3].args[20].exec[0]  references removed `my_nov6list`; unknown executable reference `$my_nov6list`
+GAP sequence_ipv6_cnfakeon_requery sequence sub_config/process_v6.yaml:plugins[3].args[20].exec[1]  unsupported executable `drop_resp`
+CASCADE sequence_ipv6_cnfakeon_requery sequence sub_config/process_v6.yaml:plugins[3].args[25].matches[0]  references removed `geoip_cn`; unknown or wrong-type ip_set `geoip_cn`
+GAP sequence_sbnode sequence sub_config/for_singbox.yaml:plugins[1].args[1].exec  unsupported executable `sleep`
+CASCADE sequence_sbnode sequence sub_config/for_singbox.yaml:plugins[1].args[2].exec  references removed `sbnodefallback`; unknown executable reference `$sbnodefallback`
+CASCADE sequence_6666 sequence config_custom.yaml:plugins[0].args[0].exec  references removed `rewrite`; unknown executable reference `$rewrite`
+CASCADE sequence_6666 sequence config_custom.yaml:plugins[0].args[3].exec  references removed `unified_matcher1`; unknown executable reference `$unified_matcher1`
+CASCADE sequence_6666 sequence config_custom.yaml:plugins[0].args[4].exec  references removed `special_upstream_matcher`; unknown executable reference `$special_upstream_matcher`
+CASCADE sequence_6666 sequence config_custom.yaml:plugins[0].args[11].exec[0]  references removed `prefer_foreign_nocache`; unknown executable reference `$prefer_foreign_nocache`
+CASCADE sequence_6666 sequence config_custom.yaml:plugins[0].args[12].exec[0]  references removed `domestic`; unknown executable reference `$domestic`
+GAP sequence_6666 sequence config_custom.yaml:plugins[0].args[15].exec[1]  unsupported executable `tag_setter`
+CASCADE sequence_6666 sequence config_custom.yaml:plugins[0].args[18].exec  references removed `top_domains`; unknown executable reference `$top_domains`
+CASCADE sequence_requery sequence config_custom.yaml:plugins[3].args[0].exec  references removed `rewrite`; unknown executable reference `$rewrite`
+CASCADE sequence_requery sequence config_custom.yaml:plugins[3].args[3].exec  references removed `unified_matcher1`; unknown executable reference `$unified_matcher1`
+CASCADE sequence_requery sequence config_custom.yaml:plugins[3].args[4].exec  references removed `special_upstream_matcher`; unknown executable reference `$special_upstream_matcher`
+CASCADE sequence_requery sequence config_custom.yaml:plugins[3].args[11].exec[0]  references removed `prefer_foreign_nocache`; unknown executable reference `$prefer_foreign_nocache`
+CASCADE sequence_requery sequence config_custom.yaml:plugins[3].args[12].exec[0]  references removed `domestic`; unknown executable reference `$domestic`
+GAP sequence_requery sequence config_custom.yaml:plugins[3].args[15].exec[1]  unsupported executable `tag_setter`
+GAP sequence_for_stash sequence config_custom.yaml:plugins[6].args[1].exec[1]  unsupported executable `tag_setter`
+GAP sequence_for_stash sequence config_custom.yaml:plugins[6].args[2].exec[0]  unsupported executable `tag_setter`
+GAP sequence_for_stash sequence config_custom.yaml:plugins[6].args[3].exec  unsupported executable `tag_setter`
+GAP sequence_for_clashmi sequence config_custom.yaml:plugins[9].args[1].exec[1]  unsupported executable `tag_setter`
+GAP sequence_for_clashmi sequence config_custom.yaml:plugins[9].args[3].exec[1]  unsupported executable `tag_setter`
+GAP sequence_for_singbox sequence config_custom.yaml:plugins[12].args[1].exec[0]  unsupported executable `tag_setter`
+GAP sequence_for_singbox sequence config_custom.yaml:plugins[12].args[2].exec[0]  unsupported executable `tag_setter`
+GAP sequence_for_singbox sequence config_custom.yaml:plugins[12].args[3].exec  unsupported executable `tag_setter`
+GLOBAL config_custom.yaml:plugins  missing listener plugin
+SKIPPED managed-store open/recovery and pending-transaction gate (start-only; writes state)
+NOTE first-error-per-definition; rerun after fixing to see further gaps
+NOTE sequences are checked per matcher/exec/rule item; the failing item is neutralized and checking continues
+SUMMARY gaps=86 cascades=80 globals=3 definitions=126

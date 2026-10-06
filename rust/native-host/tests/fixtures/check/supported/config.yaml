@@ -1,0 +1,19 @@
+log:
+  level: error
+
+include:
+  - "sub/forward.yaml"
+
+plugins:
+  - tag: entry
+    type: sequence
+    args:
+      - matches: qtype 1
+        exec: $fwd
+
+  - tag: udp_in
+    type: udp_server
+    args:
+      entry: entry
+      listen: "127.0.0.1:15353"
+      enable_audit: false

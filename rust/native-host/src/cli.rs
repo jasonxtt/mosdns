@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliCommand {
     Start { config: PathBuf },
+    Check { config: PathBuf },
     Version,
 }
 
@@ -26,7 +27,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "{}; usage: mosdns start -c <config> | mosdns version",
+            "{}; usage: mosdns start -c <config> | mosdns check -c <config> | mosdns version",
             self.message
         )
     }
@@ -34,7 +35,7 @@ impl std::fmt::Display for CliError {
 
 impl std::error::Error for CliError {}
 
-/// Parses `mosdns start -c <path>` and its `--config` spelling.
+/// Parses `mosdns start|check -c <path>` and the `--config` spelling.
 pub fn parse_args<I, S>(args: I) -> Result<CliCommand, CliError>
 where
     I: IntoIterator<Item = S>,
@@ -53,8 +54,9 @@ where
         }
         return Ok(CliCommand::Version);
     }
-    if command != OsStr::new("start") {
-        return Err(CliError::new("expected start or version"));
+    let check = command == OsStr::new("check");
+    if command != OsStr::new("start") && !check {
+        return Err(CliError::new("expected start, check or version"));
     }
 
     let option = args
@@ -73,8 +75,11 @@ where
         return Err(CliError::new("unexpected argument"));
     }
 
-    Ok(CliCommand::Start {
-        config: PathBuf::from(config),
+    let config = PathBuf::from(config);
+    Ok(if check {
+        CliCommand::Check { config }
+    } else {
+        CliCommand::Start { config }
     })
 }
 
@@ -96,6 +101,20 @@ mod tests {
                 config: "forward.yaml".into(),
             })
         );
+    }
+
+    #[test]
+    fn check_accepts_both_config_spellings() {
+        for option in ["-c", "--config"] {
+            assert_eq!(
+                parse_args(["mosdns", "check", option, "forward.yaml"]),
+                Ok(CliCommand::Check {
+                    config: "forward.yaml".into(),
+                })
+            );
+        }
+        assert!(parse_args(["mosdns", "check", "-c"]).is_err());
+        assert!(parse_args(["mosdns", "check", "-c", "forward.yaml", "extra"]).is_err());
     }
 
     #[test]

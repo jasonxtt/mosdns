@@ -5,6 +5,15 @@ fn main() {
             println!("{}", mosdns_native_host::build_identity::VERSION);
             return;
         }
+        Ok(mosdns_native_host::CliCommand::Check { config }) => {
+            match mosdns_native_host::check_config(&config) {
+                Ok(report) => {
+                    print!("{report}");
+                    std::process::exit(report.exit_code());
+                }
+                Err(error) => Err(error.to_string()),
+            }
+        }
         Ok(mosdns_native_host::CliCommand::Start { config }) => {
             mosdns_native_host::HostAssembly::from_config_file(&config)
                 .map_err(|error| error.to_string())

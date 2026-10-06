@@ -1,0 +1,6 @@
+plugins:
+  - tag: fwd
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:15453"

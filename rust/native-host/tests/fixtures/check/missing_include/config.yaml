@@ -1,0 +1,7 @@
+log:
+  level: error
+
+include:
+  - "sub/absent.yaml"
+
+plugins: []
