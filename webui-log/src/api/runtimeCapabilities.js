@@ -3,13 +3,13 @@ import { reactive } from 'vue'
 export const OPERATION_IDS = Object.freeze([
   'system.health', 'system.version', 'audit.read', 'audit.control', 'audit.capacity',
   'query.rank', 'cache.inventory', 'cache.manage', 'metrics.cache', 'rules.local.read',
-  'rules.local.manage', 'groups.read', 'groups.manage', 'upstreams.read', 'upstreams.manage',
+  'rules.local.manage', 'groups.read', 'groups.manage', 'groups.upstreams', 'upstreams.read', 'upstreams.manage',
   'rules.diversion', 'rules.adguard', 'capture.logs', 'client.aliases', 'switches.manage',
   'cache.requery', 'lists.remembered', 'appearance.server', 'system.restart', 'system.webui_port',
   'system.config_management', 'system.update', 'system.domain_generation', 'system.global_overrides', 'metrics.process'
 ])
 function isObject(value) { return value !== null && typeof value === 'object' && !Array.isArray(value) }
-const unimplemented = new Set(['rules.adguard','capture.logs','client.aliases','switches.manage','cache.requery','lists.remembered','appearance.server','system.restart','system.webui_port','system.config_management','system.update','system.domain_generation','system.global_overrides','metrics.process'])
+const unimplemented = new Set(['groups.upstreams','rules.adguard','capture.logs','client.aliases','switches.manage','cache.requery','lists.remembered','appearance.server','system.restart','system.webui_port','system.config_management','system.update','system.domain_generation','system.global_overrides','metrics.process'])
 
 function validateSwitches(value) {
   if (!isObject(value) || value.schema_version !== 1 || typeof value.config_generation !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value.config_generation) || !Array.isArray(value.instances)) {
@@ -170,6 +170,7 @@ export function requestOperation(url, method = 'GET') {
   if (/^\/api\/v2\/audit\/rank\//.test(path)) return 'query.rank'
   if (/^\/api\/v[12]\/audit\//.test(path)) return 'audit.read'
   if (path === '/api/v1/cache/inventory') return 'cache.inventory'
+  if (path === '/api/v1/upstream/sources') return 'groups.upstreams'
   if (path.startsWith('/api/v1/special-groups')) return method === 'GET' ? 'groups.read' : 'groups.manage'
   if (path.startsWith('/api/v1/upstream/')) return method === 'GET' ? 'upstreams.read' : 'upstreams.manage'
   if (path === '/metrics') return 'metrics.cache'

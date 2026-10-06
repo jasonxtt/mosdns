@@ -3262,6 +3262,11 @@ fn ui_operations(
             "当前配置没有可管理的本地规则 provider",
         ),
         ("groups.manage", managed, "专用组编辑需要原生托管配置"),
+        (
+            "groups.upstreams",
+            false,
+            "专用组引用上游与组私有上游尚未在原生运行时实现",
+        ),
         ("upstreams.manage", managed, "上游编辑需要原生托管配置"),
         (
             "rules.diversion",

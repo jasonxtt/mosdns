@@ -30,21 +30,28 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 			t.Fatalf("expected empty rules list, got:\n%s", text)
 		}
 		for _, want := range []string{
-			"tag: sequence_special_v4",
-			"tag: sequence_special_v6",
-			"tag: sequence_special_ot",
+			"tag: sequence_special",
 			"args: []",
 		} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("expected empty config to contain %q, got:\n%s", want, text)
 			}
 		}
+		for _, oldTag := range []string{
+			"tag: sequence_special_v4",
+			"tag: sequence_special_v6",
+			"tag: sequence_special_ot",
+		} {
+			if strings.Contains(text, oldTag) {
+				t.Fatalf("unexpected legacy dispatcher %q in generated config:\n%s", oldTag, text)
+			}
+		}
 	})
 
 	t.Run("populated", func(t *testing.T) {
 		raw := renderSpecialGroupsConfig([]SpecialGroup{
-			{Slot: 50, Name: "cmcc", ListenPort: 6053, CustomPortOnly: true},
-			{Slot: 53, Name: "hk"},
+			{Slot: 50, Name: "cmcc", ListenPort: 6053, CustomPortOnly: true, OwnedUpstreams: []UpstreamOverrideConfig{{Tag: "cmcc_dns", Enabled: true, Protocol: "udp", Addr: "223.5.5.5"}}},
+			{Slot: 53, Name: "hk", OwnedUpstreams: []UpstreamOverrideConfig{{Tag: "hk_dns", Enabled: true, Protocol: "udp", Addr: "223.5.5.5"}}},
 		})
 		if err := validateSpecialGroupsConfig(raw); err != nil {
 			t.Fatalf("validateSpecialGroupsConfig(populated) error = %v", err)
@@ -65,11 +72,24 @@ func TestRenderSpecialGroupsConfigValid(t *testing.T) {
 				t.Fatalf("expected generated config to contain %q, got:\n%s", want, text)
 			}
 		}
+		if got := strings.Count(text, "  - tag: sequence_special\n"); got != 1 {
+			t.Fatalf("expected one unified special dispatcher, got %d:\n%s", got, text)
+		}
+		if got := strings.Count(text, "        exec: $sequence_special_53\n"); got != 1 {
+			t.Fatalf("expected one dispatcher entry for group 53, got %d:\n%s", got, text)
+		}
 		if strings.Contains(text, "mark 50") {
 			t.Fatalf("custom-port-only group should not be reachable from 53 chain:\n%s", text)
 		}
 		if strings.Contains(text, "special_udp_server_53") || strings.Contains(text, "special_tcp_server_53") {
 			t.Fatalf("unexpected listeners rendered for group without listen_port:\n%s", text)
+		}
+	})
+
+	t.Run("inactive without valid upstream", func(t *testing.T) {
+		text := string(renderSpecialGroupsConfig([]SpecialGroup{{Slot: 50, Name: "empty", ListenPort: 6053}}))
+		if strings.Contains(text, "special_udp_server_50") || strings.Contains(text, "special_tcp_server_50") || strings.Contains(text, "mark 50") {
+			t.Fatalf("inactive special group should not expose listeners or 53 routing:\n%s", text)
 		}
 	})
 }
@@ -83,8 +103,8 @@ func TestSyncSpecialGroupsConfigWritesRuntimeFile(t *testing.T) {
 
 	jsonPath := filepath.Join(webinfoDir, specialGroupsFilename)
 	if err := os.WriteFile(jsonPath, []byte(`[
-  {"slot": 50, "name": "cmcc", "listen_port": 6053, "custom_port_only": true},
-  {"slot": 52, "name": "hk"}
+  {"slot": 50, "name": "cmcc", "listen_port": 6053, "custom_port_only": true, "owned_upstreams": [{"tag": "cmcc_dns", "enabled": true, "protocol": "udp", "addr": "223.5.5.5"}]},
+  {"slot": 52, "name": "hk", "owned_upstreams": [{"tag": "hk_dns", "enabled": true, "protocol": "udp", "addr": "223.5.5.5"}]}
 ]`), 0o644); err != nil {
 		t.Fatalf("write json: %v", err)
 	}

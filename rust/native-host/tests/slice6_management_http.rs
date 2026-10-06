@@ -1353,7 +1353,7 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
             let ops = payload["ui_operations"]
                 .as_object()
                 .expect("complete operations");
-            assert_eq!(ops.len(), 30);
+            assert_eq!(ops.len(), 31);
             for id in [
                 "system.health",
                 "system.version",
@@ -1384,6 +1384,7 @@ fn capability_matrix_is_complete_and_matches_host_eligibility() {
                 assert_eq!(ops[id]["supported"], managed, "{id}");
             }
             for id in [
+                "groups.upstreams",
                 "rules.adguard",
                 "capture.logs",
                 "client.aliases",

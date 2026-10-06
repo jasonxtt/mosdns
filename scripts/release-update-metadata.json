@@ -1,10 +1,10 @@
 {
   "format": 1,
   "channel": "main",
-  "required_config_schema": 3,
-  "config_package_id": "main-config-schema-3",
+  "required_config_schema": 4,
+  "config_package_id": "main-config-schema-4",
   "config": {
-    "url": "https://raw.githubusercontent.com/jasonxtt/file/eb6ff926e08c1cdeb94b843836c57ba4a8ec6a20/mosdns/config/config_up.zip",
-    "sha256": "cc520a52e059639b55d3388de23fc4ee6fe6f445f2879ac7ed88c4135ad604bc"
+    "url": "https://raw.githubusercontent.com/jasonxtt/file/86e6a65/mosdns/config/config_up.zip",
+    "sha256": "7c8fb1397edef15263a952afcf85a33231df08326ecf086cd5be5f358c982aea"
   }
 }

@@ -126,6 +126,17 @@ special_groups 生成都挂在该开关上。**用户决定（2026-10-06）：�
 `sub_config/special_groups.yaml` 多一个空行（运行时生成）以及两个不被 include 的
 `.bak` 文件。因此本清单同样适用于当前生产配置。
 
+## 4.1 合并 main v0.7.3 后新增：M1-e special_groups v0.7.3 对齐
+
+`10-06-rust-merge-main-v0.7.3` 把 Go v0.7.3 合入后登记了两项原生契约漂移（详见
+[drift.md](validation-records/10-06-merge-main-v0.7.3/drift.md)），不改变 `check` 对
+`config_all` 的结果，原生实现排在 M1-a/b/c 之后：
+
+| 项 | 内容 |
+| --- | --- |
+| D2 | v0.7.2 special_groups 生成结构（共享 `sequence_special`、`domain_mapper`/`mark` 路由、`switch4` 控制 cache、`flow_setter … upstream=`）与原生托管生成器输出的差异；先由 M1-a 补 `domain_mapper`/`mark` 使非托管形态可加载 |
+| D3 | 专用组上游引用/私有上游/刷新/无效引用告警、`/api/v1/upstream/sources`、`special_upstream_groups.json` 新字段；原生 UI 已通过 `groups.upstreams` 能力显式禁用 |
+
 ## 5. 不在 M1 的注册项
 
 `config_all` 未使用、延后到首次替换之后：见 [feature-coverage](feature-coverage.md)
