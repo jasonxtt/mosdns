@@ -194,7 +194,7 @@ fn all_seventeen_switch_types_compile_with_unique_tags_and_state_files() {
 }
 
 #[test]
-fn relative_state_paths_resolve_against_the_including_files_directory() {
+fn relative_state_paths_resolve_against_the_configuration_root_not_the_include() {
     let fixture = Fixture::new("include");
     std::fs::create_dir_all(fixture.path("sub")).expect("subdir");
     let included = fixture.path("sub/included.yaml");
@@ -215,7 +215,7 @@ fn relative_state_paths_resolve_against_the_including_files_directory() {
     let config = load_and_compile(&main).expect("included switch compiles");
     assert_eq!(config.switches.len(), 1);
     assert_eq!(config.switches[0].tag, "sw9");
-    assert_eq!(config.switches[0].state_file, fixture.path("sub/sw9.txt"));
+    assert_eq!(config.switches[0].state_file, fixture.path("sw9.txt"));
 }
 
 #[test]

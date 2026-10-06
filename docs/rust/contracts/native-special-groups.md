@@ -130,7 +130,7 @@ is not the S4 disjoint dependency-closure or durable-dump transaction contract.
 ## S3 startup and candidate input boundaries
 
 Startup makes the managed opt-in and writer/recovery decision from one root YAML
-snapshot and compiles that same snapshot against the declaring directory. It
+snapshot and compiles that same snapshot against the main configuration's directory (include paths and managed state; plugin-argument paths use the `-d` root, which defaults to that directory). It
 must not reread the root file after deciding whether to own the managed writer
 lock. Candidate compilation records every file that affects the compiled graph,
 including an optional `rule/special_N.txt` when it is absent and therefore

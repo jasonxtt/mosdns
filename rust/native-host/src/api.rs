@@ -102,7 +102,7 @@ fn legacy_audit_settings_paths(root: &Path) -> [PathBuf; 2] {
 }
 
 fn audit_settings_diagnostic(path: &Path, message: impl AsRef<str>) {
-    eprintln!(
+    crate::diag::warn_line!(
         "native audit settings diagnostic: {} ({})",
         message.as_ref(),
         path.display()

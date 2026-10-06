@@ -43,7 +43,7 @@ impl Registry {
                 Ok(ui) => ui,
                 Err(rustix::io::Errno::NOENT) => return registry,
                 Err(error) => {
-                    eprintln!("native UI registry unavailable: {error}");
+                    crate::diag::warn_line!("native UI registry unavailable: {error}");
                     return registry;
                 }
             };
@@ -95,11 +95,11 @@ impl Registry {
                 Ok(())
             })();
             if let Err(error) = result {
-                eprintln!("native UI registry enumeration failed: {error}");
+                crate::diag::warn_line!("native UI registry enumeration failed: {error}");
                 return Self::default();
             }
             if skipped > 0 {
-                eprintln!(
+                crate::diag::warn_line!(
                     "native UI registry skipped {skipped} reserved, invalid, symlink or non-directory entries"
                 );
             }

@@ -32,8 +32,8 @@ fn every_gap_is_listed_with_location_and_classification() {
     let report = check_config(Path::new(GAPS)).expect("check runs");
     let expected = format!(
         "\
-GLOBAL {GAPS}:log.file  unsupported field
-GLOBAL {GAPS}:log.level  only the error level is supported
+GLOBAL {GAPS}:log.production  unsupported field
+GLOBAL {GAPS}:log.encoding  unsupported field
 GAP no_args domain_output {GAPS}:plugins[3].args  required field is missing
 GAP light_set domain_set_light sub/rules.yaml:plugins[0].type  unsupported plugin type `domain_set_light`
 GAP rewrite_x rewrite {GAPS}:plugins[1].type  unsupported plugin type `rewrite`
@@ -226,7 +226,7 @@ fn start_still_fails_fast_on_the_first_rejection() {
     let (code, stdout, stderr) = run_binary(&["start", "-c", GAPS]);
     assert_eq!(code, 2);
     assert!(stdout.is_empty());
-    assert_eq!(stderr, "mosdns: $.log.file: unsupported field\n");
+    assert_eq!(stderr, "mosdns: $.log.production: unsupported field\n");
 }
 
 /// Recursive content and metadata snapshot (atime excluded).

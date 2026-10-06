@@ -1,0 +1,12 @@
+plugins:
+  - tag: direct
+    type: domain_set
+    args:
+      files:
+        - gen/direct.txt
+
+  - tag: direct_ip
+    type: ip_set
+    args:
+      files:
+        - rule/direct_ip.txt

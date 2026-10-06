@@ -141,15 +141,16 @@ plugins:
         - "RULES_PATH"
 "#;
 
-/// Writes the representative chain with a directory-relative rule file.
+/// Writes the representative chain with a root-relative rule file.
 fn write_chain(fixture: &Fixture) {
     fixture.write(
-        "sub_config/rules/local.txt",
+        "rules/local.txt",
         "domain:local.test\nfull:local.only.test\n",
     );
-    // If an included definition loses its declaring directory, this invalid
-    // root-relative decoy makes the regression fail visibly.
-    fixture.write("rules/local.txt", "not-a-valid-rule\n");
+    // Plugin paths resolve against the configuration root, not the including
+    // file's directory: this invalid decoy beside the include makes a
+    // regression to the old rule fail visibly.
+    fixture.write("sub_config/rules/local.txt", "not-a-valid-rule\n");
     fixture.write(
         "sub_config/routes.yaml",
         &ROUTES_CONFIG.replace("RULES_PATH", "rules/local.txt"),
@@ -232,7 +233,7 @@ fn a_missing_include_or_rule_file_fails_before_assembly_with_its_path() {
 
     let fixture = Fixture::new("missing-rules");
     write_chain(&fixture);
-    fs::remove_file(fixture.root.join("sub_config/rules/local.txt")).expect("remove rules");
+    fs::remove_file(fixture.root.join("rules/local.txt")).expect("remove rules");
     let error = expect_config_error(
         mosdns_native_host::load_and_compile(&fixture.config()),
         "a missing rule file must fail",
@@ -245,13 +246,13 @@ fn included_definitions_keep_their_relative_path_and_source_context() {
     let fixture = Fixture::new("included-relative-rules");
     write_chain(&fixture);
     let config = mosdns_native_host::load_and_compile(&fixture.config())
-        .expect("included rule files resolve from the included YAML directory");
+        .expect("included rule files resolve from the configuration root");
     assert_eq!(config.forwards.len(), 2);
 
     // Go-visible text-file policy: one invalid individual rule is skipped and
     // the remaining valid rules still load instead of aborting the whole file.
     fs::write(
-        fixture.root.join("sub_config/rules/local.txt"),
+        fixture.root.join("rules/local.txt"),
         "regexp:[\nstill-valid.example\n",
     )
     .expect("invalid included rule");
@@ -261,7 +262,7 @@ fn included_definitions_keep_their_relative_path_and_source_context() {
 
     // A real file-read failure still retains the included YAML source context
     // and the offending rule-file path.
-    fs::remove_file(fixture.root.join("sub_config/rules/local.txt")).expect("remove rules");
+    fs::remove_file(fixture.root.join("rules/local.txt")).expect("remove rules");
     let error = expect_config_error(
         mosdns_native_host::load_and_compile(&fixture.config()),
         "a missing included rule file must retain its included-file source context",
@@ -273,7 +274,7 @@ fn included_definitions_keep_their_relative_path_and_source_context() {
         "included YAML source path was lost: {error}"
     );
     assert!(
-        error.reason.contains("sub_config/rules/local.txt"),
+        error.reason.contains("rules/local.txt") && !error.reason.contains("sub_config"),
         "rule-file path was lost: {error}"
     );
 }
@@ -541,10 +542,10 @@ fn client_request(listener: SocketAddr, request: &[u8], timeout: Duration) -> Ve
 /// Builds the representative chain with both peers pointed at live fixtures.
 fn chain_assembly(fixture: &Fixture, local: SocketAddr, default: SocketAddr) -> HostAssembly {
     fixture.write(
-        "sub_config/rules/local.txt",
+        "rules/local.txt",
         "domain:local.test\nfull:local.only.test\n",
     );
-    fixture.write("rules/local.txt", "not-a-valid-rule\n");
+    fixture.write("sub_config/rules/local.txt", "not-a-valid-rule\n");
     fixture.write(
         "sub_config/routes.yaml",
         &ROUTES_CONFIG
@@ -742,10 +743,10 @@ fn the_representative_chain_also_serves_tcp_with_audit_off() {
     let local = Peer::start(LOCAL_ANSWER);
     let default = Peer::start(DEFAULT_ANSWER);
     fixture.write(
-        "sub_config/rules/local.txt",
+        "rules/local.txt",
         "domain:local.test\nfull:local.only.test\n",
     );
-    fixture.write("rules/local.txt", "not-a-valid-rule\n");
+    fixture.write("sub_config/rules/local.txt", "not-a-valid-rule\n");
     fixture.write(
         "sub_config/routes.yaml",
         &ROUTES_CONFIG

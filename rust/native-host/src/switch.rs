@@ -109,7 +109,7 @@ impl Executor for SwitchNoopExecutor {
     }
 }
 
-/// Resolves one declared state-file path against its declaration base and
+/// Resolves one declared state-file path against the configuration root and
 /// normalizes it lexically, exactly the way cache dump targets resolve.
 pub(crate) fn resolved_state_file(
     declared: &str,

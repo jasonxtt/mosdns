@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -26,12 +26,27 @@ use crate::plugins::{FastMarkConfig, FlowSetterConfig};
 use crate::policy::{self, IpSetConfig, ResponsePolicy, ResponsePolicyConfig, TtlPolicy};
 
 mod check;
-pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config};
+pub use check::{CheckFinding, CheckFindingKind, CheckReport, check_config, check_config_in};
 
-/// The only accepted log level in the native host subset.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// The diagnostic threshold of the `log.level` section; ordered from the most
+/// to the least verbose.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
     Error,
+}
+
+/// The compiled `log` section.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LogSettings {
+    pub level: LogLevel,
+    /// Diagnostics are appended here instead of stderr; already resolved
+    /// against the configuration root.
+    pub file: Option<PathBuf>,
+    /// A `level` that is not a known name; the level then falls back to `info`.
+    pub unknown_level: Option<String>,
 }
 
 /// The listener transport accepted by the native host.
@@ -638,12 +653,13 @@ pub(crate) fn load_yaml_with_inputs(
 }
 
 /// Reads and compiles one configuration file. Relative `include` paths and
-/// relative rule-file paths resolve against the declaring file's directory,
-/// never against the process working directory.
+/// every relative plugin-argument path (rule, state, dump files) resolve
+/// against that file's directory, never against the process working
+/// directory.
 pub fn load_and_compile(path: &Path) -> Result<CompiledConfig, ConfigError> {
     let yaml = load_yaml(path)?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new(""));
-    let mut compiled = compile_yaml_with_base_and_origin(&yaml, base_dir, Some(path))?;
+    let mut compiled = compile_yaml_with_base_and_origin(&yaml, base_dir, base_dir, Some(path))?;
     compiled.ui_base = Some(absolute_base(base_dir)?);
     Ok(compiled)
 }
@@ -657,9 +673,20 @@ pub fn compile_yaml(yaml: &str) -> Result<CompiledConfig, ConfigError> {
 }
 
 /// Strictly decodes and compiles the supported YAML subset with an explicit
-/// base directory for relative include and rule-file paths.
+/// base directory for relative include and plugin-argument paths.
 pub fn compile_yaml_with_base(yaml: &str, base_dir: &Path) -> Result<CompiledConfig, ConfigError> {
-    compile_yaml_with_base_and_origin(yaml, base_dir, None)
+    compile_yaml_with_base_and_origin(yaml, base_dir, base_dir, None)
+}
+
+/// Like [`compile_yaml_with_base`], with a separate configuration root for
+/// relative plugin-argument paths (`mosdns start -d <root>`). `include` paths
+/// still resolve against `base_dir`, the main configuration's directory.
+pub fn compile_yaml_with_roots(
+    yaml: &str,
+    base_dir: &Path,
+    root_dir: &Path,
+) -> Result<CompiledConfig, ConfigError> {
+    compile_yaml_with_base_and_origin(yaml, base_dir, root_dir, None)
 }
 
 /// The shared file-backed and in-memory compile entry. `origin` names the
@@ -668,10 +695,11 @@ pub fn compile_yaml_with_base(yaml: &str, base_dir: &Path) -> Result<CompiledCon
 fn compile_yaml_with_base_and_origin(
     yaml: &str,
     base_dir: &Path,
+    root_dir: &Path,
     origin: Option<&Path>,
 ) -> Result<CompiledConfig, ConfigError> {
     let raw = parse_yaml(yaml)?;
-    let mut compiled = compile_raw(&raw, base_dir, None, None, None, origin)?;
+    let mut compiled = compile_raw(&raw, base_dir, root_dir, None, None, None, origin)?;
     if !base_dir.as_os_str().is_empty() {
         compiled.ui_base = Some(absolute_base(base_dir)?);
     }
@@ -690,6 +718,7 @@ fn absolute_base(base: &Path) -> Result<PathBuf, ConfigError> {
 pub(crate) fn compile_candidate_yaml(
     yaml: &str,
     base_dir: &Path,
+    root_dir: &Path,
     profile: crate::special_groups::ManagedProfile,
     files: &crate::special_groups::StagedFiles,
     inputs: &mut crate::special_groups::CandidateInputSet,
@@ -697,6 +726,7 @@ pub(crate) fn compile_candidate_yaml(
     compile_raw(
         &parse_yaml(yaml)?,
         base_dir,
+        root_dir,
         Some(profile),
         Some(files),
         Some(inputs),
@@ -737,6 +767,7 @@ const ROOT_FIELDS: &[&str] = &["log", "include", "plugins", "api", "native_manag
 fn compile_raw(
     raw: &RawValue,
     base_dir: &Path,
+    root_dir: &Path,
     candidate: Option<crate::special_groups::ManagedProfile>,
     staged: Option<&crate::special_groups::StagedFiles>,
     mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
@@ -744,7 +775,7 @@ fn compile_raw(
 ) -> Result<CompiledConfig, ConfigError> {
     let root = expect_map(raw, "$", "top level must be a mapping")?;
     root.reject_unknown(ROOT_FIELDS, "$")?;
-    let log = compile_log(root.required("log", "$")?)?;
+    let log = compile_log(root.required("log", "$")?, root_dir)?.level;
     let api = root.get("api").map(compile_api).transpose()?;
     let managed = if managed_opt_in(raw)? {
         Some(match candidate {
@@ -778,6 +809,7 @@ fn compile_raw(
             collect_included(
                 &expression,
                 base_dir,
+                root_dir,
                 &mut definitions,
                 inputs.as_deref_mut(),
             )?;
@@ -788,7 +820,7 @@ fn compile_raw(
         definitions.push(decode_plugin(
             plugin,
             &format!("$.plugins[{index}]"),
-            base_dir,
+            root_dir,
         )?);
     }
 
@@ -1449,7 +1481,7 @@ impl<'a> CacheDependencyClosure<'a> {
         }
         self.material.insert(format!(
             "plugin:{}:{}:{:?}:{:?}",
-            plugin.tag, plugin.kind, plugin.args, plugin.base_dir
+            plugin.tag, plugin.kind, plugin.args, plugin.root_dir
         ));
         if matches!(plugin.kind.as_str(), "hosts" | "redirect" | "ip_set")
             || (plugin.kind == "sequence" && sequence_has_file_backed_ip_matcher(&plugin.args))
@@ -1674,6 +1706,7 @@ fn compile_api(value: &RawValue) -> Result<ApiConfig, ConfigError> {
 fn collect_included(
     expression: &str,
     base_dir: &Path,
+    root_dir: &Path,
     definitions: &mut Vec<RawPlugin>,
     inputs: Option<&mut crate::special_groups::CandidateInputSet>,
 ) -> Result<(), ConfigError> {
@@ -1682,7 +1715,7 @@ fn collect_included(
         definitions.push(decode_plugin(
             plugin,
             &format!("{}.plugins[{index}]", included.display),
-            &included.base_dir,
+            root_dir,
         )?);
     }
     Ok(())
@@ -1692,7 +1725,6 @@ fn collect_included(
 struct IncludedFile {
     display: String,
     plugins: Vec<RawValue>,
-    base_dir: PathBuf,
 }
 
 fn load_included(
@@ -1742,7 +1774,6 @@ fn included_plugins(path: &Path, raw: &RawValue) -> Result<IncludedFile, ConfigE
     )?;
     Ok(IncludedFile {
         plugins: plugins.to_vec(),
-        base_dir: path.parent().unwrap_or_else(|| Path::new("")).to_path_buf(),
         display,
     })
 }
@@ -2113,12 +2144,6 @@ fn compile_definitions(
                 caches.push((plugin.tag.clone(), compiled, plugin.source_path.clone()));
             }
             PluginKind::Listener => {
-                if !managed_listeners && !listeners.is_empty() {
-                    return Err(ConfigError::new(
-                        &plugin.source_path,
-                        "exactly one listener plugin is supported without native management",
-                    ));
-                }
                 let candidate = compile_listener(plugin)?;
                 if listeners
                     .iter()
@@ -2639,20 +2664,40 @@ fn find_forward(
     None
 }
 
-fn compile_log(value: &RawValue) -> Result<LogLevel, ConfigError> {
+fn compile_log(value: &RawValue, root_dir: &Path) -> Result<LogSettings, ConfigError> {
     let map = expect_map(value, "$.log", "log must be a mapping")?;
-    map.reject_unknown(&["level"], "$.log")?;
+    map.reject_unknown(&["level", "file"], "$.log")?;
     let level = expect_string(map.required("level", "$.log")?, "$.log.level")?;
-    if level != "error" {
-        return Err(ConfigError::new(
-            "$.log.level",
-            "only the error level is supported",
-        ));
-    }
-    Ok(LogLevel::Error)
+    let (level, unknown_level) = match level.as_str() {
+        "debug" => (LogLevel::Debug, None),
+        "info" => (LogLevel::Info, None),
+        "warn" => (LogLevel::Warn, None),
+        "error" => (LogLevel::Error, None),
+        _ => (LogLevel::Info, Some(level)),
+    };
+    let file = match map.get("file") {
+        None => None,
+        Some(value) => {
+            let file = expect_string(value, "$.log.file")?;
+            (!file.is_empty()).then(|| resolve_relative(&file, root_dir))
+        }
+    };
+    Ok(LogSettings {
+        level,
+        file,
+        unknown_level,
+    })
 }
 
-fn decode_plugin(value: &RawValue, path: &str, base_dir: &Path) -> Result<RawPlugin, ConfigError> {
+/// Reads only the `log` section so `start` can route diagnostics before the
+/// full compilation emits any.
+pub(crate) fn log_settings(yaml: &str, root_dir: &Path) -> Result<LogSettings, ConfigError> {
+    let raw = parse_yaml(yaml)?;
+    let root = expect_map(&raw, "$", "top level must be a mapping")?;
+    compile_log(root.required("log", "$")?, root_dir)
+}
+
+fn decode_plugin(value: &RawValue, path: &str, root_dir: &Path) -> Result<RawPlugin, ConfigError> {
     let map = expect_map(value, path, "plugin must be a mapping")?;
     map.reject_unknown(&["tag", "type", "args"], path)?;
     let tag = expect_string(map.required("tag", path)?, &format!("{path}.tag"))?;
@@ -2685,7 +2730,7 @@ fn decode_plugin(value: &RawValue, path: &str, base_dir: &Path) -> Result<RawPlu
         kind,
         args,
         source_path: path.to_owned(),
-        base_dir: base_dir.to_path_buf(),
+        root_dir: root_dir.to_path_buf(),
     })
 }
 
@@ -2825,7 +2870,7 @@ fn compile_switch_declaration(
     }
     let type_number = crate::switch::switch_type_number(&plugin.kind)
         .expect("switch kind is validated before compilation");
-    let state_file = crate::switch::resolved_state_file(&declared, &plugin.base_dir, &path)?;
+    let state_file = crate::switch::resolved_state_file(&declared, &plugin.root_dir, &path)?;
     Ok(crate::switch::SwitchDeclaration {
         type_number,
         tag: plugin.tag.clone(),
@@ -3030,7 +3075,7 @@ fn compile_domain_set(
     let mut strict_expressions = expressions.clone();
     let mut remaining_files = Vec::new();
     for file in &files {
-        let path = resolve_rule_path(file, &plugin.base_dir);
+        let path = resolve_rule_path(file, &plugin.root_dir);
         let candidate =
             staged.and_then(|files| files.get(&crate::special_groups::lexical_path(&path)));
         if !strict && candidate.is_none() {
@@ -3103,7 +3148,7 @@ fn compile_domain_set(
     let (matcher, accepted) = build_domain_set_with_inputs(
         &strict_expressions,
         &remaining_files,
-        &plugin.base_dir,
+        &plugin.root_dir,
         inputs,
     )
     .map_err(|error| match error {
@@ -3133,12 +3178,12 @@ fn compile_domain_set(
     let references: Vec<PathBuf> = files
         .iter()
         .map(|file| {
-            let path = resolve_rule_path(file, &plugin.base_dir);
+            let path = resolve_rule_path(file, &plugin.root_dir);
             canonicalized_path(&path).unwrap_or(path)
         })
         .collect();
     let candidate = if single_txt_file {
-        let file = resolve_rule_path(&files[0], &plugin.base_dir);
+        let file = resolve_rule_path(&files[0], &plugin.root_dir);
         Some(ManagedCandidate {
             file,
             identity: references
@@ -3251,7 +3296,7 @@ fn compile_cache(plugin: &RawPlugin) -> Result<CompiledCacheArgs, ConfigError> {
                     "dump_file must not be empty",
                 ));
             }
-            let resolved = resolve_relative(&declared, &plugin.base_dir);
+            let resolved = resolve_relative(&declared, &plugin.root_dir);
             let absolute = if resolved.is_absolute() {
                 resolved
             } else {
@@ -3391,7 +3436,7 @@ fn compile_sequence(
                     &expression,
                     &format!("{matches_path}[{match_index}]"),
                     catalog,
-                    &plugin.base_dir,
+                    &plugin.root_dir,
                 )?);
             }
         }
@@ -3722,10 +3767,12 @@ fn compile_exec_item(
                         ConfigError::new(path, "legacy ecs requires an IP")
                     })?));
                 if mask.is_some() {
-                    eprintln!("native {path}: legacy ecs mask is ignored");
+                    crate::diag::warn_line!("native {path}: legacy ecs mask is ignored");
                 }
                 if tokens.next().is_some() {
-                    eprintln!("native {path}: trailing legacy ecs arguments are ignored");
+                    crate::diag::warn_line!(
+                        "native {path}: trailing legacy ecs arguments are ignored"
+                    );
                 }
             } else {
                 policy.active = false;
@@ -4002,16 +4049,16 @@ fn compile_listener(plugin: &RawPlugin) -> Result<ListenerConfig, ConfigError> {
         ));
     }
     let listen = expect_string(args.required("listen", &path)?, &format!("{path}.listen"))?;
-    let listen = parse_socket_addr(&listen, &format!("{path}.listen"))?;
-    let enable_audit = expect_bool(
-        args.required("enable_audit", &path)?,
-        &format!("{path}.enable_audit"),
-    )?;
+    let listen = parse_listen_addr(&listen, &format!("{path}.listen"))?;
+    let enable_audit = match args.get("enable_audit") {
+        Some(value) => expect_bool(value, &format!("{path}.enable_audit"))?,
+        None => false,
+    };
     let idle_timeout = if is_tcp {
-        let timeout = expect_positive_integer(
-            args.required("idle_timeout", &path)?,
-            &format!("{path}.idle_timeout"),
-        )?;
+        let timeout = match args.get("idle_timeout") {
+            Some(value) => expect_positive_integer(value, &format!("{path}.idle_timeout"))?,
+            None => DEFAULT_TCP_IDLE_TIMEOUT_SECS,
+        };
         Some(Duration::from_secs(timeout))
     } else {
         None
@@ -4305,6 +4352,21 @@ fn validate_inactive_forward_options(item: &RawMap, path: &str) -> Result<(), Co
     Ok(())
 }
 
+/// The reference `tcp_server` default when `idle_timeout` is not configured.
+const DEFAULT_TCP_IDLE_TIMEOUT_SECS: u64 = 10;
+
+/// A listener address: a numeric `ip:port`, or `:port` for every address,
+/// which binds the IPv6 wildcard (dual-stack, see `bind.rs`).
+fn parse_listen_addr(value: &str, path: &str) -> Result<SocketAddr, ConfigError> {
+    match value.strip_prefix(':') {
+        Some(port) => match port.parse::<u16>() {
+            Ok(port) if port != 0 => Ok(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port)),
+            _ => Err(ConfigError::new(path, "port must be a nonzero number")),
+        },
+        None => parse_socket_addr(value, path),
+    }
+}
+
 fn parse_socket_addr(value: &str, path: &str) -> Result<SocketAddr, ConfigError> {
     let socket = value.parse::<SocketAddr>().map_err(|_| {
         ConfigError::new(
@@ -4391,7 +4453,10 @@ struct RawPlugin {
     kind: String,
     args: RawValue,
     source_path: String,
-    base_dir: PathBuf,
+    /// The configuration root every relative plugin-argument path resolves
+    /// against (`-d`, else the main configuration's directory), regardless of
+    /// which file declared the plugin.
+    root_dir: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -4594,7 +4659,7 @@ fn policy_sources(
     let inline = policy_strings(args.get(field), &format!("{path}.{field}"))?;
     let files = policy_strings(args.get("files"), &format!("{path}.files"))?
         .into_iter()
-        .map(|file| resolve_rule_path(&file, &plugin.base_dir))
+        .map(|file| resolve_rule_path(&file, &plugin.root_dir))
         .collect();
     Ok((inline, files))
 }
@@ -4993,7 +5058,7 @@ plugins:
   - { tag: f, type: forward, args: { upstreams: [ { addr: udp://127.0.0.1:53 } ] } }
   - { tag: s, type: sequence, args: [ { exec: "$f" } ] }
   - { tag: l1, type: udp_server, args: { entry: s, listen: "127.0.0.1:53", enable_audit: false } }
-  - { tag: l2, type: udp_server, args: { entry: s, listen: "127.0.0.1:54", enable_audit: false } }
+  - { tag: l2, type: udp_server, args: { entry: s, listen: "127.0.0.1:53", enable_audit: false } }
 "#;
         assert!(compile_yaml(duplicate_listener).is_err());
     }

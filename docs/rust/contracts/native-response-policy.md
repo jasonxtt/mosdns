@@ -10,7 +10,7 @@ S1 of `rust-native-response-policy-ip-rules` compiles immutable startup policy d
 
 ## 3. Contracts
 
-Named `hosts` accepts entries/files; `redirect` rules/files; `ip_set` ips/files and empty sets only. Missing/null lists are empty. Quick `ttl` accepts exactly one unsigned decimal uint32 or min-max pair; zero and inverted bounds compile. Expanded `resp_ip` combines literal/CIDR, `$ip_set` and `&text-file` by OR. Relative files resolve against the declaring YAML/include directory. Domain payload defaults to full match; existing core full/suffix/regexp/keyword precedence applies. Duplicate patterns replace payload without changing first registration order. Files follow inline rules and may replace their payloads. IPv4-mapped hosts literals remain in the IPv6 family.
+Named `hosts` accepts entries/files; `redirect` rules/files; `ip_set` ips/files and empty sets only. Missing/null lists are empty. Quick `ttl` accepts exactly one unsigned decimal uint32 or min-max pair; zero and inverted bounds compile. Expanded `resp_ip` combines literal/CIDR, `$ip_set` and `&text-file` by OR. Relative files resolve against the configuration root (`-d`, else the main configuration's directory). Domain payload defaults to full match; existing core full/suffix/regexp/keyword precedence applies. Duplicate patterns replace payload without changing first registration order. Files follow inline rules and may replace their payloads. IPv4-mapped hosts literals remain in the IPv6 family.
 
 ## 4. Validation & Error Matrix
 
