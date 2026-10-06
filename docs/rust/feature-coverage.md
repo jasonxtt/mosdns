@@ -2,6 +2,16 @@
 
 规划盘点日期：2026-09-20。源码基线：`4fe08c0eebed45efd304f9b197ce1d6e5d2608d5`；盘点时存在无关工作树改动，本次不将它们计为迁移成果。
 
+2026-10-06 当前状态：下文第 2–6 节保留历史盘点，其中关于 switch、domain_set 等的旧
+“无证据/规划中”描述不代表当前源码状态。当前首次替换范围以原生 `check` 驱动的
+第 7 节“M1 范围标注”与 [M1 缺口清单](m1-gap-list.md) 为准；不自动提升任何整行状态，
+也不把 source presence 当作产品验收。
+
+2026-10-06 用户决定（见[重写方案第 6 节](../ai/rust-rewrite-plan.md)）：首次生产替换
+以自用 `config_all` 原生运行为功能门槛（M1）；`config_all` 未使用的条目延后到
+首次替换之后补齐，**仍保留在本表，不视为删除**。台账收敛改由原生 `check` 命令对
+`config_all` 的输出驱动，并在各行标注“M1”或“替换后”。
+
 本表是现有功能的迁移归属与验收台账，不是 Rust 功能完成声明。架构和阶段见 [重写方案](../ai/rust-rewrite-plan.md)，测量方法见 [性能验收方案](performance-validation.md)。后续 main 同步必须复查增删条目并记录参考 commit。
 
 ## 1. 状态与维护规则
@@ -297,3 +307,106 @@ The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validat
 | C11 native static/external hosting | Executable serves maintained `/`, compatibility `/log`, nested assets; safe Linux pinned mounts, live reads, budgets/saturation/timeout/worker drain; binary/config/data with source unavailable and no tools PATH | Full plugin/UI compatibility, unsupported-platform external mounts, performance/stability and production/default replacement |
 | C11 existing supported workflows | Both shells actual audit details, named-cache list/flush, eligible local-rule saves, managed group/upstream edits; controlled DNS/supplier/cache/files, real failure drafts, refresh/restart persistence; all mounted views/refresh suppress false operations; actual Go404 legacy workflow and same asset hashes | Go-only capture/aliases/switch/requery/remembered/AdGuard/system APIs remain unsupported in native; complete C11 and full5D/Phase6 remain pending |
 | C12 health/version/capability UI | CLI/HTTP shared product identity; all-bind/apply/recovery/stopping health; null schemas, visible native identity and per-family disabled reasons; local theme storage retained | Server appearance upload/history/colors, webui port/restart/update/config management/generation/overrides/process metrics; complete C12 remains pending |
+
+## 7. M1 范围标注（2026-10-06，原生 `check`）
+
+依据 [M1 缺口清单](m1-gap-list.md) 与原始输出 [config_all-check.txt](validation-records/10-06-config-check/config_all-check.txt)。
+只标注首次替换范围，**不改变上文任何整行的“原生接入/产品验收”状态**。“已有原生接入”表示
+`config_all` 对该条目的用法被当前原生编译器接受，并且有下列已归档证据；它不是整项产品验收。
+“替换后”条目仍保留在本表，首次替换之后补齐。API/UI 行按维护中 Vue 源码实际调用的端点归类。
+
+| ID | 条目 | M1 标注 | 已归档证据 |
+| --- | --- | --- | --- |
+| P01 | `domain_mapper` | M1；`check` 报缺口（M1-a，2 个） |  |
+| P02 | `domain_set` | 已有原生接入；M1-0 起 `config_all` 的 2 个实例（`gen/*.txt`）按配置根目录解析，`check` 通过 | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md)、[domain_set 管理](validation-records/09-28-rust-native-domain-set-management/prd.md) |
+| P03 | `domain_set_light` | M1；`check` 报缺口（M1-a，11 个） |  |
+| P04 | `ip_set` | 已有原生接入（`config_all` 用法 `check` 通过）；文件路径基准见 §3.1 | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
+| P05 | `sd_set` | 替换后 |  |
+| P06 | `sd_set_light` | M1；`check` 报缺口（M1-a，4 个） |  |
+| P07 | `si_set` | M1；`check` 报缺口（M1-a，1 个） |  |
+| P08 | `client_ip` | 已有原生接入（`config_all` 用法 `check` 通过） | [client/ECS](validation-records/10-02-rust-native-client-context-ecs/) |
+| P09 | `cname` | 替换后（`config_all` 未使用） |  |
+| P10 | `env` | 替换后 |  |
+| P11 | `fast_mark` | 已有原生接入（`config_all` 用法 `check` 通过） | [fast_mark/flow_setter](validation-records/09-28-rust-native-fast-mark-flow-setter/) |
+| P12 | `has_resp` | 替换后（`config_all` 未使用；已有子项证据） | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| P13 | `has_wanted_ans` | 替换后 |  |
+| P14 | `ptr_ip` | 替换后 |  |
+| P15 | `qclass` | 替换后 |  |
+| P16 | `qname` | 替换后（`config_all` 未使用；已有子项证据） | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| P17 | `qtype` | 已有原生接入（`config_all` 用法 `check` 通过） | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| P18 | `random` | 替换后 |  |
+| P19 | `rcode` | M1；`check` 报缺口（M1-b，6 处 matcher） |  |
+| P20 | `resp_ip` | 已有原生接入（`config_all` 用法 `check` 通过）；`$geoip_cn` 引用随 P07 | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
+| P21 | `string_exp` | 替换后 |  |
+| P22 | `adguard_rule` | M1；`check` 报缺口；因被 `unified_matcher1` 引用，规则加载移入 M1-a1，管理归 M1-a2 |  |
+| P23 | `aliapi` | M1；`check` 报缺口（M1-b，5 个） |  |
+| P24 | `arbitrary` | 替换后 |  |
+| P25 | `black_hole` | 替换后 |  |
+| P26 | `cache` | 已有原生接入（`config_all` 用法 `check` 通过）；`dump_file` 路径基准见 §3.1 | [cache 生命周期](validation-records/10-01-rust-native-cache-lifecycle-management/prd.md) |
+| P27 | `cname_remover` | 已有原生接入（`config_all` 用法 `check` 通过）（quick） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
+| P28 | `debug_print` | 替换后 |  |
+| P29 | `domain_output` | M1；`check` 报缺口（M1-c，8 个） |  |
+| P30 | `drop_resp` | M1；`check` 报缺口（M1-b，10 处 exec） |  |
+| P31 | `prefer_ipv4`, `prefer_ipv6` | 已有原生接入（`config_all` 用法 `check` 通过）（`config_all` 只用 `prefer_ipv4`） | [fallback/地址偏好](validation-records/10-01-rust-native-query-fallback-address-preference/) |
+| P32 | `ecs_handler` | 替换后（插件类型未使用；quick `ecs` 见 L03） | [client/ECS](validation-records/10-02-rust-native-client-context-ecs/) |
+| P33 | `flow_setter` | 已有原生接入（`config_all` 用法 `check` 通过） | [fast_mark/flow_setter](validation-records/09-28-rust-native-fast-mark-flow-setter/) |
+| P34 | `forward` | M1（经 P23 `aliapi` 提供上游；`config_all` 不直接声明 `forward`） | [上游转发](validation-records/09-30-rust-native-upstream-forwarding/prd.md) |
+| P35 | `forward_edns0opt` | 替换后 |  |
+| P36 | `hosts` | 替换后（`config_all` 未使用；已有子项证据） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
+| P37 | `metrics_collector` | 替换后 |  |
+| P38 | `query_summary` | 替换后 |  |
+| P39 | `rate_limiter` | 替换后 |  |
+| P40 | `redirect` | 替换后（`config_all` 未使用；已有子项证据） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
+| P41 | `requery` | M1；`check` 报缺口（M1-c） |  |
+| P42 | `reverse_lookup` | 替换后 |  |
+| P43 | `rewrite` | M1；`check` 报缺口（M1-b） |  |
+| P44 | `sequence` | 已有原生接入（`config_all` 用法 `check` 通过）（控制流与引用）；其中被剔除插件的引用为连带错误 | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| P45 | `fallback` | M1；`check` 报缺口（M1-b：`primary`/`secondary` 裸 tag 形式，2 个） | [fallback/地址偏好](validation-records/10-01-rust-native-query-fallback-address-preference/) |
+| P46 | `sleep` | M1；`check` 报缺口（M1-b，`sleep 1000`） |  |
+| P47 | `switch1` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P48 | `switch10` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P49 | `switch11` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P50 | `switch12` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P51 | `switch13` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P52 | `switch14` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P53 | `switch15` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P54 | `switch16` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P55 | `switch17` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P56 | `switch2` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P57 | `switch3` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P58 | `switch4` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P59 | `switch5` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P60 | `switch6` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P61 | `switch7` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P62 | `switch8` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P63 | `switch9` | 已有原生接入（`config_all` 用法 `check` 通过）；状态文件路径基准见 §3.1 | [switch 状态](validation-records/10-05-rust-native-switch-state-management/) |
+| P64 | `tag_setter` | M1；`check` 报缺口（M1-b，10 处 exec） |  |
+| P65 | `ttl` | 已有原生接入（`config_all` 用法 `check` 通过） | [响应策略/IP 规则](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md) |
+| P66 | `webinfo` | M1；`check` 报缺口（M1-b） |  |
+| P67 | `mark` | 替换后（`config_all` 未使用） |  |
+| P68 | `http_server` | 替换后 |  |
+| P69 | `quic_server` | 替换后 |  |
+| P70 | `tcp_server` | 已有原生接入；M1-0 起 `listen: ":port"`（双栈）、`enable_audit`/`idle_timeout` 可选、多 listener 无需 `native_management`（`config_all` 的 listener `check` 通过） | [5A routing](validation-records/09-22-rust-phase5a-native-routing/)、[5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| P71 | `udp_server` | 已有原生接入；M1-0 起同 P70（`config_all` 的 listener `check` 通过） | [5A routing](validation-records/09-22-rust-phase5a-native-routing/)、[5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| L01 | 控制流内置 | 已有原生接入（`exit`/`reject`/`try` 通过） | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| L02 | quick setup/取反/命名引用 | M1；框架已接入，quick 项缺口见 P19/P30/P46/P64 | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| L03 | `ecs` 旧入口 | 已有原生接入（`config_all` 用法 `check` 通过） | [client/ECS](validation-records/10-02-rust-native-client-context-ecs/) |
+| L04 | `_remove_cname` | 替换后（`config_all` 用 quick `cname_remover`） |  |
+| L05 | `_sleep_500ms` | 替换后（`config_all` 用 quick `sleep 1000`，归 P46） |  |
+| C01 | YAML/include/启动 | 已有原生接入；M1-0 起 `-d`/配置根目录路径基准、`log.level`（debug/info/warn/error）、`log.file`（追加）均 `check` 通过；M1 仍等待插件缺口（见 [M1 缺口清单](m1-gap-list.md)） | [5B 代表链](validation-records/09-27-rust-phase5b-config-sequence-composition/prd.md) |
+| C02 | DNS wire/server | M1（全链路固有） | [5A routing](validation-records/09-22-rust-phase5a-native-routing/) |
+| C03 | 上游配置及策略 | M1（https/tls/udp，经 `aliapi`） | [上游转发](validation-records/09-30-rust-native-upstream-forwarding/prd.md) |
+| C04 | 数据格式与规则下载 | M1（SRS/geodata json、adguard 规则，随 M1-a/b） |  |
+| C05 | `special_groups` | M1；未托管配置下的形态见 M1 清单 §3.2 | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
+| C06 | 上游管理 | M1（随 `aliapi`） | [special_groups/上游管理](validation-records/10-02-rust-native-special-groups-upstream-management/prd.md) |
+| C07 | 配置导出/更新/生成 | M1（切换门槛，执行顺序第 5 项） |  |
+| C08 | 查询审计 | M1（WebUI 使用面；`check` 不覆盖 API） | [查询诊断](validation-records/09-30-rust-native-query-diagnostics-overview/prd.md) |
+| C09 | 日志/capture | M1（维护中 Vue 调用 `/api/v1/capture/*`；`check` 不覆盖 API 面） |  |
+| C10 | Prometheus/插件 API | M1（维护中 Vue 调用 `/metrics` 与 `/plugins/{tag}`） |  |
+| C11 | Vue `/`、`/log`、UI 挂载 | M1（WebUI 使用面） | [WebUI 运行时](validation-records/10-04-rust-native-webui-runtime-capabilities/) |
+| C12 | 外观与系统设置 | M1（维护中 Vue 调用 `/api/v1/appearance/*` 等） | [WebUI 运行时](validation-records/10-04-rust-native-webui-runtime-capabilities/) |
+| C13 | cache dump/运行时文件 | M1（7 个 cache 带 `dump_file`；路径基准见 §3.1） | [cache 生命周期](validation-records/10-01-rust-native-cache-lifecycle-management/prd.md) |
+| C14 | CLI/服务生命周期 | M1（Linux amd64） |  |
+| C15 | 二进制/配置更新与发布 | M1（切换门槛，执行顺序第 5 项） |  |
+| C16 | `/debug/pprof` | 替换后（`webui-log/src`、`src-log1` 与 `config_all` 均不引用；延后不等于删除，C16 的兼容决策要求保留） |  |
+| C17 | 配置包 | M1（本清单即基于 `config_all` 实际包版本） |  |
