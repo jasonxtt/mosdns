@@ -304,8 +304,35 @@ pub struct NativeCache {
     state: CacheState,
 }
 
+/// An optional native-only immutable attachment. It shares the exact entry's
+/// replacement/eviction/flush lifetime. Native snapshots retain it; codecs choose
+/// supported typed metadata. It remains absent from the transitional ABI.
+#[derive(Clone)]
+pub struct NativeAttachment(Arc<dyn std::any::Any + Send + Sync>);
+impl NativeAttachment {
+    pub fn new<T: std::any::Any + Send + Sync>(value: T) -> Self {
+        Self(Arc::new(value))
+    }
+    #[must_use]
+    pub fn downcast_ref<T: std::any::Any>(&self) -> Option<&T> {
+        self.0.downcast_ref()
+    }
+}
+impl std::fmt::Debug for NativeAttachment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NativeAttachment")
+    }
+}
+impl PartialEq for NativeAttachment {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for NativeAttachment {}
+
 #[derive(Debug)]
 struct CacheEntry {
+    attachment: Option<NativeAttachment>,
     response: Bytes,
     domain_set: Bytes,
     stored_at_unix: i64,
@@ -316,6 +343,7 @@ struct CacheEntry {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct NativeLookup {
+    pub attachment: Option<NativeAttachment>,
     pub state: LookupState,
     pub stored_at_unix: i64,
     pub message_expires_at_unix: i64,
@@ -326,6 +354,7 @@ pub struct NativeLookup {
 /// An owned native snapshot; runtime timestamps use the caller's monotonic epoch.
 #[derive(Clone, Debug)]
 pub struct NativeSnapshotEntry {
+    pub attachment: Option<NativeAttachment>,
     pub key: Vec<u8>,
     pub response: Vec<u8>,
     pub domain_set: Vec<u8>,
@@ -350,6 +379,7 @@ impl PreparedNativeEntry {
         Ok(Self {
             key: Bytes::from(item.key),
             entry: Arc::new(CacheEntry {
+                attachment: item.attachment,
                 response: Bytes::from(item.response),
                 domain_set: Bytes::from(item.domain_set),
                 stored_at_unix: item.times[0],
@@ -410,6 +440,7 @@ fn lookup_data(
         CacheError::Internal
     })?;
     Ok(Some(NativeLookup {
+        attachment: entry.attachment.clone(),
         state: lookup_state,
         stored_at_unix: entry.stored_at_unix,
         message_expires_at_unix: entry.message_expires_at_unix,
@@ -462,6 +493,18 @@ impl NativeCache {
         times: [i64; 3],
         wall_times: Option<[i64; 3]>,
     ) -> Result<(), CacheError> {
+        self.store_timed_with_attachment(key, response, domain_set, times, wall_times, None)
+    }
+
+    pub fn store_timed_with_attachment(
+        &self,
+        key: &[u8],
+        response: &[u8],
+        domain_set: &[u8],
+        times: [i64; 3],
+        wall_times: Option<[i64; 3]>,
+        attachment: Option<NativeAttachment>,
+    ) -> Result<(), CacheError> {
         let [
             stored_at_unix,
             message_expires_at_unix,
@@ -477,6 +520,7 @@ impl NativeCache {
         self.state.entries.insert(
             Bytes::copy_from_slice(key),
             Arc::new(CacheEntry {
+                attachment,
                 response: Bytes::copy_from_slice(response),
                 domain_set: Bytes::copy_from_slice(domain_set),
                 stored_at_unix,
@@ -504,6 +548,7 @@ impl NativeCache {
             .iter()
             .filter_map(|(key, entry)| {
                 (entry.cache_expires_at_unix > now).then(|| NativeSnapshotEntry {
+                    attachment: entry.attachment.clone(),
                     key: key.to_vec(),
                     response: entry.response.to_vec(),
                     domain_set: entry.domain_set.to_vec(),
@@ -541,6 +586,7 @@ impl NativeCache {
                 return Err(CacheError::InvalidConfig);
             }
             snapshot.push(NativeSnapshotEntry {
+                attachment: entry.attachment.clone(),
                 key: key.to_vec(),
                 response: entry.response.to_vec(),
                 domain_set: entry.domain_set.to_vec(),
@@ -918,6 +964,71 @@ mod tests {
 
     fn answer_ttl(packet: &[u8]) -> u32 {
         u32::from_be_bytes(packet[35..39].try_into().expect("answer TTL"))
+    }
+
+    #[test]
+    fn native_attachment_tracks_entry_replacement_flush_and_import() {
+        let cache = NativeCache::new(CONFIG).unwrap();
+        let wire = response(60, [192, 0, 2, 1]);
+        cache
+            .store_timed_with_attachment(
+                b"key",
+                &wire,
+                b"rules",
+                [100, 160, 200],
+                None,
+                Some(super::NativeAttachment::new(7_u64)),
+            )
+            .unwrap();
+        assert_eq!(
+            cache
+                .lookup(b"key", 101)
+                .unwrap()
+                .unwrap()
+                .attachment
+                .unwrap()
+                .downcast_ref::<u64>(),
+            Some(&7)
+        );
+        let snapshot = cache.snapshot(101);
+        cache.merge_prepared(
+            snapshot
+                .into_iter()
+                .map(|item| super::PreparedNativeEntry::new(item).unwrap())
+                .collect(),
+        );
+        assert_eq!(
+            cache
+                .lookup(b"key", 101)
+                .unwrap()
+                .unwrap()
+                .attachment
+                .unwrap()
+                .downcast_ref::<u64>(),
+            Some(&7),
+            "native snapshots preserve attachment"
+        );
+        cache
+            .store_timed_with_attachment(
+                b"key",
+                &wire,
+                b"rules",
+                [100, 160, 200],
+                None,
+                Some(super::NativeAttachment::new(8_u64)),
+            )
+            .unwrap();
+        cache.store(b"key", &wire, b"", 100, 160, 200).unwrap();
+        assert!(
+            cache
+                .lookup(b"key", 101)
+                .unwrap()
+                .unwrap()
+                .attachment
+                .is_none()
+        );
+        cache.flush();
+        assert!(cache.lookup(b"key", 101).unwrap().is_none());
     }
 
     #[test]

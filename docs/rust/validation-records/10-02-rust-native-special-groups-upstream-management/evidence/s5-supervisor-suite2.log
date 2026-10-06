@@ -1,0 +1,29 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.97s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-ffd12075785eba3b)
+
+running 21 tests
+test audit_can_be_enabled_by_a_later_managed_snapshot ... ok
+test capabilities_disable_managed_features_without_the_native_profile ... ok
+test api_failure_releases_all_main_and_custom_listener_sockets ... ok
+test changing_listener_entry_invalidates_a_shared_wire_cache ... ok
+test custom_udp_tcp_pair_serves_the_group_without_main_matching ... ok
+test concurrent_managed_writes_and_cache_management_preserve_committed_state ... ok
+test discarded_candidate_does_not_change_upstream_inventory ... ok
+test disconnected_manual_post_remains_owned_until_transaction_commit ... ok
+test diversion_catalog_http_uses_single_transaction_for_source_rename ... ok
+test managed_manual_http_post_commits_rule_file_and_new_generation ... ok
+test managed_publication_cannot_disable_the_frozen_opt_in ... ok
+test occupied_listener_update_returns_conflict_and_preserves_active_generation ... ok
+test occupied_tcp_rolls_back_the_prebound_udp_half ... ok
+test in_flight_uses_old_snapshot_and_next_tcp_frame_uses_new_snapshot ... ok
+test running_port_change_prebinds_both_halves_and_drains_only_removed_sockets ... ok
+test special_group_zero_or_missing_slot_allocates_the_first_unused_slot ... ok
+test removing_another_group_preserves_the_live_tcp_upstream_owner ... ok
+test special_groups_http_view_reflects_the_committed_profile ... ok
+test special_groups_http_crud_commits_and_removes_owned_state ... ok
+test stable_api_captures_the_snapshot_after_the_complete_http_request ... ok
+test upstream_http_snapshot_save_changes_generation_and_dns_supplier ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+

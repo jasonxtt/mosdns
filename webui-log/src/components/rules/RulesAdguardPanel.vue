@@ -11,6 +11,10 @@ defineProps({
   formatTime: {
     type: Function,
     required: true
+  },
+  supported: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -19,6 +23,10 @@ defineEmits(['create', 'update-all', 'toggle', 'update', 'edit', 'delete'])
 
 <template>
   <section class="sub-panel">
+    <div v-if="!supported" class="muted" role="note">
+      当前原生运行时不提供 AdGuard 在线下载管理；现有规则数据保持不变。
+    </div>
+    <template v-else>
     <div class="actions">
       <button class="btn primary entry-action-btn" @click="$emit('create')">新增拦截规则</button>
       <button class="btn warning entry-action-btn" @click="$emit('update-all')">更新全部规则</button>
@@ -62,5 +70,6 @@ defineEmits(['create', 'update-all', 'toggle', 'update', 'edit', 'delete'])
         </tbody>
       </table>
     </div>
+    </template>
   </section>
 </template>

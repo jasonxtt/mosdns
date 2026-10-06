@@ -1,0 +1,64 @@
+{
+  "api": 38635,
+  "dns": 34291,
+  "pid": 259492,
+  "pages": [
+    {
+      "path": "/",
+      "title": "MosDNS Dashboard (Vue Preview)",
+      "requests": [
+        "/",
+        "/assets/vue-log/app.css",
+        "/assets/vue-log/app.js",
+        "/api/v1/capabilities",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/api/v1/system/health",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective"
+      ]
+    },
+    {
+      "path": "/log",
+      "title": "MosDNS Dashboard (Log1 Preview)",
+      "requests": [
+        "/log",
+        "/assets/vue-log1/app.css",
+        "/assets/vue-log1/app.js",
+        "/api/v1/capabilities",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/api/v1/system/health",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective"
+      ]
+    }
+  ],
+  "unsupported": [],
+  "errors": [],
+  "status": "PASS",
+  "cleanup": {
+    "forced": false,
+    "exit": {
+      "code": 0,
+      "signal": null
+    }
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (/root/mosdns-rust-webui-20261004/evidence/s5-adapted/runtime/webinfo/audit_settings.json)\n"
+}

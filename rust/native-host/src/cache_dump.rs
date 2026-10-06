@@ -31,6 +31,52 @@ fn field(out: &mut Vec<u8>, number: u64, bytes: &[u8]) {
     varint(out, bytes.len() as u64);
     out.extend_from_slice(bytes);
 }
+// Entry field 7 is a versioned native extension; existing Go protobuf readers
+// skip it. Fields 1..6, gzip name and framing remain mosdns_cache_v2.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DumpOrigin {
+    version: u8,
+    entry: String,
+    peer: Option<std::net::SocketAddr>,
+    transport: Option<String>,
+}
+const MAX_ORIGIN: usize = 64 * 1024;
+fn validate_origin(value: &DumpOrigin) -> Result<(), CacheAdapterError> {
+    if value.version != 1
+        || value.entry.is_empty()
+        || value.entry.len() > MAX_ORIGIN / 8
+        || value
+            .transport
+            .as_deref()
+            .is_some_and(|transport| !matches!(transport, "udp" | "tcp" | "tls" | "https"))
+    {
+        return Err(bad());
+    }
+    Ok(())
+}
+fn decode_origin(bytes: &[u8]) -> Result<mosdns_cache_core::NativeAttachment, CacheAdapterError> {
+    if bytes.len() > MAX_ORIGIN {
+        return Err(bad());
+    }
+    let value: DumpOrigin = serde_json::from_slice(bytes).map_err(|_| bad())?;
+    validate_origin(&value)?;
+    let transport = match value.transport.as_deref() {
+        Some("udp") => Some("udp"),
+        Some("tcp") => Some("tcp"),
+        Some("tls") => Some("tls"),
+        Some("https") => Some("https"),
+        None => None,
+        _ => return Err(bad()),
+    };
+    Ok(mosdns_cache_core::NativeAttachment::new(
+        mosdns_sequence_core::ResponseOrigin {
+            identity: std::sync::Arc::from(value.entry),
+            peer: value.peer,
+            transport,
+        },
+    ))
+}
 fn encode_entry(entry: &NativeSnapshotEntry) -> Result<Vec<u8>, CacheAdapterError> {
     let [stored, msg, cache] = entry.wall_times.ok_or_else(bad)?;
     let mut out = Vec::new();
@@ -42,6 +88,27 @@ fn encode_entry(entry: &NativeSnapshotEntry) -> Result<Vec<u8>, CacheAdapterErro
     }
     if !entry.domain_set.is_empty() {
         field(&mut out, 6, &entry.domain_set);
+    }
+    if let Some(origin) = entry
+        .attachment
+        .as_ref()
+        .and_then(|attachment| attachment.downcast_ref::<mosdns_sequence_core::ResponseOrigin>())
+    {
+        if origin.identity.len() > MAX_ORIGIN / 8 {
+            return Err(bad());
+        }
+        let value = DumpOrigin {
+            version: 1,
+            entry: origin.identity.to_string(),
+            peer: origin.peer,
+            transport: origin.transport.map(str::to_owned),
+        };
+        validate_origin(&value)?;
+        let bytes = serde_json::to_vec(&value).map_err(|_| bad())?;
+        if bytes.len() > MAX_ORIGIN {
+            return Err(bad());
+        }
+        field(&mut out, 7, &bytes);
     }
     Ok(out)
 }
@@ -136,6 +203,7 @@ fn decode_entry(
     let mut data = [Vec::new(), Vec::new(), Vec::new()];
     let mut times = [0_i64; 3];
     let mut seen = 0;
+    let mut attachment = None;
     while input.pos < bytes.len() {
         let tag = input.integer()?;
         let number = tag >> 3;
@@ -143,7 +211,7 @@ fn decode_entry(
         if number == 0 {
             return Err(bad());
         }
-        if number <= 6 {
+        if number <= 7 {
             let bit = 1 << number;
             if seen & bit != 0 {
                 return Err(bad());
@@ -159,6 +227,11 @@ fn decode_entry(
                     let value = input.data()?;
                     charge(budget, value.len())?;
                     data[index] = value.to_vec();
+                }
+                7 if kind == 2 => {
+                    let value = input.data()?;
+                    charge(budget, value.len())?;
+                    attachment = Some(decode_origin(value)?);
                 }
                 3..=5 if kind == 0 => {
                     let index = match number {
@@ -176,6 +249,7 @@ fn decode_entry(
     }
     let [key, response, domain_set] = data;
     Ok(NativeSnapshotEntry {
+        attachment,
         key,
         response,
         domain_set,
@@ -242,6 +316,62 @@ mod tests {
         writer.write_all(payload).unwrap();
         writer.finish().unwrap()
     }
+
+    #[test]
+    fn origin_extension_roundtrip_legacy_and_malformed_are_bounded() {
+        let origin = mosdns_sequence_core::ResponseOrigin {
+            identity: std::sync::Arc::from("persisted_supplier"),
+            peer: Some("127.0.0.1:25556".parse().unwrap()),
+            transport: Some("udp"),
+        };
+        let mut item = NativeSnapshotEntry {
+            attachment: Some(mosdns_cache_core::NativeAttachment::new(origin.clone())),
+            key: vec![1],
+            response: vec![2],
+            domain_set: vec![],
+            times: [0; 3],
+            wall_times: Some([1, 2, 3]),
+        };
+        let decoded = decode(&encode(&[item.clone()]).unwrap()).unwrap();
+        assert_eq!(
+            decoded[0]
+                .attachment
+                .as_ref()
+                .unwrap()
+                .downcast_ref::<mosdns_sequence_core::ResponseOrigin>(),
+            Some(&origin)
+        );
+        item.attachment = None;
+        assert!(
+            decode(&encode(&[item.clone()]).unwrap()).unwrap()[0]
+                .attachment
+                .is_none()
+        );
+        for bytes in [
+            br#"{"version":2,"entry":"peer","peer":null,"transport":"udp"}"#.as_slice(),
+            br#"{"version":1,"entry":"","peer":null,"transport":"udp"}"#,
+            br#"{"version":1,"entry":"peer","peer":null,"transport":"quic"}"#,
+            br#"{"version":1,"entry":"peer","entry":"other","peer":null,"transport":"udp"}"#,
+        ] {
+            assert!(decode_origin(bytes).is_err());
+        }
+        assert!(decode_origin(&vec![b'x'; MAX_ORIGIN + 1]).is_err());
+        let mut entry = encode_entry(&item).unwrap();
+        field(
+            &mut entry,
+            7,
+            br#"{"version":1,"entry":"peer","peer":null,"transport":"udp"}"#,
+        );
+        field(
+            &mut entry,
+            7,
+            br#"{"version":1,"entry":"peer","peer":null,"transport":"udp"}"#,
+        );
+        assert!(
+            decode_entry(&entry, &mut 0).is_err(),
+            "duplicate origin fields rejected"
+        );
+    }
     #[test]
     fn stream_owned_and_entry_limits_apply_before_any_merge() {
         let mut writer = GzBuilder::new()
@@ -261,6 +391,7 @@ mod tests {
         framed.extend_from_slice(&payload);
         assert!(decode(&gzip(&framed)).is_err());
         let item = NativeSnapshotEntry {
+            attachment: None,
             key: vec![],
             response: vec![],
             domain_set: vec![],

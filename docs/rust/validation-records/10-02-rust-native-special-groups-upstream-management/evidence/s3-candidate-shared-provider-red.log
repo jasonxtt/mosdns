@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 9.07s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-d7fe384451f80feb)
+
+running 1 test
+test transaction::tests::candidate_owned_text_updates_every_referencing_immutable_provider ... FAILED
+
+failures:
+
+---- transaction::tests::candidate_owned_text_updates_every_referencing_immutable_provider stdout ----
+
+thread 'transaction::tests::candidate_owned_text_updates_every_referencing_immutable_provider' (41187) panicked at native-host/src/transaction.rs:663:13:
+shared_text must compile candidate bytes
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    transaction::tests::candidate_owned_text_updates_every_referencing_immutable_provider
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 114 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

@@ -1,0 +1,121 @@
+{
+  "api": 36039,
+  "dns": 43981,
+  "pid": 258242,
+  "pages": [
+    {
+      "path": "/",
+      "title": "MosDNS Dashboard (Vue Preview)",
+      "requests": [
+        "/",
+        "/assets/vue-log/app.css",
+        "/assets/vue-log/app.js",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/plugins/clientname",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/plugins/switch17/show",
+        "/api/v1/appearance/panel-background",
+        "/api/v1/appearance/text-color",
+        "/api/v1/appearance/button-color",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective"
+      ]
+    },
+    {
+      "path": "/log",
+      "title": "MosDNS Dashboard (Log1 Preview)",
+      "requests": [
+        "/log",
+        "/assets/vue-log1/app.css",
+        "/assets/vue-log1/app.js",
+        "/api/v2/audit/stats",
+        "/api/v1/audit/status",
+        "/api/v1/audit/capacity",
+        "/api/v2/audit/logs",
+        "/api/v2/audit/stats",
+        "/api/v2/audit/rank/domain",
+        "/api/v1/special-groups",
+        "/plugins/clientname",
+        "/api/v1/upstream/config",
+        "/metrics",
+        "/plugins/switch17/show",
+        "/api/v1/appearance/panel-background",
+        "/api/v1/appearance/text-color",
+        "/api/v1/appearance/button-color",
+        "/api/v2/audit/rank/client",
+        "/api/v2/audit/rank/slowest",
+        "/api/v2/audit/rank/effective"
+      ]
+    }
+  ],
+  "unsupported": [
+    {
+      "shell": "/plugins/clientname",
+      "page": "/plugins/clientname",
+      "url": "http://127.0.0.1:36039/plugins/clientname"
+    },
+    {
+      "shell": "/plugins/switch17/show",
+      "page": "/plugins/switch17/show",
+      "url": "http://127.0.0.1:36039/plugins/switch17/show"
+    },
+    {
+      "shell": "/api/v1/appearance/panel-background",
+      "page": "/api/v1/appearance/panel-background",
+      "url": "http://127.0.0.1:36039/api/v1/appearance/panel-background"
+    },
+    {
+      "shell": "/api/v1/appearance/text-color",
+      "page": "/api/v1/appearance/text-color",
+      "url": "http://127.0.0.1:36039/api/v1/appearance/text-color"
+    },
+    {
+      "shell": "/api/v1/appearance/button-color",
+      "page": "/api/v1/appearance/button-color",
+      "url": "http://127.0.0.1:36039/api/v1/appearance/button-color"
+    },
+    {
+      "shell": "/plugins/clientname",
+      "page": "/plugins/clientname",
+      "url": "http://127.0.0.1:36039/plugins/clientname"
+    },
+    {
+      "shell": "/plugins/switch17/show",
+      "page": "/plugins/switch17/show",
+      "url": "http://127.0.0.1:36039/plugins/switch17/show"
+    },
+    {
+      "shell": "/api/v1/appearance/panel-background",
+      "page": "/api/v1/appearance/panel-background",
+      "url": "http://127.0.0.1:36039/api/v1/appearance/panel-background"
+    },
+    {
+      "shell": "/api/v1/appearance/text-color",
+      "page": "/api/v1/appearance/text-color",
+      "url": "http://127.0.0.1:36039/api/v1/appearance/text-color"
+    },
+    {
+      "shell": "/api/v1/appearance/button-color",
+      "page": "/api/v1/appearance/button-color",
+      "url": "http://127.0.0.1:36039/api/v1/appearance/button-color"
+    }
+  ],
+  "errors": [],
+  "status": "FAIL",
+  "cleanup": {
+    "forced": false,
+    "exit": {
+      "code": 0,
+      "signal": null
+    }
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (/root/mosdns-rust-webui-20261004/evidence/s5-baseline/runtime/webinfo/audit_settings.json)\n"
+}

@@ -1,0 +1,10 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0425]: cannot find function `hosts` in this scope
+   --> native-host/src/policy.rs:626:21
+    |
+626 |         let rules = hosts(
+    |                     ^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `mosdns-native-host` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

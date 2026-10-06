@@ -1,13 +1,13 @@
 // null means an explicitly unsupported catalog and permits the Go fallback.
-export async function loadCacheInventory(getJSON) {
+export async function loadCacheInventory(getJSON, { native = false } = {}) {
   let inventory
   try {
     inventory = await getJSON('/api/v1/cache/inventory')
   } catch (error) {
-    if (error?.status === 404) return null
+    if (error?.status === 404 && !native) return null
     throw error
   }
-  if (inventory?.supported === false) return null
+  if (inventory?.supported === false) { if (native) throw new Error('原生缓存目录与声明能力不一致'); return null }
   if (inventory?.schema_version !== 1 || !Array.isArray(inventory.caches)) {
     throw new Error('缓存列表格式或版本不受支持')
   }

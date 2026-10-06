@@ -1,0 +1,25 @@
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/special_groups.rs:517:
+         None => {
+             let read_path = path.clone();
+             let worker_display = display.clone();
+-            let result = crate::transaction::blocking_io(move || {
+-                match std::fs::metadata(&read_path) {
++            let result =
++                crate::transaction::blocking_io(move || match std::fs::metadata(&read_path) {
+                     Ok(metadata) if metadata.len() > crate::policy::POLICY_BYTES_LIMIT as u64 => {
+                         Err(std::io::Error::other("rule file exceeds byte limit"))
+                     }
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/special_groups.rs:525:
+                     Ok(_) => std::fs::read(read_path).map(Some),
+                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                     Err(error) => Err(error),
+-                }
+-            })
+-            .map_err(|error| fail(worker_display.clone(), error.to_string()))?
+-            .map_err(|error| fail(worker_display, error.to_string()))?;
++                })
++                .map_err(|error| fail(worker_display.clone(), error.to_string()))?
++                .map_err(|error| fail(worker_display, error.to_string()))?;
+             match result {
+                 Some(bytes) => {
+                     inputs

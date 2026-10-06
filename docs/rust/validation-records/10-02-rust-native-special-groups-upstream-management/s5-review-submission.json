@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task": ".trellis/tasks/10-02-rust-native-special-groups-upstream-management",
+  "unit": "Slice 5",
+  "base_sha": "d43da11ababb0104c84b827f96ffd6262e00ac7e",
+  "head_sha": "b290a6de8e9dedeebb34f339fd36a17d55cd00bc",
+  "audit_tree": "0349e895943542cf1c575913812fd03b64258821",
+  "reviewer": {
+    "provider": "c2c-web",
+    "url": "https://chatgpt.com/c/6ac058cd-6138-83e8-af54-758358f73006",
+    "title": "Review Rust Native Groups"
+  },
+  "request_file": "docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s5-review-request.md",
+  "request_sha256": "c184466e4cd51205b24f9c7b166601623f2f5aa4efd95950782313c57dbd4a00",
+  "source_manifest": "docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-source-manifest.json",
+  "source_manifest_sha256": "759c52b8240e1a8964bffbb03d1b51e999a82da1f8bbc799b7d95674fa332dff",
+  "validation": {
+    "native_host": "375 passed / 0 failed / 3 ignored; ignored subprocess probes invoked by parent tests",
+    "format": "cargo fmt --all --check passed",
+    "clippy": "mosdns-native-host all-targets with -D warnings passed",
+    "source_inputs": "140 files; isolated-host and audit-tree hashes match"
+  },
+  "branch_head_at_submission": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "index_clean_at_submission": true,
+  "review_status": "fail",
+  "finding_ids": ["P1-1"],
+  "result_file": "docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s5-review-round-0-result.md"
+}

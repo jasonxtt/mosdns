@@ -1,4 +1,6 @@
 <script setup>
+import CapabilityBoundary from './CapabilityBoundary.vue'
+import { capabilityFetch, capabilityState, supportsOperation, operationReason, switchInstances, switchValueFromResponse } from '../api/runtimeCapabilities'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { getJSON, getText, postJSON } from "../api/http";
 import { openConfirm } from "../utils/confirm";
@@ -15,6 +17,7 @@ import SystemOverridesPanel from "./system/SystemOverridesPanel.vue";
 import SystemReplacementRulesPanel from "./system/SystemReplacementRulesPanel.vue";
 import SystemUpdatePanel from "./system/SystemUpdatePanel.vue";
 import SystemWebuiPortPanel from "./system/SystemWebuiPortPanel.vue";
+import SwitchInventoryPanel from "./system/SwitchInventoryPanel.vue";
 import { clearTopNotice, setError, setSuccess } from "../utils/notice";
 import { formatRelativeTime } from "../utils/time";
 import {
@@ -261,6 +264,7 @@ const dnsRoutingMode = computed(() => String(switchStates.switch17 || ""));
 const secondarySwitches = computed(() =>
   switchProfiles.filter((profile) => !profile.modes),
 );
+const nativeSwitches = computed(() => switchInstances());
 
 const hasUpdate = computed(() => {
   const status = update.status;
@@ -354,6 +358,7 @@ function formatConfigVersionDisplay(schema) {
 }
 
 const configVersionInfo = computed(() => {
+  if (capabilityState.value?.kind === 'native') return { versionText: '不适用', statusText: operationReason('system.config_management') }
   const applied = Number(update.status?.config_schema_applied || 0);
   const required = Number(update.status?.config_schema_required || 0);
   if (!applied && !required) {
@@ -417,7 +422,7 @@ function parseSystemMetrics(metricsText) {
 }
 
 async function requestResponse(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await capabilityFetch(url, options);
   if (!response.ok) {
     let message = `HTTP ${response.status} ${response.statusText}`;
     try {
@@ -449,21 +454,23 @@ function isHttpConflictError(error) {
 }
 
 async function readSwitchValue(tag) {
-  const value = String(await getText(`/plugins/${tag}/show`) || "").trim();
+  if (!supportsOperation('switches.manage')) return
+  const value = String(await getText(`/plugins/${encodeURIComponent(tag)}/show`) || "");
   switchStates[tag] = value;
   return value;
 }
 
 async function loadAuditStatusAndCapacity() {
+  if (!supportsOperation('audit.read') && !supportsOperation('audit.capacity')) return
   audit.error = "";
   const [statusResult, capacityResult] = await Promise.allSettled([
-    getJSON("/api/v1/audit/status"),
-    getJSON("/api/v1/audit/capacity"),
+    supportsOperation('audit.read') ? getJSON("/api/v1/audit/status") : Promise.resolve({capturing:null}),
+    supportsOperation('audit.capacity') ? getJSON("/api/v1/audit/capacity") : Promise.resolve({capacity:null}),
   ]);
-  if (statusResult.status === "fulfilled") {
+  if (supportsOperation('audit.read') && statusResult.status === "fulfilled") {
     audit.capturing = Boolean(statusResult.value?.capturing);
   }
-  if (capacityResult.status === "fulfilled") {
+  if (supportsOperation('audit.capacity') && capacityResult.status === "fulfilled") {
     audit.capacity = Number(capacityResult.value?.capacity || 0);
   }
   const failure = [statusResult, capacityResult].find((result) => result.status === "rejected");
@@ -475,6 +482,7 @@ async function loadAuditStatusAndCapacity() {
 }
 
 async function toggleAuditCapture() {
+  if (!supportsOperation('audit.control')) return
   if (audit.busy || audit.capturing === null) {
     return;
   }
@@ -499,6 +507,7 @@ async function toggleAuditCapture() {
 }
 
 async function clearAuditLogs() {
+  if (!supportsOperation('audit.control')) return
   if (audit.busy || audit.capturing === null) {
     return;
   }
@@ -525,6 +534,7 @@ async function clearAuditLogs() {
 }
 
 async function submitCapacity() {
+  if (!supportsOperation('audit.capacity')) return
   if (audit.busy || audit.capacity === null) {
     return;
   }
@@ -559,23 +569,41 @@ async function submitCapacity() {
 }
 
 async function loadFeatureSwitches() {
+  if (!supportsOperation('switches.manage')) return
+  const profiles = capabilityState.value?.kind === 'native'
+    ? nativeSwitches.value
+    : switchProfiles
   const settled = await Promise.allSettled(
-    switchProfiles.map((profile) => getText(`/plugins/${profile.tag}/show`)),
+    profiles.map((profile) => getText(`/plugins/${encodeURIComponent(profile.tag)}/show`)),
   );
   settled.forEach((item, index) => {
-    const profile = switchProfiles[index];
+    const profile = profiles[index];
     if (item.status === "fulfilled") {
-      switchStates[profile.tag] = String(item.value || "").trim();
+      switchStates[profile.tag] = switchValueFromResponse(item.value, capabilityState.value?.kind);
       return;
     }
     switchStates[profile.tag] = "error";
   });
 }
 
+async function saveNativeSwitch({ tag, value }) {
+  if (capabilityState.value?.kind !== 'native' || !supportsOperation('switches.manage')) return
+  clearMessage();
+  try {
+    await setSwitchValue(tag, value);
+    await readSwitchValue(tag);
+    setSuccess(`“${tag}” 已保存，当前值已回读`);
+  } catch (error) {
+    setError(`保存“${tag}”失败: ${error.message}`);
+    await loadFeatureSwitches();
+  }
+}
+
 async function setSwitchValue(tag, value, successHint = "") {
+  if (!supportsOperation('switches.manage')) return
   switchLoading[tag] = true;
   try {
-    await postJSON(`/plugins/${tag}/post`, { value });
+    await postJSON(`/plugins/${encodeURIComponent(tag)}/post`, { value });
     switchStates[tag] = value;
     if (successHint) {
       setSuccess(successHint);
@@ -586,6 +614,7 @@ async function setSwitchValue(tag, value, successHint = "") {
 }
 
 async function setCoreMode(modeValue) {
+  if (!supportsOperation('switches.manage')) return
   if (!["A", "B"].includes(String(modeValue)) || coreMode.value === modeValue) {
     return;
   }
@@ -598,7 +627,7 @@ async function setCoreMode(modeValue) {
   try {
     await setSwitchValue("switch3", modeValue, "核心模式已切换");
     try {
-      await postEmpty("/plugins/requery/trigger");
+      supportsOperation('cache.requery') ? await postEmpty("/plugins/requery/trigger") : undefined;
     } catch {
       // ignore
     }
@@ -608,6 +637,7 @@ async function setCoreMode(modeValue) {
 }
 
 async function setDnsRoutingMode(modeValue) {
+  if (!supportsOperation('switches.manage')) return
   if (
     switchLoading.switch17 ||
     !["A", "B"].includes(String(modeValue)) ||
@@ -649,7 +679,7 @@ async function setDnsRoutingMode(modeValue) {
       requestResponse("/plugins/cache_cnmihomo/flush"),
     ]);
     const requeryResults = await Promise.allSettled([
-      postEmpty("/plugins/requery/trigger"),
+      ...(supportsOperation('cache.requery') ? [postEmpty("/plugins/requery/trigger")] : []),
     ]);
     const backgroundErrors = [...flushResults, ...requeryResults]
       .filter((item) => item.status === "rejected")
@@ -670,6 +700,7 @@ async function setDnsRoutingMode(modeValue) {
 }
 
 async function toggleSecondarySwitch(profile, checked) {
+  if (!supportsOperation('switches.manage')) return
   if (!profile?.tag || !profile.valueForOn) {
     return;
   }
@@ -734,6 +765,7 @@ function buildDomainGenerationPayload(key, checked) {
 }
 
 async function toggleDomainGeneration(profile, checked) {
+  if (!supportsOperation('system.domain_generation')) return
   if (!profile?.key) {
     return;
   }
@@ -764,6 +796,7 @@ async function toggleDomainGeneration(profile, checked) {
 }
 
 async function loadDomainGenerationSettings() {
+  if (!supportsOperation('system.domain_generation')) return
   const payload = await getJSON("/api/v1/domain-generation");
   applyDomainGenerationSettings(payload);
 }
@@ -793,6 +826,7 @@ function getMutuallyExclusiveProfile(tag) {
 }
 
 async function loadOverrides() {
+  if (!supportsOperation('system.global_overrides')) return
   const data = await getJSON("/api/v1/overrides");
   overrides.socks5 = String(data?.socks5 || "");
   overrides.ecs = String(data?.ecs || "");
@@ -819,6 +853,7 @@ function removeReplacement(index) {
 }
 
 async function saveOverrides() {
+  if (!supportsOperation('system.global_overrides')) return
   clearMessage();
   applyingOverrides.value = true;
   try {
@@ -853,12 +888,14 @@ async function saveOverrides() {
 }
 
 async function loadSystemInfo() {
+  if (!supportsOperation('metrics.process')) return
   const metricsText = await getText("/metrics");
   const next = parseSystemMetrics(metricsText);
   Object.assign(systemInfo, next);
 }
 
 async function restartMosdns() {
+  if (!supportsOperation('system.restart')) return
   if (!(await openConfirm("确认重启 MosDNS？", { tone: "danger" }))) {
     return;
   }
@@ -889,6 +926,7 @@ function buildWebUIRootUrl(port) {
 }
 
 async function loadWebUIPortSettings() {
+  if (!supportsOperation('system.webui_port')) return
   webuiPort.loading = true;
   try {
     const payload = await getJSON("/api/v1/system/webui-port");
@@ -902,6 +940,7 @@ async function loadWebUIPortSettings() {
 }
 
 async function applyWebUIPortAndRestart() {
+  if (!supportsOperation('system.webui_port')) return
   const port = Number.parseInt(String(webuiPort.input || "").trim(), 10);
   if (!Number.isFinite(port) || port < 1 || port > 65535) {
     setError("请输入 1-65535 之间的端口");
@@ -934,6 +973,7 @@ async function applyWebUIPortAndRestart() {
 }
 
 async function loadUpdateStatus() {
+  if (!supportsOperation('system.update')) return
   const status = await getJSON("/api/v1/update/status");
   update.status = status;
   if (status?.config_auto_updated > 0) {
@@ -946,6 +986,7 @@ async function loadUpdateStatus() {
 }
 
 async function checkUpdate() {
+  if (!supportsOperation('system.update')) return
   clearMessage();
   update.loading = true;
   try {
@@ -960,6 +1001,7 @@ async function checkUpdate() {
 }
 
 function startRestartWatch() {
+  if (!supportsOperation('system.update')) return
   stopRestartWatch();
   const deadline = Date.now() + 90_000;
   restartProbeTimerId = window.setInterval(async () => {
@@ -989,6 +1031,7 @@ function stopRestartWatch() {
 }
 
 async function applyUpdate(force = false, preferV3 = false) {
+  if (!supportsOperation('system.update')) return
   if (update.loading) {
     return;
   }
@@ -1091,6 +1134,7 @@ function textColorPayload() {
 }
 
 async function loadTextColorSettings() {
+  if (!supportsOperation('appearance.server')) { applyTextColorForTheme(activeThemeKey(), textColorSettings); syncTextColorDraft(activeThemeKey()); return }
   try {
     const settings = await getJSON("/api/v1/appearance/text-color");
     const normalized = normalizeTextColorSettings(settings || {});
@@ -1108,6 +1152,7 @@ function buttonColorPayload() {
 }
 
 async function loadButtonColorSettings() {
+  if (!supportsOperation('appearance.server')) { applyButtonColorForTheme(activeThemeKey(), buttonColorSettings); syncButtonColorDraft(activeThemeKey()); return }
   try {
     const settings = await getJSON("/api/v1/appearance/button-color");
     const normalized = normalizeButtonColorSettings(settings || {});
@@ -1121,6 +1166,7 @@ async function loadButtonColorSettings() {
 }
 
 async function saveTextColorSettings(showMessage = true) {
+  if (!supportsOperation('appearance.server')) { saveTextColorSettingsToStorage(normalizeTextColorSettings(textColorSettings)); return }
   if (textColorSaving.value) {
     textColorSaveQueued = true;
     return;
@@ -1151,6 +1197,7 @@ async function saveTextColorSettings(showMessage = true) {
 }
 
 async function saveButtonColorSettings(showMessage = true) {
+  if (!supportsOperation('appearance.server')) { saveButtonColorSettingsToStorage(normalizeButtonColorSettings(buttonColorSettings)); return }
   if (buttonColorSaving.value) {
     buttonColorSaveQueued = true;
     return;
@@ -1323,6 +1370,7 @@ function buildPanelBackgroundPayload() {
 }
 
 async function loadPanelBackgroundSettings() {
+  if (!supportsOperation('appearance.server')) return
   if (panelBackground.applying || panelBackground.uploading) {
     return;
   }
@@ -1336,6 +1384,7 @@ async function loadPanelBackgroundSettings() {
 }
 
 async function loadPanelBackgroundHistory() {
+  if (!supportsOperation('appearance.server')) return
   panelBackgroundHistoryLoading.value = true;
   try {
     const payload = await getJSON(
@@ -1355,6 +1404,7 @@ async function loadPanelBackgroundHistory() {
 }
 
 async function togglePanelBackgroundHistory() {
+  if (!supportsOperation('appearance.server')) return
   panelBackgroundHistoryOpen.value = !panelBackgroundHistoryOpen.value;
   if (panelBackgroundHistoryOpen.value) {
     await loadPanelBackgroundHistory();
@@ -1362,6 +1412,7 @@ async function togglePanelBackgroundHistory() {
 }
 
 async function usePanelBackgroundHistory(item) {
+  if (!supportsOperation('appearance.server')) return
   const uploadId = String(item?.id || "").trim();
   const imageUrl = String(item?.image_url || "").trim();
   if (!uploadId || !imageUrl) {
@@ -1377,6 +1428,7 @@ async function usePanelBackgroundHistory(item) {
 }
 
 async function deletePanelBackgroundHistory(item) {
+  if (!supportsOperation('appearance.server')) return
   const uploadId = String(item?.id || "").trim();
   if (!uploadId) {
     return;
@@ -1388,7 +1440,7 @@ async function deletePanelBackgroundHistory(item) {
   }
   panelBackgroundHistoryBusy.value = uploadId;
   try {
-    const response = await fetch(
+    const response = await capabilityFetch(
       `/api/v1/appearance/panel-background/history/${encodeURIComponent(uploadId)}`,
       {
         method: "DELETE",
@@ -1411,6 +1463,7 @@ async function deletePanelBackgroundHistory(item) {
 }
 
 async function clearPanelBackgroundHistory() {
+  if (!supportsOperation('appearance.server')) return
   if (
     !(await openConfirm("确认清空所有历史背景图片吗？", { tone: "danger" }))
   ) {
@@ -1418,7 +1471,7 @@ async function clearPanelBackgroundHistory() {
   }
   panelBackgroundHistoryBusy.value = "clear-all";
   try {
-    const response = await fetch(
+    const response = await capabilityFetch(
       "/api/v1/appearance/panel-background/history",
       {
         method: "DELETE",
@@ -1442,6 +1495,7 @@ async function clearPanelBackgroundHistory() {
 }
 
 async function applyPanelBackgroundSettings() {
+  if (!supportsOperation('appearance.server')) return
   clearMessage();
   panelBackground.applying = true;
   try {
@@ -1503,7 +1557,8 @@ async function resetAppearanceSettings() {
   panelBackground.opacity = 1;
   panelBackground.blur = 0;
   panelBackgroundHistoryOpen.value = false;
-  await syncPanelBackgroundPreview(false);
+  await syncPanelBackgroundPreview(false)
+  if (!supportsOperation('appearance.server')) { setSuccess('本地主题已重置'); return };
 
   try {
     await Promise.all([
@@ -1555,6 +1610,7 @@ function onPanelBackgroundSliderInput() {
 }
 
 async function onPanelBackgroundFileChange(event) {
+  if (!supportsOperation('appearance.server')) return
   const input = event?.target;
   const file = input?.files?.[0];
   if (input) {
@@ -1573,7 +1629,7 @@ async function onPanelBackgroundFileChange(event) {
   try {
     const formData = new FormData();
     formData.append("file", file);
-    const response = await fetch("/api/v1/appearance/panel-background/upload", {
+    const response = await capabilityFetch("/api/v1/appearance/panel-background/upload", {
       method: "POST",
       body: formData,
     });
@@ -1619,6 +1675,7 @@ function loadConfigManagerSettings() {
 }
 
 async function loadSystemHealth() {
+  if (!supportsOperation('system.health')) return
   const health = await getJSON("/api/v1/system/health");
   configManagementEnabled.value = health?.config_management_enabled !== false;
 }
@@ -1635,6 +1692,7 @@ function saveConfigManagerSettings() {
 }
 
 async function backupConfig() {
+  if (!supportsOperation('system.config_management')) return
   const dir = String(configManaging.localDir || "").trim();
   if (!dir) {
     setError("请先输入 MosDNS 本地工作目录");
@@ -1644,7 +1702,7 @@ async function backupConfig() {
   saveConfigManagerSettings();
   configManaging.backingUp = true;
   try {
-    const response = await fetch("/api/v1/config/export", {
+    const response = await capabilityFetch("/api/v1/config/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dir }),
@@ -1681,6 +1739,7 @@ async function backupConfig() {
 }
 
 async function applyRemoteConfig() {
+  if (!supportsOperation('system.config_management')) return
   const dir = String(configManaging.localDir || "").trim();
   const url = String(configManaging.remoteUrl || "").trim();
   if (!dir || !url) {
@@ -1819,7 +1878,8 @@ onBeforeUnmount(() => {
           @restart="restartMosdns"
         />
 
-        <SystemUpdatePanel
+        <CapabilityBoundary operation="system.update">
+<SystemUpdatePanel
           :has-update="hasUpdate"
           :show-v3-callout="showV3Callout"
           :update="update"
@@ -1831,8 +1891,10 @@ onBeforeUnmount(() => {
           @apply-force-update="applyUpdate(true, false)"
           @apply-v3-update="applyUpdate(true, true)"
         />
+</CapabilityBoundary>
 
-        <SystemConfigManagePanel
+        <CapabilityBoundary operation="system.config_management">
+<SystemConfigManagePanel
           :config-managing="configManaging"
           :config-management-enabled="configManagementEnabled"
           :config-version="configVersionInfo"
@@ -1840,49 +1902,69 @@ onBeforeUnmount(() => {
           @backup-config="backupConfig"
           @apply-remote-config="applyRemoteConfig"
         />
+</CapabilityBoundary>
 
-        <SystemOverridesPanel
+        <CapabilityBoundary operation="system.global_overrides">
+<SystemOverridesPanel
           :applying-overrides="applyingOverrides"
           :overrides="overrides"
           @load-overrides="loadOverrides"
           @save-overrides="saveOverrides"
         />
+</CapabilityBoundary>
       </div>
 
       <div class="control-panel-grid system-grid-feature-layout">
-        <div class="system-mini-stack">
-          <SystemCoreModePanel
+        <SwitchInventoryPanel
+          v-if="capabilityState.value?.kind === 'native'"
+          :instances="nativeSwitches"
+          :states="switchStates"
+          :loading="switchLoading"
+          @save="saveNativeSwitch"
+        />
+        <div v-if="capabilityState.value?.kind !== 'native'" class="system-mini-stack">
+          <CapabilityBoundary v-if="capabilityState.value?.kind !== 'native'" operation="switches.manage">
+<SystemCoreModePanel
             :core-mode="coreMode"
             :switch-loading="switchLoading"
             @set-core-mode="setCoreMode"
           />
+</CapabilityBoundary>
 
-          <SystemDnsRoutingModePanel
+          <CapabilityBoundary v-if="capabilityState.value?.kind !== 'native'" operation="switches.manage">
+<SystemDnsRoutingModePanel
             :routing-mode="dnsRoutingMode"
             :switch-loading="switchLoading"
             @set-dns-routing-mode="setDnsRoutingMode"
           />
+</CapabilityBoundary>
 
-          <SystemWebuiPortPanel
+          <CapabilityBoundary operation="system.webui_port">
+<SystemWebuiPortPanel
             :webui-port="webuiPort"
             @apply-port="applyWebUIPortAndRestart"
           />
+</CapabilityBoundary>
         </div>
 
-        <SystemFeatureSwitchesPanel
+        <CapabilityBoundary v-if="capabilityState.value?.kind !== 'native'" operation="switches.manage">
+<SystemFeatureSwitchesPanel
           :is-switch-checked="isSwitchChecked"
           :secondary-switches="secondarySwitches"
           :switch-loading="switchLoading"
           :switch-states="switchStates"
           @toggle-switch="toggleSecondarySwitch"
         />
+</CapabilityBoundary>
 
-        <SystemDomainGenerationPanel
+        <CapabilityBoundary operation="system.domain_generation">
+<SystemDomainGenerationPanel
           :domain-generation-profiles="domainGenerationProfiles"
           :domain-generation-loading="domainGenerationLoading"
           :domain-generation-settings="domainGenerationSettings"
           @toggle-domain-generation="toggleDomainGeneration"
         />
+</CapabilityBoundary>
       </div>
 
       <div class="system-advanced-toggle-row">
@@ -1902,7 +1984,8 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="expandedAdvanced.replacementRules" class="control-panel-grid">
-        <SystemReplacementRulesPanel
+        <CapabilityBoundary operation="system.global_overrides">
+<SystemReplacementRulesPanel
           :applying-overrides="applyingOverrides"
           :overrides="overrides"
           @load-overrides="loadOverrides"
@@ -1910,19 +1993,24 @@ onBeforeUnmount(() => {
           @save-overrides="saveOverrides"
           @remove-replacement="removeReplacement"
         />
+</CapabilityBoundary>
       </div>
 
       <div class="control-panel-grid system-grid-quad">
-        <SystemAuditPanel
+        <CapabilityBoundary operation="audit.control">
+<SystemAuditPanel
           :audit="audit"
           @toggle-audit="toggleAuditCapture"
           @clear-logs="clearAuditLogs"
         />
+</CapabilityBoundary>
 
-        <SystemAuditCapacityPanel
+        <CapabilityBoundary operation="audit.capacity">
+<SystemAuditCapacityPanel
           :audit="audit"
           @submit-capacity="submitCapacity"
         />
+</CapabilityBoundary>
 
         <SystemAutoRefreshPanel
           :auto-refresh="autoRefresh"
@@ -1976,7 +2064,8 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="appearance-compact-row appearance-compact-row-top appearance-compact-row-bg">
+            <p v-if="!supportsOperation('appearance.server')" class="muted" role="note">本地主题可用；服务器外观：{{ operationReason('appearance.server') }}</p>
+<fieldset data-operation="appearance.server" :disabled="!supportsOperation('appearance.server')" class="appearance-compact-row appearance-compact-row-top appearance-compact-row-bg">
               <strong class="appearance-compact-label appearance-compact-label-stack">
                 <span>面板</span>
                 <span>背景</span>
@@ -2047,7 +2136,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
-            </div>
+            </fieldset>
 
             <div class="appearance-compact-row">
               <strong class="appearance-compact-label">透明度</strong>

@@ -1,0 +1,19 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 9.30s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-d7fe384451f80feb)
+
+running 1 test
+
+thread 'transaction::tests::sigkill_at_every_filesystem_boundary_recovers_whole_generation' (37828) panicked at native-host/src/transaction.rs:598:17:
+crash child exited before boundary 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test transaction::tests::sigkill_at_every_filesystem_boundary_recovers_whole_generation ... FAILED
+
+failures:
+
+failures:
+    transaction::tests::sigkill_at_every_filesystem_boundary_recovers_whole_generation
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 110 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

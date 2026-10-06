@@ -1,0 +1,20 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.31s
+     Running tests/slice6_management_http.rs (rust/target/debug/deps/slice6_management_http-8e172f456a41e331)
+
+running 12 tests
+test a_failed_dns_bind_releases_the_management_listener ... ok
+test a_dns_only_configuration_has_no_management_listener ... ok
+test a_running_side_failure_cancels_and_joins_the_other_listener ... ok
+test a_failed_management_bind_releases_the_dns_listener ... ok
+test a_tag_that_is_not_mounted_is_404_before_any_method_decision ... ok
+test a_writable_file_shared_by_two_tags_is_never_managed ... ok
+test audit_capacity_without_state_root_and_failed_replace_keep_old_runtime_state ... ok
+test audit_v1_controls_use_real_http_and_dns_and_persist_capacity ... ok
+test embedded_ui_roots_assets_and_revalidation_are_real_http ... ok
+test native_supervisor_health_matches_cli_identity_and_closes_with_listeners ... ok
+test one_shutdown_scope_releases_both_listeners_for_rebind ... ok
+test management_routes_match_the_go_visible_contract ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

@@ -395,12 +395,18 @@ func (m *Mosdns) initHttpMux() {
 		r.Get("/trace", pprof.Trace)
 	})
 
-	// A helper page for invalid request.
-	invalidApiReqHelper := func(w http.ResponseWriter, req *http.Request) {
+	registerInvalidAPIRequestHandlers(m.httpMux)
+}
+
+// registerInvalidAPIRequestHandlers preserves the route-help body while
+// returning 404 for unmatched routes so UI callers can detect unsupported
+// endpoints. Method-mismatch responses keep their established status.
+func registerInvalidAPIRequestHandlers(router *chi.Mux) {
+	invalidAPIRequest := func(w http.ResponseWriter, req *http.Request) {
 		b := new(bytes.Buffer)
 		_, _ = fmt.Fprintf(b, "Invalid request %s %s\n\n", req.Method, req.RequestURI)
 		b.WriteString("Available api urls:\n")
-		_ = chi.Walk(m.httpMux, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+		_ = chi.Walk(router, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
 			b.WriteString(method)
 			b.WriteByte(' ')
 			b.WriteString(route)
@@ -409,8 +415,11 @@ func (m *Mosdns) initHttpMux() {
 		})
 		_, _ = w.Write(b.Bytes())
 	}
-	m.httpMux.NotFound(invalidApiReqHelper)
-	m.httpMux.MethodNotAllowed(invalidApiReqHelper)
+	router.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		invalidAPIRequest(w, req)
+	})
+	router.MethodNotAllowed(invalidAPIRequest)
 }
 
 func (m *Mosdns) loadPresetPlugins() error {

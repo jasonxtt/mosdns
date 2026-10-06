@@ -1,0 +1,25 @@
+{
+  "s6-final-native-tests": {
+    "passed": 391,
+    "failed": 0,
+    "parent_invoked_ignored_probes": 3
+  },
+  "s6-final-workspace-tests": {
+    "passed": 1194,
+    "failed": 0,
+    "parent_invoked_ignored_probes": 3
+  },
+  "node": {
+    "passed": 26,
+    "failed": 0
+  },
+  "fmt": "PASS",
+  "strict_clippy_all_targets": "PASS",
+  "go_limited_coremain": "ok  \tgithub.com/IrineSistiana/mosdns/v5/coremain\t2.012s",
+  "profile": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "debug_assertions": true
+  }
+}

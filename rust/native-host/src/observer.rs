@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
 use std::ops::Index;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
@@ -523,6 +523,7 @@ pub(crate) struct UpstreamAttemptList {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct UpstreamMetricAttempt {
+    pub generation: u64,
     pub executable: ExecutableId,
     pub entry_index: usize,
     pub outcome: UpstreamAttemptOutcome,
@@ -1048,7 +1049,7 @@ impl ExecutionCheckpoint {
 
 #[derive(Clone, Debug, Default)]
 struct MetricsState {
-    metric_identities: BTreeMap<(ExecutableId, usize), Arc<str>>,
+    metric_identities: BTreeMap<(u64, ExecutableId, usize), Arc<str>>,
     completed_total: u64,
     malformed_total: u64,
     send_succeeded_total: u64,
@@ -1083,7 +1084,11 @@ impl MetricsState {
         }
     }
 
-    fn record_metric_key(&mut self, key: (ExecutableId, usize), outcome: UpstreamAttemptOutcome) {
+    fn record_metric_key(
+        &mut self,
+        key: (u64, ExecutableId, usize),
+        outcome: UpstreamAttemptOutcome,
+    ) {
         let Some(identity) = self.metric_identities.get(&key).cloned() else {
             self.unknown_forward_attempts_total =
                 self.unknown_forward_attempts_total.saturating_add(1);
@@ -1174,7 +1179,10 @@ impl MetricsState {
             }
         } else {
             for attempt in metric_attempts {
-                self.record_metric_key((attempt.executable, attempt.entry_index), attempt.outcome);
+                self.record_metric_key(
+                    (attempt.generation, attempt.executable, attempt.entry_index),
+                    attempt.outcome,
+                );
             }
         }
         self.duration.observe(elapsed);
@@ -1196,7 +1204,7 @@ struct ObserverState {
 /// Thread-safe observer state owned by one host assembly.
 #[cfg_attr(not(test), allow(dead_code))] // Listener terminalization is wired in Slice 2.
 pub(crate) struct QueryObserver {
-    audit_enabled: bool,
+    audit_enabled: AtomicBool,
     audit_clock: Arc<dyn AuditClock>,
     request_ids: NativeRequestIdAllocator,
     in_flight: AtomicU64,
@@ -1286,7 +1294,7 @@ impl QueryObserver {
         let metric_identities = metric_registry
             .into_iter()
             .map(|(executable, entry_index, identity)| {
-                ((executable, entry_index), Arc::<str>::from(identity))
+                ((0, executable, entry_index), Arc::<str>::from(identity))
             })
             .collect::<BTreeMap<_, _>>();
         let mut forward_attempts_by_upstream = forward_attempts_by_upstream;
@@ -1301,7 +1309,7 @@ impl QueryObserver {
             0
         });
         Self {
-            audit_enabled,
+            audit_enabled: AtomicBool::new(audit_enabled),
             audit_clock,
             request_ids,
             in_flight: AtomicU64::new(0),
@@ -1343,7 +1351,17 @@ impl QueryObserver {
         observation: TerminalObservation,
         make_audit_record: impl FnOnce(TerminalObservation) -> AuditRecord,
     ) {
-        let capture_at_terminal = self.audit_enabled && self.lock().capturing;
+        self.record_terminal_on_listener(observation, true, make_audit_record);
+    }
+
+    fn record_terminal_on_listener(
+        &self,
+        observation: TerminalObservation,
+        listener_audit: bool,
+        make_audit_record: impl FnOnce(TerminalObservation) -> AuditRecord,
+    ) {
+        let capture_at_terminal =
+            listener_audit && self.audit_enabled.load(Ordering::SeqCst) && self.lock().capturing;
         if capture_at_terminal {
             let mut state = self.lock();
             let can_retain = if state.audit_capacity == 0 {
@@ -1426,7 +1444,7 @@ impl QueryObserver {
 
     pub(crate) fn start_capture(&self) -> bool {
         let mut state = self.lock();
-        if !self.audit_enabled {
+        if !self.audit_enabled.load(Ordering::SeqCst) {
             return false;
         }
         state.capturing = true;
@@ -1435,7 +1453,7 @@ impl QueryObserver {
 
     pub(crate) fn stop_capture(&self) -> bool {
         let mut state = self.lock();
-        if !self.audit_enabled {
+        if !self.audit_enabled.load(Ordering::SeqCst) {
             return false;
         }
         state.capturing = false;
@@ -1482,6 +1500,7 @@ impl QueryObserver {
             .expect("terminal query must have a matching admission");
     }
 
+    #[cfg(test)]
     pub(crate) fn try_admit(
         self: &std::sync::Arc<Self>,
         client_addr: SocketAddr,
@@ -1489,9 +1508,21 @@ impl QueryObserver {
         question: &mosdns_dns_core::QuestionInfo,
         cancellation: TransportCancellation,
     ) -> Result<AdmittedQueryGuard, AdmissionError> {
+        self.try_admit_on_listener(true, client_addr, transport, question, cancellation)
+    }
+
+    pub(crate) fn try_admit_on_listener(
+        self: &std::sync::Arc<Self>,
+        listener_audit: bool,
+        client_addr: SocketAddr,
+        transport: QueryTransport,
+        question: &mosdns_dns_core::QuestionInfo,
+        cancellation: TransportCancellation,
+    ) -> Result<AdmittedQueryGuard, AdmissionError> {
+        let enabled = listener_audit && self.audit_enabled.load(Ordering::SeqCst);
         let admitted_at = Instant::now();
         let trace_id = self.request_ids.allocate()?;
-        let audit_context = self.audit_enabled.then(|| AuditContext {
+        let audit_context = enabled.then(|| AuditContext {
             timestamp: self.audit_clock.now(),
             client_addr,
             transport,
@@ -1506,7 +1537,7 @@ impl QueryObserver {
             admitted_at,
             audit_context,
             cancellation,
-            execution_checkpoint: Box::new(ExecutionCheckpoint::new(self.audit_enabled)),
+            execution_checkpoint: Box::new(ExecutionCheckpoint::new(enabled)),
             finalized: false,
         })
     }
@@ -1523,12 +1554,78 @@ impl QueryObserver {
             .expect("test request ID allocation")
     }
 
+    pub(crate) fn enable_snapshot_audit(&self, config: &crate::config::CompiledConfig) {
+        if config
+            .listeners
+            .iter()
+            .any(|listener| listener.enable_audit)
+            && !self.audit_enabled.swap(true, Ordering::SeqCst)
+        {
+            self.lock().capturing = true;
+        }
+    }
+
+    pub(crate) fn register_generation(
+        &self,
+        config: &crate::config::CompiledConfig,
+    ) -> Vec<String> {
+        let mut state = self.lock();
+        let mut added = Vec::new();
+        for invocation in &config.forward_invocations {
+            let definition = &config.forward_definitions[invocation.definition];
+            for &entry in &invocation.entries {
+                let identity = &definition.entries[entry].identity;
+                if !state
+                    .metrics
+                    .forward_attempts_by_upstream
+                    .contains_key(identity)
+                {
+                    added.push(identity.clone());
+                    state
+                        .metrics
+                        .forward_attempts_by_upstream
+                        .insert(identity.clone(), UpstreamAttemptMetricsSnapshot::default());
+                }
+                state.metrics.metric_identities.insert(
+                    (config.generation, invocation.executable, entry),
+                    Arc::from(identity.as_str()),
+                );
+            }
+        }
+        added
+    }
+
+    pub(crate) fn discard_generation(&self, generation: u64, added: &[String]) {
+        self.retire_generation(generation);
+        let mut state = self.lock();
+        for identity in added {
+            if !state
+                .metrics
+                .metric_identities
+                .values()
+                .any(|value| value.as_ref() == identity)
+                && state.metrics.forward_attempts_by_upstream.get(identity)
+                    == Some(&UpstreamAttemptMetricsSnapshot::default())
+            {
+                state.metrics.forward_attempts_by_upstream.remove(identity);
+            }
+        }
+    }
+
+    pub(crate) fn retire_generation(&self, generation: u64) {
+        self.lock()
+            .metrics
+            .metric_identities
+            .retain(|(owner, _, _), _| *owner != generation);
+    }
+
     pub(crate) fn record_background_attempts(&self, attempts: &UpstreamAttemptList) {
         let mut state = self.lock();
         for attempt in attempts.metric_attempts() {
-            state
-                .metrics
-                .record_metric_key((attempt.executable, attempt.entry_index), attempt.outcome);
+            state.metrics.record_metric_key(
+                (attempt.generation, attempt.executable, attempt.entry_index),
+                attempt.outcome,
+            );
         }
     }
 
@@ -1630,42 +1727,44 @@ impl AdmittedQueryGuard {
     fn record(&mut self, observation: TerminalObservation) {
         self.finalized = true;
         let audit_context = self.audit_context.take();
-        self.observer.record_terminal(observation, |observation| {
-            let context = audit_context.expect("audit context exists when capture is enabled");
-            let derived_final_upstream = match &observation.response {
-                ResponseState::Dns {
-                    source: ResponseSource::Upstream(upstream),
-                    ..
-                } => Some(upstream.clone()),
-                ResponseState::Dns { .. } | ResponseState::NoResponse => None,
-            };
-            let final_upstream = observation.final_upstream.or(derived_final_upstream);
-            AuditRecord {
-                timestamp: context.timestamp,
-                client_addr: context.client_addr,
-                transport: context.transport,
-                qname: context.qname,
-                qtype: context.qtype,
-                qclass: context.qclass,
-                trace_id: context.trace_id,
-                elapsed: observation.elapsed,
-                terminal_outcome: observation.outcome,
-                response: observation.response,
-                response_details: observation.response_details,
-                cache_status: observation.cache_status,
-                final_sequence: observation.final_sequence,
-                matched_group: observation.matched_group,
-                domain_set: observation.domain_set,
-                effective_tag: observation.effective_tag,
-                matched_rule_source: observation.matched_rule_source,
-                final_upstream,
-                upstream_targets: observation.upstream_targets,
-                selected_upstream: observation.selected_upstream,
-                upstream_attempts: observation.upstream_attempts.into_vec(),
-                upstream_diagnostics: observation.upstream_diagnostics,
-                failure_provenance: observation.failure_provenance,
-            }
-        });
+        let enabled = audit_context.is_some();
+        self.observer
+            .record_terminal_on_listener(observation, enabled, |observation| {
+                let context = audit_context.expect("audit context exists when capture is enabled");
+                let derived_final_upstream = match &observation.response {
+                    ResponseState::Dns {
+                        source: ResponseSource::Upstream(upstream),
+                        ..
+                    } => Some(upstream.clone()),
+                    ResponseState::Dns { .. } | ResponseState::NoResponse => None,
+                };
+                let final_upstream = observation.final_upstream.or(derived_final_upstream);
+                AuditRecord {
+                    timestamp: context.timestamp,
+                    client_addr: context.client_addr,
+                    transport: context.transport,
+                    qname: context.qname,
+                    qtype: context.qtype,
+                    qclass: context.qclass,
+                    trace_id: context.trace_id,
+                    elapsed: observation.elapsed,
+                    terminal_outcome: observation.outcome,
+                    response: observation.response,
+                    response_details: observation.response_details,
+                    cache_status: observation.cache_status,
+                    final_sequence: observation.final_sequence,
+                    matched_group: observation.matched_group,
+                    domain_set: observation.domain_set,
+                    effective_tag: observation.effective_tag,
+                    matched_rule_source: observation.matched_rule_source,
+                    final_upstream,
+                    upstream_targets: observation.upstream_targets,
+                    selected_upstream: observation.selected_upstream,
+                    upstream_attempts: observation.upstream_attempts.into_vec(),
+                    upstream_diagnostics: observation.upstream_diagnostics,
+                    failure_provenance: observation.failure_provenance,
+                }
+            });
     }
 }
 

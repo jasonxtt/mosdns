@@ -1,0 +1,48 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error: this boolean expression can be simplified
+   --> native-host/src/transaction.rs:906:8
+    |
+906 |       if !matches!(
+    |  ________^
+907 | |         text,
+908 | |         "webinfo/special_upstream_groups.json"
+909 | |             | "webinfo/upstream_overrides.json"
+...   |
+912 | |         && !numbered("rule/special_", ".txt")
+913 | |         && !(allow_cache_dump && is_cache_dump_artifact(path))
+    | |______________________________________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#nonminimal_bool
+    = note: `-D clippy::nonminimal-bool` implied by `-D clippy::all`
+    = help: to override `-D clippy::all` add `#[allow(clippy::nonminimal_bool)]`
+help: try
+    |
+906 ~     if !(matches!(
+907 +         text,
+908 +         "webinfo/special_upstream_groups.json"
+909 +             | "webinfo/upstream_overrides.json"
+910 +             | "sub_config/special_groups.yaml"
+911 +     ) || numbered("srs/special_", ".json") || numbered("rule/special_", ".txt") || allow_cache_dump && is_cache_dump_artifact(path))
+    |
+
+error: could not compile `mosdns-native-host` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> native-host/src/runtime_snapshot.rs:2304:24
+     |
+2304 |             seed_cache(&cache, "example.test.");
+     |                        ^^^^^^ help: change this to: `cache`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#needless_borrow
+     = note: `-D clippy::needless-borrow` implied by `-D clippy::all`
+     = help: to override `-D clippy::all` add `#[allow(clippy::needless_borrow)]`
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> native-host/src/runtime_snapshot.rs:2306:24
+     |
+2306 |             seed_cache(&cache, "pending.test.");
+     |                        ^^^^^^ help: change this to: `cache`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#needless_borrow
+
+error: could not compile `mosdns-native-host` (lib test) due to 3 previous errors

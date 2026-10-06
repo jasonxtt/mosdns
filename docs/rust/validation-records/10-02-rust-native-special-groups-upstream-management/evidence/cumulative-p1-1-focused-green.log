@@ -1,0 +1,46 @@
+   Compiling mosdns-cache-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/cache-core)
+   Compiling mosdns-sequence-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/sequence-core)
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0277]: the trait bound `ExecutableId: std::hash::Hash` is not satisfied
+    --> native-host/src/config.rs:2241:33
+     |
+2241 |             response_identities.insert(
+     |                                 ^^^^^^ the trait `std::hash::Hash` is not implemented for `ExecutableId`
+     |
+     = help: the following other types implement trait `std::hash::Hash`:
+               ()
+               (T, B)
+               (T, B, C)
+               (T, B, C, D)
+               (T, B, C, D, E)
+               (T, B, C, D, E, F)
+               (T, B, C, D, E, F, G)
+               (T, B, C, D, E, F, G, H)
+             and 5 others
+     = note: required for `(ExecutableId, usize)` to implement `std::hash::Hash`
+note: required by a bound in `HashMap::<K, V, S, A>::insert`
+    --> /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/collections/hash/map.rs:1295:4
+
+error[E0599]: the method `get` exists for struct `HashMap<(ExecutableId, usize), Arc<str>>`, but its trait bounds were not satisfied
+    --> native-host/src/execution.rs:3490:18
+     |
+3488 | /             config
+3489 | |                 .response_identities
+3490 | |                 .get(&(executable, index))
+     | |                 -^^^ method cannot be called on `HashMap<(ExecutableId, usize), Arc<str>>` due to unsatisfied trait bounds
+     | |_________________|
+     |
+     |
+    ::: sequence-core/src/program.rs:21:1
+     |
+  21 |   pub struct ExecutableId(pub usize);
+     |   ----------------------- doesn't satisfy `ExecutableId: std::hash::Hash`
+     |
+     = note: the following trait bounds were not satisfied:
+             `ExecutableId: std::hash::Hash`
+             which is required by `(ExecutableId, usize): std::hash::Hash`
+
+Some errors have detailed explanations: E0277, E0599.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `mosdns-native-host` (lib) due to 2 previous errors
+exit_code=101

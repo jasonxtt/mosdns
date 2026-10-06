@@ -1,0 +1,46 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 18 tests
+test runtime_snapshot::admission_tests::ambiguous_marker_failure_fails_closed_and_retains_transaction_evidence ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-123416-0/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::apply_admission_gate_closes_and_recovers_without_touching_the_snapshot ... ok
+test runtime_snapshot::admission_tests::cleanup_failures_still_close_retired_and_current_transports ... ok
+test runtime_snapshot::admission_tests::committed_apply_finishes_after_client_disconnect_and_host_shutdown ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-123416-1/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::deleting_and_reusing_a_slot_does_not_reimport_its_old_cache_dump ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-123416-2/webinfo/audit_settings.json)
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-123416-2/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::group_rename_and_port_only_change_retain_wire_cache_owners ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-123416-3/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::host_shutdown_before_marker_rolls_back_and_does_not_reopen_admission ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-123416-4/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::managed_apply_closes_admission_then_waits_for_existing_management_write ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-123416-5/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::managed_apply_conflict_keeps_external_edit_and_reopens_old_generation ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-123416-6/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::managed_apply_crash_child ... ignored, subprocess crash probe invoked by the parent recovery test
+test runtime_snapshot::admission_tests::managed_apply_replaces_files_swaps_runtime_and_cleans_after_retirement ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-123416-7/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::managed_policy_change_replaces_only_affected_cache_owners ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-123416-8/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::managed_policy_commit_fences_changed_misses_but_keeps_disjoint_miss ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-123416-9/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::managed_policy_commit_replaces_affected_dumps_and_keeps_sibling_dump ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-123416-10/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::managed_rule_edit_changes_real_dns_and_preserves_disjoint_warm_answer ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-cache-123416-11/webinfo/audit_settings.json)
+cache startup /tmp/native-managed-cache-123416-11/cache/cache_all.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/native-managed-cache-123416-11/cache/sibling.dump: cache persistence: No such file or directory (os error 2); starting empty
+cache startup /tmp/native-managed-cache-123416-11/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+ok
+test runtime_snapshot::admission_tests::publication_rejects_removed_bindings_before_supervisor_cancellation ... ok
+test runtime_snapshot::admission_tests::rollback_failure_enters_recovery_required_and_retains_journal ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-123416-12/webinfo/audit_settings.json)
+ok
+test runtime_snapshot::admission_tests::sigkill_after_marker_swap_retirement_and_cleanup_recovers_committed_candidate ... native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-123416-marker/webinfo/audit_settings.json)
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-123416-swap/webinfo/audit_settings.json)
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-123416-retirement/webinfo/audit_settings.json)
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-123416-cleanup/webinfo/audit_settings.json)
+ok
+
+test result: ok. 17 passed; 0 failed; 1 ignored; 0 measured; 121 filtered out; finished in 0.32s
+

@@ -1,12 +1,68 @@
 # Rust migration handover
 
-Last verified: `2026-09-27`
+Last verified: `2026-10-04`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
+## Current planning — native switch state (2026-10-05)
+
+[Next task plan](../rust/plans/native-switch-state-management.md) covers all
+switch1–17 query/admission semantics, durable configured state owners, actual-tag
+API/capabilities and truthful generic controls in both Vue shells, in six slices.
+Scope discussion and round2 written-plan review in the same C2C chat returned
+PLAN READY; valid filesystem-conflict/I/O-discovery/header-parser findings closed.
+Full Lazy recipe retention remains unchanged; no generic cache invalidation or
+requery, FakeIP/AdGuard, appearance/media, aliases or runtime logging implementation.
+Local task10-05-rust-native-switch-state-management stays planning, awaiting
+subsequent explicit human implementation approval and a fresh dedicated code-review
+binding.265 product inputs match accepted dirty c98dc source; HEAD/index unchanged.
+No product code/build/test/deploy/push in this planning session.
+
+## Native WebUI runtime increment (2026-10-04; accepted and archived)
+
+The approved S1–S6 task adds embedded `/`/`/log`/assets on native api.http,
+pinned safe external ui/name mounts, truthful lifecycle health/shared version,
+30-operation capability admission in both existing shells, and a separate opt-in
+pure native build. S1–S6 exact-source reviews and separate cumulative review PASS
+at c98dc5d1012ce73aed318504c1053b04ab15de08. Cumulative P2-1/P3-1 were repaired
+with actual RED/GREEN proof. Final native-host391/0, Node26/0, HTTP14, fmt/strict
+Clippy and rebuilt native/Go artifacts pass; workspace1194/0 is pre-repair evidence,
+with other workspace packages unchanged. Three subprocess probes are intentionally
+parent-invoked. Limited Go regression passed before repair; final real Go proof
+serves the rebuilt assets. Both shells complete actual managed/unmanaged rule,
+audit/details/cache/group/upstream DNS/files/restart workflows; current release
+all-tabs has zero unsupported requests/page errors. Source-unavailable runtime,
+external saturation/timeout/drain and actual Go404 proof passed.
+
+See [final cumulative verdict](../rust/validation-records/10-04-rust-native-webui-runtime-capabilities/cumulative-review-result-final.md) and [S6 evidence](../rust/validation-records/10-04-rust-native-webui-runtime-capabilities/s6-status.md)
+and [hosting contract](../rust/contracts/native-webui-hosting.md). Inherited accepted
+source ac629018 and unrelated dirty changes are preserved; real HEAD/index stay
+unchanged. Only demonstrated C11/C12 subitems are registered; full5D/Phase6,
+scaffold retirement and production/default approval remain required.
+
+Parent acceptance and archive completed after current-source checks and VM rerun391 native/26 frontend tests. [Acceptance record](../rust/validation-records/10-04-rust-native-webui-runtime-capabilities/owner-acceptance.md). Real source HEAD/index remain unchanged; no commit/push/deploy.
+
+## Native special-groups task (2026-10-04)
+
+The authorized S1–S7 stages and complete `79d93ae1...` baseline-to-final cumulative
+review have explicit `FINAL: PASS` on tested source `ac629018d2aa8fd2a34a26f1f7ff0b2ecab4c0fc`.
+Final isolated workspace 1,184/0/3, native-host 381/0/3, libraries 410/0/3,
+fmt/strict Clippy and native build pass. Same-ID P1-1 repairs retain actual supplier
+entry/peer/transport through cache hits, native save and process restart without
+fabricating attempts or ECS echo; legacy wire-only imports remain unknown.
+Three real restart hits add zero peer requests; the existing Go reader accepts
+all three extended v2 dumps. Unchanged Vue/Go source retains S6/S7 build/browser
+proof. All failures and earlier rejected audit objects remain public.
+
+See the [final cumulative result](../rust/validation-records/10-02-rust-native-special-groups-upstream-management/cumulative-review-remediation-round-2-result.md),
+[public plan](../rust/plans/special-groups-upstream-management.md) and
+[contract](../rust/contracts/native-special-groups.md). Real branch HEAD/index and
+original authorization remain unchanged. No push, deployment, production switch,
+ordinary commit or archive. Task PASS is separate from the full migration gate.
+
 ## Native client/ECS task (2026-10-02)
 
-Task `.trellis/tasks/10-02-rust-native-client-context-ecs/` owns trusted UDP/TCP
+Task `.trellis/tasks/archive/2026-10/10-02-rust-native-client-context-ecs/` owns trusted UDP/TCP
 client context/client_ip, scoped ecs_handler/legacy ecs, supplier-only echo,
 opt-in full ECS cache keys, conservative unsafe-placement rejection, and canonical
 v2 Go/native dump interoperability. S1–S6 and cumulative whole-task C2C review PASS on source f9c523bb; S6 proves
@@ -16,6 +72,9 @@ which takes precedence over this concise handover. Default/quick ECS cache bypas
 remains; no scope-covering lookup or byte-identical noncanonical Go key promise.
 All validation uses the isolated SSH mosdns-rust environment. No push/deployment
 or production/default cutover is authorized by this task.
+User requested conditional archive after verification. Parent verification found
+no actionable issue, matched all129 source/manifests locally/remotely and reran
+28 focused tests successfully; see research/owner-acceptance.md in the archive.
 
 ## Source of truth (precedence)
 

@@ -1,0 +1,31 @@
+{
+  "base_sha": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "parent_sha": "ccc147bb35aab2301633325c563368ac8457dbba",
+  "head_sha": "ac629018d2aa8fd2a34a26f1f7ff0b2ecab4c0fc",
+  "tree_sha": "1575272a271e02ca9b7bd5051b651e9d63f471cf",
+  "source_inputs": 527,
+  "source_mismatches": 0,
+  "evidence_artifacts": 115,
+  "real_head": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "real_index_tree": "65b21ecc1a3e3fe14f50da3d49e0cb153c1d53ac",
+  "authorization_sha256": "b8d9269287f2117056cfb2633c5b06fcacf048bc9ac7ef5420cf087c8edf1f6c",
+  "state": "explicit_pass_recorded",
+  "provider": "c2c-web",
+  "reviewer_url": "https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ac058cd-6138-83e8-af54-758358f73006",
+  "request_bytes": 1015,
+  "request_sha256": "42900692d47bc8153b13546a2d83e15460488a4d2a513952008674f8a2919280",
+  "open_findings": [
+    "P1-1"
+  ],
+  "sent_at_utc": "2026-10-03T18:12:59.009983+00:00",
+  "result": {
+    "status": "pass",
+    "raw": "FINAL: PASS",
+    "open_findings": [],
+    "closed_findings": [
+      "P1-1"
+    ],
+    "scope": "complete original baseline through exact tested source head"
+  },
+  "recorded_at_utc": "2026-10-03T18:16:43.547372+00:00"
+}

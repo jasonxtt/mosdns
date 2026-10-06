@@ -1,0 +1,203 @@
+   Compiling libc v0.2.189
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling syn v3.0.5
+   Compiling cfg-if v1.0.4
+   Compiling portable-atomic v1.15.0
+   Compiling pin-project-lite v0.2.17
+   Compiling memchr v2.8.3
+   Compiling critical-section v1.2.0
+   Compiling once_cell v1.21.4
+   Compiling bytes v1.12.1
+   Compiling itoa v1.0.18
+   Compiling futures-core v0.3.34
+   Compiling slab v0.4.12
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling cc v1.4.6
+   Compiling futures-sink v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling futures-channel v0.3.34
+   Compiling ring v0.17.14
+   Compiling futures-macro v0.3.34
+   Compiling errno v0.3.14
+   Compiling socket2 v0.6.5
+   Compiling futures-task v0.3.34
+   Compiling smallvec v1.15.2
+   Compiling rand_core v0.10.1
+   Compiling futures-util v0.3.34
+   Compiling signal-hook-registry v1.4.8
+   Compiling tracing-core v0.1.36
+   Compiling tokio-macros v2.7.2
+   Compiling mio v1.2.2
+   Compiling getrandom v0.4.3
+   Compiling zeroize v1.9.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling tokio v1.53.1
+   Compiling tracing v0.1.44
+   Compiling getrandom v0.2.17
+   Compiling untrusted v0.9.0
+   Compiling tinyvec v1.13.3
+   Compiling http v1.5.0
+   Compiling unicode-joining-type v1.0.0
+   Compiling equivalent v1.0.2
+   Compiling cfg_aliases v0.2.2
+   Compiling crossbeam-utils v0.8.22
+   Compiling rustls v0.23.45
+   Compiling thiserror v2.0.20
+   Compiling rustls-webpki v0.103.15
+   Compiling thiserror-impl v2.0.20
+   Compiling cpufeatures v0.3.1
+   Compiling subtle v2.6.1
+   Compiling hashbrown v0.17.1
+   Compiling zerocopy v0.8.48
+   Compiling parking_lot_core v0.9.12
+   Compiling indexmap v2.14.2
+   Compiling chacha20 v0.10.2
+   Compiling idna_mapping v1.1.0
+   Compiling quinn-udp v0.5.15
+   Compiling unicode-normalization v0.1.25
+   Compiling tokio-util v0.7.19
+   Compiling httparse v1.10.1
+   Compiling serde_core v1.0.229
+   Compiling scopeguard v1.2.0
+   Compiling unicode-bidi v0.3.18
+   Compiling idna_adapter v1.1.0
+   Compiling lock_api v0.4.14
+   Compiling rand v0.10.2
+   Compiling quinn v0.11.7
+   Compiling http-body v1.1.0
+   Compiling rand_pcg v0.10.2
+   Compiling rustc-hash v2.1.3
+   Compiling utf8_iter v1.0.4
+   Compiling try-lock v0.2.5
+   Compiling lru-slab v0.1.3
+   Compiling crossbeam-epoch v0.9.20
+   Compiling powerfmt v0.2.0
+   Compiling fnv v1.0.7
+   Compiling percent-encoding v2.3.2
+   Compiling atomic-waker v1.1.2
+   Compiling h2 v0.4.19
+   Compiling form_urlencoded v1.2.2
+   Compiling deranged v0.5.8
+   Compiling quinn-proto v0.11.18
+   Compiling want v0.3.1
+   Compiling idna v1.1.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling futures-executor v0.3.34
+   Compiling aho-corasick v1.1.5
+   Compiling syn v2.0.119
+   Compiling socket2 v0.5.10
+   Compiling fastrand v2.5.0
+   Compiling zmij v1.0.19
+   Compiling time-core v0.1.7
+   Compiling serde v1.0.229
+   Compiling num-conv v0.1.0
+   Compiling crc32fast v1.5.0
+   Compiling rand_core v0.9.5
+   Compiling regex-syntax v0.8.11
+   Compiling regex-automata v0.4.18
+   Compiling rand_chacha v0.9.0
+   Compiling time v0.3.45
+   Compiling h3 v0.0.8
+   Compiling futures v0.3.34
+   Compiling hyper v1.11.0
+   Compiling url v2.5.8
+   Compiling parking_lot v0.12.5
+   Compiling crossbeam-channel v0.5.16
+   Compiling uuid v1.24.0
+   Compiling serde_derive v1.0.229
+   Compiling hashbrown v0.14.5
+   Compiling heck v0.5.0
+   Compiling serde_json v1.0.149
+   Compiling mosdns-dns-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/dns-core)
+   Compiling adler2 v2.0.1
+   Compiling tagptr v0.2.0
+   Compiling simd-adler32 v0.3.9
+   Compiling miniz_oxide v0.8.9
+   Compiling moka v0.12.12
+   Compiling enum-as-inner v0.6.1
+   Compiling dashmap v6.1.0
+   Compiling hyper-util v0.1.20
+   Compiling h3-quinn v0.0.10
+   Compiling rand v0.9.4
+   Compiling regex v1.11.1
+   Compiling async-trait v0.1.89
+   Compiling http-body-util v0.1.3
+   Compiling tokio-rustls v0.26.4
+   Compiling openssl-probe v0.2.1
+   Compiling base64 v0.22.1
+   Compiling libyaml-rs v0.3.0
+   Compiling ryu v1.0.23
+   Compiling data-encoding v2.11.1
+   Compiling ipnet v2.12.0
+   Compiling hickory-proto v0.25.2
+   Compiling yaml_serde v0.10.7
+   Compiling mosdns-upstream-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/upstream-core)
+   Compiling rustls-native-certs v0.8.4
+   Compiling mosdns-matcher-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/matcher-core)
+   Compiling flate2 v1.1.9
+   Compiling mosdns-cache-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/cache-core)
+   Compiling mosdns-sequence-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/sequence-core)
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+   Compiling yasna v0.5.2
+   Compiling rcgen v0.14.7
+    Finished `test` profile [unoptimized] target(s) in 59.46s
+     Running tests/special_groups_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_config-0eaa4d989be1116c)
+
+running 8 tests
+test conflicting_schema_or_reserved_generated_names_fail_before_assembly ... ok
+test compiled_router_selects_first_provider_group_and_never_falls_through ... FAILED
+test empty_managed_profile_compiles_at_explicit_hook ... FAILED
+test file_relative_managed_state_is_not_process_relative ... ok
+test enabled_sources_are_strict_and_disabled_unsupported_data_remains_visible ... FAILED
+test opt_in_requires_a_reachable_hook ... FAILED
+test group_identity_priority_and_listener_inventory_are_compiled_from_generated_input ... FAILED
+test standard_dns_overrides_preserve_disabled_unsupported_records_and_reject_activation ... FAILED
+
+failures:
+
+---- compiled_router_selects_first_provider_group_and_never_falls_through stdout ----
+
+thread 'compiled_router_selects_first_provider_group_and_never_falls_through' (5772) panicked at native-host/tests/special_groups_config.rs:291:36:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[2].args.enable_audit", reason: "required field is missing" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- empty_managed_profile_compiles_at_explicit_hook stdout ----
+
+thread 'empty_managed_profile_compiles_at_explicit_hook' (5774) panicked at native-host/tests/special_groups_config.rs:63:55:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[2].args.enable_audit", reason: "required field is missing" }
+
+---- enabled_sources_are_strict_and_disabled_unsupported_data_remains_visible stdout ----
+
+thread 'enabled_sources_are_strict_and_disabled_unsupported_data_remains_visible' (5775) panicked at native-host/tests/special_groups_config.rs:239:27:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[2].args.enable_audit", reason: "required field is missing" }
+
+---- opt_in_requires_a_reachable_hook stdout ----
+
+thread 'opt_in_requires_a_reachable_hook' (5778) panicked at native-host/tests/special_groups_config.rs:78:9:
+$.plugins[2].args.enable_audit: required field is missing
+
+---- group_identity_priority_and_listener_inventory_are_compiled_from_generated_input stdout ----
+
+thread 'group_identity_priority_and_listener_inventory_are_compiled_from_generated_input' (5777) panicked at native-host/tests/special_groups_config.rs:104:36:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[2].args.enable_audit", reason: "required field is missing" }
+
+---- standard_dns_overrides_preserve_disabled_unsupported_records_and_reject_activation stdout ----
+
+thread 'standard_dns_overrides_preserve_disabled_unsupported_records_and_reject_activation' (5779) panicked at native-host/tests/special_groups_config.rs:203:36:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[2].args.enable_audit", reason: "required field is missing" }
+
+
+failures:
+    compiled_router_selects_first_provider_group_and_never_falls_through
+    empty_managed_profile_compiles_at_explicit_hook
+    enabled_sources_are_strict_and_disabled_unsupported_data_remains_visible
+    group_identity_priority_and_listener_inventory_are_compiled_from_generated_input
+    opt_in_requires_a_reachable_hook
+    standard_dns_overrides_preserve_disabled_unsupported_records_and_reject_activation
+
+test result: FAILED. 2 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_config`

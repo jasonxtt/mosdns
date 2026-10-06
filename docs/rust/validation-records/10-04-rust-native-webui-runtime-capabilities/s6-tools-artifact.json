@@ -1,0 +1,12 @@
+{
+  "file": "/root/mosdns-rust-webui-20261004/evidence/mosdns-native: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=845984e88eca53f16b91e513a3432926f29b3726, not stripped\n",
+  "ldd": "\tlinux-vdso.so.1 (0x00007f15cdf15000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f15cded8000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f15cd00c000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f15cdf17000)\n",
+  "initial_probe_failure": "go --version exited2: incorrect CLI option; corrected to go version",
+  "tools": {
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "node": "v20.19.2",
+    "npm": "9.2.0",
+    "go": "go version go1.24.4 linux/amd64"
+  }
+}

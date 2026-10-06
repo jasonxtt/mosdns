@@ -1,0 +1,24 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 9.12s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-d7fe384451f80feb)
+
+running 1 test
+test transaction::tests::durable_marker_recovers_new_state_even_if_canonical_files_are_torn ... FAILED
+
+failures:
+
+---- transaction::tests::durable_marker_recovers_new_state_even_if_canonical_files_are_torn stdout ----
+
+thread 'transaction::tests::durable_marker_recovers_new_state_even_if_canonical_files_are_torn' (36865) panicked at native-host/src/transaction.rs:449:9:
+assertion `left == right` failed
+  left: [111, 108, 100]
+ right: [110, 101, 119]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    transaction::tests::durable_marker_recovers_new_state_even_if_canonical_files_are_torn
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 106 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

@@ -1,0 +1,9 @@
+   Compiling tokio v1.53.1
+   Compiling rustls v0.23.45
+error: failed to write to `/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/rmetazuKzky/full.rmeta`: No space left on device (os error 28)
+
+error: could not compile `rustls` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: failed to write to `/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/rmetavqWOBx/full.rmeta`: No space left on device (os error 28)
+
+error: could not compile `tokio` (lib) due to 1 previous error

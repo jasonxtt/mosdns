@@ -1,0 +1,18 @@
+
+> mosdns-log-vue@0.1.0 build:log1
+> vite build --config vite.log1.config.js
+
+vite v7.3.2 building client environment for production...
+transforming...
+✓ 614 modules transformed.
+rendering chunks...
+computing gzip size...
+../coremain/www/assets/vue-log1/log1.index.html    0.36 kB │ gzip:   0.25 kB
+../coremain/www/assets/vue-log1/app.css          125.26 kB │ gzip:  21.17 kB
+../coremain/www/assets/vue-log1/app.js           816.01 kB │ gzip: 265.86 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.09s

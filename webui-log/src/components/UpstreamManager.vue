@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deleteRequest, getJSON, getText, postJSON } from '../api/http'
+import { getRuntimeCapabilities, supportsOperation, operationReason } from '../api/runtimeCapabilities'
+import { isNativeUpstreamReadOnly } from '../api/nativeManagement'
 import { openConfirm } from '../utils/confirm'
 import { clearTopNotice, setError, setSuccess } from '../utils/notice'
 import { orderUpstreamGroups, upstreamAddressDisplay, upstreamGroupDisplay } from '../utils/upstreamStats'
@@ -21,6 +23,7 @@ const filterGroup = ref('all')
 const showEditor = ref(false)
 const hideDisabled = ref(false)
 const dnsRoutingMode = ref('')
+const runtimeCapabilities = ref(null)
 
 const sortState = reactive({
   key: '',
@@ -41,6 +44,22 @@ const specialEditor = reactive({
   customPortOnly: false
 })
 const editingCtx = ref({ group: '', index: -1 })
+
+const isNative = computed(() => runtimeCapabilities.value?.kind === 'native')
+const canManageGroups = computed(() => Boolean(
+  supportsOperation('groups.manage')
+))
+const canManageUpstreams = computed(() => Boolean(
+  supportsOperation('upstreams.manage')
+))
+const nativeUnsupportedLabels = computed(() => {
+  const labels = {
+    signed_aliapi: '签名 AliAPI', quic: 'DoQ/QUIC', http3: 'HTTP/3', socks_proxy: 'SOCKS 代理',
+    socket_marks: 'Socket 标记', bind_to_device: '绑定网卡', positive_idle_timeout: '正数空闲超时',
+    enable_pipeline: 'Pipeline', srs_geodata: 'SRS/地理数据', remote_download: '远程下载', auto_update: '自动更新'
+  }
+  return (runtimeCapabilities.value?.unsupported_features || []).map((feature) => labels[feature] || feature)
+})
 
 const form = reactive({
   group: '',
@@ -67,7 +86,7 @@ const form = reactive({
   ecs_client_mask: 0
 })
 
-const protocolOptions = [
+const legacyProtocolOptions = [
   { value: 'udp', label: 'UDP' },
   { value: 'tcp', label: 'TCP' },
   { value: 'tls', label: 'DoT (TLS)' },
@@ -93,6 +112,12 @@ function normalizeProtocolAlias(protocol) {
       return value
   }
 }
+
+const protocolOptions = computed(() => {
+  if (!isNative.value) return legacyProtocolOptions
+  const supported = new Set((runtimeCapabilities.value?.upstream_protocols || []).map(normalizeProtocolAlias))
+  return legacyProtocolOptions.filter((item) => supported.has(normalizeProtocolAlias(item.value)))
+})
 
 const protocolValue = computed(() => normalizeProtocolAlias(form.protocol))
 const isAliapi = computed(() => protocolValue.value === 'aliapi')
@@ -146,8 +171,12 @@ function isRowModeDisabled(row) {
   return isModeDisabledGroup(row?.group)
 }
 
+function isRowReadOnly(row) {
+  return !canManageUpstreams.value || Boolean(row?.nativeStatus?.readOnly)
+}
+
 function isRowEffectiveEnabled(row) {
-  return Boolean(row?.data?.enabled) && !isRowModeDisabled(row)
+  return Boolean(row?.data?.enabled) && !isRowModeDisabled(row) && !row?.nativeStatus?.readOnly
 }
 
 function groupDisplayName(group) {
@@ -206,9 +235,12 @@ const rows = computed(() => {
         group,
         index,
         originalOrder,
-        data: item || {}
+        data: item || {},
+        nativeStatus: isNative.value
+          ? isNativeUpstreamReadOnly(item || {}, runtimeCapabilities.value)
+          : { readOnly: false, reason: '' }
       }
-      if (hideDisabled.value && !isRowEffectiveEnabled(row)) {
+      if (hideDisabled.value && !isRowEffectiveEnabled(row) && !row.nativeStatus.readOnly) {
         return
       }
       all.push(row)
@@ -244,6 +276,9 @@ function rowAddress(item) {
 }
 
 function rowStatusLabel(row) {
+  if (row?.nativeStatus?.readOnly) {
+    return '原生只读'
+  }
   if (isRowModeDisabled(row)) {
     return '当前模式未启用'
   }
@@ -317,6 +352,28 @@ async function loadData() {
   loading.value = true
   resetMessage()
   try {
+    try {
+      runtimeCapabilities.value = await getRuntimeCapabilities()
+    } catch (error) {
+      setError(`读取运行时能力失败: ${error.message}`)
+      return
+    }
+
+    if (isNative.value) {
+      if (!supportsOperation('upstreams.read')) { upstreamTags.value = []; upstreamConfig.value = {}; return }
+      const [tags, config, groups] = await Promise.all([
+        getJSON('/api/v1/upstream/tags'),
+        getJSON('/api/v1/upstream/config'),
+        supportsOperation('groups.read') ? getJSON('/api/v1/special-groups') : Promise.resolve([])
+      ])
+      upstreamTags.value = Array.isArray(tags) ? tags : []
+      upstreamConfig.value = config && typeof config === 'object' && !Array.isArray(config) ? config : {}
+      specialGroups.value = Array.isArray(groups) ? groups : []
+      globalSocks5.value = ''
+      dnsRoutingMode.value = ''
+      return
+    }
+
     const [tagsRes, configRes, groupsRes, overridesRes, dnsModeRes] = await Promise.allSettled([
       getJSON('/api/v1/upstream/tags'),
       getJSON('/api/v1/upstream/config'),
@@ -343,15 +400,24 @@ async function loadData() {
 }
 
 function beginAdd() {
+  if (!canManageUpstreams.value) {
+    setError('当前原生运行时不支持修改上游配置')
+    return
+  }
   resetMessage()
   editingCtx.value = { group: '', index: -1 }
   resetForm()
   form.group = groupOptions.value[0] || ''
+  if (isNative.value) form.protocol = protocolOptions.value[0]?.value || ''
   showEditor.value = true
 }
 
 function beginEdit(row) {
   resetMessage()
+  if (isRowReadOnly(row)) {
+    setError(row?.nativeStatus?.reason || '当前上游配置为只读')
+    return
+  }
   if (blockModeDisabledGroup(row?.group)) {
     return
   }
@@ -389,6 +455,10 @@ function closeEditor() {
 }
 
 function openCreateSpecialGroup() {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   resetMessage()
   specialEditor.slot = 0
   specialEditor.name = ''
@@ -403,6 +473,10 @@ function openSpecialGroupsManager() {
 }
 
 function openEditSpecialGroup(group) {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   resetMessage()
   specialEditor.slot = Number(group?.slot) || 0
   specialEditor.name = String(group?.name || '')
@@ -420,6 +494,10 @@ function closeSpecialGroupsManager() {
 }
 
 async function saveSpecialGroup() {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   const name = String(specialEditor.name || '').trim()
   if (!name) {
     setError('专属分流组名称不能为空')
@@ -461,6 +539,10 @@ async function saveSpecialGroup() {
 }
 
 async function deleteSpecialGroup(group) {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   const ok = await openConfirm(`确定删除专属分流组“${group?.name || ''}”吗？删除后会清空该组绑定的上游配置与在线分流配置。`, { tone: 'danger' })
   if (!ok) {
     return
@@ -521,12 +603,24 @@ async function saveUpstream() {
   if (blockModeDisabledGroup(group)) {
     return
   }
+  if (!canManageUpstreams.value) {
+    setError('当前原生运行时不支持修改上游配置')
+    return
+  }
   if (!tag) {
     setError('上游标识不能为空')
     return
   }
   if (!protocol) {
     setError('协议不能为空')
+    return
+  }
+  if (isNative.value && !protocolOptions.value.some((item) => normalizeProtocolAlias(item.value) === protocol)) {
+    setError('所选协议当前原生运行时不支持')
+    return
+  }
+  if (isNative.value && protocol !== 'aliapi' && !String(form.addr || '').trim()) {
+    setError('上游地址不能为空')
     return
   }
 
@@ -561,6 +655,10 @@ async function removeRow(row) {
   if (blockModeDisabledGroup(row?.group)) {
     return
   }
+  if (isRowReadOnly(row)) {
+    setError(row?.nativeStatus?.reason || '当前上游配置为只读')
+    return
+  }
   const ok = await openConfirm(`确定删除上游 "${row.data?.tag || 'unnamed'}" 吗？`, { tone: 'danger' })
   if (!ok) {
     return
@@ -583,6 +681,10 @@ async function removeRow(row) {
 async function toggleEnable(row) {
   resetMessage()
   if (blockModeDisabledGroup(row?.group)) {
+    return
+  }
+  if (isRowReadOnly(row)) {
+    setError(row?.nativeStatus?.reason || '当前上游配置为只读')
     return
   }
   try {
@@ -627,9 +729,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="panel upstream-page">
+    <p v-if="!canManageUpstreams" class="muted" role="note" data-operation-reason="upstreams.manage">{{ operationReason('upstreams.manage') }}</p>
     <div class="upstream-toolbar">
       <div class="upstream-toolbar-left">
-        <button class="btn primary entry-action-btn" type="button" @click="beginAdd">添加上游DNS</button>
+        <button class="btn primary entry-action-btn" type="button" :disabled="!canManageUpstreams" @click="beginAdd">添加上游DNS</button>
         <section class="special-groups-summary" aria-label="专属分流组摘要">
           <div class="special-groups-summary-copy">
             <span class="special-groups-summary-title">专属分流组</span>
@@ -658,8 +761,9 @@ onBeforeUnmount(() => {
           <button class="btn tiny secondary" type="button" @click="closeSpecialGroupsManager" aria-label="Close">✕</button>
         </header>
 
+        <p v-if="!canManageGroups" class="muted" role="note" data-operation-reason="groups.manage">{{ operationReason('groups.manage') }}</p>
         <div class="special-groups-manager-actions">
-          <button class="btn secondary entry-action-btn" type="button" @click="openCreateSpecialGroup">新增专属分流组</button>
+          <button class="btn secondary entry-action-btn" type="button" :disabled="!canManageGroups" @click="openCreateSpecialGroup">新增专属分流组</button>
         </div>
 
         <div v-if="specialGroupCards.length === 0" class="special-group-empty">
@@ -679,8 +783,8 @@ onBeforeUnmount(() => {
               <p class="special-group-meta">{{ group.routeLabel }} · {{ group.upstreamCountLabel }}</p>
             </div>
             <div class="special-group-actions special-group-card-actions">
-              <button class="btn tiny secondary" type="button" @click="openEditSpecialGroup(group)">编辑</button>
-              <button class="btn tiny danger" type="button" @click="deleteSpecialGroup(group)">删除</button>
+              <button class="btn tiny secondary" type="button" :disabled="!canManageGroups" @click="openEditSpecialGroup(group)">编辑</button>
+              <button class="btn tiny danger" type="button" :disabled="!canManageGroups" @click="deleteSpecialGroup(group)">删除</button>
             </div>
           </article>
         </div>
@@ -695,6 +799,10 @@ onBeforeUnmount(() => {
           <button class="btn tiny secondary upstream-editor-close" type="button" aria-label="关闭" @click="closeEditor">✕</button>
         </header>
         <div class="upstream-editor-modal-body">
+        <p v-if="isNative" class="muted" role="note">
+          原生可用协议：{{ protocolOptions.map((item) => item.label).join('、') || '无' }}。
+          不可用功能：{{ nativeUnsupportedLabels.join('、') || '无' }}。已有不支持配置保持只读。
+        </p>
         <div class="form-grid">
           <label>所属组</label>
           <input v-if="editingCtx.index >= 0" v-model="form.group" disabled />
@@ -722,13 +830,13 @@ onBeforeUnmount(() => {
 
             <label v-if="showSocksProxyToggle">使用 socks 代理</label>
             <label v-if="showSocksProxyToggle" class="switch-inline">
-              <input v-model="form.use_socks_proxy" type="checkbox" />
+              <input v-model="form.use_socks_proxy" type="checkbox" :disabled="isNative" />
               <span>{{ form.use_socks_proxy ? '开启' : '关闭' }}</span>
             </label>
 
             <label v-if="showSocks5Input">Socks5 代理</label>
             <div v-if="showSocks5Input">
-              <input v-model="form.socks5" placeholder="host:port" />
+              <input v-model="form.socks5" placeholder="host:port" :disabled="isNative" />
               <small v-if="showForeignSocksFallbackHint" class="muted">
                 当前为空时会自动继承系统设置中的 SOCKS5：{{ globalSocks5 }}
               </small>
@@ -736,13 +844,13 @@ onBeforeUnmount(() => {
 
             <label v-if="showPipeline">Enable Pipeline</label>
             <label v-if="showPipeline" class="switch-inline">
-              <input v-model="form.enable_pipeline" type="checkbox" />
+              <input v-model="form.enable_pipeline" type="checkbox" :disabled="isNative" />
               <span>{{ form.enable_pipeline ? '开启' : '关闭' }}</span>
             </label>
 
             <label v-if="showHttp3">Enable HTTP/3</label>
             <label v-if="showHttp3" class="switch-inline">
-              <input v-model="form.enable_http3" type="checkbox" />
+              <input v-model="form.enable_http3" type="checkbox" :disabled="isNative" />
               <span>{{ form.enable_http3 ? '开启' : '关闭' }}</span>
             </label>
 
@@ -763,16 +871,16 @@ onBeforeUnmount(() => {
             </select>
 
             <label>Idle Timeout (秒)</label>
-            <input v-model.number="form.idle_timeout" type="number" min="0" placeholder="空闲超时" />
+            <input v-model.number="form.idle_timeout" type="number" min="0" placeholder="空闲超时" :disabled="isNative" />
 
             <label>Query Timeout (毫秒)</label>
             <input v-model.number="form.upstream_query_timeout" type="number" min="0" placeholder="查询超时" />
 
             <label>Bind Device (网卡)</label>
-            <input v-model="form.bind_to_device" placeholder="例如: eth0" />
+            <input v-model="form.bind_to_device" placeholder="例如: eth0" :disabled="isNative" />
 
             <label>SoMark (标记)</label>
-            <input v-model.number="form.so_mark" type="number" min="0" placeholder="例如: 100" />
+            <input v-model.number="form.so_mark" type="number" min="0" placeholder="例如: 100" :disabled="isNative" />
           </template>
 
           <template v-else>
@@ -798,7 +906,7 @@ onBeforeUnmount(() => {
 
         <div class="actions">
           <button class="btn secondary" @click="closeEditor">取消</button>
-          <button class="btn primary" :disabled="saving" @click="saveUpstream">
+          <button class="btn primary" :disabled="saving || !canManageUpstreams" @click="saveUpstream">
             {{ saving ? '保存中...' : '保存' }}
           </button>
         </div>
@@ -838,27 +946,28 @@ onBeforeUnmount(() => {
           <tr
             v-for="row in rows"
             :key="`${row.group}-${row.index}-${row.data?.tag || 'x'}`"
-            :class="{ disabled: !isRowEffectiveEnabled(row), 'upstream-row-mode-disabled': isRowModeDisabled(row) }"
+            :class="{ disabled: !isRowEffectiveEnabled(row), 'upstream-row-mode-disabled': isRowModeDisabled(row) || row.nativeStatus.readOnly }"
           >
             <td>
               <label class="switch switch-table">
                 <input
                   type="checkbox"
                   :checked="Boolean(row.data?.enabled)"
-                  :disabled="isRowModeDisabled(row)"
+                  :disabled="isRowModeDisabled(row) || isRowReadOnly(row)"
                   @change="toggleEnable(row)"
                 />
                 <span class="slider"></span>
               </label>
               <span v-if="isRowModeDisabled(row)" class="upstream-mode-disabled-chip">当前模式未启用</span>
+              <span v-if="row.nativeStatus.readOnly" class="upstream-mode-disabled-chip" :title="row.nativeStatus.reason">原生只读</span>
             </td>
             <td :title="groupDisplayName(row.group)">{{ groupDisplayName(row.group) }}</td>
             <td :title="row.data?.tag || '-'">{{ row.data?.tag || '-' }}</td>
             <td :title="row.data?.protocol || '-'">{{ row.data?.protocol || '-' }}</td>
             <td :title="rowAddress(row.data || {})" class="mono">{{ rowAddress(row.data || {}) }}</td>
             <td class="row-actions">
-              <button class="btn tiny secondary" :disabled="isRowModeDisabled(row)" @click="beginEdit(row)">编辑</button>
-              <button class="btn tiny danger" :disabled="isRowModeDisabled(row)" @click="removeRow(row)">删除</button>
+              <button class="btn tiny secondary" :disabled="isRowModeDisabled(row) || isRowReadOnly(row)" @click="beginEdit(row)">编辑</button>
+              <button class="btn tiny danger" :disabled="isRowModeDisabled(row) || isRowReadOnly(row)" @click="removeRow(row)">删除</button>
             </td>
           </tr>
         </tbody>
@@ -904,7 +1013,7 @@ onBeforeUnmount(() => {
         <p class="muted">2.保存后可在上游设置中维护该组上游，并在在线分流中直接选择该组。</p>
         <div class="actions">
           <button class="btn secondary" type="button" @click="closeSpecialGroupModal">取消</button>
-          <button class="btn primary" type="button" :disabled="specialSaving" @click="saveSpecialGroup">
+          <button class="btn primary" type="button" :disabled="specialSaving || !canManageGroups" @click="saveSpecialGroup">
             {{ specialSaving ? '保存中...' : '保存' }}
           </button>
         </div>

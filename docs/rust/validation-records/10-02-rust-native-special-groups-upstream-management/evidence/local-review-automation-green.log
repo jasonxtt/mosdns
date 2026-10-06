@@ -1,0 +1,14 @@
+............................F.......................
+======================================================================
+FAIL: test_rereview_includes_existing_ledger_without_changing_controller (test_automation_c2c_web.C2CReviewerOnlyContractTest.test_rereview_includes_existing_ledger_without_changing_controller)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/mosdns-rust-special-groups-20261003/local-tools/tests/test_automation_c2c_web.py", line 416, in test_rereview_includes_existing_ledger_without_changing_controller
+    with self.assertRaisesRegex(AutomationRunError, "explicit prior result"):
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: AutomationRunError not raised
+
+----------------------------------------------------------------------
+Ran 52 tests in 0.024s
+
+FAILED (failures=1)

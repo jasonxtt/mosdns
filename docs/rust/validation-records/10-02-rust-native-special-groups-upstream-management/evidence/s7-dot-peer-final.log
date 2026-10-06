@@ -1,0 +1,15 @@
+   Compiling once_cell v1.21.4
+   Compiling tokio v1.53.1
+   Compiling tracing-core v0.1.36
+   Compiling tracing v0.1.44
+   Compiling rustls v0.23.45
+error: failed to write /root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/rustcpl3CAG/lib.rmeta: No space left on device (os error 28)
+
+error: could not compile `tokio` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+rustc-LLVM ERROR: IO failure on output stream: No space left on device
+rustc-LLVM ERROR: IO failure on output stream: No space left on device
+error: could not compile `rustls` (lib)
+
+Caused by:
+  process didn't exit successfully: `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc --crate-name rustls --edition=2021 /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustls-0.23.45/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 --warn=unexpected_cfgs --check-cfg 'cfg(bench)' --check-cfg 'cfg(coverage_nightly)' --check-cfg 'cfg(read_buf)' --check-cfg 'cfg(rustls_docsrs)' --cfg 'feature="ring"' --cfg 'feature="std"' --cfg 'feature="tls12"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("aws-lc-rs", "aws_lc_rs", "brotli", "custom-provider", "default", "fips", "hashbrown", "log", "logging", "prefer-post-quantum", "read_buf", "ring", "rustversion", "std", "tls12", "zlib"))' -C metadata=8b1b7d3281ee12c6 -C extra-filename=-f566101d190ae039 --out-dir /root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps -L dependency=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps --extern once_cell=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/libonce_cell-6fe0e84c103b3d0a.rmeta --extern ring=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/libring-20fcafc834121ba4.rmeta --extern pki_types=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/librustls_pki_types-31f0f925463c1e5b.rmeta --extern webpki=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/libwebpki-82d1899b6e9f00ad.rmeta --extern subtle=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/libsubtle-38f50f8cde93854a.rmeta --extern zeroize=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/libzeroize-a857da2210c493d7.rmeta --cap-lints allow -L native=/root/mosdns-rust-special-groups-20261003/target-candidate/debug/build/ring-65839aed23a1411d/out` (exit status: 101)

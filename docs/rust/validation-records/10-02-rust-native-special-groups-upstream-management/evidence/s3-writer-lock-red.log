@@ -1,0 +1,42 @@
+    Updating crates.io index
+     Locking 4 packages to latest Rust 1.85 compatible versions
+      Adding fs2 v0.4.3
+      Adding winapi v0.3.9
+      Adding winapi-i686-pc-windows-gnu v0.4.0
+      Adding winapi-x86_64-pc-windows-gnu v0.4.0
+ Downloading crates ...
+  Downloaded fs2 v0.4.3
+   Compiling fs2 v0.4.3
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 11.63s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-d7fe384451f80feb)
+
+running 1 test
+test transaction::tests::writer_lock_refuses_an_independent_process_and_releases_on_drop ... FAILED
+
+failures:
+
+---- transaction::tests::writer_lock_refuses_an_independent_process_and_releases_on_drop stdout ----
+
+thread 'transaction::tests::writer_lock_refuses_an_independent_process_and_releases_on_drop' (35997) panicked at native-host/src/transaction.rs:54:9:
+second process must be refused: 
+running 1 test
+test transaction::tests::writer_lock_child ... FAILED
+
+failures:
+
+failures:
+    transaction::tests::writer_lock_child
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 103 filtered out; finished in 0.00s
+
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    transaction::tests::writer_lock_refuses_an_independent_process_and_releases_on_drop
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 103 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

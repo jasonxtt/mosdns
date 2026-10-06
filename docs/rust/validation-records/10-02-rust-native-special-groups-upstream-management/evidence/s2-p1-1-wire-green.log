@@ -1,0 +1,9 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 8.78s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-556fd23d77659943)
+
+running 1 test
+test runtime_snapshot::admission_tests::publication_rejects_removed_bindings_before_supervisor_cancellation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 101 filtered out; finished in 0.11s
+

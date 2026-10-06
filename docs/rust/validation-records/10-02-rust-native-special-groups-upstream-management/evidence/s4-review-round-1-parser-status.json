@@ -1,0 +1,15 @@
+{
+  "unit": "Slice 4",
+  "review_round": 1,
+  "initial_response_file": "s4-review-round-1-response-raw.txt",
+  "initial_response": "P1-1 [closed]\\nFINAL: PASS",
+  "initial_parser_status": "pending",
+  "corrected_response_file": "s4-review-round-1-response-corrected.txt",
+  "corrected_response": "FINAL: PASS",
+  "corrected_parser_status": "pass",
+  "formal_result_persisted": true,
+  "finding_id": "P1-1",
+  "finding_status": "closed",
+  "stage_phase": "passed",
+  "automation_current_unit": "Slice 5"
+}

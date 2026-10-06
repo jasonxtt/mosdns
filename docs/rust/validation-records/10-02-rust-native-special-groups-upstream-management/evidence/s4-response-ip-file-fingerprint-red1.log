@@ -1,0 +1,19 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.80s
+     Running unittests src/lib.rs (mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+test config::tests::cache_dependency_fingerprint_tracks_response_ip_rule_file_content ... 
+thread 'config::tests::cache_dependency_fingerprint_tracks_response_ip_rule_file_content' (123999) panicked at native-host/src/config.rs:4371:63:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[sequence].args", reason: "unsafe cache `cache` at entry rule 0: successor may execute client_ip at entry rule 2; move policy before cache" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    config::tests::cache_dependency_fingerprint_tracks_response_ip_rule_file_content
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 139 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --lib`

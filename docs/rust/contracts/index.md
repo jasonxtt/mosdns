@@ -16,6 +16,10 @@ These files are short, source-backed rules for MosDNS-T backend and Rust migrati
 | [Native response policy](native-response-policy.md) | Immutable hosts/redirect/IP snapshots and TTL compilation |
 | [Native client/ECS](native-client-ecs.md) | Trusted socket identity and client_ip; ECS slices tracked by owning task |
 | [Native cache lifecycle](native-cache-lifecycle.md) | Cache publication/refresh, v2 persistence, management HTTP and Vue workflow |
+| [Native special groups](native-special-groups.md) | Opt-in managed compiler, generated routing, CNAME/audit preservation, S5 management HTTP, S6 Vue workflow, and S7 isolated whole-chain evidence; S7 and cumulative exact-source reviews passed; production cutover remains gated |
+| [Native switch state](native-switch-state.md) | Configured switch1–17 state, immutable query admission, durable HTTP control, capability inventory, and truthful native Vue controls |
+
+| [Native WebUI hosting](native-webui-hosting.md) | Same-origin embedded/external UI, truthful health/version, capability admission and opt-in pure native build |
 
 ## Before development
 

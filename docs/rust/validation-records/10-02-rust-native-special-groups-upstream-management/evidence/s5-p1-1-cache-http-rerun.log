@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running tests/cache_http.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/cache_http-1bb3a7ca1bc3db39)
+
+running 1 test
+cache startup /tmp/cache-http-167380/alpha.gz: cache persistence: No such file or directory (os error 2); starting empty
+test named_inventory_metrics_management_and_restart_use_real_owners ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.06s
+

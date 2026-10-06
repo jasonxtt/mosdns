@@ -1,3 +1,4 @@
+import { capabilityFetch } from '../api/runtimeCapabilities'
 import type {
   AuditCapacityResponse,
   AuditStatusResponse,
@@ -23,7 +24,7 @@ export interface DashboardWindowStat {
 }
 
 async function requestJSON<T>(url: string): Promise<T> {
-  const response = await fetch(url)
+  const response = await capabilityFetch(url)
   if (!response.ok) {
     let message = `HTTP ${response.status} ${response.statusText}`
     try {

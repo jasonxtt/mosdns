@@ -1,0 +1,21 @@
+# Empty native managed profile. Controlled local upstream; no public DNS.
+# State lives beside this file; the hook fixes the main routing insertion point.
+log: {level: error}
+native_management: {special_groups: true}
+api: {http: "127.0.0.1:15380"}
+plugins:
+  - tag: default_upstream
+    type: forward
+    args:
+      upstreams: [{tag: local_default, addr: "udp://127.0.0.1:15455"}]
+  - tag: main_entry
+    type: sequence
+    args:
+      - exec: $special_upstream_matcher
+      - exec: $default_upstream
+  - tag: main_udp
+    type: udp_server
+    args:
+      entry: main_entry
+      listen: "127.0.0.1:15355"
+      enable_audit: true

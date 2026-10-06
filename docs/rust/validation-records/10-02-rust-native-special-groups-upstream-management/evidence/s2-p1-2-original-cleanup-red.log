@@ -1,0 +1,59 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/s2-p1-2-red-source/rust/native-host)
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/assembly.rs:1589:23
+     |
+1589 |     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/config.rs:3619:23
+     |
+3619 |     const UDP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-tcp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/config.rs:3620:23
+     |
+3620 |     const TCP: &str = include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/execution.rs:4620:35
+     |
+4620 |           let config = compile_yaml(include_str!(
+     |  ___________________________________^
+4621 | |             "../../../tests/phase5a-baseline/configs/forward-udp.yaml"
+4622 | |         ))
+     | |_________^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+    --> native-host/src/execution.rs:4693:31
+     |
+4693 |           let w1 = compile_yaml(include_str!(
+     |  _______________________________^
+4694 | |             "../../../tests/phase5a-baseline/configs/forward-udp.yaml"
+4695 | |         ))
+     | |_________^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/routing.yaml`: No such file or directory (os error 2)
+    --> native-host/src/execution.rs:5067:35
+     |
+5067 |           let config = compile_yaml(include_str!(
+     |  ___________________________________^
+5068 | |             "../../../tests/phase5a-baseline/configs/routing.yaml"
+5069 | |         ))
+     | |_________^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-tcp.yaml`: No such file or directory (os error 2)
+   --> native-host/src/tcp.rs:484:9
+    |
+484 |         include_str!("../../../tests/phase5a-baseline/configs/forward-tcp.yaml");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: couldn't read `native-host/src/../../../tests/phase5a-baseline/configs/forward-udp.yaml`: No such file or directory (os error 2)
+   --> native-host/src/udp.rs:455:9
+    |
+455 |         include_str!("../../../tests/phase5a-baseline/configs/forward-udp.yaml");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: could not compile `mosdns-native-host` (lib test) due to 8 previous errors

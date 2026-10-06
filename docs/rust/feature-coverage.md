@@ -18,6 +18,20 @@
 
 ### 审计控制与 DNS 卡片限定闭环（C08/C11 子项；整行仍“待验收”）
 
+2026-09-30 增量登记：下表关于“排名/搜索/过滤/丰富字段仍延期”的描述是
+审计控制任务交付时的历史范围，已被后续 [查询诊断任务](validation-records/09-30-rust-native-query-diagnostics-overview/prd.md)
+的限定交付扩充：原生 admission ID、最终 wire 的 flags/完整 Answer 投影与
+decode 状态、规则来源及实际 supplier、过滤分页日志、四类排名、独立
+top-300 慢查询、精确域名下钻、两槽 expensive read 与真实断开取消，以及
+现有 Vue 查询详情/排名错误态与下钻。`860c6253` 范围由执行对话报告最终
+C2C PASS，独立收尾复查重跑 VM 集成 5/5 与 permit-cancel 1/1；证据见
+该任务 `research/closure-review.md` 和 `research/browser-proof/`。
+C08/C11 整行仍未完成；capture、别名、上游管理/指标、兼容 UI/静态服务、
+高负载完整性和全阶段验收等未覆盖项继续延期，不由此登记升级。
+
+下一项 P34/C03 原生上游转发规划见 [新任务](validation-records/09-30-rust-native-upstream-forwarding/prd.md)，
+其多上游/secure/bootstrap/reuse 内容尚未实现或验收，不计为交付。
+
 `09-30-rust-native-next-bundled-delivery` 在原生 host 上新增动态审计采集、容量设置与安全持久化、限定的 v1/v2 审计 API，并让维护中的 Vue DNS 概览卡片和 System 审计面板消费真实 HTTP/DNS 数据。本批仅登记下列可运行子项；C08/C11 整行未完成，C10 的 Prometheus 与插件 API 没有获得新证据。
 
 | 条目 | 本批实际交付 | 仍延期 |
@@ -248,6 +262,20 @@ reviewer gate 尚待实际返回，且没有启用 production/default wiring。
 
 同一条目由多个阶段负责时，各阶段交接列出未完成子项及接收任务/阶段，不能因某个子任务归档而关闭整行。5B 关闭全部查询条目，5C 关闭管理/状态条目；5D 汇总完整 E2E 和性能证据，Phase 6 删除桥接后再确认所有条目有效。未映射、未测或只测 hybrid 的条目保持待验收。
 
+### 2026-10-04 native special-groups and upstream-management task (under exact-source review)
+
+The authorized task implements the explicit native `special_groups` managed
+compiler, durable whole-generation mutation/recovery, cache dependency fencing,
+management HTTP/capability matrix, the existing Vue workflow, and the integrated
+DNS/cache/audit chain. S1–S6 have exact-source C2C PASS records. S7 isolated
+validation passes 1,179 workspace tests (0 failures; 3 subprocess probes are
+invoked by parent tests), fmt/strict Clippy, native build, DoT/DoH peers, both
+Vue builds, and controlled DNS/HTTP/browser proof. S7 exact-source review and a
+separate cumulative review from `79d93ae1` remain required; this task does not
+close complete native compatibility, performance/stability, hybrid retirement,
+or production cutover. See the [S7 validation record](validation-records/10-02-rust-native-special-groups-upstream-management/s7-status.md),
+[normative contract](contracts/native-special-groups.md), and [approved plan](plans/special-groups-upstream-management.md).
+
 ### 2026-10-02 native cache lifecycle scope (P26/C10/C11/C13 subitems)
 
 The [cache task](validation-records/10-01-rust-native-cache-lifecycle-management/prd.md) reviewed delivery implements multiple named/quick stores, tokenized successor publication, basic EDNS0/DO product keys, wall/monotonic metadata, CIDR exclusion, domain_set, owner lazy refresh, v2 dump/import/atomic save/durable-first empty flush, SIGTERM/SIGINT drain/final save, four cache metrics, named inventory and existing Vue list/details/partial failure. S1-S7 passed the same C2C review; iteration 11 returned full-task FINAL: PASS / DONE.
@@ -259,3 +287,13 @@ Stable tests: native-host cache_catalog/cache_lifecycle/cache_http, owner/codec 
 P36 hosts, P40 redirect, P65 TTL and P20 resp_ip now have bounded native integration: immutable full/suffix/regexp/keyword hosts/redirect inline+text loaders; hosts A/AAAA and empty-family FakeSOA; scoped redirect/CNAME restoration and inherited actual supplier; fixed/range uint32 TTL across non-OPT records; multi-value IPv4/IPv6/CIDR OR predicates with $ip_set and &text-file references. ip_set sets/binary/SRS/compression and management reload remain unsupported. P26 composition covers cache boundary/aging/lazy refresh and v2 retained dump: rule changes alone do not invalidate old entries, so immediate replacement requires quiescent live-owner Flush before shutdown/restart. Full-item acceptance and production gates remain open.
 
 Evidence: [response-policy task](validation-records/10-02-rust-native-response-policy-ip-rules/prd.md), native-host policy_config/policy_wire tests, [actual DNS/API/Vue/restart proof](validation-records/10-02-rust-native-response-policy-ip-rules/research/public-proof/README.md). Final workspace 1,070 tests pass, zero ignored; fmt/clippy pass. S1–S6 and cumulative exact range 2c059b0e..13d60d3e C2C FINAL: PASS (iteration 7); task archived. Historical narrower P20 rows below describe their earlier delivery, not the current approved grammar.
+
+### 2026-10-04 native WebUI/runtime capabilities (C11/C12 subitems)
+
+The [hosting contract](contracts/native-webui-hosting.md) and [S6 proof](validation-records/10-04-rust-native-webui-runtime-capabilities/s6-status.md) register only these demonstrated increments; S1–S6 and exact cumulative review PASS, parent acceptance completed and task archived. Whole C11/C12 gates remain open.
+
+| Subitem | Actual isolated proof | Still outside this acceptance |
+|---|---|---|
+| C11 native static/external hosting | Executable serves maintained `/`, compatibility `/log`, nested assets; safe Linux pinned mounts, live reads, budgets/saturation/timeout/worker drain; binary/config/data with source unavailable and no tools PATH | Full plugin/UI compatibility, unsupported-platform external mounts, performance/stability and production/default replacement |
+| C11 existing supported workflows | Both shells actual audit details, named-cache list/flush, eligible local-rule saves, managed group/upstream edits; controlled DNS/supplier/cache/files, real failure drafts, refresh/restart persistence; all mounted views/refresh suppress false operations; actual Go404 legacy workflow and same asset hashes | Go-only capture/aliases/switch/requery/remembered/AdGuard/system APIs remain unsupported in native; complete C11 and full5D/Phase6 remain pending |
+| C12 health/version/capability UI | CLI/HTTP shared product identity; all-bind/apply/recovery/stopping health; null schemas, visible native identity and per-family disabled reasons; local theme storage retained | Server appearance upload/history/colors, webui port/restart/update/config management/generation/overrides/process metrics; complete C12 remains pending |

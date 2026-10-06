@@ -1,0 +1,12 @@
+{
+  "base": "2e1b9387c6cc50067d003acca2c0a9ec795caa2d",
+  "files": {
+    "rust/native-host/build.rs": "a646dc77624f649d763397fce88915c7bd2b22278da88aac65d7a996368ffe6b",
+    "rust/native-host/Cargo.toml": "72b08dcb09a001fa4d125504a2ac1e80cddcd109a5b56c539ea9fcceba974f1f",
+    "rust/native-host/src/static_ui.rs": "e4e89be259cf2275977a86c870774fa0a17debc707c8e8918c2a684838963aba",
+    "rust/native-host/src/api.rs": "a0a90dd0e86e6548d9f77dac7b28e864d6d79f23679b61fc659dda74c21d10b6",
+    "rust/native-host/src/lib.rs": "669ecb0f77a1a9d3f16eda75a253fec0b118a01bf3d4acbefcd0fedc6cc980a8",
+    "rust/native-host/tests/slice6_management_http.rs": "00c8e73bf96e89a5e23b59a26ace5b55e4f1c4305e5899a4a44619a1648a2837"
+  },
+  "remote_match": true
+}

@@ -1,0 +1,165 @@
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s1-exact-tests.log:234: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s1-final-tests.log:234: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s1-gate.log:233: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s1-immutable-tests.log:140: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s1-p1-1-green.log:234: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s1-reviewed-tests.log:233: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-api-failure-all-listeners.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-audit-enable-green.log:126: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-canceled-retirement-green.log:127: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-discard-inventory-green.log:154: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-frame-snapshot-tests.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-frozen-opt-in-green.log:123: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-native-host-regressions.log:495: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-native-host-reviewed.log:499: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-owner-reuse-tests.log:158: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-p1-1-wire-green.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-p1-2-final-green.log:152: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-p1-3-green.log:19: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-p1-3-valid-red.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-p1-remediation-native-host.log:502: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-pair-green-3.log:10: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-port-transition-tests.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-preallocated-listener-update.log:15: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-prepared-listeners-initial.log:131: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-prepared-periodic-tests.log:130: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-shared-tcp-owner-proof.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-snapshot-initial-tests.log:114: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-snapshot-retirement-tests.log:156: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-stable-api-frame-green.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-stable-api-tests.log:151: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-staged-periodic-proof.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s2-warm-cache-counter.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-admission-gate-recheck1.log:210: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-candidate-final-native-host.log:516: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-candidate-input-green-2.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-candidate-native-host.log:516: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-candidate-shared-provider-green.log:23: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-captured-cache-read-green.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-coordinator-apply-tests-1.log:251: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-current-fmt-recheck2.log:46: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-current-fmt-recheck2.log:51: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-current-fmt-recheck2.log:60: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-current-native-host-tests-final1.log:531: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-current-native-host-tests-serial.log:615: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-external-edit-green.log:20: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-filesystem-matrix-green.log:14: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-full-input-recheck2.log:227: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-full-input-recheck4.log:179: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-journal-redo-green.log:13: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-journal-undo-green.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-p1-1-green.log:172: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-p1-2-green.log:170: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-p1-rerun-native-host.log:533: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-path-containment-green.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-policy-wire-regression-green.log:118: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-sigkill-matrix-green.log:19: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-startup-recovery-green.log:15: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-store-native-host.log:513: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-store-regressions.log:21: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-transaction-module-recheck1.log:196: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-transaction-module-recheck2.log:237: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-transaction-ownership-tests-recheck1.log:303: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-transaction-ownership-tests-recheck2.log:27: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-writer-lock-green.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s3-writer-lock-red.log:22: trailing whitespace.
++second process must be refused: 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-conflict-preservation-green1.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-dump-crash-restart-green1.log:29: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-dump-crash-restart-green2.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-dump-filesystem-matrix-green1.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-name-port-reuse-green1.log:10: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-owner-green-rerun.log:22: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-policy-focused-rerun2.log:14: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-cache-policy-green-rerun.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-custom-only-invalidation-green1.log:10: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:18: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:52: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:68: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:196: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:207: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:210: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:229: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:258: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:273: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:309: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:335: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:364: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:367: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:376: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:394: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-fmt-check1.log:435: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-group-upstream-invalidation-green1.log:10: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-lazy-refresh-fence-green1.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-live-dns-policy-test.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-native-host-tests-final1.log:544: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-native-host-tests-final2.log:544: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-response-ip-file-fingerprint-green1.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-response-ip-file-fingerprint-green2.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-response-ip-file-fingerprint-red1.log:6: trailing whitespace.
++test config::tests::cache_dependency_fingerprint_tracks_response_ip_rule_file_content ... 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-response-ip-file-fingerprint-red2.log:6: trailing whitespace.
++test config::tests::cache_dependency_fingerprint_tracks_response_ip_rule_file_content ... 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-runtime-snapshot-admission-green2.log:46: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s4-slot-reuse-green2.log:10: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-capability-disabled-profile-green1.log:10: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-disconnect-green1.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-diversion-http-green1.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-group-auto-allocation-green1.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-group-crud-green3.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-groups-get-green1.log:10: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-listener-conflict-green1.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-manual-post-green1.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-native-host-suite5.log:553: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-native-host-suite6.log:554: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-native-host-suite7.log:553: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-p1-1-cache-http-rerun.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-p1-1-fmt-check.log:13: trailing whitespace.
++ 
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-p1-1-native-host-suite-serial.log:554: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-p1-1-root-config-green1.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-route-method-matrix-green1.log:9: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-sigkill-publication-green1.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-supervisor-suite1.log:43: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-supervisor-suite2.log:29: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-upstream-api-green2.log:11: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-upstream-api-green3.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s5-upstream-http-contract-green1.log:12: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s6-go-cache-detail.log:15: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-doh-peer-retry.log:47: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-dot-peer-retry.log:53: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-final-static-checks.log:141: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-native-host-suite-final.log:562: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-native-host-suite-retry.log:708: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-workspace-full-final.log:12: trailing whitespace.
++          
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-workspace-full-retry.log:1662: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-workspace-libs-final.log:459: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/evidence/s7-workspace-libs-retry.log:459: new blank line at EOF.
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s6-review-round-1-request.md:3: trailing whitespace.
++**Task:** `10-02-rust-native-special-groups-upstream-management`  
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s6-review-round-1-request.md:4: trailing whitespace.
++**Formal context:** `codex_01a0fc3e-79ef-7e23-9943-34062de8ded0`  
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s6-review-round-1-request.md:5: trailing whitespace.
++**Unit:** Slice 6 — maintained Vue workflow  
+docs/rust/validation-records/10-02-rust-native-special-groups-upstream-management/s6-review-round-1-request.md:6: trailing whitespace.
++**Reviewer:** dedicated `Review Rust Native Groups` conversation  

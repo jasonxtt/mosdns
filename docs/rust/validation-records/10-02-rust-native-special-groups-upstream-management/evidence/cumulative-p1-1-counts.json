@@ -1,0 +1,20 @@
+{
+  "native-host": {
+    "passed": 379,
+    "failed": 0,
+    "ignored": 3,
+    "targets": 30
+  },
+  "workspace-libs": {
+    "passed": 409,
+    "failed": 0,
+    "ignored": 3,
+    "targets": 7
+  },
+  "workspace-full": {
+    "passed": 1182,
+    "failed": 0,
+    "ignored": 3,
+    "targets": 79
+  }
+}

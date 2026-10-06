@@ -7,6 +7,10 @@ defineProps({
   specialGroups: {
     type: Array,
     default: () => []
+  },
+  canManage: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -16,7 +20,7 @@ defineEmits(['create', 'edit', 'delete'])
 <template>
   <section class="sub-panel">
     <div class="actions">
-      <button class="btn primary entry-action-btn" @click="$emit('create')">新增专属分流组</button>
+      <button class="btn primary entry-action-btn" :disabled="!canManage" @click="$emit('create')">新增专属分流组</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -46,8 +50,8 @@ defineEmits(['create', 'edit', 'delete'])
             <td class="mono">{{ group.upstream_plugin_tag }}</td>
             <td class="mono">{{ group.diversion_plugin_tag }}</td>
             <td class="row-actions">
-              <button class="btn tiny secondary" @click="$emit('edit', group)">编辑</button>
-              <button class="btn tiny danger" @click="$emit('delete', group)">删除</button>
+              <button class="btn tiny secondary" :disabled="!canManage" @click="$emit('edit', group)">编辑</button>
+              <button class="btn tiny danger" :disabled="!canManage" @click="$emit('delete', group)">删除</button>
             </td>
           </tr>
         </tbody>

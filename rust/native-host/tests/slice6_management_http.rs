@@ -21,7 +21,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(name: &str) -> Self {
-        let root = std::env::temp_dir().join(format!("mosdns-http-{name}-{}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .expect("canonical temporary directory")
+            .join(format!("mosdns-http-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("rules")).expect("fixture directory");
         Self { root }
@@ -217,6 +220,15 @@ fn get(path: &str) -> String {
     format!("GET {path} HTTP/1.1\r\nHost: native\r\nConnection: close\r\n\r\n")
 }
 
+fn get_with_headers(path: &str, headers: &[(&str, &str)]) -> String {
+    use std::fmt::Write as _;
+    let mut extra = String::new();
+    for (key, value) in headers {
+        write!(&mut extra, "{key}: {value}\r\n").expect("write request header");
+    }
+    format!("GET {path} HTTP/1.1\r\nHost: native\r\n{extra}Connection: close\r\n\r\n")
+}
+
 fn raw(method: &str, path: &str) -> String {
     format!("{method} {path} HTTP/1.1\r\nHost: native\r\nConnection: close\r\n\r\n")
 }
@@ -226,6 +238,54 @@ fn post(path: &str, body: &str) -> String {
         "POST {path} HTTP/1.1\r\nHost: native\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
+}
+
+fn post_with_headers(path: &str, body: &str, headers: &[(&str, &str)]) -> String {
+    use std::fmt::Write as _;
+    let mut extra = String::new();
+    for (key, value) in headers {
+        write!(&mut extra, "{key}: {value}\r\n").expect("write request header");
+    }
+    format!(
+        "POST {path} HTTP/1.1\r\nHost: native\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn switch_fixture(name: &str, dns_port: u16, api_port: u16) -> Fixture {
+    let fixture = Fixture::new(name);
+    fixture.write("state/custom switch.txt", " A \n");
+    let yaml = format!(
+        r#"log:
+  level: error
+api:
+  http: "127.0.0.1:{api_port}"
+plugins:
+  - tag: sequence_main
+    type: sequence
+    args:
+      - matches: switch3 A
+        exec: reject 3
+      - exec: $forward_main
+  - tag: "custom switch"
+    type: switch3
+    args:
+      initial_value: "state/custom switch.txt"
+  - tag: forward_main
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://127.0.0.1:25999"
+  - tag: listener
+    type: udp_server
+    args:
+      entry: sequence_main
+      listen: "127.0.0.1:{dns_port}"
+      enable_audit: false
+"#
+    );
+    fixture.write("config.yaml", &yaml);
+    fixture
 }
 
 /// A port that was just free; used to prove a failed bind released the other
@@ -337,6 +397,183 @@ fn management_routes_match_the_go_visible_contract() {
         task.await.expect("supervisor task")
     });
 
+    result.expect("supervisor shutdown is clean");
+}
+
+#[allow(clippy::too_many_lines)]
+#[test]
+fn configured_switch_http_uses_inventory_tags_and_strict_value_inputs() {
+    let fixture = switch_fixture("switch-http", free_udp_port(), free_tcp_port());
+    let assembly = assembly_for(&fixture);
+    let bound = assembly
+        .block_on(assembly.bind_host())
+        .expect("bound host listeners");
+    let api = bound.api_addr().expect("management listener address");
+    let shutdown = TransportCancellation::new();
+
+    let result = assembly.block_on(async {
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+
+        let capabilities = http_request(api, &get("/api/v1/capabilities")).await;
+        assert_eq!(capabilities.status, 200);
+        let capabilities: serde_json::Value =
+            serde_json::from_str(&capabilities.body).expect("capability JSON");
+        assert_eq!(capabilities["ui_operations"]["switches.manage"]["supported"], true);
+        assert_eq!(capabilities["switches"]["schema_version"], 1);
+        assert_eq!(capabilities["switches"]["config_generation"], "0");
+        assert_eq!(capabilities["switches"]["instances"][0]["type"], "switch3");
+        assert_eq!(capabilities["switches"]["instances"][0]["tag"], "custom switch");
+        assert_eq!(capabilities["switches"]["instances"][0]["readable"], true);
+        assert_eq!(capabilities["switches"]["instances"][0]["writable"], true);
+
+        let encoded = http_request(api, &get("/plugins/custom%20switch/show")).await;
+        assert_eq!(encoded.status, 200, "{encoded:?}");
+        assert_eq!(encoded.body, "A");
+
+        let custom = http_request(
+            api,
+            &post_with_headers(
+                "/plugins/custom%20switch/post",
+                r#"{"value":"custom value"}"#,
+                &[
+                    ("Content-Type", "Application/JSON; charset=UTF-8"),
+                    ("X-Mosdns-Config-Generation", "0"),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(custom.status, 200, "{custom:?}");
+        assert_eq!(custom.body, "updated to: custom value\n");
+        assert_eq!(fixture.read("state/custom switch.txt"), "custom value");
+        assert_eq!(
+            http_request(api, &get("/plugins/custom%20switch/show")).await.body,
+            "custom value"
+        );
+
+        let form = http_request(
+            api,
+            &post_with_headers(
+                "/plugins/custom%20switch/post",
+                "value=",
+                &[("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")],
+            ),
+        )
+        .await;
+        assert_eq!(form.status, 200, "{form:?}");
+        assert_eq!(form.body, "updated to: \n");
+        assert_eq!(fixture.read("state/custom switch.txt"), "");
+
+        let legacy_json = http_request(
+            api,
+            &post_with_headers(
+                "/plugins/custom%20switch/post",
+                r#"{"Value":"B"}"#,
+                &[],
+            ),
+        )
+        .await;
+        assert_eq!(legacy_json.status, 200, "{legacy_json:?}");
+        assert_eq!(fixture.read("state/custom switch.txt"), "B");
+
+        for (body, expected) in [
+            (r#"{"value":"A","Value":"B"}"#, 400),
+            (r#"{"value":1}"#, 400),
+        ] {
+            let invalid = http_request(
+                api,
+                &post_with_headers(
+                    "/plugins/custom%20switch/post",
+                    body,
+                    &[("Content-Type", "application/json")],
+                ),
+            )
+            .await;
+            assert_eq!(invalid.status, expected, "{body}: {invalid:?}");
+        }
+        let duplicate_form = http_request(
+            api,
+            &post_with_headers(
+                "/plugins/custom%20switch/post",
+                "value=A&value=B",
+                &[("Content-Type", "application/x-www-form-urlencoded")],
+            ),
+        )
+        .await;
+        assert_eq!(duplicate_form.status, 400);
+        let unsupported = http_request(
+            api,
+            &post_with_headers(
+                "/plugins/custom%20switch/post",
+                "value=A",
+                &[("Content-Type", "text/plain")],
+            ),
+        )
+        .await;
+        assert_eq!(unsupported.status, 415);
+
+        let oversized = http_request(
+            api,
+            &format!(
+                "POST /plugins/custom%20switch/post HTTP/1.1\r\nHost: native\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                1024 * 1024 + 1
+            ),
+        )
+        .await;
+        assert_eq!(oversized.status, 413);
+        assert_eq!(fixture.read("state/custom switch.txt"), "B");
+
+        let malformed_generation = http_request(
+            api,
+            &post_with_headers(
+                "/plugins/custom%20switch/post",
+                r#"{"value":"A"}"#,
+                &[("X-Mosdns-Config-Generation", "01")],
+            ),
+        )
+        .await;
+        assert_eq!(malformed_generation.status, 400);
+        let stale = http_request(
+            api,
+            &post_with_headers(
+                "/plugins/custom%20switch/post",
+                r#"{"value":"A"}"#,
+                &[("X-Mosdns-Config-Generation", "1")],
+            ),
+        )
+        .await;
+        assert_eq!(stale.status, 409);
+        assert_eq!(fixture.read("state/custom switch.txt"), "B");
+
+        // Generation is a precondition only after a configured switch route
+        // has been identified. Unrelated plugin and non-plugin requests keep
+        // their normal route semantics even with malformed input.
+        let unrelated_plugin = http_request(
+            api,
+            &get_with_headers(
+                "/plugins/absent%20switch/show",
+                &[("X-Mosdns-Config-Generation", "01")],
+            ),
+        )
+        .await;
+        assert_eq!(unrelated_plugin.status, 404, "{unrelated_plugin:?}");
+        let unrelated_api = http_request(
+            api,
+            &get_with_headers(
+                "/api/v1/capabilities",
+                &[("X-Mosdns-Config-Generation", "not-a-number")],
+            ),
+        )
+        .await;
+        assert_eq!(unrelated_api.status, 200, "{unrelated_api:?}");
+
+        let wrong_method = http_request(api, &raw("DELETE", "/plugins/custom%20switch/show")).await;
+        assert_eq!(wrong_method.status, 405);
+        let unknown = http_request(api, &get("/plugins/absent%20switch/show")).await;
+        assert_eq!(unknown.status, 404);
+
+        shutdown.cancel();
+        task.await.expect("supervisor task")
+    });
     result.expect("supervisor shutdown is clean");
 }
 
@@ -732,8 +969,8 @@ fn a_tag_that_is_not_mounted_is_404_before_any_method_decision() {
         let unknown_action = http_request(api, &raw("GET", "/plugins/blocklist/nope")).await;
         assert_eq!(unknown_action.status, 404);
 
-        // The group-list route exists, so a wrong method there is 405.
-        let group_wrong_method = http_request(api, &raw("POST", "/api/v1/special-groups")).await;
+        // The collection route accepts GET and POST, so DELETE is the wrong method.
+        let group_wrong_method = http_request(api, &raw("DELETE", "/api/v1/special-groups")).await;
         assert_eq!(group_wrong_method.status, 405);
 
         shutdown.cancel();
@@ -826,4 +1063,396 @@ plugins:
         task.await.expect("supervisor task")
     });
     result.expect("supervisor shutdown is clean");
+}
+
+#[test]
+fn native_supervisor_health_matches_cli_identity_and_closes_with_listeners() {
+    let dns_port = free_udp_port();
+    let api_port = free_tcp_port();
+    let fixture = fixture("health-supervisor", dns_port, api_port);
+    let host = assembly_for(&fixture);
+    host.block_on(async {
+        let bound = host.bind_host().await.unwrap();
+        let api = bound.api_addr().unwrap();
+        let shutdown = TransportCancellation::new();
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let response = http_request(api, &get("/api/v1/system/health")).await;
+        assert_eq!(response.status, 200);
+        let health: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(health["ready"], true);
+        assert_eq!(
+            health["version"],
+            mosdns_native_host::build_identity::VERSION
+        );
+        assert_eq!(health["runtime"], "rust");
+        shutdown.cancel();
+        task.await.unwrap().unwrap();
+        assert!(tokio::net::TcpStream::connect(api).await.is_err());
+    });
+}
+
+#[test]
+fn embedded_ui_roots_assets_and_revalidation_are_real_http() {
+    let fixture = fixture("embedded-ui", free_udp_port(), free_tcp_port());
+    let host = assembly_for(&fixture);
+    host.block_on(async {
+        let bound = host.bind_host().await.unwrap();
+        let api = bound.api_addr().unwrap();
+        let shutdown = TransportCancellation::new();
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let before = host.metrics_snapshot();
+        host.start_audit();
+        for path in [
+            "/",
+            "/log",
+            "/assets/vue-log/app.js?v=proof",
+            "/assets/vue-log1/app.css",
+        ] {
+            let response = http_request(api, &get(path)).await;
+            assert_eq!(response.status, 200, "{path}: {response:?}");
+            assert!(!response.body.is_empty());
+            let mime = if path.contains("app.js") {
+                "text/javascript; charset=utf-8"
+            } else if path == "/assets/vue-log1/app.css" {
+                "text/css; charset=utf-8"
+            } else {
+                "text/html; charset=utf-8"
+            };
+            assert_eq!(response.header("content-type"), Some(mime));
+            assert_eq!(response.header("cache-control"), Some("no-cache"));
+            assert_eq!(response.header("x-content-type-options"), Some("nosniff"));
+            let etag = response.header("etag").unwrap();
+            let cached = http_request(
+                api,
+                &format!("GET {path} HTTP/1.1\r\nHost: test\r\nIf-None-Match: {etag}\r\n\r\n"),
+            )
+            .await;
+            assert_eq!(cached.status, 304);
+            assert!(cached.body.is_empty());
+            let head =
+                http_request(api, &format!("HEAD {path} HTTP/1.1\r\nHost: test\r\n\r\n")).await;
+            assert_eq!(head.status, 200);
+            assert!(head.body.is_empty());
+            assert_eq!(
+                head.header("content-length"),
+                response.header("content-length")
+            );
+        }
+        for path in [
+            "/assets/no-such.js",
+            "/api/missing",
+            "/plugins/missing",
+            "/assets/%2e%2e/log.html",
+            "/assets/vue-log%2fapp.js",
+        ] {
+            assert_eq!(http_request(api, &get(path)).await.status, 404, "{path}");
+        }
+        let wrong = http_request(api, &post("/", "")).await;
+        assert_eq!(wrong.status, 405);
+        assert_eq!(wrong.header("allow"), Some("GET, HEAD"));
+        let redirect = http_request(api, &get("/log/")).await;
+        assert_eq!(redirect.status, 301);
+        assert_eq!(redirect.header("location"), Some("/log"));
+        let queried = http_request(api, &get("/log/?x=1&return=%2F")).await;
+        assert_eq!(queried.status, 301);
+        assert_eq!(queried.header("location"), Some("/log?x=1&return=%2F"));
+        let unsafe_query = http_request(api, &get("/log/?x=%0d%0aInjected%3Ayes")).await;
+        assert_eq!(unsafe_query.status, 404);
+        assert!(unsafe_query.header("location").is_none());
+        assert_eq!(host.metrics_snapshot(), before);
+        assert!(host.audit_snapshot().records.is_empty());
+        shutdown.cancel();
+        task.await.unwrap().unwrap();
+    });
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn external_ui_is_live_confined_and_root_pinned() {
+    use std::os::unix::fs::symlink;
+    let fixture = fixture("external-ui", free_udp_port(), free_tcp_port());
+    fixture.write("ui/demo/index.html", "initial");
+    fixture.write("ui/demo/nested/file.js", "nested");
+    fixture.write("ui/a?b%# 空/index.html", "reserved root");
+    fixture.write("ui/demo/n?%# 空/index.html", "reserved nested");
+    fixture.write("secret.txt", "SECRET");
+    fixture.write("ui/api/index.html", "reserved");
+    symlink(&fixture.root, fixture.root.join("ui/link")).unwrap();
+    symlink(
+        fixture.root.join("secret.txt"),
+        fixture.root.join("ui/demo/leak"),
+    )
+    .unwrap();
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        fixture.root.join("ui/demo/fifo"),
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+    )
+    .unwrap();
+    let _socket =
+        std::os::unix::net::UnixListener::bind(fixture.root.join("ui/demo/socket")).unwrap();
+    let host = assembly_for(&fixture);
+    host.block_on(async {
+        let bound = host.bind_host().await.unwrap();
+        let api = bound.api_addr().unwrap();
+        let shutdown = TransportCancellation::new();
+        let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+        let redirect = http_request(api, &get("/demo?x=1")).await;
+        assert_eq!(redirect.status, 301);
+        assert_eq!(redirect.header("location"), Some("/demo/?x=1"));
+        exercise_encoded_redirects(api).await;
+        let initial = http_request(api, &get("/demo/")).await;
+        assert_eq!(initial.status, 200);
+        assert_eq!(initial.body, "initial");
+        assert_eq!(initial.header("cache-control"), Some("no-store"));
+        fixture.write("ui/demo/index.html", "changed");
+        assert_eq!(http_request(api, &get("/demo/")).await.body, "changed");
+        assert_eq!(
+            http_request(api, &get("/demo/nested/file.js?v=1"))
+                .await
+                .body,
+            "nested"
+        );
+        let dir = http_request(api, &get("/demo/nested?x=1")).await;
+        assert_eq!(dir.status, 301);
+        assert_eq!(dir.header("location"), Some("/demo/nested/?x=1"));
+        let head = http_request(api, "HEAD /demo/ HTTP/1.1\r\nHost: test\r\n\r\n").await;
+        assert_eq!(head.status, 200);
+        assert!(head.body.is_empty());
+        assert_eq!(head.header("content-length"), Some("7"));
+        for path in [
+            "/demo/leak",
+            "/demo/fifo",
+            "/demo/socket",
+            "/link/secret.txt",
+            "/api/",
+            "/demo/%2e%2e/secret.txt",
+            "/demo/a%2fb",
+            "/demo/%00",
+            "/demo/%ff",
+            "/demo/missing",
+            "/demo/nested/",
+        ] {
+            assert_eq!(http_request(api, &get(path)).await.status, 404, "{path}");
+        }
+        assert_eq!(http_request(api, &post("/demo/", "")).await.status, 405);
+        let large = fs::File::create(fixture.root.join("ui/demo/large")).unwrap();
+        large.set_len(16 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(http_request(api, &get("/demo/large")).await.status, 413);
+        fs::rename(fixture.root.join("ui/demo"), fixture.root.join("ui/old")).unwrap();
+        fixture.write("ui/demo/index.html", "replacement");
+        assert_eq!(http_request(api, &get("/demo/")).await.body, "changed");
+        for _ in 0..20 {
+            fs::rename(
+                fixture.root.join("ui/old/nested"),
+                fixture.root.join("ui/old/safe"),
+            )
+            .unwrap();
+            symlink(&fixture.root, fixture.root.join("ui/old/nested")).unwrap();
+            let response = http_request(api, &get("/demo/nested/secret.txt")).await;
+            assert_eq!(response.status, 404);
+            assert!(!response.body.contains("SECRET"));
+            fs::remove_file(fixture.root.join("ui/old/nested")).unwrap();
+            fs::rename(
+                fixture.root.join("ui/old/safe"),
+                fixture.root.join("ui/old/nested"),
+            )
+            .unwrap();
+        }
+        exercise_ui_swaps(api, &fixture).await;
+        fs::remove_file(fixture.root.join("ui/old/index.html")).unwrap();
+        assert_eq!(http_request(api, &get("/demo/")).await.status, 404);
+        shutdown.cancel();
+        task.await.unwrap().unwrap();
+    });
+}
+
+#[cfg(target_os = "linux")]
+async fn exercise_encoded_redirects(api: SocketAddr) {
+    let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: test\r\n\r\n");
+    for (path, body) in [
+        ("/a%3Fb%25%23%20%E7%A9%BA", "reserved root"),
+        ("/demo/n%3F%25%23%20%E7%A9%BA", "reserved nested"),
+    ] {
+        let response = http_request(api, &get(&format!("{path}?safe=%E7%A9%BA&x=1"))).await;
+        assert_eq!(response.status, 301);
+        let expected = format!("{path}/?safe=%E7%A9%BA&x=1");
+        assert_eq!(response.header("location"), Some(expected.as_str()));
+        let followed = http_request(api, &get(&expected)).await;
+        assert_eq!(followed.status, 200);
+        assert_eq!(followed.body, body);
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn exercise_ui_swaps(api: SocketAddr, fixture: &Fixture) {
+    use std::os::unix::fs::symlink;
+    struct SwapOwner(
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        Option<std::thread::JoinHandle<()>>,
+    );
+    impl Drop for SwapOwner {
+        fn drop(&mut self) {
+            self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+            self.1.take().unwrap().join().unwrap();
+        }
+    }
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flag = running.clone();
+    let race_root = fixture.root.clone();
+    let swap = SwapOwner(
+        running,
+        Some(std::thread::spawn(move || {
+            while flag.load(std::sync::atomic::Ordering::SeqCst) {
+                fs::rename(
+                    race_root.join("ui/old/nested"),
+                    race_root.join("ui/old/safe"),
+                )
+                .unwrap();
+                symlink(&race_root, race_root.join("ui/old/nested")).unwrap();
+                std::thread::yield_now();
+                fs::remove_file(race_root.join("ui/old/nested")).unwrap();
+                fs::rename(
+                    race_root.join("ui/old/safe"),
+                    race_root.join("ui/old/nested"),
+                )
+                .unwrap();
+            }
+        })),
+    );
+    for _ in 0..100 {
+        let leak = http_request(api, &get("/demo/nested/secret.txt")).await;
+        assert_eq!(leak.status, 404);
+        assert!(!leak.body.contains("SECRET"));
+        let legitimate = http_request(api, &get("/demo/nested/file.js")).await;
+        assert!(matches!(legitimate.status, 200 | 404));
+        if legitimate.status == 200 {
+            assert_eq!(legitimate.body, "nested");
+        }
+    }
+    drop(swap);
+}
+
+#[test]
+fn capability_matrix_is_complete_and_matches_host_eligibility() {
+    for (managed, local) in [(false, true), (true, true), (false, false), (true, false)] {
+        let fixture = capability_fixture(managed, local);
+        let host = assembly_for(&fixture);
+        host.block_on(async {
+            let bound = host.bind_host().await.unwrap();
+            let api = bound.api_addr().unwrap();
+            let shutdown = TransportCancellation::new();
+            let task = tokio::task::spawn_local(bound.serve(shutdown.clone()));
+            let payload: serde_json::Value =
+                serde_json::from_str(&http_request(api, &get("/api/v1/capabilities")).await.body)
+                    .unwrap();
+            assert_eq!(payload["schema_version"], 1);
+            assert_eq!(payload["runtime"], "rust");
+            assert_eq!(payload["special_groups"]["enabled"], managed);
+            assert_eq!(payload["endpoints"]["manual_rules"]["post"], managed);
+            let ops = payload["ui_operations"]
+                .as_object()
+                .expect("complete operations");
+            assert_eq!(ops.len(), 30);
+            for id in [
+                "system.health",
+                "system.version",
+                "audit.read",
+                "audit.control",
+                "audit.capacity",
+                "query.rank",
+                "cache.inventory",
+                "cache.manage",
+                "metrics.cache",
+                "rules.local.read",
+                "groups.read",
+                "upstreams.read",
+            ] {
+                assert_eq!(ops[id]["supported"], true, "{id}");
+                assert!(ops[id]["reason"].is_null());
+            }
+            assert_eq!(ops["rules.local.manage"]["supported"], local);
+            if !local {
+                assert!(
+                    !ops["rules.local.manage"]["reason"]
+                        .as_str()
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+            for id in ["groups.manage", "upstreams.manage", "rules.diversion"] {
+                assert_eq!(ops[id]["supported"], managed, "{id}");
+            }
+            for id in [
+                "rules.adguard",
+                "capture.logs",
+                "client.aliases",
+                "switches.manage",
+                "cache.requery",
+                "lists.remembered",
+                "appearance.server",
+                "system.restart",
+                "system.webui_port",
+                "system.config_management",
+                "system.update",
+                "system.domain_generation",
+                "system.global_overrides",
+                "metrics.process",
+            ] {
+                assert_eq!(ops[id]["supported"], false, "{id}");
+                assert!(
+                    !ops[id]["reason"].as_str().unwrap().trim().is_empty(),
+                    "{id}"
+                );
+            }
+            for path in [
+                "/plugins/adguard/rules",
+                "/api/v1/capture/logs",
+                "/plugins/clientname",
+                "/plugins/switch3/show",
+                "/plugins/requery/status",
+                "/api/v1/appearance/text-color",
+                "/api/v1/system/webui-port",
+                "/api/v1/update/status",
+                "/api/v1/domain-generation",
+                "/api/v1/overrides",
+            ] {
+                assert_eq!(http_request(api, &get(path)).await.status, 404, "{path}");
+            }
+            assert_eq!(
+                http_request(api, &post("/api/v1/system/restart", "{}"))
+                    .await
+                    .status,
+                404
+            );
+            shutdown.cancel();
+            task.await.unwrap().unwrap();
+        });
+    }
+}
+
+fn capability_fixture(managed: bool, local: bool) -> Fixture {
+    if managed || !local {
+        let fixture = Fixture::new("capabilities-managed");
+        fixture.write("config.yaml", &format!("log: {{level: error}}\nnative_management: {{special_groups: true}}\napi: {{http: '127.0.0.1:{}'}}\nplugins:\n  - tag: default_forward\n    type: forward\n    args: {{upstreams: [{{addr: 'udp://127.0.0.1:9'}}]}}\n  - tag: main_entry\n    type: sequence\n    args: [{{exec: $special_upstream_matcher}}, {{exec: $default_forward}}]\n  - tag: main\n    type: udp_server\n    args: {{entry: main_entry, listen: '127.0.0.1:{}', enable_audit: true}}\n",free_tcp_port(),free_udp_port()));
+        if managed && local {
+            fs::create_dir_all(fixture.root.join("cache")).unwrap();
+            fixture.write(
+                "webinfo/special_upstream_groups.json",
+                r#"[{"slot":50,"name":"actual","listen_port":0,"custom_port_only":false}]"#,
+            );
+            fixture.write("webinfo/upstream_overrides.json", r#"{"special_upstream_50":[{"tag":"fixture","enabled":true,"protocol":"udp","addr":"127.0.0.1:9"}]}"#);
+        }
+        if !managed {
+            let yaml = fixture
+                .read("config.yaml")
+                .replace("special_groups: true", "special_groups: false")
+                .replace("{{exec: $special_upstream_matcher}}, ", "")
+                .replace("{exec: $special_upstream_matcher}, ", "");
+            fixture.write("config.yaml", &yaml);
+        }
+        fixture
+    } else {
+        fixture("capabilities-unmanaged", free_udp_port(), free_tcp_port())
+    }
 }

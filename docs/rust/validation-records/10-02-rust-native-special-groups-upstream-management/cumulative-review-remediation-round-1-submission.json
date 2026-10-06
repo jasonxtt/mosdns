@@ -1,0 +1,27 @@
+{
+  "base_sha": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "parent_sha": "1495c508fe5ead3dc2ba9fa6c7c435a0a220cf1e",
+  "head_sha": "ccc147bb35aab2301633325c563368ac8457dbba",
+  "tree_sha": "3aab66be7ab39fcf6878d85c417430bda3ca41f7",
+  "source_inputs": 527,
+  "source_mismatches": 0,
+  "remediation_evidence_files": 71,
+  "s7_evidence_files": 38,
+  "real_head": "79d93ae1b3b3253a2d09563444b251aad18eb5df",
+  "real_index_tree": "65b21ecc1a3e3fe14f50da3d49e0cb153c1d53ac",
+  "state": "explicit_fail_recorded",
+  "provider": "c2c-web",
+  "reviewer_url": "https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ac058cd-6138-83e8-af54-758358f73006",
+  "request_bytes": 1017,
+  "request_sha256": "9ab997a5f19c420db635669eb7f0a1592028b2453bb3970049f4c996760b0f16",
+  "open_findings": [
+    "P1-1"
+  ],
+  "sent_at_utc": "2026-10-03T17:45:57.046743+00:00",
+  "result": {
+    "status": "fail",
+    "open_findings": [
+      "P1-1"
+    ]
+  }
+}

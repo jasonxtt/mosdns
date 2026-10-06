@@ -1,0 +1,8 @@
+{
+  "base": "95bf300a97acda82b5eae741fd3f671afa9681d2",
+  "files": {
+    "rust/native-host/src/api.rs": "d11bafaebac6021aa374174cec21619fd8608f52bbe64e1fc30730e8311491fc",
+    "rust/native-host/tests/slice6_management_http.rs": "9ceb26c96918cc553c10741f3462ac85db121575774a3bb059c6287bc1ef86a5"
+  },
+  "remote_match": true
+}

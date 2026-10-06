@@ -1,0 +1,543 @@
+{
+  "queries": [
+    {
+      "port": 16555,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.50"
+    },
+    {
+      "port": 16555,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.50"
+    },
+    {
+      "port": 16556,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.50"
+    },
+    {
+      "port": 16557,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.51"
+    },
+    {
+      "port": 16555,
+      "qname": "exclusive.example",
+      "rcode": 0,
+      "answer": "192.0.2.90"
+    },
+    {
+      "port": 16558,
+      "qname": "exclusive.example",
+      "rcode": 0,
+      "answer": "192.0.2.52"
+    },
+    {
+      "port": 16555,
+      "qname": "no-match.example",
+      "rcode": 0,
+      "answer": "192.0.2.90"
+    },
+    {
+      "port": 16555,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.55"
+    },
+    {
+      "port": 16557,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.51"
+    },
+    {
+      "port": 16555,
+      "qname": "shared.example",
+      "rcode": 0,
+      "answer": "192.0.2.55"
+    }
+  ],
+  "save": {
+    "status": 200,
+    "body": {
+      "message": "Upstream configuration saved."
+    }
+  },
+  "unsupported_save": {
+    "status": 400,
+    "body": "special_upstream_50: unsupported upstream protocol\n"
+  },
+  "committed_runtime": {
+    "status": 200,
+    "body": {
+      "override_config": [
+        {
+          "addr": "udp://127.0.0.1:25559",
+          "enabled": true,
+          "protocol": "udp",
+          "tag": "lower_supplier_v2"
+        }
+      ],
+      "runtime_targets": [
+        "127.0.0.1:25559"
+      ],
+      "tag": "special_upstream_50"
+    }
+  },
+  "audit": {
+    "status": 200,
+    "body": {
+      "pagination": {
+        "total_items": 10,
+        "total_pages": 1,
+        "current_page": 1,
+        "items_per_page": 100
+      },
+      "logs": [
+        {
+          "query_time": "2026-10-03T18:07:58.046458449Z",
+          "query_name": "shared.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-000000000000000a",
+          "duration_ms": 0.113257,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.55"
+            }
+          ],
+          "answer_details_status": "complete",
+          "domain_set": "special_route_50",
+          "effective_tag": "特殊上游50",
+          "matched_group": "special_50",
+          "final_sequence": "sequence_special_50",
+          "final_upstream": "lower_supplier_v2",
+          "upstream_targets": "127.0.0.1:25559",
+          "selected_upstream": "127.0.0.1:25559",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "lower_supplier_v2",
+              "peer": "127.0.0.1:25559",
+              "transport": "udp"
+            },
+            "attempts": []
+          },
+          "matched_rule_source": "domain_set:special_route_50"
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.044861431Z",
+          "query_name": "shared.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000009",
+          "duration_ms": 0.07534600000000001,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.51"
+            }
+          ],
+          "answer_details_status": "complete",
+          "effective_tag": "unmatched_rule",
+          "matched_group": "special_51",
+          "final_sequence": "sequence_special_51",
+          "final_upstream": "higher_supplier",
+          "upstream_targets": "127.0.0.1:25557",
+          "selected_upstream": "127.0.0.1:25557",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "higher_supplier",
+              "peer": "127.0.0.1:25557",
+              "transport": "tcp"
+            },
+            "attempts": []
+          }
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.044011424Z",
+          "query_name": "shared.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000008",
+          "duration_ms": 0.765528,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.55"
+            }
+          ],
+          "answer_details_status": "complete",
+          "domain_set": "special_route_50",
+          "effective_tag": "特殊上游50",
+          "matched_group": "special_50",
+          "final_sequence": "sequence_special_50",
+          "final_upstream": "lower_supplier_v2",
+          "upstream_targets": "127.0.0.1:25559",
+          "selected_upstream": "127.0.0.1:25559",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "lower_supplier_v2",
+              "peer": "127.0.0.1:25559",
+              "transport": "udp"
+            },
+            "attempts": [
+              {
+                "ordinal": 0,
+                "entry": "lower_supplier_v2",
+                "peer": "127.0.0.1:25559",
+                "transport": "udp",
+                "outcome": "response"
+              }
+            ]
+          },
+          "matched_rule_source": "domain_set:special_route_50"
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.019756961Z",
+          "query_name": "no-match.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000007",
+          "duration_ms": 0.565857,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.90"
+            }
+          ],
+          "answer_details_status": "complete",
+          "effective_tag": "unmatched_rule",
+          "final_sequence": "main_entry",
+          "final_upstream": "default_supplier",
+          "upstream_targets": "127.0.0.1:25555",
+          "selected_upstream": "127.0.0.1:25555",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "default_supplier",
+              "peer": "127.0.0.1:25555",
+              "transport": "udp"
+            },
+            "attempts": [
+              {
+                "ordinal": 0,
+                "entry": "default_supplier",
+                "peer": "127.0.0.1:25555",
+                "transport": "udp",
+                "outcome": "response"
+              }
+            ]
+          }
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.01881388Z",
+          "query_name": "exclusive.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000006",
+          "duration_ms": 0.632549,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.52"
+            }
+          ],
+          "answer_details_status": "complete",
+          "effective_tag": "unmatched_rule",
+          "matched_group": "special_52",
+          "final_sequence": "sequence_special_52",
+          "final_upstream": "isolated_supplier",
+          "upstream_targets": "127.0.0.1:25558",
+          "selected_upstream": "127.0.0.1:25558",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "isolated_supplier",
+              "peer": "127.0.0.1:25558",
+              "transport": "udp"
+            },
+            "attempts": [
+              {
+                "ordinal": 0,
+                "entry": "isolated_supplier",
+                "peer": "127.0.0.1:25558",
+                "transport": "udp",
+                "outcome": "response"
+              }
+            ]
+          }
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.018125735Z",
+          "query_name": "exclusive.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000005",
+          "duration_ms": 0.600837,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.90"
+            }
+          ],
+          "answer_details_status": "complete",
+          "effective_tag": "unmatched_rule",
+          "final_sequence": "main_entry",
+          "final_upstream": "default_supplier",
+          "upstream_targets": "127.0.0.1:25555",
+          "selected_upstream": "127.0.0.1:25555",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "default_supplier",
+              "peer": "127.0.0.1:25555",
+              "transport": "udp"
+            },
+            "attempts": [
+              {
+                "ordinal": 0,
+                "entry": "default_supplier",
+                "peer": "127.0.0.1:25555",
+                "transport": "udp",
+                "outcome": "response"
+              }
+            ]
+          }
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.017170778Z",
+          "query_name": "shared.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000004",
+          "duration_ms": 0.8667119999999999,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.51"
+            }
+          ],
+          "answer_details_status": "complete",
+          "effective_tag": "unmatched_rule",
+          "matched_group": "special_51",
+          "final_sequence": "sequence_special_51",
+          "final_upstream": "higher_supplier",
+          "upstream_targets": "127.0.0.1:25557",
+          "selected_upstream": "127.0.0.1:25557",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "higher_supplier",
+              "peer": "127.0.0.1:25557",
+              "transport": "tcp"
+            },
+            "attempts": [
+              {
+                "ordinal": 0,
+                "entry": "higher_supplier",
+                "peer": "127.0.0.1:25557",
+                "transport": "tcp",
+                "outcome": "response"
+              }
+            ]
+          }
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.016976316Z",
+          "query_name": "shared.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000003",
+          "duration_ms": 0.083522,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.50"
+            }
+          ],
+          "answer_details_status": "complete",
+          "domain_set": "special_route_50",
+          "effective_tag": "特殊上游50",
+          "matched_group": "special_50",
+          "final_sequence": "sequence_special_50",
+          "final_upstream": "lower_supplier",
+          "upstream_targets": "127.0.0.1:25556",
+          "selected_upstream": "127.0.0.1:25556",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "lower_supplier",
+              "peer": "127.0.0.1:25556",
+              "transport": "udp"
+            },
+            "attempts": []
+          }
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.016598726Z",
+          "query_name": "shared.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000002",
+          "duration_ms": 0.16065400000000002,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.50"
+            }
+          ],
+          "answer_details_status": "complete",
+          "domain_set": "special_route_50",
+          "effective_tag": "特殊上游50",
+          "matched_group": "special_50",
+          "final_sequence": "sequence_special_50",
+          "final_upstream": "lower_supplier",
+          "upstream_targets": "127.0.0.1:25556",
+          "selected_upstream": "127.0.0.1:25556",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "lower_supplier",
+              "peer": "127.0.0.1:25556",
+              "transport": "udp"
+            },
+            "attempts": []
+          },
+          "matched_rule_source": "domain_set:special_route_50"
+        },
+        {
+          "query_time": "2026-10-03T18:07:58.015129464Z",
+          "query_name": "shared.example",
+          "query_type": "A",
+          "query_class": "IN",
+          "client_ip": "127.0.0.1",
+          "trace_id": "n-46182c3b2b6cff5df3f5270ed7fa3122-0000000000000001",
+          "duration_ms": 1.335468,
+          "response_code": "NOERROR",
+          "response_flags": {
+            "AA": false,
+            "TC": false,
+            "RA": true
+          },
+          "answers": [
+            {
+              "type": "A",
+              "ttl": 60,
+              "data": "192.0.2.50"
+            }
+          ],
+          "answer_details_status": "complete",
+          "domain_set": "special_route_50",
+          "effective_tag": "特殊上游50",
+          "matched_group": "special_50",
+          "final_sequence": "sequence_special_50",
+          "final_upstream": "lower_supplier",
+          "upstream_targets": "127.0.0.1:25556",
+          "selected_upstream": "127.0.0.1:25556",
+          "upstream_diagnostics": {
+            "schema_version": 1,
+            "selected": {
+              "entry": "lower_supplier",
+              "peer": "127.0.0.1:25556",
+              "transport": "udp"
+            },
+            "attempts": [
+              {
+                "ordinal": 0,
+                "entry": "lower_supplier",
+                "peer": "127.0.0.1:25556",
+                "transport": "udp",
+                "outcome": "response"
+              }
+            ]
+          },
+          "matched_rule_source": "domain_set:special_route_50"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "status": 200,
+    "body": "# TYPE mosdns_cache_query_total counter\nmosdns_cache_query_total{tag=\"cache_special_50\"} 2\nmosdns_cache_query_total{tag=\"cache_special_51\"} 2\nmosdns_cache_query_total{tag=\"cache_special_52\"} 1\n# TYPE mosdns_cache_hit_total counter\nmosdns_cache_hit_total{tag=\"cache_special_50\"} 1\nmosdns_cache_hit_total{tag=\"cache_special_51\"} 1\nmosdns_cache_hit_total{tag=\"cache_special_52\"} 0\n# TYPE mosdns_cache_lazy_hit_total counter\nmosdns_cache_lazy_hit_total{tag=\"cache_special_50\"} 0\nmosdns_cache_lazy_hit_total{tag=\"cache_special_51\"} 0\nmosdns_cache_lazy_hit_total{tag=\"cache_special_52\"} 0\n# TYPE mosdns_cache_size_current gauge\nmosdns_cache_size_current{tag=\"cache_special_50\"} 1\nmosdns_cache_size_current{tag=\"cache_special_51\"} 1\nmosdns_cache_size_current{tag=\"cache_special_52\"} 1\n"
+  }
+}

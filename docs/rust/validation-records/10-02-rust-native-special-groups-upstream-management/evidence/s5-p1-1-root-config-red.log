@@ -1,0 +1,24 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.92s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-ffd12075785eba3b)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/managed-supervisor-163062-0/webinfo/audit_settings.json)
+cache startup /tmp/managed-supervisor-163062-0/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+
+thread 'special_group_http_mutations_follow_nonstandard_root_config_across_snapshots' (163063) panicked at native-host/tests/special_groups_supervisor.rs:697:9:
+assertion `left == right` failed: native_management: candidate requires the frozen managed opt-in
+
+  left: 400
+ right: 200
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test special_group_http_mutations_follow_nonstandard_root_config_across_snapshots ... FAILED
+
+failures:
+
+failures:
+    special_group_http_mutations_follow_nonstandard_root_config_across_snapshots
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_supervisor`

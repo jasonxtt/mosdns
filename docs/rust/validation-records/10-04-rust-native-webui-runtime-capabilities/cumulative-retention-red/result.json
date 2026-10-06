@@ -1,0 +1,10 @@
+{
+  "status": "FAIL",
+  "cases": [],
+  "error": "Error: seed 404 404 page not found\n",
+  "exit": {
+    "code": 2,
+    "signal": null
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (./webinfo/audit_settings.json)\ncache startup /root/mosdns-rust-webui-20261004/evidence/cumulative-retention-red/runtime/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty\nmosdns: listener task failed: cache setup failed: cache persistence: cache 0: cache persistence: No such file or directory (os error 2)\n"
+}

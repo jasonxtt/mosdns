@@ -1,0 +1,28 @@
+{
+  "task": ".trellis/tasks/10-02-rust-native-special-groups-upstream-management",
+  "formal_context": "codex_01a0fc3e-79ef-7e23-9943-34062de8ded0",
+  "unit": "Slice 6",
+  "review_round": 1,
+  "request_kind": "rereview",
+  "phase": "passed",
+  "parent_sha": "e5d129feaf0adc1b75c23ddeeb650a94618903d2",
+  "head_sha": "eec6c4447e221ea304893dd8ddaf5b761a35cdb3",
+  "tree_sha": "44a41971f7729270c8d171a9c58612d2734243a7",
+  "reviewer": {
+    "label": "Review Rust Native Groups",
+    "conversation": "https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ac058cd-6138-83e8-af54-758358f73006"
+  },
+  "source_manifest": {
+    "path": "evidence/s6-p1-1-source-manifest.json",
+    "file_sha256": "65b533ebbf03f11b35132793bf451d91c4dd2253a07b8ac1a80e5bf5ae1051b7",
+    "source_map_sha256": "8d519ce6d9fea8867bbf438fc094edb63664b5239d29544b96b6c0ae0c0ef9cc",
+    "source_inputs": 526,
+    "isolated_host_matches": 526,
+    "audit_tree_matches": 526
+  },
+  "result": {
+    "status": "pass",
+    "findings": [],
+    "raw": "FINAL: PASS"
+  }
+}

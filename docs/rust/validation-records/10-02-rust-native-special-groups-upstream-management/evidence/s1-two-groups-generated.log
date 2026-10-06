@@ -1,0 +1,2 @@
+    Finished `dev` profile [unoptimized] target(s) in 0.07s
+     Running `/root/mosdns-rust-special-groups-20261003/target-candidate/debug/examples/inspect_managed_config /root/mosdns-rust-special-groups-20261003/artifacts/two-groups/config.yaml`

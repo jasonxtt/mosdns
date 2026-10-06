@@ -1,0 +1,4 @@
+{"time": 1791029999.371636, "qname": "s6-browser.example", "qtype": 1, "peer": "127.0.0.1"}
+{"time": 1791030364.7456534, "qname": "blocked.browser.example", "qtype": 1, "peer": "127.0.0.1"}
+{"time": 1791030402.2754385, "qname": "blocked.browser.example", "qtype": 1, "peer": "127.0.0.1"}
+{"time": 1791030493.4893181, "qname": "s6-after-delete.example", "qtype": 1, "peer": "127.0.0.1"}

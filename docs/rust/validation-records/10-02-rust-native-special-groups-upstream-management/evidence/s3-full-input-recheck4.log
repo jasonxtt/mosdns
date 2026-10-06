@@ -1,0 +1,179 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.22s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+/tmp/native-candidate-input-root-yaml-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+/tmp/native-candidate-input-included-yaml-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+/tmp/native-candidate-input-upstream-overrides-json-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+/tmp/native-candidate-input-query-only-rule-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+/tmp/native-candidate-input-hosts-policy-rule-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+/tmp/native-candidate-input-ip-set-rule-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+/tmp/native-candidate-input-response-ip-rule-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+/tmp/native-candidate-input-optional-ip-file-created-61375/parts/../rules/optional-ip.txt: missing IP rule file, skipped
+test transaction::tests::candidate_rejects_changes_to_every_compiled_file_dependency ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 116 filtered out; finished in 0.01s
+
+     Running unittests src/main.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns-fc4d535fb264e80e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cache_catalog.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/cache_catalog-e7181cb60d415745)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+     Running tests/cache_http.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/cache_http-1bb3a7ca1bc3db39)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/cache_lifecycle.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/cache_lifecycle-f50aa77b49e18d65)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running tests/client_context.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/client_context-8c16ab614186523c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/ecs_cache.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/ecs_cache-acc7a24e36ddf58c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/ecs_dump.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/ecs_dump-587189552542831c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/ecs_refresh.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/ecs_refresh-d3e3b1a4c160cf5d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/ecs_wire.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/ecs_wire-c24e82aa6843eff1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/observability.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/observability-43ccfda8dc4ed318)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/policy_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/policy_config-3172a19687368650)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/policy_wire.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/policy_wire-d45469055049b519)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.00s
+
+     Running tests/slice1_cache.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice1_cache-94a05ba7d8c1db40)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/slice2_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice2_config-aca452933eb51958)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+     Running tests/slice3_composition.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice3_composition-5397903d47af610e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/slice4_fast_mark_flow_setter.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice4_fast_mark_flow_setter-577e91d1a9f03946)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/slice5_management_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice5_management_config-1ac378235e02543d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/slice6_management_http.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice6_management_http-d3f2977e7ddee9b7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/slice7_management_publication.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice7_management_publication-12aadf1f7fb0c758)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/slice8_audit_read_http.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice8_audit_read_http-000413009ae2e56b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/slice9_forwarding.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice9_forwarding-0e89638b15182de9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/special_groups_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_config-c6b65ac9d91cd624)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-ffd12075785eba3b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/w1_tcp.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/w1_tcp-70e6928d08bc2f91)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/w1_udp.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/w1_udp-6f3b1a56178a1b6d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/w2_cache.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/w2_cache-7f500242fc2b622b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/w3_routing.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/w3_routing-625572f92742e9c5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

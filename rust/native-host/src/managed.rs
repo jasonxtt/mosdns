@@ -287,6 +287,10 @@ fn compile_candidate(values: &[String]) -> (MixMatcher<()>, Vec<String>) {
     (matcher, accepted)
 }
 
+pub(crate) fn normalized_rules(values: &[String]) -> Vec<String> {
+    compile_candidate(values).1
+}
+
 /// A managed-provider failure that guarantees no partial publication.
 #[derive(Debug)]
 pub enum ManagedSetError {

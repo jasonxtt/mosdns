@@ -1,0 +1,14 @@
+{
+  "base": "1f498a9736fbc3aca55c84149282a0678cd53809",
+  "files": {
+    "rust/native-host/src/config.rs": "9f47d759de7c19a56fbcc5cfdab5a68976fc167efe6e8f56f26c7a0bd4a292b5",
+    "rust/native-host/src/api.rs": "cee10882cd1deab6f7eb5bd084b2f8bbea54446903b5006d84c2c180bb406144",
+    "rust/native-host/src/lib.rs": "cea26056698acbca094878c9eb4e2a4e8ed54f61c45e985157af8f57ba490b1a",
+    "rust/native-host/src/external_ui.rs": "6b57e8724f2bc722fb800aa974a1d267fa6a09aae749f55f7eee9eb23adf7443",
+    "rust/native-host/src/execution.rs": "82de0eb0bd0a0059bc03a3d7d705455ded0bc75af89e0bb745605b214f494b27",
+    "rust/native-host/tests/slice6_management_http.rs": "1f21defeaf9f67ff1d2540ff9901382a2192c3cec61281814961227f2eabffc9",
+    "rust/native-host/Cargo.toml": "620ca407362a4092d8640382a6991a6a00f5b26d996da628c51c082ad1633cfc",
+    "rust/Cargo.lock": "2fb23915e23b226461d1a2511483570b4e7ac237236b2e602008f00981fbfde2"
+  },
+  "remote_match": true
+}

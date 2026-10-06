@@ -1,10 +1,11 @@
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
-/// The only command supported by the Phase 5A native host at this boundary.
+/// Commands supported by the native host.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliCommand {
     Start { config: PathBuf },
+    Version,
 }
 
 /// Deterministic command-line usage failure.
@@ -14,7 +15,7 @@ pub struct CliError {
 }
 
 impl CliError {
-    fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }
@@ -25,7 +26,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "{}; usage: mosdns start -c <config>",
+            "{}; usage: mosdns start -c <config> | mosdns version",
             self.message
         )
     }
@@ -46,8 +47,14 @@ where
     let command = args
         .next()
         .ok_or_else(|| CliError::new("missing command"))?;
+    if command == OsStr::new("version") {
+        if args.next().is_some() {
+            return Err(CliError::new("unexpected argument"));
+        }
+        return Ok(CliCommand::Version);
+    }
     if command != OsStr::new("start") {
-        return Err(CliError::new("only the start command is supported"));
+        return Err(CliError::new("expected start or version"));
     }
 
     let option = args

@@ -1,0 +1,7 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Checking mosdns-matcher-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/matcher-core)
+    Checking mosdns-dns-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/dns-core)
+    Checking mosdns-cache-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/cache-core)
+    Checking mosdns-upstream-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/upstream-core)
+    Checking mosdns-sequence-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/sequence-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.79s

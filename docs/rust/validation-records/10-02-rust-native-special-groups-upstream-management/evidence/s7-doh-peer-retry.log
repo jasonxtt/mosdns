@@ -1,0 +1,47 @@
+   Compiling mosdns-upstream-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/upstream-core)
+    Finished `test` profile [unoptimized] target(s) in 2.13s
+     Running tests/slice2_doh.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice2_doh-538e247532d1ffb5)
+
+running 39 tests
+test a_body_larger_than_the_dns_maximum_is_rejected ... ok
+test a_body_of_exactly_the_dns_maximum_is_accepted ... ok
+test a_body_of_one_byte_over_the_dns_maximum_is_rejected ... ok
+test a_body_shorter_than_a_dns_header_is_rejected ... ok
+test a_body_truncated_mid_header_is_an_incomplete_body ... ok
+test a_chunked_body_is_reassembled_and_validated ... ok
+test a_chunked_body_over_the_dns_maximum_is_rejected_by_the_incremental_gate ... ok
+test a_close_delimited_body_over_the_dns_maximum_is_rejected_by_the_incremental_gate ... ok
+test a_complete_body_with_invalid_dns_wire_is_rejected ... ok
+test a_declared_content_length_over_the_dns_maximum_fails_at_the_head ... ok
+test a_dropped_exchange_future_releases_its_registration ... ok
+test a_missing_or_wrong_media_type_is_rejected ... ok
+test a_negotiated_http11_alpn_is_accepted ... ok
+test a_non_200_status_is_a_typed_protocol_error ... ok
+test a_non_identity_content_encoding_is_rejected ... ok
+test a_peer_offering_only_h2_is_not_reinterpreted_as_http11 ... ok
+test a_ra_clear_response_keeps_ra_clear_and_only_rewrites_the_id ... ok
+test a_redirect_is_not_followed ... ok
+test a_response_head_just_under_the_byte_bound_is_accepted ... ok
+test a_response_head_over_the_byte_bound_is_rejected ... ok
+test a_server_that_closes_without_responding_is_a_typed_failure ... ok
+test a_server_without_alpn_still_serves_http11_on_the_same_tls_stream ... ok
+test a_shared_absolute_deadline_terminates_the_exchange ... ok
+test a_successful_exchange_sends_a_get_with_no_body_and_no_user_agent ... ok
+test a_truncated_chunked_body_is_an_incomplete_body ... ok
+test an_absent_response_head_is_never_reported_as_sent ... ok
+test an_early_eof_with_a_larger_declared_length_is_an_incomplete_body ... ok
+test an_over_long_non_canonical_reason_phrase_is_rejected_on_the_raw_wire ... ok
+test an_oversized_outbound_query_is_rejected_before_any_connection ... ok
+test an_ra_set_response_keeps_ra_set ... ok
+test caller_cancellation_before_the_response_is_cancelled_with_a_typed_state ... ok
+test exchanges_after_close_are_rejected_without_opening_a_connection ... ok
+test owner_close_before_the_response_is_closed_with_maybe_sent ... ok
+test the_authority_is_the_service_host_not_the_numeric_dial_address ... ok
+test the_media_type_is_matched_case_insensitively_with_parameters ... ok
+test the_outbound_query_id_is_zeroed_while_the_caller_id_is_restored ... ok
+test the_side_effect_classification_of_each_doh_defect_is_explicit ... ok
+test tls_verification_still_applies_to_the_doh_service_identity ... ok
+test unrelated_query_parameters_are_preserved_and_existing_dns_is_replaced ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+

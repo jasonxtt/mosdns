@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: catalog uses actual ordered tags including empty catalog and permits only explicit fallback
+ok 1 - catalog uses actual ordered tags including empty catalog and permits only explicit fallback
+  ---
+  duration_ms: 2.588758
+  ...
+# Subtest: failures and unknown/malformed schema never become the legacy fake catalog
+ok 2 - failures and unknown/malformed schema never become the legacy fake catalog
+  ---
+  duration_ms: 0.620258
+  ...
+# Subtest: metrics preserve missing values, exact tags, escaped labels and genuine zero
+ok 3 - metrics preserve missing values, exact tags, escaped labels and genuine zero
+  ---
+  duration_ms: 0.421577
+  ...
+# Subtest: partial batch failures retain specific tags and actual successful count
+ok 4 - partial batch failures retain specific tags and actual successful count
+  ---
+  duration_ms: 0.225793
+  ...
+# Subtest: runtime capability discovery caches native response for the page session
+ok 5 - runtime capability discovery caches native response for the page session
+  ---
+  duration_ms: 2.676214
+  ...
+# Subtest: only capability endpoint 404 selects the legacy Go workflow
+ok 6 - only capability endpoint 404 selects the legacy Go workflow
+  ---
+  duration_ms: 0.477159
+  ...
+# Subtest: network and server errors are surfaced and can be retried
+ok 7 - network and server errors are surfaced and can be retried
+  ---
+  duration_ms: 0.818006
+  ...
+# Subtest: malformed capability responses fail closed
+ok 8 - malformed capability responses fail closed
+  ---
+  duration_ms: 0.295785
+  ...
+# Subtest: native source editor accepts only supported local text records
+ok 9 - native source editor accepts only supported local text records
+  ---
+  duration_ms: 0.446703
+  ...
+# Subtest: native source payload excludes downloader and advanced-format state
+ok 10 - native source payload excludes downloader and advanced-format state
+  ---
+  duration_ms: 0.27845
+  ...
+# Subtest: native source edits cannot move ownership across catalogs
+ok 11 - native source edits cannot move ownership across catalogs
+  ---
+  duration_ms: 0.374131
+  ...
+# Subtest: unsupported upstreams stay read-only and visible
+ok 12 - unsupported upstreams stay read-only and visible
+  ---
+  duration_ms: 0.419116
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 271.484606

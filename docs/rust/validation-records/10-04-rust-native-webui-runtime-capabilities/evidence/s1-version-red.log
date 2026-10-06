@@ -1,0 +1,22 @@
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.63s
+     Running tests/native_version.rs (rust/target/debug/deps/native_version-d60c0d9b4152a34f)
+
+running 1 test
+test version_is_a_bounded_standalone_command ... FAILED
+
+failures:
+
+---- version_is_a_bounded_standalone_command stdout ----
+
+thread 'version_is_a_bounded_standalone_command' (236221) panicked at native-host/tests/native_version.rs:6:5:
+Output { status: ExitStatus(unix_wait_status(512)), stdout: "", stderr: "mosdns: only the start command is supported; usage: mosdns start -c <config>\n" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    version_is_a_bounded_standalone_command
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test native_version`

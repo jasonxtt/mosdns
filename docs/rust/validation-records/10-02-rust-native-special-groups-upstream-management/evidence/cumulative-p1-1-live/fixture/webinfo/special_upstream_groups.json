@@ -1,0 +1,5 @@
+[
+  {"slot":50,"name":"lower","listen_port":16556,"custom_port_only":false},
+  {"slot":51,"name":"higher","listen_port":16557,"custom_port_only":false},
+  {"slot":52,"name":"custom-only","listen_port":16558,"custom_port_only":true}
+]

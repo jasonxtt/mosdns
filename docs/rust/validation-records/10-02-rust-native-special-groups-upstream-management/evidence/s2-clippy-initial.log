@@ -1,0 +1,27 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error: unused variable: `observed_queries`
+   --> native-host/tests/special_groups_supervisor.rs:163:13
+    |
+163 |         let observed_queries = queries.clone();
+    |             ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_observed_queries`
+    |
+    = note: `-D unused-variables` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(unused_variables)]`
+
+error: casting `usize` to `u16` may truncate the value
+  --> native-host/tests/special_groups_supervisor.rs:78:121
+   |
+78 | ...ort)).await.unwrap(); let wire=query(); tcp.write_all(&(wire.len() as u16).to_be_bytes()).await.unwrap();tcp.write_all(&wire).awa...
+   |                                                           ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: if this is intentional allow the lint with `#[allow(clippy::cast_possible_truncation)]` ...
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#cast_possible_truncation
+   = note: `-D clippy::cast-possible-truncation` implied by `-D clippy::pedantic`
+   = help: to override `-D clippy::pedantic` add `#[allow(clippy::cast_possible_truncation)]`
+help: ... or use `try_from` and handle the error accordingly
+   |
+78 -         let mut tcp=tokio::net::TcpStream::connect(("127.0.0.1",port)).await.unwrap(); let wire=query(); tcp.write_all(&(wire.len() as u16).to_be_bytes()).await.unwrap();tcp.write_all(&wire).await.unwrap();
+78 +         let mut tcp=tokio::net::TcpStream::connect(("127.0.0.1",port)).await.unwrap(); let wire=query(); tcp.write_all(&u16::try_from(wire.len()).to_be_bytes()).await.unwrap();tcp.write_all(&wire).await.unwrap();
+   |
+
+error: could not compile `mosdns-native-host` (test "special_groups_supervisor") due to 2 previous errors

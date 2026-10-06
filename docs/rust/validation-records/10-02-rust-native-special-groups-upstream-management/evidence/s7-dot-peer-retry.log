@@ -1,0 +1,53 @@
+   Compiling once_cell v1.21.4
+   Compiling tokio v1.53.1
+   Compiling tracing-core v0.1.36
+   Compiling tracing v0.1.44
+   Compiling rustls v0.23.45
+   Compiling tokio-util v0.7.19
+   Compiling h2 v0.4.19
+   Compiling quinn-proto v0.11.18
+   Compiling quinn-udp v0.5.15
+   Compiling time v0.3.45
+   Compiling h3 v0.0.8
+   Compiling quinn v0.11.7
+   Compiling hyper v1.11.0
+   Compiling hyper-util v0.1.20
+   Compiling h3-quinn v0.0.10
+   Compiling yasna v0.5.2
+   Compiling tokio-rustls v0.26.4
+   Compiling mosdns-upstream-core v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/upstream-core)
+   Compiling rcgen v0.14.7
+    Finished `test` profile [unoptimized] target(s) in 14.39s
+     Running tests/slice1_dot.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice1_dot-86262a2396da3501)
+
+running 27 tests
+test a_bad_handshake_signature_also_fails_under_the_verified_policy ... ok
+test a_bad_handshake_signature_fails_even_under_the_insecure_policy ... ok
+test a_complete_frame_with_invalid_dns_wire_is_a_malformed_response ... ok
+test a_complete_truncated_response_is_returned_without_plaintext_fallback ... ok
+test a_dropped_exchange_future_releases_its_registration ... ok
+test a_response_with_a_different_transaction_id_is_a_mismatch ... ok
+test a_verified_policy_never_retries_after_a_rejection ... ok
+test a_zero_length_inbound_prefix_is_a_malformed_response ... ok
+test absolute_deadline_while_waiting_for_the_response_is_deadline_exceeded_with_sent ... ok
+test an_oversized_outbound_query_is_rejected_before_any_connection ... ok
+test caller_cancellation_while_waiting_for_the_response_is_cancelled_with_sent ... ok
+test cancellation_after_the_tcp_connect_sends_no_query ... ok
+test certificate_for_a_different_name_is_rejected_before_any_query ... ok
+test certificate_from_an_untrusted_issuer_is_rejected_before_any_query ... ok
+test concurrent_exchanges_use_separate_connections_and_owned_responses ... ok
+test eof_before_a_complete_prefix_is_a_truncated_frame ... ok
+test eof_during_the_declared_body_is_a_truncated_frame ... ok
+test exchanges_after_close_are_rejected_without_opening_a_connection ... ok
+test expired_certificate_is_rejected_before_any_query ... ok
+test fragmented_response_frame_is_reassembled_across_tls_records ... ok
+test insecure_policy_accepts_an_untrusted_certificate_only_when_explicitly_chosen ... ok
+test owner_close_after_the_tcp_connect_sends_no_query ... ok
+test owner_close_drains_a_concurrent_exchange_before_reporting_closed ... ok
+test owner_close_while_waiting_for_the_response_is_closed_with_sent ... ok
+test sequential_exchanges_open_a_fresh_authenticated_connection_each_time ... ok
+test the_same_untrusted_certificate_verifies_under_its_own_root ... ok
+test trusted_certificate_for_the_service_identity_completes_the_exchange ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.81s
+

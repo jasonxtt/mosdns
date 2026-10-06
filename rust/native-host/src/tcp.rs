@@ -12,9 +12,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinSet;
 
-use crate::assembly::{ForwardCatalog, HostAssembly, HostOptions};
+use crate::assembly::{ForwardCatalog, HostAssembly};
 use crate::cache::CacheCatalog;
-use crate::config::{CompiledConfig, ListenerKind};
+use crate::config::ListenerKind;
 use crate::execution::{ExecutionRequest, execute_request};
 use crate::observer::{
     FailureProvenance, LocalFailureKind, QueryObserver, QueryTerminalOutcome, QueryTransport,
@@ -26,40 +26,87 @@ const MAX_TCP_FRAME: usize = u16::MAX as usize;
 
 /// A local TCP listener for the supported W1 DNS-over-TCP path.
 pub struct TcpServer {
-    config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
     cache: Rc<CacheCatalog>,
-    options: HostOptions,
     listener: Arc<TcpListener>,
     idle_timeout: Duration,
     observer: Arc<QueryObserver>,
+    supervised: bool,
+    control: crate::runtime_snapshot::RuntimeControl,
+    listener_tag: String,
+    listener_addr: SocketAddr,
 }
 
 impl TcpServer {
     /// Binds a TCP listener after strict configuration compilation.
     pub async fn bind(assembly: &HostAssembly, listen: SocketAddr) -> Result<Self, TcpServerError> {
-        if assembly.config().listener.kind != ListenerKind::Tcp {
-            return Err(TcpServerError::WrongListener(
-                assembly.config().listener.kind,
-            ));
+        Self::bind_listener(assembly, &assembly.config().listener, listen, false).await
+    }
+
+    pub(crate) async fn bind_listener(
+        assembly: &HostAssembly,
+        declared: &crate::config::ListenerConfig,
+        listen: SocketAddr,
+        supervised: bool,
+    ) -> Result<Self, TcpServerError> {
+        if declared.kind != ListenerKind::Tcp {
+            return Err(TcpServerError::WrongListener(declared.kind));
         }
         let idle_timeout = assembly
             .config()
-            .listener
-            .idle_timeout
+            .listeners
+            .iter()
+            .find(|listener| listener.tag == declared.tag)
+            .and_then(|listener| listener.idle_timeout)
             .ok_or(TcpServerError::MissingIdleTimeout)?;
         let listener = TcpListener::bind(listen)
             .await
             .map_err(TcpServerError::Bind)?;
         Ok(Self {
-            config: assembly.config_handle(),
             forwards: assembly.forwards_handle(),
             cache: assembly.cache_handle(),
-            options: assembly.options().clone(),
             listener: Arc::new(listener),
             idle_timeout,
             observer: assembly.observer_handle(),
+            supervised,
+            control: assembly.control(),
+            listener_tag: declared.tag.clone(),
+            listener_addr: declared.listen,
         })
+    }
+
+    pub(crate) async fn bind_snapshot(
+        control: crate::runtime_snapshot::RuntimeControl,
+        snapshot: &crate::runtime_snapshot::RuntimeSnapshot,
+        observer: Arc<QueryObserver>,
+        declared: &crate::config::ListenerConfig,
+    ) -> Result<Self, TcpServerError> {
+        let bound = TcpListener::bind(declared.listen)
+            .await
+            .map_err(TcpServerError::Bind)?;
+        Ok(Self {
+            forwards: snapshot.forwards.clone(),
+            cache: snapshot.cache.clone(),
+            listener: Arc::new(bound),
+            observer,
+            supervised: true,
+            control,
+            listener_tag: declared.tag.clone(),
+            listener_addr: declared.listen,
+            idle_timeout: declared
+                .idle_timeout
+                .ok_or(TcpServerError::MissingIdleTimeout)?,
+        })
+    }
+
+    pub(crate) fn binding_key(
+        &self,
+    ) -> Result<crate::runtime_snapshot::BindingKey, TcpServerError> {
+        Ok((
+            self.listener_tag.clone(),
+            ListenerKind::Tcp,
+            self.local_addr()?,
+        ))
     }
 
     /// Binds the listener address declared by the compiled W1 YAML.
@@ -94,22 +141,20 @@ impl TcpServer {
                 accepted = self.listener.accept() => {
                     match accepted {
                         Ok((stream, peer)) => {
-                            let config = Rc::clone(&self.config);
-                            let forwards = Rc::clone(&self.forwards);
-                            let cache = Rc::clone(&self.cache);
+                            let control = self.control.clone();
+                            let listener_tag = self.listener_tag.clone();
+                            let listener_addr = self.listener_addr;
                             let observer = Arc::clone(&self.observer);
-                            let options = self.options.clone();
                             let idle_timeout = self.idle_timeout;
                             let connection_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
                                 process_connection(ConnectionTask {
                                     stream,
-                                    config,
-                                    forwards,
-                                    cache,
+                                    control,
+                                    listener_tag,
+                                    listener_addr,
                                     observer,
                                     client_addr: peer,
-                                    options,
                                     idle_timeout,
                                     connection_shutdown,
                                 }).await;
@@ -126,12 +171,18 @@ impl TcpServer {
         }
 
         shutdown.cancel();
-        self.cache.stop_admission();
-        drain_tasks(&mut tasks, &mut task_error).await;
-        if let Err(error) = self.cache.stop_refreshes().await {
-            task_error = Some(error.to_string());
+        if !self.supervised {
+            self.cache.stop_admission();
         }
-        self.forwards.close_all().await;
+        drain_tasks(&mut tasks, &mut task_error).await;
+        if !self.supervised {
+            if let Err(error) = self.cache.stop_refreshes().await {
+                task_error = Some(error.to_string());
+            }
+        }
+        if !self.supervised {
+            self.forwards.close_all().await;
+        }
         if let Some(error) = task_error {
             return Err(TcpServerError::Task(error));
         }
@@ -144,12 +195,11 @@ impl TcpServer {
 
 struct ConnectionTask {
     stream: TcpStream,
-    config: Rc<CompiledConfig>,
-    forwards: Rc<ForwardCatalog>,
-    cache: Rc<CacheCatalog>,
+    control: crate::runtime_snapshot::RuntimeControl,
+    listener_tag: String,
+    listener_addr: SocketAddr,
     observer: Arc<QueryObserver>,
     client_addr: SocketAddr,
-    options: HostOptions,
     idle_timeout: Duration,
     connection_shutdown: TransportCancellation,
 }
@@ -157,12 +207,11 @@ struct ConnectionTask {
 async fn process_connection(task: ConnectionTask) {
     let ConnectionTask {
         mut stream,
-        config,
-        forwards,
-        cache,
+        control,
+        listener_tag,
+        listener_addr,
         observer,
         client_addr,
-        options,
         idle_timeout,
         connection_shutdown,
     } = task;
@@ -181,12 +230,25 @@ async fn process_connection(task: ConnectionTask) {
                     return;
                 }
             };
+        let Some(admission) = control.capture(&listener_tag, ListenerKind::Tcp, listener_addr)
+        else {
+            return;
+        };
+        let config = admission.snapshot.config.clone();
+        let forwards = admission.snapshot.forwards.clone();
+        let cache = admission.snapshot.cache.clone();
+        // The switch seed is captured synchronously at the frame boundary,
+        // not when the request future runs.
+        let switch_seed = admission.snapshot.switches.admission_seed();
+        let options = admission.options.clone();
+        let enable_audit = admission.enable_audit;
         let Ok((header, question)) = parse_query(&frame) else {
             // A malformed or partial DNS message closes only this connection.
             observer.record_malformed();
             return;
         };
-        let mut admitted = match observer.try_admit(
+        let mut admitted = match observer.try_admit_on_listener(
+            enable_audit,
             client_addr,
             QueryTransport::Tcp,
             &question,
@@ -212,6 +274,7 @@ async fn process_connection(task: ConnectionTask) {
                 raw: &frame,
                 header,
                 question,
+                switch_seed,
             },
             &forwards,
             connection_shutdown.clone(),

@@ -19,7 +19,8 @@ use tokio::task::JoinSet;
 
 use crate::api::{ApiServer, ApiServerError, AuditPersistenceFaults};
 use crate::config::{
-    CompiledConfig, ConfigError, ForwardScheme, ForwardTargetConfig, compile_yaml, load_and_compile,
+    CompiledConfig, ConfigError, ForwardScheme, ForwardTargetConfig, compile_yaml,
+    compile_yaml_with_base,
 };
 use crate::execution::{ExchangeError, ExchangeExecutor, InvocationExchange};
 use crate::observer::{
@@ -37,6 +38,7 @@ pub(crate) const DEFAULT_AUDIT_CAPACITY: usize = 100_000;
 pub struct HostOptions {
     pub(crate) refresh_environment: Option<Rc<crate::execution::RefreshEnvironment>>,
     pub request_deadline: Duration,
+    pub(crate) entry_sequence: Option<mosdns_sequence_core::SequenceId>,
     pub cancellation: Option<TransportCancellation>,
     pub cache_clock: Rc<dyn CacheClock>,
     pub(crate) audit_clock: Arc<dyn AuditClock>,
@@ -49,6 +51,7 @@ impl Default for HostOptions {
     fn default() -> Self {
         Self {
             refresh_environment: None,
+            entry_sequence: None,
             request_deadline: Duration::from_secs(5),
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
@@ -67,6 +70,7 @@ impl HostOptions {
     pub fn with_deadline(request_deadline: Duration) -> Self {
         Self {
             refresh_environment: None,
+            entry_sequence: None,
             request_deadline,
             cancellation: None,
             cache_clock: Rc::new(crate::cache::MonotonicCacheClock::new()),
@@ -149,6 +153,7 @@ impl HostRuntime {
 /// executable-to-upstream catalog, but deliberately does not bind the
 /// configured listener.
 pub struct HostAssembly {
+    control: crate::runtime_snapshot::RuntimeControl,
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
     cache: Rc<CacheCatalog>,
@@ -169,9 +174,76 @@ impl HostAssembly {
     /// Reads and compiles one configuration file, resolving relative include
     /// and rule-file paths against that file's directory.
     pub fn from_config_file(path: &std::path::Path) -> Result<Self, AssemblyError> {
-        let config = load_and_compile(path).map_err(AssemblyError::Config)?;
-        let state_root = path.parent().unwrap_or_else(|| Path::new(""));
-        Self::with_options_and_state_root(config, HostOptions::default(), state_root)
+        Self::from_config_file_after_preflight(path, || {})
+    }
+
+    fn from_config_file_after_preflight(
+        path: &std::path::Path,
+        after_preflight: impl FnOnce(),
+    ) -> Result<Self, AssemblyError> {
+        let yaml = crate::config::load_yaml(path).map_err(AssemblyError::Config)?;
+        let state_root = path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let mut store = if crate::config::management_enabled(&yaml)
+            .map_err(AssemblyError::Config)?
+        {
+            Some(
+                crate::transaction::ManagedStore::open(state_root)
+                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?,
+            )
+        } else {
+            if crate::transaction::ManagedStore::has_pending(state_root) {
+                return Err(AssemblyError::Runtime(
+                    "unfinished native transaction requires the managed opt-in for recovery".into(),
+                ));
+            }
+            None
+        };
+        if let Some(store) = &mut store {
+            store
+                .recover()
+                .map_err(|error| AssemblyError::Runtime(error.to_string()))?;
+        }
+        let canonical_config_path = if let Some(store) = &store {
+            let config_path = path.to_path_buf();
+            let config_path =
+                crate::transaction::blocking_io(move || std::fs::canonicalize(config_path))
+                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?
+                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?;
+            if config_path.parent() != Some(store.root()) {
+                return Err(AssemblyError::Runtime(
+                    "managed root configuration must reside directly under its state root".into(),
+                ));
+            }
+            Some(config_path)
+        } else {
+            None
+        };
+        after_preflight();
+        // File-backed startup always has a base, including a bare basename.
+        // An empty in-memory base intentionally does not mount external UI.
+        let config_base = path
+            .parent()
+            .filter(|base| !base.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let mut config =
+            compile_yaml_with_base(&yaml, config_base).map_err(AssemblyError::Config)?;
+        match (&mut config.managed_profile, canonical_config_path) {
+            (Some(profile), Some(config_path)) => profile.config_path = Some(config_path),
+            (None, None) => {}
+            _ => {
+                return Err(AssemblyError::Runtime(
+                    "managed root configuration identity changed during startup".into(),
+                ));
+            }
+        }
+        let host = Self::with_options_and_state_root(config, HostOptions::default(), state_root)?;
+        if let Some(store) = store {
+            host.control.attach_managed_store(store)?;
+        }
+        Ok(host)
     }
 
     /// Constructs a pre-I/O graph from an already compiled configuration.
@@ -215,29 +287,7 @@ impl HostAssembly {
         );
         // One store per compiled cache. Named caches and inline callsites alike
         // get a private instance, so nothing is shared between dispatches.
-        let cache = Rc::new(CacheCatalog::from_adapters(
-            config
-                .caches
-                .iter()
-                .map(|compiled| {
-                    crate::cache::NativeCacheAdapter::with_options_and_clock(
-                        compiled.capacity,
-                        compiled.lazy_cache_ttl_secs,
-                        options.cache_clock.clone(),
-                    )
-                    .map(|adapter| {
-                        adapter
-                            .with_ecs(compiled.enable_ecs)
-                            .with_exclusions(&compiled.exclude_ip)
-                            .with_persistence(
-                                compiled.dump_file.clone(),
-                                compiled.dump_interval_secs,
-                            )
-                    })
-                })
-                .collect::<Result<Vec<_>, CacheAdapterError>>()
-                .map_err(AssemblyError::Cache)?,
-        ));
+        let cache = build_cache_catalog(&config, &options)?;
         let upstream_identities = config
             .forwards
             .iter()
@@ -272,7 +322,10 @@ impl HostAssembly {
             .unwrap_or(options.audit_capacity);
         let observer = Arc::new(
             QueryObserver::try_with_clock_and_registry(
-                config.listener.enable_audit,
+                config
+                    .listeners
+                    .iter()
+                    .any(|listener| listener.enable_audit),
                 upstream_identities,
                 metric_registry,
                 audit_capacity,
@@ -286,7 +339,15 @@ impl HostAssembly {
             forwards: forwards.clone(),
             observer: observer.clone(),
         }));
+        let control = crate::runtime_snapshot::RuntimeControl::new(
+            config.clone(),
+            forwards.clone(),
+            cache.clone(),
+            options.clone(),
+            observer.clone(),
+        )?;
         Ok(Self {
+            control,
             config,
             forwards,
             cache,
@@ -299,6 +360,10 @@ impl HostAssembly {
     }
 
     #[must_use]
+    pub fn control(&self) -> crate::runtime_snapshot::RuntimeControl {
+        self.control.clone()
+    }
+
     pub fn config(&self) -> &CompiledConfig {
         &self.config
     }
@@ -416,21 +481,26 @@ impl HostAssembly {
     /// failed startup.
     pub async fn bind_host(&self) -> Result<BoundHost, HostRunError> {
         self.cache.load_startup().await;
-        let dns = match self.config.listener.kind {
-            crate::config::ListenerKind::Udp => {
-                let server = UdpServer::bind_configured(self)
-                    .await
-                    .map_err(HostRunError::Udp)?;
-                DnsServer::Udp(server)
-            }
-            crate::config::ListenerKind::Tcp => {
-                let server = TcpServer::bind_configured(self)
-                    .await
-                    .map_err(HostRunError::Tcp)?;
-                DnsServer::Tcp(server)
-            }
-        };
-        let dns_addr = dns.local_addr()?;
+        let mut dns = Vec::new();
+        for listener in &self.config.listeners {
+            let server = match listener.kind {
+                crate::config::ListenerKind::Udp => DnsServer::Udp(
+                    UdpServer::bind_listener(self, listener, listener.listen, true)
+                        .await
+                        .map_err(HostRunError::Udp)?,
+                ),
+                crate::config::ListenerKind::Tcp => DnsServer::Tcp(
+                    TcpServer::bind_listener(self, listener, listener.listen, true)
+                        .await
+                        .map_err(HostRunError::Tcp)?,
+                ),
+            };
+            dns.push(server);
+        }
+        let dns_addr = dns
+            .first()
+            .ok_or_else(|| HostRunError::Task("no DNS listeners".into()))?
+            .local_addr()?;
         let api = match &self.config.api {
             Some(config) => {
                 let server = ApiServer::bind(
@@ -443,7 +513,8 @@ impl HostAssembly {
                     config.http,
                 )
                 .await
-                .map_err(HostRunError::Api)?;
+                .map_err(HostRunError::Api)?
+                .with_control(self.control());
                 let address = server.local_addr().map_err(HostRunError::Api)?;
                 Some((server, address))
             }
@@ -454,7 +525,7 @@ impl HostAssembly {
             None => (None, None),
         };
         Ok(BoundHost {
-            cache: self.cache_handle(),
+            control: self.control(),
             dns,
             dns_addr,
             api,
@@ -501,6 +572,33 @@ impl HostAssembly {
     }
 }
 
+pub(crate) fn build_cache_catalog(
+    config: &CompiledConfig,
+    options: &HostOptions,
+) -> Result<Rc<CacheCatalog>, AssemblyError> {
+    let cache = Rc::new(CacheCatalog::from_adapters(
+        config
+            .caches
+            .iter()
+            .map(|compiled| {
+                crate::cache::NativeCacheAdapter::with_options_and_clock(
+                    compiled.capacity,
+                    compiled.lazy_cache_ttl_secs,
+                    options.cache_clock.clone(),
+                )
+                .map(|adapter| {
+                    adapter
+                        .with_ecs(compiled.enable_ecs)
+                        .with_exclusions(&compiled.exclude_ip)
+                        .with_persistence(compiled.dump_file.clone(), compiled.dump_interval_secs)
+                })
+            })
+            .collect::<Result<Vec<_>, CacheAdapterError>>()
+            .map_err(AssemblyError::Cache)?,
+    ));
+    Ok(cache)
+}
+
 async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -531,6 +629,13 @@ impl DnsServer {
         }
     }
 
+    fn binding_key(&self) -> Result<crate::runtime_snapshot::BindingKey, HostRunError> {
+        match self {
+            Self::Udp(server) => server.binding_key().map_err(HostRunError::Udp),
+            Self::Tcp(server) => server.binding_key().map_err(HostRunError::Tcp),
+        }
+    }
+
     async fn serve(self, shutdown: TransportCancellation) -> Result<(), HostRunError> {
         match self {
             Self::Udp(server) => server.serve(shutdown).await.map_err(HostRunError::Udp),
@@ -542,8 +647,8 @@ impl DnsServer {
 /// Every listener the supervisor bound, before any of them started serving.
 /// The sockets are released when this value is dropped or its `serve` returns.
 pub struct BoundHost {
-    cache: Rc<CacheCatalog>,
-    dns: DnsServer,
+    control: crate::runtime_snapshot::RuntimeControl,
+    dns: Vec<DnsServer>,
     dns_addr: std::net::SocketAddr,
     api: Option<ApiServer>,
     api_addr: Option<std::net::SocketAddr>,
@@ -575,47 +680,68 @@ impl BoundHost {
     /// upstream-catalog close, so the management side never closes it.
     pub async fn serve(self, shutdown: TransportCancellation) -> Result<(), HostRunError> {
         let Self {
-            cache,
+            control,
             dns,
             dns_addr: _,
             api,
             api_addr: _,
         } = self;
-        cache.start_periodic(&shutdown);
-        let mut tasks: JoinSet<Result<(), HostRunError>> = JoinSet::new();
-        {
+        let mut updates = control.start(&shutdown);
+        let mut scopes = BTreeMap::new();
+        let mut task_keys = std::collections::HashMap::new();
+        let mut tasks: JoinSet<(
+            Option<crate::runtime_snapshot::BindingKey>,
+            Result<(), HostRunError>,
+        )> = JoinSet::new();
+        for dns in dns {
+            let key = dns.binding_key()?;
             let scope = shutdown.child_token();
-            tasks.spawn_local(async move { dns.serve(scope).await });
+            scopes.insert(key.clone(), scope.clone());
+            let task_key = key.clone();
+            let task = tasks.spawn_local(async move { (Some(task_key), dns.serve(scope).await) });
+            task_keys.insert(task.id(), Some(key));
         }
         if let Some(api) = api {
             let scope = shutdown.child_token();
-            tasks.spawn_local(async move { api.serve(scope).await.map_err(HostRunError::Api) });
+            let task = tasks.spawn_local(async move {
+                (None, api.serve(scope).await.map_err(HostRunError::Api))
+            });
+            task_keys.insert(task.id(), None);
         }
-
         let mut failure: Option<HostRunError> = None;
-        while let Some(joined) = tasks.join_next().await {
-            match joined {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    if failure.is_none() {
-                        failure = Some(error);
+        while !tasks.is_empty() {
+            tokio::select! {
+                update = updates.recv() => {
+                    if let Some(update) = update {
+                        for key in update.remove {
+                            if let Some(scope) = scopes.get(&key) { scope.cancel(); }
+                            else { control.listener_finished(&key); }
+                        }
+                        for (key, server) in update.add {
+                            let scope = shutdown.child_token();
+                            scopes.insert(key.clone(), scope.clone());
+                            let task_key = key.clone();
+                            let task = tasks.spawn_local(async move { (Some(task_key), server.serve(scope).await) });
+                            task_keys.insert(task.id(), Some(key));
+                        }
                     }
-                    // A running-side failure stops the other listener; the
-                    // loop keeps joining until every task has finished.
-                    shutdown.cancel();
                 }
-                Err(error) => {
-                    if failure.is_none() {
-                        failure = Some(HostRunError::Task(error.to_string()));
+                joined = tasks.join_next_with_id() => {
+                    let Some(joined) = joined else { break; };
+                    let (key, result) = match joined {
+                        Ok((id, (key, result))) => { task_keys.remove(&id); (key, result) },
+                        Err(error) => (task_keys.remove(&error.id()).flatten(), Err(HostRunError::Task(error.to_string()))),
+                    };
+                    if let Some(key) = key { scopes.remove(&key); control.listener_finished(&key); }
+                    if let Err(error) = result {
+                        if failure.is_none() { failure = Some(error); }
+                        shutdown.cancel();
                     }
-                    shutdown.cancel();
                 }
             }
         }
-        if let Err(error) = cache.stop_refreshes().await {
-            failure.get_or_insert(HostRunError::Task(error.to_string()));
-        }
-        if let Err(error) = cache.finish_persistence().await {
+        drop(updates);
+        if let Err(error) = control.close().await {
             failure.get_or_insert(HostRunError::Task(error.to_string()));
         }
         match failure {
@@ -832,6 +958,7 @@ fn tls_policy(
 /// entry; W3 populates one entry per validated route without introducing a
 /// fallback-to-first-upstream path.
 pub struct ForwardCatalog {
+    entry_indexes: BTreeMap<mosdns_sequence_core::ExecutableId, Vec<usize>>,
     owners: BTreeMap<mosdns_sequence_core::ExecutableId, Vec<Rc<ForwardAdapter>>>,
     concurrent: BTreeMap<mosdns_sequence_core::ExecutableId, usize>,
     rotation: RefCell<u64>,
@@ -867,17 +994,45 @@ impl ForwardCatalog {
             }
         }
         let concurrent = owners.keys().map(|executable| (*executable, 1)).collect();
+        let entry_indexes = owners.keys().map(|id| (*id, vec![0])).collect();
         Ok(Self {
+            entry_indexes,
             owners,
             concurrent,
             rotation: RefCell::new(seed),
         })
     }
 
-    fn from_compiled_config(
+    pub(crate) fn from_compiled_config(
         config: &CompiledConfig,
         tls_roots: Option<Arc<rustls::RootCertStore>>,
     ) -> Result<Self, String> {
+        Self::from_compiled_reusing(config, tls_roots, None)
+    }
+
+    pub(crate) fn from_compiled_reusing(
+        config: &CompiledConfig,
+        tls_roots: Option<Arc<rustls::RootCertStore>>,
+        previous: Option<(&CompiledConfig, &ForwardCatalog)>,
+    ) -> Result<Self, String> {
+        let mut previous_owners = Vec::new();
+        if let Some((old, catalog)) = previous {
+            for invocation in &old.forward_invocations {
+                let definition = &old.forward_definitions[invocation.definition];
+                if let Some(owners) = catalog.owners.get(&invocation.executable) {
+                    for (&entry_index, owner) in invocation.entries.iter().zip(owners) {
+                        let entry = &definition.entries[entry_index];
+                        previous_owners.push((
+                            definition.tag.clone(),
+                            entry.identity.clone(),
+                            entry.target.clone(),
+                            owner.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+        let mut entry_indexes = BTreeMap::new();
         let mut owners: BTreeMap<mosdns_sequence_core::ExecutableId, Vec<Rc<ForwardAdapter>>> =
             BTreeMap::new();
         let mut shared: BTreeMap<(usize, usize), Rc<ForwardAdapter>> = BTreeMap::new();
@@ -890,6 +1045,7 @@ impl ForwardCatalog {
                     format!("forward definition {} is missing", invocation.definition)
                 })?;
             concurrent.insert(invocation.executable, definition.concurrent);
+            entry_indexes.insert(invocation.executable, invocation.entries.clone());
             let mut invocation_owners = Vec::with_capacity(invocation.entries.len());
             for &entry_index in &invocation.entries {
                 let entry = definition.entries.get(entry_index).ok_or_else(|| {
@@ -901,12 +1057,21 @@ impl ForwardCatalog {
                 let owner = if let Some(owner) = shared.get(&(invocation.definition, entry_index)) {
                     Rc::clone(owner)
                 } else {
-                    let owner = Rc::new(ForwardAdapter::new_entry(
-                        invocation.executable,
-                        entry_index,
-                        entry.target.clone(),
-                        tls_roots.clone(),
-                    )?);
+                    let owner = if let Some((_, _, _, owner)) =
+                        previous_owners.iter().find(|(tag, identity, target, _)| {
+                            tag == &definition.tag
+                                && identity == &entry.identity
+                                && target == &entry.target
+                        }) {
+                        owner.clone()
+                    } else {
+                        Rc::new(ForwardAdapter::new_entry(
+                            invocation.executable,
+                            entry_index,
+                            entry.target.clone(),
+                            tls_roots.clone(),
+                        )?)
+                    };
                     shared.insert((invocation.definition, entry_index), Rc::clone(&owner));
                     owner
                 };
@@ -921,6 +1086,7 @@ impl ForwardCatalog {
             0x9e37_79b9_7f4a_7c15
         };
         Ok(Self {
+            entry_indexes,
             owners,
             concurrent,
             rotation: RefCell::new(seed),
@@ -952,6 +1118,34 @@ impl ForwardCatalog {
         self.owners
             .get(&executable)
             .and_then(|owners| (owners.len() == 1).then(|| owners[0].as_ref()))
+    }
+
+    pub(crate) fn runtime_targets(
+        &self,
+        executable: mosdns_sequence_core::ExecutableId,
+    ) -> Vec<String> {
+        self.owners
+            .get(&executable)
+            .into_iter()
+            .flatten()
+            .filter_map(|owner| owner.runtime_target())
+            .collect()
+    }
+
+    pub(crate) async fn close_exclusive_to(&self, live: &ForwardCatalog) {
+        let preserved = live
+            .owners
+            .values()
+            .flatten()
+            .map(|owner| Rc::as_ptr(owner) as usize)
+            .collect::<BTreeSet<_>>();
+        let mut closed = BTreeSet::new();
+        for owner in self.owners.values().flatten() {
+            let key = Rc::as_ptr(owner) as usize;
+            if !preserved.contains(&key) && closed.insert(key) {
+                owner.close().await;
+            }
+        }
     }
 
     pub async fn close_all(&self) {
@@ -1023,9 +1217,10 @@ impl ExchangeExecutor for ForwardCatalog {
         let start = self.rotation_start(owners.len());
         let selected_indices = Self::selected_owner_indices(owners.len(), concurrent, start);
         if owners.len() <= 1 || concurrent <= 1 {
+            let entry_index = self.entry_indexes[&executable][selected_indices[0]];
             let owner = Rc::clone(&owners[selected_indices[0]]);
             let shared = Rc::clone(&ledger);
-            let slot = shared.borrow_mut().start(owner.entry_index());
+            let slot = shared.borrow_mut().start(entry_index);
             let mut tracker =
                 UpstreamAttemptTracker::new(Rc::clone(&shared), slot, cancellation.clone());
             return Box::pin(async move {
@@ -1046,7 +1241,7 @@ impl ExchangeExecutor for ForwardCatalog {
                         };
                         tracker.finish(peer, transport, UpstreamAttemptOutcome::Response);
                         Ok(InvocationExchange {
-                            selected_entry: Some(owner.entry_index()),
+                            selected_entry: Some(entry_index),
                             selected_peer: peer,
                             response: ExchangeResponse::new(
                                 wire,
@@ -1068,22 +1263,21 @@ impl ExchangeExecutor for ForwardCatalog {
         let scope = cancellation.child_token();
         let owners = selected_indices
             .into_iter()
-            .map(|index| Rc::clone(&owners[index]))
+            .map(|index| {
+                (
+                    self.entry_indexes[&executable][index],
+                    Rc::clone(&owners[index]),
+                )
+            })
             .collect::<Vec<_>>();
         let shared = Rc::clone(&ledger);
         let slots = owners
             .iter()
-            .map(|owner| {
-                (
-                    owner.entry_index(),
-                    shared.borrow_mut().start(owner.entry_index()),
-                )
-            })
+            .map(|(entry_index, _)| (*entry_index, shared.borrow_mut().start(*entry_index)))
             .collect::<BTreeMap<_, _>>();
         Box::pin(async move {
             let mut tasks = JoinSet::new();
-            for owner in owners {
-                let entry_index = owner.entry_index();
+            for (entry_index, owner) in owners {
                 let slot = slots[&entry_index];
                 let leg_cancellation = scope.child_token();
                 let leg_query = query.clone();
@@ -1294,6 +1488,10 @@ impl ForwardAdapter {
         self.entry_index
     }
 
+    pub(crate) fn runtime_target(&self) -> Option<String> {
+        self.active_peer.borrow().map(|address| address.to_string())
+    }
+
     #[must_use]
     pub fn endpoint(&self) -> Endpoint {
         let dial = self
@@ -1444,6 +1642,7 @@ pub enum AssemblyError {
     Config(ConfigError),
     Cache(CacheAdapterError),
     Catalog(String),
+    ListenerConflict(String),
     Runtime(String),
 }
 
@@ -1453,6 +1652,9 @@ impl std::fmt::Display for AssemblyError {
             Self::Config(error) => error.fmt(formatter),
             Self::Cache(error) => write!(formatter, "cache setup failed: {error}"),
             Self::Catalog(message) => write!(formatter, "forward catalog setup failed: {message}"),
+            Self::ListenerConflict(message) => {
+                write!(formatter, "listener resource conflict: {message}")
+            }
             Self::Runtime(message) => write!(formatter, "runtime setup failed: {message}"),
         }
     }
@@ -1509,6 +1711,34 @@ mod tests {
             HostAssembly::from_yaml(&invalid),
             Err(AssemblyError::Config(ConfigError { .. }))
         ));
+    }
+
+    #[test]
+    fn startup_uses_the_same_config_snapshot_for_preflight_and_compilation() {
+        let root = std::env::temp_dir().join(format!(
+            "native-preflight-config-snapshot-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.yaml");
+        std::fs::write(&path, UDP).unwrap();
+
+        let host = HostAssembly::from_config_file_after_preflight(&path, || {
+            std::fs::write(
+                &path,
+                include_str!("../../../docs/rust/examples/native-managed-empty/config.yaml"),
+            )
+            .unwrap();
+        })
+        .expect("the preflight snapshot remains a valid unmanaged configuration");
+
+        assert!(
+            host.config().managed_profile.is_none(),
+            "the compiled graph must reflect the YAML snapshot whose opt-in was checked"
+        );
+        drop(host);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

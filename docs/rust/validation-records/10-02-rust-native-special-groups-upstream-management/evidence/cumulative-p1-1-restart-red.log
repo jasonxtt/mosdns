@@ -1,0 +1,39 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0599]: no function or associated item named `new` found for struct `HostAssembly` in the current scope
+   --> native-host/tests/special_groups_whole_chain.rs:578:34
+    |
+578 |         let host = HostAssembly::new(config).unwrap();
+    |                                  ^^^ function or associated item not found in `HostAssembly`
+    |
+note: if you're trying to build a new `HostAssembly` consider using one of the following associated functions:
+      HostAssembly::from_yaml
+      HostAssembly::from_config_file
+      HostAssembly::from_config
+      HostAssembly::with_options
+      HostAssembly::with_options_and_state_root
+   --> native-host/src/assembly.rs:169:5
+    |
+169 |       pub fn from_yaml(yaml: &str) -> Result<Self, AssemblyError> {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+176 |       pub fn from_config_file(path: &std::path::Path) -> Result<Self, AssemblyError> {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+245 |       pub fn from_config(config: CompiledConfig) -> Result<Self, AssemblyError> {
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+251 | /     pub fn with_options(
+252 | |         config: CompiledConfig,
+253 | |         options: HostOptions,
+254 | |     ) -> Result<Self, AssemblyError> {
+    | |____________________________________^
+...
+261 | /     pub fn with_options_and_state_root(
+262 | |         config: CompiledConfig,
+263 | |         options: HostOptions,
+264 | |         state_root: impl AsRef<Path>,
+265 | |     ) -> Result<Self, AssemblyError> {
+    | |____________________________________^
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `mosdns-native-host` (test "special_groups_whole_chain") due to 1 previous error

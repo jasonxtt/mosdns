@@ -1,0 +1,11 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.63s
+     Running tests/special_groups_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_config-c0cae653bc145d4f)
+
+running 2 tests
+test real_group_cache_keeps_supplier_when_warmed_without_audit ... ok
+test real_group_dns_normalizes_before_cache_and_reports_actual_supplier ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+exit_code=0

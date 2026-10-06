@@ -1,0 +1,19 @@
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error: this `RefCell` reference is held across an await point
+   --> native-host/src/runtime_snapshot.rs:857:29
+    |
+857 |         if let Some(gate) = self.0.apply_marker_test_gate.borrow_mut().take() {
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: ensure the reference is dropped before calling `await`
+note: these are all the await points this reference is held through
+   --> native-host/src/runtime_snapshot.rs:859:37
+    |
+859 |             gate.release.notified().await;
+    |                                     ^^^^^
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#await_holding_refcell_ref
+    = note: `-D clippy::await-holding-refcell-ref` implied by `-D clippy::all`
+    = help: to override `-D clippy::all` add `#[allow(clippy::await_holding_refcell_ref)]`
+
+error: could not compile `mosdns-native-host` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

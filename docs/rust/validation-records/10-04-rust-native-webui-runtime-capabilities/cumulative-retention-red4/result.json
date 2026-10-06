@@ -1,0 +1,10 @@
+{
+  "status": "FAIL",
+  "cases": [],
+  "error": "TimeoutError: locator.waitFor: Timeout 5000ms exceeded.\nCall log:\n  - waiting for locator('.rules-diversion-table tbody tr').filter({ hasText: 'retained-catalog' }) to be visible\n",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (./webinfo/audit_settings.json)\ncache startup /root/mosdns-rust-webui-20261004/evidence/cumulative-retention-red4/runtime/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty\n"
+}

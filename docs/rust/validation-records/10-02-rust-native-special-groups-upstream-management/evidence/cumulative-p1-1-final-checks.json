@@ -1,0 +1,29 @@
+[
+  {
+    "step": "fmt",
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--",
+      "--check"
+    ],
+    "exit_code": 0,
+    "log": "cumulative-p1-1-fmt-final.log"
+  },
+  {
+    "step": "clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "--workspace",
+      "--all-targets",
+      "--locked",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_code": 101,
+    "log": "cumulative-p1-1-clippy-final.log"
+  }
+]

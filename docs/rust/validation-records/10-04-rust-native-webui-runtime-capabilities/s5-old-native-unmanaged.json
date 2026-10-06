@@ -1,0 +1,51 @@
+{
+  "endpoints": {
+    "audit_v1": true,
+    "audit_v2": true,
+    "cache_inventory_get": true,
+    "capabilities_get": true,
+    "diversion_sources": {
+      "delete": false,
+      "list_get": false,
+      "put": false
+    },
+    "manual_rules": {
+      "post": false,
+      "save_get": true,
+      "show_get": true
+    },
+    "metrics_get": true,
+    "special_groups": {
+      "delete": false,
+      "get": true,
+      "post": false
+    },
+    "upstream": {
+      "config_get": true,
+      "config_post": false,
+      "runtime_get": true,
+      "tags_get": true
+    }
+  },
+  "rule_formats": [],
+  "runtime": "rust",
+  "schema_version": 1,
+  "special_groups": {
+    "enabled": false,
+    "profile": null
+  },
+  "unsupported_features": [
+    "signed_aliapi",
+    "quic",
+    "http3",
+    "socks_proxy",
+    "socket_marks",
+    "bind_to_device",
+    "positive_idle_timeout",
+    "enable_pipeline",
+    "srs_geodata",
+    "remote_download",
+    "auto_update"
+  ],
+  "upstream_protocols": []
+}

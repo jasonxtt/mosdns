@@ -1,0 +1,234 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 18.95s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-556fd23d77659943)
+
+running 98 tests
+test api::tests::audit_query_decoding_is_form_strict_and_rank_limits_are_bounded ... ok
+test api::tests::canonical_settings_win_before_legacy_and_clamp_saved_values ... ok
+test api::tests::known_dns_types_keep_mnemonics_and_unknown_types_are_empty ... ok
+test api::tests::null_or_missing_capacity_is_zero_and_failed_migration_keeps_source ... ok
+test api::tests::windows_use_the_oldest_admission_time_not_terminal_order ... ok
+test assembly::tests::audit_retention_defaults_to_the_frozen_hundred_thousand_record_limit ... ok
+test assembly::tests::catalog_closes_all_distinct_forward_owners_and_rejects_duplicates ... ok
+test assembly::tests::seeded_rotation_also_selects_the_single_leg_start ... ok
+test assembly::tests::valid_graph_is_pre_io_and_invalid_graph_never_reaches_assembly ... ok
+test cache::persistence_tests::all_entry_validation_precedes_merge_including_expired_and_ecs_keys ... ok
+test cache::persistence_tests::ecs_suffix_validation_is_atomic_even_for_expired_last_entries ... ok
+test cache::persistence_tests::post_commit_invariant_failure_stops_host_and_never_saves_old_memory ... ok
+test api::tests::canceled_audit_read_releases_its_slot_only_after_worker_exit ... ok
+test cache_dump::tests::complete_footer_name_framing_limits_and_trailing_members_are_validated ... ok
+test cache_dump::tests::stream_owned_and_entry_limits_apply_before_any_merge ... ok
+test cli::tests::accepts_both_config_spellings ... ok
+test cli::tests::rejects_other_commands_and_extra_arguments ... ok
+test config::tests::compiles_both_preference_quick_forms_and_rejects_arguments ... ok
+test config::tests::compiles_fallback_defaults_and_preserves_explicit_zero ... ok
+test config::tests::compiles_the_frozen_udp_and_tcp_shapes_without_rewriting_them ... ok
+test config::tests::declaration_order_and_references_are_compiled_after_collection ... ok
+test config::tests::fast_mark_and_flow_setter_support_quick_and_named_forms ... ok
+test config::tests::independently_proves_the_remaining_fail_closed_categories ... ok
+test config::tests::matcher_expressions_follow_the_documented_grammar_and_negation ... ok
+test config::tests::native_plugin_compilation_rejects_bad_values_with_paths ... ok
+test config::tests::rejects_duplicates_and_missing_required_roles ... ok
+test config::tests::rejects_every_unsupported_shape_before_assembly ... ok
+test config::tests::unsupported_or_malformed_matchers_are_rejected_at_load_time ... ok
+test execution::tests::a_cancelled_query_never_publishes_a_partial_child_result ... ok
+test execution::tests::a_child_cache_keeps_its_successor_result_when_the_parent_overwrites_the_response ... ok
+test execution::tests::a_nested_cache_hit_short_circuits_the_inner_cache ... ok
+test execution::tests::a_repeated_dynamic_cache_dispatch_builds_its_own_frame_and_answers_normally ... ok
+test execution::tests::an_entry_cache_wraps_its_successor_and_caches_that_successor_result ... ok
+test execution::tests::audit_disabled_execution_keeps_metric_facts_without_audit_details ... ok
+test execution::tests::byte_identical_parent_response_replacement_drops_child_provenance ... ok
+test execution::tests::cache_hit_skips_the_exact_forward_dispatch_and_miss_publishes_at_completion ... ok
+test execution::tests::canonical_machine_resumes_two_external_legs_with_one_deadline ... ok
+test execution::tests::dropped_flow_setter_execution_preserves_configured_metadata_precedence ... ok
+test execution::tests::dropped_w2_execution_retains_cache_miss_and_interrupted_forward_attempt ... ok
+test execution::tests::dropped_w3_execution_does_not_publish_intermediate_response_as_final ... ok
+test execution::tests::effective_tag_normalization_keeps_special_and_memory_precedence ... ok
+test execution::tests::execution_observation_reports_actual_w3_final_route_and_ordered_legs ... ok
+test execution::tests::execution_observation_tracks_w1_w2_and_servfail_provenance ... ok
+test execution::tests::failed_first_multi_forward_leg_stops_before_the_next_external ... ok
+test execution::tests::failed_second_multi_forward_leg_does_not_republish_first_answer ... ok
+test execution::tests::fallback_aggregation_preserves_root_terminal_error ... ok
+test execution::tests::fallback_zero_starts_both_branches_and_reports_schema_two ... ok
+test execution::tests::final_response_flags_read_ra_from_the_low_dns_header_byte ... ok
+test execution::tests::interleaved_request_cancellation_does_not_cross_request_state ... ok
+test execution::tests::malformed_address_rdata_is_terminal_for_multi_forward_w3 ... ok
+test execution::tests::mismatched_question_is_terminal_and_never_reaches_the_next_external ... ok
+test execution::tests::one_cache_dispatched_in_two_scopes_publishes_at_both_boundaries ... ok
+test execution::tests::policy_root_terminals_are_not_recoverable_executor_errors ... ok
+test execution::tests::prefer_ipv4_rewrites_reference_qtype_and_suppresses_original_answer ... ok
+test execution::tests::publication_deadline_drops_the_pending_token_without_changing_w1_output ... ok
+test execution::tests::redirect_error_cancel_and_shared_fuel_restore_without_decoration ... ok
+test execution::tests::reverse_qname_and_parent_replacement_do_not_publish_stale_route_provenance ... ok
+test execution::tests::terminal_trace_cleanup_clears_supplier_without_relabeling_history ... ok
+test execution::tests::the_representative_chain_blocks_rejects_and_routes_without_a_listener ... ok
+test execution::tests::two_calls_to_one_child_dispatch_the_shared_cache_again_after_a_hit ... ok
+test execution::tests::two_nested_caches_each_store_their_own_successors_result ... ok
+test execution::tests::unknown_executable_id_fails_closed_without_selecting_the_only_forward ... ok
+test execution::tests::upstream_servfail_is_cacheable_but_local_servfail_is_not ... ok
+test matchers::tests::expanded_response_ip_ignores_non_answer_addresses_and_cname_without_mutation ... ok
+test matchers::tests::qname_is_exact_case_insensitive_and_requires_plain_wire_labels ... ok
+test matchers::tests::response_ip_matches_only_a_raw_answer_without_mutating_state ... ok
+test observer::tests::audit_admission_renders_escaped_question_in_exact_sized_buffer ... ok
+test observer::tests::audit_ring_reserves_a_bounded_initial_capacity_only_when_enabled ... ok
+test observer::tests::checkpoint_shared_ledger_survives_dropped_active_multi_leg ... ok
+test observer::tests::clear_and_resize_linearize_against_the_retained_ring ... ok
+test observer::tests::disabled_audit_keeps_basic_metrics_without_building_query_details ... ok
+test observer::tests::dropped_send_preserves_completed_facts_from_boxed_observation ... ok
+test observer::tests::duration_histogram_uses_inclusive_frozen_bounds_and_positive_infinity ... ok
+test observer::tests::enabled_audit_retains_the_newest_records_and_counts_evictions ... ok
+test observer::tests::failure_provenance_has_typed_upstream_and_local_cases ... ok
+test observer::tests::native_request_ids_are_fixed_width_and_fail_closed_at_counter_exhaustion ... ok
+test observer::tests::observer_is_send_and_sync_for_a_future_multicore_host ... ok
+test observer::tests::runtime_capture_defaults_on_and_static_gate_cannot_be_overridden ... ok
+test observer::tests::terminal_capture_uses_the_runtime_state_at_terminalization ... ok
+test observer::tests::terminal_counters_partition_completion_and_keep_metric_dimensions_bounded ... ok
+test observer::tests::unfinished_admission_is_finalized_once_using_its_cancellation_scope ... ok
+test observer::tests::unfinished_execution_preserves_known_facts_and_marks_unresolved_facts ... ok
+test observer::tests::upstream_attempt_list_keeps_one_attempt_inline_and_promotes_in_order ... ok
+test observer::tests::zero_capacity_keeps_lifetime_metrics_without_retaining_records ... ok
+test plugins::tests::fast_mark_matches_any_id_and_sets_bits_without_clearing_existing_flags ... ok
+test plugins::tests::flow_setter_rejects_empty_quick_setup ... ok
+test policy::special_group_cname_tests::compressed_group_cname_policy_preserves_control_sections_and_routing ... ok
+test policy::wire_tests::malformed_ttl_response_is_not_partially_committed ... ok
+test policy::wire_tests::no_op_hosts_preserves_existing_response_and_generation ... ok
+test tcp::tests::tcp_connection_records_multiple_queries_and_excludes_partial_input ... ok
+test tcp::tests::tcp_write_failure_and_pending_write_cancellation_are_distinct ... ok
+test udp::tests::a_completed_sequence_without_response_maps_to_refused ... ok
+test udp::tests::cancellation_wins_at_the_pre_send_commit_gate ... ok
+test udp::tests::completed_tasks_are_reaped_and_failures_do_not_skip_remaining_tasks ... ok
+test udp::tests::task_failure_still_closes_upstream_after_full_drain ... ok
+test udp::tests::udp_listener_records_one_terminal_audit_for_the_actual_request ... ok
+test udp::tests::udp_send_failure_and_pending_send_cancellation_are_distinct ... ok
+test cache::persistence_tests::startup_periodic_shutdown_snapshot_and_all_owner_errors_are_observable ... ok
+
+test result: ok. 98 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+
+     Running tests/cache_catalog.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/cache_catalog-f26e0042643fe0e2)
+
+running 14 tests
+test a_fallback_cache_target_publishes_only_after_a_natural_successor_completion ... ok
+test a_fallback_cache_target_never_publishes_a_successor_that_exited ... ok
+test a_quick_cache_and_a_named_cache_coexist_and_stay_distinguishable ... ok
+test an_inline_cache_callsite_owns_a_private_instance_without_a_public_identity ... ok
+test detached_successor_owns_its_state_and_rebinds_exactly_one_64_fuel_root ... ok
+test cache_hit_restores_the_successor_domain_set_in_the_final_query_audit ... ok
+test distinct_names_do_not_share_a_cache_entry ... ok
+test every_configured_named_cache_is_listed_in_configuration_order ... ok
+test each_inline_cache_callsite_is_a_separate_instance ... ok
+test nested_named_caches_publish_independently_and_the_outer_hit_short_circuits ... ok
+test lazy_refresh_outlives_the_client_merges_followers_and_leaves_audit_unchanged ... ok
+test positive_lazy_retention_is_accepted_for_named_caches_only ... ok
+test the_same_cache_dispatched_twice_in_one_scope_answers_normally ... ok
+test two_named_caches_compile_to_two_distinct_stores_with_stable_ids ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/client_context.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/client_context-f2ced61d4a970133)
+
+running 3 tests
+test real_udp_trusted_peers_forged_ecs_and_audit_off ... ok
+test real_ipv6_udp_and_tcp_context ... ok
+test unknown_and_mapped_embedding_identity_with_file_or_and_negation ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/ecs_cache.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/ecs_cache-4393bc23559eeaa3)
+
+running 6 tests
+test family2_mapped_string_matches_go_without_changing_wire_family ... ok
+test full_ecs_keys_partition_exact_network_family_and_mask ... ok
+test ecs_cache_is_explicitly_opt_in_and_rejects_unsafe_placement ... ok
+test jump_inherited_continuation_is_checked_but_child_boundary_is_respected ... ok
+test refresh_singleflight_uses_full_ecs_key ... ok
+test placement_covers_control_flow_and_own_boundary ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/ecs_wire.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/ecs_wire-95b8e6641543328a)
+
+running 16 tests
+test compressed_noopt_query_can_receive_generated_ecs ... ok
+test cache_hit_reconstructs_client_opt_without_inventing_ecs ... ok
+test current_policy_ecs_survives_later_handler ... ok
+test ecs_scope_preserves_exit_and_local_terminal_completion ... ok
+test enabled_cache_uses_current_policy_ecs_and_hit_has_no_echo_scope ... ok
+test fallback_echo_uses_only_winning_supplier ... ok
+test forwarded_ipv6_supplier_has_legal_echo ... ok
+test generated_policy_cannot_echo_supplier_ecs ... ok
+test handler_configuration_validation ... ok
+test handler_preserves_other_opt_flags_and_empty_legacy_and_non_in ... ok
+test ecs_scope_shutdown_cancels_without_fabricated_response ... ok
+test named_handler_selection_and_masked_wire ... ok
+test nested_redirect_and_handler_inherit_echo_permission ... ok
+test only_legal_matching_supplier_ecs_can_echo ... ok
+test preference_local_suppression_has_no_supplier_echo ... ok
+test malformed_incoming_ecs_fails_locally_without_forwarding ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.25s
+
+     Running tests/policy_wire.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/policy_wire-8fec99f2ed1e8505)
+
+running 24 tests
+test cache_before_and_inside_redirect_owns_correct_wire_and_key ... ok
+test composition_ip_condition_selects_fallback_supplier_and_keeps_both_attempts ... ok
+test composition_ip_matchers_see_target_and_restored_cached_answers_at_their_own_boundaries ... ok
+test composition_lazy_refresh_uses_same_immutable_hosts_snapshot ... ok
+test composition_redirect_preference_probe_uses_current_question_and_qtype_matchers ... ok
+test composition_retained_dump_can_hit_old_policy_until_quiescent_durable_flush ... ok
+test composition_ttl_inside_and_outside_cache_keep_distinct_stored_ttls ... ok
+test direct_fallback_hosts_target_continues_into_branch_ttl ... ok
+test hosts_dual_stack_order_ttl_and_continue_into_quick_ttl ... ok
+test hosts_empty_family_has_complete_fake_soa ... ok
+test hosts_no_hit_no_addresses_non_in_and_non_address_continue ... ok
+test hosts_replaces_upstream_supplier_but_preserves_actual_attempts ... ok
+test nested_redirect_restores_each_question_and_negative_soa ... ok
+test redirect_consumes_jump_continuation_exactly_once_before_restoration ... ok
+test composition_fallback_redirect_siblings_are_isolated_and_cancelled_supplier_never_wins ... ok
+test redirect_exit_decorates_response_but_never_publishes_outer_cache ... ok
+test redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail ... ok
+test redirect_non_in_is_noop_and_direct_fallback_redirect_uses_current_target ... ok
+test redirect_query_view_preserves_flags_qtype_and_opt ... ok
+test redirect_sends_actual_target_preserves_existing_chain_and_admission_audit ... ok
+test response_ip_named_cidr_or_ipv6_and_mapped_addresses_drive_real_sequence ... ok
+test response_ip_text_file_is_or_snapshot_not_request_time_io ... ok
+test ttl_fixed_zero_is_noop_and_range_zero_is_unbounded ... ok
+test redirect_cycle_shares_root_fuel_and_cannot_manufacture_success ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.08s
+
+     Running tests/slice2_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/slice2_config-e3b52d467d67780f)
+
+running 13 tests
+test a_second_listener_with_a_mixed_audit_flag_is_rejected_before_assembly ... ok
+test assembly_owns_one_upstream_and_no_listener_socket ... ok
+test audit_enabled_is_accepted_for_every_supported_single_listener_graph ... ok
+test effective_upstream_identities_must_be_unique_across_explicit_and_default_tags ... ok
+test frozen_w2_cache_configuration_compiles_to_udp_graph ... ok
+test frozen_w3_graph_compiles_to_three_owned_udp_routes_and_four_rules ... ok
+test invalid_configuration_is_rejected_before_pre_io_assembly ... ok
+test cache_parameters_and_composition_are_configurable_where_the_contract_allows_it ... ok
+test the_composed_grammar_accepts_the_bounded_w3_shapes_it_used_to_forbid ... ok
+test unsupported_cache_configuration_is_rejected_before_io ... ok
+test w1_graph_remains_accepted_and_cache_is_not_implicit ... ok
+test w3_names_order_and_data_are_not_fixture_constants ... ok
+test w3_negative_grammar_and_graph_matrix_fails_closed ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/special_groups_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_config-5639732cc424ab64)
+
+running 10 tests
+test conflicting_schema_or_reserved_generated_names_fail_before_assembly ... ok
+test empty_managed_profile_compiles_at_explicit_hook ... ok
+test compiled_router_selects_first_provider_group_and_never_falls_through ... ok
+test file_relative_managed_state_is_not_process_relative ... ok
+test enabled_sources_are_strict_and_disabled_unsupported_data_remains_visible ... ok
+test legacy_aliapi_wrapper_does_not_authorize_signed_api_entries ... ok
+test group_identity_priority_and_listener_inventory_are_compiled_from_generated_input ... ok
+test opt_in_requires_a_reachable_hook ... ok
+test standard_dns_overrides_preserve_disabled_unsupported_records_and_reject_activation ... ok
+test real_group_dns_normalizes_before_cache_and_reports_actual_supplier ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

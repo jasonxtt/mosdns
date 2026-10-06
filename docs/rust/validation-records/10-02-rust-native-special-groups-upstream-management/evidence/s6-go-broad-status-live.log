@@ -1,0 +1,151 @@
+GET /api/v1/capabilities
+Invalid request GET /api/v1/capabilities
+
+Available api urls:
+GET /
+POST /api/v1/appearance/button-color
+GET /api/v1/appearance/button-color
+GET /api/v1/appearance/panel-background
+POST /api/v1/appearance/panel-background
+GET /api/v1/appearance/panel-background/history
+DELETE /api/v1/appearance/panel-background/history
+DELETE /api/v1/appearance/panel-background/history/{id}
+GET /api/v1/appearance/panel-background/history/{id}
+GET /api/v1/appearance/panel-background/image
+POST /api/v1/appearance/panel-background/upload
+GET /api/v1/appearance/text-color
+POST /api/v1/appearance/text-color
+POST /api/v1/audit/capacity
+GET /api/v1/audit/capacity
+POST /api/v1/audit/clear
+GET /api/v1/audit/logs
+POST /api/v1/audit/start
+GET /api/v1/audit/status
+POST /api/v1/audit/stop
+GET /api/v1/capture/logs
+POST /api/v1/capture/start
+POST /api/v1/config/export
+POST /api/v1/config/update_from_url
+GET /api/v1/domain-generation/
+POST /api/v1/domain-generation/
+GET /api/v1/overrides/
+POST /api/v1/overrides/
+POST /api/v1/special-groups/
+GET /api/v1/special-groups/
+DELETE /api/v1/special-groups/{slot}
+GET /api/v1/system/health
+POST /api/v1/system/restart
+GET /api/v1/system/webui-port
+POST /api/v1/system/webui-port
+POST /api/v1/update/apply
+POST /api/v1/update/check
+GET /api/v1/update/status
+GET /api/v1/upstream/config
+POST /api/v1/upstream/config
+GET /api/v1/upstream/runtime/{tag}
+GET /api/v1/upstream/tags
+GET /api/v2/audit/logs
+GET /api/v2/audit/rank/client
+GET /api/v2/audit/rank/domain
+GET /api/v2/audit/rank/domain_set
+GET /api/v2/audit/rank/effective
+GET /api/v2/audit/rank/slowest
+GET /api/v2/audit/stats
+GET /api/v2/audit/stats/windows
+GET /assets/*
+GET /debug/pprof/cmdline
+GET /debug/pprof/profile
+GET /debug/pprof/symbol
+GET /debug/pprof/trace
+GET /debug/pprof/*
+GET /log
+GET /metrics
+GET /plugins/cache_default/dump
+GET /plugins/cache_default/flush
+POST /plugins/cache_default/load_dump
+GET /plugins/cache_default/save
+GET /plugins/cache_default/show
+
+HTTP_STATUS=404
+
+POST /api/v1/capabilities
+Invalid request POST /api/v1/capabilities
+
+Available api urls:
+GET /
+GET /api/v1/appearance/button-color
+POST /api/v1/appearance/button-color
+GET /api/v1/appearance/panel-background
+POST /api/v1/appearance/panel-background
+GET /api/v1/appearance/panel-background/history
+DELETE /api/v1/appearance/panel-background/history
+DELETE /api/v1/appearance/panel-background/history/{id}
+GET /api/v1/appearance/panel-background/history/{id}
+GET /api/v1/appearance/panel-background/image
+POST /api/v1/appearance/panel-background/upload
+POST /api/v1/appearance/text-color
+GET /api/v1/appearance/text-color
+GET /api/v1/audit/capacity
+POST /api/v1/audit/capacity
+POST /api/v1/audit/clear
+GET /api/v1/audit/logs
+POST /api/v1/audit/start
+GET /api/v1/audit/status
+POST /api/v1/audit/stop
+GET /api/v1/capture/logs
+POST /api/v1/capture/start
+POST /api/v1/config/export
+POST /api/v1/config/update_from_url
+POST /api/v1/domain-generation/
+GET /api/v1/domain-generation/
+POST /api/v1/overrides/
+GET /api/v1/overrides/
+GET /api/v1/special-groups/
+POST /api/v1/special-groups/
+DELETE /api/v1/special-groups/{slot}
+GET /api/v1/system/health
+POST /api/v1/system/restart
+GET /api/v1/system/webui-port
+POST /api/v1/system/webui-port
+POST /api/v1/update/apply
+POST /api/v1/update/check
+GET /api/v1/update/status
+POST /api/v1/upstream/config
+GET /api/v1/upstream/config
+GET /api/v1/upstream/runtime/{tag}
+GET /api/v1/upstream/tags
+GET /api/v2/audit/logs
+GET /api/v2/audit/rank/client
+GET /api/v2/audit/rank/domain
+GET /api/v2/audit/rank/domain_set
+GET /api/v2/audit/rank/effective
+GET /api/v2/audit/rank/slowest
+GET /api/v2/audit/stats
+GET /api/v2/audit/stats/windows
+GET /assets/*
+GET /debug/pprof/cmdline
+GET /debug/pprof/profile
+GET /debug/pprof/symbol
+GET /debug/pprof/trace
+GET /debug/pprof/*
+GET /log
+GET /metrics
+GET /plugins/cache_default/dump
+GET /plugins/cache_default/flush
+POST /plugins/cache_default/load_dump
+GET /plugins/cache_default/save
+GET /plugins/cache_default/show
+
+HTTP_STATUS=404
+
+GET /api/v2/audit/stats
+{"total_queries":0,"average_duration_ms":0}
+
+HTTP_STATUS=200
+
+GET /plugins/cache_default/show
+
+HTTP_STATUS=200
+
+GET /log
+HTTP_STATUS=200

@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.76s
+     Running tests/special_groups_config.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_config-5639732cc424ab64)
+
+running 1 test
+test enabled_sources_reject_unknown_fields_even_with_valid_local_text ... FAILED
+
+failures:
+
+---- enabled_sources_reject_unknown_fields_even_with_valid_local_text stdout ----
+
+thread 'enabled_sources_reject_unknown_fields_even_with_valid_local_text' (17230) panicked at native-host/tests/special_groups_config.rs:296:45:
+unknown enabled source field must reject
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    enabled_sources_reject_unknown_fields_even_with_valid_local_text
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_config`

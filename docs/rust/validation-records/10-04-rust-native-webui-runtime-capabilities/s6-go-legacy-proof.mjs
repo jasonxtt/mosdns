@@ -1,0 +1,33 @@
+// Actual Go discovery404 regression on the same newly built Vue bundles.
+import {createRequire} from 'node:module'
+import {spawn} from 'node:child_process'
+import {mkdir,copyFile,writeFile,readFile} from 'node:fs/promises'
+import {createHash} from 'node:crypto'
+import net from 'node:net'
+import dgram from 'node:dgram'
+const {chromium}=createRequire(import.meta.url)('/root/mosdns-rust-webui-20261004/browser-tools/node_modules/playwright')
+const base='/root/mosdns-rust-webui-20261004',label=process.argv[2]||'s6-go-legacy',out=`${base}/evidence/${label}`,runtime=`${out}/runtime`
+await mkdir(`${runtime}/rule`,{recursive:true});await mkdir(`${runtime}/webinfo`,{recursive:true})
+const check=(v,m)=>{if(!v)throw new Error(m)},delay=ms=>new Promise(r=>setTimeout(r,ms))
+function response(page,predicate){const pending=page.waitForResponse(predicate);pending.catch(()=>{});return pending}
+async function port(){const s=net.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p}
+const api=await port(),dns=await port(),origin=`http://127.0.0.1:${api}`,peer=dgram.createSocket('udp4')
+let peerCount=0;peer.on('message',(q,from)=>{peerCount++;const head=Buffer.from(q.subarray(0,12));head.writeUInt16BE(0x8180,2);head.writeUInt16BE(1,6);const rr=Buffer.from([192,12,0,1,0,1,0,0,0,120,0,4,192,0,2,90]);peer.send(Buffer.concat([head,q.subarray(12),rr]),from.port,from.address)});await new Promise(r=>peer.bind(0,'127.0.0.1',r))
+await copyFile(`${base}/evidence/mosdns-go`,`${runtime}/mosdns-go`);await writeFile(`${runtime}/rule/whitelist.txt`,'full:legacy-initial.example\n')
+await writeFile(`${runtime}/config.yaml`,`log: {level: error}\napi: {http: '127.0.0.1:${api}'}\nplugins:\n  - tag: whitelist\n    type: domain_set\n    args: {files: [rule/whitelist.txt]}\n  - tag: default_forward\n    type: forward\n    args: {upstreams: [{addr: 'udp://127.0.0.1:${peer.address().port}'}]}\n  - tag: main_entry\n    type: sequence\n    args:\n      - {matches: qname $whitelist, exec: 'black_hole 192.0.2.99'}\n      - {matches: has_resp, exec: accept}\n      - {exec: $default_forward}\n  - tag: main\n    type: udp_server\n    args: {entry: main_entry, listen: '127.0.0.1:${dns}', enable_audit: true}\n`)
+const assetManifest=JSON.parse(await readFile(`${base}/evidence/mosdns-native.manifest.json`,'utf8')).assets
+const sha=b=>createHash('sha256').update(b).digest('hex')
+const child=spawn(`${runtime}/mosdns-go`,['start','-d',runtime,'-c',`${runtime}/config.yaml`],{cwd:runtime});let stderr='';child.stderr.on('data',b=>stderr+=b);const exited=new Promise(r=>child.once('exit',(code,signal)=>r({code,signal})));const result={status:'RUNNING',pid:child.pid,api,dns,artifactSha256:sha(await readFile(`${runtime}/mosdns-go`)),shells:[]};let browser
+async function query(name){const s=dgram.createSocket('udp4');const q=Buffer.concat([Buffer.from([0,1,1,0,0,1,0,0,0,0,0,0]),...name.split('.').map(l=>Buffer.concat([Buffer.from([l.length]),Buffer.from(l)])),Buffer.from([0,0,1,0,1])]);const b=await new Promise((r,j)=>{const t=setTimeout(()=>j(new Error('DNS timeout')),3000);s.once('message',b=>{clearTimeout(t);r(b)});s.send(q,dns,'127.0.0.1')}).finally(()=>s.close());return [...b.subarray(-4)].join('.')}
+try{
+ for(let i=0;i<100;i++){try{if((await fetch(origin+'/')).ok)break}catch{}if(i===99)throw new Error('Go not listening');await delay(50)}
+ const actual=await fetch(origin+'/api/v1/capabilities');check(actual.status===404,'actual Go discovery must404');result.discoveryStatus=actual.status
+ browser=await chromium.launch({headless:true,args:['--no-sandbox']})
+ for(const [index,shell] of ['/','/log'].entries()){
+  const page=await browser.newPage(),requests=[],discovery=[];page.on('request',r=>requests.push(new URL(r.url()).pathname));page.on('response',r=>{if(new URL(r.url()).pathname==='/api/v1/capabilities')discovery.push(r.status())});await page.goto(origin+shell,{waitUntil:'networkidle'});const assetProof={};for(const p of [...new Set(requests.filter(p=>p.startsWith('/assets/')))]){const bytes=Buffer.from(await(await fetch(origin+p)).arrayBuffer());assetProof[p]=sha(bytes);check(assetProof[p]===assetManifest[`coremain/www${p}`],'Go embedded asset differs from final native build '+p)}
+  await page.locator(shell==='/'?'nav.legacy-main-nav':'nav.log1-primary-nav').getByRole('button',{name:'规则管理',exact:true}).click();if(shell==='/log')await page.locator('nav.log1-secondary-nav').getByRole('button',{name:'本地规则',exact:true}).click();await page.getByRole('button',{name:'白名单',exact:true}).click();const editor=page.locator('.list-editor');await editor.waitFor();for(let i=0;i<100&&!(await editor.inputValue()).includes('legacy-');i++)await delay(50)
+  check(await page.getByRole('button',{name:'保存全部改动',exact:true}).isEnabled(),'legacy local writes disabled');const name=`legacy-${index}.example`;check(await query(name)==='192.0.2.90','legacy initial DNS');await editor.fill(`full:legacy-initial.example\nfull:${name}\n`);const saved=response(page,r=>new URL(r.url()).pathname==='/plugins/whitelist/post'&&r.request().method()==='POST');await page.getByRole('button',{name:'保存全部改动',exact:true}).click();check((await saved).status()===200,'legacy UI save');check(await query(name)==='192.0.2.99','legacy saved DNS');check((await readFile(`${runtime}/rule/whitelist.txt`,'utf8')).includes(name),'legacy file persistence');await page.reload({waitUntil:'networkidle'});check(discovery.every(n=>n===404),'legacy spoofed discovery');check(requests.some(p=>p.startsWith('/api/v1/appearance/')),'legacy appearance changed');result.shells.push({shell,assetProof,discovery,requests,localSave:true,dnsAfter:'192.0.2.99',filePersistence:true,legacyAppearanceRequests:true});await page.screenshot({path:`${out}/${index===0?'root':'log'}.png`,fullPage:true});await page.close()
+ }
+ result.status='PASS'
+}catch(e){result.status='FAIL';result.error=String(e);if(browser)try{for(const c of browser.contexts())for(const p of c.pages())await p.screenshot({path:`${out}/failure.png`,fullPage:true})}catch{}}
+finally{if(browser)await browser.close();child.kill('SIGINT');const exit=await Promise.race([exited,delay(5000).then(()=>null)]);if(!exit){child.kill('SIGKILL');result.cleanup={forced:true,exit:await exited};result.status='FAIL'}else {result.cleanup={forced:false,exit};if(exit.code!==0||exit.signal)result.status='FAIL'}await new Promise(r=>peer.close(r));result.peerCount=peerCount;result.stderr=stderr;await writeFile(`${out}/result.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result,null,2));process.exitCode=result.status==='PASS'?0:1}

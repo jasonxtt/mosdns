@@ -1,4 +1,5 @@
 <script setup>
+import { capabilityState, getRuntimeCapabilities, supportsOperation, operationReason, retryRuntimeCapabilities } from '../src/api/runtimeCapabilities'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, postJSON } from '../src/api/http'
 import ConfirmBubbleHost from '../src/components/ConfirmBubbleHost.vue'
@@ -205,6 +206,7 @@ function handleTopNoticeEvent(event) {
 }
 
 async function initializePanelBackground() {
+  if (!supportsOperation('appearance.server')) return
   try {
     const settings = await getJSON('/api/v1/appearance/panel-background')
     await previewPanelBackground(settings)
@@ -214,6 +216,7 @@ async function initializePanelBackground() {
 }
 
 async function initializeTextColors() {
+  if (!supportsOperation('appearance.server')) return
   try {
     const settings = await getJSON('/api/v1/appearance/text-color')
     const normalized = normalizeTextColorSettings(settings || {})
@@ -226,6 +229,7 @@ async function initializeTextColors() {
 }
 
 async function initializeButtonColors() {
+  if (!supportsOperation('appearance.server')) return
   try {
     const settings = await getJSON('/api/v1/appearance/button-color')
     const normalized = normalizeButtonColorSettings(settings || {})
@@ -282,6 +286,7 @@ function activateSecondaryTab(tab) {
 }
 
 async function restartMosdns() {
+  if (!supportsOperation('system.restart')) return
   if (restartLoading.value) {
     return
   }
@@ -303,6 +308,7 @@ async function restartMosdns() {
 }
 
 async function resetOverviewStats() {
+  if (!supportsOperation('system.restart')) return
   if (overviewResetting.value) {
     return
   }
@@ -329,11 +335,18 @@ async function resetOverviewStats() {
   }
 }
 
-onMounted(() => {
-  initializeAppearance()
+function initializeServerAppearance() {
+  if (supportsOperation('system.health')) getJSON('/api/v1/system/health').catch(() => {})
   initializePanelBackground()
   initializeTextColors()
   initializeButtonColors()
+}
+
+onMounted(async () => {
+  initializeAppearance()
+  try { await getRuntimeCapabilities() } catch { /* Keep retryable discovery visible and optional children unmounted. */ }
+  initializeServerAppearance()
+  window.addEventListener('mosdns-capabilities-ready', initializeServerAppearance)
   loadAutoRefreshState()
   window.addEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
   window.addEventListener('mosdns-top-notice', handleTopNoticeEvent)
@@ -342,6 +355,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('mosdns-capabilities-ready', initializeServerAppearance)
   stopAutoRefresh()
   clearTopNotice()
   window.removeEventListener('mosdns-auto-refresh-update', handleAutoRefreshUpdate)
@@ -353,6 +367,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="log1-shell">
+    <div v-if="capabilityState.status !== 'ready'" role="alert" class="panel">
+      {{ capabilityState.status === 'pending' ? '正在读取运行时能力' : capabilityState.error }}
+      <button v-if="capabilityState.status === 'error'" class="btn secondary" @click="retryRuntimeCapabilities().catch(() => {})">重试能力发现</button>
+    </div>
+    <p v-if="capabilityState.value?.kind === 'native'" class="muted" role="note">Rust · {{ supportsOperation('system.version') ? (capabilityState.health?.version || '读取中') : operationReason('system.version') }} · 进程 / Go 指标：{{ operationReason('metrics.process') }}</p>
+    <p v-if="!supportsOperation('system.restart')" class="muted" role="note">重置/重启：{{ operationReason('system.restart') }}</p>
     <aside class="log1-sidebar">
       <div class="log1-top-row">
         <div class="log1-brand">
@@ -377,7 +397,7 @@ onBeforeUnmount(() => {
             type="button"
             :title="activeMainTab === 'overview' ? '重置统计' : '重启'"
             :aria-label="activeMainTab === 'overview' ? '重置统计' : '重启'"
-            :disabled="activeMainTab === 'overview' ? overviewResetting : restartLoading"
+            :disabled="!supportsOperation('system.restart') || (activeMainTab === 'overview' ? overviewResetting : restartLoading)"
             @click="activeMainTab === 'overview' ? resetOverviewStats() : restartMosdns()"
           >
             {{
@@ -411,7 +431,7 @@ onBeforeUnmount(() => {
           class="log1-primary-btn log1-primary-btn-refresh-desktop"
           type="button"
           :title="activeMainTab === 'overview' ? '重置统计' : '重启'"
-          :disabled="activeMainTab === 'overview' ? overviewResetting : restartLoading"
+          :disabled="!supportsOperation('system.restart') || (activeMainTab === 'overview' ? overviewResetting : restartLoading)"
           @click="activeMainTab === 'overview' ? resetOverviewStats() : restartMosdns()"
         >
           <span class="log1-primary-icon" aria-hidden="true">↻</span>
@@ -456,7 +476,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <main class="log1-content" :class="{ 'has-secondary-bar': showTopRail }">
+      <main v-if="capabilityState.value" class="log1-content" :class="{ 'has-secondary-bar': showTopRail }">
         <section v-if="activeMainTab === 'overview'" class="page-shell">
           <OverviewManager show-system-summary />
         </section>

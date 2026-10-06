@@ -3,6 +3,7 @@
 
 mod api;
 mod assembly;
+pub mod build_identity;
 mod cache;
 mod cache_dump;
 mod cache_placement;
@@ -10,12 +11,21 @@ mod cli;
 mod config;
 mod ecs;
 mod execution;
+mod external_ui;
 mod managed;
 mod matchers;
 mod observer;
 mod plugins;
 mod policy;
+mod runtime_snapshot;
+mod special_groups;
+mod static_ui;
+mod switch;
+#[cfg(test)]
+mod switch_admission_tests;
+mod switch_state;
 mod tcp;
+mod transaction;
 mod udp;
 
 pub use api::{ApiServer, ApiServerError};
@@ -31,8 +41,8 @@ pub use config::{
     ApiConfig, CacheId, CacheKind, CachePluginConfig, CompiledConfig, ConfigError, DomainSetConfig,
     ForwardConfig, ForwardDefinitionConfig, ForwardEntryConfig, ForwardInvocationConfig,
     ForwardScheme, ForwardTargetConfig, ListenerConfig, ListenerKind, LogLevel,
-    ResponseIpRuleConfig, SequenceConfig, compile_yaml, compile_yaml_with_base, load_and_compile,
-    load_yaml,
+    ManagedRouterConfig, ManagedRouterGroup, ResponseIpRuleConfig, SequenceConfig, compile_yaml,
+    compile_yaml_with_base, load_and_compile, load_yaml,
 };
 pub use managed::{ManagedDomainSet, ManagedSetError, PersistFault, PersistGate};
 pub use observer::{
@@ -43,6 +53,8 @@ pub use observer::{
     UpstreamAttemptOutcome, UpstreamAttemptRecord, UpstreamDiagnosticAttempt,
     UpstreamDiagnosticSelected, UpstreamDiagnostics, UpstreamTransport,
 };
+pub use special_groups::{ManagedProfile, SpecialGroup, forward_entries, normalize_groups};
+pub use switch::SwitchDeclaration;
 pub use tcp::{TcpServer, TcpServerError};
 pub use udp::{UdpServer, UdpServerError};
 
@@ -55,6 +67,9 @@ where
 {
     let command = parse_args(args).map_err(HostError::Cli)?;
     match command {
+        CliCommand::Version => Err(HostError::Cli(CliError::new(
+            "version does not prepare a host",
+        ))),
         CliCommand::Start { config } => {
             HostAssembly::from_config_file(&config).map_err(HostError::Assembly)
         }
@@ -85,3 +100,7 @@ pub use policy::{
     DomainPayload, HostAddresses, IpSetConfig, POLICY_BYTES_LIMIT, POLICY_LINE_LIMIT,
     POLICY_RULE_LIMIT, ResponsePolicy, ResponsePolicyConfig, TtlPolicy,
 };
+
+pub use runtime_snapshot::{PreparedSnapshot, RuntimeControl};
+
+pub use transaction::{CandidatePersistence, CompiledCandidate, ManagedStore, TransactionError};

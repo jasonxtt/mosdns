@@ -1,6 +1,15 @@
 <script setup>
+import CapabilityBoundary from './CapabilityBoundary.vue'
+import { capabilityState, supportsOperation, operationReason } from '../api/runtimeCapabilities'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { deleteRequest, getJSON, postJSON, putJSON } from '../api/http'
+import { getRuntimeCapabilities } from '../api/runtimeCapabilities'
+import {
+  buildNativeDiversionPayload,
+  classifyDiversionSource,
+  loadLegacyDiversionCatalogs,
+  validateDiversionCatalogChange
+} from '../api/nativeManagement'
 import { openConfirm } from '../utils/confirm'
 import RulesAdguardPanel from './rules/RulesAdguardPanel.vue'
 import RulesDiversionPanel from './rules/RulesDiversionPanel.vue'
@@ -34,6 +43,17 @@ const loading = reactive({
 const specialGroups = ref([])
 const adguardRules = ref([])
 const diversionRules = ref([])
+const runtimeCapabilities = ref(null)
+const capabilityError = ref('')
+
+const isNative = computed(() => runtimeCapabilities.value?.kind === 'native')
+const nativeGroupsEnabled = computed(() => Boolean(
+  isNative.value && runtimeCapabilities.value?.special_groups?.enabled
+))
+const canManageGroups = computed(() => Boolean(
+  supportsOperation('groups.manage')
+))
+const canManageDiversion = computed(() => supportsOperation('rules.diversion'))
 
 const builtInDiversionTypes = [
   { value: 'geositecn', label: '中国域名', pluginTag: 'geosite_cn' },
@@ -44,16 +64,20 @@ const builtInDiversionTypes = [
 ]
 
 const diversionTypeOptions = computed(() => {
-  const base = builtInDiversionTypes.map((item) => ({ value: item.value, label: item.label }))
+  const base = isNative.value
+    ? []
+    : builtInDiversionTypes.map((item) => ({ value: item.value, label: item.label }))
   const special = specialGroups.value.map((group) => ({ value: group.key, label: group.name }))
   return [...base, ...special]
 })
 
 const diversionPluginMap = computed(() => {
   const map = {}
-  builtInDiversionTypes.forEach((item) => {
-    map[item.value] = item.pluginTag
-  })
+  if (!isNative.value) {
+    builtInDiversionTypes.forEach((item) => {
+      map[item.value] = item.pluginTag
+    })
+  }
   specialGroups.value.forEach((group) => {
     map[group.key] = group.diversion_plugin_tag
   })
@@ -149,7 +173,20 @@ function sanitizeRulePayload(rule) {
   return copy
 }
 
+async function loadRuntimeCapabilities() {
+  try {
+    runtimeCapabilities.value = await getRuntimeCapabilities()
+    capabilityError.value = ''
+    return true
+  } catch (error) {
+    capabilityError.value = error.message || '运行时能力发现失败'
+    setError(`读取运行时能力失败: ${capabilityError.value}`)
+    return false
+  }
+}
+
 async function loadSpecialGroups() {
+  if (!supportsOperation('groups.read')) return
   loading.special = true
   try {
     const data = await getJSON('/api/v1/special-groups')
@@ -162,6 +199,11 @@ async function loadSpecialGroups() {
 }
 
 async function loadAdguardRules() {
+  if (!supportsOperation('rules.adguard')) return
+  if (isNative.value) {
+    adguardRules.value = []
+    return
+  }
   loading.adguard = true
   try {
     const data = await getJSON('/plugins/adguard/rules')
@@ -175,27 +217,48 @@ async function loadAdguardRules() {
 }
 
 async function loadDiversionRules() {
+  if (!supportsOperation('rules.diversion')) {
+    // Discovery failure cannot invalidate the catalog or an accepted mutation ACK.
+    if (capabilityState.status === 'ready') diversionRules.value = []
+    return
+  }
   loading.diversion = true
   try {
-    const entries = Object.entries(diversionPluginMap.value)
-    const tasks = entries.map(async ([type, tag]) => {
-      const data = await getJSON(`/plugins/${tag}/config`)
-      return { type, tag, rules: Array.isArray(data) ? data : [] }
-    })
-    const settled = await Promise.allSettled(tasks)
-    const merged = []
-    settled.forEach((item) => {
-      if (item.status !== 'fulfilled') {
-        return
+    if (isNative.value && !nativeGroupsEnabled.value) {
+      diversionRules.value = []
+      return
+    }
+    const entries = isNative.value
+      ? specialGroups.value.map((group) => [group.key, group.diversion_plugin_tag])
+      : Object.entries(diversionPluginMap.value)
+    let catalogs
+    if (isNative.value) {
+      catalogs = await Promise.all(entries.map(async ([type, tag]) => {
+        const data = await getJSON(`/plugins/${tag}/config`)
+        return { type, tag, rules: Array.isArray(data) ? data : [] }
+      }))
+    } else {
+      const result = await loadLegacyDiversionCatalogs(entries, getJSON)
+      catalogs = result.catalogs
+      if (result.failures.length > 0) {
+        const failedTags = result.failures.map(({ tag, error }) => `${tag}: ${error}`).join('；')
+        setError(`部分分流规则加载失败: ${failedTags}`)
       }
-      const { type, tag, rules } = item.value
+    }
+    const merged = []
+    catalogs.forEach(({ type, tag, rules }) => {
       rules.forEach((rule) => {
+        const nativeStatus = isNative.value
+          ? classifyDiversionSource(rule, type, rule?.name)
+          : { readOnly: false, reason: '' }
         merged.push({
           ...rule,
           type: rule.type || type,
           __pluginTag: tag,
           __type: type,
-          __typeLabel: typeLabelMap.value[rule.type || type] || (rule.type || type)
+          __typeLabel: typeLabelMap.value[rule.type || type] || (rule.type || type),
+          __readOnly: nativeStatus.readOnly,
+          __unavailableReason: nativeStatus.reason
         })
       })
     })
@@ -212,6 +275,7 @@ async function loadDiversionRules() {
     })
     diversionRules.value = merged
   } catch (error) {
+    diversionRules.value = []
     setError(`加载分流规则失败: ${error.message}`)
   } finally {
     loading.diversion = false
@@ -224,9 +288,16 @@ function shouldShowTab(tab) {
 
 async function reloadCurrentView() {
   clearMessage()
+  if (!(await loadRuntimeCapabilities())) {
+    return
+  }
   if (mode.value === 'all') {
     await loadSpecialGroups()
-    await Promise.all([loadAdguardRules(), loadDiversionRules()])
+    if (isNative.value) {
+      await loadDiversionRules()
+    } else {
+      await Promise.all([loadAdguardRules(), loadDiversionRules()])
+    }
     return
   }
   if (mode.value === 'special') {
@@ -242,6 +313,10 @@ async function reloadCurrentView() {
 }
 
 function openCreateSpecial() {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   clearMessage()
   specialEditor.open = true
   specialEditor.slot = 0
@@ -251,6 +326,10 @@ function openCreateSpecial() {
 }
 
 function openEditSpecial(group) {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   clearMessage()
   specialEditor.open = true
   specialEditor.slot = Number(group.slot) || 0
@@ -264,6 +343,10 @@ function closeSpecialEditor() {
 }
 
 async function saveSpecial() {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   const name = specialEditor.name.trim()
   if (!name) {
     setError('专属分流组名称不能为空')
@@ -303,6 +386,10 @@ async function saveSpecial() {
 }
 
 async function deleteSpecial(group) {
+  if (!canManageGroups.value) {
+    setError('当前原生运行时未启用专属分流组管理')
+    return
+  }
   if (!(await openConfirm(`确定删除专属分流组“${group.name}”吗？`, { tone: 'danger' }))) {
     return
   }
@@ -319,6 +406,7 @@ async function deleteSpecial(group) {
 }
 
 function openCreateAdguard() {
+  if (!supportsOperation('rules.adguard')) return
   clearMessage()
   adguardRaw.value = null
   adguardEditor.open = true
@@ -331,6 +419,7 @@ function openCreateAdguard() {
 }
 
 function openEditAdguard(rule) {
+  if (!supportsOperation('rules.adguard')) return
   clearMessage()
   adguardRaw.value = { ...rule }
   adguardEditor.open = true
@@ -362,6 +451,7 @@ function adguardPayload() {
 }
 
 async function saveAdguard() {
+  if (!supportsOperation('rules.adguard')) return
   try {
     const payload = adguardPayload()
     if (adguardEditor.id) {
@@ -383,6 +473,7 @@ async function saveAdguard() {
 }
 
 async function toggleAdguard(rule) {
+  if (!supportsOperation('rules.adguard')) return
   try {
     const payload = {
       ...rule,
@@ -396,6 +487,7 @@ async function toggleAdguard(rule) {
 }
 
 async function deleteAdguard(rule) {
+  if (!supportsOperation('rules.adguard')) return
   if (!(await openConfirm(`确定删除 AdGuard 规则“${rule.name}”吗？`, { tone: 'danger' }))) {
     return
   }
@@ -409,6 +501,7 @@ async function deleteAdguard(rule) {
 }
 
 async function updateAdguardAll() {
+  if (!supportsOperation('rules.adguard')) return
   try {
     await postJSON('/plugins/adguard/update', {})
     setSuccess('已触发 AdGuard 全量更新，5 秒后自动刷新列表')
@@ -421,6 +514,7 @@ async function updateAdguardAll() {
 }
 
 async function updateAdguard(rule) {
+  if (!supportsOperation('rules.adguard')) return
   const id = String(rule?.id || '')
   if (!id) {
     setError('无法定位 AdGuard 规则 ID')
@@ -438,6 +532,14 @@ async function updateAdguard(rule) {
 }
 
 function openCreateDiversion() {
+  if (!runtimeCapabilities.value) {
+    setError('尚未完成运行时能力发现')
+    return
+  }
+  if (isNative.value && !nativeGroupsEnabled.value) {
+    setError('当前原生运行时未启用本地分流规则管理')
+    return
+  }
   clearMessage()
   diversionRaw.value = null
   diversionEditor.open = true
@@ -448,7 +550,7 @@ function openCreateDiversion() {
   diversionEditor.files = ''
   diversionEditor.url = ''
   diversionEditor.enabled = true
-  diversionEditor.auto_update = true
+  diversionEditor.auto_update = !isNative.value
   diversionEditor.enable_regexp = false
   diversionEditor.update_interval_hours = 24
   diversionAutofill.isApplying = false
@@ -458,6 +560,14 @@ function openCreateDiversion() {
 }
 
 function openEditDiversion(rule) {
+  if (!canManageDiversion.value) {
+    setError('当前运行时未开放本地分流规则管理')
+    return
+  }
+  if (rule?.__readOnly) {
+    setError(rule.__unavailableReason || '该规则包含原生端不支持的配置，保持只读')
+    return
+  }
   clearMessage()
   diversionRaw.value = { ...rule }
   diversionEditor.open = true
@@ -580,6 +690,14 @@ function diversionPayload() {
   if (!type) {
     throw new Error('规则类型不能为空')
   }
+  if (isNative.value) {
+    return buildNativeDiversionPayload({
+      name,
+      type,
+      files,
+      enabled: diversionEditor.enabled
+    })
+  }
   if (!files || !url) {
     throw new Error('本地文件路径和 URL 都不能为空')
   }
@@ -620,6 +738,10 @@ async function waitForDiversionRuleReady(ruleName, attempts = 6, intervalMs = 30
 }
 
 async function saveDiversion() {
+  if (!canManageDiversion.value) {
+    setError('当前运行时未开放本地分流规则管理')
+    return
+  }
   try {
     const payload = diversionPayload()
     const currentMap = diversionPluginMap.value
@@ -639,6 +761,18 @@ async function saveDiversion() {
       if (!oldPluginTag) {
         throw new Error('无法定位旧规则插件')
       }
+      if (isNative.value) {
+        validateDiversionCatalogChange(oldPluginTag, newPluginTag)
+        const nativePayload = buildNativeDiversionPayload(payload)
+        await putJSON(
+          `/plugins/${encodeURIComponent(oldPluginTag)}/config/${encodeURIComponent(diversionEditor.oldName)}`,
+          nativePayload
+        )
+        setSuccess('本地分流规则已更新')
+        closeDiversionEditor()
+        await loadDiversionRules()
+        return
+      }
       const nameChanged = diversionEditor.oldName !== payload.name
       const typeChanged = diversionEditor.oldType !== payload.type
       if (nameChanged || typeChanged) {
@@ -649,9 +783,18 @@ async function saveDiversion() {
       await putJSON(`/plugins/${newPluginTag}/config/${endpointName}`, merged)
       setSuccess('分流规则已更新')
     } else {
-      await putJSON(`/plugins/${newPluginTag}/config/${payload.name}`, merged)
-      shouldAutoUpdate = Boolean(payload.url)
-      setSuccess('分流规则已新增')
+      if (isNative.value) {
+        const nativePayload = buildNativeDiversionPayload(payload)
+        await putJSON(
+          `/plugins/${encodeURIComponent(newPluginTag)}/config/${encodeURIComponent(payload.name)}`,
+          nativePayload
+        )
+        setSuccess('本地分流规则已新增')
+      } else {
+        await putJSON(`/plugins/${newPluginTag}/config/${payload.name}`, merged)
+        shouldAutoUpdate = Boolean(payload.url)
+        setSuccess('分流规则已新增')
+      }
     }
 
     closeDiversionEditor()
@@ -677,17 +820,35 @@ async function saveDiversion() {
 }
 
 async function toggleDiversion(rule) {
+  if (!canManageDiversion.value) {
+    setError('当前运行时未开放本地分流规则管理')
+    return
+  }
+  if (rule?.__readOnly) {
+    setError(rule.__unavailableReason || '该规则包含原生端不支持的配置，保持只读')
+    return
+  }
   const pluginTag = diversionPluginMap.value[rule.type] || rule.__pluginTag
   if (!pluginTag) {
     setError('无法定位分流规则插件')
     return
   }
   try {
-    const payload = {
-      ...sanitizeRulePayload(rule),
-      enabled: !Boolean(rule.enabled)
-    }
-    await putJSON(`/plugins/${pluginTag}/config/${rule.name}`, payload)
+    const payload = isNative.value
+      ? buildNativeDiversionPayload({
+          name: rule.name,
+          type: rule.type,
+          files: rule.files,
+          enabled: !Boolean(rule.enabled)
+        })
+      : {
+          ...sanitizeRulePayload(rule),
+          enabled: !Boolean(rule.enabled)
+        }
+    await putJSON(
+      `/plugins/${encodeURIComponent(pluginTag)}/config/${encodeURIComponent(rule.name)}`,
+      payload
+    )
     await loadDiversionRules()
   } catch (error) {
     setError(`切换分流规则失败: ${error.message}`)
@@ -695,6 +856,14 @@ async function toggleDiversion(rule) {
 }
 
 async function deleteDiversion(rule) {
+  if (!canManageDiversion.value) {
+    setError('当前运行时未开放本地分流规则管理')
+    return
+  }
+  if (rule?.__readOnly) {
+    setError(rule.__unavailableReason || '该规则包含原生端不支持的配置，保持只读')
+    return
+  }
   if (!(await openConfirm(`确定删除分流规则“${rule.name}”吗？`, { tone: 'danger' }))) {
     return
   }
@@ -704,7 +873,7 @@ async function deleteDiversion(rule) {
     return
   }
   try {
-    await deleteRequest(`/plugins/${pluginTag}/config/${rule.name}`)
+    await deleteRequest(`/plugins/${encodeURIComponent(pluginTag)}/config/${encodeURIComponent(rule.name)}`)
     setSuccess('分流规则已删除')
     await loadDiversionRules()
   } catch (error) {
@@ -713,6 +882,10 @@ async function deleteDiversion(rule) {
 }
 
 async function updateDiversion(rule) {
+  if (isNative.value) {
+    setError('原生运行时不支持在线下载或更新规则')
+    return
+  }
   const pluginTag = diversionPluginMap.value[rule.type] || rule.__pluginTag
   if (!pluginTag) {
     setError('无法定位分流规则插件')
@@ -730,6 +903,10 @@ async function updateDiversion(rule) {
 }
 
 async function updateDiversionAll() {
+  if (isNative.value) {
+    setError('原生运行时不支持在线下载或更新规则')
+    return
+  }
   const targetsMap = new Map()
   diversionRules.value.forEach((rule) => {
     const pluginTag = diversionPluginMap.value[rule.type] || rule.__pluginTag
@@ -805,29 +982,36 @@ onBeforeUnmount(() => {
       v-if="shouldShowTab('special')"
       :loading="loading.special"
       :special-groups="specialGroups"
+      :can-manage="canManageGroups"
       @create="openCreateSpecial"
       @edit="openEditSpecial"
       @delete="deleteSpecial"
     />
+    <p v-if="isNative && !canManageGroups && shouldShowTab('special')" class="muted" role="note">
+      当前原生运行时未开放专属分流组修改；已加载的组保持只读。
+    </p>
 
-    <RulesAdguardPanel
+    <CapabilityBoundary operation="rules.adguard"><RulesAdguardPanel
       v-if="shouldShowTab('adguard')"
       :loading="loading.adguard"
       :adguard-rules="adguardRules"
       :format-time="formatTime"
+      :supported="supportsOperation('rules.adguard')"
       @create="openCreateAdguard"
       @update-all="updateAdguardAll"
       @toggle="toggleAdguard"
       @update="updateAdguard"
       @edit="openEditAdguard"
       @delete="deleteAdguard"
-    />
+    /></CapabilityBoundary>
 
     <RulesDiversionPanel
       v-if="shouldShowTab('diversion')"
       :loading="loading.diversion"
       :diversion-rules="diversionRules"
       :format-time="formatTime"
+      :native-local-text="isNative"
+      :can-mutate="canManageDiversion"
       @create="openCreateDiversion"
       @update-all="updateDiversionAll"
       @toggle="toggleDiversion"
@@ -855,6 +1039,7 @@ onBeforeUnmount(() => {
       :editor="diversionEditor"
       :diversion-type-options="diversionTypeOptions"
       :is-editing="Boolean(diversionEditor.oldName)"
+      :native-local-text="isNative"
       @close="closeDiversionEditor"
       @save="saveDiversion"
       @apply-autofill="applyDiversionAutofill"

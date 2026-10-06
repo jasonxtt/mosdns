@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 1.17s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-dec9d4e49d597c3a)
+
+running 1 test
+test managed_publication_cannot_disable_the_frozen_opt_in ... FAILED
+
+failures:
+
+---- managed_publication_cannot_disable_the_frozen_opt_in stdout ----
+
+thread 'managed_publication_cannot_disable_the_frozen_opt_in' (28928) panicked at native-host/tests/special_groups_supervisor.rs:402:5:
+assertion failed: host.control().prepare(candidate).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    managed_publication_cannot_disable_the_frozen_opt_in
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_supervisor`

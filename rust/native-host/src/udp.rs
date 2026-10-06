@@ -25,12 +25,14 @@ const REFUSED: u8 = 5;
 /// host's current-thread local task set because sequence executors are not
 /// widened to `Send + Sync` by this migration slice.
 pub struct UdpServer {
-    config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
     cache: Rc<CacheCatalog>,
-    options: HostOptions,
     socket: Arc<UdpSocket>,
     observer: Arc<QueryObserver>,
+    supervised: bool,
+    control: crate::runtime_snapshot::RuntimeControl,
+    listener_tag: String,
+    listener_addr: SocketAddr,
 }
 
 impl UdpServer {
@@ -38,22 +40,62 @@ impl UdpServer {
     /// supplied address is testable with port zero; the compiled graph still
     /// determines that the selected listener role is UDP.
     pub async fn bind(assembly: &HostAssembly, listen: SocketAddr) -> Result<Self, UdpServerError> {
-        if assembly.config().listener.kind != ListenerKind::Udp {
-            return Err(UdpServerError::WrongListener(
-                assembly.config().listener.kind,
-            ));
+        Self::bind_listener(assembly, &assembly.config().listener, listen, false).await
+    }
+
+    pub(crate) async fn bind_listener(
+        assembly: &HostAssembly,
+        declared: &crate::config::ListenerConfig,
+        listen: SocketAddr,
+        supervised: bool,
+    ) -> Result<Self, UdpServerError> {
+        if declared.kind != ListenerKind::Udp {
+            return Err(UdpServerError::WrongListener(declared.kind));
         }
         let socket = UdpSocket::bind(listen)
             .await
             .map_err(UdpServerError::Bind)?;
         Ok(Self {
-            config: assembly.config_handle(),
             forwards: assembly.forwards_handle(),
             cache: assembly.cache_handle(),
-            options: assembly.options().clone(),
             socket: Arc::new(socket),
             observer: assembly.observer_handle(),
+            supervised,
+            control: assembly.control(),
+            listener_tag: declared.tag.clone(),
+            listener_addr: declared.listen,
         })
+    }
+
+    pub(crate) async fn bind_snapshot(
+        control: crate::runtime_snapshot::RuntimeControl,
+        snapshot: &crate::runtime_snapshot::RuntimeSnapshot,
+        observer: Arc<QueryObserver>,
+        declared: &crate::config::ListenerConfig,
+    ) -> Result<Self, UdpServerError> {
+        let bound = UdpSocket::bind(declared.listen)
+            .await
+            .map_err(UdpServerError::Bind)?;
+        Ok(Self {
+            forwards: snapshot.forwards.clone(),
+            cache: snapshot.cache.clone(),
+            socket: Arc::new(bound),
+            observer,
+            supervised: true,
+            control,
+            listener_tag: declared.tag.clone(),
+            listener_addr: declared.listen,
+        })
+    }
+
+    pub(crate) fn binding_key(
+        &self,
+    ) -> Result<crate::runtime_snapshot::BindingKey, UdpServerError> {
+        Ok((
+            self.listener_tag.clone(),
+            ListenerKind::Udp,
+            self.local_addr()?,
+        ))
     }
 
     /// Binds the listener address declared by the compiled W1 YAML.
@@ -88,24 +130,34 @@ impl UdpServer {
                         Ok((length, peer)) => {
                             let raw = packet[..length].to_vec();
                             let socket = Arc::clone(&self.socket);
-                            let config = Rc::clone(&self.config);
-                            let forwards = Rc::clone(&self.forwards);
-                            let cache = Rc::clone(&self.cache);
+                            let Some(admission) = self.control.capture(&self.listener_tag, ListenerKind::Udp, self.listener_addr) else { continue; };
+                            let config = admission.snapshot.config.clone();
+                            let forwards = admission.snapshot.forwards.clone();
+                            let cache = admission.snapshot.cache.clone();
+                            // The switch seed is captured synchronously at
+                            // the datagram boundary: a POST landing between
+                            // receive and task execution cannot change what
+                            // this already-admitted datagram observes.
+                            let switch_seed = admission.snapshot.switches.admission_seed();
                             let observer = Arc::clone(&self.observer);
-                            let mut options = self.options.clone();
+                            let mut options = admission.options.clone();
                             options.admission_deadline = Some(Instant::now() + options.request_deadline);
                             let request_shutdown = shutdown.child_token();
+                            let enable_audit = admission.enable_audit;
                             tasks.spawn_local(async move {
                                 process_request(RequestTask {
                                     socket,
                                     config,
                                     forwards,
                                     cache,
+                                    switch_seed,
                                     observer,
                                     options,
                                     raw,
                                     peer,
                                     request_shutdown,
+                                    enable_audit,
+                                    _admission: admission,
                                 })
                                 .await;
                             });
@@ -121,12 +173,25 @@ impl UdpServer {
         }
 
         shutdown.cancel();
-        self.cache.stop_admission();
-        drain_tasks(&mut tasks, &mut task_error).await;
-        if let Err(error) = self.cache.stop_refreshes().await {
-            task_error = Some(error.to_string());
+        if !self.supervised {
+            self.cache.stop_admission();
         }
-        finish_server(&self.forwards, &mut tasks, &mut task_error, receive_error).await
+        drain_tasks(&mut tasks, &mut task_error).await;
+        if !self.supervised {
+            if let Err(error) = self.cache.stop_refreshes().await {
+                task_error = Some(error.to_string());
+            }
+        }
+        if !self.supervised {
+            self.forwards.close_all().await;
+        }
+        if let Some(error) = task_error {
+            return Err(UdpServerError::Task(error));
+        }
+        if let Some(error) = receive_error {
+            return Err(UdpServerError::Receive(error));
+        }
+        Ok(())
     }
 }
 
@@ -135,11 +200,14 @@ struct RequestTask {
     config: Rc<CompiledConfig>,
     forwards: Rc<ForwardCatalog>,
     cache: Rc<CacheCatalog>,
+    switch_seed: crate::switch_state::SwitchAdmissionSeed,
     observer: Arc<QueryObserver>,
     options: HostOptions,
     raw: Vec<u8>,
     peer: SocketAddr,
     request_shutdown: TransportCancellation,
+    enable_audit: bool,
+    _admission: crate::runtime_snapshot::AdmittedSnapshot,
 }
 
 async fn process_request(task: RequestTask) {
@@ -148,11 +216,14 @@ async fn process_request(task: RequestTask) {
         config,
         forwards,
         cache,
+        switch_seed,
         observer,
         options,
         raw,
         peer,
         request_shutdown,
+        enable_audit,
+        _admission,
     } = task;
     let Ok((header, question)) = mosdns_dns_core::parse_query(&raw) else {
         // Malformed UDP input is isolated to this datagram and produces no
@@ -161,7 +232,8 @@ async fn process_request(task: RequestTask) {
         return;
     };
 
-    let mut admitted = match observer.try_admit(
+    let mut admitted = match observer.try_admit_on_listener(
+        enable_audit,
         peer,
         QueryTransport::Udp,
         &question,
@@ -185,6 +257,7 @@ async fn process_request(task: RequestTask) {
             raw: &raw,
             header,
             question,
+            switch_seed,
         },
         &forwards,
         request_shutdown.clone(),
@@ -319,6 +392,7 @@ pub(crate) async fn drain_tasks(tasks: &mut JoinSet<()>, task_error: &mut Option
     while reap_one_task(tasks, task_error).await {}
 }
 
+#[cfg(test)]
 async fn finish_server(
     forwards: &ForwardCatalog,
     tasks: &mut JoinSet<()>,

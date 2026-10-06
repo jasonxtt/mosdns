@@ -1,0 +1,10 @@
+{
+  "status": "FAIL",
+  "cases": [],
+  "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('.rules-diversion-table tbody tr').filter({ hasText: 'retained-catalog' }).locator('input[type=checkbox]')\n    - locator resolved to <input checked type=\"checkbox\"/>\n  - attempting click action\n    2 × waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 × waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    58 × waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "stderr": "native audit settings diagnostic: using default: settings file is missing (./webinfo/audit_settings.json)\ncache startup /root/mosdns-rust-webui-20261004/evidence/cumulative-retention-red3/runtime/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty\n"
+}

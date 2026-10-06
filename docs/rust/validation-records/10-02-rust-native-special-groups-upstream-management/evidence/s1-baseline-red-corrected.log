@@ -1,0 +1,36 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/baseline/rust/native-host)
+    Finished `test` profile [unoptimized] target(s) in 0.31s
+     Running tests/special_groups_config.rs (/root/mosdns-rust-special-groups-20261003/target/debug/deps/special_groups_config-0eaa4d989be1116c)
+
+running 3 tests
+test empty_managed_profile_compiles_at_explicit_hook ... FAILED
+test file_relative_managed_state_is_not_process_relative ... FAILED
+test opt_in_requires_a_reachable_hook ... FAILED
+
+failures:
+
+---- empty_managed_profile_compiles_at_explicit_hook stdout ----
+
+thread 'empty_managed_profile_compiles_at_explicit_hook' (9087) panicked at native-host/tests/special_groups_config.rs:25:55:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.native_management", reason: "unsupported field" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- file_relative_managed_state_is_not_process_relative stdout ----
+
+thread 'file_relative_managed_state_is_not_process_relative' (9088) panicked at native-host/tests/special_groups_config.rs:55:5:
+$.native_management: unsupported field
+
+---- opt_in_requires_a_reachable_hook stdout ----
+
+thread 'opt_in_requires_a_reachable_hook' (9089) panicked at native-host/tests/special_groups_config.rs:40:9:
+$.native_management: unsupported field
+
+
+failures:
+    empty_managed_profile_compiles_at_explicit_hook
+    file_relative_managed_state_is_not_process_relative
+    opt_in_requires_a_reachable_hook
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_config`

@@ -229,10 +229,11 @@ pub(crate) fn resolve_rule_path(file: &str, base_dir: &std::path::Path) -> std::
 /// rule, and skip an invalid individual rule instead of failing the whole load.
 /// A missing or unreadable file stays a load error, because the caller
 /// configured an explicit path.
-pub(crate) fn build_domain_set(
+pub(crate) fn build_domain_set_with_inputs(
     expressions: &[String],
     files: &[String],
     base_dir: &std::path::Path,
+    mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
 ) -> Result<(MixMatcher<()>, Vec<String>), DomainSetError> {
     let mut set = MixMatcher::new();
     set.set_default("domain");
@@ -248,11 +249,28 @@ pub(crate) fn build_domain_set(
     }
     for (index, file) in files.iter().enumerate() {
         let path = resolve_rule_path(file, base_dir);
-        let text = std::fs::read_to_string(&path).map_err(|error| DomainSetError::File {
-            index,
-            path: path.display().to_string(),
-            reason: error.to_string(),
-        })?;
+        let display = path.display().to_string();
+        let file_path = path.clone();
+        let text = crate::transaction::blocking_io(move || std::fs::read_to_string(file_path))
+            .map_err(|error| DomainSetError::File {
+                index,
+                path: display.clone(),
+                reason: error.to_string(),
+            })?
+            .map_err(|error| DomainSetError::File {
+                index,
+                path: display,
+                reason: error.to_string(),
+            })?;
+        if let Some(inputs) = inputs.as_deref_mut() {
+            inputs
+                .record_bytes(&path, text.as_bytes())
+                .map_err(|reason| DomainSetError::File {
+                    index,
+                    path: path.display().to_string(),
+                    reason,
+                })?;
+        }
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {

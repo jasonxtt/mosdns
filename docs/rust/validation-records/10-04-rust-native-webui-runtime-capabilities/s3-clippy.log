@@ -1,0 +1,5 @@
+    Checking linux-raw-sys v0.12.1
+    Checking bitflags v2.13.1
+    Checking rustix v1.1.4
+    Checking mosdns-native-host v0.1.0 (/root/mosdns-rust-webui-20261004/source/rust/native-host)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.56s

@@ -250,6 +250,7 @@ const MAX_BODY_BYTES: usize = 1024 * 1024;
 
 /// The host-owned management listener.
 pub struct ApiServer {
+    control: Option<crate::runtime_snapshot::RuntimeControl>,
     listener: TcpListener,
     config: Rc<CompiledConfig>,
     cache: Rc<CacheCatalog>,
@@ -259,6 +260,8 @@ pub struct ApiServer {
     audit_persistence_faults: AuditPersistenceFaults,
     audit_clock: Arc<dyn AuditClock>,
     audit_read_slots: Arc<Semaphore>,
+    external_ui: Arc<crate::external_ui::Registry>,
+    static_slots: Arc<Semaphore>,
     accept_fault_after: Cell<Option<usize>>,
 }
 
@@ -278,7 +281,17 @@ impl ApiServer {
         let listener = TcpListener::bind(address)
             .await
             .map_err(ApiServerError::Bind)?;
+        let ui_base = config.ui_base.clone();
+        let external_ui = Arc::new(
+            tokio::task::spawn_blocking(move || {
+                crate::external_ui::Registry::scan(ui_base.as_deref())
+            })
+            .await
+            .map_err(|error| ApiServerError::Bind(io::Error::other(error)))?,
+        );
         Ok(Self {
+            external_ui,
+            control: None,
             listener,
             config,
             cache,
@@ -288,8 +301,14 @@ impl ApiServer {
             audit_persistence_faults,
             audit_clock,
             audit_read_slots: Arc::new(Semaphore::new(2)),
+            static_slots: Arc::new(Semaphore::new(4)),
             accept_fault_after: Cell::new(None),
         })
+    }
+
+    pub(crate) fn with_control(mut self, control: crate::runtime_snapshot::RuntimeControl) -> Self {
+        self.control = Some(control);
+        self
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, ApiServerError> {
@@ -337,6 +356,7 @@ impl ApiServer {
                                 shutdown.cancel();
                                 break;
                             }
+                            let control = self.control.clone();
                             let config = Rc::clone(&self.config);
                             let cache = Rc::clone(&self.cache);
                             let observer = Arc::clone(&self.observer);
@@ -345,10 +365,13 @@ impl ApiServer {
                             let audit_persistence_faults = self.audit_persistence_faults.clone();
                             let audit_clock = Arc::clone(&self.audit_clock);
                             let audit_read_slots = Arc::clone(&self.audit_read_slots);
+                            let static_slots = self.static_slots.clone();
+                            let external_ui = self.external_ui.clone();
                             let connection_shutdown = shutdown.child_token();
                             tasks.spawn_local(async move {
                                 let _ = process_connection(
                                     stream,
+                                    control,
                                     config,
                                     cache,
                                     observer,
@@ -357,6 +380,8 @@ impl ApiServer {
                                     audit_persistence_faults,
                                     audit_clock,
                                     audit_read_slots,
+                                    static_slots,
+                                    external_ui,
                                     connection_shutdown,
                                 )
                                 .await;
@@ -410,6 +435,10 @@ impl std::error::Error for ApiServerError {}
 struct Request {
     method: String,
     target: String,
+    if_none_match: Option<String>,
+    content_type: Option<String>,
+    config_generation: Option<String>,
+    config_generation_duplicate: bool,
     body: Vec<u8>,
 }
 
@@ -481,6 +510,12 @@ impl Response {
         }
     }
 
+    fn json_with_status<T: Serialize>(status: u16, value: &T) -> Self {
+        let mut response = Self::json(value);
+        response.status = status;
+        response
+    }
+
     fn json_compact<T: Serialize>(value: &T) -> Self {
         Self {
             status: 200,
@@ -507,6 +542,7 @@ impl Response {
 #[allow(clippy::too_many_arguments)]
 async fn process_connection(
     mut stream: TcpStream,
+    control: Option<crate::runtime_snapshot::RuntimeControl>,
     config: Rc<CompiledConfig>,
     cache: Rc<CacheCatalog>,
     observer: Arc<QueryObserver>,
@@ -515,6 +551,8 @@ async fn process_connection(
     audit_persistence_faults: AuditPersistenceFaults,
     audit_clock: Arc<dyn AuditClock>,
     audit_read_slots: Arc<Semaphore>,
+    static_slots: Arc<Semaphore>,
+    external_ui: Arc<crate::external_ui::Registry>,
     shutdown: TransportCancellation,
 ) -> io::Result<()> {
     let request = tokio::select! {
@@ -524,16 +562,115 @@ async fn process_connection(
             Ok(Some(request)) => request,
             // The client closed before sending a complete request.
             Ok(None) => return Ok(()),
-            Err(_) => {
-                let response = Response::error(400, "bad request");
+            Err(error) => {
+                let status = if error.to_string() == "request body too large" {
+                    413
+                } else {
+                    400
+                };
+                let response = Response::error(status, "bad request");
                 let (_reader, mut writer) = stream.into_split();
                 return write_response(&mut writer, &response).await;
             }
         },
     };
+    // Exact read-only health is available through admission pause. It takes no
+    // lease and cannot resume admission or trigger recovery shutdown.
+    if request.target.split('?').next() == Some("/api/v1/system/health") {
+        let response = if request.method == "GET" {
+            let state = control
+                .as_ref()
+                .map_or("starting", |control| control.lifecycle_state());
+            Response::json_with_status(
+                if state == "ready" { 200 } else { 503 },
+                &serde_json::json!({
+                    "ready": state == "ready", "state": state, "runtime": "rust",
+                    "version": crate::build_identity::VERSION,
+                    "required_config_schema": null, "applied_config_schema": null,
+                    "config_management_enabled": false
+                }),
+            )
+        } else {
+            Response::method_not_allowed()
+        };
+        let (_reader, mut writer) = stream.into_split();
+        return write_response(&mut writer, &response).await;
+    }
+    if let Some(control) = control.as_ref().filter(|control| !control.admission_open()) {
+        let response = if control.recovery_required() {
+            Response::error(503, "recovery required")
+        } else {
+            Response::error(503, "host is applying configuration")
+        };
+        let (_reader, mut writer) = stream.into_split();
+        let result = write_response(&mut writer, &response).await;
+        if control.recovery_required() {
+            control.stop_host();
+        }
+        return result;
+    }
+    if crate::static_ui::serve_embedded(
+        &mut stream,
+        &request.target,
+        &request.method,
+        request.if_none_match.as_deref(),
+        static_slots.clone(),
+        &shutdown,
+    )
+    .await?
+    {
+        return Ok(());
+    }
+    if external_ui
+        .serve(
+            &mut stream,
+            &request.target,
+            &request.method,
+            static_slots,
+            &shutdown,
+        )
+        .await?
+    {
+        return Ok(());
+    }
+    let _management_lease = if request_mutates_managed_state(&request) {
+        if let Some(control) = control.as_ref() {
+            match control.begin_management_mutation() {
+                Ok(lease) => Some(lease),
+                Err(_) => {
+                    let response = if control.recovery_required() {
+                        Response::error(503, "recovery required")
+                    } else {
+                        Response::error(503, "host is applying configuration")
+                    };
+                    let (_reader, mut writer) = stream.into_split();
+                    let result = write_response(&mut writer, &response).await;
+                    if control.recovery_required() {
+                        control.stop_host();
+                    }
+                    return result;
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    // Capture the committed API view after a complete bounded HTTP request,
+    // not at connection acceptance. The server address/observer stay stable.
+    let snapshot = control.as_ref().map(|control| control.view());
+    let config = snapshot
+        .as_ref()
+        .map_or(config, |snapshot| snapshot.config.clone());
+    let cache = snapshot
+        .as_ref()
+        .map_or(cache, |snapshot| snapshot.cache.clone());
     let (_reader, mut writer) = stream.into_split();
     let request_shutdown = shutdown.child_token();
     let dispatch = dispatch(
+        control.as_ref(),
+        snapshot.as_deref(),
         &config,
         &cache,
         &observer,
@@ -545,24 +682,23 @@ async fn process_connection(
         &request_shutdown,
         &request,
     );
-    tokio::pin!(dispatch);
-    let disconnect = watch_client_disconnect(_reader, request_shutdown.clone());
-    tokio::pin!(disconnect);
-    let response = tokio::select! {
-        biased;
-        () = shutdown.cancelled() => {
-            request_shutdown.cancel();
-            dispatch.await
+    let response =
+        await_dispatch_after_disconnect(&shutdown, &request_shutdown, _reader, dispatch).await;
+    // Mutation ownership covers the disk/runtime operation, not a slow
+    // response write after the operation has already completed.
+    drop(_management_lease);
+    if let Some(control) = control
+        .as_ref()
+        .filter(|control| control.recovery_required())
+    {
+        if request_shutdown.is_cancelled() {
+            control.stop_host();
+            return Ok(());
         }
-        () = &mut disconnect => {
-            // Keep awaiting the worker after the peer closes. The worker owns
-            // the expensive-read permit until it observes cancellation and
-            // exits, so a disconnect cannot create an unbounded admission path.
-            request_shutdown.cancel();
-            dispatch.await
-        }
-        response = &mut dispatch => response,
-    };
+        let written = write_response(&mut writer, &response).await;
+        control.stop_host();
+        return written;
+    }
     if request_shutdown.is_cancelled() {
         return Ok(());
     }
@@ -589,26 +725,70 @@ async fn watch_client_disconnect(mut stream: OwnedReadHalf, cancellation: Transp
     }
 }
 
+/// Keeps an admitted management operation owned until completion after its
+/// client disconnects or the API listener begins shutdown. The request token
+/// still stops cancellable reads; transaction coordinators use the host token
+/// and finish any operation whose durable marker has already been written.
+pub(crate) async fn await_dispatch_after_disconnect<F>(
+    shutdown: &TransportCancellation,
+    request_shutdown: &TransportCancellation,
+    reader: OwnedReadHalf,
+    dispatch: F,
+) -> F::Output
+where
+    F: std::future::Future,
+{
+    tokio::pin!(dispatch);
+    let disconnect = watch_client_disconnect(reader, request_shutdown.clone());
+    tokio::pin!(disconnect);
+    tokio::select! {
+        biased;
+        () = shutdown.cancelled() => {
+            request_shutdown.cancel();
+            dispatch.await
+        }
+        () = &mut disconnect => {
+            request_shutdown.cancel();
+            dispatch.await
+        }
+        result = &mut dispatch => result,
+    }
+}
+
 /// Reads one complete request head and its declared body. Returns `None` when
 /// the peer closed first, and an error when the request is unusable.
 async fn read_request(stream: &mut TcpStream) -> io::Result<Option<Request>> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 1024];
+    let header_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let head_end = loop {
         if let Some(position) = head_end(&buffer) {
+            if position > MAX_HEADER_BYTES {
+                return Err(io::Error::other("request head too large"));
+            }
             break position;
         }
         if buffer.len() > MAX_HEADER_BYTES {
             return Err(io::Error::other("request head too large"));
         }
-        let read = stream.read(&mut chunk).await?;
+        let read = tokio::time::timeout_at(header_deadline, stream.read(&mut chunk))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "request header deadline"))??;
         if read == 0 {
             return Ok(None);
         }
         buffer.extend_from_slice(&chunk[..read]);
     };
 
-    let (method, target, content_length) = {
+    let (
+        method,
+        target,
+        content_length,
+        if_none_match,
+        content_type,
+        config_generation,
+        config_generation_duplicate,
+    ) = {
         let head = std::str::from_utf8(&buffer[..head_end])
             .map_err(|_| io::Error::other("request head is not UTF-8"))?;
         let mut lines = head.split("\r\n");
@@ -624,17 +804,48 @@ async fn read_request(stream: &mut TcpStream) -> io::Result<Option<Request>> {
             .ok_or_else(|| io::Error::other("missing request target"))?;
 
         let mut content_length = 0_usize;
+        let mut if_none_match = None;
+        let mut content_type = None;
+        let mut config_generation = None;
+        let mut config_generation_duplicate = false;
         for line in lines {
             if let Some((key, value)) = line.split_once(':') {
+                if key.trim().eq_ignore_ascii_case("if-none-match") {
+                    if_none_match = Some(value.trim().to_owned());
+                }
                 if key.trim().eq_ignore_ascii_case("content-length") {
                     content_length = value
                         .trim()
                         .parse()
                         .map_err(|_| io::Error::other("invalid content length"))?;
                 }
+                if key.trim().eq_ignore_ascii_case("content-type") {
+                    if content_type.is_some() {
+                        return Err(io::Error::other("duplicate content type"));
+                    }
+                    content_type = Some(value.trim().to_owned());
+                }
+                if key
+                    .trim()
+                    .eq_ignore_ascii_case("x-mosdns-config-generation")
+                {
+                    if config_generation.is_some() {
+                        config_generation_duplicate = true;
+                    } else {
+                        config_generation = Some(value.trim().to_owned());
+                    }
+                }
             }
         }
-        (method.to_owned(), target.to_owned(), content_length)
+        (
+            method.to_owned(),
+            target.to_owned(),
+            content_length,
+            if_none_match,
+            content_type,
+            config_generation,
+            config_generation_duplicate,
+        )
     };
     let body_limit = if matches!(
         route(&target),
@@ -666,12 +877,40 @@ async fn read_request(stream: &mut TcpStream) -> io::Result<Option<Request>> {
     Ok(Some(Request {
         method,
         target,
+        if_none_match,
+        content_type,
+        config_generation,
+        config_generation_duplicate,
         body,
     }))
 }
 
 fn head_end(buffer: &[u8]) -> Option<usize> {
     buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_config_generation(value: &str) -> io::Result<u64> {
+    if value.is_empty()
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+        || (value.len() > 1 && value.starts_with('0'))
+    {
+        return Err(io::Error::other("invalid config generation"));
+    }
+    value
+        .parse::<u64>()
+        .map_err(|_| io::Error::other("invalid config generation"))
+}
+
+fn switch_generation_response(request: &Request, current: u64) -> Option<Response> {
+    if request.config_generation_duplicate {
+        return Some(Response::error(400, "duplicate config generation"));
+    }
+    let value = request.config_generation.as_deref()?;
+    match parse_config_generation(value) {
+        Ok(expected) if expected == current => None,
+        Ok(_) => Some(Response::error(409, "configuration generation is stale")),
+        Err(_) => Some(Response::error(400, "invalid config generation")),
+    }
 }
 
 async fn write_response<W: AsyncWrite + Unpin>(
@@ -698,9 +937,16 @@ async fn write_response<W: AsyncWrite + Unpin>(
 const fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        201 => "Created",
+        204 => "No Content",
         400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        403 => "Forbidden",
+        413 => "Payload Too Large",
+        409 => "Conflict",
+        415 => "Unsupported Media Type",
+        503 => "Service Unavailable",
         _ => "Internal Server Error",
     }
 }
@@ -716,10 +962,30 @@ enum Route<'a> {
     },
     Audit(AuditRoute),
     AuditV2(AuditV2Route),
-    SpecialGroups,
+    Capabilities,
+    SpecialGroups {
+        slot: Option<&'a str>,
+    },
+    Upstream(UpstreamRoute<'a>),
+    DiversionCatalog {
+        slot: Option<u32>,
+        action: DiversionCatalogAction<'a>,
+    },
     CacheInventory,
     Metrics,
     Unknown,
+}
+
+enum UpstreamRoute<'a> {
+    Tags,
+    Config,
+    Runtime(std::borrow::Cow<'a, str>),
+}
+
+enum DiversionCatalogAction<'a> {
+    List,
+    Source(Result<std::borrow::Cow<'a, str>, ()>),
+    Unsupported,
 }
 
 #[derive(Clone, Copy)]
@@ -765,6 +1031,100 @@ fn decode_plugin_tag(tag: &str) -> Option<std::borrow::Cow<'_, str>> {
     String::from_utf8(bytes).ok().map(std::borrow::Cow::Owned)
 }
 
+fn safe_catalog_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.chars().any(char::is_control)
+}
+
+fn special_manual_slot(tag: &str) -> Option<u32> {
+    let suffix = tag.strip_prefix("special_manual_")?;
+    let slot = suffix.parse::<u32>().ok()?;
+    (slot >= 50 && slot.to_string() == suffix).then_some(slot)
+}
+
+fn managed_manual_slot(config: &CompiledConfig, tag: &str) -> Option<u32> {
+    let slot = special_manual_slot(tag)?;
+    config
+        .managed_profile
+        .as_ref()?
+        .groups
+        .iter()
+        .any(|group| group.slot == slot)
+        .then_some(slot)
+}
+
+fn manual_rule_text(profile: &crate::special_groups::ManagedProfile, slot: u32) -> String {
+    let submitted = profile
+        .manual_rules
+        .get(&slot)
+        .into_iter()
+        .flat_map(|text| text.lines().map(str::to_owned))
+        .collect::<Vec<_>>();
+    let accepted = crate::managed::normalized_rules(&submitted);
+    if accepted.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", accepted.join("\n"))
+    }
+}
+
+fn manual_rule_bytes(values: &[String]) -> (usize, Vec<u8>) {
+    let safe_values = values
+        .iter()
+        .filter(|value| !value.contains('\n') && !value.contains('\r'))
+        .cloned()
+        .collect::<Vec<_>>();
+    let accepted = crate::managed::normalized_rules(&safe_values);
+    let count = accepted.len();
+    let bytes = if accepted.is_empty() {
+        Vec::new()
+    } else {
+        format!("{}\n", accepted.join("\n")).into_bytes()
+    };
+    (count, bytes)
+}
+
+fn disabled_source_is_supported(
+    source: &serde_json::Value,
+    name: &str,
+    group: &crate::special_groups::SpecialGroup,
+) -> bool {
+    let Some(object) = source.as_object() else {
+        return false;
+    };
+    if object.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "enabled" | "name" | "type" | "url" | "auto_update" | "enable_regexp" | "files"
+        )
+    }) {
+        return false;
+    }
+    if object.get("enabled").and_then(serde_json::Value::as_bool) != Some(false)
+        || object.get("name").and_then(serde_json::Value::as_str) != Some(name)
+        || object.get("type").and_then(serde_json::Value::as_str) != Some(group.key().as_str())
+    {
+        return false;
+    }
+    if ["url", "auto_update", "enable_regexp"].iter().any(|key| {
+        object
+            .get(*key)
+            .is_some_and(|value| !(value.is_null() || value == false || value == 0 || value == ""))
+    }) {
+        return false;
+    }
+    object
+        .get("files")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|file| {
+            !file.is_empty() && Path::new(file).extension().and_then(|s| s.to_str()) == Some("txt")
+        })
+}
+
 fn route(target: &str) -> Route<'_> {
     // Go's `/show` ignores the query string; the UI sends `?limit=10000`.
     let path = target.split_once('?').map_or(target, |(path, _query)| path);
@@ -774,8 +1134,68 @@ fn route(target: &str) -> Route<'_> {
     if path == "/metrics" {
         return Route::Metrics;
     }
+    if path == "/api/v1/capabilities" {
+        return Route::Capabilities;
+    }
     if path == "/api/v1/special-groups" {
-        return Route::SpecialGroups;
+        return Route::SpecialGroups { slot: None };
+    }
+    if let Some(slot) = path.strip_prefix("/api/v1/special-groups/") {
+        return Route::SpecialGroups { slot: Some(slot) };
+    }
+    if let Some(action) = path.strip_prefix("/api/v1/upstream/") {
+        return match action {
+            "tags" => Route::Upstream(UpstreamRoute::Tags),
+            "config" => Route::Upstream(UpstreamRoute::Config),
+            runtime if runtime.starts_with("runtime/") => {
+                let raw_tag = runtime.strip_prefix("runtime/").unwrap_or_default();
+                if raw_tag.is_empty() || raw_tag.contains('/') {
+                    Route::Unknown
+                } else {
+                    match decode_plugin_tag(raw_tag) {
+                        Some(tag)
+                            if !tag.is_empty()
+                                && !tag.contains('/')
+                                && !tag.contains('\\')
+                                && !tag.as_bytes().contains(&0) =>
+                        {
+                            Route::Upstream(UpstreamRoute::Runtime(tag))
+                        }
+                        _ => Route::Unknown,
+                    }
+                }
+            }
+            _ => Route::Unknown,
+        };
+    }
+    if let Some(rest) = path.strip_prefix("/plugins/") {
+        if let Some((raw_tag, action)) = rest.split_once('/') {
+            if let Some(decoded_tag) = decode_plugin_tag(raw_tag) {
+                if let Some(slot_text) = decoded_tag.strip_prefix("special_route_") {
+                    let slot = slot_text
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|slot| *slot >= 50 && slot.to_string() == slot_text);
+                    let action = if action == "config" {
+                        DiversionCatalogAction::List
+                    } else if action == "update" || action == "download" || action == "reload" {
+                        DiversionCatalogAction::Unsupported
+                    } else if let Some(raw_name) = action.strip_prefix("config/") {
+                        let name = if raw_name.contains('/') {
+                            Err(())
+                        } else {
+                            decode_plugin_tag(raw_name)
+                                .and_then(|name| safe_catalog_name(name.as_ref()).then_some(name))
+                                .ok_or(())
+                        };
+                        DiversionCatalogAction::Source(name)
+                    } else {
+                        DiversionCatalogAction::Unsupported
+                    };
+                    return Route::DiversionCatalog { slot, action };
+                }
+            }
+        }
     }
     if let Some(suffix) = path.strip_prefix("/api/v2/audit/") {
         return match suffix {
@@ -816,6 +1236,31 @@ fn route(target: &str) -> Route<'_> {
             None => Route::Unknown,
         },
         _ => Route::Unknown,
+    }
+}
+
+fn request_mutates_managed_state(request: &Request) -> bool {
+    match route(&request.target) {
+        Route::Plugin {
+            tag,
+            action: "post",
+        } => request.method == "POST" && special_manual_slot(tag.as_ref()).is_none(),
+        Route::Plugin {
+            tag,
+            action: "save" | "flush",
+        } => request.method == "GET" && special_manual_slot(tag.as_ref()).is_none(),
+        Route::Plugin {
+            action: "load_dump",
+            ..
+        } => request.method == "POST",
+        Route::Audit(AuditRoute::Start | AuditRoute::Stop | AuditRoute::Clear) => {
+            request.method == "POST"
+        }
+        Route::Audit(AuditRoute::Capacity) => request.method == "POST",
+        // The special-groups mutation is a transaction owner in its own
+        // right; it closes admission from inside the coordinator.
+        Route::SpecialGroups { .. } => false,
+        _ => false,
     }
 }
 
@@ -1872,6 +2317,8 @@ async fn dispatch_audit_read(
 
 #[allow(clippy::too_many_arguments)]
 async fn dispatch(
+    control: Option<&crate::runtime_snapshot::RuntimeControl>,
+    runtime_snapshot: Option<&crate::runtime_snapshot::RuntimeSnapshot>,
     config: &CompiledConfig,
     cache: &CacheCatalog,
     observer: &Arc<QueryObserver>,
@@ -1883,7 +2330,26 @@ async fn dispatch(
     shutdown: &TransportCancellation,
     request: &Request,
 ) -> Response {
+    if let Some(switches) = runtime_snapshot.map(|snapshot| &snapshot.switches) {
+        if let Route::Plugin { tag, action } = route(&request.target) {
+            if switches.is_known(tag.as_ref()) {
+                let current_generation = control
+                    .as_ref()
+                    .map_or(config.generation, |control| control.generation());
+                if let Some(response) = switch_generation_response(request, current_generation) {
+                    return response;
+                }
+                return dispatch_switch(switches, tag.as_ref(), action, request).await;
+            }
+        }
+    }
     match route(&request.target) {
+        Route::Capabilities => {
+            if request.method != "GET" {
+                return Response::method_not_allowed();
+            }
+            Response::json(&capabilities(config, runtime_snapshot))
+        }
         Route::CacheInventory => {
             if request.method != "GET" {
                 return Response::method_not_allowed();
@@ -2093,6 +2559,14 @@ async fn dispatch(
             Response::error(404, "404 page not found")
         }
         Route::Plugin { tag, action } => match (request.method.as_str(), action) {
+            ("GET", "show") if managed_manual_slot(config, tag.as_ref()).is_some() => {
+                let slot = managed_manual_slot(config, tag.as_ref()).expect("guarded manual slot");
+                let profile = config
+                    .managed_profile
+                    .as_ref()
+                    .expect("guarded managed profile");
+                Response::text(manual_rule_text(profile, slot))
+            }
             ("GET", "show") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => {
@@ -2104,6 +2578,12 @@ async fn dispatch(
                     Response::text(body)
                 }
             },
+            ("GET", "save") if managed_manual_slot(config, tag.as_ref()).is_some() => {
+                // Generated manual providers are immutable snapshot inputs. Their
+                // canonical file is already durable; a Go-compatible save call
+                // therefore succeeds without writing around the transaction log.
+                Response::empty(200)
+            }
             ("GET", "save") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => match provider.save().await {
@@ -2111,6 +2591,34 @@ async fn dispatch(
                     Err(error) => Response::error(500, &error.to_string()),
                 },
             },
+            ("POST", "post") if managed_manual_slot(config, tag.as_ref()).is_some() => {
+                let payload: PostPayload = match serde_json::from_slice(&request.body) {
+                    Ok(payload) => payload,
+                    Err(_) => return Response::error(400, "invalid JSON"),
+                };
+                let Some(control) = control else {
+                    return Response::error(503, "managed runtime control is unavailable");
+                };
+                let current = control.view();
+                let Some(slot) = managed_manual_slot(&current.config, tag.as_ref()) else {
+                    return Response::error(404, "manual provider not found");
+                };
+                let profile = current
+                    .config
+                    .managed_profile
+                    .as_ref()
+                    .expect("managed manual slot requires a profile");
+                let (count, bytes) = manual_rule_bytes(&payload.values);
+                let config_path = match managed_config_path(profile) {
+                    Ok(path) => path,
+                    Err(response) => return response,
+                };
+                let path = PathBuf::from(format!("rule/special_{slot}.txt"));
+                match apply_managed_files(control, config_path, vec![(path, Some(bytes))]).await {
+                    Ok(()) => Response::text(format!("domain_set replaced with {count} entries")),
+                    Err(response) => response,
+                }
+            }
             ("POST", "post") => match eligible(config, tag.as_ref()) {
                 Err(response) => response,
                 Ok(provider) => {
@@ -2129,19 +2637,746 @@ async fn dispatch(
             // Any other method on a registered, mounted path, as chi replies.
             _ => Response::empty(405),
         },
-        // The strict native subset cannot configure dedicated routing groups, so
-        // an empty list is the true state and no group mutation route exists.
-        Route::SpecialGroups => match request.method.as_str() {
-            "GET" => Response {
-                status: 200,
-                content_type: Some("application/json"),
-                body: b"[]\n".to_vec(),
-            },
-            _ => Response::empty(405),
+        Route::SpecialGroups { slot: None } => match request.method.as_str() {
+            "GET" => {
+                let groups: Vec<_> = config
+                    .managed_profile
+                    .as_ref()
+                    .map(|profile| {
+                        profile
+                            .groups
+                            .iter()
+                            .map(crate::special_groups::SpecialGroup::view)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Response::json(&groups)
+            }
+            "POST" => {
+                let mutation: GroupMutation = match serde_json::from_slice(&request.body) {
+                    Ok(mutation) => mutation,
+                    Err(_) => return Response::error(400, "invalid special group JSON"),
+                };
+                let Some(control) = control else {
+                    return Response::error(503, "managed runtime control is unavailable");
+                };
+                let current = control.view();
+                let Some(profile) = current.config.managed_profile.as_ref() else {
+                    return Response::error(400, "native special_groups profile is disabled");
+                };
+                let slot = if mutation.slot == 0 {
+                    first_unused_group_slot(&profile.groups).unwrap_or_default()
+                } else {
+                    mutation.slot
+                };
+                let mut group = crate::special_groups::SpecialGroup {
+                    slot,
+                    name: mutation.name,
+                    listen_port: mutation.listen_port,
+                    custom_port_only: mutation.custom_port_only,
+                };
+                if group.slot < 50 || group.name.trim().is_empty() {
+                    return Response::error(400, "invalid special group slot or name");
+                }
+                if group.listen_port == 53 {
+                    return Response::error(400, "special group listen port 53 is reserved");
+                }
+                let mut groups = profile.groups.clone();
+                if let Some(existing) = groups.iter_mut().find(|item| item.slot == group.slot) {
+                    *existing = group.clone();
+                } else {
+                    groups.push(group.clone());
+                }
+                if groups.iter().any(|item| {
+                    item.slot != group.slot && item.name.eq_ignore_ascii_case(group.name.trim())
+                }) {
+                    return Response::error(409, "special group name already exists");
+                }
+                if group.listen_port != 0
+                    && groups.iter().any(|item| {
+                        item.slot != group.slot && item.listen_port == group.listen_port
+                    })
+                {
+                    return Response::error(409, "special group listen port already exists");
+                }
+                if let Err(error) = crate::special_groups::normalize_groups(&mut groups) {
+                    return Response::error(400, &error.to_string());
+                }
+                group = groups
+                    .iter()
+                    .find(|item| item.slot == slot)
+                    .expect("validated group remains in candidate")
+                    .clone();
+                let bytes = match serde_json::to_vec(&groups) {
+                    Ok(bytes) => bytes,
+                    Err(error) => return Response::error(500, &error.to_string()),
+                };
+                let config_path = match managed_config_path(profile) {
+                    Ok(path) => path,
+                    Err(response) => return response,
+                };
+                let changes = vec![(
+                    PathBuf::from("webinfo/special_upstream_groups.json"),
+                    Some(bytes),
+                )];
+                match apply_managed_files(control, config_path, changes).await {
+                    Ok(()) => Response::json(&group.view()),
+                    Err(response) => response,
+                }
+            }
+            _ => Response::method_not_allowed(),
         },
+        Route::SpecialGroups { slot: Some(slot) } => match request.method.as_str() {
+            "DELETE" => {
+                let Ok(slot) = slot.parse::<u32>() else {
+                    return Response::error(400, "invalid special group slot");
+                };
+                let Some(control) = control else {
+                    return Response::error(503, "managed runtime control is unavailable");
+                };
+                let current = control.view();
+                let Some(profile) = current.config.managed_profile.as_ref() else {
+                    return Response::error(400, "native special_groups profile is disabled");
+                };
+                let Some(group) = profile.groups.iter().find(|item| item.slot == slot) else {
+                    return Response::error(404, "special group not found");
+                };
+                let mut groups = profile.groups.clone();
+                groups.retain(|item| item.slot != slot);
+                let mut overrides = profile.overrides.clone();
+                overrides.remove(&format!("special_upstream_{slot}"));
+                let group_path = PathBuf::from("webinfo/special_upstream_groups.json");
+                let overrides_path = PathBuf::from("webinfo/upstream_overrides.json");
+                let sources_path = PathBuf::from(format!("srs/{}.json", group.key()));
+                let manual_path = PathBuf::from(format!("rule/{}.txt", group.key()));
+                let changes = [
+                    serde_json::to_vec(&groups)
+                        .map(|bytes| (group_path, Some(bytes)))
+                        .map_err(|error| error.to_string()),
+                    serde_json::to_vec(&overrides)
+                        .map(|bytes| (overrides_path, Some(bytes)))
+                        .map_err(|error| error.to_string()),
+                ]
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>();
+                let mut changes = match changes {
+                    Ok(changes) => changes,
+                    Err(error) => return Response::error(500, &error),
+                };
+                changes.push((sources_path, None));
+                changes.push((manual_path, None));
+                let config_path = match managed_config_path(profile) {
+                    Ok(path) => path,
+                    Err(response) => return response,
+                };
+                match apply_managed_files(control, config_path, changes).await {
+                    Ok(()) => Response::empty(204),
+                    Err(response) => response,
+                }
+            }
+            _ => Response::method_not_allowed(),
+        },
+        Route::Upstream(route) => match route {
+            UpstreamRoute::Tags if request.method == "GET" => {
+                let tags = config
+                    .forward_definitions
+                    .iter()
+                    .map(|definition| definition.tag.as_str())
+                    .collect::<Vec<_>>();
+                Response::json(&tags)
+            }
+            UpstreamRoute::Config if request.method == "GET" => {
+                let overrides = config
+                    .managed_profile
+                    .as_ref()
+                    .map(|profile| &profile.overrides);
+                match overrides {
+                    Some(overrides) => Response::json(overrides),
+                    None => Response::json(&std::collections::BTreeMap::<
+                        String,
+                        Vec<serde_json::Value>,
+                    >::new()),
+                }
+            }
+            UpstreamRoute::Runtime(tag) if request.method == "GET" => {
+                let Some(definition_index) = config
+                    .forward_definitions
+                    .iter()
+                    .position(|definition| definition.tag == tag)
+                else {
+                    return Response::error(404, "upstream tag not found");
+                };
+                let override_config = config
+                    .managed_profile
+                    .as_ref()
+                    .and_then(|profile| profile.overrides.get(tag.as_ref()))
+                    .cloned()
+                    .unwrap_or_default();
+                let mut runtime_targets = Vec::new();
+                if let Some(snapshot) = runtime_snapshot {
+                    for invocation in config
+                        .forward_invocations
+                        .iter()
+                        .filter(|invocation| invocation.definition == definition_index)
+                    {
+                        for target in snapshot.forwards.runtime_targets(invocation.executable) {
+                            if !runtime_targets.contains(&target) {
+                                runtime_targets.push(target);
+                            }
+                        }
+                    }
+                }
+                Response::json(&serde_json::json!({
+                    "tag": tag,
+                    "override_config": override_config,
+                    "runtime_targets": runtime_targets,
+                }))
+            }
+            UpstreamRoute::Config if request.method == "POST" => {
+                let mutation: UpstreamConfigMutation = match serde_json::from_slice(&request.body) {
+                    Ok(mutation) => mutation,
+                    Err(_) => return Response::error(400, "invalid upstream configuration JSON"),
+                };
+                if mutation.plugin_tag.trim().is_empty() {
+                    return Response::error(400, "plugin_tag is required");
+                }
+                let Some(control) = control else {
+                    return Response::error(503, "managed runtime control is unavailable");
+                };
+                let current = control.view();
+                if !current
+                    .config
+                    .forward_definitions
+                    .iter()
+                    .any(|definition| definition.tag == mutation.plugin_tag)
+                {
+                    return Response::error(404, "upstream tag not found");
+                }
+                let Some(profile) = current.config.managed_profile.as_ref() else {
+                    return Response::error(400, "native special_groups profile is disabled");
+                };
+                let mut overrides = profile.overrides.clone();
+                overrides.insert(mutation.plugin_tag, mutation.upstreams);
+                let bytes = match serde_json::to_vec(&overrides) {
+                    Ok(bytes) => bytes,
+                    Err(error) => return Response::error(500, &error.to_string()),
+                };
+                let changes = vec![(
+                    PathBuf::from("webinfo/upstream_overrides.json"),
+                    Some(bytes),
+                )];
+                let config_path = match managed_config_path(profile) {
+                    Ok(path) => path,
+                    Err(response) => return response,
+                };
+                match apply_managed_files(control, config_path, changes).await {
+                    Ok(()) => Response::json(&serde_json::json!({
+                        "message":"Upstream configuration saved."
+                    })),
+                    Err(response) => response,
+                }
+            }
+            UpstreamRoute::Tags | UpstreamRoute::Config | UpstreamRoute::Runtime(_) => {
+                Response::method_not_allowed()
+            }
+        },
+        Route::DiversionCatalog { slot, action } => {
+            let Some(slot) = slot else {
+                return Response::error(404, "diversion group not found");
+            };
+            let Some(control) = control else {
+                if !matches!(action, DiversionCatalogAction::List) {
+                    return Response::error(503, "managed runtime control is unavailable");
+                }
+                return Response::error(503, "managed runtime snapshot is unavailable");
+            };
+            let current = control.view();
+            let Some(profile) = current.config.managed_profile.as_ref() else {
+                return Response::error(400, "native special_groups profile is disabled");
+            };
+            let Some(group) = profile.groups.iter().find(|group| group.slot == slot) else {
+                return Response::error(404, "diversion group not found");
+            };
+            match action {
+                DiversionCatalogAction::List if request.method == "GET" => {
+                    let sources: Vec<_> = profile
+                        .sources
+                        .get(&slot)
+                        .into_iter()
+                        .flat_map(|sources| sources.values().cloned())
+                        .collect();
+                    Response::json(&sources)
+                }
+                DiversionCatalogAction::Source(Err(())) => {
+                    Response::error(400, "invalid diversion source name or path")
+                }
+                DiversionCatalogAction::Source(Ok(path_name)) if request.method == "PUT" => {
+                    let source: serde_json::Value = match serde_json::from_slice(&request.body) {
+                        Ok(source) => source,
+                        Err(_) => return Response::error(400, "invalid diversion source JSON"),
+                    };
+                    let Some(name) = source.get("name").and_then(serde_json::Value::as_str) else {
+                        return Response::error(400, "diversion source name is required");
+                    };
+                    if !safe_catalog_name(name) {
+                        return Response::error(400, "invalid diversion source name");
+                    }
+                    let mut sources = profile.sources.get(&slot).cloned().unwrap_or_default();
+                    let existed = sources.contains_key(path_name.as_ref());
+                    if !existed && name != path_name.as_ref() {
+                        return Response::error(404, "diversion source not found");
+                    }
+                    if let Some(existing) = sources.get(path_name.as_ref()) {
+                        if existing.get("enabled").and_then(serde_json::Value::as_bool)
+                            == Some(false)
+                            && existing != &source
+                            && !disabled_source_is_supported(existing, path_name.as_ref(), group)
+                        {
+                            return Response::error(
+                                400,
+                                "unsupported disabled diversion source is read-only",
+                            );
+                        }
+                    }
+                    let enabled = source.get("enabled").and_then(serde_json::Value::as_bool);
+                    if enabled == Some(false) {
+                        let Some(existing) = sources.get(path_name.as_ref()) else {
+                            return Response::error(400, "new diversion sources must be enabled");
+                        };
+                        let mut disabled = existing.clone();
+                        if let Some(object) = disabled.as_object_mut() {
+                            object.insert("enabled".into(), serde_json::Value::Bool(false));
+                        }
+                        if disabled != source {
+                            return Response::error(400, "disabled diversion source is read-only");
+                        }
+                        if existing == &source {
+                            return Response::json_with_status(200, &source);
+                        }
+                    } else if enabled != Some(true) {
+                        return Response::error(400, "diversion source enabled must be boolean");
+                    }
+                    if name != path_name.as_ref() && sources.contains_key(name) {
+                        return Response::error(409, "diversion source name already exists");
+                    }
+                    sources.remove(path_name.as_ref());
+                    sources.insert(name.to_owned(), source.clone());
+                    let bytes = match serde_json::to_vec(&sources) {
+                        Ok(bytes) => bytes,
+                        Err(error) => return Response::error(500, &error.to_string()),
+                    };
+                    let config_path = match managed_config_path(profile) {
+                        Ok(path) => path,
+                        Err(response) => return response,
+                    };
+                    let catalog_path = PathBuf::from(format!("srs/{}.json", group.key()));
+                    match apply_managed_files(
+                        control,
+                        config_path,
+                        vec![(catalog_path, Some(bytes))],
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            let status = if existed { 200 } else { 201 };
+                            Response::json_with_status(status, &source)
+                        }
+                        Err(response) => response,
+                    }
+                }
+                DiversionCatalogAction::Source(Ok(path_name)) if request.method == "DELETE" => {
+                    let mut sources = profile.sources.get(&slot).cloned().unwrap_or_default();
+                    let Some(existing) = sources.get(path_name.as_ref()) else {
+                        return Response::error(404, "diversion source not found");
+                    };
+                    if existing.get("enabled").and_then(serde_json::Value::as_bool) == Some(false)
+                        && !disabled_source_is_supported(existing, path_name.as_ref(), group)
+                    {
+                        return Response::error(
+                            400,
+                            "unsupported disabled diversion source is read-only",
+                        );
+                    }
+                    sources.remove(path_name.as_ref());
+                    let bytes = match serde_json::to_vec(&sources) {
+                        Ok(bytes) => bytes,
+                        Err(error) => return Response::error(500, &error.to_string()),
+                    };
+                    let config_path = match managed_config_path(profile) {
+                        Ok(path) => path,
+                        Err(response) => return response,
+                    };
+                    let catalog_path = PathBuf::from(format!("srs/{}.json", group.key()));
+                    match apply_managed_files(
+                        control,
+                        config_path,
+                        vec![(catalog_path, Some(bytes))],
+                    )
+                    .await
+                    {
+                        Ok(()) => Response::empty(204),
+                        Err(response) => response,
+                    }
+                }
+                DiversionCatalogAction::Unsupported => {
+                    Response::error(405, "diversion source operation is unsupported")
+                }
+                DiversionCatalogAction::List | DiversionCatalogAction::Source(_) => {
+                    Response::method_not_allowed()
+                }
+            }
+        }
         // Mirrors Go's `http.NotFound` for an unmatched route.
         Route::Unknown => Response::error(404, "404 page not found"),
     }
+}
+
+enum SwitchValueError {
+    Invalid,
+    UnsupportedMedia,
+}
+
+fn switch_value(request: &Request) -> Result<String, SwitchValueError> {
+    let content_type = request
+        .content_type
+        .as_deref()
+        .unwrap_or("application/json");
+    let mut parts = content_type.split(';');
+    let media_type = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
+    let form = match media_type.as_str() {
+        "application/json" => false,
+        "application/x-www-form-urlencoded" => true,
+        _ => return Err(SwitchValueError::UnsupportedMedia),
+    };
+    for parameter in parts {
+        let (key, value) = parameter.split_once('=').ok_or(SwitchValueError::Invalid)?;
+        if key.trim().eq_ignore_ascii_case("charset") {
+            let value = value.trim().trim_matches('"');
+            if !value.eq_ignore_ascii_case("utf-8") {
+                return Err(SwitchValueError::UnsupportedMedia);
+            }
+        }
+    }
+
+    if form {
+        let body = std::str::from_utf8(&request.body).map_err(|_| SwitchValueError::Invalid)?;
+        let mut value = None;
+        for pair in body.split('&') {
+            if pair.is_empty() {
+                return Err(SwitchValueError::Invalid);
+            }
+            let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+            let key = decode_query_component(raw_key).map_err(|_| SwitchValueError::Invalid)?;
+            if key != "value" || value.is_some() {
+                return Err(SwitchValueError::Invalid);
+            }
+            value = Some(decode_query_component(raw_value).map_err(|_| SwitchValueError::Invalid)?);
+        }
+        return value.ok_or(SwitchValueError::Invalid);
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&request.body).map_err(|_| SwitchValueError::Invalid)?;
+    let object = value.as_object().ok_or(SwitchValueError::Invalid)?;
+    if object.len() != 1 {
+        return Err(SwitchValueError::Invalid);
+    }
+    let value = object
+        .get("value")
+        .or_else(|| object.get("Value"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or(SwitchValueError::Invalid)?;
+    Ok(value.to_owned())
+}
+
+fn switch_mutation_response(error: crate::switch_state::SwitchMutationError) -> Response {
+    use crate::switch_state::SwitchMutationError;
+    match error {
+        SwitchMutationError::UnknownTag(_) => Response::error(404, "404 page not found"),
+        SwitchMutationError::ReadOnly { reason, .. } => Response::error(403, &reason),
+        SwitchMutationError::ValueTooLarge { .. } => Response::error(413, "switch value too large"),
+        SwitchMutationError::Busy { .. } | SwitchMutationError::Overloaded => {
+            Response::error(409, "switch mutation is busy")
+        }
+        SwitchMutationError::Closed
+        | SwitchMutationError::Paused
+        | SwitchMutationError::RecoveryRequired => {
+            Response::error(503, "switch mutation unavailable")
+        }
+        SwitchMutationError::Conflict { reason, .. } => Response::error(409, &reason),
+        SwitchMutationError::Io { reason, .. } => Response::error(500, &reason),
+    }
+}
+
+async fn dispatch_switch(
+    registry: &crate::switch_state::SwitchRegistry,
+    tag: &str,
+    action: &str,
+    request: &Request,
+) -> Response {
+    match (request.method.as_str(), action) {
+        ("GET", "show") => Response::text(registry.show(tag).unwrap_or_default()),
+        ("POST", "post") => {
+            let value = match switch_value(request) {
+                Ok(value) => value,
+                Err(SwitchValueError::Invalid) => {
+                    return Response::error(400, "invalid switch value");
+                }
+                Err(SwitchValueError::UnsupportedMedia) => {
+                    return Response::error(415, "unsupported switch content type");
+                }
+            };
+            match registry.post(tag, value) {
+                Ok(ticket) => match ticket.complete().await {
+                    Ok(()) => Response::text(format!(
+                        "updated to: {}\n",
+                        registry.show(tag).unwrap_or_default()
+                    )),
+                    Err(error) => switch_mutation_response(error),
+                },
+                Err(error) => switch_mutation_response(error),
+            }
+        }
+        (_, "show" | "post") => Response::method_not_allowed(),
+        _ => Response::error(404, "404 page not found"),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpstreamConfigMutation {
+    plugin_tag: String,
+    upstreams: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupMutation {
+    #[serde(default)]
+    slot: u32,
+    name: String,
+    #[serde(default)]
+    listen_port: u16,
+    #[serde(default)]
+    custom_port_only: bool,
+}
+
+fn first_unused_group_slot(groups: &[crate::special_groups::SpecialGroup]) -> Option<u32> {
+    let used = groups
+        .iter()
+        .map(|group| group.slot)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut candidate = 50;
+    while used.contains(&candidate) {
+        candidate = candidate.checked_add(1)?;
+    }
+    Some(candidate)
+}
+
+async fn apply_managed_files(
+    control: &crate::runtime_snapshot::RuntimeControl,
+    config_path: PathBuf,
+    changes: Vec<(PathBuf, Option<Vec<u8>>)>,
+) -> Result<(), Response> {
+    let candidate = control
+        .compile_managed_candidate(&config_path, changes)
+        .map_err(transaction_error_response)?;
+    control
+        .apply_candidate(candidate)
+        .await
+        .map(|_| ())
+        .map_err(apply_failure_response)
+}
+
+fn managed_config_path(
+    profile: &crate::special_groups::ManagedProfile,
+) -> Result<PathBuf, Response> {
+    profile
+        .config_path
+        .clone()
+        .ok_or_else(|| Response::error(503, "managed root configuration path is unavailable"))
+}
+
+fn transaction_error_response(error: crate::transaction::TransactionError) -> Response {
+    use crate::transaction::TransactionError;
+    match error {
+        TransactionError::Busy(error) => Response::error(409, &error.to_string()),
+        TransactionError::Conflict(path) => Response::error(409, &path.display().to_string()),
+        TransactionError::Invalid(reason) => Response::error(400, &reason),
+        TransactionError::CommitAmbiguous(reason) => Response::error(503, &reason),
+        TransactionError::Io(error) => Response::error(500, &error.to_string()),
+    }
+}
+
+fn apply_failure_response(error: crate::runtime_snapshot::ApplyFailure) -> Response {
+    use crate::runtime_snapshot::ApplyFailure;
+    match error {
+        ApplyFailure::Busy(reason) => Response::error(409, &reason),
+        ApplyFailure::Conflict(path) => Response::error(409, &path.display().to_string()),
+        ApplyFailure::ResourceConflict(reason) => Response::error(409, &reason),
+        ApplyFailure::Invalid(reason) => Response::error(400, &reason),
+        ApplyFailure::Failed(reason) => Response::error(500, &reason),
+        ApplyFailure::Shutdown => Response::error(503, "host is shutting down"),
+        ApplyFailure::RecoveryRequired(reason) => Response::error(503, &reason),
+        ApplyFailure::CommittedCleanup { generation, reason } => Response::error(
+            500,
+            &format!("generation {generation} committed but cleanup failed: {reason}"),
+        ),
+    }
+}
+
+fn ui_operations(
+    config: &CompiledConfig,
+    switches: Option<&crate::switch_state::SwitchRegistry>,
+) -> serde_json::Value {
+    let managed = config.managed_profile.is_some();
+    let local = config.domain_sets.iter().any(|set| set.managed.is_some())
+        || config
+            .managed_profile
+            .as_ref()
+            .is_some_and(|profile| !profile.groups.is_empty());
+    let mut operations = serde_json::Map::new();
+    for id in [
+        "system.health",
+        "system.version",
+        "audit.read",
+        "audit.control",
+        "audit.capacity",
+        "query.rank",
+        "cache.inventory",
+        "cache.manage",
+        "metrics.cache",
+        "rules.local.read",
+        "groups.read",
+        "upstreams.read",
+    ] {
+        operations.insert(
+            id.to_owned(),
+            serde_json::json!({"supported": true, "reason": null}),
+        );
+    }
+    for (id, supported, reason) in [
+        (
+            "rules.local.manage",
+            local,
+            "当前配置没有可管理的本地规则 provider",
+        ),
+        ("groups.manage", managed, "专用组编辑需要原生托管配置"),
+        ("upstreams.manage", managed, "上游编辑需要原生托管配置"),
+        (
+            "rules.diversion",
+            managed,
+            "本地文本分流源管理需要原生托管配置",
+        ),
+    ] {
+        operations.insert(id.to_owned(), serde_json::json!({"supported": supported, "reason": if supported { None } else { Some(reason) }}));
+    }
+    let switch_supported = switches.is_some_and(|registry| !registry.capabilities().is_empty());
+    operations.insert(
+        "switches.manage".to_owned(),
+        serde_json::json!({
+            "supported": switch_supported,
+            "reason": if switch_supported { None::<&str> } else { Some("当前配置没有已接入的 switch owner") }
+        }),
+    );
+    for id in [
+        "rules.adguard",
+        "capture.logs",
+        "client.aliases",
+        "cache.requery",
+        "lists.remembered",
+        "appearance.server",
+        "system.restart",
+        "system.webui_port",
+        "system.config_management",
+        "system.update",
+        "system.domain_generation",
+        "system.global_overrides",
+        "metrics.process",
+    ] {
+        operations.insert(
+            id.to_owned(),
+            serde_json::json!({"supported": false, "reason": "当前 Rust 原生运行时尚未实现此操作"}),
+        );
+    }
+    serde_json::Value::Object(operations)
+}
+
+fn capabilities(
+    config: &CompiledConfig,
+    runtime_snapshot: Option<&crate::runtime_snapshot::RuntimeSnapshot>,
+) -> serde_json::Value {
+    let enabled = config.managed_profile.is_some();
+    let protocols = if enabled {
+        vec!["udp", "tcp", "dot", "doh"]
+    } else {
+        Vec::new()
+    };
+    let rule_formats = if enabled {
+        vec!["local_text"]
+    } else {
+        Vec::new()
+    };
+    let switches = runtime_snapshot
+        .map(|snapshot| {
+            snapshot
+                .switches
+                .capabilities()
+                .into_iter()
+                .map(|item| {
+                    serde_json::json!({
+                        "type": format!("switch{}", item.type_number),
+                        "tag": item.tag,
+                        "readable": item.readable,
+                        "writable": item.writable,
+                        "reason": item.reason,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let generation =
+        runtime_snapshot.map_or(config.generation, |snapshot| snapshot.config.generation);
+    serde_json::json!({
+        "schema_version": 1,
+        "runtime": "rust",
+        "ui_operations": ui_operations(config, runtime_snapshot.map(|snapshot| &snapshot.switches)),
+        "switches": {
+            "schema_version": 1,
+            "config_generation": generation.to_string(),
+            "instances": switches,
+        },
+        "special_groups": {
+            "enabled": enabled,
+            "profile": if enabled { Some("local_text_dns_v1") } else { None::<&str> }
+        },
+        "upstream_protocols": protocols,
+        "rule_formats": rule_formats,
+        "unsupported_features": [
+            "signed_aliapi",
+            "quic",
+            "http3",
+            "socks_proxy",
+            "socket_marks",
+            "bind_to_device",
+            "positive_idle_timeout",
+            "enable_pipeline",
+            "srs_geodata",
+            "remote_download",
+            "auto_update"
+        ],
+        "endpoints": {
+            "capabilities_get": true,
+            "special_groups": {"get": true, "post": enabled, "delete": enabled},
+            "upstream": {"tags_get": true, "config_get": true, "runtime_get": true, "config_post": enabled},
+            "diversion_sources": {"list_get": enabled, "put": enabled, "delete": enabled},
+            "manual_rules": {"show_get": true, "save_get": true, "post": enabled},
+            "cache_inventory_get": true,
+            "metrics_get": true,
+            "audit_v1": true,
+            "audit_v2": true
+        }
+    })
 }
 
 /// Looks up one management-eligible provider, or the explicit failure.
@@ -2166,6 +3401,7 @@ fn eligible<'a>(config: &'a CompiledConfig, tag: &str) -> Result<&'a ManagedDoma
 
 /// The UI payload: `{ "values": ["...", ...] }`.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PostPayload {
     #[serde(default)]
     values: Vec<String>,
@@ -2394,6 +3630,95 @@ mod tests {
         migrate_legacy_settings, normalized_ip, parse_audit_filter, parse_rank_limit, query_pairs,
         query_type_name, response_code_name,
     };
+
+    #[test]
+    fn health_probe_observes_lifecycle_through_closed_admission() {
+        let host = crate::HostAssembly::from_config(
+            crate::compile_yaml(include_str!(
+                "../../../tests/phase5a-baseline/configs/forward-udp.yaml"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        host.block_on(async {
+            let control = host.control();
+            let shutdown = TransportCancellation::new();
+            let server = super::ApiServer::bind(
+                host.config_handle(),
+                host.cache_handle(),
+                host.observer_handle(),
+                None,
+                super::AuditPersistenceFaults::default(),
+                host.options().audit_clock.clone(),
+                "127.0.0.1:0".parse().unwrap(),
+            )
+            .await
+            .unwrap()
+            .with_control(control.clone());
+            let address = server.local_addr().unwrap();
+            let serving = tokio::task::spawn_local(server.serve(shutdown.clone()));
+            async fn probe(
+                address: std::net::SocketAddr,
+                method: &str,
+            ) -> (u16, serde_json::Value) {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+                client
+                    .write_all(
+                        format!("{method} /api/v1/system/health HTTP/1.1\r\nHost: test\r\n\r\n")
+                            .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                let mut bytes = Vec::new();
+                client.read_to_end(&mut bytes).await.unwrap();
+                let text = String::from_utf8(bytes).unwrap();
+                let (head, body) = text.split_once("\r\n\r\n").unwrap();
+                (
+                    head.split_whitespace().nth(1).unwrap().parse().unwrap(),
+                    serde_json::from_str(body).unwrap_or(serde_json::Value::Null),
+                )
+            }
+            let (status, health) = probe(address, "GET").await;
+            assert_eq!(status, 503);
+            assert_eq!(health["state"], "starting");
+            let lifecycle_shutdown = TransportCancellation::new();
+            let updates = control.start(&lifecycle_shutdown);
+            let (status, health) = probe(address, "GET").await;
+            assert_eq!(status, 200);
+            assert_eq!(health["ready"], true);
+            assert_eq!(health["runtime"], "rust");
+            assert_eq!(health["version"], crate::build_identity::VERSION);
+            assert!(health["required_config_schema"].is_null());
+            assert!(health["applied_config_schema"].is_null());
+            assert_eq!(health["config_management_enabled"], false);
+            control.pause_admission().unwrap();
+            let (status, health) = probe(address, "GET").await;
+            assert_eq!(status, 503);
+            assert_eq!(health["state"], "applying");
+            assert_eq!(health["ready"], false);
+            assert!(!control.admission_open());
+            assert_eq!(probe(address, "POST").await.0, 405);
+            control.resume_admission();
+            assert_eq!(probe(address, "GET").await.0, 200);
+            lifecycle_shutdown.cancel();
+            let (status, health) = probe(address, "GET").await;
+            assert_eq!(status, 503);
+            assert_eq!(health["state"], "stopping");
+            control.enter_recovery_required();
+            let (status, health) = probe(address, "GET").await;
+            assert_eq!(status, 503);
+            assert_eq!(health["state"], "recovery_required");
+            assert!(
+                !shutdown.is_cancelled(),
+                "read-only health never changes lifecycle"
+            );
+            drop(updates);
+            shutdown.cancel();
+            serving.await.unwrap().unwrap();
+            control.close().await.unwrap();
+        });
+    }
 
     fn test_root(name: &str) -> std::path::PathBuf {
         let root =

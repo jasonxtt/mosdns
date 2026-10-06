@@ -1,0 +1,102 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0425]: cannot find function `forward_entries` in crate `mosdns_native_host`
+   --> native-host/tests/special_groups_config.rs:225:37
+    |
+225 |         assert!(mosdns_native_host::forward_entries(invalid.as_array().unwrap(), "test").is_err());
+    |                                     ^^^^^^^^^^^^^^^ not found in `mosdns_native_host`
+
+error[E0609]: no field `managed_profile` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:105:26
+    |
+105 |     let profile = config.managed_profile.as_ref().unwrap();
+    |                          ^^^^^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `response_policies`, `ip_sets`, `response_ip_rules`, `log_level`, `forward` ... and 11 others
+
+error[E0609]: no field `listeners` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:109:23
+    |
+109 |     assert_eq!(config.listeners.len(), 3);
+    |                       ^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+109 -     assert_eq!(config.listeners.len(), 3);
+109 +     assert_eq!(config.listener.len(), 3);
+    |
+
+error[E0609]: no field `listeners` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:111:16
+    |
+111 |         config.listeners[1].kind,
+    |                ^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+111 -         config.listeners[1].kind,
+111 +         config.listener[1].kind,
+    |
+
+error[E0609]: no field `listeners` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:115:16
+    |
+115 |         config.listeners[2].kind,
+    |                ^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+115 -         config.listeners[2].kind,
+115 +         config.listener[2].kind,
+    |
+
+error[E0609]: no field `listeners` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:118:23
+    |
+118 |     assert_eq!(config.listeners[1].listen.port(), 15401);
+    |                       ^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+118 -     assert_eq!(config.listeners[1].listen.port(), 15401);
+118 +     assert_eq!(config.listener[1].listen.port(), 15401);
+    |
+
+error[E0609]: no field `listeners` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:119:23
+    |
+119 |     assert_eq!(config.listeners[2].entry, "sequence_special_51");
+    |                       ^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+119 -     assert_eq!(config.listeners[2].entry, "sequence_special_51");
+119 +     assert_eq!(config.listener[2].entry, "sequence_special_51");
+    |
+
+error[E0609]: no field `managed_router` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:120:25
+    |
+120 |     let router = config.managed_router.as_ref().unwrap();
+    |                         ^^^^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `response_policies`, `ip_sets`, `response_ip_rules`, `log_level`, `forward` ... and 11 others
+
+error[E0609]: no field `managed_profile` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:215:16
+    |
+215 |         config.managed_profile.unwrap().overrides["special_upstream_50"][1],
+    |                ^^^^^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `response_policies`, `ip_sets`, `response_ip_rules`, `log_level`, `forward` ... and 11 others
+
+error[E0609]: no field `managed_profile` on type `CompiledConfig`
+   --> native-host/tests/special_groups_config.rs:239:36
+    |
+239 |         fixture.compile().unwrap().managed_profile.unwrap().sources[&50]["deferred"],
+    |                                    ^^^^^^^^^^^^^^^ unknown field
+    |
+    = note: available fields are: `response_policies`, `ip_sets`, `response_ip_rules`, `log_level`, `forward` ... and 11 others
+
+Some errors have detailed explanations: E0425, E0609.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `mosdns-native-host` (test "special_groups_config") due to 10 previous errors

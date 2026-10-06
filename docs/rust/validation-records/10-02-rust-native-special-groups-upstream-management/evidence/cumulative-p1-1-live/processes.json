@@ -1,0 +1,102 @@
+[
+  {
+    "pid": 214632,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25555",
+      "--answer",
+      "192.0.2.90",
+      "--peer-id",
+      "default",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 214633,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25556",
+      "--answer",
+      "192.0.2.50",
+      "--peer-id",
+      "lower",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 214634,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25557",
+      "--answer",
+      "192.0.2.51",
+      "--peer-id",
+      "higher",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 214635,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25558",
+      "--answer",
+      "192.0.2.52",
+      "--peer-id",
+      "isolated",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 214636,
+    "returncode": 0,
+    "args": [
+      "python3",
+      "/root/mosdns-rust-special-groups-20261003/evidence/s7-controlled-dns-peer.py",
+      "--transport",
+      "udp",
+      "--port",
+      "25559",
+      "--answer",
+      "192.0.2.55",
+      "--peer-id",
+      "lower_v2",
+      "--log",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live/peer-queries.jsonl"
+    ]
+  },
+  {
+    "pid": 214637,
+    "returncode": 2,
+    "args": [
+      "/root/mosdns-rust-special-groups-20261003/target-candidate/debug/mosdns",
+      "start",
+      "-c",
+      "/root/mosdns-rust-special-groups-20261003/evidence/cumulative-p1-1-live/fixture/config.yaml"
+    ]
+  }
+]

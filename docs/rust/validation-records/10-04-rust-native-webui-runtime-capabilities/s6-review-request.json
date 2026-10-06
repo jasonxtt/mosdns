@@ -1,0 +1,30 @@
+{
+  "task": "10-04-rust-native-webui-runtime-capabilities",
+  "base": "14bac57a115be4a2ce3b882f1e9203fa2c96b468",
+  "head": "ca35be6f7bf1c49b41de0b6640c7366f4382b864",
+  "reviewer": "https://chatgpt.com/c/6ac1b38b-dffc-83ee-a594-3a18c8ba872a",
+  "kind": "exact-source S6",
+  "status": "submitted",
+  "paths": [
+    "rust/native-host/src/assembly.rs",
+    "rust/native-host/tests/native_hosting.rs",
+    "scripts/build-rust-native.sh",
+    "scripts/native-build-manifest.mjs",
+    "docs/rust/contracts/native-webui-hosting.md",
+    "docs/rust/contracts/index.md",
+    "docs/rust/feature-coverage.md",
+    "docs/rust/validation-summary.md",
+    "docs/ai/rust-handover.md",
+    "coremain/www/assets/vue-log/app.css",
+    "coremain/www/assets/vue-log/app.js",
+    "coremain/www/assets/vue-log/index.html",
+    "coremain/www/assets/vue-log1/app.css",
+    "coremain/www/assets/vue-log1/app.js",
+    "coremain/www/assets/vue-log1/log1.index.html",
+    "coremain/www/log.html",
+    "coremain/www/log1.html",
+    "docs/rust/validation-records/10-04-rust-native-webui-runtime-capabilities/s5-browser-check.mjs",
+    "docs/rust/validation-records/10-04-rust-native-webui-runtime-capabilities/s6-native-proof.mjs",
+    "docs/rust/validation-records/10-04-rust-native-webui-runtime-capabilities/s6-go-legacy-proof.mjs"
+  ]
+}

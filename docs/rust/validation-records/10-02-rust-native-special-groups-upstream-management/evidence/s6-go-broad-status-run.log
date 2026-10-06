@@ -1,0 +1,4 @@
+2026-10-03T12:51:59.617Z	INFO	working directory changed	{"path": "/root/mosdns-rust-special-groups-20261003/evidence/s6-go-run"}
+2026-10-03T12:51:59.966Z	WARN	配置自动升级失败，继续使用原配置	{"error": "config package schema 4 does not match required schema 3"}
+2026-10-03T12:51:59.967Z	INFO	main config base directory set	{"path": "/root/mosdns-rust-special-groups-20261003/evidence/s6-go-run"}
+2026-10-03T12:51:59.968Z	INFO	main config loaded	{"file": "/root/mosdns-rust-special-groups-20261003/evidence/s6-go-run/config.yaml"}

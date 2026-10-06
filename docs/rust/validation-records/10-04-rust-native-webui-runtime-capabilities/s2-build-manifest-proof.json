@@ -1,0 +1,8 @@
+{
+  "nested_deterministic_manifest": true,
+  "missing_referenced_asset_rejected": true,
+  "missing_root_rejected": true,
+  "file_symlink_rejected": true,
+  "directory_symlink_rejected": true,
+  "unexpected_key_rejected": true
+}

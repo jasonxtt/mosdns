@@ -1,0 +1,5 @@
+# S4 complete operation capabilities
+
+Additive schema1 ui_operations includes all30 approved IDs, independently supported boolean plus null on true/displayable reason on false. Existing schema/runtime/special_groups/protocols/formats/unsupported_features/endpoints retain their previous semantics, including old manual_rules.post=false on unmanaged hosts. New rules.local.manage reflects actual file-backed provider eligibility (or managed generated providers). Group/upstream/diversion management requires managed profile. Go-only families remain false and routes retain honest404; no success stubs.
+
+VM meaningful missing-matrix RED retained. HTTP14 PASS, one matrix test covers managed, unmanaged with eligible rule provider, and unmanaged without eligible provider; asserts complete IDs, old keys/booleans, false reasons and actual unsupported HTTP routes. Previous13 HTTP tests remain green. Initial managed test fixture required a reachable forward and was corrected, without sending any upstream traffic. Strict Clippy/fmt PASS after test helper extraction. Old schema1 operation fallback consumption is S5, with exact per-operation fixtures. Source hashes match VM.

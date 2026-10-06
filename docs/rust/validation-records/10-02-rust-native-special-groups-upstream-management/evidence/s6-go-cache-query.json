@@ -1,0 +1,26 @@
+{
+  "query_name": "s6-go-cache.example",
+  "listener": "127.0.0.1:16453",
+  "controlled_upstream": "127.0.0.1:25455",
+  "expected_answer": "198.51.100.42",
+  "results": [
+    {
+      "query_id": 25857,
+      "rcode": 0,
+      "answer_count": 1,
+      "answers": [
+        "198.51.100.42"
+      ],
+      "response_source": "127.0.0.1"
+    },
+    {
+      "query_id": 25858,
+      "rcode": 0,
+      "answer_count": 1,
+      "answers": [
+        "198.51.100.42"
+      ],
+      "response_source": "127.0.0.1"
+    }
+  ]
+}

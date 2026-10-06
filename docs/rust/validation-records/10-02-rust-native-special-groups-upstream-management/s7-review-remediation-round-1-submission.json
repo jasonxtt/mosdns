@@ -1,0 +1,27 @@
+{
+  "unit": "Slice 7",
+  "review_round": 1,
+  "state": "explicit_pass_recorded",
+  "sent_date_local": "2026-10-04",
+  "transport": "c2c-web",
+  "binding_source": "c2c-reviewer",
+  "reviewer_title": "Review Rust Native Groups",
+  "reviewer_url": "https://chatgpt.com/g/g-p-6ab6002418488191a95a80a83575f0ac-mosdns-rust/c/6ac058cd-6138-83e8-af54-758358f73006",
+  "connector_name": "Codex with ChatGPT \u00b7 mosdns-rust",
+  "base_sha": "59b1612ad3629150cee68a68c8e0d19a7ed5968d",
+  "head_sha": "3eaeabdd75f74c4eb86db96b46f466afbe4aa3be",
+  "tree_sha": "91f40762e7836b16e564f7292488d18a7b3fc622",
+  "request_bytes": 915,
+  "request_sha256": "96d99226c1db7b610d60f3bac28a92787ae56a83708f6d3d136e56b4c5f50ba5",
+  "source_manifest_sha256": "cd32bcce468bd898c2d98e2023b74e51f5280af3068b6b5f244572ad968256c2",
+  "evidence_manifest_sha256": "113a4d870fa4b111b06f894a2ca6cbe60986ee17e29fe0e6c61ef144c89e2274",
+  "sent_at_utc": "2026-10-03T16:39:59.707619+00:00",
+  "request_kind": "rereview",
+  "result": {
+    "status": "pass",
+    "finding_ids": [],
+    "closed_findings": [
+      "P2-1"
+    ]
+  }
+}

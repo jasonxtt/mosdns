@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use mosdns_cache_core::{CacheConfig, CacheError, NativeCache};
@@ -277,6 +278,13 @@ impl NativeCacheAdapter {
         let response = patch_response_id_ra(&lookup.response, request_id)
             .map_err(|_| CacheAdapterError::InvalidQuery)?;
         Ok(Some(CacheHit {
+            origin: lookup
+                .attachment
+                .as_ref()
+                .and_then(|attachment| {
+                    attachment.downcast_ref::<mosdns_sequence_core::ResponseOrigin>()
+                })
+                .cloned(),
             response,
             domain_set: String::from_utf8(lookup.domain_set)
                 .map_err(|_| CacheAdapterError::InvalidQuery)?,
@@ -354,14 +362,20 @@ impl NativeCacheAdapter {
     pub async fn stop_refreshes(&self) -> Result<(), CacheAdapterError> {
         self.owner.stopped.set(true);
         self.owner.cancellation.cancel();
-        let mut tasks = std::mem::take(&mut *self.owner.tasks.borrow_mut());
-        let mut failed = self.owner.failed.get();
-        while let Some(result) = tasks.join_next().await {
-            if result.is_err() {
-                failed = true;
+        self.join_refreshes().await
+    }
+
+    async fn join_refreshes(&self) -> Result<(), CacheAdapterError> {
+        let mut drain = RefreshDrain::new(self.owner.clone());
+        while let Some(tasks) = drain.tasks.last_mut() {
+            while let Some(result) = tasks.join_next().await {
+                if result.is_err() {
+                    self.owner.failed.set(true);
+                }
             }
+            drain.tasks.pop();
         }
-        if failed {
+        if self.owner.failed.get() {
             return Err(CacheAdapterError::Cache(CacheError::Internal));
         }
         Ok(())
@@ -372,6 +386,11 @@ impl NativeCacheAdapter {
         self.dump_file = path;
         self.dump_interval = interval;
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inject_refresh_join_failure(&self) {
+        self.owner.failed.set(true);
     }
 
     #[doc(hidden)]
@@ -603,15 +622,30 @@ impl NativeCacheAdapter {
         }
     }
     fn start_periodic(&self) {
+        self.stage_periodic(None);
+    }
+
+    fn stage_periodic(
+        &self,
+        activation: Option<Rc<PeriodicActivation>>,
+    ) -> Option<tokio::task::AbortHandle> {
         if self.dump_file.is_none()
             || !self.owner.periodic.borrow().is_empty()
             || self.owner.stopped.get()
         {
-            return;
+            return None;
         }
         let adapter = self.clone();
         let cancellation = self.owner.cancellation.clone();
-        self.owner.periodic.borrow_mut().spawn_local(async move {
+        let task = self.owner.periodic.borrow_mut().spawn_local(async move {
+            if let Some(activation) = activation {
+                while !activation.active.get() {
+                    tokio::select! {
+                        () = cancellation.cancelled() => return,
+                        () = activation.ready.notified() => {},
+                    }
+                }
+            }
             loop {
                 tokio::select! {
                     () = cancellation.cancelled() => break,
@@ -622,13 +656,21 @@ impl NativeCacheAdapter {
                     } => {},
                 }
                 let _guard = adapter.owner.management_gate.lock().await;
+                if cancellation.is_cancelled() || adapter.owner.stopped.get() {
+                    break;
+                }
                 if adapter.is_dirty() {
                     if let Err(error) = adapter.commit_operation(ManagementOperation::Save).await { eprintln!("cache periodic save: {error}"); }
                 }
             }
         });
+        Some(task)
     }
     async fn finish_persistence(&self) -> Result<(), CacheAdapterError> {
+        self.join_persistence(true).await
+    }
+
+    async fn join_persistence(&self, final_dump: bool) -> Result<(), CacheAdapterError> {
         self.stop_admission();
         self.owner.cancellation.cancel();
         let mut periodic = std::mem::take(&mut *self.owner.periodic.borrow_mut());
@@ -644,7 +686,7 @@ impl NativeCacheAdapter {
             self.owner.failed.set(true);
             return Err(CacheAdapterError::Closed);
         }
-        if self.dump_file.is_some() {
+        if final_dump && self.dump_file.is_some() {
             self.commit_operation(ManagementOperation::Save).await?;
         }
         Ok(())
@@ -703,6 +745,30 @@ fn normalize_dump_key(key: &[u8], base: &[u8], enable_ecs: bool) -> Option<Vec<u
 
 /// One owner for native publication and refresh lifetime. No client token is
 /// retained here; each task has an owner child cancellation and independent root.
+struct PeriodicActivation {
+    active: Cell<bool>,
+    ready: tokio::sync::Notify,
+}
+pub(crate) struct PreparedPeriodic {
+    activation: Rc<PeriodicActivation>,
+    tasks: Vec<tokio::task::AbortHandle>,
+}
+impl PreparedPeriodic {
+    pub(crate) fn activate(&self) {
+        self.activation.active.set(true);
+        self.activation.ready.notify_waiters();
+    }
+}
+impl Drop for PreparedPeriodic {
+    fn drop(&mut self) {
+        if !self.activation.active.get() {
+            for task in &self.tasks {
+                task.abort();
+            }
+        }
+    }
+}
+
 struct CacheOwner {
     generation: Cell<u64>,
     revision: Cell<u64>,
@@ -714,7 +780,7 @@ struct CacheOwner {
     loaded: Cell<bool>,
     fault: Cell<crate::managed::PersistFault>,
     gate: RefCell<Option<crate::managed::PersistGate>>,
-    management_gate: Rc<tokio::sync::Mutex<()>>,
+    management_gate: Arc<tokio::sync::Mutex<()>>,
     management: RefCell<tokio::task::JoinSet<()>>,
     periodic: RefCell<tokio::task::JoinSet<()>>,
     stopped: Cell<bool>,
@@ -723,7 +789,30 @@ struct CacheOwner {
     host_shutdown: RefCell<Option<TransportCancellation>>,
     active: RefCell<BTreeSet<Vec<u8>>>,
     tasks: RefCell<tokio::task::JoinSet<()>>,
+    interrupted_refresh_joins: RefCell<Vec<tokio::task::JoinSet<()>>>,
 }
+// Cancellation must return pending joins to their supervisor rather than
+// dropping JoinSet (which aborts the safe shared refreshes).
+struct RefreshDrain {
+    owner: Rc<CacheOwner>,
+    tasks: Vec<tokio::task::JoinSet<()>>,
+}
+impl RefreshDrain {
+    fn new(owner: Rc<CacheOwner>) -> Self {
+        let mut tasks = std::mem::take(&mut *owner.interrupted_refresh_joins.borrow_mut());
+        tasks.push(std::mem::take(&mut *owner.tasks.borrow_mut()));
+        Self { owner, tasks }
+    }
+}
+impl Drop for RefreshDrain {
+    fn drop(&mut self) {
+        self.owner
+            .interrupted_refresh_joins
+            .borrow_mut()
+            .append(&mut self.tasks);
+    }
+}
+
 impl CacheOwner {
     fn new() -> Self {
         Self {
@@ -737,7 +826,7 @@ impl CacheOwner {
             loaded: Cell::new(false),
             fault: Cell::new(crate::managed::PersistFault::None),
             gate: RefCell::new(None),
-            management_gate: Rc::new(tokio::sync::Mutex::new(())),
+            management_gate: Arc::new(tokio::sync::Mutex::new(())),
             management: RefCell::new(tokio::task::JoinSet::new()),
             periodic: RefCell::new(tokio::task::JoinSet::new()),
             stopped: Cell::new(false),
@@ -746,6 +835,7 @@ impl CacheOwner {
             host_shutdown: RefCell::new(None),
             active: RefCell::new(BTreeSet::new()),
             tasks: RefCell::new(tokio::task::JoinSet::new()),
+            interrupted_refresh_joins: RefCell::new(Vec::new()),
         }
     }
 }
@@ -826,7 +916,185 @@ pub struct CacheCatalog {
     entries: Rc<Vec<NativeCacheAdapter>>,
 }
 
+fn same_cache_options(
+    old: &crate::config::CachePluginConfig,
+    next: &crate::config::CachePluginConfig,
+) -> bool {
+    old.tag == next.tag
+        && old.kind == next.kind
+        && old.capacity == next.capacity
+        && old.enable_ecs == next.enable_ecs
+        && old.lazy_cache_ttl_secs == next.lazy_cache_ttl_secs
+        && old.dump_file == next.dump_file
+        && old.dump_interval_secs == next.dump_interval_secs
+        && old.exclude_ip == next.exclude_ip
+}
+
+fn same_cache_dependencies(
+    old_config: &crate::config::CompiledConfig,
+    old: &crate::config::CachePluginConfig,
+    next_config: &crate::config::CompiledConfig,
+    next: &crate::config::CachePluginConfig,
+) -> bool {
+    old_config
+        .cache_dependencies
+        .get(old.id.0)
+        .and_then(Option::as_ref)
+        .zip(
+            next_config
+                .cache_dependencies
+                .get(next.id.0)
+                .and_then(Option::as_ref),
+        )
+        .is_some_and(|(previous, next)| previous == next)
+}
+
+/// Holds every current cache owner's persistence lock and rejects late cache
+/// publications while a managed policy transaction crosses its durable point.
+// S5 wires this S3 persistence gate to managed HTTP mutations.
+#[allow(dead_code)]
+pub(crate) struct PolicyTransactionGate {
+    owners: Vec<Rc<CacheOwner>>,
+    _guards: Vec<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for PolicyTransactionGate {
+    fn drop(&mut self) {
+        for owner in &self.owners {
+            owner.blocked.set(false);
+        }
+    }
+}
+
 impl CacheCatalog {
+    pub(crate) fn invalidated_dump_paths(
+        old_config: &crate::config::CompiledConfig,
+        new_config: &crate::config::CompiledConfig,
+    ) -> Vec<std::path::PathBuf> {
+        let mut paths = std::collections::BTreeSet::new();
+        for old in &old_config.caches {
+            let reusable = new_config
+                .caches
+                .iter()
+                .find(|next| same_cache_options(old, next))
+                .is_some_and(|next| same_cache_dependencies(old_config, old, new_config, next));
+            if !reusable {
+                if let Some(path) = &old.dump_file {
+                    paths.insert(path.clone());
+                }
+            }
+        }
+        for next in &new_config.caches {
+            let reusable = old_config
+                .caches
+                .iter()
+                .find(|old| same_cache_options(old, next))
+                .is_some_and(|old| same_cache_dependencies(old_config, old, new_config, next));
+            if !reusable {
+                if let Some(path) = &next.dump_file {
+                    paths.insert(path.clone());
+                }
+            }
+        }
+        paths.into_iter().collect()
+    }
+
+    // S5 wires this S3 persistence gate to managed HTTP mutations.
+    #[allow(dead_code)]
+    pub(crate) async fn acquire_policy_transaction_gate(&self) -> PolicyTransactionGate {
+        let mut seen = std::collections::BTreeSet::new();
+        let owners: Vec<_> = self
+            .entries
+            .iter()
+            .filter_map(|adapter| {
+                let address = Rc::as_ptr(&adapter.owner) as usize;
+                seen.insert(address).then(|| adapter.owner.clone())
+            })
+            .collect();
+        let mut guards = Vec::with_capacity(owners.len());
+        for owner in &owners {
+            guards.push(owner.management_gate.clone().lock_owned().await);
+        }
+        for owner in &owners {
+            owner.blocked.set(true);
+        }
+        PolicyTransactionGate {
+            owners,
+            _guards: guards,
+        }
+    }
+
+    /// Stops exclusive old owners before the policy gate is released. In
+    /// particular, a periodic writer already queued on its persistence lock
+    /// must not recreate the old dump after the candidate runtime is visible.
+    pub(crate) fn fence_exclusive_to(&self, live: &CacheCatalog) {
+        for adapter in self.entries.iter() {
+            if !live
+                .entries
+                .iter()
+                .any(|next| Rc::ptr_eq(&adapter.owner, &next.owner))
+            {
+                adapter.stop_admission();
+                adapter.owner.cancellation.cancel();
+            }
+        }
+    }
+
+    pub(crate) fn reuse_matching(
+        &self,
+        current: &CacheCatalog,
+        old_config: &crate::config::CompiledConfig,
+        new_config: &crate::config::CompiledConfig,
+    ) -> Self {
+        Self::from_adapters(
+            new_config
+                .caches
+                .iter()
+                .map(|next| {
+                    old_config
+                        .caches
+                        .iter()
+                        .find(|old| same_cache_options(old, next))
+                        .and_then(|old| {
+                            same_cache_dependencies(old_config, old, new_config, next)
+                                .then(|| current.get(old.id).cloned())
+                                .flatten()
+                        })
+                        .unwrap_or_else(|| self.get(next.id).expect("candidate cache IDs").clone())
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) async fn retire_exclusive_to(
+        &self,
+        live: &CacheCatalog,
+    ) -> Result<(), CacheAdapterError> {
+        let mut failure = None;
+        for owner in self.entries.iter() {
+            if !live
+                .entries
+                .iter()
+                .any(|next| Rc::ptr_eq(&owner.owner, &next.owner))
+            {
+                owner.stop_admission();
+                if let Err(error) = owner.stop_refreshes().await {
+                    failure.get_or_insert(error);
+                }
+                if let Err(error) = owner.join_persistence(false).await {
+                    failure.get_or_insert(error);
+                }
+            } else {
+                // Preserve safe background work, but join its old snapshot's
+                // finite refresh leases before retiring that metric registry.
+                if let Err(error) = owner.join_refreshes().await {
+                    failure.get_or_insert(error);
+                }
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
     /// Builds a catalog whose index is the [`CacheId`] of each adapter.
     #[must_use]
     pub fn from_adapters(entries: Vec<NativeCacheAdapter>) -> Self {
@@ -862,6 +1130,21 @@ impl CacheCatalog {
             owner.load_startup().await;
         }
     }
+    pub(crate) fn prepare_periodic(&self, shutdown: &TransportCancellation) -> PreparedPeriodic {
+        let activation = Rc::new(PeriodicActivation {
+            active: Cell::new(false),
+            ready: tokio::sync::Notify::new(),
+        });
+        let mut tasks = Vec::new();
+        for owner in self.entries.iter() {
+            *owner.owner.host_shutdown.borrow_mut() = Some(shutdown.clone());
+            if let Some(task) = owner.stage_periodic(Some(activation.clone())) {
+                tasks.push(task);
+            }
+        }
+        PreparedPeriodic { activation, tasks }
+    }
+
     pub(crate) fn start_periodic(&self, shutdown: &TransportCancellation) {
         for owner in self.entries.iter() {
             *owner.owner.host_shutdown.borrow_mut() = Some(shutdown.clone());
@@ -892,6 +1175,7 @@ impl CacheCatalog {
 /// One request-owned cache publication token. Dropping it is the normal path
 /// for cancellation, failed execution, malformed responses, and local errors.
 pub struct CacheHit {
+    pub origin: Option<mosdns_sequence_core::ResponseOrigin>,
     pub response: Vec<u8>,
     pub domain_set: String,
     pub state: mosdns_cache_core::LookupState,
@@ -915,6 +1199,15 @@ impl PendingStore {
         self,
         response: &[u8],
         domain_set: &str,
+    ) -> Result<bool, CacheAdapterError> {
+        self.publish_with_origin(response, domain_set, None)
+    }
+
+    pub(crate) fn publish_with_origin(
+        self,
+        response: &[u8],
+        domain_set: &str,
+        origin: Option<mosdns_sequence_core::ResponseOrigin>,
     ) -> Result<bool, CacheAdapterError> {
         if self.adapter.owner.blocked.get()
             || self.adapter.owner.failed.get()
@@ -981,7 +1274,7 @@ impl PendingStore {
             at.checked_add(i64::from(ttl))
                 .ok_or(CacheAdapterError::ExpiryOverflow)
         };
-        self.adapter.cache.store_timed(
+        self.adapter.cache.store_timed_with_attachment(
             &self.key,
             &clean,
             domain_set.as_bytes(),
@@ -991,6 +1284,7 @@ impl PendingStore {
                 add(stored_at, cache_ttl)?,
             ],
             Some([wall, add(wall, retention)?, add(wall, cache_ttl)?]),
+            origin.map(mosdns_cache_core::NativeAttachment::new),
         )?;
         self.adapter.owner.revision.set(next_revision);
         Ok(true)
@@ -1122,6 +1416,200 @@ impl From<ResponseError> for CacheAdapterError {
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
+
+    #[test]
+    fn stopped_owner_keeps_reads_for_an_already_captured_generation() {
+        let adapter = NativeCacheAdapter::for_test(CacheTestClock::new(1000)).unwrap();
+        let (query, response) = query_response();
+        adapter
+            .begin_store(&query)
+            .unwrap()
+            .unwrap()
+            .publish(&response)
+            .unwrap();
+
+        adapter.stop_admission();
+
+        assert!(adapter.lookup(&query).unwrap().is_some());
+        let late = adapter.begin_store(&query).unwrap().unwrap();
+        assert!(!late.publish(&response).unwrap());
+    }
+
+    #[test]
+    fn policy_transaction_gate_blocks_late_store_and_fences_retired_owner() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let adapter = NativeCacheAdapter::for_test(CacheTestClock::new(1000)).unwrap();
+            let old = CacheCatalog::from_adapters(vec![adapter.clone()]);
+            let live = CacheCatalog::from_adapters(Vec::new());
+            let (query, response) = query_response();
+            let admitted_before_commit = adapter.begin_store(&query).unwrap().unwrap();
+            let gate = old.acquire_policy_transaction_gate().await;
+            let admitted_while_gated = adapter.begin_store(&query).unwrap().unwrap();
+            assert!(!admitted_while_gated.publish(&response).unwrap());
+
+            old.fence_exclusive_to(&live);
+            drop(gate);
+            assert!(adapter.owner.stopped.get());
+            assert!(
+                !admitted_before_commit.publish(&response).unwrap(),
+                "a pre-commit miss cannot publish into an owner retired at swap"
+            );
+        });
+    }
+
+    #[test]
+    fn retired_cache_owner_cancels_lazy_refresh_before_publication() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let clock = CacheTestClock::new(1000);
+            let cache = NativeCacheAdapter::with_options_and_clock(8, 3600, Rc::new(clock.clone()))
+                .unwrap();
+            let (query, response) = query_response();
+            let entry = mosdns_cache_core::NativeSnapshotEntry {
+                attachment: None,
+                key: cache.key_for_query(&query).unwrap().unwrap(),
+                response: response.clone(),
+                domain_set: Vec::new(),
+                times: [0; 3],
+                wall_times: Some([900, 999, 2000]),
+            };
+            cache
+                .import_dump(crate::cache_dump::encode(&[entry]).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                cache.lookup_entry(&query).unwrap().unwrap().state,
+                mosdns_cache_core::LookupState::Lazy
+            );
+
+            let old = CacheCatalog::from_adapters(vec![cache.clone()]);
+            let replacement =
+                NativeCacheAdapter::with_options_and_clock(8, 3600, Rc::new(clock)).unwrap();
+            let live = CacheCatalog::from_adapters(vec![replacement.clone()]);
+            let (started, started_rx) = tokio::sync::oneshot::channel();
+            let (release, release_rx) = tokio::sync::oneshot::channel();
+            let published = Rc::new(Cell::new(false));
+            let publish_result = published.clone();
+            let fresh_response = response.clone();
+            assert!(
+                cache
+                    .start_refresh(&query, move |pending, _, _| async move {
+                        let _ = started.send(());
+                        let _ = release_rx.await;
+                        publish_result.set(pending.publish(&fresh_response).unwrap());
+                    })
+                    .unwrap()
+            );
+            started_rx.await.unwrap();
+
+            let gate = old.acquire_policy_transaction_gate().await;
+            old.fence_exclusive_to(&live);
+            drop(gate);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                old.retire_exclusive_to(&live),
+            )
+            .await
+            .expect("retirement cancels and joins the stale refresh")
+            .unwrap();
+
+            assert_eq!(cache.pending_refreshes(), 0);
+            assert_eq!(
+                cache.lookup_entry(&query).unwrap().unwrap().state,
+                mosdns_cache_core::LookupState::Lazy,
+                "the retired response remains unchanged"
+            );
+            assert!(!published.get());
+            assert!(
+                release.send(()).is_err(),
+                "the old refresh future was dropped"
+            );
+            assert!(replacement.lookup_entry(&query).unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn canceled_shared_retirement_keeps_pending_work_owned() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let adapter = NativeCacheAdapter::for_test(CacheTestClock::new(1000)).unwrap();
+            let old = CacheCatalog::from_adapters(vec![adapter.clone()]);
+            let live = CacheCatalog::from_adapters(vec![adapter.clone()]);
+            let (release, waiting) = tokio::sync::oneshot::channel();
+            let completed = Rc::new(Cell::new(false));
+            let result = completed.clone();
+            adapter.owner.tasks.borrow_mut().spawn_local(async move {
+                waiting.await.unwrap();
+                result.set(true);
+            });
+            assert!(
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(10),
+                    old.retire_exclusive_to(&live)
+                )
+                .await
+                .is_err()
+            );
+            release
+                .send(())
+                .expect("shared work must survive canceled retirement");
+            old.retire_exclusive_to(&live).await.unwrap();
+            assert!(completed.get());
+            assert!(!adapter.owner.stopped.get());
+        });
+    }
+
+    #[test]
+    fn staged_periodic_writer_stays_inactive_until_publication() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let path = std::env::temp_dir()
+                .join(format!("native-staged-periodic-{}.gz", std::process::id()));
+            let _ = std::fs::remove_file(&path);
+            let adapter = NativeCacheAdapter::for_test(CacheTestClock::new(1000))
+                .unwrap()
+                .with_persistence(Some(path.clone()), 1);
+            let (query, response) = query_response();
+            adapter
+                .begin_store(&query)
+                .unwrap()
+                .unwrap()
+                .publish_with_domain(&response, "staged")
+                .unwrap();
+            let catalog = CacheCatalog::from_adapters(vec![adapter]);
+            let prepared = catalog.prepare_periodic(&TransportCancellation::new());
+            tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+            assert!(
+                !path.exists(),
+                "prepared writer must not act before publication"
+            );
+            prepared.activate();
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                while !path.exists() {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            catalog.stop_refreshes().await.unwrap();
+            catalog.finish_persistence().await.unwrap();
+            std::fs::remove_file(path).unwrap();
+        });
+    }
+
     fn query_response() -> (Vec<u8>, Vec<u8>) {
         let query = vec![0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, b'a', 0, 0, 1, 0, 1];
         let mut response = query.clone();

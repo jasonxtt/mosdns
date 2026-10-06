@@ -1,0 +1,12 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 1 test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-157919-marker/webinfo/audit_settings.json)
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-157919-swap/webinfo/audit_settings.json)
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-157919-retirement/webinfo/audit_settings.json)
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-kill-157919-cleanup/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::sigkill_after_marker_swap_retirement_and_cleanup_recovers_committed_candidate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 143 filtered out; finished in 0.06s
+

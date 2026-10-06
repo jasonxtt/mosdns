@@ -1,0 +1,27 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.11s
+     Running unittests src/lib.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/mosdns_native_host-feda8807cc9f5d81)
+
+running 12 tests
+test runtime_snapshot::admission_tests::apply_admission_gate_closes_and_recovers_without_touching_the_snapshot ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-98875-0/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::ambiguous_marker_failure_fails_closed_and_retains_transaction_evidence ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-98875-1/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::cleanup_failures_still_close_retired_and_current_transports ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-98875-2/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::host_shutdown_before_marker_rolls_back_and_does_not_reopen_admission ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-98875-3/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::committed_apply_finishes_after_client_disconnect_and_host_shutdown ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-98875-4/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::managed_apply_closes_admission_then_waits_for_existing_management_write ... ok
+test runtime_snapshot::admission_tests::managed_apply_crash_child ... ignored, subprocess crash probe invoked by the parent recovery test
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-98875-5/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::managed_apply_conflict_keeps_external_edit_and_reopens_old_generation ... ok
+test runtime_snapshot::admission_tests::managed_apply_replaces_files_swaps_runtime_and_cleans_after_retirement ... ok
+native audit settings diagnostic: using default: settings file is missing (/tmp/native-managed-apply-98875-6/webinfo/audit_settings.json)
+test runtime_snapshot::admission_tests::rollback_failure_enters_recovery_required_and_retains_journal ... ok
+test runtime_snapshot::admission_tests::sigkill_after_marker_swap_retirement_and_cleanup_recovers_committed_candidate ... ok
+test runtime_snapshot::admission_tests::publication_rejects_removed_bindings_before_supervisor_cancellation ... ok
+
+test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 119 filtered out; finished in 0.13s
+

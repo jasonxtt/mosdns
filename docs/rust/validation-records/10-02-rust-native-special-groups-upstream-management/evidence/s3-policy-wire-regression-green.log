@@ -1,0 +1,118 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: struct `PolicyTransactionGate` is never constructed
+   --> native-host/src/cache.rs:914:19
+    |
+914 | pub(crate) struct PolicyTransactionGate {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `acquire_policy_transaction_gate` is never used
+   --> native-host/src/cache.rs:928:25
+    |
+927 | impl CacheCatalog {
+    | ----------------- method in this implementation
+928 |     pub(crate) async fn acquire_policy_transaction_gate(&self) -> PolicyTransactionGate {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `store_io_gate` is never read
+  --> native-host/src/runtime_snapshot.rs:75:5
+   |
+67 | struct Control {
+   |        ------- field in this struct
+...
+75 |     store_io_gate: Arc<tokio::sync::Semaphore>,
+   |     ^^^^^^^^^^^^^
+
+warning: function `wait_for_shutdown` is never used
+   --> native-host/src/runtime_snapshot.rs:101:10
+    |
+101 | async fn wait_for_shutdown(token: Option<mosdns_upstream_core::TransportCancellation>) {
+    |          ^^^^^^^^^^^^^^^^^
+
+warning: enum `ApplyFailure` is never used
+   --> native-host/src/runtime_snapshot.rs:145:17
+    |
+145 | pub(crate) enum ApplyFailure {
+    |                 ^^^^^^^^^^^^
+
+warning: multiple associated items are never used
+   --> native-host/src/runtime_snapshot.rs:264:19
+    |
+219 | impl RuntimeControl {
+    | ------------------- associated items in this implementation
+...
+264 |     pub(crate) fn compile_managed_candidate(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+305 |     pub(crate) async fn with_managed_store<T, F>(
+    |                         ^^^^^^^^^^^^^^^^^^
+...
+351 |     pub(crate) fn pause_admission(&self) -> Result<(), AssemblyError> {
+    |                   ^^^^^^^^^^^^^^^
+...
+361 |     pub(crate) fn resume_admission(&self) {
+    |                   ^^^^^^^^^^^^^^^^
+...
+395 |     async fn wait_management_drain(&self) {
+    |              ^^^^^^^^^^^^^^^^^^^^^
+...
+653 |     fn shutdown_token(&self) -> Option<mosdns_upstream_core::TransportCancellation> {
+    |        ^^^^^^^^^^^^^^
+...
+657 |     fn shutdown_requested(&self) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^
+...
+662 |     async fn abort_precommit(
+    |              ^^^^^^^^^^^^^^^
+...
+686 |     fn map_transaction_error(error: crate::transaction::TransactionError) -> ApplyFailure {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+...
+700 |     pub(crate) async fn apply_candidate(
+    |                         ^^^^^^^^^^^^^^^
+
+warning: methods `persistence` and `into_parts` are never used
+   --> native-host/src/transaction.rs:163:19
+    |
+152 | impl CompiledCandidate {
+    | ---------------------- methods in this implementation
+...
+163 |     pub(crate) fn persistence(&self) -> &CandidatePersistence {
+    |                   ^^^^^^^^^^^
+...
+166 |     pub(crate) fn into_parts(mut self) -> (crate::config::CompiledConfig, CandidatePersistence) {
+    |                   ^^^^^^^^^^
+
+warning: `mosdns-native-host` (lib) generated 7 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.32s
+     Running tests/policy_wire.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/policy_wire-d45469055049b519)
+
+running 24 tests
+test cache_before_and_inside_redirect_owns_correct_wire_and_key ... ok
+test composition_ip_condition_selects_fallback_supplier_and_keeps_both_attempts ... ok
+test composition_ip_matchers_see_target_and_restored_cached_answers_at_their_own_boundaries ... ok
+test composition_lazy_refresh_uses_same_immutable_hosts_snapshot ... ok
+test composition_redirect_preference_probe_uses_current_question_and_qtype_matchers ... ok
+test composition_retained_dump_can_hit_old_policy_until_quiescent_durable_flush ... ok
+test composition_ttl_inside_and_outside_cache_keep_distinct_stored_ttls ... ok
+test direct_fallback_hosts_target_continues_into_branch_ttl ... ok
+test hosts_dual_stack_order_ttl_and_continue_into_quick_ttl ... ok
+test hosts_empty_family_has_complete_fake_soa ... ok
+test hosts_no_hit_no_addresses_non_in_and_non_address_continue ... ok
+test hosts_replaces_upstream_supplier_but_preserves_actual_attempts ... ok
+test nested_redirect_restores_each_question_and_negative_soa ... ok
+test redirect_consumes_jump_continuation_exactly_once_before_restoration ... ok
+test composition_fallback_redirect_siblings_are_isolated_and_cancelled_supplier_never_wins ... ok
+test redirect_exit_decorates_response_but_never_publishes_outer_cache ... ok
+test redirect_exit_through_named_fallback_target_keeps_abort_and_skips_parent_tail ... ok
+test redirect_non_in_is_noop_and_direct_fallback_redirect_uses_current_target ... ok
+test redirect_query_view_preserves_flags_qtype_and_opt ... ok
+test redirect_sends_actual_target_preserves_existing_chain_and_admission_audit ... ok
+test response_ip_named_cidr_or_ipv6_and_mapped_addresses_drive_real_sequence ... ok
+test response_ip_text_file_is_or_snapshot_not_request_time_io ... ok
+test ttl_fixed_zero_is_noop_and_range_zero_is_unbounded ... ok
+test redirect_cycle_shares_root_fuel_and_cannot_manufacture_success ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.06s
+

@@ -1,0 +1,247 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+error[E0425]: cannot find function `build_domain_set_with_inputs` in this scope
+    --> native-host/src/config.rs:2237:9
+     |
+2237 |         build_domain_set_with_inputs(
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in this scope
+     |
+help: consider importing this function
+     |
+   1 + use crate::matchers::build_domain_set_with_inputs;
+     |
+
+warning: unused import: `build_domain_set`
+  --> native-host/src/config.rs:23:37
+   |
+23 |     ResponseIpMatcher, TrueMatcher, build_domain_set, resolve_rule_path,
+   |                                     ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0308]: mismatched types
+   --> native-host/src/transaction.rs:475:33
+    |
+460 |             if !seen.insert(&file.path) {
+    |                 ----        ---------- this argument has type `&PathBuf`...
+    |                 |
+    |                 ... which causes `seen` to have type `BTreeSet<&PathBuf>`
+...
+475 |                 || !seen.insert(crate::special_groups::lexical_path(&input.path))
+    |                          ------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `&PathBuf`, found `PathBuf`
+    |                          |
+    |                          arguments to this method are incorrect
+    |
+note: method defined here
+   --> /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/alloc/src/collections/btree/set.rs:898:11
+help: consider borrowing here
+    |
+475 |                 || !seen.insert(&crate::special_groups::lexical_path(&input.path))
+    |                                 +
+
+warning: variable does not need to be mutable
+    --> native-host/src/config.rs:1070:5
+     |
+1070 |     mut inputs: Option<&mut crate::special_groups::CandidateInputSet>,
+     |     ----^^^^^^
+     |     |
+     |     help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0505]: cannot move out of `forward_compiler` because it is borrowed
+    --> native-host/src/config.rs:1465:28
+     |
+1379 |     let forward_compiler = RefCell::new(ForwardCompiler {
+     |         ---------------- binding `forward_compiler` declared here
+...
+1394 |         forwards: &forward_compiler,
+     |                   ----------------- borrow of `forward_compiler` occurs here
+...
+1465 |     let forward_compiler = forward_compiler.into_inner();
+     |                            ^^^^^^^^^^^^^^^^ move out of `forward_compiler` occurs here
+...
+1716 |     drop(catalog);
+     |          ------- borrow later used here
+     |
+note: if `ForwardCompiler` implemented `Clone`, you could clone the value
+    --> native-host/src/config.rs:120:1
+     |
+ 120 | struct ForwardCompiler {
+     | ^^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+...
+1394 |         forwards: &forward_compiler,
+     |                    ---------------- you could clone this value
+
+error[E0505]: cannot move out of `preference_invocations` because it is borrowed
+    --> native-host/src/config.rs:1474:34
+     |
+1383 |     let preference_invocations = RefCell::new(Vec::new());
+     |         ---------------------- binding `preference_invocations` declared here
+...
+1395 |         preferences: &preference_invocations,
+     |                      ----------------------- borrow of `preference_invocations` occurs here
+...
+1474 |     let preference_invocations = preference_invocations.into_inner();
+     |                                  ^^^^^^^^^^^^^^^^^^^^^^ move out of `preference_invocations` occurs here
+...
+1716 |     drop(catalog);
+     |          ------- borrow later used here
+     |
+help: consider cloning the value if the performance cost is acceptable
+     |
+1395 |         preferences: &preference_invocations.clone(),
+     |                                             ++++++++
+
+error[E0505]: cannot move out of `quick_caches` because it is borrowed
+    --> native-host/src/config.rs:1475:29
+     |
+1384 |     let quick_caches = RefCell::new(Vec::new());
+     |         ------------ binding `quick_caches` declared here
+...
+1396 |         quick_caches: &quick_caches,
+     |                       ------------- borrow of `quick_caches` occurs here
+...
+1475 |     let quick_cache_specs = quick_caches.into_inner();
+     |                             ^^^^^^^^^^^^ move out of `quick_caches` occurs here
+...
+1716 |     drop(catalog);
+     |          ------- borrow later used here
+     |
+note: if `QuickCacheSpec` implemented `Clone`, you could clone the value
+    --> native-host/src/config.rs:1035:1
+     |
+1035 | struct QuickCacheSpec {
+     | ^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+...
+1396 |         quick_caches: &quick_caches,
+     |                        ------------ you could clone this value
+
+error[E0505]: cannot move out of `policies` because it is borrowed
+    --> native-host/src/config.rs:1476:20
+     |
+1234 |     let policies = RefCell::new(Vec::new());
+     |         -------- binding `policies` declared here
+...
+1386 |         policies: &policies,
+     |                   --------- borrow of `policies` occurs here
+...
+1476 |     let policies = policies.into_inner();
+     |                    ^^^^^^^^ move out of `policies` occurs here
+...
+1716 |     drop(catalog);
+     |          ------- borrow later used here
+     |
+note: if `ResponsePolicy` implemented `Clone`, you could clone the value
+    --> native-host/src/policy.rs:140:1
+     |
+ 140 | pub enum ResponsePolicy {
+     | ^^^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+     |
+    ::: native-host/src/config.rs:1386:20
+     |
+1386 |         policies: &policies,
+     |                    -------- you could clone this value
+
+error[E0505]: cannot move out of `ip_sets` because it is borrowed
+    --> native-host/src/config.rs:1669:9
+     |
+1235 |     let mut ip_sets = Vec::new();
+     |         ----------- binding `ip_sets` declared here
+...
+1387 |         ip_sets: &ip_sets,
+     |                  -------- borrow of `ip_sets` occurs here
+...
+1669 |         ip_sets,
+     |         ^^^^^^^ move out of `ip_sets` occurs here
+...
+1716 |     drop(catalog);
+     |          ------- borrow later used here
+     |
+note: if `IpSetConfig` implemented `Clone`, you could clone the value
+    --> native-host/src/policy.rs:152:1
+     |
+ 152 | pub struct IpSetConfig {
+     | ^^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+     |
+    ::: native-host/src/config.rs:1387:19
+     |
+1387 |         ip_sets: &ip_sets,
+     |                   ------- you could clone this value
+
+error[E0505]: cannot move out of `response_ip_rules` because it is borrowed
+    --> native-host/src/config.rs:1670:28
+     |
+1236 |     let response_ip_rules = RefCell::new(Vec::new());
+     |         ----------------- binding `response_ip_rules` declared here
+...
+1388 |         response_ip_rules: &response_ip_rules,
+     |                            ------------------ borrow of `response_ip_rules` occurs here
+...
+1670 |         response_ip_rules: response_ip_rules.into_inner(),
+     |                            ^^^^^^^^^^^^^^^^^ move out of `response_ip_rules` occurs here
+...
+1716 |     drop(catalog);
+     |          ------- borrow later used here
+     |
+note: if `ResponseIpRuleConfig` implemented `Clone`, you could clone the value
+    --> native-host/src/config.rs:489:1
+     |
+ 489 | pub struct ResponseIpRuleConfig {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+...
+1388 |         response_ip_rules: &response_ip_rules,
+     |                             ----------------- you could clone this value
+
+error[E0308]: mismatched types
+   --> native-host/src/transaction.rs:475:33
+    |
+460 |             if !seen.insert(&file.path) {
+    |                 ----        ---------- this argument has type `&std::path::PathBuf`...
+    |                 |
+    |                 ... which causes `seen` to have type `BTreeSet<&std::path::PathBuf>`
+...
+475 |                 || !seen.insert(crate::special_groups::lexical_path(&input.path))
+    |                          ------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `&PathBuf`, found `PathBuf`
+    |                          |
+    |                          arguments to this method are incorrect
+    |
+note: method defined here
+   --> /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/alloc/src/collections/btree/set.rs:898:11
+help: consider borrowing here
+    |
+475 |                 || !seen.insert(&crate::special_groups::lexical_path(&input.path))
+    |                                 +
+
+Some errors have detailed explanations: E0308, E0425, E0505.
+For more information about an error, try `rustc --explain E0308`.
+warning: `mosdns-native-host` (lib) generated 2 warnings
+error: could not compile `mosdns-native-host` (lib) due to 8 previous errors; 2 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+error[E0505]: cannot move out of `policies` because it is borrowed
+    --> native-host/src/config.rs:1476:20
+     |
+1234 |     let policies = RefCell::new(Vec::new());
+     |         -------- binding `policies` declared here
+...
+1386 |         policies: &policies,
+     |                   --------- borrow of `policies` occurs here
+...
+1476 |     let policies = policies.into_inner();
+     |                    ^^^^^^^^ move out of `policies` occurs here
+...
+1716 |     drop(catalog);
+     |          ------- borrow later used here
+     |
+note: if `policy::ResponsePolicy` implemented `Clone`, you could clone the value
+    --> native-host/src/policy.rs:140:1
+     |
+ 140 | pub enum ResponsePolicy {
+     | ^^^^^^^^^^^^^^^^^^^^^^^ consider implementing `Clone` for this type
+     |
+    ::: native-host/src/config.rs:1386:20
+     |
+1386 |         policies: &policies,
+     |                    -------- you could clone this value
+
+warning: `mosdns-native-host` (lib test) generated 2 warnings (2 duplicates)
+error: could not compile `mosdns-native-host` (lib test) due to 8 previous errors; 2 warnings emitted

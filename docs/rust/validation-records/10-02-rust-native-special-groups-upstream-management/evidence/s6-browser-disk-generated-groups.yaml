@@ -1,0 +1,5 @@
+plugins:
+- args:
+  - exec: return
+  tag: special_upstream_matcher
+  type: sequence

@@ -11,6 +11,10 @@ defineProps({
   isEditing: {
     type: Boolean,
     default: false
+  },
+  nativeLocalText: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -33,30 +37,33 @@ defineEmits([
           <h3>{{ isEditing ? '编辑分流规则' : '新增分流规则' }}</h3>
           <button class="btn tiny secondary" type="button" @click="$emit('close')">✕</button>
         </header>
+        <p v-if="nativeLocalText" class="muted" role="note">
+          本地文本规则只读取本地 .txt 文件。在线下载、自动更新、正则和高级数据格式不可用；编辑时不能更改规则所属组。
+        </p>
         <div class="form-grid">
           <label>类型</label>
-          <select v-model="editor.type" @change="$emit('type-change')">
+          <select v-model="editor.type" :disabled="nativeLocalText && isEditing" @change="$emit('type-change')">
             <option v-for="item in diversionTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
-          <label v-if="!isEditing">自动识别</label>
-          <div v-if="!isEditing" class="autofill-actions">
+          <label v-if="!isEditing && !nativeLocalText">自动识别</label>
+          <div v-if="!isEditing && !nativeLocalText" class="autofill-actions">
             <small class="muted">输入 URL 后会自动识别名称和本地文件路径，也可以手动点击“自动识别”。</small>
             <button class="btn tiny secondary" type="button" @click="$emit('apply-autofill')">自动识别</button>
           </div>
-          <label>URL</label>
-          <input v-model="editor.url" @input="$emit('url-input')" />
+          <label>{{ nativeLocalText ? 'URL（不可用）' : 'URL' }}</label>
+          <input v-model="editor.url" :disabled="nativeLocalText" :placeholder="nativeLocalText ? '原生模式不使用 URL' : ''" @input="$emit('url-input')" />
           <label>名称</label>
           <input v-model="editor.name" @input="$emit('name-input')" />
           <label>本地文件</label>
-          <input v-model="editor.files" placeholder="例如 /cus/mosdns/srs/geo/cn.json" @input="$emit('files-input')" />
-          <label>更新间隔 (小时)</label>
-          <input v-model.number="editor.update_interval_hours" type="number" min="1" />
+          <input v-model="editor.files" :placeholder="nativeLocalText ? '例如 rules/custom.txt' : '例如 /cus/mosdns/srs/geo/cn.json'" @input="$emit('files-input')" />
+          <label>{{ nativeLocalText ? '更新间隔（不可用）' : '更新间隔 (小时)' }}</label>
+          <input v-model.number="editor.update_interval_hours" type="number" min="1" :disabled="nativeLocalText" />
           <label>启用</label>
           <label class="switch-inline"><input v-model="editor.enabled" type="checkbox" /><span>{{ editor.enabled ? '已启用' : '已禁用' }}</span></label>
-          <label>自动更新</label>
-          <label class="switch-inline"><input v-model="editor.auto_update" type="checkbox" /><span>{{ editor.auto_update ? '开启' : '关闭' }}</span></label>
-          <label>启用正则</label>
-          <label class="switch-inline"><input v-model="editor.enable_regexp" type="checkbox" /><span>{{ editor.enable_regexp ? '开启' : '关闭' }}</span></label>
+          <label>{{ nativeLocalText ? '自动更新（不可用）' : '自动更新' }}</label>
+          <label class="switch-inline"><input v-model="editor.auto_update" type="checkbox" :disabled="nativeLocalText" /><span>{{ editor.auto_update ? '开启' : '关闭' }}</span></label>
+          <label>{{ nativeLocalText ? '启用正则（不可用）' : '启用正则' }}</label>
+          <label class="switch-inline"><input v-model="editor.enable_regexp" type="checkbox" :disabled="nativeLocalText" /><span>{{ editor.enable_regexp ? '开启' : '关闭' }}</span></label>
         </div>
         <div class="actions">
           <button class="btn secondary" @click="$emit('close')">取消</button>

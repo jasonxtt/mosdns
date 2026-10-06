@@ -1,0 +1,41 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+warning: method `try_admit` is never used
+    --> native-host/src/observer.rs:1494:19
+     |
+1206 | impl QueryObserver {
+     | ------------------ method in this implementation
+...
+1494 |     pub(crate) fn try_admit(
+     |                   ^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mosdns-native-host` (lib) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 6.24s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-dec9d4e49d597c3a)
+
+running 2 tests
+test custom_udp_tcp_pair_serves_the_group_without_main_matching ... FAILED
+test occupied_tcp_rolls_back_the_prebound_udp_half ... FAILED
+
+failures:
+
+---- custom_udp_tcp_pair_serves_the_group_without_main_matching stdout ----
+
+thread 'custom_udp_tcp_pair_serves_the_group_without_main_matching' (19155) panicked at native-host/tests/special_groups_supervisor.rs:33:81:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[1].args.listen", reason: "port must be nonzero" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- occupied_tcp_rolls_back_the_prebound_udp_half stdout ----
+
+thread 'occupied_tcp_rolls_back_the_prebound_udp_half' (19156) panicked at native-host/tests/special_groups_supervisor.rs:33:81:
+called `Result::unwrap()` on an `Err` value: ConfigError { path: "$.plugins[1].args.listen", reason: "port must be nonzero" }
+
+
+failures:
+    custom_udp_tcp_pair_serves_the_group_without_main_matching
+    occupied_tcp_rolls_back_the_prebound_udp_half
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_supervisor`

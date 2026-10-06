@@ -1,0 +1,22 @@
+   Compiling mosdns-native-host v0.1.0 (/root/mosdns-rust-special-groups-20261003/src/rust/native-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.91s
+     Running tests/special_groups_supervisor.rs (/root/mosdns-rust-special-groups-20261003/target-candidate/debug/deps/special_groups_supervisor-ffd12075785eba3b)
+
+running 1 test
+cache startup /tmp/managed-supervisor-137580-0/cache/cache_special_50.dump: cache persistence: No such file or directory (os error 2); starting empty
+
+thread 'special_groups_http_view_reflects_the_committed_profile' (137581) panicked at native-host/tests/special_groups_supervisor.rs:539:9:
+assertion `left == right` failed
+  left: Null
+ right: 50
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test special_groups_http_view_reflects_the_committed_profile ... FAILED
+
+failures:
+
+failures:
+    special_groups_http_view_reflects_the_committed_profile
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p mosdns-native-host --test special_groups_supervisor`

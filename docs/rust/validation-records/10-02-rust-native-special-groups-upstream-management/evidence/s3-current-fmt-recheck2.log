@@ -1,0 +1,68 @@
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/api.rs:601:
+         &request_shutdown,
+         &request,
+     );
+-    let response = await_dispatch_after_disconnect(
+-        &shutdown,
+-        &request_shutdown,
+-        _reader,
+-        dispatch,
+-    )
+-    .await;
++    let response =
++        await_dispatch_after_disconnect(&shutdown, &request_shutdown, _reader, dispatch).await;
+     // Mutation ownership covers the disk/runtime operation, not a slow
+     // response write after the operation has already completed.
+     drop(_management_lease);
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/config.rs:791:
+             )?);
+         }
+     }
+-    let mut compiled = compile_definitions(
+-        log,
+-        api,
+-        definitions,
+-        managed.is_some(),
+-        staged,
+-        inputs,
+-    )?;
++    let mut compiled =
++        compile_definitions(log, api, definitions, managed.is_some(), staged, inputs)?;
+     if let Some(profile) = managed {
+         let router = compiled
+             .program
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1235:
+                 )
+                 .unwrap();
+             let task_control = control.clone();
+-            let apply = tokio::task::spawn_local(
+-                async move { task_control.apply_candidate(candidate).await },
+-            );
++            let apply =
++                tokio::task::spawn_local(
++                    async move { task_control.apply_candidate(candidate).await },
++                );
+             gate.wait_until_reached().await;
+ 
+             let journal = root.join("webinfo/native_management.transaction");
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1282:
+                 )
+                 .unwrap();
+ 
+-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+-                .await
+-                .unwrap();
++            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+             let mut client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+                 .await
+                 .unwrap();
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/runtime_snapshot.rs:1307:
+ 
+             gate.wait_until_reached().await;
+             assert!(
+-                root.join("webinfo/native_management.transaction/commit").is_file(),
++                root.join("webinfo/native_management.transaction/commit")
++                    .is_file(),
+                 "the durable commit marker precedes the disconnect"
+             );
+             client.shutdown().await.unwrap();

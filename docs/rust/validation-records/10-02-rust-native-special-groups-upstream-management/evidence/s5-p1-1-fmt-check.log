@@ -1,0 +1,30 @@
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/api.rs:2918:
+ fn managed_config_path(
+     profile: &crate::special_groups::ManagedProfile,
+ ) -> Result<PathBuf, Response> {
+-    profile.config_path.clone().ok_or_else(|| {
+-        Response::error(503, "managed root configuration path is unavailable")
+-    })
++    profile
++        .config_path
++        .clone()
++        .ok_or_else(|| Response::error(503, "managed root configuration path is unavailable"))
+ }
+ 
+ fn transaction_error_response(error: crate::transaction::TransactionError) -> Response {
+Diff in /root/mosdns-rust-special-groups-20261003/src/rust/native-host/src/assembly.rs:208:
+         }
+         let canonical_config_path = if let Some(store) = &store {
+             let config_path = path.to_path_buf();
+-            let config_path = crate::transaction::blocking_io(move || {
+-                std::fs::canonicalize(config_path)
+-            })
+-            .map_err(|error| AssemblyError::Runtime(error.to_string()))?
+-            .map_err(|error| AssemblyError::Runtime(error.to_string()))?;
++            let config_path =
++                crate::transaction::blocking_io(move || std::fs::canonicalize(config_path))
++                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?
++                    .map_err(|error| AssemblyError::Runtime(error.to_string()))?;
+             if config_path.parent() != Some(store.root()) {
+                 return Err(AssemblyError::Runtime(
+                     "managed root configuration must reside directly under its state root".into(),

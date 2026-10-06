@@ -1,4 +1,5 @@
 <script setup>
+import { capabilityState, supportsOperation, operationReason, switchTagForType } from '../api/runtimeCapabilities'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getJSON, getText } from '../api/http'
 import DnsOverviewCard from './dashboard/DnsOverviewCard.vue'
@@ -290,6 +291,13 @@ const systemSummaryCards = computed(() => {
   if (!props.showSystemSummary) {
     return []
   }
+  if (capabilityState.value?.kind === 'native') {
+    return [
+      {key:'runtime', title:'运行时', value:'Rust', tone:'ok'},
+      {key:'product-version', title:'产品版本', value:supportsOperation('system.version') ? (capabilityState.health?.version || '读取中') : operationReason('system.version'), tone:'ok'},
+      ...['CPU 时间','常驻内存 (RSS)','GC 次数','Go 版本','go_goroutines','进程 / 系统指标'].map((title,index) => ({key:`unsupported-${index}`,title,value:operationReason('metrics.process'),tone:'neutral'}))
+    ]
+  }
   return [
     {
       key: 'start-time',
@@ -376,7 +384,7 @@ const upstreamStatSections = computed(() => {
   const sections = []
 
   orderedGroups.forEach((group) => {
-    if (dnsRoutingMode.value === 'B' && group === 'nocnfake') {
+    if (capabilityState.value?.kind !== 'native' && dnsRoutingMode.value === 'B' && group === 'nocnfake') {
       return
     }
     const rows = Array.isArray(upstreamConfig.value?.[group]) ? upstreamConfig.value[group] : []
@@ -990,6 +998,7 @@ function generateDualSparklineSVG(totalValues, avgValues, timestamps) {
 }
 
 async function reloadOverview(showMessage = false) {
+  if (capabilityState.status !== 'ready') return
   loading.value = true
   clearTopNotice()
   if (showMessage) {
@@ -1003,8 +1012,9 @@ async function reloadOverview(showMessage = false) {
         error: error?.message || '请求失败',
         status: Number(error?.status || 0)
       }))
-    const optionalPanel = (promise) => auditPanel(promise)
+    const optionalPanel = (operation, request) => supportsOperation(operation) ? auditPanel(request()) : Promise.resolve({data:null,error:'',status:0,unsupported:operationReason(operation)})
     const rankPanels = async () => {
+      if (!supportsOperation('query.rank')) return Object.fromEntries(['domain','client','slowest','rules'].map(key => [key,{data:[],error:'',status:0}]))
       // Native audit ranks use a two-slot, no-queue backend gate. Keep one
       // Overview refresh within that budget even when the page has four rank
       // cards, so a normal refresh cannot manufacture its own 503s.
@@ -1034,13 +1044,16 @@ async function reloadOverview(showMessage = false) {
       metricsRes,
       dnsRoutingModeRes
     ] = await Promise.all([
-      auditPanel(getJSON('/api/v2/audit/stats')),
+      optionalPanel('audit.read', () => getJSON(`/api/${capabilityState.value?.kind === 'native' && capabilityState.value.endpoints.audit_v2 !== true ? 'v1' : 'v2'}/audit/stats`)),
       rankPanels(),
-      optionalPanel(getJSON('/api/v1/special-groups')),
-      optionalPanel(getJSON('/plugins/clientname')),
-      optionalPanel(getJSON('/api/v1/upstream/config')),
-      optionalPanel(getText('/metrics')),
-      optionalPanel(getText('/plugins/switch17/show'))
+      optionalPanel('groups.read', () => getJSON('/api/v1/special-groups')),
+      optionalPanel('client.aliases', () => getJSON('/plugins/clientname')),
+      optionalPanel('upstreams.read', () => getJSON('/api/v1/upstream/config')),
+      optionalPanel('metrics.cache', () => getText('/metrics')),
+      optionalPanel('switches.manage', () => {
+        const tag = switchTagForType(17)
+        return tag ? getText(`/plugins/${encodeURIComponent(tag)}/show`) : Promise.resolve('')
+      })
     ])
 
     const topDomainsRes = rankRes.domain
