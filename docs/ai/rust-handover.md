@@ -1,22 +1,33 @@
 # Rust migration handover
 
-Last verified: `2026-10-04`
+Last verified: `2026-10-06`
 
 Concise cross-session handover for the Rust migration on branch `rust`.
 
-## Current planning — native switch state (2026-10-05)
+## Current planning — native core query primitives (2026-10-06)
 
-[Next task plan](../rust/plans/native-switch-state-management.md) covers all
-switch1–17 query/admission semantics, durable configured state owners, actual-tag
-API/capabilities and truthful generic controls in both Vue shells, in six slices.
-Scope discussion and round2 written-plan review in the same C2C chat returned
-PLAN READY; valid filesystem-conflict/I/O-discovery/header-parser findings closed.
-Full Lazy recipe retention remains unchanged; no generic cache invalidation or
-requery, FakeIP/AdGuard, appearance/media, aliases or runtime logging implementation.
-Local task10-05-rust-native-switch-state-management stays planning, awaiting
-subsequent explicit human implementation approval and a fresh dedicated code-review
-binding.265 product inputs match accepted dirty c98dc source; HEAD/index unchanged.
-No product code/build/test/deploy/push in this planning session.
+User decision (2026-10-06): the first production replacement is gated on the
+user's own `config_all` running natively (milestone M1); plugins it does not
+use are deferred, not removed. Production `mosdns` is 1 vCPU / 957 MB, so the
+single-threaded runtime model stays (no concurrency spike) and memory is a
+first-class goal with an RSS budget in 5D. Order: native `check` command and
+ledger convergence (`10-06-rust-native-config-check-ledger`), merge `main`,
+M1 batches, 5D, Phase 6. See
+[next-stage plan](../rust/next-stage-plan.md) and the revised
+[M1 task plan](../rust/plans/native-core-query-primitives.md), which now scopes
+the `10-06-rust-native-core-query-primitives` task.
+The task remains `planning` with `implementation_authorized: false`; no product
+code, build, test, deploy, push, or production/default cutover is authorized
+by this planning update.
+
+The old `09-28-rust-next-step-roadmap` is now archived as superseded historical
+coordination work. Its canary, bounded `fast_mark`/`flow_setter`, completed
+`domain_set` management, and bundled-delivery children remain archived under
+their own evidence/review paths. The accepted switch-state implementation is
+also historical completed evidence, not a current planning task. The new task's
+planning baseline is clean branch `rust` at `83b86cd90cc15f23b3a882226e06551b909045ef`;
+the older switch review SHAs remain evidence ancestry only. Implementation
+must refresh that baseline and accepted evidence before product edits.
 
 ## Native WebUI runtime increment (2026-10-04; accepted and archived)
 

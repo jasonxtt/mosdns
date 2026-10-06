@@ -1,6 +1,83 @@
 # Rust-native 下一阶段安排（2026-09-28）
 
+## 2026-10-06 规划调整：以自用 `config_all` 为首次替换门槛（当前）
+
+用户于 2026-10-06 做出以下决定（规范记录见
+[重写方案第 6 节](../ai/rust-rewrite-plan.md)）：
+
+- 首次生产替换的功能门槛改为：原生 host **无修改加载并运行自用 `config_all`**
+  （里程碑 **M1**），再经 5D、Phase 6 和用户确认；`config_all` 未使用的插件延后
+  到替换之后补齐，不删除。
+- 下一批任务改为跑通真实配置，不再按“请求内原语家族”补全全表。
+- 审查强度维持现状。
+- 同日补充：生产机为 1 vCPU / 957 MB，取消原定的并发模型 spike，保持单线程
+  模型；内存提升为与延迟同等的优先目标，5D 设 RSS 预算并以单核实际负载为基准。
+
+`config_all` 当前原生缺口（2026-10-06 按 YAML 文本统计，实施前以 `check`
+输出为准）：
+
+| 批次 | 内容 |
+| --- | --- |
+| M1-a 规则 provider | `domain_set_light`（11 实例）、`sd_set_light`（4）、`domain_mapper`（2）、`si_set`（1），SRS/geodata 格式 |
+| M1-b 上游与响应 | 独立 `aliapi`（5 实例，签名 API 字段另行确认；`forward_nocn*` 使用 `socks5`，须同时支持 SOCKS5 上游）、`rewrite`、`adguard_rule`、`webinfo`；原计划中实际使用的 `rcode`、`cname`、`mark`、`tag_setter`、`drop_resp`、`cname_remover`、`sleep` |
+| M1-c 输出与再查询 | `domain_output`（8 实例）、`requery` |
+
+实际上游仅使用 https/tls/udp；H3/DoQ 不在 M1 关键路径上。
+
+**2026-10-06 `check` 结果（以此为准，取代上表）**：详见 [M1 缺口清单](m1-gap-list.md)。
+与上表的差异：
+
+- M1-a、M1-c 的插件类型与实例数一致；`si_set` 另连带 10 处 `resp_ip $geoip_cn`。
+- M1-b：`cname`、`mark` 在 `config_all` 中未使用，`cname_remover` 已被原生接受，三者移出；
+  实际缺口为 `rcode`（6）、`tag_setter`（10）、`drop_resp`（10）、`sleep`（1），并新增
+  `fallback` 的 `primary`/`secondary` 裸 tag 形式（2）。
+- 新增 **M1-d 配置加载与 listener**：`log.file`、`log.level: warn`、全部 20 个
+  listener 的 `listen: ":port"`、`enable_audit` 必填、未托管时只允许一个 listener。
+- 两项用户决定（2026-10-06）：相对路径改为与 Go 一致、从配置根目录解析（改原生，
+  不改配置包）；原生在不开启 `native_management` 时也接受 `config_all` 的形态（多
+  listener、`aliapi` 等）。两者先于依赖路径的 M1 插件实施。
+- 生产快照（Go v0.7.3）的 `check` 输出与 `config_all` 逐字节相同。
+
+### 执行顺序
+
+| 次序 | 交付 | 结束条件 |
+| --- | --- | --- |
+| 1 | 原生 `check -c <config>` 与台账收敛（任务 `10-06-rust-native-config-check-ledger`）：**已完成，C2C 第 2 轮 PASS，已归档** | 一次列出全部不支持的类型/参数；`config_all` 输出成为 M1 清单，`feature-coverage.md` 据此更新 |
+| 1.5 | **M1-0** 配置根目录路径基准 + 非托管加载兼容（任务 `10-06-rust-native-m1-0-config-loading`，即 M1-d）：**已完成（`26accd14`），C2C PASS，已归档**；`check` gaps 86→64、globals 3→1（剩余 GLOBAL 为 aliapi 缺失的连带结果） | `-d` 支持，插件参数相对路径按配置根目录解析；非托管多 listener、`":port"`、`enable_audit` 可选、`log.level`/`log.file`；重跑 `check` 后 M1-d 无剩余 |
+| 2 | 合并 `main`（v0.7.1 → v0.7.3；任务 `10-06-rust-merge-main-v0.7.3`）：**已实施（merge 提交待 C2C review）** | 真实 merge 提交；UI 产物由构建生成；v0.7.3 新 UI 操作在原生下禁用+原因；契约漂移登记，原生 special_groups v0.7.2/0.7.3 对齐归入 M1-e |
+| 3 | M1-a1 规则 provider 查询侧（任务 `10-07-rust-native-m1-a1-rule-providers`）→ M1-a2 规则源管理 → M1-b → M1-c | a1：`domain_set_light`/`sd_set_light`/`si_set`/`adguard_rule` 只读加载、SRS 解码、`domain_mapper`、`mark` matcher，以 Go 为差分 oracle 在生产规则上逐条一致；a2：三类规则源共享的管理（增删改、下载、自动更新、socks5）与 `domain_set_light` 编辑、热更新 mapper；`adguard_rule` 因被 `unified_matcher1` 引用而从 M1-b 移入 M1-a；每批有真实配置链路 E2E，最终 `check` 无缺口 |
+| 3.5 | M1-e special_groups v0.7.3 对齐 | 原生托管生成器输出 schema-4 结构（共享 `sequence_special`），支持专用组上游引用/私有上游/无效引用排除；排在 M1-a/b/c 之后（生产当前无专用组） |
+| 4 | 5D 整机验收 | 单核、实际负载；先补齐 Go 基线、冻结延迟与 RSS 阈值，以 `config_all` 做正式对照、恢复、长稳 |
+| 5 | Phase 6 + 生产切换/回滚方案 | 退役脚手架，纯 Rust 构建/运行；配置包升级（C15）与回滚步骤明确；`mos-test` 验证后经用户确认替换 `mosdns` |
+| 6 | 未使用插件补齐 | 首次替换后进行，不阻塞替换 |
+
+此前延期且无归属的“专门远端 fault/cancel/close E2E”并入 5D。
+
+## 2026-10-06 原生核心查询原语与迁移台账收敛（已被上方调整取代）
+
+> 历史状态记录：本段原规划已由上方 2026-10-06 规划调整取代。台账收敛并入
+> 次序 2；原语中 `config_all` 实际使用的部分并入 M1-b，其余延后到首次替换后。
+
+[公开规划摘要](plans/native-core-query-primitives.md)对应新的独立顶层任务
+`10-06-rust-native-core-query-primitives`。它先以当前 accepted native source
+和验收证据收敛 feature ledger，再处理 qclass、ptr_ip、random、rcode、
+has_wanted_ans、cname、mark、tag_setter、drop_resp、black_hole、cname_remover
+命名/预设补齐，以及 sleep 的命名/quick/预设形式。
+
+任务目前仍为 `planning`，实施授权为 false；尚未启动产品代码、构建、测试、
+部署或默认/生产切换。规划基线为干净的 `rust` HEAD
+`83b86cd90cc15f23b3a882226e06551b909045ef`，实施前必须重新冻结 HEAD、工作树、
+accepted evidence 和 roadmap succession。
+
+旧 `09-28-rust-next-step-roadmap` 已作为历史协调任务标记 `superseded` 并归档；
+其 canary、限定 fast_mark/flow_setter、domain_set 管理和 bundled delivery 均保留
+各自归档证据，不再作为待执行下一项。完整 5B/5C、5D、Phase 6 和生产切换门禁
+仍然保留。
+
 ## 2026-10-05 当前规划：原生开关状态与管理
+
+> 历史状态记录：本段保留 2026-10-05 的规划快照；switch 状态实现随后已完成
+> 并归档，不再是当前待启动任务。
 
 专用组/上游管理和 WebUI 运行时能力均已完成验收归档；当前 accepted dirty
 源码为 c98dc5d1012ce73aed318504c1053b04ab15de08，真实 HEAD 仍79d93ae1。
